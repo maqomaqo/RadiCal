@@ -4,6 +4,7 @@ from sqlalchemy import func
 from app.database import get_db
 from app.models import Project, Analysis
 from app.schemas.project import ProjectCreate, ProjectUpdate
+from app.api.analysis import _rerun_analysis
 from typing import Optional
 
 router = APIRouter()
@@ -133,6 +134,41 @@ async def update_project(project_id: str, updates: ProjectUpdate, db: Session = 
             "created_at": project.created_at.isoformat(),
             "updated_at": project.updated_at.isoformat(),
         },
+    }
+
+
+@router.post("/projects/{project_id}/rerun")
+async def rerun_project(project_id: str, db: Session = Depends(get_db)):
+    """
+    Recompute every analysis in this project in place, from each one's own
+    persisted inputs (see analysis.py's _rerun_analysis) -- one analysis
+    failing (e.g. a curve/MCMC error) doesn't abort the rest; failures are
+    collected and reported back instead. Runs synchronously in this
+    request (no background job queue exists yet), so this can take a
+    while for a project with several/large Bayesian analyses.
+    """
+    project = db.query(Project.id).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    analyses = db.query(Analysis).filter(Analysis.project_id == project_id).all()
+
+    rerun_count = 0
+    failed = []
+    for analysis in analyses:
+        try:
+            _rerun_analysis(analysis, db)
+            rerun_count += 1
+        except Exception as e:
+            db.rollback()
+            analysis.status = 'failed'
+            analysis.error_message = str(e)
+            db.commit()
+            failed.append({"id": analysis.id, "name": analysis.name, "error": str(e)})
+
+    return {
+        "success": True,
+        "data": {"rerun_count": rerun_count, "failed": failed},
     }
 
 

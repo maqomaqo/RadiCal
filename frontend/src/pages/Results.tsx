@@ -31,9 +31,11 @@ import {
 import DownloadIcon from '@mui/icons-material/Download'
 import AccountTreeIcon from '@mui/icons-material/AccountTree'
 import DeleteIcon from '@mui/icons-material/Delete'
+import ReplayIcon from '@mui/icons-material/Replay'
 import PosteriorPlot from '@/components/PosteriorPlot'
 import HarrisMatrixDiagram from '@/components/HarrisMatrixDiagram'
 import ConfirmDialog from '@/components/ConfirmDialog'
+import AssignProjectDialog from '@/components/AssignProjectDialog'
 import { formatApiError } from '@/utils/apiError'
 import {
   DateFormat,
@@ -108,6 +110,9 @@ export default function Results() {
   )
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [assignOpen, setAssignOpen] = useState(false)
+  const [rerunOpen, setRerunOpen] = useState(false)
+  const [rerunning, setRerunning] = useState(false)
   // Posterior mean/median are opt-in reporting choices, not shown by
   // default -- HPD ranges are the primary convention for reporting a
   // (possibly multimodal) calibrated/Bayesian result; a single point
@@ -189,6 +194,25 @@ export default function Results() {
     }
   }
 
+  const handleRerun = async () => {
+    if (!analysisId) return
+    setRerunning(true)
+    try {
+      const response = await fetch(`/api/analysis/${analysisId}/rerun`, { method: 'POST' })
+      const data = await response.json()
+      if (data.success) {
+        setRerunOpen(false)
+        fetchAnalysis(analysisId)
+      } else {
+        alert('Failed to rerun analysis: ' + formatApiError(data))
+      }
+    } catch (err) {
+      alert('Error rerunning analysis: ' + (err as Error).message)
+    } finally {
+      setRerunning(false)
+    }
+  }
+
   if (loading) {
     return (
       <Container sx={{ py: 4, display: 'flex', justifyContent: 'center' }}>
@@ -242,7 +266,10 @@ export default function Results() {
                 <RouterLink to={`/projects/${analysis.project_id}`}>{analysis.project_name}</RouterLink>
               ) : (
                 'Unassigned'
-              )}
+              )}{' '}
+              <Button size="small" onClick={() => setAssignOpen(true)} sx={{ minWidth: 0, py: 0 }}>
+                Change
+              </Button>
             </Typography>
           </Box>
           <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
@@ -256,6 +283,13 @@ export default function Results() {
                 ))}
               </Select>
             </FormControl>
+            <Button
+              startIcon={<ReplayIcon />}
+              variant="outlined"
+              onClick={() => setRerunOpen(true)}
+            >
+              Re-run
+            </Button>
             <Button
               startIcon={<DeleteIcon />}
               color="error"
@@ -538,6 +572,24 @@ export default function Results() {
         loading={deleting}
         onConfirm={handleDelete}
         onCancel={() => setDeleteOpen(false)}
+      />
+
+      <ConfirmDialog
+        open={rerunOpen}
+        title="Re-run this analysis?"
+        message="Recomputes results from this analysis's existing inputs and replaces its current results. This can't be undone."
+        confirmLabel="Re-run"
+        loading={rerunning}
+        onConfirm={handleRerun}
+        onCancel={() => setRerunOpen(false)}
+      />
+
+      <AssignProjectDialog
+        open={assignOpen}
+        analysisId={analysis.id}
+        currentProjectId={analysis.project_id ?? null}
+        onClose={() => setAssignOpen(false)}
+        onAssigned={() => analysisId && fetchAnalysis(analysisId)}
       />
     </Container>
   )

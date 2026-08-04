@@ -2,10 +2,10 @@ from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.schemas.sample import CalibrateRequest, BayesianRequest
-from app.services.calibration import get_curve
+from app.services.calibration import get_curve, CalibrationCurve
 from app.services.bayesian import BayesianChronology
 from app.models import Analysis, RadiocarbonSample, AnalysisResult, StratigraphicRelationship, SampleGroup, Project
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 import numpy as np
 import uuid
 
@@ -22,6 +22,81 @@ def _validate_project_id(project_id: Optional[str], db: Session) -> Optional[str
     if not db.query(Project.id).filter(Project.id == project_id).first():
         raise HTTPException(status_code=404, detail=f"Project '{project_id}' not found")
     return project_id
+
+
+def _compute_calibration_stats(curve: CalibrationCurve, age_bp: float, error_1sigma: float) -> Dict:
+    """
+    Calibrate one measurement against `curve` and return every derived
+    stat the calibration-analysis path needs: point estimates, the overall
+    HPD envelope, the full multi-range HPD breakdown, and a plottable
+    distribution. Shared between calibrate_single (a fresh calibration)
+    and the analysis rerun path (re-calibrating an already-saved sample
+    with its current age_bp/error_1sigma/curve), so the two can't drift
+    out of sync with each other.
+    """
+    cal_ages, probs = curve.calibrate(age_bp, error_1sigma)
+
+    # Full multi-range HPD breakdown (calibration curves are non-monotonic,
+    # so the posterior for a single measurement can be genuinely multimodal
+    # -- e.g. plateaus/wiggles splitting it into several disjoint
+    # calendar-age ranges). hpd_68/hpd_95 below stay as the overall min/max
+    # envelope for simple display; hpd_68_ranges/hpd_95_ranges carry the
+    # actual per-range breakdown with each range's own probability share,
+    # standard OxCal/CALIB-style.
+    hpd_68_ranges = curve.get_hpd_ranges(cal_ages, probs, 0.68)
+    hpd_95_ranges = curve.get_hpd_ranges(cal_ages, probs, 0.95)
+    hpd_68 = (
+        min(r['min'] for r in hpd_68_ranges),
+        max(r['max'] for r in hpd_68_ranges),
+    )
+    hpd_95 = (
+        min(r['min'] for r in hpd_95_ranges),
+        max(r['max'] for r in hpd_95_ranges),
+    )
+    calibrated_age_bp = float(cal_ages[np.argmax(probs)])
+    point_estimate = curve.get_point_estimate(cal_ages, probs)
+    display_distribution = curve.get_display_distribution(cal_ages, probs)
+
+    return {
+        'calibrated_age_bp': calibrated_age_bp,
+        'posterior_mean': point_estimate['mean'],
+        'posterior_median': point_estimate['median'],
+        'posterior_std': point_estimate['std'],
+        'hpd_68': hpd_68,
+        'hpd_95': hpd_95,
+        'hpd_68_ranges': hpd_68_ranges,
+        'hpd_95_ranges': hpd_95_ranges,
+        'probability_distribution': display_distribution,
+    }
+
+
+def _run_bayesian(
+    measurements: List[Dict],
+    relationships: List[Dict],
+    groups: List[Dict],
+    bayesian_config: Dict,
+) -> Tuple[Dict, Dict]:
+    """
+    Run BayesianChronology's build/sample/extract sequence and return
+    (results, context_results) -- the same shapes bayesian_analysis's
+    inline version used to produce. Shared between bayesian_analysis (a
+    fresh run from request-body measurements) and the analysis rerun path
+    (re-running an already-saved analysis's own measurements/groups/
+    relationships), so the two can't drift out of sync with each other.
+    """
+    bayesian = BayesianChronology(
+        mcmc_samples=bayesian_config.get('mcmc_samples', 2000),
+        mcmc_tune=bayesian_config.get('mcmc_tune', 1000),
+        mcmc_chains=bayesian_config.get('mcmc_chains', 4),
+    )
+    model, ages = bayesian.build_model(measurements, relationships, groups)
+    idata, ages_dict = bayesian.sample(model, ages)
+    extracted = bayesian.extract_results(
+        idata, ages_dict,
+        measurements=measurements,
+        groups=groups,
+    )
+    return extracted['measurements'], extracted['contexts']
 
 @router.post("/analysis/calibrate")
 async def calibrate_single(measurement: CalibrateRequest, db: Session = Depends(get_db)):
@@ -56,45 +131,16 @@ async def calibrate_single(measurement: CalibrateRequest, db: Session = Depends(
         curve_id = measurement.curve_id
         curve = get_curve(curve_id)
 
-        cal_ages, probs = curve.calibrate(
-            measurement.age_bp,
-            measurement.error_1sigma
-        )
-        
-        # Full multi-range HPD breakdown (calibration curves are
-        # non-monotonic, so the posterior for a single measurement can be
-        # genuinely multimodal -- e.g. plateaus/wiggles splitting it into
-        # several disjoint calendar-age ranges). hpd_68/hpd_95 below stay as
-        # the overall min/max envelope for simple display; hpd_68_ranges/
-        # hpd_95_ranges carry the actual per-range breakdown with each
-        # range's own probability share, standard OxCal/CALIB-style.
-        hpd_68_ranges = curve.get_hpd_ranges(cal_ages, probs, 0.68)
-        hpd_95_ranges = curve.get_hpd_ranges(cal_ages, probs, 0.95)
-        hpd_68 = (
-            min(r['min'] for r in hpd_68_ranges),
-            max(r['max'] for r in hpd_68_ranges),
-        )
-        hpd_95 = (
-            min(r['min'] for r in hpd_95_ranges),
-            max(r['max'] for r in hpd_95_ranges),
-        )
-        calibrated_age_bp = float(cal_ages[np.argmax(probs)])
+        # Point estimates, HPD ranges, and a plottable distribution -- see
+        # _compute_calibration_stats for the full breakdown (shared with
+        # the analysis rerun path so the two can't drift out of sync).
+        stats = _compute_calibration_stats(curve, measurement.age_bp, measurement.error_1sigma)
+        calibrated_age_bp = stats['calibrated_age_bp']
+        point_estimate = {'mean': stats['posterior_mean'], 'median': stats['posterior_median'], 'std': stats['posterior_std']}
+        hpd_68, hpd_95 = stats['hpd_68'], stats['hpd_95']
+        hpd_68_ranges, hpd_95_ranges = stats['hpd_68_ranges'], stats['hpd_95_ranges']
+        display_distribution = stats['probability_distribution']
 
-        # Point estimates (mean/median/std) of the calibrated posterior --
-        # previously only the mode (calibrated_age_bp) and HPD ranges were
-        # computed here, so single-calibration results were persisted with
-        # posterior_mean/median/std left at their nullable-column default of
-        # None. That made the Results table's "Posterior Mean" column show
-        # "N/A" for every single-calibration analysis, even though the
-        # calibrated distribution has a perfectly well-defined mean.
-        point_estimate = curve.get_point_estimate(cal_ages, probs)
-
-        # Distribution windowed to where the probability mass actually is,
-        # not an arbitrary slice of the curve's first 100 (oldest) grid
-        # points -- that slice was almost always nowhere near the sample's
-        # actual calendar age, so the frontend plot would render as flat.
-        display_distribution = curve.get_display_distribution(cal_ages, probs)
-        
         response_data = {
             "id": None,
             "name": "Single Calibration",
@@ -297,33 +343,19 @@ async def bayesian_analysis(request: BayesianRequest, db: Session = Depends(get_
                 ))
             db.commit()
 
-        bayesian = BayesianChronology(
-            mcmc_samples=request.bayesian_config.mcmc_samples,
-            mcmc_tune=request.bayesian_config.mcmc_tune,
-            mcmc_chains=request.bayesian_config.mcmc_chains
-        )
-
-        # build_model() works with plain dicts (measurements keyed by
+        # _run_bayesian works with plain dicts (measurements keyed by
         # 'id'/'age_bp'/etc, relationships keyed by 'from_sample_id' etc)
         # -- converting the validated Pydantic models to dicts here keeps
         # bayesian.py's existing dict-based interface untouched. This uses
         # the request's own client-side ids throughout (not the persisted
-        # DB ids), since build_model() needs to match against `ages`,
-        # which is also keyed by the client-side measurement id.
-        model, ages = bayesian.build_model(
+        # DB ids), since build_model() needs to match against the internal
+        # `ages` dict, which is also keyed by the client-side measurement id.
+        results, context_results = _run_bayesian(
             [m.model_dump() for m in request.measurements],
             [r.model_dump() for r in request.relationships],
             [g.model_dump() for g in request.groups],
+            request.bayesian_config.model_dump(),
         )
-
-        idata, ages_dict = bayesian.sample(model, ages)
-        extracted = bayesian.extract_results(
-            idata, ages_dict,
-            measurements=[m.model_dump() for m in request.measurements],
-            groups=[g.model_dump() for g in request.groups],
-        )
-        results = extracted['measurements']
-        context_results = extracted['contexts']
 
         if save:
             # Store results in database using the sample IDs
@@ -627,3 +659,135 @@ async def update_analysis(analysis_id: str, updates: Dict, db: Session = Depends
             "project_name": analysis.project.name if analysis.project else None,
         },
     }
+
+
+def _rerun_analysis(analysis: Analysis, db: Session) -> None:
+    """
+    Recompute an already-saved analysis's results from its own persisted
+    inputs -- no new Analysis/RadiocarbonSample/SampleGroup rows, since
+    the inputs aren't changing, only the computed results. Used by both
+    the single-analysis and project-level rerun endpoints below.
+
+    Raises on failure (curve/MCMC error, no samples, etc); callers are
+    responsible for catching it, marking the analysis 'failed', and
+    rolling back -- this function itself only commits on success.
+    """
+    samples = list(analysis.measurements)
+    if not samples:
+        raise ValueError("Analysis has no measurements to rerun")
+
+    if analysis.analysis_type == 'calibration':
+        sample = samples[0]
+        curve = get_curve(sample.curve_id)
+        stats = _compute_calibration_stats(curve, sample.age_bp, sample.error_1sigma)
+
+        result = db.query(AnalysisResult).filter(AnalysisResult.analysis_id == analysis.id).first()
+        if not result:
+            result = AnalysisResult(analysis_id=analysis.id, sample_id=sample.id)
+            db.add(result)
+        result.calibrated_age_bp = stats['calibrated_age_bp']
+        result.posterior_mean = stats['posterior_mean']
+        result.posterior_median = stats['posterior_median']
+        result.posterior_std = stats['posterior_std']
+        result.hpd_68_min, result.hpd_68_max = stats['hpd_68']
+        result.hpd_95_min, result.hpd_95_max = stats['hpd_95']
+        result.hpd_68_ranges = stats['hpd_68_ranges']
+        result.hpd_95_ranges = stats['hpd_95_ranges']
+        result.probability_distribution = stats['probability_distribution']
+
+    elif analysis.analysis_type == 'bayesian':
+        groups = db.query(SampleGroup).filter(SampleGroup.analysis_id == analysis.id).all()
+        relationships = db.query(StratigraphicRelationship).filter(
+            StratigraphicRelationship.analysis_id == analysis.id
+        ).all()
+
+        measurement_dicts = [
+            {
+                'id': s.id,
+                'age_bp': s.age_bp,
+                'error_1sigma': s.error_1sigma,
+                'sample_name': s.sample_name,
+                'curve_id': s.curve_id,
+                'group_id': s.group_id,
+                'tpq_age_bp': s.tpq_age_bp,
+                'taq_age_bp': s.taq_age_bp,
+            }
+            for s in samples
+        ]
+        group_dicts = [
+            {'id': g.id, 'name': g.name, 'tpq_age_bp': g.tpq_age_bp, 'taq_age_bp': g.taq_age_bp}
+            for g in groups
+        ]
+        relationship_dicts = [
+            {
+                'from_sample_id': r.from_sample_id,
+                'to_sample_id': r.to_sample_id,
+                'from_type': r.from_type,
+                'to_type': r.to_type,
+                'relationship': r.relationship,
+            }
+            for r in relationships
+        ]
+
+        results, context_results = _run_bayesian(
+            measurement_dicts, relationship_dicts, group_dicts, analysis.bayesian_config or {},
+        )
+
+        db.query(AnalysisResult).filter(AnalysisResult.analysis_id == analysis.id).delete(synchronize_session=False)
+        for sample_id, result in results.items():
+            db.add(AnalysisResult(
+                analysis_id=analysis.id,
+                sample_id=sample_id,
+                posterior_mean=result['posterior_mean'],
+                posterior_median=result['posterior_median'],
+                posterior_std=result['posterior_std'],
+                hpd_68_min=result['hpd_68'][0],
+                hpd_68_max=result['hpd_68'][1],
+                hpd_95_min=result['hpd_95'][0],
+                hpd_95_max=result['hpd_95'][1],
+                hpd_68_ranges=result['hpd_68_ranges'],
+                hpd_95_ranges=result['hpd_95_ranges'],
+                posterior_samples=result['posterior_samples'],
+                probability_distribution=result['probability_distribution'],
+            ))
+
+        # Refresh every group's modelled start/end -- explicitly cleared
+        # for a group no longer in context_results (shouldn't happen since
+        # the member set is unchanged between reruns, but keeps stale data
+        # from lingering if it ever did).
+        for group_row in groups:
+            ctx = context_results.get(group_row.id)
+            group_row.modeled_start = ctx['start'] if ctx else None
+            group_row.modeled_end = ctx['end'] if ctx else None
+
+    else:
+        raise ValueError(f"Unknown analysis_type '{analysis.analysis_type}'")
+
+    analysis.status = 'completed'
+    analysis.error_message = None
+    db.commit()
+
+
+@router.post("/analysis/{analysis_id}/rerun")
+async def rerun_analysis(analysis_id: str, db: Session = Depends(get_db)):
+    """
+    Recompute an already-saved analysis's results in place, from its own
+    persisted inputs -- same analysis id/URL, old results replaced. Useful
+    e.g. after a change to the underlying model (like the Boundary
+    parameter change for context Modelled Start/End) to refresh stale
+    results without re-entering every input from scratch.
+    """
+    analysis = db.query(Analysis).filter(Analysis.id == analysis_id).first()
+    if not analysis:
+        raise HTTPException(status_code=404, detail="Analysis not found")
+
+    try:
+        _rerun_analysis(analysis, db)
+    except Exception as e:
+        db.rollback()
+        analysis.status = 'failed'
+        analysis.error_message = str(e)
+        db.commit()
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return {"success": True, "data": {"id": analysis.id, "status": analysis.status}}

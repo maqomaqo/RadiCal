@@ -24,8 +24,11 @@ import {
 import EditIcon from '@mui/icons-material/Edit'
 import DeleteIcon from '@mui/icons-material/Delete'
 import AddIcon from '@mui/icons-material/Add'
+import DriveFileMoveIcon from '@mui/icons-material/DriveFileMove'
+import ReplayIcon from '@mui/icons-material/Replay'
 import { formatApiError } from '@/utils/apiError'
 import ConfirmDialog from '@/components/ConfirmDialog'
+import AssignProjectDialog from '@/components/AssignProjectDialog'
 
 interface AnalysisSummary {
   id: string
@@ -63,6 +66,12 @@ export default function ProjectDetail() {
   const [deletingProject, setDeletingProject] = useState(false)
   const [deleteAnalysisTarget, setDeleteAnalysisTarget] = useState<AnalysisSummary | null>(null)
   const [deletingAnalysis, setDeletingAnalysis] = useState(false)
+
+  const [assignTarget, setAssignTarget] = useState<AnalysisSummary | null>(null)
+  const [rerunTarget, setRerunTarget] = useState<AnalysisSummary | null>(null)
+  const [rerunningOne, setRerunningOne] = useState(false)
+  const [rerunAllOpen, setRerunAllOpen] = useState(false)
+  const [rerunningAll, setRerunningAll] = useState(false)
 
   useEffect(() => {
     if (projectId) fetchProject(projectId)
@@ -174,6 +183,60 @@ export default function ProjectDetail() {
     }
   }
 
+  const handleRerunOne = async () => {
+    if (!rerunTarget || !project) return
+    setRerunningOne(true)
+    try {
+      const response = await fetch(`/api/analysis/${rerunTarget.id}/rerun`, { method: 'POST' })
+      const data = await response.json()
+      if (data.success) {
+        setRerunTarget(null)
+        fetchProject(project.id)
+      } else {
+        alert('Failed to rerun analysis: ' + formatApiError(data))
+      }
+    } catch (err) {
+      alert('Error rerunning analysis: ' + (err as Error).message)
+    } finally {
+      setRerunningOne(false)
+    }
+  }
+
+  // Real project: one batch call. Unassigned pseudo-project: there's no
+  // real project id to hit a batch endpoint with, so rerun each listed
+  // analysis individually instead -- same end result, just client-side
+  // fan-out rather than a single request.
+  const handleRerunAll = async () => {
+    if (!project) return
+    setRerunningAll(true)
+    try {
+      if (isUnassigned) {
+        const outcomes = await Promise.allSettled(
+          project.analyses.map((a) => fetch(`/api/analysis/${a.id}/rerun`, { method: 'POST' }).then((r) => r.json()))
+        )
+        const failed = outcomes.filter((o) => o.status === 'rejected' || !o.value?.success)
+        if (failed.length > 0) {
+          alert(`Rerun finished with ${failed.length} of ${outcomes.length} analyses failing. Check them individually for details.`)
+        }
+      } else {
+        const response = await fetch(`/api/projects/${project.id}/rerun`, { method: 'POST' })
+        const data = await response.json()
+        if (data.success && data.data.failed.length > 0) {
+          const names = data.data.failed.map((f: { name: string; error: string }) => `${f.name}: ${f.error}`).join('\n')
+          alert(`${data.data.rerun_count} rerun successfully. ${data.data.failed.length} failed:\n${names}`)
+        } else if (!data.success) {
+          alert('Failed to rerun project: ' + formatApiError(data))
+        }
+      }
+      setRerunAllOpen(false)
+      fetchProject(project.id)
+    } catch (err) {
+      alert('Error rerunning project: ' + (err as Error).message)
+    } finally {
+      setRerunningAll(false)
+    }
+  }
+
   if (loading) {
     return (
       <Container sx={{ py: 4, display: 'flex', justifyContent: 'center' }}>
@@ -217,6 +280,15 @@ export default function ProjectDetail() {
           >
             New Analysis
           </Button>
+          {project.analyses.length > 0 && (
+            <Button
+              variant="outlined"
+              startIcon={<ReplayIcon />}
+              onClick={() => setRerunAllOpen(true)}
+            >
+              Re-run All
+            </Button>
+          )}
           {!isUnassigned && (
             <>
               <IconButton onClick={openEdit} aria-label="Edit project">
@@ -266,6 +338,30 @@ export default function ProjectDetail() {
                     <TableCell align="right">{a.measurements_count}</TableCell>
                     <TableCell align="right">{new Date(a.created_at).toLocaleDateString()}</TableCell>
                     <TableCell align="right">
+                      {isUnassigned && (
+                        <IconButton
+                          size="small"
+                          aria-label={`Assign ${a.name} to a project`}
+                          title="Assign to project"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setAssignTarget(a)
+                          }}
+                        >
+                          <DriveFileMoveIcon fontSize="small" />
+                        </IconButton>
+                      )}
+                      <IconButton
+                        size="small"
+                        aria-label={`Re-run ${a.name}`}
+                        title="Re-run"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setRerunTarget(a)
+                        }}
+                      >
+                        <ReplayIcon fontSize="small" />
+                      </IconButton>
                       <IconButton
                         size="small"
                         aria-label={`Delete ${a.name}`}
@@ -343,6 +439,43 @@ export default function ProjectDetail() {
         onConfirm={handleDeleteAnalysis}
         onCancel={() => setDeleteAnalysisTarget(null)}
       />
+
+      <ConfirmDialog
+        open={!!rerunTarget}
+        title="Re-run this analysis?"
+        message={
+          rerunTarget
+            ? `Recompute results for "${rerunTarget.name}" from its existing inputs and replace its current results. This can't be undone.`
+            : ''
+        }
+        confirmLabel="Re-run"
+        loading={rerunningOne}
+        onConfirm={handleRerunOne}
+        onCancel={() => setRerunTarget(null)}
+      />
+
+      <ConfirmDialog
+        open={rerunAllOpen}
+        title="Re-run all analyses?"
+        message={`Recompute results for all ${project.analyses.length} analyses in ${isUnassigned ? 'the unassigned list' : `"${project.name}"`} from their existing inputs, replacing their current results. This can't be undone and may take a while.`}
+        confirmLabel="Re-run All"
+        loading={rerunningAll}
+        onConfirm={handleRerunAll}
+        onCancel={() => setRerunAllOpen(false)}
+      />
+
+      {assignTarget && (
+        <AssignProjectDialog
+          open={!!assignTarget}
+          analysisId={assignTarget.id}
+          currentProjectId={null}
+          onClose={() => setAssignTarget(null)}
+          onAssigned={() => {
+            setAssignTarget(null)
+            fetchProject(project.id)
+          }}
+        />
+      )}
     </Container>
   )
 }
