@@ -97,13 +97,14 @@ export default function Dashboard() {
               <Grid item xs={12} sm={6} md={4} key={analysis.id}>
                 <Paper
                   sx={{
+                    display: 'block',
                     p: 2,
                     cursor: 'pointer',
+                    textDecoration: 'none',
                     '&:hover': { boxShadow: 3 },
                   }}
                   component={RouterLink}
                   to={`/results/${analysis.id}`}
-                  style={{ textDecoration: 'none' }}
                 >
                   <Typography variant="h6" component="h3">
                     {analysis.name}
