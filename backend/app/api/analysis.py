@@ -317,7 +317,13 @@ async def bayesian_analysis(request: BayesianRequest, db: Session = Depends(get_
         )
 
         idata, ages_dict = bayesian.sample(model, ages)
-        results = bayesian.extract_results(idata, ages_dict)
+        extracted = bayesian.extract_results(
+            idata, ages_dict,
+            measurements=[m.model_dump() for m in request.measurements],
+            groups=[g.model_dump() for g in request.groups],
+        )
+        results = extracted['measurements']
+        context_results = extracted['contexts']
 
         if save:
             # Store results in database using the sample IDs
@@ -340,6 +346,17 @@ async def bayesian_analysis(request: BayesianRequest, db: Session = Depends(get_
                 )
                 db.add(analysis_result)
 
+            # Persist each context's modelled start/end onto its SampleGroup
+            # row (client-side group id -> persisted DB id via groups_map).
+            for client_group_id, ctx in context_results.items():
+                db_group_id = groups_map.get(client_group_id)
+                if not db_group_id:
+                    continue
+                group_row = db.query(SampleGroup).filter(SampleGroup.id == db_group_id).first()
+                if group_row:
+                    group_row.modeled_start = ctx['start']
+                    group_row.modeled_end = ctx['end']
+
             analysis.status = 'completed'
             db.commit()
 
@@ -347,18 +364,21 @@ async def bayesian_analysis(request: BayesianRequest, db: Session = Depends(get_
         # distribution (exclude the huge raw posterior_samples array, which
         # can be tens of thousands of floats per sample -- the frontend only
         # ever needs the binned distribution to render the plot)
-        results_summary = {}
-        for measurement_id, result in results.items():
-            results_summary[measurement_id] = {
-                'posterior_mean': result['posterior_mean'],
-                'posterior_median': result['posterior_median'],
-                'posterior_std': result['posterior_std'],
-                'hpd_68': result['hpd_68'],
-                'hpd_95': result['hpd_95'],
-                'hpd_68_ranges': result['hpd_68_ranges'],
-                'hpd_95_ranges': result['hpd_95_ranges'],
-                'probability_distribution': result['probability_distribution']
+        def _without_raw_samples(stats: Dict) -> Dict:
+            return {k: v for k, v in stats.items() if k != 'posterior_samples'}
+
+        results_summary = {
+            measurement_id: _without_raw_samples(result)
+            for measurement_id, result in results.items()
+        }
+        context_summary = {
+            group_id: {
+                'name': ctx['name'],
+                'start': _without_raw_samples(ctx['start']),
+                'end': _without_raw_samples(ctx['end']),
             }
+            for group_id, ctx in context_results.items()
+        }
 
         return {
             "success": True,
@@ -370,6 +390,7 @@ async def bayesian_analysis(request: BayesianRequest, db: Session = Depends(get_
                 "saved": save,
                 "project_id": (analysis.project_id if save else None),
                 "results": results_summary,
+                "contexts": context_summary,
                 "measurements_count": len(request.measurements)
             }
         }
@@ -430,6 +451,12 @@ async def get_analysis(analysis_id: str, db: Session = Depends(get_db)):
                     "name": g.name,
                     "tpq_age_bp": g.tpq_age_bp,
                     "taq_age_bp": g.taq_age_bp,
+                    # Modelled start/end of this context's own span (see
+                    # BayesianChronology.extract_results) -- null for
+                    # calibration-only analyses or a context with fewer
+                    # than 2 dated members.
+                    "modeled_start": g.modeled_start,
+                    "modeled_end": g.modeled_end,
                 }
                 for g in groups
             ],

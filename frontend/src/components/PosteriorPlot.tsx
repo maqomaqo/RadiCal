@@ -21,9 +21,14 @@ interface PosteriorPlotProps {
   pointEstimates?: {
     mean?: number
     median?: number
-    mode?: number
     std?: number
   }
+  /** Which point estimates to actually render below the chart -- lets the
+   * caller offer mean/median as opt-in reporting choices rather than
+   * always showing both. Defaults to both shown (existing behavior) when
+   * not provided. */
+  showMean?: boolean
+  showMedian?: boolean
   height?: number
   /**
    * Optional formatter for displaying a cal BP value in the Point
@@ -44,6 +49,8 @@ export default function PosteriorPlot({
   hpd95Ranges,
   sampleName,
   pointEstimates,
+  showMean = true,
+  showMedian = true,
   height = 400,
   formatAge = (age: number) => (Number.isFinite(age) ? `${age.toFixed(0)} cal BP` : 'N/A'),
 }: PosteriorPlotProps) {
@@ -141,7 +148,7 @@ export default function PosteriorPlot({
     }
 
     // Vertical line at mean
-    if (isNum(pointEstimates?.mean)) {
+    if (showMean && isNum(pointEstimates?.mean)) {
       data.push({
         x: [pointEstimates.mean, pointEstimates.mean],
         y: [0, Math.max(...probabilities)],
@@ -154,7 +161,7 @@ export default function PosteriorPlot({
     }
 
     // Vertical line at median
-    if (isNum(pointEstimates?.median)) {
+    if (showMedian && isNum(pointEstimates?.median)) {
       data.push({
         x: [pointEstimates.median, pointEstimates.median],
         y: [0, Math.max(...probabilities)],
@@ -167,7 +174,7 @@ export default function PosteriorPlot({
     }
 
     return { data }
-  }, [calAges, probabilities, hpd68, hpd95, hpd68Ranges, hpd95Ranges, pointEstimates])
+  }, [calAges, probabilities, hpd68, hpd95, hpd68Ranges, hpd95Ranges, pointEstimates, showMean, showMedian])
 
   // Use dynamic import for Plotly to avoid SSR issues
   const [plotlyLoaded, setPlotlyLoaded] = React.useState(false)
@@ -237,21 +244,22 @@ export default function PosteriorPlot({
           minHeight: '300px',
         }}
       />
-      {pointEstimates && (
+      {pointEstimates && (showMean || showMedian) && (
         <Box sx={{ mt: 2, p: 1, backgroundColor: '#f5f5f5', borderRadius: 1 }}>
           <Typography variant="body2" color="textSecondary" gutterBottom>
             <strong>Point Estimates:</strong>
           </Typography>
-          <Typography variant="body2">
-            Mean: <strong>{isNum(pointEstimates.mean) ? formatAge(pointEstimates.mean) : 'N/A'}</strong>
-            {isNum(pointEstimates.std) && ` (± ${pointEstimates.std.toFixed(0)} yr)`}
-          </Typography>
-          <Typography variant="body2">
-            Median: <strong>{isNum(pointEstimates.median) ? formatAge(pointEstimates.median) : 'N/A'}</strong>
-          </Typography>
-          <Typography variant="body2">
-            Mode: <strong>{isNum(pointEstimates.mode) ? formatAge(pointEstimates.mode) : 'N/A'}</strong>
-          </Typography>
+          {showMean && (
+            <Typography variant="body2">
+              Mean: <strong>{isNum(pointEstimates.mean) ? formatAge(pointEstimates.mean) : 'N/A'}</strong>
+              {isNum(pointEstimates.std) && ` (± ${pointEstimates.std.toFixed(0)} yr)`}
+            </Typography>
+          )}
+          {showMedian && (
+            <Typography variant="body2">
+              Median: <strong>{isNum(pointEstimates.median) ? formatAge(pointEstimates.median) : 'N/A'}</strong>
+            </Typography>
+          )}
         </Box>
       )}
     </Paper>

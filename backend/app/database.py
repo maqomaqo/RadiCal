@@ -50,6 +50,10 @@ _COLUMN_MIGRATIONS = {
         ("from_type", "VARCHAR DEFAULT 'sample'"),
         ("to_type", "VARCHAR DEFAULT 'sample'"),
     ],
+    'sample_groups': [
+        ('modeled_start', 'JSON'),
+        ('modeled_end', 'JSON'),
+    ],
 }
 
 # stratigraphic_relationships.from_sample_id/to_sample_id are polymorphic --

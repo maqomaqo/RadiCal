@@ -23,6 +23,7 @@ import {
   DialogActions,
   Chip,
   Stack,
+  Autocomplete,
 } from '@mui/material'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import DeleteIcon from '@mui/icons-material/Delete'
@@ -42,6 +43,15 @@ import type { DraftMeasurement } from '@/types'
 import { expandRelationships, findCycle } from '@/utils/stratigraphy'
 
 type Measurement = DraftMeasurement
+
+// Common radiocarbon-datable material types, offered as suggestions in
+// the Material field below (free text is still allowed -- this is a
+// convenience list, not a restriction). material_type is already
+// persisted and appears in the CSV export; this is just the form control
+// that was missing to actually set it away from the "unknown" default.
+const COMMON_MATERIAL_TYPES = [
+  'charcoal', 'wood', 'bone', 'shell', 'seed', 'antler', 'eggshell', 'peat', 'sediment',
+]
 
 interface ProjectOption {
   id: string
@@ -389,6 +399,20 @@ export default function NewAnalysis() {
               />
             </Box>
 
+            <Box sx={{ mb: 2 }}>
+              <Autocomplete
+                freeSolo
+                options={COMMON_MATERIAL_TYPES}
+                value={currentMeasurement.material_type || ''}
+                onInputChange={(_, newValue) =>
+                  setCurrentMeasurement({ ...currentMeasurement, material_type: newValue })
+                }
+                renderInput={(params) => (
+                  <TextField {...params} label="Material" placeholder="e.g., charcoal, bone, shell" size="small" />
+                )}
+              />
+            </Box>
+
             <Box sx={{ display: 'flex', gap: 1, mb: 2 }}>
               <TextField
                 type="number"
@@ -476,6 +500,11 @@ export default function NewAnalysis() {
                         <Typography variant="body2" color="textSecondary">
                           {m.sample_type} ({m.curve_id})
                         </Typography>
+                        {m.material_type && m.material_type !== 'unknown' && (
+                          <Typography variant="body2" color="textSecondary">
+                            Material: {m.material_type}
+                          </Typography>
+                        )}
                       </Box>
                       <IconButton
                         size="small"
@@ -559,7 +588,6 @@ export default function NewAnalysis() {
             pointEstimates={{
               mean: previewResult.posterior_mean,
               median: previewResult.posterior_median,
-              mode: previewResult.calibrated_age_bp,
               std: previewResult.posterior_std,
             }}
             formatAge={(age) => formatCalendarAge(age, dateFormat)}

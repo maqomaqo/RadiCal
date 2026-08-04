@@ -22,6 +22,10 @@ import {
   Select,
   MenuItem,
   SelectChangeEvent,
+  FormGroup,
+  FormControlLabel,
+  Checkbox,
+  Chip,
 } from '@mui/material'
 import DownloadIcon from '@mui/icons-material/Download'
 import AccountTreeIcon from '@mui/icons-material/AccountTree'
@@ -86,6 +90,13 @@ export default function Results() {
   )
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  // Posterior mean/median are opt-in reporting choices, not shown by
+  // default -- HPD ranges are the primary convention for reporting a
+  // (possibly multimodal) calibrated/Bayesian result; a single point
+  // estimate can be misleading on its own (a "mean" can fall in a
+  // low-probability gap between two peaks).
+  const [showMean, setShowMean] = useState(false)
+  const [showMedian, setShowMedian] = useState(false)
 
   const handleDateFormatChange = (e: SelectChangeEvent) => {
     const next = e.target.value as DateFormat
@@ -176,6 +187,19 @@ export default function Results() {
     )
   }
 
+  // Which context (if any) each sample belongs to -- both maps come
+  // straight from data GET /api/analysis/:id already returns (measurement
+  // group_id, group id/name), just cross-referenced here so the table and
+  // each plot can show a sample's context without re-deriving it per row.
+  const groupNameById = new Map((analysis.groups || []).map((g) => [g.id, g.name]))
+  const groupIdBySampleId = new Map((analysis.measurements || []).map((m) => [m.id, m.group_id]))
+  const contextNameFor = (sampleId: string): string | null => {
+    const groupId = groupIdBySampleId.get(sampleId)
+    return groupId ? groupNameById.get(groupId) || null : null
+  }
+  const hasContexts = (analysis.groups || []).length > 0
+  const contextsWithModeledSpan = (analysis.groups || []).filter((g) => g.modeled_start && g.modeled_end)
+
   return (
     <Container maxWidth="lg" sx={{ py: 4 }}>
       <Box sx={{ mb: 4 }}>
@@ -265,29 +289,37 @@ export default function Results() {
       </Grid>
 
       {/* Posterior Distribution Plots */}
-      {analysis.results.map((result, idx) => (
-        <Box key={result.sample_id} sx={{ mb: 4 }}>
-          {result.probability_distribution && result.probability_distribution.length > 0 ? (
-            <PosteriorPlot
-              calAges={result.probability_distribution.map(([age]) => age)}
-              probabilities={result.probability_distribution.map(([, prob]) => prob)}
-              hpd68={result.hpd_68}
-              hpd95={result.hpd_95}
-              hpd68Ranges={result.hpd_68_ranges}
-              hpd95Ranges={result.hpd_95_ranges}
-              sampleName={result.sample_name || `Sample ${idx + 1}`}
-              pointEstimates={{
-                mean: result.posterior_mean,
-                median: result.posterior_median,
-                std: result.posterior_std,
-              }}
-              formatAge={(age) => formatCalendarAge(age, dateFormat)}
-            />
-          ) : (
-            <Alert severity="info">No posterior distribution data available for this sample</Alert>
-          )}
-        </Box>
-      ))}
+      {analysis.results.map((result, idx) => {
+        const contextName = contextNameFor(result.sample_id)
+        return (
+          <Box key={result.sample_id} sx={{ mb: 4 }}>
+            {contextName && (
+              <Chip size="small" icon={<AccountTreeIcon />} label={`Context: ${contextName}`} sx={{ mb: 1 }} />
+            )}
+            {result.probability_distribution && result.probability_distribution.length > 0 ? (
+              <PosteriorPlot
+                calAges={result.probability_distribution.map(([age]) => age)}
+                probabilities={result.probability_distribution.map(([, prob]) => prob)}
+                hpd68={result.hpd_68}
+                hpd95={result.hpd_95}
+                hpd68Ranges={result.hpd_68_ranges}
+                hpd95Ranges={result.hpd_95_ranges}
+                sampleName={result.sample_name || `Sample ${idx + 1}`}
+                pointEstimates={{
+                  mean: result.posterior_mean,
+                  median: result.posterior_median,
+                  std: result.posterior_std,
+                }}
+                showMean={showMean}
+                showMedian={showMedian}
+                formatAge={(age) => formatCalendarAge(age, dateFormat)}
+              />
+            ) : (
+              <Alert severity="info">No posterior distribution data available for this sample</Alert>
+            )}
+          </Box>
+        )
+      })}
 
       {/* Stratigraphy -- read-only view of the groups/relationships/TPQ-TAQ
           this bayesian analysis actually used, if any. Doubles as the
@@ -311,10 +343,73 @@ export default function Results() {
           </Paper>
         )}
 
+      {/* Context Spans -- the modelled start/end of each context's own
+          duration (the posterior of its oldest and youngest dated member
+          respectively), for every context with 2+ dated members. Only a
+          Bayesian analysis with the uniform span prior (see
+          services/bayesian.py) computes this. */}
+      {contextsWithModeledSpan.length > 0 && (
+        <Paper sx={{ p: 3, mb: 3 }}>
+          <Typography variant="h6" gutterBottom>
+            Context Spans
+          </Typography>
+          <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
+            Modelled start and end date of each context, from the posterior of its oldest and
+            youngest dated member.
+          </Typography>
+          <TableContainer>
+            <Table size="small">
+              <TableHead>
+                <TableRow sx={{ backgroundColor: '#f5f5f5' }}>
+                  <TableCell>Context</TableCell>
+                  <TableCell align="right">Modelled Start (68% HPD)</TableCell>
+                  <TableCell align="right">Modelled End (68% HPD)</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {contextsWithModeledSpan.map((g) => (
+                  <TableRow key={g.id}>
+                    <TableCell>{g.name}</TableCell>
+                    <TableCell align="right">
+                      {formatCalendarAge(g.modeled_start!.posterior_mean, dateFormat)}
+                      {' — '}
+                      {g.modeled_start!.hpd_68_ranges && g.modeled_start!.hpd_68_ranges.length > 0
+                        ? formatHPDRanges(g.modeled_start!.hpd_68_ranges, dateFormat)
+                        : formatCalendarRange(g.modeled_start!.hpd_68[0], g.modeled_start!.hpd_68[1], dateFormat)}
+                    </TableCell>
+                    <TableCell align="right">
+                      {formatCalendarAge(g.modeled_end!.posterior_mean, dateFormat)}
+                      {' — '}
+                      {g.modeled_end!.hpd_68_ranges && g.modeled_end!.hpd_68_ranges.length > 0
+                        ? formatHPDRanges(g.modeled_end!.hpd_68_ranges, dateFormat)
+                        : formatCalendarRange(g.modeled_end!.hpd_68[0], g.modeled_end!.hpd_68[1], dateFormat)}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </Paper>
+      )}
+
       {/* Results Table */}
       <Paper sx={{ p: 3, mb: 3 }}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-          <Typography variant="h6">Results Summary</Typography>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 2, mb: 2 }}>
+          <Box>
+            <Typography variant="h6" gutterBottom>
+              Results Summary
+            </Typography>
+            <FormGroup row>
+              <FormControlLabel
+                control={<Checkbox size="small" checked={showMean} onChange={(e) => setShowMean(e.target.checked)} />}
+                label="Show Mean"
+              />
+              <FormControlLabel
+                control={<Checkbox size="small" checked={showMedian} onChange={(e) => setShowMedian(e.target.checked)} />}
+                label="Show Median"
+              />
+            </FormGroup>
+          </Box>
           <Button
             startIcon={<DownloadIcon />}
             onClick={handleExportCSV}
@@ -329,8 +424,10 @@ export default function Results() {
             <TableHead>
               <TableRow sx={{ backgroundColor: '#f5f5f5' }}>
                 <TableCell>Sample</TableCell>
-                <TableCell align="right">Posterior Mean</TableCell>
-                <TableCell align="right">Posterior Std (yr)</TableCell>
+                {hasContexts && <TableCell>Context</TableCell>}
+                {showMean && <TableCell align="right">Posterior Mean</TableCell>}
+                {showMean && <TableCell align="right">Posterior Std (yr)</TableCell>}
+                {showMedian && <TableCell align="right">Posterior Median</TableCell>}
                 <TableCell align="right">68% HPD Range</TableCell>
                 <TableCell align="right">95% HPD Range</TableCell>
               </TableRow>
@@ -339,14 +436,26 @@ export default function Results() {
               {analysis.results.map((result, idx) => (
                 <TableRow key={result.sample_id}>
                   <TableCell>{result.sample_name || `Sample ${idx + 1}`}</TableCell>
-                  <TableCell align="right">
-                    {result.posterior_mean != null
-                      ? formatCalendarAge(result.posterior_mean, dateFormat)
-                      : 'N/A'}
-                  </TableCell>
-                  <TableCell align="right">
-                    {result.posterior_std?.toFixed(0) ?? 'N/A'}
-                  </TableCell>
+                  {hasContexts && <TableCell>{contextNameFor(result.sample_id) || 'Unassigned'}</TableCell>}
+                  {showMean && (
+                    <TableCell align="right">
+                      {result.posterior_mean != null
+                        ? formatCalendarAge(result.posterior_mean, dateFormat)
+                        : 'N/A'}
+                    </TableCell>
+                  )}
+                  {showMean && (
+                    <TableCell align="right">
+                      {result.posterior_std?.toFixed(0) ?? 'N/A'}
+                    </TableCell>
+                  )}
+                  {showMedian && (
+                    <TableCell align="right">
+                      {result.posterior_median != null
+                        ? formatCalendarAge(result.posterior_median, dateFormat)
+                        : 'N/A'}
+                    </TableCell>
+                  )}
                   <TableCell align="right">
                     {result.hpd_68_ranges && result.hpd_68_ranges.length > 0
                       ? formatHPDRanges(result.hpd_68_ranges, dateFormat)

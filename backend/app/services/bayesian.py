@@ -372,78 +372,137 @@ class BayesianChronology:
 
         return idata, ages
 
-    def extract_results(self, idata, ages: Dict):
-        """Extract and summarize posterior distributions"""
-        results = {}
+    @staticmethod
+    def _summarize_posterior(posterior: np.ndarray) -> Dict:
+        """
+        Turn a 1D array of posterior draws (calendar ages, cal BP) into the
+        same summary shape used throughout this app for a plottable
+        distribution: point estimates, a compact (age, density) series for
+        plotting, and a multi-range HPD breakdown. Shared between per-
+        sample ages and per-context start/end (see extract_results) so
+        both can be rendered with the exact same frontend component.
+        """
+        # Turn the raw MCMC draws into a compact (cal_age, probability)
+        # series the frontend can plot directly -- the same
+        # [[age, prob], ...] shape the single-sample calibration endpoint
+        # returns as `probability_distribution`. Sending only the raw
+        # `posterior_samples` array (as before) isn't itself a density
+        # curve, and the previous frontend code was constructing a fake
+        # synthetic x-axis (sample index * 10) to plot it against, which
+        # doesn't correspond to real calendar ages at all.
+        counts, bin_edges = np.histogram(posterior, bins=100, density=True)
+        bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2.0
+        probability_distribution = [
+            [float(age), float(density)] for age, density in zip(bin_centers, counts)
+        ]
 
-        for age_id, age_var in ages.items():
-            posterior = idata.posterior[age_var.name].values.flatten()
+        # HPD ranges from the binned posterior, using the same multi-range
+        # logic as the direct-calibration path (CalibrationCurve.
+        # get_hpd_ranges): MCMC posteriors for radiocarbon dates can be
+        # just as multimodal as the raw calibration likelihood, since the
+        # same curve plateaus/wiggles drive both. A single min/max span
+        # (what az.hdi's default, unimodal HDI returns) would misrepresent
+        # a two-peaked posterior as one mostly-empty contiguous range.
+        #
+        # hpd_ranges_from_distribution reports each selected segment's
+        # boundaries as ages[s]/ages[e] -- correct when `ages` are
+        # themselves the discrete supported points of the distribution
+        # (true for the direct-calibration path, where they're the curve's
+        # own grid points), but bin_centers here are an artifact of
+        # histogramming a continuous posterior: using them as boundaries
+        # silently shrinks every range by a full bin width (half lost on
+        # each side), and collapses any single-bin segment -- common for a
+        # spread-out or multimodal posterior sampled into only 100 bins --
+        # to a reported width of exactly zero. Expanding each returned
+        # range by half a bin width restores the actual continuous span
+        # the bins approximate.
+        bin_width = bin_edges[1] - bin_edges[0]
+        half_bin = bin_width / 2.0
 
-            # Turn the raw MCMC draws into a compact (cal_age, probability)
-            # series the frontend can plot directly -- the same
-            # [[age, prob], ...] shape the single-sample calibration endpoint
-            # returns as `probability_distribution`. Sending only the raw
-            # `posterior_samples` array (as before) isn't itself a density
-            # curve, and the previous frontend code was constructing a fake
-            # synthetic x-axis (sample index * 10) to plot it against, which
-            # doesn't correspond to real calendar ages at all.
-            counts, bin_edges = np.histogram(posterior, bins=100, density=True)
-            bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2.0
-            probability_distribution = [
-                [float(age), float(density)] for age, density in zip(bin_centers, counts)
-            ]
+        def _widen_to_bin_edges(ranges):
+            for r in ranges:
+                r['min'] -= half_bin
+                r['max'] += half_bin
+            return ranges
 
-            # HPD ranges from the binned posterior, using the same
-            # multi-range logic as the direct-calibration path
-            # (CalibrationCurve.get_hpd_ranges): MCMC posteriors for
-            # radiocarbon dates can be just as multimodal as the raw
-            # calibration likelihood, since the same curve plateaus/wiggles
-            # drive both. A single min/max span (what az.hdi's default,
-            # unimodal HDI returns) would misrepresent a two-peaked
-            # posterior as one mostly-empty contiguous range.
-            #
-            # hpd_ranges_from_distribution reports each selected segment's
-            # boundaries as ages[s]/ages[e] -- correct when `ages` are
-            # themselves the discrete supported points of the distribution
-            # (true for the direct-calibration path, where they're the
-            # curve's own grid points), but bin_centers here are an
-            # artifact of histogramming a continuous posterior: using them
-            # as boundaries silently shrinks every range by a full bin
-            # width (half lost on each side), and collapses any single-bin
-            # segment -- common for a spread-out or multimodal posterior
-            # sampled into only 100 bins -- to a reported width of exactly
-            # zero. Expanding each returned range by half a bin width
-            # restores the actual continuous span the bins approximate.
-            bin_width = bin_edges[1] - bin_edges[0]
-            half_bin = bin_width / 2.0
+        hpd_68_ranges = _widen_to_bin_edges(hpd_ranges_from_distribution(bin_centers, counts, 0.68))
+        hpd_95_ranges = _widen_to_bin_edges(hpd_ranges_from_distribution(bin_centers, counts, 0.95))
+        hpd_68 = (
+            min(r['min'] for r in hpd_68_ranges),
+            max(r['max'] for r in hpd_68_ranges),
+        )
+        hpd_95 = (
+            min(r['min'] for r in hpd_95_ranges),
+            max(r['max'] for r in hpd_95_ranges),
+        )
 
-            def _widen_to_bin_edges(ranges):
-                for r in ranges:
-                    r['min'] -= half_bin
-                    r['max'] += half_bin
-                return ranges
+        return {
+            'posterior_mean': float(np.mean(posterior)),
+            'posterior_median': float(np.median(posterior)),
+            'posterior_std': float(np.std(posterior)),
+            'hpd_68': hpd_68,
+            'hpd_95': hpd_95,
+            'hpd_68_ranges': hpd_68_ranges,
+            'hpd_95_ranges': hpd_95_ranges,
+            'probability_distribution': probability_distribution,
+            'posterior_samples': posterior.tolist()
+        }
 
-            hpd_68_ranges = _widen_to_bin_edges(hpd_ranges_from_distribution(bin_centers, counts, 0.68))
-            hpd_95_ranges = _widen_to_bin_edges(hpd_ranges_from_distribution(bin_centers, counts, 0.95))
-            hpd_68 = (
-                min(r['min'] for r in hpd_68_ranges),
-                max(r['max'] for r in hpd_68_ranges),
-            )
-            hpd_95 = (
-                min(r['min'] for r in hpd_95_ranges),
-                max(r['max'] for r in hpd_95_ranges),
-            )
+    def extract_results(
+        self,
+        idata,
+        ages: Dict,
+        measurements: Optional[List[Dict]] = None,
+        groups: Optional[List[Dict]] = None,
+    ) -> Dict:
+        """
+        Extract and summarize posterior distributions: one entry per
+        sample's calendar age, plus -- for every context/group with 2 or
+        more dated members -- the MODELLED start and end of that
+        context's own span.
 
-            results[age_id] = {
-                'posterior_mean': float(np.mean(posterior)),
-                'posterior_median': float(np.median(posterior)),
-                'posterior_std': float(np.std(posterior)),
-                'hpd_68': hpd_68,
-                'hpd_95': hpd_95,
-                'hpd_68_ranges': hpd_68_ranges,
-                'hpd_95_ranges': hpd_95_ranges,
-                'probability_distribution': probability_distribution,
-                'posterior_samples': posterior.tolist()
+        A context's start is the posterior of its oldest member's age;
+        its end is the posterior of its youngest member's age (computed
+        per-draw as the elementwise max/min across that context's member
+        age arrays, so the reported uncertainty reflects the same joint
+        posterior the uniform span prior in build_model() shaped, not an
+        independent recomputation). Skipped for a context with fewer than
+        2 dated members, since a span isn't a meaningful concept for a
+        single date (or none).
+
+        Returns {'measurements': {sample_id: {...}}, 'contexts': {group_id:
+        {'name': ..., 'start': {...}, 'end': {...}}}}, where every {...}
+        stats dict has the shape documented in _summarize_posterior.
+        """
+        measurements = measurements or []
+        groups = groups or []
+
+        posteriors: Dict[str, np.ndarray] = {
+            age_id: idata.posterior[age_var.name].values.flatten()
+            for age_id, age_var in ages.items()
+        }
+
+        measurement_results = {
+            age_id: self._summarize_posterior(posterior)
+            for age_id, posterior in posteriors.items()
+        }
+
+        group_members: Dict[str, List[str]] = defaultdict(list)
+        for m in measurements:
+            gid = m.get('group_id')
+            if gid and m['id'] in posteriors:
+                group_members[gid].append(m['id'])
+
+        groups_by_id = {g['id']: g for g in groups}
+        context_results = {}
+        for group_id, member_ids in group_members.items():
+            if len(member_ids) < 2:
+                continue
+            member_posteriors = np.stack([posteriors[mid] for mid in member_ids])
+            context_results[group_id] = {
+                'name': groups_by_id.get(group_id, {}).get('name'),
+                'start': self._summarize_posterior(member_posteriors.max(axis=0)),
+                'end': self._summarize_posterior(member_posteriors.min(axis=0)),
             }
 
-        return results
+        return {'measurements': measurement_results, 'contexts': context_results}

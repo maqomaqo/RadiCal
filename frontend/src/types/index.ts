@@ -56,11 +56,35 @@ export interface DraftMeasurement extends MatrixMeasurement {
   taq_age_bp?: number | null
 }
 
+// A summarized posterior distribution -- the shape returned for both a
+// sample's calendar age and (see DraftGroup.modeled_start/modeled_end
+// below) a context's modelled span boundaries. posterior_samples (the
+// raw MCMC draws) is deliberately not part of this -- the backend strips
+// it before sending a response, since the frontend only ever needs the
+// binned distribution/summary stats to render a plot.
+export interface PosteriorSummary {
+  posterior_mean: number
+  posterior_median: number
+  posterior_std: number
+  hpd_68: [number, number]
+  hpd_95: [number, number]
+  hpd_68_ranges?: HPDRange[]
+  hpd_95_ranges?: HPDRange[]
+  probability_distribution: Array<[number, number]>
+}
+
 export interface DraftGroup {
   id: string
   name: string
   tpq_age_bp?: number | null
   taq_age_bp?: number | null
+  // The MODELLED start/end of this context's own span (the posterior of
+  // its oldest/youngest dated member respectively) -- present only for a
+  // saved Bayesian analysis's context with 2+ dated members; absent
+  // everywhere else (the draft/editing flow never sets these, they only
+  // ever come back from GET /api/analysis/:id after a run).
+  modeled_start?: PosteriorSummary | null
+  modeled_end?: PosteriorSummary | null
 }
 
 export interface DraftRelationship {
