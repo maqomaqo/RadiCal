@@ -1,4 +1,4 @@
-# Radiocarbon Calibration Webapp
+# RadiCal
 
 A comprehensive web-based tool for radiocarbon dating analysis with Bayesian statistical modeling, stratigraphic relationship handling, and interactive visualization.
 
@@ -40,7 +40,7 @@ A comprehensive web-based tool for radiocarbon dating analysis with Bayesian sta
 ## Project Structure
 
 ```
-radiocarbon-calibration-webapp/
+RadiCal/
 ├── frontend/                 # React TypeScript application
 │   ├── src/
 │   │   ├── components/      # React components
@@ -80,8 +80,8 @@ radiocarbon-calibration-webapp/
 
 ```bash
 # Clone the repository
-git clone https://github.com/maqomaqo/radiocarbon-calibration-webapp.git
-cd radiocarbon-calibration-webapp
+git clone https://github.com/maqomaqo/RadiCal.git
+cd RadiCal
 
 # Copy environment variables
 cp .env.example .env

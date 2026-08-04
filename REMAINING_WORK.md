@@ -1,4 +1,4 @@
-# Remaining Work: Radiocarbon Calibration Webapp
+# Remaining Work: RadiCal
 
 *This file was rewritten from scratch after an audit against the actual code (previous version was stale and both overstated and understated different parts of the app). Everything below reflects what's actually in the repo, verified by reading the code and, where practical, exercising it against a real database.*
 

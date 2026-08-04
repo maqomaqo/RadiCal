@@ -18,7 +18,7 @@ export default function Navigation() {
               fontWeight: 600,
             }}
           >
-            ☢️ Radiocarbon Calibration
+            ☢️ RadiCal
           </Typography>
           <Box sx={{ display: 'flex', gap: 2 }}>
             <Button

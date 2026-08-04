@@ -1,7 +1,7 @@
 # Implementation Summary: Operational Build Fixes
 
 ## Overview
-This branch (`fix/operational-build`) brings the Radiocarbon Calibration Webapp from a skeleton to a **minimally operational application** with end-to-end functionality.
+This branch (`fix/operational-build`) brings RadiCal from a skeleton to a **minimally operational application** with end-to-end functionality.
 
 **Branch:** `fix/operational-build`  
 **Status:** Ready for testing & deployment
@@ -266,7 +266,7 @@ frontend/
 
 ### 1. Start with Docker Compose
 ```bash
-cd radiocarbon-calibration-webapp
+cd RadiCal
 cp .env.example .env
 docker-compose up -d
 ```

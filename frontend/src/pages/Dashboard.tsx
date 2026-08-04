@@ -46,10 +46,10 @@ export default function Dashboard() {
     <Container maxWidth="lg" sx={{ py: 4 }}>
       <Box sx={{ mb: 4 }}>
         <Typography variant="h3" component="h1" gutterBottom>
-          Radiocarbon Calibration Dashboard
+          RadiCal Dashboard
         </Typography>
         <Typography variant="body1" color="textSecondary" paragraph>
-          Welcome to the Radiocarbon Calibration Webapp. Create a new analysis or browse your projects.
+          Welcome to RadiCal. Create a new analysis or browse your projects.
         </Typography>
       </Box>
 

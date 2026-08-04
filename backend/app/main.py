@@ -8,7 +8,7 @@ from app.database import init_db
 load_dotenv()
 
 app = FastAPI(
-    title="Radiocarbon Calibration API",
+    title="RadiCal API",
     description="Bayesian analysis of radiocarbon dates",
     version="0.1.0"
 )
@@ -44,7 +44,7 @@ async def health_check():
 @app.get("/")
 async def root():
     return {
-        "message": "Radiocarbon Calibration Webapp API",
+        "message": "RadiCal API",
         "docs": "/docs",
         "health": "/api/health"
     }

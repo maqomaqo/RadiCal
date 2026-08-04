@@ -11,8 +11,8 @@
 
 ```bash
 # Clone repository
-git clone https://github.com/maqomaqo/radiocarbon-calibration-webapp.git
-cd radiocarbon-calibration-webapp
+git clone https://github.com/maqomaqo/RadiCal.git
+cd RadiCal
 
 # Copy environment template
 cp .env.example .env
