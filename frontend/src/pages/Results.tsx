@@ -369,18 +369,21 @@ export default function Results() {
         )}
 
       {/* Context Spans -- the modelled start/end of each context's own
-          duration (the posterior of its oldest and youngest dated member
-          respectively), for every context with 2+ dated members. Only a
-          Bayesian analysis with the uniform span prior (see
-          services/bayesian.py) computes this. */}
+          duration, for every context with 2+ dated members. These are
+          Boundary parameters in the same sense as OxCal's Boundary command
+          (see services/bayesian.py's build_model): separate latent
+          variables constrained to lie outside every dated member, so they
+          may extend earlier/later than the oldest/youngest dated sample
+          itself, not just report that sample's own posterior. */}
       {contextsWithModeledSpan.length > 0 && (
         <Paper sx={{ p: 3, mb: 3 }}>
           <Typography variant="h6" gutterBottom>
             Context Spans
           </Typography>
           <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
-            Modelled start and end date of each context, from the posterior of its oldest and
-            youngest dated member.
+            Modelled start and end date of each context (OxCal-style Boundary parameters) --
+            these may extend beyond the oldest/youngest dated sample, since the dated samples
+            are treated as a partial sample of the context's true duration.
           </Typography>
           <TableContainer>
             <Table size="small">

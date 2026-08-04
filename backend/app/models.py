@@ -111,11 +111,13 @@ class SampleGroup(Base):
     taq_age_bp = Column(Float, nullable=True)
 
     # The MODELLED start/end of this context's own span, filled in after a
-    # Bayesian run that includes this group -- the posterior of its oldest
-    # member's age (start) and youngest member's age (end) respectively
-    # (see BayesianChronology.extract_results's uniform-span-prior
-    # discussion in services/bayesian.py for why these are meaningful).
-    # Each is a JSON dict with the same shape as a per-sample result
+    # Bayesian run that includes this group -- Boundary parameters in the
+    # same sense as OxCal's Boundary command: separate latent variables
+    # constrained to lie outside every dated member's own age, not simply
+    # the oldest/youngest member's own posterior (see
+    # BayesianChronology.build_model/.extract_results in
+    # services/bayesian.py for the generative model and how these are
+    # sampled). Each is a JSON dict with the same shape as a per-sample result
     # (posterior_mean/median/std/hpd_68/hpd_95/hpd_68_ranges/hpd_95_ranges/
     # probability_distribution), so the frontend can render it with the
     # exact same component used for a sample's age. Left null for

@@ -22,6 +22,12 @@ _DEFAULT_PRIOR_PAD_YEARS = 5000.0
 # since here the window sets a hard prior bound, not just a plot's
 # x-axis, and being too aggressive would risk excluding real tail mass.
 _PRACTICAL_WINDOW_MASS_THRESHOLD = 1e-6
+# Steepness (1/years) of the smooth softplus penalty used for every soft
+# ordering constraint in this module (above/below sample constraints, and
+# each context's Boundary-vs-member-age containment below) -- see the long
+# comment above the above/below constraint loop in build_model for why a
+# smooth penalty is used instead of a hard switch(..., 0, -inf).
+ORDER_CONSTRAINT_STEEPNESS = 10.0
 
 
 def _practical_bounds(curve: CalibrationCurve, age_bp: float, error_1sigma: float) -> Tuple[float, float]:
@@ -167,11 +173,10 @@ class BayesianChronology:
         (tpq_age_bp/taq_age_bp), combining its own limiter with its
         group's if it belongs to one -- see effective_bounds().
 
-        Every group/context with 2 or more dated members also gets a
-        uniform span prior on its own phase duration (Nicholls and Jones,
-        2001, Section 4) -- see the comment above the Potential loop below
-        for why plain independent Uniform priors on member ages need this
-        correction.
+        Every group/context with 2 or more dated members also gets a pair of
+        Boundary parameters (boundary_start_{group_id}/boundary_end_{group_id}),
+        the same concept as OxCal's Boundary command -- see the comment above
+        the Potential loop below for the generative model these implement.
 
         Callers are expected to have already validated that `relationships`
         contains no stratigraphic cycle (BayesianRequest does this before
@@ -278,39 +283,40 @@ class BayesianChronology:
                     initval=initvals[m['id']]
                 )
 
-            # Uniform span prior for each context's phase duration
-            # (Nicholls and Jones, 2001, "Radiocarbon Dating with Temporal
-            # Order Constraints", Appl. Statist. 50(4), Section 4).
+            # Boundary parameters for each context/phase -- the same concept
+            # as OxCal's Boundary command (see
+            # https://c14.arch.ox.ac.uk/oxcalhelp/hlp_analysis_oper.html):
+            # a genuine latent parameter marking a phase's start/end, NOT
+            # simply the oldest/youngest dated member's own age. The
+            # generative model (Buck et al. 1992; Nicholls and Jones 2001,
+            # "Radiocarbon Dating with Temporal Order Constraints", Appl.
+            # Statist. 50(4), Section 4) is:
+            #     ta, tb ~ Uniform(window)           (the boundaries)
+            #     t_i | ta, tb ~iid Uniform(tb, ta)   (each member, given the
+            #                                          boundaries)
+            # i.e. every dated event's density, CONDITIONAL on the
+            # boundaries, is 1/(ta-tb) -- events are treated as randomly
+            # scattered within the phase, not independently informative
+            # about it. (Nicholls and Jones's eq. (9) shows this is
+            # equivalent, after ANALYTICALLY marginalizing ta/tb out, to
+            # reweighting the member ages' own marginal by span^(2-K)/(R-
+            # span) -- a shortcut for getting the member ages' posterior
+            # right without adding ta/tb as variables at all. That shortcut
+            # doesn't produce a boundary posterior to report, though, since
+            # there's no boundary variable left in the model -- so unlike
+            # that shortcut, ta/tb are kept here as real PyMC variables,
+            # exactly what "Modelled Start"/"Modelled End" need to behave
+            # like OxCal's Boundary.)
             #
-            # Each member age above is, on its own, an independent flat
-            # Uniform -- which sounds maximally non-informative but isn't:
-            # for a context with K dated members, integrating a constant
-            # density over every legal (ordered) combination of K ages
-            # makes the *marginal* prior on that context's span (its
-            # oldest member's age minus its youngest member's age) scale
-            # like span^(K-2) (the paper's eq. (9)/(10)) -- i.e. flat priors
-            # on the individual dates actively favour a WIDER span as K
-            # grows, a form of the Stein effect the paper documents in
-            # detail. In practice this pushes a context's earliest and
-            # latest reconstructed dates toward unrepresentatively early
-            # and late values, independent of what the radiocarbon
-            # evidence actually supports -- worse the more dates share a
-            # context and the tighter their errors are relative to the
-            # true span.
-            #
-            # The correction is the paper's own recommended fix: reweight
-            # so every span is equally likely a priori. Their eq. (9)
-            # (Section 4's "drop the separate phase-boundary parameters,
-            # keep the uniform span property" simplification -- no extra
-            # latent variables needed, since it's expressed directly in
-            # terms of the member ages already in the model) gives, for a
-            # context of K members with span s = max(ages) - min(ages)
-            # ranging within a window of width R:
-            #     f(span) = span^(2-K) / (R - span)
-            # added here as a Potential on top of the flat Uniform priors
-            # each member age already has. Skipped for contexts with fewer
-            # than 2 dated members, since span isn't a meaningful concept
-            # for a single date (or none).
+            # Because a Boundary's posterior isn't bounded by the sampled
+            # members' own range, it's free to extend earlier (start) /
+            # later (end) than the earliest/latest dated sample -- capturing
+            # that a finite set of dated events is a partial sample of the
+            # phase's true (continuous) duration, so the true start/end is
+            # expected to be somewhat more extreme than what was directly
+            # dated. Skipped for contexts with fewer than 2 dated members,
+            # since a span/boundary isn't a meaningful concept for a single
+            # date (or none).
             group_members: Dict[str, List[str]] = defaultdict(list)
             for m in measurements:
                 gid = m.get('group_id')
@@ -320,30 +326,72 @@ class BayesianChronology:
             for group_id, member_ids in group_members.items():
                 if len(member_ids) < 2:
                     continue
-                member_ages = [ages[mid] for mid in member_ids]
-                num_members = len(member_ages)
+                num_members = len(member_ids)
 
                 # R: how wide this context's span could possibly range --
                 # the union of its members' own (already TPQ/TAQ- and
                 # curve-bounded) ranges, so a context isn't artificially
                 # narrowed just because e.g. one member uses a different
-                # calibration curve than another.
+                # calibration curve than another. Also used as the
+                # boundaries' own prior range, so they stay bounded to
+                # something the radiocarbon evidence can actually inform
+                # rather than the full curve range (avoiding the same "huge
+                # prior vs tiny likelihood-informed posterior" SMC breakdown
+                # _practical_bounds above exists to prevent).
                 window_lower = min(bounds[mid][0] for mid in member_ids)
                 window_upper = max(bounds[mid][1] for mid in member_ids)
-                window_width = window_upper - window_lower
-                if window_width <= 0:
+                if window_upper <= window_lower:
                     continue
 
-                span = pt.max(pt.stack(member_ages)) - pt.min(pt.stack(member_ages))
-                if num_members == 2:
-                    # (2 - K) is exactly 0 here, so the span**(2-K) factor
-                    # is exactly 1 -- skip computing it explicitly. Doing
-                    # `0 * pt.log(span)` instead would risk a NaN (not 0)
-                    # the moment span -> 0, since 0 * -inf is undefined.
-                    logp_term = -pt.log(window_width - span)
-                else:
-                    logp_term = (2 - num_members) * pt.log(span) - pt.log(window_width - span)
-                pm.Potential(f"uniform_span_{group_id}", logp_term)
+                margin = 1.0  # years -- keeps boundary initvals strictly inside the window/each other, not right on the edge
+                start_initval = min(window_upper, max(initvals[mid] for mid in member_ids) + margin)
+                end_initval = max(window_lower, min(initvals[mid] for mid in member_ids) - margin)
+                end_initval = min(end_initval, start_initval - margin)
+
+                # boundary_end's upper bound is boundary_start ITSELF (a
+                # nested Uniform, standard PyMC hierarchical-parameter
+                # usage) -- this makes boundary_start >= boundary_end
+                # structurally guaranteed, not just softly encouraged,
+                # which is what keeps pt.log(boundary_start - boundary_end)
+                # below safe (it can only blow up in the zero-measure edge
+                # case of the two becoming exactly equal).
+                boundary_start = pm.Uniform(
+                    f"boundary_start_{group_id}",
+                    lower=window_lower, upper=window_upper,
+                    initval=start_initval,
+                )
+                boundary_end = pm.Uniform(
+                    f"boundary_end_{group_id}",
+                    lower=window_lower, upper=boundary_start,
+                    initval=end_initval,
+                )
+
+                # Containment of each member age within [boundary_end,
+                # boundary_start], as a smooth softplus penalty rather than
+                # dynamically bounding each member's own Uniform by the
+                # (live) boundary variables -- the latter risks an invalid
+                # lower > upper Uniform mid-sampling, since the boundaries'
+                # own range is the UNION window across all members and can
+                # wander outside one specific member's tighter static
+                # bounds. Same softplus-not-hard-switch reasoning as the
+                # above/below constraints below.
+                for mid in member_ids:
+                    pm.Potential(
+                        f"boundary_start_order_{group_id}_{mid}",
+                        -pt.softplus(ORDER_CONSTRAINT_STEEPNESS * (ages[mid] - boundary_start))
+                    )
+                    pm.Potential(
+                        f"boundary_end_order_{group_id}_{mid}",
+                        -pt.softplus(ORDER_CONSTRAINT_STEEPNESS * (boundary_end - ages[mid]))
+                    )
+
+                # The conditional density each member contributes given the
+                # boundaries -- 1/(ta-tb) per member, i.e. (ta-tb)^(-K) for
+                # K members -- from the generative model above.
+                pm.Potential(
+                    f"boundary_span_{group_id}",
+                    -num_members * pt.log(boundary_start - boundary_end)
+                )
 
             # Above/below constraints as a smooth, steep penalty rather than
             # a hard switch(..., 0, -inf). A literal -inf Potential gives
@@ -362,7 +410,7 @@ class BayesianChronology:
             # values) divides out to NaN and crashes outright with
             # "ValueError: cannot convert float NaN to integer" --
             # reproduced directly, and confirmed independent of SMC kernel
-            # choice (IMH or MH) and of the uniform span prior above.
+            # choice (IMH or MH) and of the Boundary parameters above.
             #
             # -softplus(k * (younger - older)) is smooth everywhere, so
             # tempering has an actual gradient to climb from the first
@@ -376,7 +424,6 @@ class BayesianChronology:
             # excluded from the posterior -- confirmed on the same
             # 11-sample chain: 0 crashes, <1% ordering-violation rate in
             # the final posterior draws, sensible per-sample results.
-            ORDER_CONSTRAINT_STEEPNESS = 10.0
             for older_id, younger_id in older_younger:
                 if older_id not in ages or younger_id not in ages:
                     continue
@@ -553,15 +600,16 @@ class BayesianChronology:
         Extract and summarize posterior distributions: one entry per
         sample's calendar age, plus -- for every context/group with 2 or
         more dated members -- the MODELLED start and end of that
-        context's own span.
+        context's own span, i.e. its Boundary parameters (see the comment
+        above the Potential loop in build_model for what these are and how
+        they differ from the group's own member ages).
 
-        A context's start is the posterior of its oldest member's age;
-        its end is the posterior of its youngest member's age (computed
-        per-draw as the elementwise max/min across that context's member
-        age arrays, so the reported uncertainty reflects the same joint
-        posterior the uniform span prior in build_model() shaped, not an
-        independent recomputation). Skipped for a context with fewer than
-        2 dated members, since a span isn't a meaningful concept for a
+        Start/end are read directly from the boundary_start_{group_id}/
+        boundary_end_{group_id} free variables build_model() adds to the
+        model for every context with 2+ dated members -- real posterior
+        samples of the boundary parameters themselves, not derived from the
+        member ages here. Skipped for a context with fewer than 2 dated
+        members, since a span/boundary isn't a meaningful concept for a
         single date (or none).
 
         Returns {'measurements': {sample_id: {...}}, 'contexts': {group_id:
@@ -592,11 +640,13 @@ class BayesianChronology:
         for group_id, member_ids in group_members.items():
             if len(member_ids) < 2:
                 continue
-            member_posteriors = np.stack([posteriors[mid] for mid in member_ids])
+            start_name, end_name = f"boundary_start_{group_id}", f"boundary_end_{group_id}"
+            if start_name not in idata.posterior or end_name not in idata.posterior:
+                continue
             context_results[group_id] = {
                 'name': groups_by_id.get(group_id, {}).get('name'),
-                'start': self._summarize_posterior(member_posteriors.max(axis=0)),
-                'end': self._summarize_posterior(member_posteriors.min(axis=0)),
+                'start': self._summarize_posterior(idata.posterior[start_name].values.flatten()),
+                'end': self._summarize_posterior(idata.posterior[end_name].values.flatten()),
             }
 
         return {'measurements': measurement_results, 'contexts': context_results}
