@@ -109,6 +109,12 @@ class BayesianChronology:
         (tpq_age_bp/taq_age_bp), combining its own limiter with its
         group's if it belongs to one -- see effective_bounds().
 
+        Every group/context with 2 or more dated members also gets a
+        uniform span prior on its own phase duration (Nicholls and Jones,
+        2001, Section 4) -- see the comment above the Potential loop below
+        for why plain independent Uniform priors on member ages need this
+        correction.
+
         Callers are expected to have already validated that `relationships`
         contains no stratigraphic cycle (BayesianRequest does this before
         the request ever reaches here); this function does not re-check.
@@ -209,6 +215,73 @@ class BayesianChronology:
                     upper=upper,
                     initval=initvals[m['id']]
                 )
+
+            # Uniform span prior for each context's phase duration
+            # (Nicholls and Jones, 2001, "Radiocarbon Dating with Temporal
+            # Order Constraints", Appl. Statist. 50(4), Section 4).
+            #
+            # Each member age above is, on its own, an independent flat
+            # Uniform -- which sounds maximally non-informative but isn't:
+            # for a context with K dated members, integrating a constant
+            # density over every legal (ordered) combination of K ages
+            # makes the *marginal* prior on that context's span (its
+            # oldest member's age minus its youngest member's age) scale
+            # like span^(K-2) (the paper's eq. (9)/(10)) -- i.e. flat priors
+            # on the individual dates actively favour a WIDER span as K
+            # grows, a form of the Stein effect the paper documents in
+            # detail. In practice this pushes a context's earliest and
+            # latest reconstructed dates toward unrepresentatively early
+            # and late values, independent of what the radiocarbon
+            # evidence actually supports -- worse the more dates share a
+            # context and the tighter their errors are relative to the
+            # true span.
+            #
+            # The correction is the paper's own recommended fix: reweight
+            # so every span is equally likely a priori. Their eq. (9)
+            # (Section 4's "drop the separate phase-boundary parameters,
+            # keep the uniform span property" simplification -- no extra
+            # latent variables needed, since it's expressed directly in
+            # terms of the member ages already in the model) gives, for a
+            # context of K members with span s = max(ages) - min(ages)
+            # ranging within a window of width R:
+            #     f(span) = span^(2-K) / (R - span)
+            # added here as a Potential on top of the flat Uniform priors
+            # each member age already has. Skipped for contexts with fewer
+            # than 2 dated members, since span isn't a meaningful concept
+            # for a single date (or none).
+            group_members: Dict[str, List[str]] = defaultdict(list)
+            for m in measurements:
+                gid = m.get('group_id')
+                if gid and m['id'] in ages:
+                    group_members[gid].append(m['id'])
+
+            for group_id, member_ids in group_members.items():
+                if len(member_ids) < 2:
+                    continue
+                member_ages = [ages[mid] for mid in member_ids]
+                num_members = len(member_ages)
+
+                # R: how wide this context's span could possibly range --
+                # the union of its members' own (already TPQ/TAQ- and
+                # curve-bounded) ranges, so a context isn't artificially
+                # narrowed just because e.g. one member uses a different
+                # calibration curve than another.
+                window_lower = min(bounds[mid][0] for mid in member_ids)
+                window_upper = max(bounds[mid][1] for mid in member_ids)
+                window_width = window_upper - window_lower
+                if window_width <= 0:
+                    continue
+
+                span = pt.max(pt.stack(member_ages)) - pt.min(pt.stack(member_ages))
+                if num_members == 2:
+                    # (2 - K) is exactly 0 here, so the span**(2-K) factor
+                    # is exactly 1 -- skip computing it explicitly. Doing
+                    # `0 * pt.log(span)` instead would risk a NaN (not 0)
+                    # the moment span -> 0, since 0 * -inf is undefined.
+                    logp_term = -pt.log(window_width - span)
+                else:
+                    logp_term = (2 - num_members) * pt.log(span) - pt.log(window_width - span)
+                pm.Potential(f"uniform_span_{group_id}", logp_term)
 
             for older_id, younger_id in older_younger:
                 if older_id not in ages or younger_id not in ages:
