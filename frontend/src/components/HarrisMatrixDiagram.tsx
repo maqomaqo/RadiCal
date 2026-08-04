@@ -1,18 +1,25 @@
-// Drag-and-drop Harris matrix diagram: samples and groups as nodes,
-// above/below/equal relationships as edges. Nodes auto-layout into
-// layers on first render (oldest at the bottom, youngest at the top,
-// matching the conventional Harris matrix reading direction) but can be
-// freely dragged afterward -- reactflow persists whatever position the
-// user leaves a node at for the rest of the session.
+// Drag-and-drop Harris matrix diagram: each node is a stratigraphic
+// Context (a named phase/layer that one or more dated samples belong to),
+// with above/below/equal relationships as edges between contexts. Nodes
+// auto-layout into layers on first render (oldest at the bottom, youngest
+// at the top, matching the conventional Harris matrix reading direction)
+// but can be freely dragged afterward -- reactflow persists whatever
+// position the user leaves a node at for the rest of the session.
 //
-// In editable mode, dragging a connection from one node to another
+// Individual dated samples are deliberately NOT drawn as their own boxes
+// here -- the workflow is "assign each sample to a Context, then relate
+// Contexts to each other," so a context node just shows how many dates it
+// contains (see the "N dates" sub-label). A sample not yet assigned to any
+// context has nowhere to attach in this diagram; see unassignedCount below.
+//
+// In editable mode, dragging a connection from one context to another
 // creates a new "above" relationship (source = younger, target = older --
 // law of superposition: what's above is younger); click an edge to change
-// its type or delete it via the panel below the
-// canvas. In read-only mode (used on the Results page to show what
-// stratigraphy a saved analysis actually used), dragging is limited to
-// repositioning -- no edges can be added, changed, or removed.
-import React, { useCallback, useMemo, useState, useEffect } from 'react'
+// its type or delete it via the panel below the canvas. In read-only mode
+// (used on the Results page to show what stratigraphy a saved analysis
+// actually used), dragging is limited to repositioning -- no edges can be
+// added, changed, or removed.
+import React, { useMemo, useState, useEffect } from 'react'
 import ReactFlow, {
   Node,
   Edge,
@@ -30,11 +37,11 @@ import DeleteIcon from '@mui/icons-material/Delete'
 import type { DraftGroup, MatrixMeasurement, DraftRelationship, RelationshipType } from '@/types'
 import { expandRelationships, findCycle } from '@/utils/stratigraphy'
 
-const GROUP_COLORS = ['#1976d2', '#9c27b0', '#2e7d32', '#ed6c02', '#0288d1', '#c2185b', '#5d4037', '#455a64']
+const CONTEXT_COLORS = ['#1976d2', '#9c27b0', '#2e7d32', '#ed6c02', '#0288d1', '#c2185b', '#5d4037', '#455a64']
 
-function colorForGroup(groupId: string, groups: DraftGroup[]): string {
-  const idx = groups.findIndex((g) => g.id === groupId)
-  return GROUP_COLORS[idx % GROUP_COLORS.length] || '#666'
+function colorForContext(contextId: string, contexts: DraftGroup[]): string {
+  const idx = contexts.findIndex((c) => c.id === contextId)
+  return CONTEXT_COLORS[idx % CONTEXT_COLORS.length] || '#666'
 }
 
 function nodeLabel(name: string, sub?: string, badges?: string[]) {
@@ -58,40 +65,28 @@ function tpqTaqBadges(tpq?: number | null, taq?: number | null): string[] {
   return badges
 }
 
-function layoutNodes(
-  measurements: MatrixMeasurement[],
-  groups: DraftGroup[],
-  relationships: DraftRelationship[]
-): { nodeId: string; layer: number }[] {
-  // Layer = length of the longest "older than" chain leading to this
-  // node; nodes with no known relationship default to layer 0 alongside
-  // genuine root nodes. Only nodes that actually appear in a relationship
-  // (directly, as a sample or group -- group membership doesn't count)
-  // get a computed layer; everything else is placed at layer 0 too so it
-  // stays visible rather than landing at the origin.
-  const participants = new Set<string>()
-  for (const r of relationships) {
-    participants.add(r.from_sample_id)
-    participants.add(r.to_sample_id)
-  }
-
+// Layer = length of the longest "older than" chain leading to this context;
+// a context with no known relationship defaults to layer 0. Only
+// context-to-context relationships participate here -- see the module
+// comment above for why individual samples don't get their own nodes.
+function layoutNodes(contexts: DraftGroup[], relationships: DraftRelationship[]): { nodeId: string; layer: number }[] {
   // Edges here are always (older, younger), matching utils/stratigraphy.ts
   // -- law of superposition: "above" means younger (so the older node is
   // the *target*), "below" means older (so the older node is the *source*).
   const edges: { from: string; to: string }[] = []
   for (const r of relationships) {
+    if (r.from_type !== 'group' || r.to_type !== 'group') continue
     if (r.relationship === 'above') edges.push({ from: r.to_sample_id, to: r.from_sample_id })
     else if (r.relationship === 'below') edges.push({ from: r.from_sample_id, to: r.to_sample_id })
   }
 
   const layer = new Map<string, number>()
-  const allIds = [...measurements.map((m) => m.id), ...groups.map((g) => g.id)]
-  for (const id of allIds) layer.set(id, 0)
+  for (const c of contexts) layer.set(c.id, 0)
 
   // Iteratively relax layers along edges until stable (equivalent to
   // longest-path in a DAG; if there's a cycle this just stops after a
   // bounded number of passes rather than looping forever).
-  for (let pass = 0; pass < allIds.length + 1; pass++) {
+  for (let pass = 0; pass < contexts.length + 1; pass++) {
     let changed = false
     for (const { from, to } of edges) {
       const candidate = (layer.get(from) || 0) + 1
@@ -103,8 +98,7 @@ function layoutNodes(
     if (!changed) break
   }
 
-  void participants
-  return allIds.map((id) => ({ nodeId: id, layer: layer.get(id) || 0 }))
+  return contexts.map((c) => ({ nodeId: c.id, layer: layer.get(c.id) || 0 }))
 }
 
 interface HarrisMatrixDiagramProps {
@@ -115,22 +109,25 @@ interface HarrisMatrixDiagramProps {
   onAddRelationship?: (rel: Omit<DraftRelationship, 'id'>) => void
   onUpdateRelationshipType?: (id: string, relationship: RelationshipType) => void
   onDeleteRelationship?: (id: string) => void
-  formatAge?: (age: number) => string
 }
 
 export default function HarrisMatrixDiagram({
   measurements,
-  groups,
+  groups: contexts,
   relationships,
   editable,
   onAddRelationship,
   onUpdateRelationshipType,
   onDeleteRelationship,
-  formatAge,
 }: HarrisMatrixDiagramProps) {
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null)
 
-  const initialLayout = useMemo(() => layoutNodes(measurements, groups, relationships), [measurements.length, groups.length])
+  const unassignedCount = useMemo(
+    () => measurements.filter((m) => !m.group_id).length,
+    [measurements]
+  )
+
+  const initialLayout = useMemo(() => layoutNodes(contexts, relationships), [contexts.length, relationships])
 
   const flowNodes = useMemo<Node[]>(() => {
     const maxLayer = Math.max(0, ...initialLayout.map((n) => n.layer))
@@ -140,79 +137,51 @@ export default function HarrisMatrixDiagram({
       byLayer.get(layer)!.push(nodeId)
     }
 
-    const nodes: Node[] = []
-
-    for (const g of groups) {
-      const layerEntry = initialLayout.find((n) => n.nodeId === g.id)
+    return contexts.map((c) => {
+      const layerEntry = initialLayout.find((n) => n.nodeId === c.id)
       const layer = layerEntry?.layer ?? 0
-      const siblings = byLayer.get(layer) || [g.id]
-      const idx = siblings.indexOf(g.id)
-      const color = colorForGroup(g.id, groups)
-      const memberCount = measurements.filter((m) => m.group_id === g.id).length
-      nodes.push({
-        id: g.id,
+      const siblings = byLayer.get(layer) || [c.id]
+      const idx = siblings.indexOf(c.id)
+      const color = colorForContext(c.id, contexts)
+      const dateCount = measurements.filter((m) => m.group_id === c.id).length
+      return {
+        id: c.id,
         position: { x: idx * 220, y: (maxLayer - layer) * 140 },
         data: {
-          label: nodeLabel(g.name, `${memberCount} sample${memberCount === 1 ? '' : 's'}`, tpqTaqBadges(g.tpq_age_bp, g.taq_age_bp)),
+          label: nodeLabel(c.name, `${dateCount} date${dateCount === 1 ? '' : 's'}`, tpqTaqBadges(c.tpq_age_bp, c.taq_age_bp)),
         },
         style: {
           background: `${color}22`,
           border: `2px solid ${color}`,
           borderRadius: 10,
           padding: 8,
-          minWidth: 130,
+          minWidth: 150,
         },
-      })
-    }
-
-    for (const m of measurements) {
-      const layerEntry = initialLayout.find((n) => n.nodeId === m.id)
-      const layer = layerEntry?.layer ?? 0
-      const siblings = (byLayer.get(layer) || [m.id]).filter((id) => measurements.some((mm) => mm.id === id))
-      const idx = siblings.indexOf(m.id)
-      const groupOffset = groups.length > 0 ? 1 : 0
-      const color = m.group_id ? colorForGroup(m.group_id, groups) : '#90a4ae'
-      const ageLabel = formatAge
-        ? formatAge(m.age_bp)
-        : m.error_1sigma != null
-          ? `${m.age_bp} ± ${m.error_1sigma} BP`
-          : `${m.age_bp} BP`
-      nodes.push({
-        id: m.id,
-        position: { x: (idx + groupOffset) * 180, y: (maxLayer - layer) * 140 + (m.group_id ? 60 : 0) },
-        data: { label: nodeLabel(m.sample_name, ageLabel, tpqTaqBadges(m.tpq_age_bp, m.taq_age_bp)) },
-        style: {
-          background: '#fff',
-          border: `2px solid ${color}`,
-          borderRadius: 8,
-          padding: 6,
-          minWidth: 110,
-        },
-      })
-    }
-
-    return nodes
+      }
+    })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [measurements, groups, initialLayout, formatAge])
+  }, [contexts, measurements, initialLayout])
 
   const flowEdges = useMemo<Edge[]>(
     () =>
-      relationships.map((r) => {
-        const isEqual = r.relationship === 'equal'
-        return {
-          id: r.id,
-          source: r.from_sample_id,
-          target: r.to_sample_id,
-          label: r.relationship,
-          animated: false,
-          style: {
-            stroke: isEqual ? '#9c27b0' : '#1976d2',
-            strokeDasharray: isEqual ? '6 4' : undefined,
-            strokeWidth: r.id === selectedEdgeId ? 3 : 1.5,
-          },
-          markerEnd: isEqual ? undefined : { type: MarkerType.ArrowClosed, color: '#1976d2' },
-        }
-      }),
+      relationships
+        .filter((r) => r.from_type === 'group' && r.to_type === 'group')
+        .map((r) => {
+          const isEqual = r.relationship === 'equal'
+          return {
+            id: r.id,
+            source: r.from_sample_id,
+            target: r.to_sample_id,
+            label: r.relationship,
+            animated: false,
+            style: {
+              stroke: isEqual ? '#9c27b0' : '#1976d2',
+              strokeDasharray: isEqual ? '6 4' : undefined,
+              strokeWidth: r.id === selectedEdgeId ? 3 : 1.5,
+            },
+            markerEnd: isEqual ? undefined : { type: MarkerType.ArrowClosed, color: '#1976d2' },
+          }
+        }),
     [relationships, selectedEdgeId]
   )
 
@@ -235,38 +204,30 @@ export default function HarrisMatrixDiagram({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [flowEdges])
 
-  const nodeTypeOf = useCallback(
-    (id: string): 'sample' | 'group' => (groups.some((g) => g.id === id) ? 'group' : 'sample'),
-    [groups]
-  )
-
-  const onConnect = useCallback(
-    (connection: Connection) => {
-      if (!editable || !onAddRelationship || !connection.source || !connection.target) return
-      if (connection.source === connection.target) return
-      onAddRelationship({
-        from_sample_id: connection.source,
-        to_sample_id: connection.target,
-        from_type: nodeTypeOf(connection.source),
-        to_type: nodeTypeOf(connection.target),
-        relationship: 'above',
-      })
-    },
-    [editable, onAddRelationship, nodeTypeOf]
-  )
+  const onConnect = (connection: Connection) => {
+    if (!editable || !onAddRelationship || !connection.source || !connection.target) return
+    if (connection.source === connection.target) return
+    onAddRelationship({
+      from_sample_id: connection.source,
+      to_sample_id: connection.target,
+      from_type: 'group',
+      to_type: 'group',
+      relationship: 'above',
+    })
+  }
 
   const cycle = useMemo(() => {
-    const { olderYounger } = expandRelationships(measurements, groups, relationships)
+    const { olderYounger } = expandRelationships(measurements, contexts, relationships)
     return findCycle(olderYounger.map((e) => ({ from: e.from, to: e.to })))
-  }, [measurements, groups, relationships])
+  }, [measurements, contexts, relationships])
 
   const cycleLabels = useMemo(() => {
     if (!cycle) return []
     const names = new Map<string, string>()
     for (const m of measurements) names.set(m.id, m.sample_name)
-    for (const g of groups) names.set(g.id, g.name)
+    for (const c of contexts) names.set(c.id, c.name)
     return cycle.map((id) => names.get(id) || id)
-  }, [cycle, measurements, groups])
+  }, [cycle, measurements, contexts])
 
   const selectedRelationship = relationships.find((r) => r.id === selectedEdgeId) || null
 
@@ -279,10 +240,17 @@ export default function HarrisMatrixDiagram({
           running the analysis.
         </Alert>
       )}
+      {unassignedCount > 0 && (
+        <Alert severity="warning" sx={{ mb: 2 }}>
+          {unassignedCount} sample{unassignedCount === 1 ? '' : 's'} not yet assigned to a context --
+          not shown here, and unconstrained by any relationship. Assign {unassignedCount === 1 ? 'it' : 'them'} to a
+          context in the Samples table to include {unassignedCount === 1 ? 'it' : 'them'} in this diagram.
+        </Alert>
+      )}
       {editable && (
         <Alert severity="info" sx={{ mb: 2 }}>
-          Drag from one node's edge to another to add an "above" relationship (younger → older). Click
-          an edge below to change its type or delete it. Drag nodes to rearrange the layout.
+          Drag from one context's edge to another to add an "above" relationship (younger → older).
+          Click an edge below to change its type or delete it. Drag contexts to rearrange the layout.
         </Alert>
       )}
 
@@ -302,7 +270,7 @@ export default function HarrisMatrixDiagram({
         >
           <Background />
           <Controls showInteractive={false} />
-          {(measurements.length + groups.length) > 8 && <MiniMap />}
+          {contexts.length > 8 && <MiniMap />}
         </ReactFlow>
       </Box>
 

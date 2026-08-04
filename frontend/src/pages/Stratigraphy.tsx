@@ -1,11 +1,22 @@
 // Stratigraphy definition page for a Bayesian analysis, reached from
-// NewAnalysis.tsx once at least two measurements exist. Offers two ways
-// to specify above/below/equal constraints and TPQ/TAQ age limiters --
-// a simple list-picker form, and a true drag-and-drop Harris matrix
-// diagram (components/HarrisMatrixDiagram.tsx) -- editing the same
-// shared draft (stores/analysisStore.ts), so either can be used alone or
-// both together (e.g. build via the list, then open the diagram just to
-// visually check the relationships are right before running).
+// NewAnalysis.tsx once at least two measurements exist. The workflow
+// mirrors how archaeologists actually record stratigraphy: samples aren't
+// related to each other directly -- each dated sample is assigned to a
+// stratigraphic Context (a layer/cut/fill -- the "same context" concept
+// standard in archaeological recording), and above/below/equal
+// relationships are then defined between Contexts, not between individual
+// dates. TPQ/TAQ age limiters can still be set per-sample or per-context.
+//
+// Offers two ways to specify this -- a simple list-picker form, and a true
+// drag-and-drop Harris matrix diagram (components/HarrisMatrixDiagram.tsx)
+// -- editing the same shared draft (stores/analysisStore.ts), so either can
+// be used alone or both together (e.g. build via the list, then open the
+// diagram just to visually check the relationships are right before
+// running).
+//
+// Internally this still uses the backend's generic "group" vocabulary
+// (DraftGroup, group_id, from_type/to_type: 'group') -- "Context" is
+// purely the label shown to the user, matching the archaeological term.
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
@@ -40,7 +51,7 @@ import DeleteIcon from '@mui/icons-material/Delete'
 import AddIcon from '@mui/icons-material/Add'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import { useAnalysisDraftStore } from '@/stores/analysisStore'
-import type { NodeType, RelationshipType } from '@/types'
+import type { RelationshipType } from '@/types'
 import HarrisMatrixDiagram from '@/components/HarrisMatrixDiagram'
 import { expandRelationships, findCycle } from '@/utils/stratigraphy'
 
@@ -58,11 +69,11 @@ export default function Stratigraphy() {
   const navigate = useNavigate()
   const {
     measurements,
-    groups,
+    groups: contexts,
     relationships,
-    addGroup,
-    removeGroup,
-    updateGroup,
+    addGroup: addContext,
+    removeGroup: removeContext,
+    updateGroup: updateContext,
     updateMeasurement,
     addRelationship,
     removeRelationship,
@@ -71,26 +82,20 @@ export default function Stratigraphy() {
 
   const [tab, setTab] = useState<'list' | 'diagram'>('list')
 
-  const [newGroupDialogOpen, setNewGroupDialogOpen] = useState(false)
-  const [newGroupName, setNewGroupName] = useState('')
+  const [newContextDialogOpen, setNewContextDialogOpen] = useState(false)
+  const [newContextName, setNewContextName] = useState('')
 
   const [relFrom, setRelFrom] = useState('')
-  const [relFromType, setRelFromType] = useState<NodeType>('sample')
   const [relTo, setRelTo] = useState('')
-  const [relToType, setRelToType] = useState<NodeType>('sample')
   const [relType, setRelType] = useState<RelationshipType>('above')
 
-  const nodeOptions = [
-    ...groups.map((g) => ({ id: g.id, type: 'group' as NodeType, label: `${g.name} (group)` })),
-    ...measurements.map((m) => ({ id: m.id, type: 'sample' as NodeType, label: m.sample_name })),
-  ]
-
-  const { olderYounger } = expandRelationships(measurements, groups, relationships)
+  const { olderYounger } = expandRelationships(measurements, contexts, relationships)
   const cycle = findCycle(olderYounger.map((e) => ({ from: e.from, to: e.to })))
   const namesById = new Map<string, string>([
     ...measurements.map((m) => [m.id, m.sample_name] as [string, string]),
-    ...groups.map((g) => [g.id, g.name] as [string, string]),
+    ...contexts.map((c) => [c.id, c.name] as [string, string]),
   ])
+  const unassignedCount = measurements.filter((m) => !m.group_id).length
 
   if (measurements.length === 0) {
     return (
@@ -105,11 +110,11 @@ export default function Stratigraphy() {
     )
   }
 
-  const handleCreateGroup = () => {
-    if (!newGroupName.trim()) return
-    addGroup({ id: newId(), name: newGroupName.trim(), tpq_age_bp: null, taq_age_bp: null })
-    setNewGroupName('')
-    setNewGroupDialogOpen(false)
+  const handleCreateContext = () => {
+    if (!newContextName.trim()) return
+    addContext({ id: newId(), name: newContextName.trim(), tpq_age_bp: null, taq_age_bp: null })
+    setNewContextName('')
+    setNewContextDialogOpen(false)
   }
 
   const handleAddRelationship = () => {
@@ -117,9 +122,9 @@ export default function Stratigraphy() {
     addRelationship({
       id: newId(),
       from_sample_id: relFrom,
-      from_type: relFromType,
+      from_type: 'group',
       to_sample_id: relTo,
-      to_type: relToType,
+      to_type: 'group',
       relationship: relType,
     })
     setRelFrom('')
@@ -134,12 +139,14 @@ export default function Stratigraphy() {
             Stratigraphy
           </Typography>
           <Typography variant="body1" color="textSecondary">
-            Define above/below/equal relationships and TPQ/TAQ age limits for this Bayesian analysis.
+            Assign each sample to a stratigraphic context, then define above/below/equal
+            relationships and TPQ/TAQ age limits between those contexts.
           </Typography>
         </Box>
-        <Stack direction="row" spacing={1}>
-          <Chip label={`${groups.length} group${groups.length === 1 ? '' : 's'}`} />
+        <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+          <Chip label={`${contexts.length} context${contexts.length === 1 ? '' : 's'}`} />
           <Chip label={`${relationships.length} relationship${relationships.length === 1 ? '' : 's'}`} />
+          {unassignedCount > 0 && <Chip label={`${unassignedCount} unassigned sample${unassignedCount === 1 ? '' : 's'}`} color="warning" />}
           {cycle ? <Chip label="Circular -- fix before running" color="error" /> : <Chip label="No cycles detected" color="success" />}
         </Stack>
       </Box>
@@ -159,17 +166,23 @@ export default function Stratigraphy() {
 
       {tab === 'list' ? (
         <Box>
-          {/* Groups */}
+          {/* Contexts */}
           <Paper sx={{ p: 3, mb: 3 }}>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-              <Typography variant="h6">Groups (phases)</Typography>
-              <Button size="small" startIcon={<AddIcon />} onClick={() => setNewGroupDialogOpen(true)}>
-                Add Group
+              <Box>
+                <Typography variant="h6">1. Contexts</Typography>
+                <Typography variant="body2" color="textSecondary">
+                  A context is a stratigraphic layer, cut, or fill -- create one for each distinct
+                  deposit your samples came from.
+                </Typography>
+              </Box>
+              <Button size="small" startIcon={<AddIcon />} onClick={() => setNewContextDialogOpen(true)}>
+                Add Context
               </Button>
             </Box>
-            {groups.length === 0 ? (
+            {contexts.length === 0 ? (
               <Typography color="textSecondary" variant="body2">
-                No groups yet. Groups let one relationship or TPQ/TAQ limiter apply to several samples at once.
+                No contexts yet. Create one, then assign your samples to it below.
               </Typography>
             ) : (
               <TableContainer>
@@ -179,20 +192,20 @@ export default function Stratigraphy() {
                       <TableCell>Name</TableCell>
                       <TableCell align="right">TPQ (max age, cal BP)</TableCell>
                       <TableCell align="right">TAQ (min age, cal BP)</TableCell>
-                      <TableCell align="right">Members</TableCell>
+                      <TableCell align="right">Dates</TableCell>
                       <TableCell align="right" />
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    {groups.map((g) => (
-                      <TableRow key={g.id}>
-                        <TableCell>{g.name}</TableCell>
+                    {contexts.map((c) => (
+                      <TableRow key={c.id}>
+                        <TableCell>{c.name}</TableCell>
                         <TableCell align="right">
                           <TextField
                             type="number"
                             size="small"
-                            value={g.tpq_age_bp ?? ''}
-                            onChange={(e) => updateGroup(g.id, { tpq_age_bp: e.target.value === '' ? null : Number(e.target.value) })}
+                            value={c.tpq_age_bp ?? ''}
+                            onChange={(e) => updateContext(c.id, { tpq_age_bp: e.target.value === '' ? null : Number(e.target.value) })}
                             sx={{ width: 110 }}
                           />
                         </TableCell>
@@ -200,14 +213,14 @@ export default function Stratigraphy() {
                           <TextField
                             type="number"
                             size="small"
-                            value={g.taq_age_bp ?? ''}
-                            onChange={(e) => updateGroup(g.id, { taq_age_bp: e.target.value === '' ? null : Number(e.target.value) })}
+                            value={c.taq_age_bp ?? ''}
+                            onChange={(e) => updateContext(c.id, { taq_age_bp: e.target.value === '' ? null : Number(e.target.value) })}
                             sx={{ width: 110 }}
                           />
                         </TableCell>
-                        <TableCell align="right">{measurements.filter((m) => m.group_id === g.id).length}</TableCell>
+                        <TableCell align="right">{measurements.filter((m) => m.group_id === c.id).length}</TableCell>
                         <TableCell align="right">
-                          <IconButton size="small" color="error" onClick={() => removeGroup(g.id)}>
+                          <IconButton size="small" color="error" onClick={() => removeContext(c.id)}>
                             <DeleteIcon fontSize="small" />
                           </IconButton>
                         </TableCell>
@@ -219,18 +232,25 @@ export default function Stratigraphy() {
             )}
           </Paper>
 
-          {/* Samples: group assignment + TPQ/TAQ */}
+          {/* Samples: context assignment + TPQ/TAQ */}
           <Paper sx={{ p: 3, mb: 3 }}>
             <Typography variant="h6" gutterBottom>
-              Samples
+              2. Assign Samples to Contexts
             </Typography>
+            {unassignedCount > 0 && (
+              <Alert severity="warning" sx={{ mb: 2 }}>
+                {unassignedCount} sample{unassignedCount === 1 ? '' : 's'} not yet assigned to a context --
+                {unassignedCount === 1 ? " it won't" : " they won't"} appear in the Harris matrix or be
+                constrained by any relationship until assigned.
+              </Alert>
+            )}
             <TableContainer>
               <Table size="small">
                 <TableHead>
                   <TableRow>
                     <TableCell>Sample</TableCell>
                     <TableCell>Age (BP)</TableCell>
-                    <TableCell>Group</TableCell>
+                    <TableCell>Context</TableCell>
                     <TableCell align="right">TPQ (max age)</TableCell>
                     <TableCell align="right">TAQ (min age)</TableCell>
                   </TableRow>
@@ -241,16 +261,18 @@ export default function Stratigraphy() {
                       <TableCell>{m.sample_name}</TableCell>
                       <TableCell>{m.age_bp} ± {m.error_1sigma}</TableCell>
                       <TableCell>
-                        <FormControl size="small" sx={{ minWidth: 140 }}>
+                        <FormControl size="small" sx={{ minWidth: 160 }}>
                           <Select
                             value={m.group_id || ''}
                             displayEmpty
                             onChange={(e) => updateMeasurement(m.id, { group_id: e.target.value || null })}
                           >
-                            <MenuItem value="">No group</MenuItem>
-                            {groups.map((g) => (
-                              <MenuItem key={g.id} value={g.id}>
-                                {g.name}
+                            <MenuItem value="">
+                              <em>No context</em>
+                            </MenuItem>
+                            {contexts.map((c) => (
+                              <MenuItem key={c.id} value={c.id}>
+                                {c.name}
                               </MenuItem>
                             ))}
                           </Select>
@@ -281,94 +303,86 @@ export default function Stratigraphy() {
             </TableContainer>
           </Paper>
 
-          {/* Relationships */}
+          {/* Relationships between contexts */}
           <Paper sx={{ p: 3 }}>
             <Typography variant="h6" gutterBottom>
-              Relationships
+              3. Relationships Between Contexts
             </Typography>
-            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ mb: 2 }} alignItems="center">
-              <FormControl size="small" sx={{ minWidth: 180 }}>
-                <InputLabel>From</InputLabel>
-                <Select
-                  label="From"
-                  value={relFrom}
-                  onChange={(e) => {
-                    const opt = nodeOptions.find((o) => o.id === e.target.value)
-                    setRelFrom(e.target.value)
-                    if (opt) setRelFromType(opt.type)
-                  }}
-                >
-                  {nodeOptions.map((o) => (
-                    <MenuItem key={`${o.type}-${o.id}`} value={o.id}>
-                      {o.label}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-              <FormControl size="small" sx={{ minWidth: 200 }}>
-                <InputLabel>Relationship</InputLabel>
-                <Select label="Relationship" value={relType} onChange={(e) => setRelType(e.target.value as RelationshipType)}>
-                  {Object.entries(RELATIONSHIP_LABELS).map(([value, label]) => (
-                    <MenuItem key={value} value={value}>
-                      {label}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-              <FormControl size="small" sx={{ minWidth: 180 }}>
-                <InputLabel>To</InputLabel>
-                <Select
-                  label="To"
-                  value={relTo}
-                  onChange={(e) => {
-                    const opt = nodeOptions.find((o) => o.id === e.target.value)
-                    setRelTo(e.target.value)
-                    if (opt) setRelToType(opt.type)
-                  }}
-                >
-                  {nodeOptions.map((o) => (
-                    <MenuItem key={`${o.type}-${o.id}`} value={o.id}>
-                      {o.label}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-              <Button variant="outlined" startIcon={<AddIcon />} onClick={handleAddRelationship} disabled={!relFrom || !relTo || relFrom === relTo}>
-                Add
-              </Button>
-            </Stack>
-
-            {relationships.length === 0 ? (
+            {contexts.length < 2 ? (
               <Typography color="textSecondary" variant="body2">
-                No relationships defined yet.
+                Create at least two contexts above to define a relationship between them.
               </Typography>
             ) : (
-              <TableContainer>
-                <Table size="small">
-                  <TableHead>
-                    <TableRow>
-                      <TableCell>From</TableCell>
-                      <TableCell>Relationship</TableCell>
-                      <TableCell>To</TableCell>
-                      <TableCell align="right" />
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {relationships.map((r) => (
-                      <TableRow key={r.id}>
-                        <TableCell>{namesById.get(r.from_sample_id) || r.from_sample_id}</TableCell>
-                        <TableCell>{RELATIONSHIP_LABELS[r.relationship]}</TableCell>
-                        <TableCell>{namesById.get(r.to_sample_id) || r.to_sample_id}</TableCell>
-                        <TableCell align="right">
-                          <IconButton size="small" color="error" onClick={() => removeRelationship(r.id)}>
-                            <DeleteIcon fontSize="small" />
-                          </IconButton>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </TableContainer>
+              <>
+                <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ mb: 2 }} alignItems="center">
+                  <FormControl size="small" sx={{ minWidth: 180 }}>
+                    <InputLabel>From context</InputLabel>
+                    <Select label="From context" value={relFrom} onChange={(e) => setRelFrom(e.target.value)}>
+                      {contexts.map((c) => (
+                        <MenuItem key={c.id} value={c.id}>
+                          {c.name}
+                        </MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                  <FormControl size="small" sx={{ minWidth: 200 }}>
+                    <InputLabel>Relationship</InputLabel>
+                    <Select label="Relationship" value={relType} onChange={(e) => setRelType(e.target.value as RelationshipType)}>
+                      {Object.entries(RELATIONSHIP_LABELS).map(([value, label]) => (
+                        <MenuItem key={value} value={value}>
+                          {label}
+                        </MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                  <FormControl size="small" sx={{ minWidth: 180 }}>
+                    <InputLabel>To context</InputLabel>
+                    <Select label="To context" value={relTo} onChange={(e) => setRelTo(e.target.value)}>
+                      {contexts.map((c) => (
+                        <MenuItem key={c.id} value={c.id}>
+                          {c.name}
+                        </MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                  <Button variant="outlined" startIcon={<AddIcon />} onClick={handleAddRelationship} disabled={!relFrom || !relTo || relFrom === relTo}>
+                    Add
+                  </Button>
+                </Stack>
+
+                {relationships.length === 0 ? (
+                  <Typography color="textSecondary" variant="body2">
+                    No relationships defined yet.
+                  </Typography>
+                ) : (
+                  <TableContainer>
+                    <Table size="small">
+                      <TableHead>
+                        <TableRow>
+                          <TableCell>From</TableCell>
+                          <TableCell>Relationship</TableCell>
+                          <TableCell>To</TableCell>
+                          <TableCell align="right" />
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {relationships.map((r) => (
+                          <TableRow key={r.id}>
+                            <TableCell>{namesById.get(r.from_sample_id) || r.from_sample_id}</TableCell>
+                            <TableCell>{RELATIONSHIP_LABELS[r.relationship]}</TableCell>
+                            <TableCell>{namesById.get(r.to_sample_id) || r.to_sample_id}</TableCell>
+                            <TableCell align="right">
+                              <IconButton size="small" color="error" onClick={() => removeRelationship(r.id)}>
+                                <DeleteIcon fontSize="small" />
+                              </IconButton>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
+                )}
+              </>
             )}
           </Paper>
         </Box>
@@ -376,7 +390,7 @@ export default function Stratigraphy() {
         <Paper sx={{ p: 3 }}>
           <HarrisMatrixDiagram
             measurements={measurements}
-            groups={groups}
+            groups={contexts}
             relationships={relationships}
             editable
             onAddRelationship={(rel) => addRelationship({ ...rel, id: newId() })}
@@ -392,22 +406,22 @@ export default function Stratigraphy() {
         </Button>
       </Box>
 
-      <Dialog open={newGroupDialogOpen} onClose={() => setNewGroupDialogOpen(false)} fullWidth maxWidth="sm">
-        <DialogTitle>New Group</DialogTitle>
+      <Dialog open={newContextDialogOpen} onClose={() => setNewContextDialogOpen(false)} fullWidth maxWidth="sm">
+        <DialogTitle>New Context</DialogTitle>
         <DialogContent>
           <TextField
             fullWidth
             autoFocus
-            label="Group Name"
-            value={newGroupName}
-            onChange={(e) => setNewGroupName(e.target.value)}
-            placeholder="e.g., Phase 2 hearth fill"
+            label="Context Name"
+            value={newContextName}
+            onChange={(e) => setNewContextName(e.target.value)}
+            placeholder="e.g., Context 104 -- hearth fill"
             sx={{ mt: 1 }}
           />
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setNewGroupDialogOpen(false)}>Cancel</Button>
-          <Button variant="contained" onClick={handleCreateGroup} disabled={!newGroupName.trim()}>
+          <Button onClick={() => setNewContextDialogOpen(false)}>Cancel</Button>
+          <Button variant="contained" onClick={handleCreateContext} disabled={!newContextName.trim()}>
             Create
           </Button>
         </DialogActions>

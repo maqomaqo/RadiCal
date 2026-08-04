@@ -10,9 +10,14 @@ import { create } from 'zustand'
 import type { DraftMeasurement, DraftGroup, DraftRelationship } from '@/types'
 
 interface AnalysisDraftState {
+  name: string
+  analysisType: 'calibration' | 'bayesian'
   measurements: DraftMeasurement[]
   groups: DraftGroup[]
   relationships: DraftRelationship[]
+
+  setName: (name: string) => void
+  setAnalysisType: (analysisType: 'calibration' | 'bayesian') => void
 
   setMeasurements: (measurements: DraftMeasurement[]) => void
   addMeasurement: (measurement: DraftMeasurement) => void
@@ -31,9 +36,14 @@ interface AnalysisDraftState {
 }
 
 export const useAnalysisDraftStore = create<AnalysisDraftState>((set) => ({
+  name: '',
+  analysisType: 'calibration',
   measurements: [],
   groups: [],
   relationships: [],
+
+  setName: (name) => set({ name }),
+  setAnalysisType: (analysisType) => set({ analysisType }),
 
   setMeasurements: (measurements) => set({ measurements }),
 
@@ -83,5 +93,5 @@ export const useAnalysisDraftStore = create<AnalysisDraftState>((set) => ({
       relationships: state.relationships.map((r) => (r.id === id ? { ...r, relationship } : r)),
     })),
 
-  reset: () => set({ measurements: [], groups: [], relationships: [] }),
+  reset: () => set({ name: '', analysisType: 'calibration', measurements: [], groups: [], relationships: [] }),
 }))

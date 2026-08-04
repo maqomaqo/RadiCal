@@ -11,7 +11,14 @@ export type SampleType = 'terrestrial' | 'marine'
 export type RelationshipType = 'above' | 'below' | 'equal'
 
 // A relationship endpoint (from/to) can point at either a single sample
-// or a named group of samples.
+// or a named group of samples -- the schema stays generic, but the
+// Stratigraphy UI (see pages/Stratigraphy.tsx) only ever creates 'group'
+// endpoints on both sides: the workflow is "assign each sample to a
+// Context, then relate Contexts to each other," not sample-to-sample.
+// "Context" is the label shown to the user for what this codebase calls
+// a "group" everywhere else (DraftGroup, group_id, SampleGroup on the
+// backend) -- the archaeological term for a stratigraphic layer/cut/fill
+// that a set of dated samples come from.
 export type NodeType = 'sample' | 'group'
 
 // The subset of a measurement's fields the Harris matrix diagram and the

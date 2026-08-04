@@ -67,14 +67,26 @@ interface PreviewResult {
 export default function NewAnalysis() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
-  const [analysisName, setAnalysisName] = useState('')
-  const [analysisType, setAnalysisType] = useState<'calibration' | 'bayesian'>('calibration')
   const [dateFormat, setDateFormat] = useState<DateFormat>(DEFAULT_DATE_FORMAT)
-  // Measurements (and, for Bayesian analyses, groups/relationships/TPQ-TAQ
-  // defined on the Stratigraphy page) live in a shared store rather than
-  // local state, so navigating to /new-analysis/stratigraphy and back
-  // doesn't lose anything that was already entered.
-  const { measurements, addMeasurement, removeMeasurement, groups, relationships, reset: resetDraft } = useAnalysisDraftStore()
+  // Name, type, measurements, and (for Bayesian analyses) groups/
+  // relationships/TPQ-TAQ defined on the Stratigraphy page all live in a
+  // shared store rather than local state, so navigating to
+  // /new-analysis/stratigraphy and back doesn't lose anything that was
+  // already entered -- local useState here would reset to its initial
+  // value on every remount, silently reverting analysisType to
+  // "calibration" and losing whatever name was typed.
+  const {
+    name: analysisName,
+    setName: setAnalysisName,
+    analysisType,
+    setAnalysisType,
+    measurements,
+    addMeasurement,
+    removeMeasurement,
+    groups,
+    relationships,
+    reset: resetDraft,
+  } = useAnalysisDraftStore()
   const [currentMeasurement, setCurrentMeasurement] = useState<Partial<Measurement>>({
     sample_type: 'terrestrial',
     curve_id: 'intcal20',
@@ -490,14 +502,14 @@ export default function NewAnalysis() {
                   Stratigraphy
                 </Typography>
                 <Stack direction="row" spacing={1} sx={{ mb: 1 }}>
-                  <Chip size="small" label={`${groups.length} group${groups.length === 1 ? '' : 's'}`} />
+                  <Chip size="small" label={`${groups.length} context${groups.length === 1 ? '' : 's'}`} />
                   <Chip size="small" label={`${relationships.length} relationship${relationships.length === 1 ? '' : 's'}`} />
                   {cycle && <Chip size="small" color="error" label="Circular -- fix before running" />}
                 </Stack>
                 <Typography variant="body2" color="textSecondary">
-                  Optional: define above/below/equal relationships between samples (or groups of
-                  samples) and TPQ/TAQ age limits, via a list picker or a drag-and-drop Harris
-                  matrix diagram.
+                  Optional: assign samples to stratigraphic contexts, then define above/below/equal
+                  relationships between those contexts and TPQ/TAQ age limits, via a list picker or a
+                  drag-and-drop Harris matrix diagram.
                 </Typography>
               </Box>
               <Button

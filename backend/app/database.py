@@ -52,6 +52,24 @@ _COLUMN_MIGRATIONS = {
     ],
 }
 
+# stratigraphic_relationships.from_sample_id/to_sample_id are polymorphic --
+# each can hold either a RadiocarbonSample.id or a SampleGroup.id (see
+# from_type/to_type) -- so models.py deliberately declares no FOREIGN KEY on
+# them; a plain FK could only ever point at one table. Databases created
+# before that polymorphism was introduced still have the old FK (pointing
+# only at radiocarbon_samples), left behind because create_all() never
+# drops or alters an existing constraint. That stale constraint silently
+# rejects every relationship whose from_sample_id/to_sample_id is actually
+# a group id -- i.e. every context-to-context relationship, which is the
+# only kind the Stratigraphy UI creates -- with a 400 ForeignKeyViolation.
+# Dropped here, by name, only if present.
+_STALE_FK_CONSTRAINTS = {
+    'stratigraphic_relationships': [
+        'stratigraphic_relationships_from_sample_id_fkey',
+        'stratigraphic_relationships_to_sample_id_fkey',
+    ],
+}
+
 def _ensure_schema_migrations():
     inspector = inspect(engine)
     existing_tables = set(inspector.get_table_names())
@@ -71,6 +89,19 @@ def _ensure_schema_migrations():
                     print(f"✓ Migrated: added column {table}.{column_name}")
                 except Exception as e:
                     print(f"⚠ Warning: could not add column {table}.{column_name}: {e}")
+
+        for table, constraint_names in _STALE_FK_CONSTRAINTS.items():
+            if table not in existing_tables:
+                continue
+            existing_fks = {fk['name'] for fk in inspector.get_foreign_keys(table)}
+            for constraint_name in constraint_names:
+                if constraint_name not in existing_fks:
+                    continue
+                try:
+                    conn.execute(text(f'ALTER TABLE {table} DROP CONSTRAINT {constraint_name}'))
+                    print(f"✓ Migrated: dropped stale constraint {table}.{constraint_name}")
+                except Exception as e:
+                    print(f"⚠ Warning: could not drop constraint {table}.{constraint_name}: {e}")
 
 def init_db():
     """Initialize database tables"""
