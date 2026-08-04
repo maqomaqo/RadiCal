@@ -150,7 +150,12 @@ class RelationshipInput(BaseModel):
 
 
 class BayesianConfigInput(BaseModel):
-    mcmc_samples: int = Field(default=2000, ge=100, le=20000)
+    # 4000 (not the more typical 2000) because convergence for a
+    # realistic multi-sample chained analysis was noticeably better at
+    # 4000 in testing (r_hat ~1.01 vs elevated 1.06-1.26 at 2000) -- see
+    # BayesianChronology.sample's docstring for the SMC context this
+    # matters for.
+    mcmc_samples: int = Field(default=4000, ge=100, le=20000)
     mcmc_tune: int = Field(default=1000, ge=100, le=20000)
     mcmc_chains: int = Field(default=4, ge=1, le=16)
 

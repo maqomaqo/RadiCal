@@ -257,7 +257,11 @@ export default function NewAnalysis() {
             relationships: relationships.map(({ id: _id, ...r }) => r),
             project_id: projectId || null,
             bayesian_config: {
-              mcmc_samples: 2000,
+              // 4000, not the more typical 2000 -- convergence for a
+              // realistic multi-sample chained analysis was noticeably
+              // better at 4000 (see BayesianChronology.sample's
+              // docstring on the backend).
+              mcmc_samples: 4000,
               mcmc_tune: 1000,
               mcmc_chains: 4,
             },

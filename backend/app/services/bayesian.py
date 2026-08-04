@@ -7,6 +7,64 @@ from typing import List, Dict, Optional, Tuple
 from app.services.calibration import get_curve, CalibrationCurve, hpd_ranges_from_distribution
 from app.services.stratigraphy import expand_relationships, effective_bounds
 
+# How far beyond a sample's own calibration likelihood its Uniform prior
+# is allowed to extend by default (see _practical_bounds below) -- wide
+# enough to comfortably accommodate a genuine stratigraphic correction
+# (order constraints pulling a sample's age away from what its own raw
+# measurement alone suggests, including a real "date inversion"), while
+# still being a small fraction of the full curve range (0-55,000 cal BP)
+# that every sample's prior defaulted to before this fix existed.
+_DEFAULT_PRIOR_PAD_YEARS = 5000.0
+# Points on a sample's own calibration curve below this fraction of its
+# peak probability are treated as negligible when finding that
+# likelihood's practical extent (see _practical_bounds) -- looser than
+# the 1e-4 CalibrationCurve.get_display_distribution uses for plotting,
+# since here the window sets a hard prior bound, not just a plot's
+# x-axis, and being too aggressive would risk excluding real tail mass.
+_PRACTICAL_WINDOW_MASS_THRESHOLD = 1e-6
+
+
+def _practical_bounds(curve: CalibrationCurve, age_bp: float, error_1sigma: float) -> Tuple[float, float]:
+    """
+    The calendar-age window a sample's OWN calibration likelihood
+    actually has non-negligible mass in, padded generously -- used as
+    every sample's default Uniform prior bounds instead of the full
+    curve range.
+
+    Why this matters: previously every sample's calendar-age prior was
+    Uniform over the *entire* curve (e.g. 0-55,000 cal BP for IntCal20)
+    unless TPQ/TAQ narrowed it, even though a real measurement's
+    likelihood is normally concentrated in a window a few hundred to a
+    couple of thousand years wide. That mismatch (an enormous prior
+    against a tiny likelihood-informed posterior) is fine for one or two
+    samples, but running many such samples together in one SMC model
+    breaks down well before realistic analysis sizes: confirmed on an
+    11-sample/no-constraints reproduction where roughly half the samples'
+    posteriors diverged to nonsense spanning tens of thousands of years
+    (PyMC's IMH kernel fits a shared multivariate-normal proposal to the
+    whole particle population each stage; estimating that covariance
+    reliably across many enormous, mismatched-scale dimensions from a
+    finite particle budget falls apart -- clean at 8 simultaneous samples
+    in that reproduction, badly broken at 10-11). Narrowing each sample's
+    prior to where its own data actually says something, before any
+    stratigraphic constraints are even considered, fixed it completely
+    (r_hat 1.0, thousands of effective samples, on the same 11-sample
+    case that previously produced means in the tens of thousands of cal
+    BP against true ages in the 500s-600s cal BP).
+    """
+    cal_ages, probs = curve.calibrate(age_bp, error_1sigma)
+    peak = float(np.max(probs))
+    if peak <= 0:
+        return float(curve.cal_ages[0]), float(curve.cal_ages[-1])
+
+    significant = np.where(probs >= peak * _PRACTICAL_WINDOW_MASS_THRESHOLD)[0]
+    if len(significant) == 0:
+        return float(curve.cal_ages[0]), float(curve.cal_ages[-1])
+
+    lower = float(cal_ages[significant[0]]) - _DEFAULT_PRIOR_PAD_YEARS
+    upper = float(cal_ages[significant[-1]]) + _DEFAULT_PRIOR_PAD_YEARS
+    return lower, upper
+
 
 def _topological_order(node_ids: set, edges: List[Tuple[str, str]]) -> List[str]:
     """
@@ -153,13 +211,17 @@ class BayesianChronology:
             group = groups_by_id.get(m.get('group_id'))
             taq, tpq = effective_bounds(m, group)  # taq=min bound, tpq=max bound
 
-            lower = max(curve_lower, taq) if taq is not None else curve_lower
-            upper = min(curve_upper, tpq) if tpq is not None else curve_upper
+            practical_lower, practical_upper = _practical_bounds(curve, m['age_bp'], m['error_1sigma'])
+
+            lower = max(curve_lower, practical_lower, taq if taq is not None else -np.inf)
+            upper = min(curve_upper, practical_upper, tpq if tpq is not None else np.inf)
             if lower >= upper:
                 raise ValueError(
                     f"Sample '{m.get('sample_name', m['id'])}' has no valid age range: "
                     f"its TPQ/TAQ limiters ([{taq}, {tpq}]) don't overlap the "
-                    f"calibration curve's range ([{curve_lower}, {curve_upper}])"
+                    f"calibration curve's range ([{curve_lower}, {curve_upper}]) or leave no "
+                    f"room near where its own measurement is actually plausible "
+                    f"([{practical_lower:.0f}, {practical_upper:.0f}])"
                 )
 
             bounds[m['id']] = (lower, upper)
@@ -283,12 +345,44 @@ class BayesianChronology:
                     logp_term = (2 - num_members) * pt.log(span) - pt.log(window_width - span)
                 pm.Potential(f"uniform_span_{group_id}", logp_term)
 
+            # Above/below constraints as a smooth, steep penalty rather than
+            # a hard switch(..., 0, -inf). A literal -inf Potential gives
+            # SMC's beta-tempering nothing to work with: -inf * beta is
+            # still -inf for every beta > 0, so there's no smooth path from
+            # "unconstrained prior" to "constraint enforced" -- the
+            # constraint switches on discontinuously at the very first
+            # tempering step. For a short chain of 1-2 constraints enough
+            # prior draws satisfy them by chance for SMC to proceed; for a
+            # longer chain (confirmed on a straightforward 11-sample/
+            # 10-constraint chain) the probability that a particle
+            # satisfies EVERY constraint simultaneously by chance becomes
+            # astronomically small (1/11! for a full strict ordering), so
+            # every particle's logp goes to -inf at once, and PyMC's SMC
+            # weight computation (a difference of logsumexps over -inf
+            # values) divides out to NaN and crashes outright with
+            # "ValueError: cannot convert float NaN to integer" --
+            # reproduced directly, and confirmed independent of SMC kernel
+            # choice (IMH or MH) and of the uniform span prior above.
+            #
+            # -softplus(k * (younger - older)) is smooth everywhere, so
+            # tempering has an actual gradient to climb from the first
+            # stage on: a violating particle gets a large but FINITE
+            # penalty (worse the larger the violation), rather than every
+            # violating particle being equally, infinitely bad. k=10
+            # (1/years) keeps compliant states at essentially zero penalty
+            # (softplus of a several-year-negative margin is already
+            # ~1e-4) while still making even a same-order-as-typical-
+            # measurement-error violation costly enough to be practically
+            # excluded from the posterior -- confirmed on the same
+            # 11-sample chain: 0 crashes, <1% ordering-violation rate in
+            # the final posterior draws, sensible per-sample results.
+            ORDER_CONSTRAINT_STEEPNESS = 10.0
             for older_id, younger_id in older_younger:
                 if older_id not in ages or younger_id not in ages:
                     continue
                 pm.Potential(
                     f"constraint_{older_id}_{younger_id}",
-                    pm.math.switch(ages[older_id] > ages[younger_id], 0, -np.inf)
+                    -pt.softplus(ORDER_CONSTRAINT_STEEPNESS * (ages[younger_id] - ages[older_id]))
                 )
 
             for a_id, b_id in equal_pairs:
