@@ -1,0 +1,70 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: radiocarbon_db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-radiocarbon}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
+      POSTGRES_DB: ${POSTGRES_DB:-radiocarbon_db}
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-radiocarbon}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: radiocarbon_backend
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-radiocarbon}:${POSTGRES_PASSWORD:-password}@postgres:5432/${POSTGRES_DB:-radiocarbon_db}
+      BACKEND_PORT: 8000
+      DEBUG: ${DEBUG:-False}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://localhost:5173}
+      MCMC_SAMPLES: ${MCMC_SAMPLES:-2000}
+      MCMC_TUNE: ${MCMC_TUNE:-1000}
+      MCMC_CHAINS: ${MCMC_CHAINS:-4}
+      INTCAL_CURVE_PATH: ${INTCAL_CURVE_PATH:-/app/data/intcal20.14c}
+      MARINE_CURVE_PATH: ${MARINE_CURVE_PATH:-/app/data/marine20.14c}
+      SHCAL_CURVE_PATH: ${SHCAL_CURVE_PATH:-/app/data/shcal20.14c}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+      - ./calibration_data:/app/data
+      - ./uploads:/app/uploads
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:8000}
+        VITE_APP_NAME: ${VITE_APP_NAME:-Radiocarbon Calibration Webapp}
+    container_name: radiocarbon_frontend
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_API_URL: ${VITE_API_URL:-http://localhost:8000}
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    command: npm run dev -- --host
+
+volumes:
+  postgres_data:
+
+networks:
+  default:
+    name: radiocarbon_network
