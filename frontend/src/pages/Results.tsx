@@ -424,7 +424,11 @@ export default function Results() {
               <TableHead>
                 <TableRow sx={{ backgroundColor: '#f5f5f5' }}>
                   <TableCell>Context</TableCell>
+                  {showMean && <TableCell align="right">Start Mean</TableCell>}
+                  {showMedian && <TableCell align="right">Start Median</TableCell>}
                   <TableCell align="right">Modelled Start ({CONFIDENCE_LABEL} HPD)</TableCell>
+                  {showMean && <TableCell align="right">End Mean</TableCell>}
+                  {showMedian && <TableCell align="right">End Median</TableCell>}
                   <TableCell align="right">Modelled End ({CONFIDENCE_LABEL} HPD)</TableCell>
                 </TableRow>
               </TableHead>
@@ -435,14 +439,30 @@ export default function Results() {
                   return (
                     <TableRow key={g.id}>
                       <TableCell>{g.name}</TableCell>
+                      {showMean && (
+                        <TableCell align="right">
+                          {formatCalendarAge(g.modeled_start!.posterior_mean, dateFormat)}
+                        </TableCell>
+                      )}
+                      {showMedian && (
+                        <TableCell align="right">
+                          {formatCalendarAge(g.modeled_start!.posterior_median, dateFormat)}
+                        </TableCell>
+                      )}
                       <TableCell align="right">
-                        {formatCalendarAge(g.modeled_start!.posterior_mean, dateFormat)}
-                        {' — '}
                         {startEnvelope ? formatCalendarRange(startEnvelope[0], startEnvelope[1], dateFormat) : 'N/A'}
                       </TableCell>
+                      {showMean && (
+                        <TableCell align="right">
+                          {formatCalendarAge(g.modeled_end!.posterior_mean, dateFormat)}
+                        </TableCell>
+                      )}
+                      {showMedian && (
+                        <TableCell align="right">
+                          {formatCalendarAge(g.modeled_end!.posterior_median, dateFormat)}
+                        </TableCell>
+                      )}
                       <TableCell align="right">
-                        {formatCalendarAge(g.modeled_end!.posterior_mean, dateFormat)}
-                        {' — '}
                         {endEnvelope ? formatCalendarRange(endEnvelope[0], endEnvelope[1], dateFormat) : 'N/A'}
                       </TableCell>
                     </TableRow>
