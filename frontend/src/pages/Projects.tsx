@@ -13,12 +13,15 @@ import {
   TextField,
   CircularProgress,
   Chip,
+  IconButton,
 } from '@mui/material'
 import { Link as RouterLink } from 'react-router-dom'
 import AddIcon from '@mui/icons-material/Add'
 import FolderIcon from '@mui/icons-material/Folder'
 import InboxIcon from '@mui/icons-material/Inbox'
+import DeleteIcon from '@mui/icons-material/Delete'
 import { formatApiError } from '@/utils/apiError'
+import ConfirmDialog from '@/components/ConfirmDialog'
 
 interface ProjectSummary {
   id: string
@@ -37,6 +40,8 @@ export default function Projects() {
   const [newName, setNewName] = useState('')
   const [newDescription, setNewDescription] = useState('')
   const [creating, setCreating] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState<ProjectSummary | null>(null)
+  const [deleting, setDeleting] = useState(false)
 
   useEffect(() => {
     fetchProjects()
@@ -80,6 +85,25 @@ export default function Projects() {
       alert('Error creating project: ' + (error as Error).message)
     } finally {
       setCreating(false)
+    }
+  }
+
+  const handleDelete = async () => {
+    if (!deleteTarget) return
+    setDeleting(true)
+    try {
+      const response = await fetch(`/api/projects/${deleteTarget.id}`, { method: 'DELETE' })
+      const data = await response.json()
+      if (data.success) {
+        setDeleteTarget(null)
+        fetchProjects()
+      } else {
+        alert('Failed to delete project: ' + formatApiError(data))
+      }
+    } catch (error) {
+      alert('Error deleting project: ' + (error as Error).message)
+    } finally {
+      setDeleting(false)
     }
   }
 
@@ -130,14 +154,31 @@ export default function Projects() {
           {projects.map((project) => (
             <Grid item xs={12} sm={6} md={4} key={project.id}>
               <Paper
-                sx={{ p: 2, cursor: 'pointer', '&:hover': { boxShadow: 3 }, display: 'flex', gap: 1.5, alignItems: 'flex-start' }}
-                component={RouterLink}
-                to={`/projects/${project.id}`}
-                style={{ textDecoration: 'none' }}
+                sx={{
+                  position: 'relative',
+                  p: 2,
+                  display: 'flex',
+                  gap: 1.5,
+                  alignItems: 'flex-start',
+                  '&:hover': { boxShadow: 3 },
+                  '&:hover .project-delete-btn': { opacity: 1 },
+                }}
               >
-                <FolderIcon color="primary" />
-                <Box sx={{ minWidth: 0 }}>
-                  <Typography variant="h6" component="h3" noWrap>
+                {/* Stretched link: covers the whole card for navigation,
+                    kept as a sibling of (not a wrapper around) the delete
+                    button below -- a <button> nested inside an <a> is
+                    invalid HTML and gets dropped from the accessibility
+                    tree, which would make delete unreachable by keyboard
+                    or screen reader. */}
+                <Box
+                  component={RouterLink}
+                  to={`/projects/${project.id}`}
+                  aria-label={project.name}
+                  sx={{ position: 'absolute', inset: 0, borderRadius: 'inherit' }}
+                />
+                <FolderIcon color="primary" sx={{ pointerEvents: 'none' }} />
+                <Box sx={{ minWidth: 0, flex: 1, pointerEvents: 'none' }}>
+                  <Typography variant="h6" component="h3" noWrap sx={{ pr: 3 }}>
                     {project.name}
                   </Typography>
                   {project.description && (
@@ -150,6 +191,15 @@ export default function Projects() {
                     Created {new Date(project.created_at).toLocaleDateString()}
                   </Typography>
                 </Box>
+                <IconButton
+                  className="project-delete-btn"
+                  size="small"
+                  aria-label={`Delete ${project.name}`}
+                  sx={{ position: 'absolute', top: 8, right: 8, opacity: 0, transition: 'opacity 0.15s', zIndex: 1 }}
+                  onClick={() => setDeleteTarget(project)}
+                >
+                  <DeleteIcon fontSize="small" />
+                </IconButton>
               </Paper>
             </Grid>
           ))}
@@ -192,6 +242,21 @@ export default function Projects() {
           </Button>
         </DialogActions>
       </Dialog>
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title="Delete project?"
+        message={
+          deleteTarget
+            ? `Delete "${deleteTarget.name}"? Its ${deleteTarget.analyses_count} analyses will be kept and moved to Unassigned -- only the project itself is removed.`
+            : ''
+        }
+        confirmLabel="Delete"
+        danger
+        loading={deleting}
+        onConfirm={handleDelete}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </Container>
   )
 }

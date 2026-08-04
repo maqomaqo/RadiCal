@@ -25,8 +25,11 @@ import {
 } from '@mui/material'
 import DownloadIcon from '@mui/icons-material/Download'
 import AccountTreeIcon from '@mui/icons-material/AccountTree'
+import DeleteIcon from '@mui/icons-material/Delete'
 import PosteriorPlot from '@/components/PosteriorPlot'
 import HarrisMatrixDiagram from '@/components/HarrisMatrixDiagram'
+import ConfirmDialog from '@/components/ConfirmDialog'
+import { formatApiError } from '@/utils/apiError'
 import {
   DateFormat,
   DATE_FORMAT_OPTIONS,
@@ -81,6 +84,8 @@ export default function Results() {
   const [dateFormat, setDateFormat] = useState<DateFormat>(() =>
     analysisId ? loadDateFormatPreference(analysisId) : 'calBP'
   )
+  const [deleteOpen, setDeleteOpen] = useState(false)
+  const [deleting, setDeleting] = useState(false)
 
   const handleDateFormatChange = (e: SelectChangeEvent) => {
     const next = e.target.value as DateFormat
@@ -132,6 +137,24 @@ export default function Results() {
     }
   }
 
+  const handleDelete = async () => {
+    if (!analysisId) return
+    setDeleting(true)
+    try {
+      const response = await fetch(`/api/analysis/${analysisId}`, { method: 'DELETE' })
+      const data = await response.json()
+      if (data.success) {
+        navigate(analysis?.project_id ? `/projects/${analysis.project_id}` : '/projects')
+      } else {
+        alert('Failed to delete analysis: ' + formatApiError(data))
+      }
+    } catch (err) {
+      alert('Error deleting analysis: ' + (err as Error).message)
+    } finally {
+      setDeleting(false)
+    }
+  }
+
   if (loading) {
     return (
       <Container sx={{ py: 4, display: 'flex', justifyContent: 'center' }}>
@@ -173,16 +196,26 @@ export default function Results() {
               )}
             </Typography>
           </Box>
-          <FormControl size="small" sx={{ minWidth: 220 }}>
-            <InputLabel>Date Format</InputLabel>
-            <Select value={dateFormat} label="Date Format" onChange={handleDateFormatChange}>
-              {DATE_FORMAT_OPTIONS.map((option) => (
-                <MenuItem key={option.value} value={option.value}>
-                  {option.label}
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
+          <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+            <FormControl size="small" sx={{ minWidth: 220 }}>
+              <InputLabel>Date Format</InputLabel>
+              <Select value={dateFormat} label="Date Format" onChange={handleDateFormatChange}>
+                {DATE_FORMAT_OPTIONS.map((option) => (
+                  <MenuItem key={option.value} value={option.value}>
+                    {option.label}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            <Button
+              startIcon={<DeleteIcon />}
+              color="error"
+              variant="outlined"
+              onClick={() => setDeleteOpen(true)}
+            >
+              Delete
+            </Button>
+          </Box>
         </Box>
       </Box>
 
@@ -340,6 +373,17 @@ export default function Results() {
           Back to Dashboard
         </Button>
       </Box>
+
+      <ConfirmDialog
+        open={deleteOpen}
+        title="Delete analysis?"
+        message={`Permanently delete "${analysis.name}"? This removes its samples and results and cannot be undone.`}
+        confirmLabel="Delete"
+        danger
+        loading={deleting}
+        onConfirm={handleDelete}
+        onCancel={() => setDeleteOpen(false)}
+      />
     </Container>
   )
 }

@@ -25,6 +25,7 @@ import EditIcon from '@mui/icons-material/Edit'
 import DeleteIcon from '@mui/icons-material/Delete'
 import AddIcon from '@mui/icons-material/Add'
 import { formatApiError } from '@/utils/apiError'
+import ConfirmDialog from '@/components/ConfirmDialog'
 
 interface AnalysisSummary {
   id: string
@@ -57,6 +58,11 @@ export default function ProjectDetail() {
   const [editName, setEditName] = useState('')
   const [editDescription, setEditDescription] = useState('')
   const [saving, setSaving] = useState(false)
+
+  const [deleteProjectOpen, setDeleteProjectOpen] = useState(false)
+  const [deletingProject, setDeletingProject] = useState(false)
+  const [deleteAnalysisTarget, setDeleteAnalysisTarget] = useState<AnalysisSummary | null>(null)
+  const [deletingAnalysis, setDeletingAnalysis] = useState(false)
 
   useEffect(() => {
     if (projectId) fetchProject(projectId)
@@ -131,9 +137,9 @@ export default function ProjectDetail() {
     }
   }
 
-  const handleDelete = async () => {
+  const handleDeleteProject = async () => {
     if (!project) return
-    if (!confirm(`Delete project "${project.name}"? Its analyses will be kept, just unassigned.`)) return
+    setDeletingProject(true)
     try {
       const response = await fetch(`/api/projects/${project.id}`, { method: 'DELETE' })
       const data = await response.json()
@@ -144,6 +150,27 @@ export default function ProjectDetail() {
       }
     } catch (err) {
       alert('Error deleting project: ' + (err as Error).message)
+    } finally {
+      setDeletingProject(false)
+    }
+  }
+
+  const handleDeleteAnalysis = async () => {
+    if (!deleteAnalysisTarget || !project) return
+    setDeletingAnalysis(true)
+    try {
+      const response = await fetch(`/api/analysis/${deleteAnalysisTarget.id}`, { method: 'DELETE' })
+      const data = await response.json()
+      if (data.success) {
+        setDeleteAnalysisTarget(null)
+        fetchProject(project.id)
+      } else {
+        alert('Failed to delete analysis: ' + formatApiError(data))
+      }
+    } catch (err) {
+      alert('Error deleting analysis: ' + (err as Error).message)
+    } finally {
+      setDeletingAnalysis(false)
     }
   }
 
@@ -195,7 +222,7 @@ export default function ProjectDetail() {
               <IconButton onClick={openEdit} aria-label="Edit project">
                 <EditIcon />
               </IconButton>
-              <IconButton onClick={handleDelete} color="error" aria-label="Delete project">
+              <IconButton onClick={() => setDeleteProjectOpen(true)} color="error" aria-label="Delete project">
                 <DeleteIcon />
               </IconButton>
             </>
@@ -222,6 +249,7 @@ export default function ProjectDetail() {
                   <TableCell>Status</TableCell>
                   <TableCell align="right">Samples</TableCell>
                   <TableCell align="right">Created</TableCell>
+                  <TableCell align="right" />
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -237,6 +265,18 @@ export default function ProjectDetail() {
                     <TableCell>{a.status}</TableCell>
                     <TableCell align="right">{a.measurements_count}</TableCell>
                     <TableCell align="right">{new Date(a.created_at).toLocaleDateString()}</TableCell>
+                    <TableCell align="right">
+                      <IconButton
+                        size="small"
+                        aria-label={`Delete ${a.name}`}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setDeleteAnalysisTarget(a)
+                        }}
+                      >
+                        <DeleteIcon fontSize="small" />
+                      </IconButton>
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -277,6 +317,32 @@ export default function ProjectDetail() {
           </Button>
         </DialogActions>
       </Dialog>
+
+      <ConfirmDialog
+        open={deleteProjectOpen}
+        title="Delete project?"
+        message={`Delete "${project.name}"? Its analyses will be kept and moved to Unassigned -- only the project itself is removed.`}
+        confirmLabel="Delete"
+        danger
+        loading={deletingProject}
+        onConfirm={handleDeleteProject}
+        onCancel={() => setDeleteProjectOpen(false)}
+      />
+
+      <ConfirmDialog
+        open={!!deleteAnalysisTarget}
+        title="Delete analysis?"
+        message={
+          deleteAnalysisTarget
+            ? `Permanently delete "${deleteAnalysisTarget.name}"? This removes its samples and results and cannot be undone.`
+            : ''
+        }
+        confirmLabel="Delete"
+        danger
+        loading={deletingAnalysis}
+        onConfirm={handleDeleteAnalysis}
+        onCancel={() => setDeleteAnalysisTarget(null)}
+      />
     </Container>
   )
 }

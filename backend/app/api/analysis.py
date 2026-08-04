@@ -513,6 +513,36 @@ async def list_analyses(
     }
 
 
+@router.delete("/analysis/{analysis_id}")
+async def delete_analysis(analysis_id: str, db: Session = Depends(get_db)):
+    """
+    Permanently delete an analysis and everything tied to it (samples,
+    results, stratigraphic relationships, groups). Unlike project deletion,
+    there's no "unassign and keep" option -- a calibration/Bayesian result
+    has no meaning outside the analysis it belongs to.
+
+    Analysis.measurements/results cascade via the ORM relationship, but
+    SampleGroup and StratigraphicRelationship reference analysis_id
+    directly with no cascade configured (see models.py), and neither has
+    an ON DELETE CASCADE at the DB level -- so they're deleted explicitly
+    here, in dependency order: results and relationships first (nothing
+    references them), then samples (referenced by results and by group_id),
+    then groups (referenced by samples), then the analysis itself.
+    """
+    analysis = db.query(Analysis).filter(Analysis.id == analysis_id).first()
+    if not analysis:
+        raise HTTPException(status_code=404, detail="Analysis not found")
+
+    db.query(AnalysisResult).filter(AnalysisResult.analysis_id == analysis_id).delete(synchronize_session=False)
+    db.query(StratigraphicRelationship).filter(StratigraphicRelationship.analysis_id == analysis_id).delete(synchronize_session=False)
+    db.query(RadiocarbonSample).filter(RadiocarbonSample.analysis_id == analysis_id).delete(synchronize_session=False)
+    db.query(SampleGroup).filter(SampleGroup.analysis_id == analysis_id).delete(synchronize_session=False)
+    db.delete(analysis)
+    db.commit()
+
+    return {"success": True, "data": {"deleted_analysis_id": analysis_id}}
+
+
 @router.patch("/analysis/{analysis_id}")
 async def update_analysis(analysis_id: str, updates: Dict, db: Session = Depends(get_db)):
     """

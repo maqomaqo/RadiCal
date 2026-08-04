@@ -1,7 +1,10 @@
 import React, { useState } from 'react'
-import { Container, Box, Paper, Typography, Button, Grid } from '@mui/material'
+import { Container, Box, Paper, Typography, Button, Grid, IconButton } from '@mui/material'
 import { Link as RouterLink } from 'react-router-dom'
 import FolderIcon from '@mui/icons-material/Folder'
+import DeleteIcon from '@mui/icons-material/Delete'
+import ConfirmDialog from '@/components/ConfirmDialog'
+import { formatApiError } from '@/utils/apiError'
 
 interface AnalysisSummary {
   id: string
@@ -22,6 +25,8 @@ const RECENT_LIMIT = 5
 export default function Dashboard() {
   const [analyses, setAnalyses] = useState<AnalysisSummary[]>([])
   const [loading, setLoading] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState<AnalysisSummary | null>(null)
+  const [deleting, setDeleting] = useState(false)
 
   React.useEffect(() => {
     fetchAnalyses()
@@ -39,6 +44,25 @@ export default function Dashboard() {
       console.error('Failed to fetch analyses:', error)
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleDelete = async () => {
+    if (!deleteTarget) return
+    setDeleting(true)
+    try {
+      const response = await fetch(`/api/analysis/${deleteTarget.id}`, { method: 'DELETE' })
+      const data = await response.json()
+      if (data.success) {
+        setDeleteTarget(null)
+        fetchAnalyses()
+      } else {
+        alert('Failed to delete analysis: ' + formatApiError(data))
+      }
+    } catch (error) {
+      alert('Error deleting analysis: ' + (error as Error).message)
+    } finally {
+      setDeleting(false)
     }
   }
 
@@ -97,39 +121,72 @@ export default function Dashboard() {
               <Grid item xs={12} sm={6} md={4} key={analysis.id}>
                 <Paper
                   sx={{
-                    display: 'block',
+                    position: 'relative',
                     p: 2,
-                    cursor: 'pointer',
-                    textDecoration: 'none',
                     '&:hover': { boxShadow: 3 },
+                    '&:hover .analysis-delete-btn': { opacity: 1 },
                   }}
-                  component={RouterLink}
-                  to={`/results/${analysis.id}`}
                 >
-                  <Typography variant="h6" component="h3">
-                    {analysis.name}
-                  </Typography>
-                  <Typography variant="body2" color="textSecondary">
-                    Type: {analysis.analysis_type}
-                  </Typography>
-                  <Typography variant="body2" color="textSecondary">
-                    Status: <strong>{analysis.status}</strong>
-                  </Typography>
-                  <Typography variant="body2" color="textSecondary">
-                    Samples: {analysis.measurements_count}
-                  </Typography>
-                  <Typography variant="body2" color="textSecondary">
-                    Project: {analysis.project_name || 'Unassigned'}
-                  </Typography>
-                  <Typography variant="caption" color="textSecondary">
-                    {new Date(analysis.created_at).toLocaleDateString()}
-                  </Typography>
+                  {/* Stretched link: see the matching comment in
+                      Projects.tsx -- kept as a sibling of the delete
+                      button, not a wrapper around it, so the button stays
+                      reachable in the accessibility tree. */}
+                  <Box
+                    component={RouterLink}
+                    to={`/results/${analysis.id}`}
+                    aria-label={analysis.name}
+                    sx={{ position: 'absolute', inset: 0, borderRadius: 'inherit' }}
+                  />
+                  <Box sx={{ pointerEvents: 'none' }}>
+                    <Typography variant="h6" component="h3" sx={{ pr: 3 }}>
+                      {analysis.name}
+                    </Typography>
+                    <Typography variant="body2" color="textSecondary">
+                      Type: {analysis.analysis_type}
+                    </Typography>
+                    <Typography variant="body2" color="textSecondary">
+                      Status: <strong>{analysis.status}</strong>
+                    </Typography>
+                    <Typography variant="body2" color="textSecondary">
+                      Samples: {analysis.measurements_count}
+                    </Typography>
+                    <Typography variant="body2" color="textSecondary">
+                      Project: {analysis.project_name || 'Unassigned'}
+                    </Typography>
+                    <Typography variant="caption" color="textSecondary">
+                      {new Date(analysis.created_at).toLocaleDateString()}
+                    </Typography>
+                  </Box>
+                  <IconButton
+                    className="analysis-delete-btn"
+                    size="small"
+                    aria-label={`Delete ${analysis.name}`}
+                    sx={{ position: 'absolute', top: 8, right: 8, opacity: 0, transition: 'opacity 0.15s', zIndex: 1 }}
+                    onClick={() => setDeleteTarget(analysis)}
+                  >
+                    <DeleteIcon fontSize="small" />
+                  </IconButton>
                 </Paper>
               </Grid>
             ))}
           </Grid>
         )}
       </Box>
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title="Delete analysis?"
+        message={
+          deleteTarget
+            ? `Permanently delete "${deleteTarget.name}"? This removes its samples and results and cannot be undone.`
+            : ''
+        }
+        confirmLabel="Delete"
+        danger
+        loading={deleting}
+        onConfirm={handleDelete}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </Container>
   )
 }
