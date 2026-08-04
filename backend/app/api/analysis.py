@@ -416,6 +416,34 @@ async def get_analysis(analysis_id: str, db: Session = Depends(get_db)):
     ).all()
     groups = db.query(SampleGroup).filter(SampleGroup.analysis_id == analysis_id).all()
 
+    # For a Bayesian analysis, also compute each sample's plain/unmodelled
+    # calibration (i.e. what calibrating it alone, with no stratigraphic
+    # constraints, would give) -- lets the Results page show "unmodelled
+    # vs modelled" side by side, the standard way to see what effect the
+    # Bayesian model actually had. Computed fresh here rather than
+    # persisted: it's a cheap analytic calibration (no MCMC), and doing it
+    # at read time means it's always consistent with the sample's current
+    # age_bp/error_1sigma/curve_id with nothing to keep in sync. Not
+    # meaningful for a calibration-only analysis, where the single stored
+    # `probability_distribution` already *is* the unmodelled result.
+    unmodelled_by_sample_id: Dict[str, list] = {}
+    if analysis.analysis_type == 'bayesian':
+        for r in results:
+            sample = samples_by_id.get(r.sample_id)
+            if not sample:
+                continue
+            try:
+                curve = get_curve(sample.curve_id)
+                cal_ages, probs = curve.calibrate(sample.age_bp, sample.error_1sigma)
+                unmodelled_by_sample_id[r.sample_id] = curve.get_display_distribution(cal_ages, probs)
+            except Exception:
+                # A sample whose curve_id can't be resolved (e.g. an old
+                # analysis predating a curve rename) shouldn't break the
+                # whole results page -- the modelled result is unaffected
+                # either way, this just leaves that one row's unmodelled
+                # column empty.
+                continue
+
     return {
         "success": True,
         "data": {
@@ -482,7 +510,8 @@ async def get_analysis(analysis_id: str, db: Session = Depends(get_db)):
                     "hpd_95": [r.hpd_95_min, r.hpd_95_max] if r.hpd_95_min is not None else None,
                     "hpd_68_ranges": r.hpd_68_ranges,
                     "hpd_95_ranges": r.hpd_95_ranges,
-                    "probability_distribution": r.probability_distribution
+                    "probability_distribution": r.probability_distribution,
+                    "unmodelled_probability_distribution": unmodelled_by_sample_id.get(r.sample_id),
                 }
                 for r in results
             ]

@@ -26,6 +26,7 @@ import {
   FormControlLabel,
   Checkbox,
   Chip,
+  Stack,
 } from '@mui/material'
 import DownloadIcon from '@mui/icons-material/Download'
 import AccountTreeIcon from '@mui/icons-material/AccountTree'
@@ -44,6 +45,7 @@ import {
   saveDateFormatPreference,
   HPDRange,
 } from '@/utils/dateFormat'
+import { hpdRangesFromCurve, hpdEnvelopeFromHistogram } from '@/utils/hpd'
 import type { MatrixMeasurement, DraftGroup, DraftRelationship } from '@/types'
 
 interface AnalysisResult {
@@ -76,8 +78,24 @@ interface AnalysisResult {
     hpd_68_ranges?: HPDRange[]
     hpd_95_ranges?: HPDRange[]
     probability_distribution?: Array<[number, number]>
+    // The plain/unmodelled calibration for this sample (no stratigraphic
+    // constraints applied) -- present only for a Bayesian analysis (see
+    // GET /api/analysis/:id), so "unmodelled vs modelled" can be
+    // compared side by side. For a calibration-only analysis,
+    // probability_distribution above already *is* the unmodelled result.
+    unmodelled_probability_distribution?: Array<[number, number]> | null
   }>
 }
+
+// The three standard Gaussian-equivalent confidence levels radiocarbon
+// results are conventionally reported at (1/2/3-sigma) -- OxCal's own
+// convention, offered here as a single user choice rather than always
+// showing the fixed 68%/95% pair.
+const CONFIDENCE_OPTIONS = [
+  { value: 0.682, label: '68.2%' },
+  { value: 0.954, label: '95.4%' },
+  { value: 0.997, label: '99.7%' },
+] as const
 
 export default function Results() {
   const { analysisId } = useParams<{ analysisId: string }>()
@@ -97,6 +115,11 @@ export default function Results() {
   // low-probability gap between two peaks).
   const [showMean, setShowMean] = useState(false)
   const [showMedian, setShowMedian] = useState(false)
+  // Confidence level for the HPD columns below -- default 95.4% (2-sigma),
+  // the most commonly cited "95% confidence" convention in archaeological
+  // reporting; switchable to 68.2% or 99.7% without a network round trip
+  // (see utils/hpd.ts).
+  const [confidence, setConfidence] = useState<number>(0.954)
 
   const handleDateFormatChange = (e: SelectChangeEvent) => {
     const next = e.target.value as DateFormat
@@ -199,6 +222,8 @@ export default function Results() {
   }
   const hasContexts = (analysis.groups || []).length > 0
   const contextsWithModeledSpan = (analysis.groups || []).filter((g) => g.modeled_start && g.modeled_end)
+  const isBayesian = analysis.analysis_type === 'bayesian'
+  const CONFIDENCE_LABEL = CONFIDENCE_OPTIONS.find((o) => o.value === confidence)?.label ?? ''
 
   return (
     <Container maxWidth="lg" sx={{ py: 4 }}>
@@ -362,30 +387,30 @@ export default function Results() {
               <TableHead>
                 <TableRow sx={{ backgroundColor: '#f5f5f5' }}>
                   <TableCell>Context</TableCell>
-                  <TableCell align="right">Modelled Start (68% HPD)</TableCell>
-                  <TableCell align="right">Modelled End (68% HPD)</TableCell>
+                  <TableCell align="right">Modelled Start ({CONFIDENCE_LABEL} HPD)</TableCell>
+                  <TableCell align="right">Modelled End ({CONFIDENCE_LABEL} HPD)</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
-                {contextsWithModeledSpan.map((g) => (
-                  <TableRow key={g.id}>
-                    <TableCell>{g.name}</TableCell>
-                    <TableCell align="right">
-                      {formatCalendarAge(g.modeled_start!.posterior_mean, dateFormat)}
-                      {' — '}
-                      {g.modeled_start!.hpd_68_ranges && g.modeled_start!.hpd_68_ranges.length > 0
-                        ? formatHPDRanges(g.modeled_start!.hpd_68_ranges, dateFormat)
-                        : formatCalendarRange(g.modeled_start!.hpd_68[0], g.modeled_start!.hpd_68[1], dateFormat)}
-                    </TableCell>
-                    <TableCell align="right">
-                      {formatCalendarAge(g.modeled_end!.posterior_mean, dateFormat)}
-                      {' — '}
-                      {g.modeled_end!.hpd_68_ranges && g.modeled_end!.hpd_68_ranges.length > 0
-                        ? formatHPDRanges(g.modeled_end!.hpd_68_ranges, dateFormat)
-                        : formatCalendarRange(g.modeled_end!.hpd_68[0], g.modeled_end!.hpd_68[1], dateFormat)}
-                    </TableCell>
-                  </TableRow>
-                ))}
+                {contextsWithModeledSpan.map((g) => {
+                  const startEnvelope = hpdEnvelopeFromHistogram(g.modeled_start!.probability_distribution, confidence)
+                  const endEnvelope = hpdEnvelopeFromHistogram(g.modeled_end!.probability_distribution, confidence)
+                  return (
+                    <TableRow key={g.id}>
+                      <TableCell>{g.name}</TableCell>
+                      <TableCell align="right">
+                        {formatCalendarAge(g.modeled_start!.posterior_mean, dateFormat)}
+                        {' — '}
+                        {startEnvelope ? formatCalendarRange(startEnvelope[0], startEnvelope[1], dateFormat) : 'N/A'}
+                      </TableCell>
+                      <TableCell align="right">
+                        {formatCalendarAge(g.modeled_end!.posterior_mean, dateFormat)}
+                        {' — '}
+                        {endEnvelope ? formatCalendarRange(endEnvelope[0], endEnvelope[1], dateFormat) : 'N/A'}
+                      </TableCell>
+                    </TableRow>
+                  )
+                })}
               </TableBody>
             </Table>
           </TableContainer>
@@ -399,16 +424,32 @@ export default function Results() {
             <Typography variant="h6" gutterBottom>
               Results Summary
             </Typography>
-            <FormGroup row>
-              <FormControlLabel
-                control={<Checkbox size="small" checked={showMean} onChange={(e) => setShowMean(e.target.checked)} />}
-                label="Show Mean"
-              />
-              <FormControlLabel
-                control={<Checkbox size="small" checked={showMedian} onChange={(e) => setShowMedian(e.target.checked)} />}
-                label="Show Median"
-              />
-            </FormGroup>
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ sm: 'center' }}>
+              <FormControl size="small" sx={{ minWidth: 140 }}>
+                <InputLabel>HPD Confidence</InputLabel>
+                <Select
+                  value={confidence}
+                  label="HPD Confidence"
+                  onChange={(e) => setConfidence(Number(e.target.value))}
+                >
+                  {CONFIDENCE_OPTIONS.map((opt) => (
+                    <MenuItem key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              <FormGroup row>
+                <FormControlLabel
+                  control={<Checkbox size="small" checked={showMean} onChange={(e) => setShowMean(e.target.checked)} />}
+                  label="Show Mean"
+                />
+                <FormControlLabel
+                  control={<Checkbox size="small" checked={showMedian} onChange={(e) => setShowMedian(e.target.checked)} />}
+                  label="Show Median"
+                />
+              </FormGroup>
+            </Stack>
           </Box>
           <Button
             startIcon={<DownloadIcon />}
@@ -428,50 +469,52 @@ export default function Results() {
                 {showMean && <TableCell align="right">Posterior Mean</TableCell>}
                 {showMean && <TableCell align="right">Posterior Std (yr)</TableCell>}
                 {showMedian && <TableCell align="right">Posterior Median</TableCell>}
-                <TableCell align="right">68% HPD Range</TableCell>
-                <TableCell align="right">95% HPD Range</TableCell>
+                {isBayesian && <TableCell align="right">Unmodelled Calibration</TableCell>}
+                <TableCell align="right">
+                  {isBayesian ? 'Posterior' : 'Calibrated'} {CONFIDENCE_LABEL} HPD Range
+                </TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
-              {analysis.results.map((result, idx) => (
-                <TableRow key={result.sample_id}>
-                  <TableCell>{result.sample_name || `Sample ${idx + 1}`}</TableCell>
-                  {hasContexts && <TableCell>{contextNameFor(result.sample_id) || 'Unassigned'}</TableCell>}
-                  {showMean && (
+              {analysis.results.map((result, idx) => {
+                const unmodelledRanges = isBayesian
+                  ? hpdRangesFromCurve(result.unmodelled_probability_distribution, confidence)
+                  : []
+                const modelledEnvelope = hpdEnvelopeFromHistogram(result.probability_distribution, confidence)
+                return (
+                  <TableRow key={result.sample_id}>
+                    <TableCell>{result.sample_name || `Sample ${idx + 1}`}</TableCell>
+                    {hasContexts && <TableCell>{contextNameFor(result.sample_id) || 'Unassigned'}</TableCell>}
+                    {showMean && (
+                      <TableCell align="right">
+                        {result.posterior_mean != null
+                          ? formatCalendarAge(result.posterior_mean, dateFormat)
+                          : 'N/A'}
+                      </TableCell>
+                    )}
+                    {showMean && (
+                      <TableCell align="right">
+                        {result.posterior_std?.toFixed(0) ?? 'N/A'}
+                      </TableCell>
+                    )}
+                    {showMedian && (
+                      <TableCell align="right">
+                        {result.posterior_median != null
+                          ? formatCalendarAge(result.posterior_median, dateFormat)
+                          : 'N/A'}
+                      </TableCell>
+                    )}
+                    {isBayesian && (
+                      <TableCell align="right">
+                        {unmodelledRanges.length > 0 ? formatHPDRanges(unmodelledRanges, dateFormat) : 'N/A'}
+                      </TableCell>
+                    )}
                     <TableCell align="right">
-                      {result.posterior_mean != null
-                        ? formatCalendarAge(result.posterior_mean, dateFormat)
-                        : 'N/A'}
+                      {modelledEnvelope ? formatCalendarRange(modelledEnvelope[0], modelledEnvelope[1], dateFormat) : 'N/A'}
                     </TableCell>
-                  )}
-                  {showMean && (
-                    <TableCell align="right">
-                      {result.posterior_std?.toFixed(0) ?? 'N/A'}
-                    </TableCell>
-                  )}
-                  {showMedian && (
-                    <TableCell align="right">
-                      {result.posterior_median != null
-                        ? formatCalendarAge(result.posterior_median, dateFormat)
-                        : 'N/A'}
-                    </TableCell>
-                  )}
-                  <TableCell align="right">
-                    {result.hpd_68_ranges && result.hpd_68_ranges.length > 0
-                      ? formatHPDRanges(result.hpd_68_ranges, dateFormat)
-                      : result.hpd_68
-                        ? formatCalendarRange(result.hpd_68[0], result.hpd_68[1], dateFormat)
-                        : 'N/A'}
-                  </TableCell>
-                  <TableCell align="right">
-                    {result.hpd_95_ranges && result.hpd_95_ranges.length > 0
-                      ? formatHPDRanges(result.hpd_95_ranges, dateFormat)
-                      : result.hpd_95
-                        ? formatCalendarRange(result.hpd_95[0], result.hpd_95[1], dateFormat)
-                        : 'N/A'}
-                  </TableCell>
-                </TableRow>
-              ))}
+                  </TableRow>
+                )
+              })}
             </TableBody>
           </Table>
         </TableContainer>
