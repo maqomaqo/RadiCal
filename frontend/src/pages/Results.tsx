@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import { useParams, useNavigate, Link as RouterLink } from 'react-router-dom'
 import {
   Container,
@@ -39,6 +39,7 @@ import HarrisMatrixDiagram from '@/components/HarrisMatrixDiagram'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import AssignProjectDialog from '@/components/AssignProjectDialog'
 import { formatApiError } from '@/utils/apiError'
+import { treeToMatrix } from '@/utils/stratigraphy'
 import {
   DateFormat,
   DATE_FORMAT_OPTIONS,
@@ -238,6 +239,33 @@ export default function Results() {
       setRerunning(false)
     }
   }
+
+  // What the Harris matrix further down draws. Derived from the model tree
+  // the same way the editor derives it, because the ordering lives in the
+  // tree: a tree-authored analysis has no SampleGroup or relationship rows
+  // at all, so reading those directly drew unordered phases containing no
+  // dates. Falls back to the stored contexts for analyses predating trees.
+  //
+  // Memoised because HarrisMatrixDiagram memoises its flow nodes/edges on
+  // the identity of these arrays and syncs them into reactflow state via an
+  // effect -- rebuilding them each render would loop that effect forever,
+  // leaving every node stuck unmeasured (invisible) and no edges drawn.
+  const structureView = useMemo(() => {
+    const measurements = analysis?.measurements || []
+    if (analysis?.model_tree) {
+      const assignments = Object.fromEntries(
+        measurements
+          .map((m) => [m.id, m.element_id || m.group_id])
+          .filter(([, elementId]) => !!elementId) as [string, string][]
+      )
+      return treeToMatrix(analysis.model_tree, measurements, assignments)
+    }
+    return {
+      measurements,
+      groups: analysis?.groups || [],
+      relationships: analysis?.relationships || [],
+    }
+  }, [analysis])
 
   if (loading) {
     return (
@@ -447,16 +475,16 @@ export default function Results() {
           confirms visually that they were specified as intended. */}
       {analysis.analysis_type === 'bayesian' &&
         analysis.measurements &&
-        ((analysis.relationships && analysis.relationships.length > 0) || (analysis.groups && analysis.groups.length > 0)) && (
+        (structureView.groups.length > 0 || structureView.relationships.length > 0) && (
           <Paper sx={{ p: 3, mb: 3 }}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
               <AccountTreeIcon color="action" />
               <Typography variant="h6">Model Structure used</Typography>
             </Box>
             <HarrisMatrixDiagram
-              measurements={analysis.measurements}
-              groups={analysis.groups || []}
-              relationships={analysis.relationships || []}
+              measurements={structureView.measurements}
+              groups={structureView.groups}
+              relationships={structureView.relationships}
               editable={false}
             />
           </Paper>

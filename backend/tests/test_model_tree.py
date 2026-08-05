@@ -298,6 +298,70 @@ class TestModelTreeApi:
         boundaries = [c for c in stored["children"] if c["element_type"] == "boundary"]
         assert all(b["posterior"] is not None for b in boundaries)
 
+    @requires_pymc
+    def test_replacing_inputs_keeps_an_authored_tree(self, client):
+        """
+        Editing a tree-authored analysis and re-running it must keep the
+        structure. PUT /inputs used to drop every ModelElement row and
+        ignore the request's model_tree, so the next run rebuilt a tree
+        from the (empty) relationships instead: the phase order came back
+        arbitrary and every date landed in an "Unassigned dates" phase.
+        """
+        # Element ids are a global primary key, so these must not collide
+        # with the ids any other test in this module persists.
+        tree = _sequence("eroot", "Site", [
+            _boundary("eb0", "Site start"),
+            _phase("ep1", "Lower"),
+            _boundary("eb1", "Lower/Upper"),
+            _phase("ep2", "Upper"),
+            _boundary("eb2", "Site end"),
+        ])
+        created = client.post(
+            "/api/analysis/bayesian",
+            json={
+                "name": "Tree edit",
+                "measurements": [
+                    {"id": "a", "sample_name": "A", "age_bp": 3300, "error_1sigma": 30, "element_id": "ep1"},
+                    {"id": "b", "sample_name": "B", "age_bp": 3000, "error_1sigma": 30, "element_id": "ep2"},
+                ],
+                "model_tree": tree,
+                "bayesian_config": {"mcmc_samples": 200, "mcmc_tune": 200, "mcmc_chains": 1},
+                "save": True,
+            },
+        )
+        assert created.status_code == 200, created.text
+        analysis_id = created.json()["data"]["id"]
+        before = client.get(f"/api/analysis/{analysis_id}").json()["data"]
+
+        # Resubmit exactly what the editor sends: the tree plus each date's
+        # element_id, with no contexts or pairwise relationships.
+        replaced = client.put(
+            f"/api/analysis/{analysis_id}/inputs",
+            json={
+                "name": before["name"],
+                "measurements": [
+                    {"id": m["id"], "sample_name": m["sample_name"], "age_bp": m["age_bp"],
+                     "error_1sigma": m["error_1sigma"], "element_id": m["element_id"]}
+                    for m in before["measurements"]
+                ],
+                "groups": [], "relationships": [],
+                "model_tree": before["model_tree"],
+                "bayesian_config": {"mcmc_samples": 200, "mcmc_tune": 200, "mcmc_chains": 1},
+            },
+        )
+        assert replaced.status_code == 200, replaced.text
+        assert client.post(f"/api/analysis/{analysis_id}/rerun").status_code == 200
+
+        after = client.get(f"/api/analysis/{analysis_id}").json()["data"]
+        assert [c["name"] for c in after["model_tree"]["children"]] == [
+            "Site start", "Lower", "Lower/Upper", "Upper", "Site end"]
+        # Each date is still in the phase it was assigned to -- no synthetic
+        # "Unassigned dates" phase, and no silent reshuffle.
+        phases = {c["id"]: c["name"] for c in after["model_tree"]["children"]
+                  if c["element_type"] == "phase"}
+        assigned = {m["sample_name"]: phases.get(m["element_id"]) for m in after["measurements"]}
+        assert assigned == {"A": "Lower", "B": "Upper"}
+
     def test_create_rejects_a_tree_with_an_orphan_date(self, client):
         response = client.post(
             "/api/analysis/bayesian",

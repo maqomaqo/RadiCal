@@ -125,10 +125,15 @@ export default function Stratigraphy() {
           else if (m.group_id) initial[m.id] = m.group_id
         }
         setAssignments(initial)
+        // Mirror into the draft store as well: NewAnalysis submits the
+        // draft's tree when the analysis is run, and it skips reloading a
+        // draft it already holds -- so a tree only edited here would
+        // otherwise be resubmitted as whatever the store loaded earlier.
+        setDraftTree(data.data.model_tree || null, initial)
       })
       .catch((err) => setStructureError((err as Error).message))
       .finally(() => setLoadingStructure(false))
-  }, [tab, editRouteId, modelTree])
+  }, [tab, editRouteId, modelTree, setDraftTree])
 
   const activeTree = editRouteId ? modelTree : draftTree
   const activeAssignments = editRouteId ? assignments : draftAssignments
@@ -258,6 +263,7 @@ export default function Stratigraphy() {
                 onChange={(nextTree, nextAssignments) => {
                   setModelTree(nextTree)
                   setAssignments(nextAssignments)
+                  setDraftTree(nextTree, nextAssignments)
                   setStructureDirty(true)
                 }}
               />

@@ -200,6 +200,21 @@ export default function NewAnalysis() {
             relationship: r.relationship,
           })),
           mcmc: a.bayesian_config || undefined,
+          // Carry the saved structure into the draft, so running the edit
+          // resubmits the tree it was saved with. Without it the draft has
+          // no tree, the submit falls back to groups/relationships, and the
+          // backend rebuilds a different structure from those.
+          //
+          // group_id is the fallback because a tree migrated from the old
+          // contexts reuses each context's id as its phase id, and those
+          // analyses have the id on group_id rather than element_id. Every
+          // date must resolve to a phase or the run is rejected outright.
+          modelTree: a.model_tree || null,
+          elementAssignments: Object.fromEntries(
+            (a.measurements || [])
+              .map((m: any) => [m.id, m.element_id || m.group_id])
+              .filter(([, elementId]: [string, string | null]) => !!elementId)
+          ),
         })
         setProjectId(a.project_id || '')
       } catch (err) {

@@ -1,7 +1,7 @@
 // Shared draft state for building a Bayesian analysis across two pages:
-// NewAnalysis.tsx (measurements) and Stratigraphy.tsx (groups +
-// relationships + TPQ/TAQ). Neither page persists anything to the backend
-// until "Run Analysis" is pressed back on NewAnalysis.tsx -- this store
+// NewAnalysis.tsx (measurements) and Stratigraphy.tsx (the model tree +
+// TPQ/TAQ). Neither page persists anything to the backend until "Run
+// Analysis" is pressed back on NewAnalysis.tsx -- this store
 // just holds the in-progress draft in memory so navigating between the
 // two pages doesn't lose it. Cleared via reset() after a successful run
 // (or when starting a fresh calibration-only analysis, where none of this
@@ -55,6 +55,12 @@ interface AnalysisDraftState {
     groups: DraftGroup[]
     relationships: DraftRelationship[]
     mcmc?: Partial<McmcConfig>
+    // The saved analysis's own structure. Hydrating these is what lets an
+    // edit keep the tree it was saved with: submitting without them sends
+    // the legacy groups/relationships instead, and the backend rebuilds a
+    // different structure from them.
+    modelTree?: ModelElement | null
+    elementAssignments?: Record<string, string>
   }) => void
 
   setMeasurements: (measurements: DraftMeasurement[]) => void
@@ -94,7 +100,10 @@ export const useAnalysisDraftStore = create<AnalysisDraftState>((set) => ({
   setAnalysisType: (analysisType) => set({ analysisType }),
   setMcmc: (mcmc) => set((state) => ({ mcmc: { ...state.mcmc, ...mcmc } })),
 
-  loadFromAnalysis: ({ analysisId, name, analysisType, measurements, groups, relationships, mcmc }) =>
+  loadFromAnalysis: ({
+    analysisId, name, analysisType, measurements, groups, relationships, mcmc,
+    modelTree, elementAssignments,
+  }) =>
     set({
       editingAnalysisId: analysisId,
       name,
@@ -103,8 +112,8 @@ export const useAnalysisDraftStore = create<AnalysisDraftState>((set) => ({
       groups,
       relationships,
       mcmc: { ...DEFAULT_MCMC, ...(mcmc || {}) },
-      modelTree: null,
-      elementAssignments: {},
+      modelTree: modelTree ?? null,
+      elementAssignments: elementAssignments ?? {},
     }),
 
   setMeasurements: (measurements) => set({ measurements }),

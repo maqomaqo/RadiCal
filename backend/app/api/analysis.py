@@ -1287,6 +1287,14 @@ async def replace_analysis_inputs(
             sample_type = measurement.sample_type or (
                 'marine' if measurement.curve_id == 'marine20' else 'terrestrial'
             )
+            if request.model_tree is not None:
+                # Client-authored tree: its phase ids are stored as-is, so the
+                # measurement's own element_id already names the phase it sits
+                # in. Falling back to group_id here would silently unassign
+                # every date, since a tree-authored analysis has no contexts.
+                element_id = measurement.element_id
+            else:
+                element_id = groups_map.get(measurement.group_id) if measurement.group_id else None
             row = RadiocarbonSample(
                 analysis_id=analysis.id,
                 sample_name=measurement.sample_name,
@@ -1296,7 +1304,7 @@ async def replace_analysis_inputs(
                 sample_type=sample_type,
                 curve_id=measurement.curve_id,
                 group_id=groups_map.get(measurement.group_id) if measurement.group_id else None,
-                element_id=groups_map.get(measurement.group_id) if measurement.group_id else None,
+                element_id=element_id,
                 tpq_age_bp=measurement.tpq_age_bp,
                 taq_age_bp=measurement.taq_age_bp,
             )
@@ -1316,6 +1324,17 @@ async def replace_analysis_inputs(
                 to_type=rel.to_type,
                 relationship=rel.relationship,
             ))
+
+        # An explicitly authored tree is the authoritative structure (see
+        # BayesianRequest.model_tree), so store it instead of letting the
+        # deletion above stand. Without this the next read/run rebuilds a
+        # tree from the contexts and an empty relationship set, which does
+        # not merely lose the ordering -- it invents a new one, and every
+        # date lands in a synthetic "Unassigned dates" phase.
+        if request.model_tree is not None:
+            root = request.model_tree
+            _relabel_tree(root, groups_map)
+            _persist_tree(analysis.id, root, db)
 
         if request.name:
             analysis.name = request.name
