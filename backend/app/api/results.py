@@ -240,11 +240,67 @@ async def export_csv(analysis_id: str, db: Session = Depends(get_db)):
     )
 
 
+def _posterior_summary(posterior: Dict) -> Dict:
+    """
+    A boundary's posterior without its raw MCMC draws.
+
+    The stored value also holds `posterior_samples` -- the full chain, tens
+    of thousands of floats per boundary (see bayesian._summarize_posterior)
+    -- which is not what an export is for, and would dwarf everything else
+    in the file. The binned probability_distribution is kept, so a consumer
+    can still plot the transition. Dates are already summarised this way by
+    _gather_export_rows, which never selects the raw samples.
+    """
+    return {k: v for k, v in posterior.items() if k != 'posterior_samples'}
+
+
+def _structure_payload(structure: List[Dict]) -> List[Dict]:
+    """
+    The structure rows as JSON, in the same reading order as the CSV and
+    the results table: each date carrying its result, each boundary its
+    posterior summary, and headings carrying only their place in the tree.
+    """
+    payload = []
+    for row in structure:
+        entry = {
+            'kind': row['kind'],
+            'name': row['name'],
+            'depth': row['depth'],
+            'path': row['path'],
+            'element_id': row['element_id'],
+            'tpq_age_bp': row['tpq_age_bp'],
+            'taq_age_bp': row['taq_age_bp'],
+        }
+        if row['kind'] == 'date':
+            entry['sample_id'] = row['sample']['id'] if row['sample'] else None
+            entry['result'] = row.get('result')
+        elif row.get('posterior'):
+            entry['posterior'] = _posterior_summary(row['posterior'])
+        payload.append(entry)
+    return payload
+
+
 @router.get("/results/{analysis_id}/export/json")
 async def export_json(analysis_id: str, db: Session = Depends(get_db)):
-    """Export an analysis's results as JSON, including sample details merged into each result row."""
+    """
+    Export an analysis's results as JSON, including sample details merged
+    into each result row.
+
+    Two views of the same data. `results` is the flat per-date list: one
+    entry per measured date, with what was measured joined onto what was
+    modelled. `structure` is that same run read in the model's own order --
+    sequences, phases, boundaries and dates, exactly the rows the CSV and
+    the results table show -- so a consumer can reproduce the model rather
+    than only the dates. Both come from one assembly, so they cannot
+    disagree; `structure` is empty for an analysis with no stored structure
+    (a plain calibration), where there is nothing to read in model order.
+
+    The nested tree itself is not repeated here -- GET /api/analysis/{id}
+    already returns model_tree. What this adds is the ordered, joined view.
+    """
     data = _gather_export_rows(analysis_id, db)
     analysis = data['analysis']
+    structure = _structure_rows(analysis_id, db, data['rows'], data['samples_by_id'])
 
     return {
         "success": True,
@@ -256,6 +312,7 @@ async def export_json(analysis_id: str, db: Session = Depends(get_db)):
             "created_at": analysis.created_at.isoformat(),
             "project_id": analysis.project_id,
             "results": data['rows'],
+            "structure": _structure_payload(structure),
         }
     }
 

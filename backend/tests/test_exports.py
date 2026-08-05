@@ -38,6 +38,11 @@ def _calibration(client, **overrides) -> str:
     return response.json()["data"]["id"]
 
 
+# Cache for the one structured analysis TestJsonStructure shares; see
+# TestJsonStructure._structured for why it is built only once.
+_STRUCTURED: dict = {}
+
+
 def _csv_rows(client, analysis_id: str, path: str = "export/csv"):
     response = client.get(f"/api/results/{analysis_id}/{path}")
     assert response.status_code == 200, response.text
@@ -136,7 +141,8 @@ class TestJsonExport:
         payload = client.get(f"/api/results/{analysis_id}/export/json").json()["data"]
         assert "samples_by_id" not in payload
         assert set(payload) == {
-            "id", "name", "analysis_type", "status", "created_at", "project_id", "results",
+            "id", "name", "analysis_type", "status", "created_at", "project_id",
+            "results", "structure",
         }
 
     def test_agrees_with_the_csv_on_the_dates(self, client):
@@ -189,6 +195,150 @@ class TestJsonExport:
 
     def test_unknown_analysis_404s(self, client):
         assert client.get("/api/results/ghost/export/json").status_code == 404
+
+
+class TestJsonStructure:
+    """
+    The `structure` view: the same run read in the model's own order, so a
+    consumer can reproduce the model and not just the dates. It is the CSV's
+    rows without the stringifying, and the tests hold the two together.
+    """
+
+    def _structured(self, client):
+        """
+        One Bayesian analysis with a real structure, created on first use and
+        reused by every test in this class.
+
+        Created once rather than per test for two reasons: element ids are a
+        global primary key (see conftest.client), so posting this tree twice
+        collides on the second test, and the MCMC run is much the slowest
+        thing in this file. Every test here only reads it.
+        """
+        if _STRUCTURED.get("id"):
+            return _STRUCTURED["id"]
+
+        tree = {
+            "id": "sroot", "element_type": "sequence", "name": "Site", "children": [
+                {"id": "sb0", "element_type": "boundary", "name": "Start", "children": []},
+                {"id": "sp1", "element_type": "phase", "name": "Lower",
+                 "tpq_age_bp": 5000, "children": []},
+                {"id": "sb1", "element_type": "boundary", "name": "Mid", "children": []},
+                {"id": "sp2", "element_type": "phase", "name": "Upper", "children": []},
+                {"id": "sb2", "element_type": "boundary", "name": "End", "children": []},
+            ],
+        }
+        created = client.post(
+            "/api/analysis/bayesian",
+            json={
+                "name": "Json model structure",
+                "measurements": [
+                    {"id": "sa", "sample_name": "A", "age_bp": 3300, "error_1sigma": 30, "element_id": "sp1"},
+                    {"id": "sb", "sample_name": "B", "age_bp": 3000, "error_1sigma": 30, "element_id": "sp2"},
+                ],
+                "model_tree": tree,
+                "bayesian_config": {"mcmc_samples": 200, "mcmc_tune": 200, "mcmc_chains": 1},
+                "save": True,
+            },
+        )
+        assert created.status_code == 200, created.text
+        _STRUCTURED["id"] = created.json()["data"]["id"]
+        return _STRUCTURED["id"]
+
+    @requires_pymc
+    def test_reads_in_model_order(self, client):
+        analysis_id = self._structured(client)
+        structure = client.get(
+            f"/api/results/{analysis_id}/export/json"
+        ).json()["data"]["structure"]
+
+        assert [(r["kind"], r["name"]) for r in structure] == [
+            ("sequence", "Site"),
+            ("boundary", "Start"),
+            ("phase", "Lower"),
+            ("date", "A"),
+            ("boundary", "Mid"),
+            ("phase", "Upper"),
+            ("date", "B"),
+            ("boundary", "End"),
+        ]
+        assert [r["depth"] for r in structure] == [0, 1, 1, 2, 1, 1, 2, 1]
+        assert structure[3]["path"] == "Site > Lower"
+
+    @requires_pymc
+    def test_matches_the_csv_row_for_row(self, client):
+        """
+        The two exports describe one model; if they ever disagree on the
+        order or the membership, one of them is lying.
+        """
+        analysis_id = self._structured(client)
+        structure = client.get(
+            f"/api/results/{analysis_id}/export/json"
+        ).json()["data"]["structure"]
+        _header, csv_rows = _csv_rows(client, analysis_id)
+
+        assert [(r["kind"].title(), r["name"], str(r["depth"]), r["path"]) for r in structure] == [
+            (row[1], row[4], row[2], row[3]) for row in csv_rows
+        ]
+
+    @requires_pymc
+    def test_a_date_carries_its_measured_and_modelled_result(self, client):
+        analysis_id = self._structured(client)
+        structure = client.get(
+            f"/api/results/{analysis_id}/export/json"
+        ).json()["data"]["structure"]
+
+        date = next(r for r in structure if r["kind"] == "date" and r["name"] == "A")
+        assert date["sample_id"]
+        assert date["element_id"] == "sp1"
+        assert date["result"]["age_bp"] == 3300
+        assert date["result"]["posterior_mean"] is not None
+        assert date["result"]["hpd_95_ranges"]
+
+    @requires_pymc
+    def test_a_boundary_carries_a_posterior_without_the_raw_chain(self, client):
+        """
+        The stored boundary posterior also holds the full MCMC chain, which
+        is tens of thousands of floats and would dwarf the export. The
+        summary and the binned distribution are kept; the chain is not.
+        """
+        analysis_id = self._structured(client)
+        structure = client.get(
+            f"/api/results/{analysis_id}/export/json"
+        ).json()["data"]["structure"]
+
+        boundary = next(r for r in structure if r["kind"] == "boundary")
+        posterior = boundary["posterior"]
+        assert posterior["posterior_mean"] is not None
+        assert posterior["hpd_95_ranges"]
+        assert posterior["probability_distribution"], "kept, so a consumer can plot the transition"
+        assert "posterior_samples" not in posterior
+
+        # Non-vacuous: the stored value this was trimmed from does carry the
+        # chain (GET /api/analysis/{id} returns the column as stored).
+        stored = client.get(f"/api/analysis/{analysis_id}").json()["data"]["model_tree"]
+        stored_boundary = next(
+            c for c in stored["children"] if c["element_type"] == "boundary" and c["posterior"]
+        )
+        assert "posterior_samples" in stored_boundary["posterior"]
+
+    @requires_pymc
+    def test_headings_carry_their_limiters_but_no_result(self, client):
+        analysis_id = self._structured(client)
+        structure = client.get(
+            f"/api/results/{analysis_id}/export/json"
+        ).json()["data"]["structure"]
+
+        phase = next(r for r in structure if r["name"] == "Lower")
+        assert phase["tpq_age_bp"] == 5000
+        assert "result" not in phase and "posterior" not in phase
+
+    def test_is_empty_without_a_stored_structure(self, client):
+        # A plain calibration has nothing to read in model order, so the
+        # flat `results` list is the whole export.
+        analysis_id = _calibration(client)
+        payload = client.get(f"/api/results/{analysis_id}/export/json").json()["data"]
+        assert payload["structure"] == []
+        assert len(payload["results"]) == 1
 
 
 class TestGraphs:
