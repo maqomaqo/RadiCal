@@ -487,6 +487,10 @@ async def get_analysis(analysis_id: str, db: Session = Depends(get_db)):
             "measurements_count": len(analysis.measurements),
             "project_id": analysis.project_id,
             "project_name": analysis.project.name if analysis.project else None,
+            # The MCMC settings this analysis was configured with -- returned
+            # so duplicating or editing it round-trips them instead of
+            # silently resetting to the schema defaults.
+            "bayesian_config": analysis.bayesian_config or {},
             # Real per-sample data, plus the stratigraphy (groups/
             # relationships/TPQ-TAQ) actually used for this analysis, if
             # any -- lets the Results page render a real (not "Sample N"
@@ -791,3 +795,220 @@ async def rerun_analysis(analysis_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail=str(e))
 
     return {"success": True, "data": {"id": analysis.id, "status": analysis.status}}
+
+
+@router.post("/analysis/{analysis_id}/duplicate")
+async def duplicate_analysis(analysis_id: str, db: Session = Depends(get_db)):
+    """
+    Deep-copy an analysis's INPUTS into a brand-new analysis, so a variant
+    can be built from an existing one instead of re-entering every date by
+    hand ("the same dates, but grouped differently").
+
+    Copies the samples, contexts (SampleGroups) and stratigraphic
+    relationships, remapping old ids to the new rows' ids -- the same
+    groups_map/samples_map translation bayesian_analysis does when first
+    persisting a request. Results are deliberately NOT copied and status is
+    'pending': the copy has inputs but has not been run, so it can be
+    edited first (PUT /analysis/{id}/inputs) and then run
+    (POST /analysis/{id}/rerun).
+    """
+    source = db.query(Analysis).filter(Analysis.id == analysis_id).first()
+    if not source:
+        raise HTTPException(status_code=404, detail="Analysis not found")
+
+    copy = Analysis(
+        name=f"{source.name} (copy)",
+        analysis_type=source.analysis_type,
+        status='pending',
+        bayesian_config=source.bayesian_config,
+        project_id=source.project_id,
+    )
+    db.add(copy)
+    db.flush()
+
+    groups_map: Dict[str, str] = {}
+    for group in db.query(SampleGroup).filter(SampleGroup.analysis_id == source.id).all():
+        new_group = SampleGroup(
+            analysis_id=copy.id,
+            name=group.name,
+            tpq_age_bp=group.tpq_age_bp,
+            taq_age_bp=group.taq_age_bp,
+            # modeled_start/end deliberately left null -- they're results,
+            # and this copy hasn't been run.
+        )
+        db.add(new_group)
+        db.flush()
+        groups_map[group.id] = new_group.id
+
+    samples_map: Dict[str, str] = {}
+    for sample in source.measurements:
+        new_sample = RadiocarbonSample(
+            analysis_id=copy.id,
+            sample_name=sample.sample_name,
+            age_bp=sample.age_bp,
+            error_1sigma=sample.error_1sigma,
+            material_type=sample.material_type,
+            sample_type=sample.sample_type,
+            curve_id=sample.curve_id,
+            reservoir_age=sample.reservoir_age,
+            depth_cm=sample.depth_cm,
+            location=sample.location,
+            notes=sample.notes,
+            group_id=groups_map.get(sample.group_id) if sample.group_id else None,
+            tpq_age_bp=sample.tpq_age_bp,
+            taq_age_bp=sample.taq_age_bp,
+        )
+        db.add(new_sample)
+        db.flush()
+        samples_map[sample.id] = new_sample.id
+
+    for rel in db.query(StratigraphicRelationship).filter(
+        StratigraphicRelationship.analysis_id == source.id
+    ).all():
+        lookup = groups_map if rel.from_type == 'group' else samples_map
+        to_lookup = groups_map if rel.to_type == 'group' else samples_map
+        from_id = lookup.get(rel.from_sample_id)
+        to_id = to_lookup.get(rel.to_sample_id)
+        if not from_id or not to_id:
+            # A relationship whose endpoint no longer resolves (shouldn't
+            # happen, but the columns are polymorphic with no FK to enforce
+            # it) is dropped rather than copied dangling.
+            continue
+        db.add(StratigraphicRelationship(
+            analysis_id=copy.id,
+            from_sample_id=from_id,
+            to_sample_id=to_id,
+            from_type=rel.from_type,
+            to_type=rel.to_type,
+            relationship=rel.relationship,
+        ))
+
+    db.commit()
+    db.refresh(copy)
+
+    return {
+        "success": True,
+        "data": {
+            "id": copy.id,
+            "name": copy.name,
+            "analysis_type": copy.analysis_type,
+            "status": copy.status,
+            "project_id": copy.project_id,
+            "source_analysis_id": source.id,
+        },
+    }
+
+
+@router.put("/analysis/{analysis_id}/inputs")
+async def replace_analysis_inputs(
+    analysis_id: str,
+    request: BayesianRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    Replace a saved analysis's inputs (measurements, contexts,
+    stratigraphic relationships, MCMC config) wholesale -- the "modify"
+    half of duplicate-and-modify. Until this existed an analysis's inputs
+    were fixed at creation, so varying a model meant rebuilding it from
+    scratch.
+
+    Reuses BayesianRequest for validation, so an edit gets exactly the same
+    checks a fresh analysis does: cycle detection, dangling group/
+    relationship references, and TPQ/TAQ contradictions are all rejected
+    with a 422 before anything is written.
+
+    Any existing results are DELETED and each context's modelled start/end
+    cleared, since they were computed from the old inputs and would
+    otherwise be silently mismatched against what's now displayed
+    alongside them; status goes back to 'pending' until the analysis is
+    re-run.
+    """
+    analysis = db.query(Analysis).filter(Analysis.id == analysis_id).first()
+    if not analysis:
+        raise HTTPException(status_code=404, detail="Analysis not found")
+
+    try:
+        # Drop the old inputs and results. Order matters (see
+        # delete_analysis): results and relationships first, then samples,
+        # then the groups the samples referenced.
+        db.query(AnalysisResult).filter(
+            AnalysisResult.analysis_id == analysis_id
+        ).delete(synchronize_session=False)
+        db.query(StratigraphicRelationship).filter(
+            StratigraphicRelationship.analysis_id == analysis_id
+        ).delete(synchronize_session=False)
+        db.query(RadiocarbonSample).filter(
+            RadiocarbonSample.analysis_id == analysis_id
+        ).delete(synchronize_session=False)
+        db.query(SampleGroup).filter(
+            SampleGroup.analysis_id == analysis_id
+        ).delete(synchronize_session=False)
+        db.flush()
+
+        groups_map: Dict[str, str] = {}
+        for group in request.groups:
+            row = SampleGroup(
+                analysis_id=analysis.id,
+                name=group.name,
+                tpq_age_bp=group.tpq_age_bp,
+                taq_age_bp=group.taq_age_bp,
+            )
+            db.add(row)
+            db.flush()
+            groups_map[group.id] = row.id
+
+        samples_map: Dict[str, str] = {}
+        for measurement in request.measurements:
+            sample_type = measurement.sample_type or (
+                'marine' if measurement.curve_id == 'marine20' else 'terrestrial'
+            )
+            row = RadiocarbonSample(
+                analysis_id=analysis.id,
+                sample_name=measurement.sample_name,
+                age_bp=measurement.age_bp,
+                error_1sigma=measurement.error_1sigma,
+                material_type=measurement.material_type,
+                sample_type=sample_type,
+                curve_id=measurement.curve_id,
+                group_id=groups_map.get(measurement.group_id) if measurement.group_id else None,
+                tpq_age_bp=measurement.tpq_age_bp,
+                taq_age_bp=measurement.taq_age_bp,
+            )
+            db.add(row)
+            db.flush()
+            samples_map[measurement.id] = row.id
+
+        def _resolve_id(client_id: str, node_type: str) -> str:
+            return groups_map[client_id] if node_type == 'group' else samples_map[client_id]
+
+        for rel in request.relationships:
+            db.add(StratigraphicRelationship(
+                analysis_id=analysis.id,
+                from_sample_id=_resolve_id(rel.from_sample_id, rel.from_type),
+                to_sample_id=_resolve_id(rel.to_sample_id, rel.to_type),
+                from_type=rel.from_type,
+                to_type=rel.to_type,
+                relationship=rel.relationship,
+            ))
+
+        if request.name:
+            analysis.name = request.name
+        analysis.bayesian_config = request.bayesian_config.model_dump()
+        analysis.status = 'pending'
+        analysis.error_message = None
+        db.commit()
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return {
+        "success": True,
+        "data": {
+            "id": analysis.id,
+            "name": analysis.name,
+            "status": analysis.status,
+            "measurements_count": len(request.measurements),
+        },
+    }

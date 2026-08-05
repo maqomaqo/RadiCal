@@ -9,15 +9,46 @@
 import { create } from 'zustand'
 import type { DraftMeasurement, DraftGroup, DraftRelationship } from '@/types'
 
+export interface McmcConfig {
+  mcmc_samples: number
+  mcmc_tune: number
+  mcmc_chains: number
+}
+
+// 4000 (not the more typical 2000) because convergence for a realistic
+// multi-sample chained analysis was noticeably better at 4000 -- see
+// BayesianChronology.sample's docstring on the backend.
+export const DEFAULT_MCMC: McmcConfig = {
+  mcmc_samples: 4000,
+  mcmc_tune: 1000,
+  mcmc_chains: 4,
+}
+
 interface AnalysisDraftState {
   name: string
   analysisType: 'calibration' | 'bayesian'
   measurements: DraftMeasurement[]
   groups: DraftGroup[]
   relationships: DraftRelationship[]
+  mcmc: McmcConfig
+  // Set when the draft is EDITING an already-saved analysis rather than
+  // building a new one (loaded via loadFromAnalysis below). Drives where
+  // "Run Analysis" submits: PUT /analysis/{id}/inputs + rerun for an edit,
+  // vs POST /analysis/bayesian for a new one.
+  editingAnalysisId: string | null
 
   setName: (name: string) => void
   setAnalysisType: (analysisType: 'calibration' | 'bayesian') => void
+  setMcmc: (mcmc: Partial<McmcConfig>) => void
+  loadFromAnalysis: (payload: {
+    analysisId: string
+    name: string
+    analysisType: 'calibration' | 'bayesian'
+    measurements: DraftMeasurement[]
+    groups: DraftGroup[]
+    relationships: DraftRelationship[]
+    mcmc?: Partial<McmcConfig>
+  }) => void
 
   setMeasurements: (measurements: DraftMeasurement[]) => void
   addMeasurement: (measurement: DraftMeasurement) => void
@@ -41,9 +72,23 @@ export const useAnalysisDraftStore = create<AnalysisDraftState>((set) => ({
   measurements: [],
   groups: [],
   relationships: [],
+  mcmc: DEFAULT_MCMC,
+  editingAnalysisId: null,
 
   setName: (name) => set({ name }),
   setAnalysisType: (analysisType) => set({ analysisType }),
+  setMcmc: (mcmc) => set((state) => ({ mcmc: { ...state.mcmc, ...mcmc } })),
+
+  loadFromAnalysis: ({ analysisId, name, analysisType, measurements, groups, relationships, mcmc }) =>
+    set({
+      editingAnalysisId: analysisId,
+      name,
+      analysisType,
+      measurements,
+      groups,
+      relationships,
+      mcmc: { ...DEFAULT_MCMC, ...(mcmc || {}) },
+    }),
 
   setMeasurements: (measurements) => set({ measurements }),
 
@@ -93,5 +138,14 @@ export const useAnalysisDraftStore = create<AnalysisDraftState>((set) => ({
       relationships: state.relationships.map((r) => (r.id === id ? { ...r, relationship } : r)),
     })),
 
-  reset: () => set({ name: '', analysisType: 'calibration', measurements: [], groups: [], relationships: [] }),
+  reset: () =>
+    set({
+      name: '',
+      analysisType: 'calibration',
+      measurements: [],
+      groups: [],
+      relationships: [],
+      mcmc: DEFAULT_MCMC,
+      editingAnalysisId: null,
+    }),
 }))

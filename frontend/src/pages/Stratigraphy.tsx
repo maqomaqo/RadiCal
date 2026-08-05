@@ -18,7 +18,7 @@
 // (DraftGroup, group_id, from_type/to_type: 'group') -- "Context" is
 // purely the label shown to the user, matching the archaeological term.
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router-dom'
 import {
   Container,
   Box,
@@ -80,6 +80,12 @@ export default function Stratigraphy() {
     updateRelationshipType,
   } = useAnalysisDraftStore()
 
+  // Reached either as /new-analysis/stratigraphy (building a new analysis)
+  // or /analysis/:analysisId/edit/stratigraphy (editing a saved one); the
+  // editing UI is identical, only where "Back" returns to differs.
+  const { analysisId: editRouteId } = useParams<{ analysisId: string }>()
+  const backPath = editRouteId ? `/analysis/${editRouteId}/edit` : '/new-analysis'
+
   const [tab, setTab] = useState<'list' | 'diagram'>('list')
 
   const [newContextDialogOpen, setNewContextDialogOpen] = useState(false)
@@ -103,7 +109,7 @@ export default function Stratigraphy() {
         <Alert severity="warning" sx={{ mb: 2 }}>
           No measurements yet -- add measurements on the New Analysis page first.
         </Alert>
-        <Button startIcon={<ArrowBackIcon />} variant="outlined" onClick={() => navigate('/new-analysis')}>
+        <Button startIcon={<ArrowBackIcon />} variant="outlined" onClick={() => navigate(backPath)}>
           Back to New Analysis
         </Button>
       </Container>
@@ -401,7 +407,7 @@ export default function Stratigraphy() {
       )}
 
       <Box sx={{ mt: 4 }}>
-        <Button startIcon={<ArrowBackIcon />} variant="contained" onClick={() => navigate('/new-analysis')}>
+        <Button startIcon={<ArrowBackIcon />} variant="contained" onClick={() => navigate(backPath)}>
           Back to New Analysis
         </Button>
       </Box>

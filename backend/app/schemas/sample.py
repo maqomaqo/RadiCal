@@ -89,6 +89,93 @@ class CalibrateRequest(MeasurementInput):
     save: bool = True
 
 
+class ProjectSampleInput(MeasurementInput):
+    """
+    A date being added to a PROJECT's date collection (see
+    models.ProjectSample). Inherits every measurement-field check from
+    MeasurementInput -- age/error bounds, known curve_id, non-blank name,
+    and the TPQ/TAQ ordering check -- and adds the deploy-time context
+    default.
+    """
+    default_context_name: Optional[str] = Field(default=None, max_length=200)
+
+    @field_validator("default_context_name")
+    @classmethod
+    def _blank_context_is_none(cls, v: Optional[str]) -> Optional[str]:
+        # Treat "" / whitespace as "no context" rather than creating a
+        # context literally named "" when this date is deployed.
+        if v is None:
+            return None
+        v = v.strip()
+        return v or None
+
+
+class ProjectSampleUpdate(BaseModel):
+    """
+    PATCH body for a date already in a project's collection -- every field
+    optional so a caller can send just the one they're changing. Field
+    constraints mirror ProjectSampleInput/MeasurementInput; the TPQ/TAQ
+    ordering check can't be repeated here (a partial update may only carry
+    one of the pair) and is instead applied against the merged result in
+    the endpoint.
+    """
+    sample_name: Optional[str] = Field(default=None, max_length=200)
+    age_bp: Optional[float] = Field(default=None, ge=0, le=60000)
+    error_1sigma: Optional[float] = Field(default=None, gt=0, le=10000)
+    material_type: Optional[str] = Field(default=None, max_length=100)
+    sample_type: Optional[Literal["terrestrial", "marine"]] = None
+    curve_id: Optional[Literal[VALID_CURVE_IDS]] = None
+    reservoir_age: Optional[float] = Field(default=None, ge=-500, le=2000)
+    depth_cm: Optional[float] = Field(default=None, ge=0, le=10000)
+    location: Optional[str] = Field(default=None, max_length=500)
+    notes: Optional[str] = Field(default=None, max_length=2000)
+    default_context_name: Optional[str] = Field(default=None, max_length=200)
+    tpq_age_bp: Optional[float] = Field(default=None, ge=0, le=60000)
+    taq_age_bp: Optional[float] = Field(default=None, ge=0, le=60000)
+
+    @field_validator("sample_name")
+    @classmethod
+    def _sample_name_not_blank(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        v = v.strip()
+        if not v:
+            raise ValueError("sample_name cannot be blank")
+        return v
+
+
+class ProjectSampleBulkInput(BaseModel):
+    """
+    POST body for adding dates to a project's collection -- a list, so the
+    UI's "paste several dates at once" path is a single request.
+    """
+    samples: List[ProjectSampleInput] = Field(..., min_length=1, max_length=500)
+
+
+class DeployRequest(BaseModel):
+    """
+    POST body for deploying a selection of a project's dates into a new
+    analysis (see api/project_samples.py). The dates are COPIED, so the
+    resulting analysis is independent of the collection from then on.
+    """
+    name: str = Field(default="Untitled", max_length=200)
+    sample_ids: List[str] = Field(..., min_length=1)
+    analysis_type: Literal["bayesian", "calibration"] = "bayesian"
+
+    @field_validator("name")
+    @classmethod
+    def _name_not_blank(cls, v: str) -> str:
+        v = v.strip()
+        return v or "Untitled"
+
+    @field_validator("sample_ids")
+    @classmethod
+    def _no_duplicate_ids(cls, v: List[str]) -> List[str]:
+        if len(set(v)) != len(v):
+            raise ValueError("sample_ids contains a duplicate id")
+        return v
+
+
 class BayesianMeasurementInput(MeasurementInput):
     """A measurement within a Bayesian analysis request. Needs a
     client-supplied id so relationships can reference it."""

@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 import os
-from app.api import curves, analysis, harris_matrix, results, projects
+from app.api import curves, analysis, harris_matrix, results, projects, project_samples
 from app.database import init_db
 
 load_dotenv()
@@ -36,6 +36,7 @@ app.include_router(analysis.router, prefix="/api", tags=["analysis"])
 app.include_router(harris_matrix.router, prefix="/api", tags=["harris matrix"])
 app.include_router(results.router, prefix="/api", tags=["results"])
 app.include_router(projects.router, prefix="/api", tags=["projects"])
+app.include_router(project_samples.router, prefix="/api", tags=["project dates"])
 
 @app.get("/api/health")
 async def health_check():

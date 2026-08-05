@@ -178,6 +178,12 @@ async def delete_project(project_id: str, db: Session = Depends(get_db)):
     Delete a project. Analyses filed under it are NOT deleted -- they're
     unassigned (project_id set to NULL) so calibration results are never
     lost just because a project got cleaned up or renamed away.
+
+    The project's date COLLECTION (ProjectSample rows) is deleted with it,
+    via the cascade on Project.samples -- unlike an analysis, a collected
+    date has no meaning outside the project it was entered under, and any
+    analysis already deployed from it holds its own independent copy of
+    the values, so nothing an analysis depends on is lost here.
     """
     project = db.query(Project).filter(Project.id == project_id).first()
     if not project:

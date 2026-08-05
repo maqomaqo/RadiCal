@@ -20,15 +20,19 @@ import {
   TextField,
   IconButton,
   Alert,
+  Tabs,
+  Tab,
 } from '@mui/material'
 import EditIcon from '@mui/icons-material/Edit'
 import DeleteIcon from '@mui/icons-material/Delete'
 import AddIcon from '@mui/icons-material/Add'
 import DriveFileMoveIcon from '@mui/icons-material/DriveFileMove'
 import ReplayIcon from '@mui/icons-material/Replay'
+import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import { formatApiError } from '@/utils/apiError'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import AssignProjectDialog from '@/components/AssignProjectDialog'
+import ProjectSampleTable from '@/components/ProjectSampleTable'
 
 interface AnalysisSummary {
   id: string
@@ -66,6 +70,12 @@ export default function ProjectDetail() {
   const [deletingProject, setDeletingProject] = useState(false)
   const [deleteAnalysisTarget, setDeleteAnalysisTarget] = useState<AnalysisSummary | null>(null)
   const [deletingAnalysis, setDeletingAnalysis] = useState(false)
+
+  // 'analyses' | 'dates' -- the project's date collection lives on its own
+  // tab (see ProjectSampleTable). The Unassigned pseudo-project isn't a real
+  // project row, so it has no collection and the tabs are hidden for it.
+  const [tab, setTab] = useState<'analyses' | 'dates'>('analyses')
+  const [duplicating, setDuplicating] = useState(false)
 
   const [assignTarget, setAssignTarget] = useState<AnalysisSummary | null>(null)
   const [rerunTarget, setRerunTarget] = useState<AnalysisSummary | null>(null)
@@ -180,6 +190,25 @@ export default function ProjectDetail() {
       alert('Error deleting analysis: ' + (err as Error).message)
     } finally {
       setDeletingAnalysis(false)
+    }
+  }
+
+  // Copy an analysis's inputs into a new one and open it for editing --
+  // "same dates, different model" without re-entering anything.
+  const handleDuplicate = async (analysis: AnalysisSummary) => {
+    setDuplicating(true)
+    try {
+      const response = await fetch(`/api/analysis/${analysis.id}/duplicate`, { method: 'POST' })
+      const data = await response.json()
+      if (data.success) {
+        navigate(`/analysis/${data.data.id}/edit`)
+      } else {
+        alert('Failed to duplicate analysis: ' + formatApiError(data))
+      }
+    } catch (err) {
+      alert('Error duplicating analysis: ' + (err as Error).message)
+    } finally {
+      setDuplicating(false)
     }
   }
 
@@ -302,6 +331,27 @@ export default function ProjectDetail() {
         </Box>
       </Box>
 
+      {!isUnassigned && (
+        <Tabs value={tab} onChange={(_e, v) => setTab(v)} sx={{ mb: 2 }}>
+          <Tab label={`Analyses (${project.analyses.length})`} value="analyses" />
+          <Tab label="Dates" value="dates" />
+        </Tabs>
+      )}
+
+      {tab === 'dates' && !isUnassigned ? (
+        <Paper sx={{ p: 3 }}>
+          <Typography variant="h6" gutterBottom>
+            Date Collection
+          </Typography>
+          <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
+            This project's radiocarbon dates. Enter them once here, then deploy any selection into a
+            new analysis — the same dates can feed several analyses, each modelling them under
+            different criteria. Deployed dates are copies, so editing one here never alters an
+            analysis already created from it.
+          </Typography>
+          <ProjectSampleTable projectId={project.id} />
+        </Paper>
+      ) : (
       <Paper sx={{ p: 3 }}>
         <Typography variant="h6" gutterBottom>
           Analyses ({project.analyses.length})
@@ -353,6 +403,29 @@ export default function ProjectDetail() {
                       )}
                       <IconButton
                         size="small"
+                        aria-label={`Duplicate ${a.name}`}
+                        title="Duplicate and edit"
+                        disabled={duplicating}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handleDuplicate(a)
+                        }}
+                      >
+                        <ContentCopyIcon fontSize="small" />
+                      </IconButton>
+                      <IconButton
+                        size="small"
+                        aria-label={`Edit ${a.name}`}
+                        title="Edit inputs"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          navigate(`/analysis/${a.id}/edit`)
+                        }}
+                      >
+                        <EditIcon fontSize="small" />
+                      </IconButton>
+                      <IconButton
+                        size="small"
                         aria-label={`Re-run ${a.name}`}
                         title="Re-run"
                         onClick={(e) => {
@@ -380,6 +453,7 @@ export default function ProjectDetail() {
           </TableContainer>
         )}
       </Paper>
+      )}
 
       <Box sx={{ mt: 4 }}>
         <Button onClick={() => navigate('/projects')} variant="outlined">

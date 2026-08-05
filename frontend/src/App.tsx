@@ -34,6 +34,12 @@ function App() {
           <Route path="/" element={<Dashboard />} />
           <Route path="/new-analysis" element={<NewAnalysis />} />
           <Route path="/new-analysis/stratigraphy" element={<Stratigraphy />} />
+          {/* Editing a saved analysis reuses the same two pages as creating
+              one -- NewAnalysis loads the saved inputs into the shared draft
+              store, and Stratigraphy edits them exactly as for a new
+              analysis. See NewAnalysis's edit-mode effect. */}
+          <Route path="/analysis/:analysisId/edit" element={<NewAnalysis />} />
+          <Route path="/analysis/:analysisId/edit/stratigraphy" element={<Stratigraphy />} />
           <Route path="/results/:analysisId" element={<Results />} />
           <Route path="/projects" element={<Projects />} />
           <Route path="/projects/:projectId" element={<ProjectDetail />} />

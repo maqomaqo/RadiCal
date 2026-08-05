@@ -17,6 +17,7 @@ import {
   FormControlLabel,
   Switch,
   Alert,
+  CircularProgress,
   Dialog,
   DialogTitle,
   DialogContent,
@@ -25,7 +26,7 @@ import {
   Stack,
   Autocomplete,
 } from '@mui/material'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useNavigate, useSearchParams, useParams } from 'react-router-dom'
 import DeleteIcon from '@mui/icons-material/Delete'
 import AddIcon from '@mui/icons-material/Add'
 import AccountTreeIcon from '@mui/icons-material/AccountTree'
@@ -95,8 +96,18 @@ export default function NewAnalysis() {
     removeMeasurement,
     groups,
     relationships,
+    mcmc,
+    setMcmc,
+    editingAnalysisId,
+    loadFromAnalysis,
     reset: resetDraft,
   } = useAnalysisDraftStore()
+  // Set when this page is reached via /analysis/:analysisId/edit -- the
+  // same form, but saving replaces an existing analysis's inputs (PUT
+  // .../inputs then rerun) instead of creating a new one.
+  const { analysisId: editRouteId } = useParams<{ analysisId: string }>()
+  const isEditing = !!editRouteId
+  const [loadingExisting, setLoadingExisting] = useState(isEditing)
   const [currentMeasurement, setCurrentMeasurement] = useState<Partial<Measurement>>({
     sample_type: 'terrestrial',
     curve_id: 'intcal20',
@@ -130,6 +141,75 @@ export default function NewAnalysis() {
   useEffect(() => {
     fetchProjects()
   }, [])
+
+  // Editing an existing analysis: pull its saved inputs into the shared
+  // draft store, so this page and the Stratigraphy page edit them with
+  // exactly the same UI used to create them. GET /api/analysis/:id already
+  // returns measurements/groups/relationships/bayesian_config, so nothing
+  // extra is needed to reconstruct the draft. Skipped if the store is
+  // already holding this analysis (e.g. returning from the Stratigraphy
+  // page), which would otherwise discard edits made over there.
+  useEffect(() => {
+    if (!editRouteId || editingAnalysisId === editRouteId) {
+      setLoadingExisting(false)
+      return
+    }
+    let cancelled = false
+    ;(async () => {
+      try {
+        const response = await fetch(`/api/analysis/${editRouteId}`)
+        const data = await response.json()
+        if (cancelled) return
+        if (!data.success) {
+          alert('Failed to load analysis: ' + formatApiError(data))
+          navigate('/projects')
+          return
+        }
+        const a = data.data
+        loadFromAnalysis({
+          analysisId: editRouteId,
+          name: a.name,
+          analysisType: a.analysis_type === 'bayesian' ? 'bayesian' : 'calibration',
+          measurements: (a.measurements || []).map((m: any) => ({
+            id: m.id,
+            sample_name: m.sample_name,
+            age_bp: m.age_bp,
+            error_1sigma: m.error_1sigma,
+            material_type: m.material_type || 'unknown',
+            sample_type: m.sample_type || 'terrestrial',
+            curve_id: m.curve_id || 'intcal20',
+            group_id: m.group_id ?? null,
+            tpq_age_bp: m.tpq_age_bp ?? null,
+            taq_age_bp: m.taq_age_bp ?? null,
+          })),
+          groups: (a.groups || []).map((g: any) => ({
+            id: g.id,
+            name: g.name,
+            tpq_age_bp: g.tpq_age_bp ?? null,
+            taq_age_bp: g.taq_age_bp ?? null,
+          })),
+          relationships: (a.relationships || []).map((r: any) => ({
+            id: r.id,
+            from_sample_id: r.from_sample_id,
+            to_sample_id: r.to_sample_id,
+            from_type: r.from_type,
+            to_type: r.to_type,
+            relationship: r.relationship,
+          })),
+          mcmc: a.bayesian_config || undefined,
+        })
+        setProjectId(a.project_id || '')
+      } catch (err) {
+        if (!cancelled) alert('Error loading analysis: ' + (err as Error).message)
+      } finally {
+        if (!cancelled) setLoadingExisting(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editRouteId])
 
   const handleCreateProjectInline = async () => {
     if (!newProjectName.trim()) return
@@ -247,31 +327,44 @@ export default function NewAnalysis() {
           setLoading(false)
           return
         }
-        const response = await fetch('/api/analysis/bayesian', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            name: analysisName,
-            measurements: measurements,
-            groups: groups,
-            relationships: relationships.map(({ id: _id, ...r }) => r),
-            project_id: projectId || null,
-            bayesian_config: {
-              // 4000, not the more typical 2000 -- convergence for a
-              // realistic multi-sample chained analysis was noticeably
-              // better at 4000 (see BayesianChronology.sample's
-              // docstring on the backend).
-              mcmc_samples: 4000,
-              mcmc_tune: 1000,
-              mcmc_chains: 4,
-            },
-          }),
-        })
+        const payload = {
+          name: analysisName,
+          measurements: measurements,
+          groups: groups,
+          relationships: relationships.map(({ id: _id, ...r }) => r),
+          project_id: projectId || null,
+          bayesian_config: mcmc,
+        }
+
+        // Editing an existing analysis replaces its inputs and then re-runs
+        // it in place, keeping the same id/URL. Creating a new one posts to
+        // /analysis/bayesian, which validates, persists and runs in one go.
+        const response = isEditing
+          ? await fetch(`/api/analysis/${editRouteId}/inputs`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload),
+            })
+          : await fetch('/api/analysis/bayesian', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload),
+            })
         const data = await response.json()
         if (data.success) {
-          saveDateFormatPreference(data.data.id, dateFormat)
+          const resultId = isEditing ? editRouteId! : data.data.id
+          if (isEditing) {
+            const runResponse = await fetch(`/api/analysis/${resultId}/rerun`, { method: 'POST' })
+            const runData = await runResponse.json()
+            if (!runData.success) {
+              alert('Inputs saved, but the run failed: ' + formatApiError(runData))
+              setLoading(false)
+              return
+            }
+          }
+          saveDateFormatPreference(resultId, dateFormat)
           resetDraft()
-          navigate(`/results/${data.data.id}`)
+          navigate(`/results/${resultId}`)
         } else {
           alert('Analysis failed: ' + formatApiError(data))
         }
@@ -283,11 +376,25 @@ export default function NewAnalysis() {
     }
   }
 
+  if (loadingExisting) {
+    return (
+      <Container sx={{ py: 4, display: 'flex', justifyContent: 'center' }}>
+        <CircularProgress />
+      </Container>
+    )
+  }
+
   return (
     <Container maxWidth="lg" sx={{ py: 4 }}>
       <Typography variant="h3" component="h1" gutterBottom>
-        New Analysis
+        {isEditing ? 'Edit Analysis' : 'New Analysis'}
       </Typography>
+      {isEditing && (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          Editing a saved analysis. Saving replaces its inputs and re-runs it, replacing its current
+          results.
+        </Alert>
+      )}
 
       <Grid container spacing={3}>
         <Grid item xs={12} md={6}>
@@ -381,6 +488,45 @@ export default function NewAnalysis() {
                 </Select>
               </FormControl>
             </Box>
+
+            {/* MCMC settings -- previously hardcoded here and unreachable
+                from the UI. Exposed now because duplicating an analysis to
+                compare model variants is exactly when varying them (e.g.
+                more draws for a chain that converged poorly) becomes
+                useful. */}
+            {analysisType === 'bayesian' && (
+              <Box sx={{ mb: 2 }}>
+                <Typography variant="subtitle2" gutterBottom>
+                  MCMC Settings
+                </Typography>
+                <Box sx={{ display: 'flex', gap: 2 }}>
+                  <TextField
+                    fullWidth
+                    size="small"
+                    type="number"
+                    label="Draws"
+                    value={mcmc.mcmc_samples}
+                    onChange={(e) => setMcmc({ mcmc_samples: Number(e.target.value) })}
+                  />
+                  <TextField
+                    fullWidth
+                    size="small"
+                    type="number"
+                    label="Tune"
+                    value={mcmc.mcmc_tune}
+                    onChange={(e) => setMcmc({ mcmc_tune: Number(e.target.value) })}
+                  />
+                  <TextField
+                    fullWidth
+                    size="small"
+                    type="number"
+                    label="Chains"
+                    value={mcmc.mcmc_chains}
+                    onChange={(e) => setMcmc({ mcmc_chains: Number(e.target.value) })}
+                  />
+                </Box>
+              </Box>
+            )}
           </Paper>
         </Grid>
 
@@ -548,7 +694,9 @@ export default function NewAnalysis() {
               <Button
                 variant="outlined"
                 startIcon={<AccountTreeIcon />}
-                onClick={() => navigate('/new-analysis/stratigraphy')}
+                onClick={() =>
+                  navigate(isEditing ? `/analysis/${editRouteId}/edit/stratigraphy` : '/new-analysis/stratigraphy')
+                }
                 disabled={measurements.length === 0}
               >
                 {groups.length > 0 || relationships.length > 0 ? 'Edit Stratigraphy' : 'Define Stratigraphy'}

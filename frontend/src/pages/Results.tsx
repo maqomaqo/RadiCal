@@ -32,6 +32,8 @@ import DownloadIcon from '@mui/icons-material/Download'
 import AccountTreeIcon from '@mui/icons-material/AccountTree'
 import DeleteIcon from '@mui/icons-material/Delete'
 import ReplayIcon from '@mui/icons-material/Replay'
+import ContentCopyIcon from '@mui/icons-material/ContentCopy'
+import EditIcon from '@mui/icons-material/Edit'
 import PosteriorPlot from '@/components/PosteriorPlot'
 import HarrisMatrixDiagram from '@/components/HarrisMatrixDiagram'
 import ConfirmDialog from '@/components/ConfirmDialog'
@@ -113,6 +115,7 @@ export default function Results() {
   const [assignOpen, setAssignOpen] = useState(false)
   const [rerunOpen, setRerunOpen] = useState(false)
   const [rerunning, setRerunning] = useState(false)
+  const [duplicating, setDuplicating] = useState(false)
   // Posterior mean/median are opt-in reporting choices, not shown by
   // default -- HPD ranges are the primary convention for reporting a
   // (possibly multimodal) calibrated/Bayesian result; a single point
@@ -191,6 +194,27 @@ export default function Results() {
       alert('Error deleting analysis: ' + (err as Error).message)
     } finally {
       setDeleting(false)
+    }
+  }
+
+  // Copy this analysis's inputs into a new one and open it for editing --
+  // the "try the same dates under a different model" path, which leaves
+  // this analysis and its results untouched.
+  const handleDuplicate = async () => {
+    if (!analysisId) return
+    setDuplicating(true)
+    try {
+      const response = await fetch(`/api/analysis/${analysisId}/duplicate`, { method: 'POST' })
+      const data = await response.json()
+      if (data.success) {
+        navigate(`/analysis/${data.data.id}/edit`)
+      } else {
+        alert('Failed to duplicate analysis: ' + formatApiError(data))
+      }
+    } catch (err) {
+      alert('Error duplicating analysis: ' + (err as Error).message)
+    } finally {
+      setDuplicating(false)
     }
   }
 
@@ -283,6 +307,21 @@ export default function Results() {
                 ))}
               </Select>
             </FormControl>
+            <Button
+              startIcon={<EditIcon />}
+              variant="outlined"
+              onClick={() => navigate(`/analysis/${analysis.id}/edit`)}
+            >
+              Edit
+            </Button>
+            <Button
+              startIcon={<ContentCopyIcon />}
+              variant="outlined"
+              disabled={duplicating}
+              onClick={handleDuplicate}
+            >
+              {duplicating ? 'Copying...' : 'Duplicate'}
+            </Button>
             <Button
               startIcon={<ReplayIcon />}
               variant="outlined"

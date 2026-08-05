@@ -22,6 +22,59 @@ class Project(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     analyses = relationship('Analysis', back_populates='project')
+    samples = relationship('ProjectSample', back_populates='project', cascade='all, delete-orphan')
+
+
+class ProjectSample(Base):
+    """
+    A radiocarbon date held in a PROJECT's own date collection, independent
+    of any analysis -- enter a site's dates once here, then deploy subsets
+    of them into as many analyses as you like, each modelling them
+    differently (different contexts, different stratigraphy).
+
+    Deliberately a separate table from RadiocarbonSample rather than
+    RadiocarbonSample gaining a nullable analysis_id: deploying COPIES
+    these values into an analysis's own RadiocarbonSample rows, so an
+    analysis is always a self-contained snapshot of exactly what it was
+    run on. Editing an entry here therefore never mutates an already-run
+    analysis or silently invalidates its stored results -- important for
+    reproducibility, since a saved result must keep matching the inputs
+    displayed alongside it. The cost is that picking up a corrected date
+    in an existing analysis is an explicit action (re-deploy, or edit that
+    analysis), which is the intended trade.
+    """
+    __tablename__ = "project_samples"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    project_id = Column(String, ForeignKey('projects.id'), nullable=False)
+
+    # Measurement fields -- same names/semantics as RadiocarbonSample, so
+    # deploying is a straight field-for-field copy.
+    sample_name = Column(String, nullable=False)
+    age_bp = Column(Float, nullable=False)
+    error_1sigma = Column(Float, nullable=False)
+    material_type = Column(String, nullable=False)
+    sample_type = Column(String, nullable=False)  # 'terrestrial' or 'marine'
+    curve_id = Column(String, default='intcal20')
+    reservoir_age = Column(Float, nullable=True)
+    depth_cm = Column(Float, nullable=True)
+    location = Column(String, nullable=True)
+    notes = Column(String, nullable=True)
+
+    # Archaeological defaults, pre-filled when this date is deployed into an
+    # analysis and freely overridable there. default_context_name is matched
+    # by name at deploy time to build that analysis's SampleGroups, so dates
+    # sharing a context name land in the same context without re-grouping
+    # them by hand every time.
+    default_context_name = Column(String, nullable=True)
+    tpq_age_bp = Column(Float, nullable=True)
+    taq_age_bp = Column(Float, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    project = relationship('Project', back_populates='samples')
+
 
 class Analysis(Base):
     """Represents a complete radiocarbon analysis"""
