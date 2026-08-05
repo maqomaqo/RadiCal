@@ -1,0 +1,13 @@
+# Test-only dependencies. The runtime image installs requirements.txt
+# alone, so the suite can't run without these:
+#
+#   pip install -r requirements-dev.txt
+#   pytest
+-r requirements.txt
+
+pytest==8.3.4
+# fastapi's TestClient goes through starlette's, which constructs
+# httpx.Client(app=...). httpx dropped that shortcut in 0.28, so anything
+# newer fails every client fixture with "unexpected keyword argument 'app'"
+# for as long as starlette stays pinned at 0.27.
+httpx==0.27.2

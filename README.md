@@ -110,6 +110,17 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload
 ```
 
+#### Backend tests
+The runtime image installs `requirements.txt` only, so the test
+dependencies live in a separate file:
+```bash
+cd backend
+pip install -r requirements-dev.txt
+pytest
+```
+Tests needing PyMC are marked `requires_pymc` and skip automatically when
+it isn't installed.
+
 ## API Endpoints
 
 ### Calibration Curves
