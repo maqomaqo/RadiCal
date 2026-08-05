@@ -1,11 +1,15 @@
 """
-Tests for the results export endpoints -- /export/json and /table.
+Tests for the results export routes: /table, /export/json, /graphs, and
+the POST /export dispatcher.
 
 The CSV body itself is covered by test_model_tree.py's TestCsvExport,
 which pins the structure ordering the CSV shares with the results table.
-What matters here is what these two routes add on top: /table promises the
-same bytes as /export/csv, and /export/json promises each sample's measured
-detail merged into its result.
+What matters here is what these routes add on top of it -- and most of it
+is delegation, which is precisely what rots quietly: /table promises the
+same bytes as /export/csv, POST /export promises to hand off to the GET
+routes rather than render its own variant, /graphs promises the same
+distributions the Results page plots, and /export/json promises each
+sample's measured detail merged into its result.
 
 Most of these use a single calibration rather than a Bayesian analysis --
 a saved calibration carries a full posterior and HPD breakdown, so it
@@ -282,3 +286,63 @@ class TestGraphs:
         an empty graph list and look like a valid, empty analysis.
         """
         assert client.get("/api/results/ghost/graphs").status_code == 404
+
+
+class TestPostExport:
+    """
+    POST /export is a thin dispatcher over the GET routes, so what matters
+    is that it really delegates -- same bytes, same headers -- rather than
+    growing a second, subtly different rendering of the same data.
+    """
+
+    def test_csv_is_the_default_format(self, client):
+        analysis_id = _calibration(client)
+        posted = client.post(f"/api/results/{analysis_id}/export", json={})
+        assert posted.status_code == 200
+        assert posted.headers["content-type"].startswith("text/csv")
+        assert posted.text == client.get(f"/api/results/{analysis_id}/export/csv").text
+
+    def test_csv_delegates_to_the_get_route(self, client):
+        analysis_id = _calibration(client)
+        posted = client.post(f"/api/results/{analysis_id}/export", json={"format": "csv"})
+        exported = client.get(f"/api/results/{analysis_id}/export/csv")
+        assert posted.text == exported.text
+        # Same download filename too -- the delegation is the whole route.
+        assert posted.headers["content-disposition"] == exported.headers["content-disposition"]
+
+    def test_json_delegates_to_the_get_route(self, client):
+        analysis_id = _calibration(client)
+        posted = client.post(f"/api/results/{analysis_id}/export", json={"format": "json"})
+        assert posted.status_code == 200
+        assert posted.json() == client.get(f"/api/results/{analysis_id}/export/json").json()
+
+    def test_pdf_reports_not_implemented(self, client):
+        analysis_id = _calibration(client)
+        response = client.post(f"/api/results/{analysis_id}/export", json={"format": "pdf"})
+        assert response.status_code == 501
+
+    def test_unsupported_format_400s_and_names_it(self, client):
+        analysis_id = _calibration(client)
+        response = client.post(f"/api/results/{analysis_id}/export", json={"format": "xlsx"})
+        assert response.status_code == 400
+        assert "xlsx" in response.json()["detail"]
+
+    def test_format_matching_is_exact(self, client):
+        # "CSV" is not accepted as "csv"; a caller sending the wrong case
+        # gets the 400 rather than silently falling through to a default.
+        analysis_id = _calibration(client)
+        response = client.post(f"/api/results/{analysis_id}/export", json={"format": "CSV"})
+        assert response.status_code == 400
+
+    def test_unknown_analysis_404s(self, client):
+        for body in ({}, {"format": "csv"}, {"format": "json"}):
+            response = client.post("/api/results/ghost/export", json=body)
+            assert response.status_code == 404, body
+
+    def test_unknown_analysis_beats_not_implemented(self, client):
+        """
+        A bad id on the pdf format reports 404, not 501 -- export_pdf checks
+        the analysis exists first, so the caller can tell "wrong id" from
+        "this format isn't built yet".
+        """
+        assert client.post("/api/results/ghost/export", json={"format": "pdf"}).status_code == 404
