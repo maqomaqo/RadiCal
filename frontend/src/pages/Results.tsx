@@ -39,7 +39,8 @@ import HarrisMatrixDiagram from '@/components/HarrisMatrixDiagram'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import AssignProjectDialog from '@/components/AssignProjectDialog'
 import { formatApiError } from '@/utils/apiError'
-import { treeToMatrix } from '@/utils/stratigraphy'
+import { treeToMatrix, flattenStructure } from '@/utils/stratigraphy'
+import type { StructureRow } from '@/utils/stratigraphy'
 import {
   DateFormat,
   DATE_FORMAT_OPTIONS,
@@ -71,27 +72,29 @@ interface AnalysisResult {
   // Explicit model structure; boundary elements carry their own posterior.
   model_tree?: ModelElement | null
   relationships?: DraftRelationship[]
-  results: Array<{
-    sample_id: string
-    sample_name?: string | null
-    posterior_mean?: number
-    posterior_median?: number
-    posterior_std?: number
-    hpd_68?: [number, number]
-    hpd_95?: [number, number]
-    // Full HPD breakdown, one or more disjoint ranges with their own
-    // probability share -- present for analyses computed after this
-    // reporting was added; older stored results may only have hpd_68/95.
-    hpd_68_ranges?: HPDRange[]
-    hpd_95_ranges?: HPDRange[]
-    probability_distribution?: Array<[number, number]>
-    // The plain/unmodelled calibration for this sample (no stratigraphic
-    // constraints applied) -- present only for a Bayesian analysis (see
-    // GET /api/analysis/:id), so "unmodelled vs modelled" can be
-    // compared side by side. For a calibration-only analysis,
-    // probability_distribution above already *is* the unmodelled result.
-    unmodelled_probability_distribution?: Array<[number, number]> | null
-  }>
+  results: SampleResult[]
+}
+
+interface SampleResult {
+  sample_id: string
+  sample_name?: string | null
+  posterior_mean?: number
+  posterior_median?: number
+  posterior_std?: number
+  hpd_68?: [number, number]
+  hpd_95?: [number, number]
+  // Full HPD breakdown, one or more disjoint ranges with their own
+  // probability share -- present for analyses computed after this
+  // reporting was added; older stored results may only have hpd_68/95.
+  hpd_68_ranges?: HPDRange[]
+  hpd_95_ranges?: HPDRange[]
+  probability_distribution?: Array<[number, number]>
+  // The plain/unmodelled calibration for this sample (no stratigraphic
+  // constraints applied) -- present only for a Bayesian analysis (see
+  // GET /api/analysis/:id), so "unmodelled vs modelled" can be
+  // compared side by side. For a calibration-only analysis,
+  // probability_distribution above already *is* the unmodelled result.
+  unmodelled_probability_distribution?: Array<[number, number]> | null
 }
 
 // The three standard Gaussian-equivalent confidence levels radiocarbon
@@ -103,6 +106,99 @@ const CONFIDENCE_OPTIONS = [
   { value: 0.954, label: '95.4%' },
   { value: 0.997, label: '99.7%' },
 ] as const
+
+// Indentation and marker for one row of the model structure. Sequences and
+// phases are headings; boundaries and dates are the rows carrying numbers.
+const STRUCTURE_MARKER: Record<string, string> = {
+  sequence: '▸', phase: '▪', boundary: '◆', hiatus: '⋯', unassigned: '⚠', date: '·',
+}
+
+/**
+ * One row of the structure-ordered results table. A boundary reports
+ * through the same columns as a date deliberately: both are modelled
+ * parameters with a posterior, and reading them in one table is what makes
+ * the transitions legible against the dates they bracket.
+ */
+function StructureTableRow({
+  row, result, isBayesian, showMean, showMedian, confidence, dateFormat,
+}: {
+  row: StructureRow
+  result?: SampleResult
+  isBayesian: boolean
+  showMean: boolean
+  showMedian: boolean
+  confidence: number
+  dateFormat: DateFormat
+}) {
+  const isDate = row.kind === 'date'
+  const posterior = row.posterior
+  // A heading (sequence/phase/hiatus) has no posterior of its own -- its
+  // numbers are the boundaries around it and the dates inside it.
+  const isHeading = !isDate && !posterior
+
+  const mean = isDate ? result?.posterior_mean : posterior?.posterior_mean
+  const median = isDate ? result?.posterior_median : posterior?.posterior_median
+  const std = isDate ? result?.posterior_std : posterior?.posterior_std
+  const distribution = isDate ? result?.probability_distribution : posterior?.probability_distribution
+  const envelope = distribution ? hpdEnvelopeFromHistogram(distribution, confidence) : null
+  const unmodelledRanges = isDate && isBayesian
+    ? hpdRangesFromCurve(result?.unmodelled_probability_distribution, confidence)
+    : []
+
+  const limiters = [
+    row.tpqAgeBp != null ? `TPQ ${row.tpqAgeBp}` : null,
+    row.taqAgeBp != null ? `TAQ ${row.taqAgeBp}` : null,
+  ].filter(Boolean).join(' · ')
+
+  const cell = (value: string) => (isHeading ? '' : value)
+
+  return (
+    <TableRow sx={isHeading ? { backgroundColor: '#fafafa' } : undefined}>
+      <TableCell sx={{ pl: 2 + row.depth * 2.5 }}>
+        <Box component="span" sx={{ color: 'text.secondary', mr: 1 }}>
+          {STRUCTURE_MARKER[row.kind] ?? '·'}
+        </Box>
+        <Box component="span" sx={{ fontWeight: isHeading ? 600 : 400 }}>
+          {row.name}
+        </Box>
+        {/* Only when it adds something: an element named "Site sequence" or
+            "Phase 1" already says what it is, but a boundary named "Start"
+            does not. */}
+        {!isDate && !row.name.toLowerCase().includes(String(row.kind)) && (
+          <Box component="span" sx={{ ml: 1, color: 'text.secondary', fontSize: '0.8em' }}>
+            {row.kind}
+          </Box>
+        )}
+        {limiters && (
+          <Box component="span" sx={{ ml: 1, color: 'text.secondary', fontSize: '0.8em' }}>
+            ({limiters})
+          </Box>
+        )}
+      </TableCell>
+      {showMean && (
+        <TableCell align="right">
+          {cell(mean != null ? formatCalendarAge(mean, dateFormat) : 'N/A')}
+        </TableCell>
+      )}
+      {showMean && <TableCell align="right">{cell(std?.toFixed(0) ?? 'N/A')}</TableCell>}
+      {showMedian && (
+        <TableCell align="right">
+          {cell(median != null ? formatCalendarAge(median, dateFormat) : 'N/A')}
+        </TableCell>
+      )}
+      {isBayesian && (
+        <TableCell align="right">
+          {/* Only a date has an unmodelled counterpart -- a boundary exists
+              solely as a modelled parameter. */}
+          {isDate ? (unmodelledRanges.length > 0 ? formatHPDRanges(unmodelledRanges, dateFormat) : 'N/A') : ''}
+        </TableCell>
+      )}
+      <TableCell align="right">
+        {cell(envelope ? formatCalendarRange(envelope[0], envelope[1], dateFormat) : 'N/A')}
+      </TableCell>
+    </TableRow>
+  )
+}
 
 export default function Results() {
   const { analysisId } = useParams<{ analysisId: string }>()
@@ -307,7 +403,6 @@ export default function Results() {
     const groupId = groupIdBySampleId.get(sampleId)
     return groupId ? groupNameById.get(groupId) || null : null
   }
-  const hasContexts = (analysis.groups || []).length > 0
   const contextsWithModeledSpan = (analysis.groups || []).filter((g) => g.modeled_start && g.modeled_end)
 
   // Every named Boundary in the model structure, in the order it appears
@@ -329,6 +424,14 @@ export default function Results() {
   }
   collectBoundaries(analysis.model_tree)
   const isBayesian = analysis.analysis_type === 'bayesian'
+
+  // The results table, read in the model's own order. Mirrors the CSV
+  // export row for row (backend model_tree.flatten_structure), so what's
+  // on screen and what's downloaded describe the same model. Empty for a
+  // calibration or an analysis with no stored structure, which falls back
+  // to the flat date list below.
+  const structureRows = flattenStructure(analysis.model_tree, analysis.measurements || [])
+  const resultBySampleId = new Map((analysis.results || []).map((r) => [r.sample_id, r]))
   const CONFIDENCE_LABEL = CONFIDENCE_OPTIONS.find((o) => o.value === confidence)?.label ?? ''
 
   return (
@@ -499,63 +602,11 @@ export default function Results() {
           </Paper>
         )}
 
-      {/* Context Spans -- the modelled start/end of each context's own
-          duration, for every context with 2+ dated members. These are
-          Boundary parameters in the same sense as OxCal's Boundary command
-          (see services/bayesian.py's build_model): separate latent
-          variables constrained to lie outside every dated member, so they
-          may extend earlier/later than the oldest/youngest dated sample
-          itself, not just report that sample's own posterior. */}
-      {boundaryRows.length > 0 && (
-        <Paper sx={{ p: 3, mb: 3 }}>
-          <Typography variant="h6" gutterBottom>
-            Boundaries
-          </Typography>
-          <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
-            The modelled transitions in this analysis's structure, oldest first. A boundary
-            between two phases is a single shared transition — the end of one and the start of the
-            next — and the outermost boundaries may extend beyond every dated sample, since the
-            dates are treated as a partial sample of the true duration.
-          </Typography>
-          <TableContainer>
-            <Table size="small">
-              <TableHead>
-                <TableRow sx={{ backgroundColor: '#f5f5f5' }}>
-                  <TableCell>Boundary</TableCell>
-                  {showMean && <TableCell align="right">Mean</TableCell>}
-                  {showMedian && <TableCell align="right">Median</TableCell>}
-                  <TableCell align="right">{CONFIDENCE_LABEL} HPD</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {boundaryRows.map((b) => {
-                  const envelope = hpdEnvelopeFromHistogram(b.posterior.probability_distribution, confidence)
-                  return (
-                    <TableRow key={b.id}>
-                      <TableCell>{b.name}</TableCell>
-                      {showMean && (
-                        <TableCell align="right">
-                          {formatCalendarAge(b.posterior.posterior_mean, dateFormat)}
-                        </TableCell>
-                      )}
-                      {showMedian && (
-                        <TableCell align="right">
-                          {formatCalendarAge(b.posterior.posterior_median, dateFormat)}
-                        </TableCell>
-                      )}
-                      <TableCell align="right">
-                        {envelope
-                          ? formatCalendarRange(envelope[0], envelope[1], dateFormat)
-                          : 'N/A'}
-                      </TableCell>
-                    </TableRow>
-                  )
-                })}
-              </TableBody>
-            </Table>
-          </TableContainer>
-        </Paper>
-      )}
+      {/* Boundaries used to be listed in a table of their own here. They now
+          sit in the results table in their place in the structure, between
+          the phases they separate, which is where they are meaningful --
+          a boundary between two phases is one shared transition, the end of
+          one and the start of the next. */}
 
       {boundaryRows.length === 0 && contextsWithModeledSpan.length > 0 && (
         <Paper sx={{ p: 3, mb: 3 }}>
@@ -669,8 +720,7 @@ export default function Results() {
           <Table>
             <TableHead>
               <TableRow sx={{ backgroundColor: '#f5f5f5' }}>
-                <TableCell>Sample</TableCell>
-                {hasContexts && <TableCell>Context</TableCell>}
+                <TableCell>{structureRows.length > 0 ? 'Structure / Sample' : 'Sample'}</TableCell>
                 {showMean && <TableCell align="right">Posterior Mean</TableCell>}
                 {showMean && <TableCell align="right">Posterior Std (yr)</TableCell>}
                 {showMedian && <TableCell align="right">Posterior Median</TableCell>}
@@ -681,45 +731,57 @@ export default function Results() {
               </TableRow>
             </TableHead>
             <TableBody>
-              {analysis.results.map((result, idx) => {
-                const unmodelledRanges = isBayesian
-                  ? hpdRangesFromCurve(result.unmodelled_probability_distribution, confidence)
-                  : []
-                const modelledEnvelope = hpdEnvelopeFromHistogram(result.probability_distribution, confidence)
-                return (
-                  <TableRow key={result.sample_id}>
-                    <TableCell>{result.sample_name || `Sample ${idx + 1}`}</TableCell>
-                    {hasContexts && <TableCell>{contextNameFor(result.sample_id) || 'Unassigned'}</TableCell>}
-                    {showMean && (
-                      <TableCell align="right">
-                        {result.posterior_mean != null
-                          ? formatCalendarAge(result.posterior_mean, dateFormat)
-                          : 'N/A'}
-                      </TableCell>
-                    )}
-                    {showMean && (
-                      <TableCell align="right">
-                        {result.posterior_std?.toFixed(0) ?? 'N/A'}
-                      </TableCell>
-                    )}
-                    {showMedian && (
-                      <TableCell align="right">
-                        {result.posterior_median != null
-                          ? formatCalendarAge(result.posterior_median, dateFormat)
-                          : 'N/A'}
-                      </TableCell>
-                    )}
-                    {isBayesian && (
-                      <TableCell align="right">
-                        {unmodelledRanges.length > 0 ? formatHPDRanges(unmodelledRanges, dateFormat) : 'N/A'}
-                      </TableCell>
-                    )}
-                    <TableCell align="right">
-                      {modelledEnvelope ? formatCalendarRange(modelledEnvelope[0], modelledEnvelope[1], dateFormat) : 'N/A'}
-                    </TableCell>
-                  </TableRow>
-                )
-              })}
+              {structureRows.length > 0
+                ? structureRows.map((row, idx) => (
+                    <StructureTableRow
+                      key={`${row.kind}-${row.elementId ?? row.sampleId ?? idx}`}
+                      row={row}
+                      result={row.sampleId ? resultBySampleId.get(row.sampleId) : undefined}
+                      isBayesian={isBayesian}
+                      showMean={showMean}
+                      showMedian={showMedian}
+                      confidence={confidence}
+                      dateFormat={dateFormat}
+                    />
+                  ))
+                : analysis.results.map((result, idx) => {
+                    const unmodelledRanges = isBayesian
+                      ? hpdRangesFromCurve(result.unmodelled_probability_distribution, confidence)
+                      : []
+                    const modelledEnvelope = hpdEnvelopeFromHistogram(result.probability_distribution, confidence)
+                    return (
+                      <TableRow key={result.sample_id}>
+                        <TableCell>{result.sample_name || `Sample ${idx + 1}`}</TableCell>
+                        {showMean && (
+                          <TableCell align="right">
+                            {result.posterior_mean != null
+                              ? formatCalendarAge(result.posterior_mean, dateFormat)
+                              : 'N/A'}
+                          </TableCell>
+                        )}
+                        {showMean && (
+                          <TableCell align="right">
+                            {result.posterior_std?.toFixed(0) ?? 'N/A'}
+                          </TableCell>
+                        )}
+                        {showMedian && (
+                          <TableCell align="right">
+                            {result.posterior_median != null
+                              ? formatCalendarAge(result.posterior_median, dateFormat)
+                              : 'N/A'}
+                          </TableCell>
+                        )}
+                        {isBayesian && (
+                          <TableCell align="right">
+                            {unmodelledRanges.length > 0 ? formatHPDRanges(unmodelledRanges, dateFormat) : 'N/A'}
+                          </TableCell>
+                        )}
+                        <TableCell align="right">
+                          {modelledEnvelope ? formatCalendarRange(modelledEnvelope[0], modelledEnvelope[1], dateFormat) : 'N/A'}
+                        </TableCell>
+                      </TableRow>
+                    )
+                  })}
             </TableBody>
           </Table>
         </TableContainer>

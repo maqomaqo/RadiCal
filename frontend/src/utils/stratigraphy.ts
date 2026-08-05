@@ -5,7 +5,9 @@
 // UI -- exactly the "use the diagram as a check that relationships are
 // specified correctly" workflow -- without a network round trip on every
 // edit.
-import type { DraftGroup, MatrixMeasurement, DraftRelationship, ModelElement } from '@/types'
+import type {
+  DraftGroup, MatrixMeasurement, DraftRelationship, ModelElement, ElementType, PosteriorSummary,
+} from '@/types'
 
 export interface Edge {
   from: string
@@ -188,4 +190,102 @@ export function treeToMatrix(
     groups,
     relationships,
   }
+}
+
+export interface StructureRow {
+  kind: ElementType | 'date' | 'unassigned'
+  elementId: string | null
+  name: string
+  depth: number
+  path: string
+  posterior?: PosteriorSummary | null
+  tpqAgeBp?: number | null
+  taqAgeBp?: number | null
+  sampleId?: string | null
+}
+
+/**
+ * Flatten a model tree into the order it should be *read* in: depth first,
+ * siblings oldest first, each phase's own dates before any branch nested
+ * inside it.
+ *
+ * Mirrors the backend's model_tree.flatten_structure so the results table
+ * and the CSV agree row for row. Both derive from the same stored tree
+ * rather than keeping separate state, so the only thing that has to stay
+ * in step is this ordering rule.
+ *
+ * A date is placed by element_id, falling back to group_id for a tree
+ * migrated from the old contexts, where each phase reuses its context's
+ * id. Anything matching neither lands under a trailing "Unassigned"
+ * heading rather than being dropped.
+ */
+export function flattenStructure(
+  tree: ModelElement | null | undefined,
+  measurements: MatrixMeasurement[]
+): StructureRow[] {
+  const rows: StructureRow[] = []
+  // No structure at all (a plain calibration) is not the same as dates
+  // missing from a structure: there is nothing to read in model order, so
+  // callers fall back to a flat list rather than showing every date under a
+  // misleading "Unassigned" heading.
+  if (!tree) return rows
+
+  const datesByElement = new Map<string, MatrixMeasurement[]>()
+  for (const m of measurements) {
+    const key = m.element_id || m.group_id
+    if (!key) continue
+    if (!datesByElement.has(key)) datesByElement.set(key, [])
+    datesByElement.get(key)!.push(m)
+  }
+
+  const placed = new Set<string>()
+  const dateRow = (
+    m: MatrixMeasurement, depth: number, path: string[], elementId: string | null
+  ): StructureRow => {
+    placed.add(m.id)
+    return {
+      kind: 'date',
+      elementId,
+      name: m.sample_name || m.id,
+      depth,
+      path: path.join(' > '),
+      posterior: null,
+      tpqAgeBp: m.tpq_age_bp ?? null,
+      taqAgeBp: m.taq_age_bp ?? null,
+      sampleId: m.id,
+    }
+  }
+
+  const visit = (element: ModelElement, depth: number, ancestors: string[]) => {
+    const name = element.name || element.element_type
+    const path = [...ancestors, name]
+    rows.push({
+      kind: element.element_type,
+      elementId: element.id,
+      name,
+      depth,
+      path: path.join(' > '),
+      posterior: element.posterior ?? null,
+      tpqAgeBp: element.tpq_age_bp ?? null,
+      taqAgeBp: element.taq_age_bp ?? null,
+      sampleId: null,
+    })
+    for (const m of datesByElement.get(element.id) || []) {
+      rows.push(dateRow(m, depth + 1, path, element.id))
+    }
+    for (const child of element.children || []) visit(child, depth + 1, path)
+  }
+
+  if (tree) visit(tree, 0, [])
+
+  const orphans = measurements.filter((m) => !placed.has(m.id))
+  if (orphans.length > 0) {
+    rows.push({
+      kind: 'unassigned', elementId: null, name: 'Unassigned', depth: 0,
+      path: 'Unassigned', posterior: null, tpqAgeBp: null, taqAgeBp: null, sampleId: null,
+    })
+    for (const m of orphans) rows.push(dateRow(m, 1, ['Unassigned'], null))
+  }
+
+  return rows
 }

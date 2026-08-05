@@ -5,6 +5,9 @@ Tests for the explicit model structure: the tree itself
 The planner tests here need no MCMC -- they are pure structure, which is
 most of the point of keeping model_tree.py free of PyMC.
 """
+import csv
+import io
+
 import pytest
 
 from app.services.model_tree import (
@@ -12,6 +15,7 @@ from app.services.model_tree import (
     plan_model,
     inherited_bounds,
     migrate_from_relationships,
+    flatten_structure,
 )
 
 from conftest import requires_pymc
@@ -179,6 +183,154 @@ class TestMigration:
         _root, linearized, _gb = migrate_from_relationships(
             measurements, groups, [], self._new_id())
         assert linearized
+
+
+class TestFlattenStructure:
+    """
+    The reading order shared by the results table and every export. The
+    frontend mirrors this in utils/stratigraphy.flattenStructure, so a
+    change here without a change there puts a date under one phase on
+    screen and another in the CSV.
+    """
+
+    def _tree(self):
+        return _sequence("root", "Site", [
+            _boundary("b0", "Start"),
+            _phase("p1", "Lower"),
+            _boundary("b1", "Mid"),
+            _phase("p2", "Upper"),
+            _boundary("b2", "End"),
+        ])
+
+    def test_reads_depth_first_oldest_first(self):
+        rows = flatten_structure(self._tree(), [
+            {"id": "a", "sample_name": "A", "element_id": "p1"},
+            {"id": "b", "sample_name": "B", "element_id": "p2"},
+        ])
+        assert [(r["kind"], r["name"]) for r in rows] == [
+            ("sequence", "Site"),
+            ("boundary", "Start"),
+            ("phase", "Lower"),
+            ("date", "A"),
+            ("boundary", "Mid"),
+            ("phase", "Upper"),
+            ("date", "B"),
+            ("boundary", "End"),
+        ]
+
+    def test_depth_and_path_describe_the_nesting(self):
+        rows = flatten_structure(self._tree(), [
+            {"id": "a", "sample_name": "A", "element_id": "p1"},
+        ])
+        date = next(r for r in rows if r["kind"] == "date")
+        assert date["depth"] == 2
+        assert date["path"] == "Site > Lower"
+
+    def test_a_phases_own_dates_come_before_a_nested_branch(self):
+        tree = _sequence("root", "Site", [
+            _phase("p1", "Lower", children=[
+                _sequence("inner", "Branch", [_phase("p2", "Deeper")]),
+            ]),
+        ])
+        rows = flatten_structure(tree, [
+            {"id": "a", "sample_name": "A", "element_id": "p1"},
+            {"id": "b", "sample_name": "B", "element_id": "p2"},
+        ])
+        assert [r["name"] for r in rows] == ["Site", "Lower", "A", "Branch", "Deeper", "B"]
+
+    def test_a_date_in_no_phase_is_still_reported(self):
+        rows = flatten_structure(self._tree(), [
+            {"id": "a", "sample_name": "A", "element_id": "p1"},
+            {"id": "orphan", "sample_name": "Stray", "element_id": None},
+        ])
+        assert rows[-2]["kind"] == "unassigned"
+        assert rows[-1]["name"] == "Stray"
+
+    def test_group_id_places_a_date_from_a_migrated_tree(self):
+        # A migrated tree reuses each context's id as its phase id, and
+        # those analyses carry the id on group_id rather than element_id.
+        rows = flatten_structure(self._tree(), [
+            {"id": "a", "sample_name": "A", "group_id": "p1"},
+        ])
+        date = next(r for r in rows if r["kind"] == "date")
+        assert date["path"] == "Site > Lower"
+
+    def test_no_tree_yields_no_rows(self):
+        assert flatten_structure(None, []) == []
+        # Even with dates: a calibration has no structure to read, so the
+        # caller falls back to a flat list rather than filing every date
+        # under "Unassigned".
+        assert flatten_structure(None, [{"id": "a", "sample_name": "A"}]) == []
+
+
+class TestCsvExport:
+    @requires_pymc
+    def test_csv_follows_the_model_structure(self, client):
+        tree = _sequence("croot", "Site", [
+            _boundary("cb0", "Start"),
+            _phase("cp1", "Lower"),
+            _boundary("cb1", "Mid"),
+            _phase("cp2", "Upper"),
+            _boundary("cb2", "End"),
+        ])
+        created = client.post(
+            "/api/analysis/bayesian",
+            json={
+                "name": "CSV structure",
+                "measurements": [
+                    {"id": "a", "sample_name": "A", "age_bp": 3300, "error_1sigma": 30, "element_id": "cp1"},
+                    {"id": "b", "sample_name": "B", "age_bp": 3000, "error_1sigma": 30, "element_id": "cp2"},
+                ],
+                "model_tree": tree,
+                "bayesian_config": {"mcmc_samples": 200, "mcmc_tune": 200, "mcmc_chains": 1},
+                "save": True,
+            },
+        )
+        assert created.status_code == 200, created.text
+        analysis_id = created.json()["data"]["id"]
+
+        body = client.get(f"/api/results/{analysis_id}/export/csv").text
+        rows = list(csv.reader(io.StringIO(body)))
+        header, data = rows[0], rows[1:]
+
+        assert header[:5] == ['Order', 'Row Type', 'Depth', 'Structure Path', 'Name']
+        assert [(r[1], r[4]) for r in data] == [
+            ('Sequence', 'Site'),
+            ('Boundary', 'Start'),
+            ('Phase', 'Lower'),
+            ('Date', 'A'),
+            ('Boundary', 'Mid'),
+            ('Phase', 'Upper'),
+            ('Date', 'B'),
+            ('Boundary', 'End'),
+        ]
+        # Order is written out so re-sorting a spreadsheet can restore the
+        # structure the file exists to convey.
+        assert [r[0] for r in data] == [str(i) for i in range(1, 9)]
+
+        by_name = {r[4]: r for r in data}
+        # A date carries what was measured; a boundary has no measurement
+        # but does have a posterior, reported through the same columns.
+        assert by_name['A'][5] == '3300.0'
+        assert by_name['Start'][5] == ''
+        assert by_name['Start'][11] != ''
+        assert by_name['A'][11] != ''
+        # A heading is structure only.
+        assert by_name['Lower'][11] == ''
+
+    def test_csv_without_a_stored_structure_still_lists_dates(self, client):
+        created = client.post(
+            "/api/analysis/calibrate",
+            json={"sample_name": "Solo", "age_bp": 3000, "error_1sigma": 30,
+                  "curve_id": "intcal20", "save": True},
+        )
+        assert created.status_code == 200, created.text
+        analysis_id = created.json()["data"]["id"]
+
+        rows = list(csv.reader(io.StringIO(
+            client.get(f"/api/results/{analysis_id}/export/csv").text)))
+        assert rows[0][:5] == ['Order', 'Row Type', 'Depth', 'Structure Path', 'Name']
+        assert [(r[1], r[4]) for r in rows[1:]] == [('Date', 'Solo')]
 
 
 class TestModelTreeApi:

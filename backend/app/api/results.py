@@ -2,7 +2,8 @@ from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from app.database import get_db
-from app.models import Analysis, RadiocarbonSample, AnalysisResult
+from app.models import Analysis, RadiocarbonSample, AnalysisResult, ModelElement
+from app.services.model_tree import rows_to_tree, flatten_structure
 from typing import Dict, List, Optional
 import io
 import csv
@@ -72,39 +73,147 @@ def _gather_export_rows(analysis_id: str, db: Session) -> Dict:
             'hpd_95_ranges': r.hpd_95_ranges,
         })
 
-    return {'analysis': analysis, 'rows': rows}
+    return {'analysis': analysis, 'rows': rows, 'samples_by_id': samples_by_id}
+
+
+def _structure_rows(analysis_id: str, db: Session, export_rows: List[Dict],
+                    samples_by_id: Dict) -> List[Dict]:
+    """
+    The analysis's model structure in reading order, with each date's
+    exported result attached to its row.
+
+    Read straight from the stored ModelElement rows rather than migrating
+    on the fly: an export is a GET and should not write, and anything with
+    results to export has already been run, which persists a tree. An
+    analysis old enough to have none yet simply exports without structure
+    (see _build_csv), and gains it the next time it's opened or re-run.
+    """
+    element_rows = db.query(ModelElement).filter(
+        ModelElement.analysis_id == analysis_id
+    ).all()
+    tree = rows_to_tree(element_rows)
+    if tree is None:
+        return []
+
+    measurements = [
+        {
+            'id': s.id,
+            'sample_name': s.sample_name,
+            'element_id': s.element_id,
+            'group_id': s.group_id,
+            'tpq_age_bp': s.tpq_age_bp,
+            'taq_age_bp': s.taq_age_bp,
+        }
+        for s in samples_by_id.values()
+    ]
+    results_by_sample = {r['sample_id']: r for r in export_rows}
+
+    structure = flatten_structure(tree, measurements)
+    for row in structure:
+        row['result'] = results_by_sample.get(row['sample']['id']) if row['sample'] else None
+    return structure
+
+
+CSV_HEADER = [
+    'Order', 'Row Type', 'Depth', 'Structure Path', 'Name',
+    'Age BP', '1-Sigma Error', 'Material', 'Sample Type', 'Curve',
+    'Calibrated Age BP (mode)', 'Posterior Mean', 'Posterior Median', 'Posterior Std',
+    '68% HPD', '95% HPD', 'TPQ BP', 'TAQ BP',
+]
+
+
+def _measurement_cells(row: Optional[Dict]) -> List:
+    """The measured half of a date row; blank for a structural row."""
+    if not row:
+        return ['', '', '', '', '']
+    return [
+        row['age_bp'] if row['age_bp'] is not None else '',
+        row['error_1sigma'] if row['error_1sigma'] is not None else '',
+        row['material_type'] or '',
+        row['sample_type'] or '',
+        row['curve_id'] or '',
+    ]
+
+
+def _posterior_cells(row: Optional[Dict]) -> List:
+    """
+    The modelled half. Dates and boundaries are both modelled parameters
+    with a posterior, so they report through exactly the same columns --
+    the whole point of exporting the structure rather than only the dates.
+    """
+    if not row:
+        return ['', '', '', '', '', '']
+    return [
+        f"{row['calibrated_age_bp']:.0f}" if row.get('calibrated_age_bp') is not None else '',
+        f"{row['posterior_mean']:.1f}" if row.get('posterior_mean') is not None else '',
+        f"{row['posterior_median']:.1f}" if row.get('posterior_median') is not None else '',
+        f"{row['posterior_std']:.1f}" if row.get('posterior_std') is not None else '',
+        _format_hpd_ranges(row.get('hpd_68_ranges'), row.get('hpd_68_min'), row.get('hpd_68_max')),
+        _format_hpd_ranges(row.get('hpd_95_ranges'), row.get('hpd_95_min'), row.get('hpd_95_max')),
+    ]
 
 
 def _build_csv(analysis_id: str, db: Session) -> str:
+    """
+    One row per modelled entity -- sequences, phases, boundaries and dates
+    -- in the model's own reading order, matching the results table
+    row for row.
+
+    `Order` is written out because a spreadsheet sort would otherwise
+    destroy the one thing the file exists to convey; re-sorting on it
+    restores the structure.
+    """
     data = _gather_export_rows(analysis_id, db)
     analysis = data['analysis']
 
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow([
-        'Sample Name', 'Age BP', '1-Sigma Error', 'Material', 'Sample Type', 'Curve',
-        'Calibrated Age BP (mode)', 'Posterior Mean', 'Posterior Median', 'Posterior Std',
-        '68% HPD', '95% HPD',
-    ])
+    writer.writerow(CSV_HEADER)
 
-    if not data['rows']:
+    structure = _structure_rows(analysis_id, db, data['rows'], data['samples_by_id'])
+
+    if not data['rows'] and not structure:
         writer.writerow([f'No results for analysis "{analysis.name}" ({analysis.status})'])
-    else:
-        for row in data['rows']:
-            writer.writerow([
-                row['sample_name'] or row['sample_id'] or '',
-                row['age_bp'] if row['age_bp'] is not None else '',
-                row['error_1sigma'] if row['error_1sigma'] is not None else '',
-                row['material_type'] or '',
-                row['sample_type'] or '',
-                row['curve_id'] or '',
-                f"{row['calibrated_age_bp']:.0f}" if row['calibrated_age_bp'] is not None else '',
-                f"{row['posterior_mean']:.1f}" if row['posterior_mean'] is not None else '',
-                f"{row['posterior_median']:.1f}" if row['posterior_median'] is not None else '',
-                f"{row['posterior_std']:.1f}" if row['posterior_std'] is not None else '',
-                _format_hpd_ranges(row['hpd_68_ranges'], row['hpd_68_min'], row['hpd_68_max']),
-                _format_hpd_ranges(row['hpd_95_ranges'], row['hpd_95_min'], row['hpd_95_max']),
-            ])
+        return output.getvalue()
+
+    # No stored structure (a calibration, or an analysis predating trees):
+    # fall back to a flat list of dates so the export still carries the
+    # results rather than coming back empty.
+    if not structure:
+        for order, row in enumerate(data['rows'], start=1):
+            writer.writerow(
+                [order, 'Date', 0, '', row['sample_name'] or row['sample_id'] or '']
+                + _measurement_cells(row) + _posterior_cells(row) + ['', '']
+            )
+        return output.getvalue()
+
+    for order, row in enumerate(structure, start=1):
+        posterior = row.get('posterior')
+        if row['kind'] == 'date':
+            measured, modelled = _measurement_cells(row.get('result')), _posterior_cells(row.get('result'))
+        elif posterior:
+            # A boundary's posterior is summary-shaped, not a result row.
+            measured = _measurement_cells(None)
+            modelled = _posterior_cells({
+                'posterior_mean': posterior.get('posterior_mean'),
+                'posterior_median': posterior.get('posterior_median'),
+                'posterior_std': posterior.get('posterior_std'),
+                'hpd_68_ranges': posterior.get('hpd_68_ranges'),
+                'hpd_95_ranges': posterior.get('hpd_95_ranges'),
+                'hpd_68_min': (posterior.get('hpd_68') or [None, None])[0],
+                'hpd_68_max': (posterior.get('hpd_68') or [None, None])[1],
+                'hpd_95_min': (posterior.get('hpd_95') or [None, None])[0],
+                'hpd_95_max': (posterior.get('hpd_95') or [None, None])[1],
+            })
+        else:
+            measured, modelled = _measurement_cells(None), _posterior_cells(None)
+
+        writer.writerow(
+            [order, str(row['kind']).title(), row['depth'], row['path'], row['name']]
+            + measured + modelled
+            + [row['tpq_age_bp'] if row['tpq_age_bp'] is not None else '',
+               row['taq_age_bp'] if row['taq_age_bp'] is not None else '']
+        )
 
     return output.getvalue()
 

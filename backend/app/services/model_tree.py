@@ -388,6 +388,98 @@ def plan_model(root: Dict, measurements: List[Dict]) -> ModelPlan:
 
 
 # --------------------------------------------------------------------------
+# Presentation order
+# --------------------------------------------------------------------------
+
+def flatten_structure(root: Optional[Dict], measurements: List[Dict]) -> List[Dict]:
+    """
+    Flatten a model tree into the order it should be *read* in: depth
+    first, siblings oldest first, each phase's own dates before any branch
+    nested inside it.
+
+    This is the single definition of "model order" behind the results
+    table and every export, so a date can't be filed under one phase on
+    screen and another in the CSV. Sibling order is already chronological
+    -- rows_to_tree sorts children by position -- so a plain depth-first
+    walk is the chronological reading of the model.
+
+    `measurements` are dicts with at least id/sample_name; a date is
+    placed by element_id, falling back to group_id for a tree migrated
+    from the old contexts, where each phase reuses its context's id.
+    Anything that resolves to neither is collected under a trailing
+    "Unassigned" heading rather than dropped, so a date can never
+    disappear from an export just because its structure is incomplete.
+
+    Each row is {kind, element_id, name, depth, path, posterior,
+    tpq_age_bp, taq_age_bp, sample}: `kind` is an element_type or 'date',
+    `sample` is the measurement dict on a date row and None otherwise.
+    """
+    rows: List[Dict] = []
+    # No structure at all (a plain calibration) is not the same as dates
+    # missing from a structure: there is nothing to read in model order, so
+    # callers fall back to a flat list rather than showing every date under
+    # a misleading "Unassigned" heading.
+    if root is None:
+        return rows
+
+    dates_by_element: Dict[str, List[Dict]] = {}
+    for m in measurements:
+        key = m.get('element_id') or m.get('group_id')
+        if key:
+            dates_by_element.setdefault(key, []).append(m)
+
+    placed: set = set()
+
+    def _date_row(m: Dict, depth: int, path: List[str], element_id: Optional[str]) -> Dict:
+        placed.add(m.get('id'))
+        return {
+            'kind': 'date',
+            'element_id': element_id,
+            'name': m.get('sample_name') or m.get('id'),
+            'depth': depth,
+            'path': ' > '.join(path),
+            'posterior': None,
+            'tpq_age_bp': m.get('tpq_age_bp'),
+            'taq_age_bp': m.get('taq_age_bp'),
+            'sample': m,
+        }
+
+    def visit(element: Dict, depth: int, ancestors: List[str]) -> None:
+        name = element.get('name') or (element.get('element_type') or 'Element').title()
+        path = ancestors + [name]
+        rows.append({
+            'kind': element.get('element_type'),
+            'element_id': element.get('id'),
+            'name': name,
+            'depth': depth,
+            'path': ' > '.join(path),
+            'posterior': element.get('posterior'),
+            'tpq_age_bp': element.get('tpq_age_bp'),
+            'taq_age_bp': element.get('taq_age_bp'),
+            'sample': None,
+        })
+        for m in dates_by_element.get(element.get('id'), []):
+            rows.append(_date_row(m, depth + 1, path, element.get('id')))
+        for child in _children(element):
+            visit(child, depth + 1, path)
+
+    if root is not None:
+        visit(root, 0, [])
+
+    orphans = [m for m in measurements if m.get('id') not in placed]
+    if orphans:
+        rows.append({
+            'kind': 'unassigned', 'element_id': None, 'name': 'Unassigned',
+            'depth': 0, 'path': 'Unassigned', 'posterior': None,
+            'tpq_age_bp': None, 'taq_age_bp': None, 'sample': None,
+        })
+        for m in orphans:
+            rows.append(_date_row(m, 1, ['Unassigned'], None))
+
+    return rows
+
+
+# --------------------------------------------------------------------------
 # Flat rows <-> nested tree
 # --------------------------------------------------------------------------
 
