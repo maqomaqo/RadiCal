@@ -50,7 +50,7 @@ import {
   HPDRange,
 } from '@/utils/dateFormat'
 import { hpdRangesFromCurve, hpdEnvelopeFromHistogram } from '@/utils/hpd'
-import type { MatrixMeasurement, DraftGroup, DraftRelationship } from '@/types'
+import type { MatrixMeasurement, DraftGroup, DraftRelationship, ModelElement, PosteriorSummary } from '@/types'
 
 interface AnalysisResult {
   id: string
@@ -67,6 +67,8 @@ interface AnalysisResult {
   // were none to persist) but still have measurements.
   measurements?: MatrixMeasurement[]
   groups?: DraftGroup[]
+  // Explicit model structure; boundary elements carry their own posterior.
+  model_tree?: ModelElement | null
   relationships?: DraftRelationship[]
   results: Array<{
     sample_id: string
@@ -270,6 +272,25 @@ export default function Results() {
   }
   const hasContexts = (analysis.groups || []).length > 0
   const contextsWithModeledSpan = (analysis.groups || []).filter((g) => g.modeled_start && g.modeled_end)
+
+  // Every named Boundary in the model structure, in the order it appears
+  // (oldest first). Preferred over the per-context table below when the
+  // analysis has an explicit model tree, since adjacent contexts SHARE a
+  // boundary -- listing them per context would print the same transition
+  // twice, once as one context's end and again as the next one's start.
+  const boundaryRows: Array<{ id: string; name: string; posterior: PosteriorSummary }> = []
+  const collectBoundaries = (element?: ModelElement | null) => {
+    if (!element) return
+    if (element.element_type === 'boundary' && element.posterior) {
+      boundaryRows.push({
+        id: element.id,
+        name: element.name || 'Boundary',
+        posterior: element.posterior,
+      })
+    }
+    for (const child of element.children || []) collectBoundaries(child)
+  }
+  collectBoundaries(analysis.model_tree)
   const isBayesian = analysis.analysis_type === 'bayesian'
   const CONFIDENCE_LABEL = CONFIDENCE_OPTIONS.find((o) => o.value === confidence)?.label ?? ''
 
@@ -448,7 +469,58 @@ export default function Results() {
           variables constrained to lie outside every dated member, so they
           may extend earlier/later than the oldest/youngest dated sample
           itself, not just report that sample's own posterior. */}
-      {contextsWithModeledSpan.length > 0 && (
+      {boundaryRows.length > 0 && (
+        <Paper sx={{ p: 3, mb: 3 }}>
+          <Typography variant="h6" gutterBottom>
+            Boundaries
+          </Typography>
+          <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
+            The modelled transitions in this analysis's structure, oldest first. A boundary
+            between two phases is a single shared transition — the end of one and the start of the
+            next — and the outermost boundaries may extend beyond every dated sample, since the
+            dates are treated as a partial sample of the true duration.
+          </Typography>
+          <TableContainer>
+            <Table size="small">
+              <TableHead>
+                <TableRow sx={{ backgroundColor: '#f5f5f5' }}>
+                  <TableCell>Boundary</TableCell>
+                  {showMean && <TableCell align="right">Mean</TableCell>}
+                  {showMedian && <TableCell align="right">Median</TableCell>}
+                  <TableCell align="right">{CONFIDENCE_LABEL} HPD</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {boundaryRows.map((b) => {
+                  const envelope = hpdEnvelopeFromHistogram(b.posterior.probability_distribution, confidence)
+                  return (
+                    <TableRow key={b.id}>
+                      <TableCell>{b.name}</TableCell>
+                      {showMean && (
+                        <TableCell align="right">
+                          {formatCalendarAge(b.posterior.posterior_mean, dateFormat)}
+                        </TableCell>
+                      )}
+                      {showMedian && (
+                        <TableCell align="right">
+                          {formatCalendarAge(b.posterior.posterior_median, dateFormat)}
+                        </TableCell>
+                      )}
+                      <TableCell align="right">
+                        {envelope
+                          ? formatCalendarRange(envelope[0], envelope[1], dateFormat)
+                          : 'N/A'}
+                      </TableCell>
+                    </TableRow>
+                  )
+                })}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </Paper>
+      )}
+
+      {boundaryRows.length === 0 && contextsWithModeledSpan.length > 0 && (
         <Paper sx={{ p: 3, mb: 3 }}>
           <Typography variant="h6" gutterBottom>
             Context Spans

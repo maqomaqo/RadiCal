@@ -21,6 +21,28 @@ export type RelationshipType = 'above' | 'below' | 'equal'
 // that a set of dated samples come from.
 export type NodeType = 'sample' | 'group'
 
+// --- Explicit model structure (OxCal-style Sequence/Phase/Boundary) ---
+//
+// Mirrors backend/app/services/model_tree.py. `children` are ordered
+// OLDEST FIRST, matching OxCal's reading order and the Harris matrix
+// convention of oldest at the bottom. A Boundary placed between two Phases
+// inside a Sequence is a SINGLE shared parameter -- the end of the earlier
+// phase and the start of the later one at once -- not two independent ones.
+export type ElementType = 'sequence' | 'phase' | 'boundary' | 'hiatus'
+
+export interface ModelElement {
+  id: string
+  element_type: ElementType
+  name?: string | null
+  // Age limiters in cal BP, applying to everything nested inside this
+  // element; the tightest of an element and its ancestors wins.
+  tpq_age_bp?: number | null
+  taq_age_bp?: number | null
+  // Set on boundary elements once the analysis has been run.
+  posterior?: PosteriorSummary | null
+  children?: ModelElement[]
+}
+
 // The subset of a measurement's fields the Harris matrix diagram and the
 // client-side cycle check actually need. DraftMeasurement (the full
 // in-progress form used on NewAnalysis/Stratigraphy) satisfies this
@@ -35,6 +57,8 @@ export interface MatrixMeasurement {
   age_bp: number
   error_1sigma?: number
   group_id?: string | null
+  // Which model-tree phase this date sits in; supersedes group_id.
+  element_id?: string | null
   tpq_age_bp?: number | null
   taq_age_bp?: number | null
 }

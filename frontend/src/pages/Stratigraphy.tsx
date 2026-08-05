@@ -17,7 +17,7 @@
 // Internally this still uses the backend's generic "group" vocabulary
 // (DraftGroup, group_id, from_type/to_type: 'group') -- "Context" is
 // purely the label shown to the user, matching the archaeological term.
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
   Container,
@@ -51,8 +51,10 @@ import DeleteIcon from '@mui/icons-material/Delete'
 import AddIcon from '@mui/icons-material/Add'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import { useAnalysisDraftStore } from '@/stores/analysisStore'
-import type { RelationshipType } from '@/types'
+import type { RelationshipType, ModelElement, MatrixMeasurement } from '@/types'
 import HarrisMatrixDiagram from '@/components/HarrisMatrixDiagram'
+import ModelTreeEditor from '@/components/ModelTreeEditor'
+import { formatApiError } from '@/utils/apiError'
 import { expandRelationships, findCycle } from '@/utils/stratigraphy'
 
 function newId(): string {
@@ -86,7 +88,75 @@ export default function Stratigraphy() {
   const { analysisId: editRouteId } = useParams<{ analysisId: string }>()
   const backPath = editRouteId ? `/analysis/${editRouteId}/edit` : '/new-analysis'
 
-  const [tab, setTab] = useState<'list' | 'diagram'>('list')
+  // When editing a saved analysis, the model structure is the primary view
+  // (and the one that works on a direct link, since it loads its own data
+  // from the API rather than from the in-memory draft).
+  const [tab, setTab] = useState<'list' | 'diagram' | 'structure'>(
+    editRouteId ? 'structure' : 'list'
+  )
+
+  // The explicit model tree only exists for a SAVED analysis (it is stored
+  // against it and edited via PUT /analysis/:id/model-tree), so this tab is
+  // offered when editing one. A brand-new analysis still uses the
+  // context/relationship editor above and is converted to a tree on save.
+  const [modelTree, setModelTree] = useState<ModelElement | null>(null)
+  const [savedMeasurements, setSavedMeasurements] = useState<MatrixMeasurement[]>([])
+  const [assignments, setAssignments] = useState<Record<string, string>>({})
+  const [loadingStructure, setLoadingStructure] = useState(false)
+  const [savingStructure, setSavingStructure] = useState(false)
+  const [structureDirty, setStructureDirty] = useState(false)
+  const [structureError, setStructureError] = useState<string | null>(null)
+  const [linearized, setLinearized] = useState(false)
+
+  useEffect(() => {
+    if (tab !== 'structure' || !editRouteId || modelTree) return
+    setLoadingStructure(true)
+    setStructureError(null)
+    fetch(`/api/analysis/${editRouteId}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (!data.success) {
+          setStructureError(formatApiError(data))
+          return
+        }
+        setModelTree(data.data.model_tree || null)
+        setLinearized(!!data.data.model_tree_linearized)
+        const saved: MatrixMeasurement[] = data.data.measurements || []
+        setSavedMeasurements(saved)
+        const initial: Record<string, string> = {}
+        for (const m of saved) {
+          if (m.element_id) initial[m.id] = m.element_id
+          else if (m.group_id) initial[m.id] = m.group_id
+        }
+        setAssignments(initial)
+      })
+      .catch((err) => setStructureError((err as Error).message))
+      .finally(() => setLoadingStructure(false))
+  }, [tab, editRouteId, modelTree])
+
+  const saveStructure = async () => {
+    if (!editRouteId || !modelTree) return
+    setSavingStructure(true)
+    setStructureError(null)
+    try {
+      const response = await fetch(`/api/analysis/${editRouteId}/model-tree`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model_tree: modelTree, sample_elements: assignments }),
+      })
+      const data = await response.json()
+      if (data.success) {
+        setStructureDirty(false)
+        setLinearized(false)
+      } else {
+        setStructureError(formatApiError(data))
+      }
+    } catch (err) {
+      setStructureError((err as Error).message)
+    } finally {
+      setSavingStructure(false)
+    }
+  }
 
   const [newContextDialogOpen, setNewContextDialogOpen] = useState(false)
   const [newContextName, setNewContextName] = useState('')
@@ -103,7 +173,11 @@ export default function Stratigraphy() {
   ])
   const unassignedCount = measurements.filter((m) => !m.group_id).length
 
-  if (measurements.length === 0) {
+  // Only meaningful for a brand-new analysis, whose measurements live in the
+  // in-memory draft. When editing a saved analysis the draft may legitimately
+  // be empty (e.g. arriving on a direct link), and the Model Structure tab
+  // loads what it needs from the API itself.
+  if (measurements.length === 0 && !editRouteId) {
     return (
       <Container maxWidth="md" sx={{ py: 4 }}>
         <Alert severity="warning" sx={{ mb: 2 }}>
@@ -168,9 +242,68 @@ export default function Stratigraphy() {
       <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 2 }}>
         <Tab value="list" label="List Editor" />
         <Tab value="diagram" label="Harris Matrix Diagram" />
+        {editRouteId && <Tab value="structure" label="Model Structure" />}
       </Tabs>
 
-      {tab === 'list' ? (
+      {tab === 'structure' && editRouteId ? (
+        <Paper sx={{ p: 3 }}>
+          <Typography variant="h6" gutterBottom>
+            Model Structure
+          </Typography>
+          <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
+            The explicit OxCal-style model: nested Sequences and Phases with Boundaries placed
+            where you want them. Use a Sequence to put groups in order, a Phase for dates with no
+            order between them, and a Boundary to mark a transition — a Boundary between two
+            Phases is a single shared parameter, giving one transition date rather than two
+            independent ones. Nest a Sequence inside a Phase for parallel branches, and put a
+            Hiatus between two Boundaries for a deliberate gap.
+          </Typography>
+          {structureError && (
+            <Alert severity="error" sx={{ mb: 2 }}>
+              {structureError}
+            </Alert>
+          )}
+          {linearized && (
+            <Alert severity="warning" sx={{ mb: 2 }}>
+              This model was converted from the older context/relationship format, and those
+              relationships could not be expressed as a tree exactly — they were flattened into a
+              single order, which constrains more than the original did. Please check the
+              structure below before running.
+            </Alert>
+          )}
+          {loadingStructure ? (
+            <Typography variant="body2">Loading…</Typography>
+          ) : modelTree ? (
+            <>
+              <ModelTreeEditor
+                tree={modelTree}
+                measurements={savedMeasurements}
+                assignments={assignments}
+                onChange={(nextTree, nextAssignments) => {
+                  setModelTree(nextTree)
+                  setAssignments(nextAssignments)
+                  setStructureDirty(true)
+                }}
+              />
+              <Box sx={{ mt: 3, display: 'flex', gap: 2, alignItems: 'center' }}>
+                <Button variant="contained" onClick={saveStructure} disabled={savingStructure}>
+                  {savingStructure ? 'Saving…' : 'Save Model Structure'}
+                </Button>
+                {structureDirty && (
+                  <Typography variant="caption" color="textSecondary">
+                    Unsaved changes. Saving clears this analysis's current results — re-run it
+                    afterwards.
+                  </Typography>
+                )}
+              </Box>
+            </>
+          ) : (
+            <Alert severity="info">
+              This analysis has no model structure yet. Add some dates and save it first.
+            </Alert>
+          )}
+        </Paper>
+      ) : tab === 'list' ? (
         <Box>
           {/* Contexts */}
           <Paper sx={{ p: 3, mb: 3 }}>

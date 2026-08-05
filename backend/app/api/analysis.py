@@ -4,8 +4,16 @@ from app.database import get_db
 from app.schemas.sample import CalibrateRequest, BayesianRequest
 from app.services.calibration import get_curve, CalibrationCurve
 from app.services.bayesian import BayesianChronology
-from app.services.model_tree import migrate_from_relationships
-from app.models import Analysis, RadiocarbonSample, AnalysisResult, StratigraphicRelationship, SampleGroup, Project
+from app.services.model_tree import (
+    migrate_from_relationships,
+    rows_to_tree,
+    tree_to_rows,
+    validate_tree,
+)
+from app.models import (
+    Analysis, RadiocarbonSample, AnalysisResult, StratigraphicRelationship,
+    SampleGroup, Project, ModelElement,
+)
 from typing import List, Dict, Optional, Tuple
 import numpy as np
 import uuid
@@ -71,74 +79,144 @@ def _compute_calibration_stats(curve: CalibrationCurve, age_bp: float, error_1si
     }
 
 
+def _iter_tree(element: Dict):
+    """Depth-first walk of a nested tree dict."""
+    yield element
+    for child in element.get('children') or []:
+        yield from _iter_tree(child)
+
+
+def _relabel_tree(root: Dict, id_map: Dict[str, str]) -> None:
+    """
+    Rewrite element ids through `id_map` in place. Used when persisting a
+    tree built from a request's client-side ids: the phases carry the
+    request's context ids, which have to become the ids the contexts were
+    actually saved under.
+    """
+    for element in _iter_tree(root):
+        if element['id'] in id_map:
+            element['id'] = id_map[element['id']]
+
+
+def _persist_tree(analysis_id: str, root: Dict, db: Session) -> None:
+    """Replace an analysis's stored model tree with `root`."""
+    db.query(ModelElement).filter(
+        ModelElement.analysis_id == analysis_id
+    ).delete(synchronize_session=False)
+    db.flush()
+    for row in tree_to_rows(root, analysis_id, ModelElement):
+        db.add(row)
+    db.flush()
+
+
+def _get_or_migrate_tree(analysis: Analysis, db: Session) -> Tuple[Optional[Dict], bool]:
+    """
+    The analysis's model tree, migrating it from the old contexts + pairwise
+    relationships representation on first access if it doesn't have one yet.
+
+    Returns (root, linearized). `linearized` flags that the old relationship
+    graph couldn't be expressed as a tree and was flattened into one order,
+    which is strictly MORE constrained than what it came from and worth
+    telling the user about.
+
+    Migrating here (lazily, on read) rather than in a batch job means an old
+    analysis keeps working untouched until something actually looks at it.
+    """
+    rows = db.query(ModelElement).filter(ModelElement.analysis_id == analysis.id).all()
+    existing = rows_to_tree(rows)
+    if existing is not None:
+        return existing, False
+
+    samples = list(analysis.measurements)
+    if not samples:
+        return None, False
+
+    groups = db.query(SampleGroup).filter(SampleGroup.analysis_id == analysis.id).all()
+    relationships = db.query(StratigraphicRelationship).filter(
+        StratigraphicRelationship.analysis_id == analysis.id
+    ).all()
+
+    root, linearized, _group_boundaries = migrate_from_relationships(
+        [{'id': s.id, 'group_id': s.group_id} for s in samples],
+        [{'id': g.id, 'name': g.name, 'tpq_age_bp': g.tpq_age_bp, 'taq_age_bp': g.taq_age_bp}
+         for g in groups],
+        [{'from_sample_id': r.from_sample_id, 'to_sample_id': r.to_sample_id,
+          'from_type': r.from_type, 'to_type': r.to_type, 'relationship': r.relationship}
+         for r in relationships],
+        lambda: str(uuid.uuid4()),
+    )
+
+    # Dates that were in no context need a phase of their own.
+    loose = [s for s in samples if not s.group_id]
+    if loose:
+        loose_id = str(uuid.uuid4())
+        root['children'].append({
+            'id': loose_id, 'element_type': 'phase', 'name': 'Unassigned dates',
+            'tpq_age_bp': None, 'taq_age_bp': None, 'children': [],
+        })
+        for s in loose:
+            s.element_id = loose_id
+    for s in samples:
+        if s.group_id:
+            s.element_id = s.group_id
+
+    _persist_tree(analysis.id, root, db)
+    db.commit()
+    return root, linearized
+
+
 def _run_bayesian(
     measurements: List[Dict],
-    relationships: List[Dict],
-    groups: List[Dict],
+    model_tree: Dict,
     bayesian_config: Dict,
 ) -> Tuple[Dict, Dict]:
     """
-    Run BayesianChronology's build/sample/extract sequence and return
-    (results, context_results) -- the same shapes bayesian_analysis's
-    inline version used to produce. Shared between bayesian_analysis (a
-    fresh run from request-body measurements) and the analysis rerun path
-    (re-running an already-saved analysis's own measurements/groups/
-    relationships), so the two can't drift out of sync with each other.
+    Run BayesianChronology's build/sample/extract sequence against an
+    explicit model tree, returning (per-sample results, per-boundary
+    results). Shared between a fresh run and a rerun so the two can't drift
+    apart.
     """
     bayesian = BayesianChronology(
         mcmc_samples=bayesian_config.get('mcmc_samples', 2000),
         mcmc_tune=bayesian_config.get('mcmc_tune', 1000),
         mcmc_chains=bayesian_config.get('mcmc_chains', 4),
     )
+    model, ages = bayesian.build_model(measurements, model_tree)
+    idata, ages_dict = bayesian.sample(model, ages)
+    extracted = bayesian.extract_results(idata, ages_dict, measurements=measurements)
+    return extracted['measurements'], extracted['boundaries']
 
-    # The model engine now works from an explicit OxCal-style model tree
-    # (services/model_tree.py). Contexts + pairwise above/below relationships
-    # are translated into one here -- a site-wide Sequence with each context
-    # as a Phase, bracketed by Boundaries -- so existing analyses and the
-    # existing request shape keep working unchanged while the tree becomes
-    # directly editable.
+
+def _tree_from_request(request: BayesianRequest) -> Tuple[Dict, Dict, List[Dict]]:
+    """
+    Build a model tree for an incoming /analysis/bayesian request, which
+    still describes stratigraphy as contexts plus above/below relationships.
+
+    Returns (root, group_boundaries, tree_measurements) -- group_boundaries
+    maps each context to the pair of boundaries now bracketing it, so results
+    can still be reported per context.
+    """
+    measurements = [m.model_dump() for m in request.measurements]
+    groups = [g.model_dump() for g in request.groups]
+    relationships = [r.model_dump() for r in request.relationships]
+
     root, _linearized, group_boundaries = migrate_from_relationships(
         measurements, groups, relationships, lambda: str(uuid.uuid4()),
     )
-    # build_model matches dates to elements by element_id; the migration puts
-    # each context's samples in the phase carrying that context's own id.
     tree_measurements = [
-        {**m, 'element_id': m.get('element_id') or m.get('group_id')}
-        for m in measurements
+        {**m, 'element_id': m.get('group_id')} for m in measurements
     ]
-    unassigned = [m for m in tree_measurements if not m.get('element_id')]
-    if unassigned:
-        # Dates with no context still need somewhere to live; give them their
-        # own phase at the end of the sequence rather than rejecting the run.
+    loose = [m for m in tree_measurements if not m.get('element_id')]
+    if loose:
         loose_id = str(uuid.uuid4())
         root['children'].append({
             'id': loose_id, 'element_type': 'phase', 'name': 'Unassigned dates',
             'tpq_age_bp': None, 'taq_age_bp': None, 'children': [],
         })
-        for m in unassigned:
+        for m in loose:
             m['element_id'] = loose_id
+    return root, group_boundaries, tree_measurements
 
-    model, ages = bayesian.build_model(tree_measurements, root)
-    idata, ages_dict = bayesian.sample(model, ages)
-    extracted = bayesian.extract_results(
-        idata, ages_dict,
-        measurements=tree_measurements,
-    )
-
-    # Report per-context start/end from the boundaries now bracketing each
-    # context, preserving the existing results shape.
-    boundaries = extracted['boundaries']
-    context_results = {}
-    for group_id, (start_bid, end_bid) in group_boundaries.items():
-        start, end = boundaries.get(start_bid), boundaries.get(end_bid)
-        if not start or not end:
-            continue
-        context_results[group_id] = {
-            'name': next((g.get('name') for g in groups if g['id'] == group_id), None),
-            'start': start['posterior'],
-            'end': end['posterior'],
-        }
-    return extracted['measurements'], context_results
 
 @router.post("/analysis/calibrate")
 async def calibrate_single(measurement: CalibrateRequest, db: Session = Depends(get_db)):
@@ -392,12 +470,24 @@ async def bayesian_analysis(request: BayesianRequest, db: Session = Depends(get_
         # the request's own client-side ids throughout (not the persisted
         # DB ids), since build_model() needs to match against the internal
         # `ages` dict, which is also keyed by the client-side measurement id.
-        results, context_results = _run_bayesian(
-            [m.model_dump() for m in request.measurements],
-            [r.model_dump() for r in request.relationships],
-            [g.model_dump() for g in request.groups],
-            request.bayesian_config.model_dump(),
+        root, group_boundaries, tree_measurements = _tree_from_request(request)
+        results, boundary_results = _run_bayesian(
+            tree_measurements, root, request.bayesian_config.model_dump(),
         )
+        # Report per-context start/end from the boundaries now bracketing each
+        # context, preserving the existing response shape. Note that adjacent
+        # contexts share a boundary, so one context's end and the next one's
+        # start are now the SAME parameter rather than two independent ones.
+        context_results = {}
+        for group_id, (start_bid, end_bid) in group_boundaries.items():
+            start, end = boundary_results.get(start_bid), boundary_results.get(end_bid)
+            if not start or not end:
+                continue
+            context_results[group_id] = {
+                'name': next((g.name for g in request.groups if g.id == group_id), None),
+                'start': start['posterior'],
+                'end': end['posterior'],
+            }
 
         if save:
             # Store results in database using the sample IDs
@@ -430,6 +520,23 @@ async def bayesian_analysis(request: BayesianRequest, db: Session = Depends(get_
                 if group_row:
                     group_row.modeled_start = ctx['start']
                     group_row.modeled_end = ctx['end']
+
+            # Persist the model tree itself, with each boundary's posterior on
+            # it, translating the request's client-side ids to the persisted
+            # ones so the stored tree lines up with the stored samples.
+            _relabel_tree(root, groups_map)
+            for element in _iter_tree(root):
+                if element['element_type'] == 'boundary':
+                    found = boundary_results.get(element['id'])
+                    element['posterior'] = found['posterior'] if found else None
+            _persist_tree(analysis.id, root, db)
+            for measurement in request.measurements:
+                sample_id = samples_map.get(measurement.id)
+                element_id = groups_map.get(measurement.group_id) if measurement.group_id else None
+                if sample_id:
+                    db.query(RadiocarbonSample).filter(
+                        RadiocarbonSample.id == sample_id
+                    ).update({'element_id': element_id}, synchronize_session=False)
 
             analysis.status = 'completed'
             db.commit()
@@ -490,6 +597,13 @@ async def get_analysis(analysis_id: str, db: Session = Depends(get_db)):
     ).all()
     groups = db.query(SampleGroup).filter(SampleGroup.analysis_id == analysis_id).all()
 
+    # Only bayesian analyses have a stratigraphic model; a single calibration
+    # has nothing to structure.
+    if analysis.analysis_type == 'bayesian':
+        model_tree, tree_linearized = _get_or_migrate_tree(analysis, db)
+    else:
+        model_tree, tree_linearized = None, False
+
     # For a Bayesian analysis, also compute each sample's plain/unmodelled
     # calibration (i.e. what calibrating it alone, with no stratigraphic
     # constraints, would give) -- lets the Results page show "unmodelled
@@ -533,6 +647,15 @@ async def get_analysis(analysis_id: str, db: Session = Depends(get_db)):
             # so duplicating or editing it round-trips them instead of
             # silently resetting to the schema defaults.
             "bayesian_config": analysis.bayesian_config or {},
+            # The explicit model structure (nested sequences/phases/
+            # boundaries/hiatuses), migrated from the old contexts +
+            # relationships on first access. Boundary elements carry their
+            # own posterior once the analysis has been run.
+            "model_tree": model_tree,
+            # True when the old relationship graph couldn't be expressed as a
+            # tree and was flattened into one order -- strictly MORE
+            # constrained than what it came from, so worth checking.
+            "model_tree_linearized": tree_linearized,
             # Real per-sample data, plus the stratigraphy (groups/
             # relationships/TPQ-TAQ) actually used for this analysis, if
             # any -- lets the Results page render a real (not "Sample N"
@@ -546,6 +669,7 @@ async def get_analysis(analysis_id: str, db: Session = Depends(get_db)):
                     "age_bp": s.age_bp,
                     "error_1sigma": s.error_1sigma,
                     "group_id": s.group_id,
+                    "element_id": s.element_id,
                     "tpq_age_bp": s.tpq_age_bp,
                     "taq_age_bp": s.taq_age_bp,
                 }
@@ -669,6 +793,7 @@ async def delete_analysis(analysis_id: str, db: Session = Depends(get_db)):
 
     db.query(AnalysisResult).filter(AnalysisResult.analysis_id == analysis_id).delete(synchronize_session=False)
     db.query(StratigraphicRelationship).filter(StratigraphicRelationship.analysis_id == analysis_id).delete(synchronize_session=False)
+    db.query(ModelElement).filter(ModelElement.analysis_id == analysis_id).delete(synchronize_session=False)
     db.query(RadiocarbonSample).filter(RadiocarbonSample.analysis_id == analysis_id).delete(synchronize_session=False)
     db.query(SampleGroup).filter(SampleGroup.analysis_id == analysis_id).delete(synchronize_session=False)
     db.delete(analysis)
@@ -747,6 +872,12 @@ def _rerun_analysis(analysis: Analysis, db: Session) -> None:
             StratigraphicRelationship.analysis_id == analysis.id
         ).all()
 
+        # The model structure comes from the analysis's own persisted tree,
+        # migrated from the old contexts + relationships on first access.
+        root, _linearized = _get_or_migrate_tree(analysis, db)
+        if root is None:
+            raise ValueError("Analysis has no model structure to run")
+
         measurement_dicts = [
             {
                 'id': s.id,
@@ -754,30 +885,41 @@ def _rerun_analysis(analysis: Analysis, db: Session) -> None:
                 'error_1sigma': s.error_1sigma,
                 'sample_name': s.sample_name,
                 'curve_id': s.curve_id,
-                'group_id': s.group_id,
+                'element_id': s.element_id or s.group_id,
                 'tpq_age_bp': s.tpq_age_bp,
                 'taq_age_bp': s.taq_age_bp,
             }
             for s in samples
         ]
-        group_dicts = [
-            {'id': g.id, 'name': g.name, 'tpq_age_bp': g.tpq_age_bp, 'taq_age_bp': g.taq_age_bp}
-            for g in groups
-        ]
-        relationship_dicts = [
-            {
-                'from_sample_id': r.from_sample_id,
-                'to_sample_id': r.to_sample_id,
-                'from_type': r.from_type,
-                'to_type': r.to_type,
-                'relationship': r.relationship,
-            }
-            for r in relationships
-        ]
 
-        results, context_results = _run_bayesian(
-            measurement_dicts, relationship_dicts, group_dicts, analysis.bayesian_config or {},
+        results, boundary_results = _run_bayesian(
+            measurement_dicts, root, analysis.bayesian_config or {},
         )
+
+        # Store each boundary's posterior on its element, and mirror it onto
+        # the old per-context start/end for anything still reading that.
+        for element_row in db.query(ModelElement).filter(
+            ModelElement.analysis_id == analysis.id
+        ).all():
+            found = boundary_results.get(element_row.id)
+            if element_row.element_type == 'boundary':
+                element_row.posterior = found['posterior'] if found else None
+
+        context_results = {}
+        children = root.get('children') or []
+        for index, child in enumerate(children):
+            if child.get('element_type') != 'phase':
+                continue
+            before = children[index - 1] if index > 0 else None
+            after = children[index + 1] if index + 1 < len(children) else None
+            start = boundary_results.get(before['id']) if before and before.get('element_type') == 'boundary' else None
+            end = boundary_results.get(after['id']) if after and after.get('element_type') == 'boundary' else None
+            if start and end:
+                context_results[child['id']] = {
+                    'name': child.get('name'),
+                    'start': start['posterior'],
+                    'end': end['posterior'],
+                }
 
         db.query(AnalysisResult).filter(AnalysisResult.analysis_id == analysis.id).delete(synchronize_session=False)
         for sample_id, result in results.items():
@@ -839,6 +981,79 @@ async def rerun_analysis(analysis_id: str, db: Session = Depends(get_db)):
     return {"success": True, "data": {"id": analysis.id, "status": analysis.status}}
 
 
+@router.put("/analysis/{analysis_id}/model-tree")
+async def replace_model_tree(analysis_id: str, payload: Dict, db: Session = Depends(get_db)):
+    """
+    Replace an analysis's model structure -- the nested tree of Sequences,
+    Phases, Boundaries and Hiatuses (see services/model_tree.py).
+
+    Body: {"model_tree": {...}, "sample_elements": {sample_id: element_id}}.
+    `sample_elements` reassigns which phase each date belongs to; dates left
+    out keep their current assignment.
+
+    Validated by model_tree.validate_tree before anything is written, so a
+    structurally impossible model (a hiatus not between boundaries, a date
+    attached to a boundary, a duplicated element id) is rejected with a 422
+    rather than surfacing much later as a confusing MCMC failure.
+
+    Any existing results are cleared and status returns to 'pending': they
+    were computed under the previous structure and would otherwise be shown
+    alongside a model that no longer produced them.
+    """
+    analysis = db.query(Analysis).filter(Analysis.id == analysis_id).first()
+    if not analysis:
+        raise HTTPException(status_code=404, detail="Analysis not found")
+
+    root = payload.get('model_tree')
+    if not root:
+        raise HTTPException(status_code=422, detail="model_tree is required")
+
+    assignments = payload.get('sample_elements') or {}
+    samples = list(analysis.measurements)
+    by_id = {s.id: s for s in samples}
+    for sample_id, element_id in assignments.items():
+        if sample_id not in by_id:
+            raise HTTPException(
+                status_code=422,
+                detail=f"sample '{sample_id}' does not belong to this analysis",
+            )
+
+    prospective = [
+        {
+            'id': s.id,
+            'sample_name': s.sample_name,
+            'element_id': assignments.get(s.id, s.element_id or s.group_id),
+        }
+        for s in samples
+    ]
+    try:
+        validate_tree(root, prospective)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    try:
+        for sample_id, element_id in assignments.items():
+            by_id[sample_id].element_id = element_id
+        _persist_tree(analysis_id, root, db)
+        db.query(AnalysisResult).filter(
+            AnalysisResult.analysis_id == analysis_id
+        ).delete(synchronize_session=False)
+        analysis.status = 'pending'
+        analysis.error_message = None
+        db.commit()
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+
+    rows = db.query(ModelElement).filter(ModelElement.analysis_id == analysis_id).all()
+    return {
+        "success": True,
+        "data": {"id": analysis.id, "status": analysis.status, "model_tree": rows_to_tree(rows)},
+    }
+
+
 @router.post("/analysis/{analysis_id}/duplicate")
 async def duplicate_analysis(analysis_id: str, db: Session = Depends(get_db)):
     """
@@ -897,6 +1112,8 @@ async def duplicate_analysis(analysis_id: str, db: Session = Depends(get_db)):
             location=sample.location,
             notes=sample.notes,
             group_id=groups_map.get(sample.group_id) if sample.group_id else None,
+            element_id=groups_map.get(sample.element_id or sample.group_id)
+            if (sample.element_id or sample.group_id) else None,
             tpq_age_bp=sample.tpq_age_bp,
             taq_age_bp=sample.taq_age_bp,
         )
@@ -924,6 +1141,29 @@ async def duplicate_analysis(analysis_id: str, db: Session = Depends(get_db)):
             to_type=rel.to_type,
             relationship=rel.relationship,
         ))
+
+    # Copy the model structure too, remapping element ids so the copy's
+    # phases are its own rows and its dates point at them. Boundary
+    # posteriors are dropped -- they're results, and the copy hasn't run.
+    source_tree = rows_to_tree(
+        db.query(ModelElement).filter(ModelElement.analysis_id == source.id).all()
+    )
+    if source_tree:
+        element_map = dict(groups_map)
+        for element in _iter_tree(source_tree):
+            if element['id'] not in element_map:
+                element_map[element['id']] = str(uuid.uuid4())
+            element['posterior'] = None
+        _relabel_tree(source_tree, element_map)
+        _persist_tree(copy.id, source_tree, db)
+        for old_sample in source.measurements:
+            new_id = samples_map.get(old_sample.id)
+            source_element = old_sample.element_id or old_sample.group_id
+            if new_id and source_element:
+                db.query(RadiocarbonSample).filter(
+                    RadiocarbonSample.id == new_id
+                ).update({'element_id': element_map.get(source_element)},
+                         synchronize_session=False)
 
     db.commit()
     db.refresh(copy)
@@ -985,6 +1225,14 @@ async def replace_analysis_inputs(
         db.query(SampleGroup).filter(
             SampleGroup.analysis_id == analysis_id
         ).delete(synchronize_session=False)
+        # The model tree describes the structure being replaced, so it goes
+        # too -- it is rebuilt from the new contexts/relationships on the
+        # next read or run (_get_or_migrate_tree). Leaving it would point
+        # phases at deleted contexts and dates at elements that no longer
+        # exist.
+        db.query(ModelElement).filter(
+            ModelElement.analysis_id == analysis_id
+        ).delete(synchronize_session=False)
         db.flush()
 
         groups_map: Dict[str, str] = {}
@@ -1013,6 +1261,7 @@ async def replace_analysis_inputs(
                 sample_type=sample_type,
                 curve_id=measurement.curve_id,
                 group_id=groups_map.get(measurement.group_id) if measurement.group_id else None,
+                element_id=groups_map.get(measurement.group_id) if measurement.group_id else None,
                 tpq_age_bp=measurement.tpq_age_bp,
                 taq_age_bp=measurement.taq_age_bp,
             )

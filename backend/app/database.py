@@ -45,6 +45,10 @@ _COLUMN_MIGRATIONS = {
         ('group_id', 'VARCHAR'),
         ('tpq_age_bp', 'FLOAT'),
         ('taq_age_bp', 'FLOAT'),
+        # Which model-tree element (a phase) this date sits in; supersedes
+        # group_id. Backfilled from group_id when an old analysis's
+        # stratigraphy is migrated to a tree.
+        ('element_id', 'VARCHAR'),
     ],
     'stratigraphic_relationships': [
         ("from_type", "VARCHAR DEFAULT 'sample'"),

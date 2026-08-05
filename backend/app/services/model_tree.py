@@ -388,6 +388,88 @@ def plan_model(root: Dict, measurements: List[Dict]) -> ModelPlan:
 
 
 # --------------------------------------------------------------------------
+# Flat rows <-> nested tree
+# --------------------------------------------------------------------------
+
+def rows_to_tree(rows: List) -> Optional[Dict]:
+    """
+    Rebuild the nested tree from flat ModelElement rows (parent_id +
+    position). Returns None if there are no rows. Siblings come back in
+    `position` order, i.e. oldest first.
+
+    Any row whose parent_id doesn't resolve is attached to the root rather
+    than dropped, so a partially-corrupt tree still round-trips visibly
+    instead of silently losing elements.
+    """
+    if not rows:
+        return None
+
+    nodes: Dict[str, Dict] = {}
+    for row in rows:
+        nodes[row.id] = {
+            'id': row.id,
+            'element_type': row.element_type,
+            'name': row.name,
+            'tpq_age_bp': row.tpq_age_bp,
+            'taq_age_bp': row.taq_age_bp,
+            'posterior': row.posterior,
+            'children': [],
+            '_position': row.position or 0,
+        }
+
+    roots = [r for r in rows if not r.parent_id or r.parent_id not in nodes]
+    if not roots:
+        return None
+    root_row = roots[0]
+
+    for row in rows:
+        if row.id == root_row.id:
+            continue
+        parent = nodes.get(row.parent_id) or nodes[root_row.id]
+        parent['children'].append(nodes[row.id])
+
+    def sort_children(node: Dict):
+        node['children'].sort(key=lambda c: c['_position'])
+        for child in node['children']:
+            sort_children(child)
+        node.pop('_position', None)
+
+    root = nodes[root_row.id]
+    sort_children(root)
+    root.pop('_position', None)
+    return root
+
+
+def tree_to_rows(root: Dict, analysis_id: str, model_element_cls) -> List:
+    """
+    Flatten a nested tree into ModelElement rows ready to persist. Ids in the
+    incoming tree are preserved, so a date's element_id keeps pointing at the
+    right phase across an edit.
+    """
+    rows = []
+
+    def walk(element: Dict, parent_id: Optional[str]):
+        rows.append(model_element_cls(
+            id=element['id'],
+            analysis_id=analysis_id,
+            parent_id=parent_id,
+            position=element.get('_position', 0),
+            element_type=element['element_type'],
+            name=element.get('name'),
+            tpq_age_bp=element.get('tpq_age_bp'),
+            taq_age_bp=element.get('taq_age_bp'),
+            posterior=element.get('posterior'),
+        ))
+        for position, child in enumerate(_children(element)):
+            child['_position'] = position
+            walk(child, element['id'])
+
+    root['_position'] = 0
+    walk(root, None)
+    return rows
+
+
+# --------------------------------------------------------------------------
 # Migration from the old contexts + pairwise-relationships model
 # --------------------------------------------------------------------------
 

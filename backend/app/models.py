@@ -121,7 +121,16 @@ class RadiocarbonSample(Base):
 
     # Optional stratigraphic phase/group membership -- NULL means this
     # sample stands alone (not part of any group) in the Harris matrix.
+    # SUPERSEDED by element_id below; retained so analyses saved before the
+    # model tree existed can still be migrated.
     group_id = Column(String, ForeignKey('sample_groups.id'), nullable=True)
+
+    # The model element (a 'phase') this date belongs to -- the replacement
+    # for group_id. No FOREIGN KEY: an analysis's elements are rewritten
+    # wholesale when its tree is replaced, and a DB-level constraint would
+    # force a specific delete/insert ordering for no real benefit, the same
+    # reasoning StratigraphicRelationship's polymorphic columns use.
+    element_id = Column(String, nullable=True)
 
     # Optional age limiters (both expressed directly in cal BP, matching
     # every other age field in this app): tpq_age_bp is a *maximum* age
@@ -138,6 +147,50 @@ class RadiocarbonSample(Base):
     # Relations
     analysis = relationship('Analysis', back_populates='measurements')
     group = relationship('SampleGroup', back_populates='samples')
+
+
+class ModelElement(Base):
+    """
+    One node of an analysis's explicit model structure -- the OxCal-style
+    tree of Sequences, Phases, Boundaries and Hiatuses that
+    services/model_tree.py interprets.
+
+    Stored flat (parent_id + position) rather than as nested JSON so a
+    single element can be addressed, and so the dates that live in a phase
+    can reference it by foreign key. The nesting is reconstructed on read;
+    `position` orders siblings OLDEST FIRST, matching OxCal's reading order
+    and the Harris matrix convention of oldest at the bottom.
+
+    This supersedes SampleGroup + StratigraphicRelationship as the source of
+    stratigraphic structure. Those tables are still present so analyses
+    saved before this existed can be migrated on read (see
+    model_tree.migrate_from_relationships); nothing writes new structure to
+    them.
+    """
+    __tablename__ = "model_elements"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    analysis_id = Column(String, ForeignKey('analyses.id'), nullable=False)
+    # NULL for the single root element of an analysis.
+    parent_id = Column(String, nullable=True)
+    position = Column(Integer, nullable=False, default=0)
+
+    element_type = Column(String, nullable=False)  # sequence | phase | boundary | hiatus
+    name = Column(String, nullable=True)
+
+    # Age limiters, as on a sample; an element's limiter applies to
+    # everything nested inside it, tightest winning.
+    tpq_age_bp = Column(Float, nullable=True)
+    taq_age_bp = Column(Float, nullable=True)
+
+    # For a boundary: its posterior after a run, same shape as a per-sample
+    # result (see BayesianChronology._summarize_posterior). Null for every
+    # other element type, and until the analysis has been run.
+    posterior = Column(JSON, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    analysis = relationship('Analysis')
 
 
 class SampleGroup(Base):
