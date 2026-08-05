@@ -1,4 +1,4 @@
-// Stratigraphy definition page for a Bayesian analysis, reached from
+// Model Structure definition page for a Bayesian analysis, reached from
 // NewAnalysis.tsx once measurements exist.
 //
 // The model is authored as an explicit OxCal-style tree -- nested Sequences
@@ -56,8 +56,8 @@ export default function Stratigraphy() {
     setModelTree: setDraftTree,
   } = useAnalysisDraftStore()
 
-  // Reached either as /new-analysis/stratigraphy (building a new analysis)
-  // or /analysis/:analysisId/edit/stratigraphy (editing a saved one); the
+  // Reached either as /new-analysis/model-structure (building a new analysis)
+  // or /analysis/:analysisId/edit/model-structure (editing a saved one); the
   // editing UI is identical, only where "Back" returns to differs.
   const { analysisId: editRouteId } = useParams<{ analysisId: string }>()
   const backPath = editRouteId ? `/analysis/${editRouteId}/edit` : '/new-analysis'
@@ -193,7 +193,7 @@ export default function Stratigraphy() {
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 3, flexWrap: 'wrap', gap: 2 }}>
         <Box>
           <Typography variant="h3" component="h1" gutterBottom>
-            Stratigraphy
+            Model Structure
           </Typography>
           <Typography variant="body1" color="textSecondary">
             Build the model as nested Sequences and Phases with Boundaries where you want them,
@@ -201,7 +201,7 @@ export default function Stratigraphy() {
           </Typography>
         </Box>
         <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-          <Chip label={`${matrixView.groups.length} context${matrixView.groups.length === 1 ? '' : 's'}`} />
+          <Chip label={`${matrixView.groups.length} phase${matrixView.groups.length === 1 ? '' : 's'}`} />
           {unassignedCount > 0 && (
             <Chip label={`${unassignedCount} unassigned date${unassignedCount === 1 ? '' : 's'}`} color="warning" />
           )}
@@ -210,14 +210,11 @@ export default function Stratigraphy() {
 
       <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 2 }}>
         <Tab value="diagram" label="Harris Matrix Diagram" />
-        <Tab value="structure" label="Model Structure" />
+        <Tab value="structure" label="Editor" />
       </Tabs>
 
       {tab === 'structure' && !editRouteId ? (
         <Paper sx={{ p: 3 }}>
-          <Typography variant="h6" gutterBottom>
-            Model Structure
-          </Typography>
           <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
             {STRUCTURE_BLURB}
           </Typography>
@@ -234,9 +231,6 @@ export default function Stratigraphy() {
         </Paper>
       ) : tab === 'structure' && editRouteId ? (
         <Paper sx={{ p: 3 }}>
-          <Typography variant="h6" gutterBottom>
-            Model Structure
-          </Typography>
           <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
             {STRUCTURE_BLURB}
           </Typography>
@@ -301,12 +295,11 @@ export default function Stratigraphy() {
           <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
             A read-only view of the model structure as a Harris matrix: each Phase is a context,
             and an arrow means the lower context is older. Boundaries and hiatuses are structural
-            and aren't drawn — the chain runs through them. Edit the structure on the Model
-            Structure tab.
+            and aren't drawn — the chain runs through them. Edit the structure on the Editor tab.
           </Typography>
           {matrixView.groups.length === 0 ? (
             <Alert severity="info">
-              No contexts to draw yet — add Phases on the Model Structure tab.
+              No contexts to draw yet — add Phases on the Editor tab.
             </Alert>
           ) : (
             <HarrisMatrixDiagram

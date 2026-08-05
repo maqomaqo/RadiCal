@@ -440,7 +440,7 @@ export default function Results() {
         )
       })}
 
-      {/* Stratigraphy -- read-only view of the groups/relationships/TPQ-TAQ
+      {/* Model Structure -- read-only view of the groups/relationships/TPQ-TAQ
           this bayesian analysis actually used, if any. Doubles as the
           "run the Harris matrix as a check" step after the fact: even
           though the constraints already fed into the MCMC run above, this
@@ -451,7 +451,7 @@ export default function Results() {
           <Paper sx={{ p: 3, mb: 3 }}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
               <AccountTreeIcon color="action" />
-              <Typography variant="h6">Stratigraphy used</Typography>
+              <Typography variant="h6">Model Structure used</Typography>
             </Box>
             <HarrisMatrixDiagram
               measurements={analysis.measurements}

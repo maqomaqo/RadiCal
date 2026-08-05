@@ -41,7 +41,7 @@ import {
 import { formatApiError } from '@/utils/apiError'
 import { useAnalysisDraftStore } from '@/stores/analysisStore'
 import type { DraftMeasurement } from '@/types'
-import { expandRelationships, findCycle } from '@/utils/stratigraphy'
+import { expandRelationships, findCycle, treeToMatrix } from '@/utils/stratigraphy'
 import { validateTree } from '@/components/ModelTreeEditor'
 
 type Measurement = DraftMeasurement
@@ -81,9 +81,9 @@ export default function NewAnalysis() {
   const [searchParams] = useSearchParams()
   const [dateFormat, setDateFormat] = useState<DateFormat>(DEFAULT_DATE_FORMAT)
   // Name, type, measurements, and (for Bayesian analyses) groups/
-  // relationships/TPQ-TAQ defined on the Stratigraphy page all live in a
+  // relationships/TPQ-TAQ defined on the Model Structure page all live in a
   // shared store rather than local state, so navigating to
-  // /new-analysis/stratigraphy and back doesn't lose anything that was
+  // /new-analysis/model-structure and back doesn't lose anything that was
   // already entered -- local useState here would reset to its initial
   // value on every remount, silently reverting analysisType to
   // "calibration" and losing whatever name was typed.
@@ -146,11 +146,11 @@ export default function NewAnalysis() {
   }, [])
 
   // Editing an existing analysis: pull its saved inputs into the shared
-  // draft store, so this page and the Stratigraphy page edit them with
+  // draft store, so this page and the Model Structure page edit them with
   // exactly the same UI used to create them. GET /api/analysis/:id already
   // returns measurements/groups/relationships/bayesian_config, so nothing
   // extra is needed to reconstruct the draft. Skipped if the store is
-  // already holding this analysis (e.g. returning from the Stratigraphy
+  // already holding this analysis (e.g. returning from the Model Structure
   // page), which would otherwise discard edits made over there.
   useEffect(() => {
     if (!editRouteId || editingAnalysisId === editRouteId) {
@@ -253,6 +253,18 @@ export default function NewAnalysis() {
     return g ? g.name : id
   })
 
+  // Summary shown on the Model Structure card below: for a model authored
+  // as a tree, phase/ordering counts and validity are derived from it
+  // (same derivation the diagram uses) rather than from the legacy
+  // groups/relationships arrays, which stay empty for a tree-authored
+  // draft and only get backfilled with a phase list (never relationships)
+  // once an existing analysis is loaded for editing.
+  const structureView = modelTree ? treeToMatrix(modelTree, measurements, elementAssignments) : null
+  const structurePhaseCount = structureView ? structureView.groups.length : groups.length
+  const structureRelationshipCount = structureView ? structureView.relationships.length : relationships.length
+  const structureDefined = modelTree ? true : groups.length > 0 || relationships.length > 0
+  const structureInvalid = modelTree ? treeProblems.length > 0 : !!cycle
+
   const handleAddMeasurement = () => {
     if (
       !currentMeasurement.sample_name ||
@@ -318,7 +330,7 @@ export default function NewAnalysis() {
         }
       } else {
         // For Bayesian, send the full stratigraphy defined on the
-        // Stratigraphy page too (groups, relationships, and any TPQ/TAQ
+        // Model Structure page too (groups, relationships, and any TPQ/TAQ
         // limiters set there or inline on a measurement) -- previously
         // this always sent relationships: [], so the working constraint
         // logic in bayesian.py was unreachable from the UI entirely.
@@ -333,7 +345,7 @@ export default function NewAnalysis() {
         if (modelTree && treeProblems.length > 0) {
           alert(
             'Cannot run: the model structure has problems that must be fixed on the ' +
-              'Stratigraphy page first:\n\n' +
+              'Model Structure page first:\n\n' +
               treeProblems.join('\n')
           )
           setLoading(false)
@@ -343,13 +355,13 @@ export default function NewAnalysis() {
           alert(
             'Cannot run: the stratigraphic relationships are circular (' +
               cycleLabels.join(', ') +
-              '). Fix this on the Stratigraphy page first.'
+              '). Fix this on the Model Structure page first.'
           )
           setLoading(false)
           return
         }
         // Stratigraphy is authored as an explicit model tree (see
-        // Stratigraphy.tsx's Model Structure tab), submitted as-is. The
+        // Stratigraphy.tsx's Editor tab), submitted as-is. The
         // groups/relationships fields are still sent for a draft that
         // predates a tree being built, in which case the backend converts
         // them into an equivalent one.
@@ -707,34 +719,39 @@ export default function NewAnalysis() {
             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ sm: 'center' }} justifyContent="space-between">
               <Box>
                 <Typography variant="h6" gutterBottom>
-                  Stratigraphy
+                  Model Structure
                 </Typography>
                 <Stack direction="row" spacing={1} sx={{ mb: 1 }}>
-                  <Chip size="small" label={`${groups.length} context${groups.length === 1 ? '' : 's'}`} />
-                  <Chip size="small" label={`${relationships.length} relationship${relationships.length === 1 ? '' : 's'}`} />
-                  {cycle && <Chip size="small" color="error" label="Circular -- fix before running" />}
+                  <Chip size="small" label={`${structurePhaseCount} phase${structurePhaseCount === 1 ? '' : 's'}`} />
+                  <Chip
+                    size="small"
+                    label={`${structureRelationshipCount} ordering relationship${structureRelationshipCount === 1 ? '' : 's'}`}
+                  />
+                  {structureInvalid && <Chip size="small" color="error" label="Invalid -- fix before running" />}
                 </Stack>
                 <Typography variant="body2" color="textSecondary">
-                  Optional: assign samples to stratigraphic contexts, then define above/below/equal
-                  relationships between those contexts and TPQ/TAQ age limits, via a list picker or a
-                  drag-and-drop Harris matrix diagram.
+                  Optional: build the model as nested Sequences and Phases with Boundaries placed where
+                  you want them, then assign each date to a Phase -- the Harris matrix diagram is derived
+                  from this structure automatically.
                 </Typography>
               </Box>
               <Button
                 variant="outlined"
                 startIcon={<AccountTreeIcon />}
                 onClick={() =>
-                  navigate(isEditing ? `/analysis/${editRouteId}/edit/stratigraphy` : '/new-analysis/stratigraphy')
+                  navigate(isEditing ? `/analysis/${editRouteId}/edit/model-structure` : '/new-analysis/model-structure')
                 }
                 disabled={measurements.length === 0}
               >
-                {groups.length > 0 || relationships.length > 0 ? 'Edit Stratigraphy' : 'Define Stratigraphy'}
+                {structureDefined ? 'Edit Model Structure' : 'Specify Model Structure'}
               </Button>
             </Stack>
-            {cycle && (
+            {structureInvalid && (
               <Alert severity="error" sx={{ mt: 2 }}>
-                Circular relationship involving: {cycleLabels.join(', ')}. Open Stratigraphy to fix this
-                before running the analysis.
+                {modelTree
+                  ? <>Model structure problems: {treeProblems.join('; ')}.</>
+                  : <>Circular relationship involving: {cycleLabels.join(', ')}.</>}
+                {' '}Open Model Structure to fix this before running the analysis.
               </Alert>
             )}
           </Paper>

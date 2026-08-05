@@ -534,8 +534,8 @@ export default function ProjectSampleTable({ projectId }: Props) {
         <DialogContent>
           <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
             The selected dates are copied into a new analysis in this project, grouped by their default
-            context. You'll go straight to its editor to set up stratigraphy before running. Editing
-            these dates in the collection later won't change that analysis.
+            context. You'll go straight to its editor to set up the model structure before running.
+            Editing these dates in the collection later won't change that analysis.
           </Typography>
           <TextField
             fullWidth
