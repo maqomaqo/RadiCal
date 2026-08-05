@@ -168,10 +168,31 @@ export default function HarrisMatrixDiagram({
         .filter((r) => r.from_type === 'group' && r.to_type === 'group')
         .map((r) => {
           const isEqual = r.relationship === 'equal'
+          // Canonical (younger, older) direction, matching layoutNodes above
+          // -- 'above' means from_sample_id is younger; 'below' means it's
+          // older. Drawing every edge from younger to older, regardless of
+          // which relationship type produced it, matters because reactflow's
+          // default node always puts its SOURCE handle at the bottom and its
+          // TARGET handle at the top, no matter which role that node plays.
+          // layoutNodes positions the younger context higher on screen (see
+          // its own "oldest at the bottom, youngest at the top" comment), so
+          // source=younger/target=older makes the connector exit the bottom
+          // of the higher box and enter the top of the lower one -- a
+          // straight vertical line. Using from/to directly instead (as
+          // before) draws a 'below' edge -- from=older, to=younger --
+          // backwards: source=older (already at the bottom) exits its own
+          // bottom, target=younger (already at the top) is entered from its
+          // top, so the line has to loop the wrong way around both boxes
+          // rather than run straight between them.
+          const [sourceId, targetId] = isEqual
+            ? [r.from_sample_id, r.to_sample_id]
+            : r.relationship === 'below'
+              ? [r.to_sample_id, r.from_sample_id]
+              : [r.from_sample_id, r.to_sample_id]
           return {
             id: r.id,
-            source: r.from_sample_id,
-            target: r.to_sample_id,
+            source: sourceId,
+            target: targetId,
             label: r.relationship,
             animated: false,
             style: {
