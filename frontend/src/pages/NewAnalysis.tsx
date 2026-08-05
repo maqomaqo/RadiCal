@@ -98,6 +98,8 @@ export default function NewAnalysis() {
     relationships,
     mcmc,
     setMcmc,
+    modelTree,
+    elementAssignments,
     editingAnalysisId,
     loadFromAnalysis,
     reset: resetDraft,
@@ -317,8 +319,10 @@ export default function NewAnalysis() {
         //
         // The backend rejects a circular relationship set with a 422
         // before running any MCMC, but checking here too avoids sending
-        // a request that's already known to be invalid.
-        if (cycle) {
+        // a request that's already known to be invalid. Only relevant to
+        // the legacy relationship path -- a model tree cannot contain a
+        // cycle, which is one of the things authoring one directly buys.
+        if (!modelTree && cycle) {
           alert(
             'Cannot run: the stratigraphic relationships are circular (' +
               cycleLabels.join(', ') +
@@ -327,14 +331,22 @@ export default function NewAnalysis() {
           setLoading(false)
           return
         }
-        const payload = {
+        // Stratigraphy is authored as an explicit model tree (see
+        // Stratigraphy.tsx's Model Structure tab), submitted as-is. The
+        // groups/relationships fields are still sent for a draft that
+        // predates a tree being built, in which case the backend converts
+        // them into an equivalent one.
+        const payload: Record<string, unknown> = {
           name: analysisName,
-          measurements: measurements,
-          groups: groups,
-          relationships: relationships.map(({ id: _id, ...r }) => r),
+          measurements: modelTree
+            ? measurements.map((m) => ({ ...m, element_id: elementAssignments[m.id] || null }))
+            : measurements,
+          groups: modelTree ? [] : groups,
+          relationships: modelTree ? [] : relationships.map(({ id: _id, ...r }) => r),
           project_id: projectId || null,
           bayesian_config: mcmc,
         }
+        if (modelTree) payload.model_tree = modelTree
 
         // Editing an existing analysis replaces its inputs and then re-runs
         // it in place, keeping the same id/URL. Creating a new one posts to

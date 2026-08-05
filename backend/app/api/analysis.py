@@ -197,6 +197,17 @@ def _tree_from_request(request: BayesianRequest) -> Tuple[Dict, Dict, List[Dict]
     can still be reported per context.
     """
     measurements = [m.model_dump() for m in request.measurements]
+
+    if request.model_tree is not None:
+        # The client authored the structure directly -- use it as given.
+        # There are no contexts to bracket, so nothing maps to the old
+        # per-context start/end shape; results are reported per boundary.
+        root = request.model_tree
+        tree_measurements = [
+            {**m, 'element_id': m.get('element_id')} for m in measurements
+        ]
+        return root, {}, tree_measurements
+
     groups = [g.model_dump() for g in request.groups]
     relationships = [r.model_dump() for r in request.relationships]
 
@@ -532,7 +543,12 @@ async def bayesian_analysis(request: BayesianRequest, db: Session = Depends(get_
             _persist_tree(analysis.id, root, db)
             for measurement in request.measurements:
                 sample_id = samples_map.get(measurement.id)
-                element_id = groups_map.get(measurement.group_id) if measurement.group_id else None
+                if request.model_tree is not None:
+                    # Client-authored tree: its phase ids are used as-is, so
+                    # the measurement's own element_id already points at one.
+                    element_id = measurement.element_id
+                else:
+                    element_id = groups_map.get(measurement.group_id) if measurement.group_id else None
                 if sample_id:
                     db.query(RadiocarbonSample).filter(
                         RadiocarbonSample.id == sample_id
@@ -603,6 +619,34 @@ async def get_analysis(analysis_id: str, db: Session = Depends(get_db)):
         model_tree, tree_linearized = _get_or_migrate_tree(analysis, db)
     else:
         model_tree, tree_linearized = None, False
+
+    groups_payload = [
+        {
+            "id": g.id,
+            "name": g.name,
+            "tpq_age_bp": g.tpq_age_bp,
+            "taq_age_bp": g.taq_age_bp,
+            # Modelled start/end of this context's own span -- superseded by
+            # per-boundary posteriors on the tree, kept for analyses run
+            # before those existed.
+            "modeled_start": g.modeled_start,
+            "modeled_end": g.modeled_end,
+        }
+        for g in groups
+    ]
+    if not groups_payload and model_tree:
+        groups_payload = [
+            {
+                "id": element['id'],
+                "name": element.get('name') or 'Phase',
+                "tpq_age_bp": element.get('tpq_age_bp'),
+                "taq_age_bp": element.get('taq_age_bp'),
+                "modeled_start": None,
+                "modeled_end": None,
+            }
+            for element in _iter_tree(model_tree)
+            if element.get('element_type') == 'phase'
+        ]
 
     # For a Bayesian analysis, also compute each sample's plain/unmodelled
     # calibration (i.e. what calibrating it alone, with no stratigraphic
@@ -675,21 +719,12 @@ async def get_analysis(analysis_id: str, db: Session = Depends(get_db)):
                 }
                 for s in analysis.measurements
             ],
-            "groups": [
-                {
-                    "id": g.id,
-                    "name": g.name,
-                    "tpq_age_bp": g.tpq_age_bp,
-                    "taq_age_bp": g.taq_age_bp,
-                    # Modelled start/end of this context's own span (see
-                    # BayesianChronology.extract_results) -- null for
-                    # calibration-only analyses or a context with fewer
-                    # than 2 dated members.
-                    "modeled_start": g.modeled_start,
-                    "modeled_end": g.modeled_end,
-                }
-                for g in groups
-            ],
+            # The contexts a date can belong to. For an analysis whose
+            # structure was authored as a tree there are no SampleGroup rows,
+            # so these are derived from the tree's phases -- keeping the
+            # "which context is this date in" displays working off one
+            # representation rather than requiring duplicate storage.
+            "groups": groups_payload,
             "relationships": [
                 {
                     "id": r.id,

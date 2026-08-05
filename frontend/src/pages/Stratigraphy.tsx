@@ -53,13 +53,21 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import { useAnalysisDraftStore } from '@/stores/analysisStore'
 import type { RelationshipType, ModelElement, MatrixMeasurement } from '@/types'
 import HarrisMatrixDiagram from '@/components/HarrisMatrixDiagram'
-import ModelTreeEditor from '@/components/ModelTreeEditor'
+import ModelTreeEditor, { newElementId } from '@/components/ModelTreeEditor'
 import { formatApiError } from '@/utils/apiError'
 import { expandRelationships, findCycle } from '@/utils/stratigraphy'
 
 function newId(): string {
   return Math.random().toString(36).substr(2, 9)
 }
+
+const STRUCTURE_BLURB =
+  'The explicit OxCal-style model: nested Sequences and Phases with Boundaries placed where you ' +
+  'want them. Use a Sequence to put groups in order, a Phase for dates with no order between ' +
+  'them, and a Boundary to mark a transition — a Boundary between two Phases is a single shared ' +
+  'parameter, giving one transition date rather than two independent ones. Nest a Sequence ' +
+  'inside a Phase for parallel branches, and put a Hiatus between two Boundaries for a ' +
+  'deliberate gap.'
 
 const RELATIONSHIP_LABELS: Record<RelationshipType, string> = {
   above: 'Above (younger than)',
@@ -80,6 +88,9 @@ export default function Stratigraphy() {
     addRelationship,
     removeRelationship,
     updateRelationshipType,
+    modelTree: draftTree,
+    elementAssignments: draftAssignments,
+    setModelTree: setDraftTree,
   } = useAnalysisDraftStore()
 
   // Reached either as /new-analysis/stratigraphy (building a new analysis)
@@ -88,12 +99,11 @@ export default function Stratigraphy() {
   const { analysisId: editRouteId } = useParams<{ analysisId: string }>()
   const backPath = editRouteId ? `/analysis/${editRouteId}/edit` : '/new-analysis'
 
-  // When editing a saved analysis, the model structure is the primary view
-  // (and the one that works on a direct link, since it loads its own data
-  // from the API rather than from the in-memory draft).
-  const [tab, setTab] = useState<'list' | 'diagram' | 'structure'>(
-    editRouteId ? 'structure' : 'list'
-  )
+  // The model structure is the authoring surface for stratigraphy in both
+  // flows, so it is the default tab. For a saved analysis it is loaded from
+  // and written back to the API; for a new one it lives in the draft store
+  // and is submitted with the analysis.
+  const [tab, setTab] = useState<'list' | 'diagram' | 'structure'>('structure')
 
   // The explicit model tree only exists for a SAVED analysis (it is stored
   // against it and edited via PUT /analysis/:id/model-tree), so this tab is
@@ -107,6 +117,29 @@ export default function Stratigraphy() {
   const [structureDirty, setStructureDirty] = useState(false)
   const [structureError, setStructureError] = useState<string | null>(null)
   const [linearized, setLinearized] = useState(false)
+
+  // For a NEW analysis the tree lives in the draft store. Start it off as a
+  // site-wide Sequence bracketed by boundaries with every date in one phase
+  // -- the smallest complete model -- which the user then splits up.
+  useEffect(() => {
+    if (editRouteId || draftTree || measurements.length === 0) return
+    const phaseId = newElementId()
+    setDraftTree(
+      {
+        id: newElementId(),
+        element_type: 'sequence',
+        name: 'Site sequence',
+        tpq_age_bp: null,
+        taq_age_bp: null,
+        children: [
+          { id: newElementId(), element_type: 'boundary', name: 'Start of sequence', tpq_age_bp: null, taq_age_bp: null, children: [] },
+          { id: phaseId, element_type: 'phase', name: 'Phase 1', tpq_age_bp: null, taq_age_bp: null, children: [] },
+          { id: newElementId(), element_type: 'boundary', name: 'End of sequence', tpq_age_bp: null, taq_age_bp: null, children: [] },
+        ],
+      },
+      Object.fromEntries(measurements.map((m) => [m.id, phaseId]))
+    )
+  }, [editRouteId, draftTree, measurements, setDraftTree])
 
   useEffect(() => {
     if (tab !== 'structure' || !editRouteId || modelTree) return
@@ -242,21 +275,35 @@ export default function Stratigraphy() {
       <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 2 }}>
         <Tab value="list" label="List Editor" />
         <Tab value="diagram" label="Harris Matrix Diagram" />
-        {editRouteId && <Tab value="structure" label="Model Structure" />}
+        <Tab value="structure" label="Model Structure" />
       </Tabs>
 
-      {tab === 'structure' && editRouteId ? (
+      {tab === 'structure' && !editRouteId ? (
         <Paper sx={{ p: 3 }}>
           <Typography variant="h6" gutterBottom>
             Model Structure
           </Typography>
           <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
-            The explicit OxCal-style model: nested Sequences and Phases with Boundaries placed
-            where you want them. Use a Sequence to put groups in order, a Phase for dates with no
-            order between them, and a Boundary to mark a transition — a Boundary between two
-            Phases is a single shared parameter, giving one transition date rather than two
-            independent ones. Nest a Sequence inside a Phase for parallel branches, and put a
-            Hiatus between two Boundaries for a deliberate gap.
+            {STRUCTURE_BLURB}
+          </Typography>
+          {draftTree ? (
+            <ModelTreeEditor
+              tree={draftTree}
+              measurements={measurements}
+              assignments={draftAssignments}
+              onChange={(nextTree, nextAssignments) => setDraftTree(nextTree, nextAssignments)}
+            />
+          ) : (
+            <Alert severity="info">Add some dates on the New Analysis page first.</Alert>
+          )}
+        </Paper>
+      ) : tab === 'structure' && editRouteId ? (
+        <Paper sx={{ p: 3 }}>
+          <Typography variant="h6" gutterBottom>
+            Model Structure
+          </Typography>
+          <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
+            {STRUCTURE_BLURB}
           </Typography>
           {structureError && (
             <Alert severity="error" sx={{ mb: 2 }}>

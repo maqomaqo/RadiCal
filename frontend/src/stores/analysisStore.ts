@@ -7,7 +7,7 @@
 // (or when starting a fresh calibration-only analysis, where none of this
 // applies).
 import { create } from 'zustand'
-import type { DraftMeasurement, DraftGroup, DraftRelationship } from '@/types'
+import type { DraftMeasurement, DraftGroup, DraftRelationship, ModelElement } from '@/types'
 
 export interface McmcConfig {
   mcmc_samples: number
@@ -36,6 +36,13 @@ interface AnalysisDraftState {
   // "Run Analysis" submits: PUT /analysis/{id}/inputs + rerun for an edit,
   // vs POST /analysis/bayesian for a new one.
   editingAnalysisId: string | null
+  // The explicit model structure being authored, and which phase each date
+  // sits in. This is the stratigraphy for a new Bayesian analysis -- it is
+  // submitted as-is rather than being derived from contexts and pairwise
+  // relationships. Null until the Stratigraphy page initialises one.
+  modelTree: ModelElement | null
+  elementAssignments: Record<string, string>
+  setModelTree: (tree: ModelElement | null, assignments?: Record<string, string>) => void
 
   setName: (name: string) => void
   setAnalysisType: (analysisType: 'calibration' | 'bayesian') => void
@@ -74,6 +81,14 @@ export const useAnalysisDraftStore = create<AnalysisDraftState>((set) => ({
   relationships: [],
   mcmc: DEFAULT_MCMC,
   editingAnalysisId: null,
+  modelTree: null,
+  elementAssignments: {},
+
+  setModelTree: (modelTree, assignments) =>
+    set((state) => ({
+      modelTree,
+      elementAssignments: assignments ?? state.elementAssignments,
+    })),
 
   setName: (name) => set({ name }),
   setAnalysisType: (analysisType) => set({ analysisType }),
@@ -88,6 +103,8 @@ export const useAnalysisDraftStore = create<AnalysisDraftState>((set) => ({
       groups,
       relationships,
       mcmc: { ...DEFAULT_MCMC, ...(mcmc || {}) },
+      modelTree: null,
+      elementAssignments: {},
     }),
 
   setMeasurements: (measurements) => set({ measurements }),
@@ -147,5 +164,7 @@ export const useAnalysisDraftStore = create<AnalysisDraftState>((set) => ({
       relationships: [],
       mcmc: DEFAULT_MCMC,
       editingAnalysisId: null,
+      modelTree: null,
+      elementAssignments: {},
     }),
 }))

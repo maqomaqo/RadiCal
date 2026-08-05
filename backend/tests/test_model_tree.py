@@ -253,6 +253,66 @@ class TestModelTreeApi:
             f"/api/analysis/{analysis_id}/model-tree", json={"model_tree": bad})
         assert response.status_code == 422
 
+    @requires_pymc
+    def test_create_an_analysis_from_a_tree_directly(self, client):
+        """
+        A client can author the structure itself rather than sending contexts
+        + relationships to be converted -- the tree is used as given.
+        """
+        tree = _sequence("root", "Site", [
+            _boundary("b0", "Site start"),
+            _phase("p1", "Lower"),
+            _boundary("b1", "Lower/Upper"),
+            _phase("p2", "Upper"),
+            _boundary("b2", "Site end"),
+        ])
+        response = client.post(
+            "/api/analysis/bayesian",
+            json={
+                "name": "Authored as a tree",
+                "measurements": [
+                    {"id": "a", "sample_name": "A", "age_bp": 3300, "error_1sigma": 30, "element_id": "p1"},
+                    {"id": "b", "sample_name": "B", "age_bp": 3330, "error_1sigma": 30, "element_id": "p1"},
+                    {"id": "c", "sample_name": "C", "age_bp": 3000, "error_1sigma": 30, "element_id": "p2"},
+                    {"id": "d", "sample_name": "D", "age_bp": 3030, "error_1sigma": 30, "element_id": "p2"},
+                ],
+                "model_tree": tree,
+                "bayesian_config": {"mcmc_samples": 200, "mcmc_tune": 200, "mcmc_chains": 1},
+                "save": True,
+            },
+        )
+        assert response.status_code == 200, response.text
+        analysis_id = response.json()["data"]["id"]
+
+        data = client.get(f"/api/analysis/{analysis_id}").json()["data"]
+        stored = data["model_tree"]
+        assert [c["name"] for c in stored["children"]] == [
+            "Site start", "Lower", "Lower/Upper", "Upper", "Site end"]
+        # Contexts are derived from the tree's phases rather than stored twice.
+        assert sorted(g["name"] for g in data["groups"]) == ["Lower", "Upper"]
+        # Every date kept its phase assignment.
+        by_name = {m["sample_name"]: m["element_id"] for m in data["measurements"]}
+        assert by_name["A"] == by_name["B"] == "p1"
+        assert by_name["C"] == by_name["D"] == "p2"
+        # And every boundary got a posterior.
+        boundaries = [c for c in stored["children"] if c["element_type"] == "boundary"]
+        assert all(b["posterior"] is not None for b in boundaries)
+
+    def test_create_rejects_a_tree_with_an_orphan_date(self, client):
+        response = client.post(
+            "/api/analysis/bayesian",
+            json={
+                "name": "Bad tree",
+                "measurements": [
+                    {"id": "a", "sample_name": "A", "age_bp": 3000, "error_1sigma": 30,
+                     "element_id": "nope"},
+                ],
+                "model_tree": _sequence("r", "S", [_phase("p1", "P")]),
+                "save": False,
+            },
+        )
+        assert response.status_code == 422
+
     def test_put_unknown_analysis_404s(self, client):
         assert client.put(
             "/api/analysis/ghost/model-tree",

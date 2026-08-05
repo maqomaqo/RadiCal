@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field, field_validator, model_validator
-from typing import Optional, List, Literal
+from typing import Optional, List, Literal, Dict, Any
 from datetime import datetime
 
 from app.services.stratigraphy import expand_relationships, find_cycle
@@ -184,6 +184,9 @@ class BayesianMeasurementInput(MeasurementInput):
     # must match the id of one of the request's top-level `groups` (see
     # BayesianRequest._validate_stratigraphy below).
     group_id: Optional[str] = None
+    # The model-tree phase this date belongs to, when the request carries a
+    # `model_tree`. Supersedes group_id; see BayesianRequest.
+    element_id: Optional[str] = None
 
 
 class SampleGroupInput(BaseModel):
@@ -256,6 +259,13 @@ class BayesianRequest(BaseModel):
     project_id: Optional[str] = None
     save: bool = True
     bayesian_config: BayesianConfigInput = Field(default_factory=BayesianConfigInput)
+    # The explicit OxCal-style model structure (nested sequences, phases,
+    # boundaries, hiatuses -- see services/model_tree.py). When present it is
+    # the authoritative structure and `groups`/`relationships` are ignored;
+    # each measurement's element_id says which phase it sits in. When absent,
+    # groups/relationships are converted into an equivalent tree server-side,
+    # so older clients keep working unchanged.
+    model_tree: Optional[Dict[str, Any]] = None
 
     @field_validator("name")
     @classmethod
@@ -278,6 +288,18 @@ class BayesianRequest(BaseModel):
         measurement_ids = [m.id for m in self.measurements]
         if len(set(measurement_ids)) != len(measurement_ids):
             raise ValueError("measurements contain a duplicate id")
+
+        # An explicit model tree is validated on its own terms -- it has no
+        # pairwise relationships to check for cycles (a tree cannot contain
+        # one) and its own structural rules instead.
+        if self.model_tree is not None:
+            from app.services.model_tree import validate_tree
+            validate_tree(
+                self.model_tree,
+                [{'id': m.id, 'sample_name': m.sample_name, 'element_id': m.element_id}
+                 for m in self.measurements],
+            )
+            return self
 
         group_ids = [g.id for g in self.groups]
         if len(set(group_ids)) != len(group_ids):

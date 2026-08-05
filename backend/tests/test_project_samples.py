@@ -304,8 +304,12 @@ class TestReplaceInputs:
         assert after["name"] == "Edited"
         assert after["status"] == "pending"
         assert after["results"] == []
-        assert after["groups"] == []
         assert sorted(m["sample_name"] for m in after["measurements"]) == ["A", "B"]
+        # The replacement supplied no contexts, so the rebuilt model tree
+        # collects the dates into a single "Unassigned dates" phase -- which
+        # is what `groups` now reflects, being derived from the tree.
+        assert [g["name"] for g in after["groups"]] == ["Unassigned dates"]
+        assert after["model_tree"] is not None
 
         # And it can be run again from the new inputs.
         assert client.post(f"/api/analysis/{created}/rerun").status_code == 200
