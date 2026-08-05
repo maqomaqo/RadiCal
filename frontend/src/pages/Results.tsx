@@ -290,10 +290,19 @@ export default function Results() {
 
   // Which context (if any) each sample belongs to -- both maps come
   // straight from data GET /api/analysis/:id already returns (measurement
-  // group_id, group id/name), just cross-referenced here so the table and
-  // each plot can show a sample's context without re-deriving it per row.
+  // element_id/group_id, group id/name), just cross-referenced here so the
+  // table and each plot can show a sample's context without re-deriving it
+  // per row.
+  //
+  // element_id first: a tree-authored analysis has no contexts at all, so
+  // its dates carry the phase they sit in on element_id and leave group_id
+  // null -- reading group_id alone reported every date as "Unassigned".
+  // group_id remains the fallback for a tree migrated from the old
+  // contexts, where each phase reuses its context's id.
   const groupNameById = new Map((analysis.groups || []).map((g) => [g.id, g.name]))
-  const groupIdBySampleId = new Map((analysis.measurements || []).map((m) => [m.id, m.group_id]))
+  const groupIdBySampleId = new Map(
+    (analysis.measurements || []).map((m) => [m.id, m.element_id || m.group_id])
+  )
   const contextNameFor = (sampleId: string): string | null => {
     const groupId = groupIdBySampleId.get(sampleId)
     return groupId ? groupNameById.get(groupId) || null : null
