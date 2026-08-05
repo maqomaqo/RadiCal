@@ -1,6 +1,6 @@
 """
-Tests for the results export routes: /table, /export/json, /graphs, and
-the POST /export dispatcher.
+Tests for the results export routes: /table, /export/json, /graphs, /pdf,
+and the POST /export dispatcher.
 
 The CSV body itself is covered by test_model_tree.py's TestCsvExport,
 which pins the structure ordering the CSV shares with the results table.
@@ -346,3 +346,22 @@ class TestPostExport:
         "this format isn't built yet".
         """
         assert client.post("/api/results/ghost/export", json={"format": "pdf"}).status_code == 404
+
+
+class TestPdfExport:
+    """
+    PDF rendering isn't built. The route exists so callers get an explicit
+    501 instead of a fake success, which is only worth anything if it keeps
+    saying so.
+    """
+
+    def test_reports_not_implemented(self, client):
+        analysis_id = _calibration(client)
+        response = client.get(f"/api/results/{analysis_id}/pdf")
+        assert response.status_code == 501
+        assert "not implemented" in response.json()["detail"].lower()
+
+    def test_unknown_analysis_404s(self, client):
+        # Checked before the format is refused, so a bad id is reported as a
+        # bad id rather than as an unbuilt feature.
+        assert client.get("/api/results/ghost/pdf").status_code == 404
