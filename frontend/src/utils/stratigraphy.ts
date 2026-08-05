@@ -5,7 +5,7 @@
 // UI -- exactly the "use the diagram as a check that relationships are
 // specified correctly" workflow -- without a network round trip on every
 // edit.
-import type { DraftGroup, MatrixMeasurement, DraftRelationship } from '@/types'
+import type { DraftGroup, MatrixMeasurement, DraftRelationship, ModelElement } from '@/types'
 
 export interface Edge {
   from: string
@@ -107,4 +107,85 @@ export function findCycle(edges: Edge[]): string[] | null {
 
   if (visited === nodes.size) return null
   return Array.from(nodes).filter((n) => (indeg.get(n) || 0) > 0)
+}
+
+/**
+ * Project a model tree onto the Harris-matrix view: contexts as nodes,
+ * with a "below" relationship wherever the tree says one group of dates is
+ * older than another.
+ *
+ * The matrix is a derived VIEW now, not an editable source -- the tree is
+ * the authoritative structure (see components/ModelTreeEditor). Only phases
+ * become nodes, since a Harris matrix shows contexts; boundaries and
+ * hiatuses are structural and are traversed through rather than drawn.
+ *
+ * Ordering comes from sequences: their children run oldest first, so each
+ * consecutive pair of children that actually contains phases is connected.
+ * Consecutive is computed over children that HAVE phases, so a boundary
+ * sitting between two phases doesn't break the chain between them. A phase
+ * imposes no order on its children, so nested branches are left unconnected
+ * to each other -- which is exactly how a branching matrix should read.
+ */
+export function treeToMatrix(
+  tree: ModelElement | null,
+  measurements: MatrixMeasurement[],
+  assignments: Record<string, string>
+): { measurements: MatrixMeasurement[]; groups: DraftGroup[]; relationships: DraftRelationship[] } {
+  if (!tree) return { measurements: [], groups: [], relationships: [] }
+
+  const groups: DraftGroup[] = []
+  const relationships: DraftRelationship[] = []
+
+  // Every phase in a subtree, which is what an ordering constraint on that
+  // subtree actually applies to.
+  const phasesIn = (element: ModelElement): string[] => {
+    const out: string[] = []
+    const walk = (el: ModelElement) => {
+      if (el.element_type === 'phase') out.push(el.id)
+      for (const child of el.children || []) walk(child)
+    }
+    walk(element)
+    return out
+  }
+
+  const walk = (element: ModelElement) => {
+    if (element.element_type === 'phase') {
+      groups.push({
+        id: element.id,
+        name: element.name || 'Phase',
+        tpq_age_bp: element.tpq_age_bp ?? null,
+        taq_age_bp: element.taq_age_bp ?? null,
+      })
+    }
+
+    if (element.element_type === 'sequence') {
+      const blocks = (element.children || [])
+        .map((child) => phasesIn(child))
+        .filter((phases) => phases.length > 0)
+      for (let i = 0; i < blocks.length - 1; i++) {
+        for (const older of blocks[i]) {
+          for (const younger of blocks[i + 1]) {
+            relationships.push({
+              id: `derived_${older}_${younger}`,
+              from_sample_id: older,
+              from_type: 'group',
+              to_sample_id: younger,
+              to_type: 'group',
+              // "from below to" -- from is older than to.
+              relationship: 'below',
+            })
+          }
+        }
+      }
+    }
+
+    for (const child of element.children || []) walk(child)
+  }
+  walk(tree)
+
+  return {
+    measurements: measurements.map((m) => ({ ...m, group_id: assignments[m.id] ?? null })),
+    groups,
+    relationships,
+  }
 }

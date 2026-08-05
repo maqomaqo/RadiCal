@@ -1,22 +1,22 @@
 // Stratigraphy definition page for a Bayesian analysis, reached from
-// NewAnalysis.tsx once at least two measurements exist. The workflow
-// mirrors how archaeologists actually record stratigraphy: samples aren't
-// related to each other directly -- each dated sample is assigned to a
-// stratigraphic Context (a layer/cut/fill -- the "same context" concept
-// standard in archaeological recording), and above/below/equal
-// relationships are then defined between Contexts, not between individual
-// dates. TPQ/TAQ age limiters can still be set per-sample or per-context.
+// NewAnalysis.tsx once measurements exist.
 //
-// Offers two ways to specify this -- a simple list-picker form, and a true
-// drag-and-drop Harris matrix diagram (components/HarrisMatrixDiagram.tsx)
-// -- editing the same shared draft (stores/analysisStore.ts), so either can
-// be used alone or both together (e.g. build via the list, then open the
-// diagram just to visually check the relationships are right before
-// running).
+// The model is authored as an explicit OxCal-style tree -- nested Sequences
+// and Phases with Boundaries placed deliberately (components/
+// ModelTreeEditor.tsx) -- which is the single source of truth for the
+// structure. It replaced an earlier list editor that described stratigraphy
+// as Contexts plus pairwise above/below/equal relationships; that could not
+// express a placed Boundary, a site-wide Sequence, or any nesting, and
+// keeping it alongside the tree would have meant two ways of saying the
+// same thing with no way to reconcile them.
 //
-// Internally this still uses the backend's generic "group" vocabulary
-// (DraftGroup, group_id, from_type/to_type: 'group') -- "Context" is
-// purely the label shown to the user, matching the archaeological term.
+// The Harris matrix (components/HarrisMatrixDiagram.tsx) is now a READ-ONLY
+// view derived from that tree via utils/stratigraphy.treeToMatrix, rather
+// than an editable second representation.
+//
+// Two flows share this page: a saved analysis edits its stored tree through
+// PUT /analysis/:id/model-tree, and a new one edits a draft tree held in
+// stores/analysisStore.ts that is submitted with the analysis.
 import { useState, useEffect } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
@@ -27,39 +27,17 @@ import {
   Button,
   Tabs,
   Tab,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  IconButton,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
-  TextField,
   Alert,
   Chip,
   Stack,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
 } from '@mui/material'
-import DeleteIcon from '@mui/icons-material/Delete'
-import AddIcon from '@mui/icons-material/Add'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import { useAnalysisDraftStore } from '@/stores/analysisStore'
-import type { RelationshipType, ModelElement, MatrixMeasurement } from '@/types'
+import type { ModelElement, MatrixMeasurement } from '@/types'
 import HarrisMatrixDiagram from '@/components/HarrisMatrixDiagram'
 import ModelTreeEditor, { newElementId } from '@/components/ModelTreeEditor'
 import { formatApiError } from '@/utils/apiError'
-import { expandRelationships, findCycle } from '@/utils/stratigraphy'
-
-function newId(): string {
-  return Math.random().toString(36).substr(2, 9)
-}
+import { treeToMatrix } from '@/utils/stratigraphy'
 
 const STRUCTURE_BLURB =
   'The explicit OxCal-style model: nested Sequences and Phases with Boundaries placed where you ' +
@@ -69,25 +47,10 @@ const STRUCTURE_BLURB =
   'inside a Phase for parallel branches, and put a Hiatus between two Boundaries for a ' +
   'deliberate gap.'
 
-const RELATIONSHIP_LABELS: Record<RelationshipType, string> = {
-  above: 'Above (younger than)',
-  below: 'Below (older than)',
-  equal: 'Equal (same phase as)',
-}
-
 export default function Stratigraphy() {
   const navigate = useNavigate()
   const {
     measurements,
-    groups: contexts,
-    relationships,
-    addGroup: addContext,
-    removeGroup: removeContext,
-    updateGroup: updateContext,
-    updateMeasurement,
-    addRelationship,
-    removeRelationship,
-    updateRelationshipType,
     modelTree: draftTree,
     elementAssignments: draftAssignments,
     setModelTree: setDraftTree,
@@ -103,7 +66,7 @@ export default function Stratigraphy() {
   // flows, so it is the default tab. For a saved analysis it is loaded from
   // and written back to the API; for a new one it lives in the draft store
   // and is submitted with the analysis.
-  const [tab, setTab] = useState<'list' | 'diagram' | 'structure'>('structure')
+  const [tab, setTab] = useState<'diagram' | 'structure'>('structure')
 
   // The explicit model tree only exists for a SAVED analysis (it is stored
   // against it and edited via PUT /analysis/:id/model-tree), so this tab is
@@ -167,6 +130,19 @@ export default function Stratigraphy() {
       .finally(() => setLoadingStructure(false))
   }, [tab, editRouteId, modelTree])
 
+  // The Harris matrix is now a derived VIEW of the model tree rather than an
+  // editable source of its own -- whichever tree is in play (the saved
+  // analysis's, or the in-progress draft) is what it draws.
+  const matrixView = treeToMatrix(
+    editRouteId ? modelTree : draftTree,
+    editRouteId ? savedMeasurements : measurements,
+    editRouteId ? assignments : draftAssignments
+  )
+
+  const activeAssignments = editRouteId ? assignments : draftAssignments
+  const activeMeasurements = editRouteId ? savedMeasurements : measurements
+  const unassignedCount = activeMeasurements.filter((m) => !activeAssignments[m.id]).length
+
   const saveStructure = async () => {
     if (!editRouteId || !modelTree) return
     setSavingStructure(true)
@@ -191,21 +167,6 @@ export default function Stratigraphy() {
     }
   }
 
-  const [newContextDialogOpen, setNewContextDialogOpen] = useState(false)
-  const [newContextName, setNewContextName] = useState('')
-
-  const [relFrom, setRelFrom] = useState('')
-  const [relTo, setRelTo] = useState('')
-  const [relType, setRelType] = useState<RelationshipType>('above')
-
-  const { olderYounger } = expandRelationships(measurements, contexts, relationships)
-  const cycle = findCycle(olderYounger.map((e) => ({ from: e.from, to: e.to })))
-  const namesById = new Map<string, string>([
-    ...measurements.map((m) => [m.id, m.sample_name] as [string, string]),
-    ...contexts.map((c) => [c.id, c.name] as [string, string]),
-  ])
-  const unassignedCount = measurements.filter((m) => !m.group_id).length
-
   // Only meaningful for a brand-new analysis, whose measurements live in the
   // in-memory draft. When editing a saved analysis the draft may legitimately
   // be empty (e.g. arriving on a direct link), and the Model Structure tab
@@ -223,27 +184,6 @@ export default function Stratigraphy() {
     )
   }
 
-  const handleCreateContext = () => {
-    if (!newContextName.trim()) return
-    addContext({ id: newId(), name: newContextName.trim(), tpq_age_bp: null, taq_age_bp: null })
-    setNewContextName('')
-    setNewContextDialogOpen(false)
-  }
-
-  const handleAddRelationship = () => {
-    if (!relFrom || !relTo || relFrom === relTo) return
-    addRelationship({
-      id: newId(),
-      from_sample_id: relFrom,
-      from_type: 'group',
-      to_sample_id: relTo,
-      to_type: 'group',
-      relationship: relType,
-    })
-    setRelFrom('')
-    setRelTo('')
-  }
-
   return (
     <Container maxWidth="lg" sx={{ py: 4 }}>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 3, flexWrap: 'wrap', gap: 2 }}>
@@ -252,28 +192,19 @@ export default function Stratigraphy() {
             Stratigraphy
           </Typography>
           <Typography variant="body1" color="textSecondary">
-            Assign each sample to a stratigraphic context, then define above/below/equal
-            relationships and TPQ/TAQ age limits between those contexts.
+            Build the model as nested Sequences and Phases with Boundaries where you want them,
+            then assign each date to a Phase.
           </Typography>
         </Box>
         <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-          <Chip label={`${contexts.length} context${contexts.length === 1 ? '' : 's'}`} />
-          <Chip label={`${relationships.length} relationship${relationships.length === 1 ? '' : 's'}`} />
-          {unassignedCount > 0 && <Chip label={`${unassignedCount} unassigned sample${unassignedCount === 1 ? '' : 's'}`} color="warning" />}
-          {cycle ? <Chip label="Circular -- fix before running" color="error" /> : <Chip label="No cycles detected" color="success" />}
+          <Chip label={`${matrixView.groups.length} context${matrixView.groups.length === 1 ? '' : 's'}`} />
+          {unassignedCount > 0 && (
+            <Chip label={`${unassignedCount} unassigned date${unassignedCount === 1 ? '' : 's'}`} color="warning" />
+          )}
         </Stack>
       </Box>
 
-      {cycle && (
-        <Alert severity="error" sx={{ mb: 2 }}>
-          Circular relationship detected involving: {cycle.map((id) => namesById.get(id) || id).join(', ')}.
-          No set of calendar ages can satisfy every constraint at once -- fix or remove one of these
-          relationships before running the analysis.
-        </Alert>
-      )}
-
       <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 2 }}>
-        <Tab value="list" label="List Editor" />
         <Tab value="diagram" label="Harris Matrix Diagram" />
         <Tab value="structure" label="Model Structure" />
       </Tabs>
@@ -350,239 +281,26 @@ export default function Stratigraphy() {
             </Alert>
           )}
         </Paper>
-      ) : tab === 'list' ? (
-        <Box>
-          {/* Contexts */}
-          <Paper sx={{ p: 3, mb: 3 }}>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-              <Box>
-                <Typography variant="h6">1. Contexts</Typography>
-                <Typography variant="body2" color="textSecondary">
-                  A context is a stratigraphic layer, cut, or fill -- create one for each distinct
-                  deposit your samples came from.
-                </Typography>
-              </Box>
-              <Button size="small" startIcon={<AddIcon />} onClick={() => setNewContextDialogOpen(true)}>
-                Add Context
-              </Button>
-            </Box>
-            {contexts.length === 0 ? (
-              <Typography color="textSecondary" variant="body2">
-                No contexts yet. Create one, then assign your samples to it below.
-              </Typography>
-            ) : (
-              <TableContainer>
-                <Table size="small">
-                  <TableHead>
-                    <TableRow>
-                      <TableCell>Name</TableCell>
-                      <TableCell align="right">TPQ (max age, cal BP)</TableCell>
-                      <TableCell align="right">TAQ (min age, cal BP)</TableCell>
-                      <TableCell align="right">Dates</TableCell>
-                      <TableCell align="right" />
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {contexts.map((c) => (
-                      <TableRow key={c.id}>
-                        <TableCell>{c.name}</TableCell>
-                        <TableCell align="right">
-                          <TextField
-                            type="number"
-                            size="small"
-                            value={c.tpq_age_bp ?? ''}
-                            onChange={(e) => updateContext(c.id, { tpq_age_bp: e.target.value === '' ? null : Number(e.target.value) })}
-                            sx={{ width: 110 }}
-                          />
-                        </TableCell>
-                        <TableCell align="right">
-                          <TextField
-                            type="number"
-                            size="small"
-                            value={c.taq_age_bp ?? ''}
-                            onChange={(e) => updateContext(c.id, { taq_age_bp: e.target.value === '' ? null : Number(e.target.value) })}
-                            sx={{ width: 110 }}
-                          />
-                        </TableCell>
-                        <TableCell align="right">{measurements.filter((m) => m.group_id === c.id).length}</TableCell>
-                        <TableCell align="right">
-                          <IconButton size="small" color="error" onClick={() => removeContext(c.id)}>
-                            <DeleteIcon fontSize="small" />
-                          </IconButton>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </TableContainer>
-            )}
-          </Paper>
-
-          {/* Samples: context assignment + TPQ/TAQ */}
-          <Paper sx={{ p: 3, mb: 3 }}>
-            <Typography variant="h6" gutterBottom>
-              2. Assign Samples to Contexts
-            </Typography>
-            {unassignedCount > 0 && (
-              <Alert severity="warning" sx={{ mb: 2 }}>
-                {unassignedCount} sample{unassignedCount === 1 ? '' : 's'} not yet assigned to a context --
-                {unassignedCount === 1 ? " it won't" : " they won't"} appear in the Harris matrix or be
-                constrained by any relationship until assigned.
-              </Alert>
-            )}
-            <TableContainer>
-              <Table size="small">
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Sample</TableCell>
-                    <TableCell>Age (BP)</TableCell>
-                    <TableCell>Context</TableCell>
-                    <TableCell align="right">TPQ (max age)</TableCell>
-                    <TableCell align="right">TAQ (min age)</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {measurements.map((m) => (
-                    <TableRow key={m.id}>
-                      <TableCell>{m.sample_name}</TableCell>
-                      <TableCell>{m.age_bp} ± {m.error_1sigma}</TableCell>
-                      <TableCell>
-                        <FormControl size="small" sx={{ minWidth: 160 }}>
-                          <Select
-                            value={m.group_id || ''}
-                            displayEmpty
-                            onChange={(e) => updateMeasurement(m.id, { group_id: e.target.value || null })}
-                          >
-                            <MenuItem value="">
-                              <em>No context</em>
-                            </MenuItem>
-                            {contexts.map((c) => (
-                              <MenuItem key={c.id} value={c.id}>
-                                {c.name}
-                              </MenuItem>
-                            ))}
-                          </Select>
-                        </FormControl>
-                      </TableCell>
-                      <TableCell align="right">
-                        <TextField
-                          type="number"
-                          size="small"
-                          value={m.tpq_age_bp ?? ''}
-                          onChange={(e) => updateMeasurement(m.id, { tpq_age_bp: e.target.value === '' ? null : Number(e.target.value) })}
-                          sx={{ width: 110 }}
-                        />
-                      </TableCell>
-                      <TableCell align="right">
-                        <TextField
-                          type="number"
-                          size="small"
-                          value={m.taq_age_bp ?? ''}
-                          onChange={(e) => updateMeasurement(m.id, { taq_age_bp: e.target.value === '' ? null : Number(e.target.value) })}
-                          sx={{ width: 110 }}
-                        />
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </TableContainer>
-          </Paper>
-
-          {/* Relationships between contexts */}
-          <Paper sx={{ p: 3 }}>
-            <Typography variant="h6" gutterBottom>
-              3. Relationships Between Contexts
-            </Typography>
-            {contexts.length < 2 ? (
-              <Typography color="textSecondary" variant="body2">
-                Create at least two contexts above to define a relationship between them.
-              </Typography>
-            ) : (
-              <>
-                <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ mb: 2 }} alignItems="center">
-                  <FormControl size="small" sx={{ minWidth: 180 }}>
-                    <InputLabel>From context</InputLabel>
-                    <Select label="From context" value={relFrom} onChange={(e) => setRelFrom(e.target.value)}>
-                      {contexts.map((c) => (
-                        <MenuItem key={c.id} value={c.id}>
-                          {c.name}
-                        </MenuItem>
-                      ))}
-                    </Select>
-                  </FormControl>
-                  <FormControl size="small" sx={{ minWidth: 200 }}>
-                    <InputLabel>Relationship</InputLabel>
-                    <Select label="Relationship" value={relType} onChange={(e) => setRelType(e.target.value as RelationshipType)}>
-                      {Object.entries(RELATIONSHIP_LABELS).map(([value, label]) => (
-                        <MenuItem key={value} value={value}>
-                          {label}
-                        </MenuItem>
-                      ))}
-                    </Select>
-                  </FormControl>
-                  <FormControl size="small" sx={{ minWidth: 180 }}>
-                    <InputLabel>To context</InputLabel>
-                    <Select label="To context" value={relTo} onChange={(e) => setRelTo(e.target.value)}>
-                      {contexts.map((c) => (
-                        <MenuItem key={c.id} value={c.id}>
-                          {c.name}
-                        </MenuItem>
-                      ))}
-                    </Select>
-                  </FormControl>
-                  <Button variant="outlined" startIcon={<AddIcon />} onClick={handleAddRelationship} disabled={!relFrom || !relTo || relFrom === relTo}>
-                    Add
-                  </Button>
-                </Stack>
-
-                {relationships.length === 0 ? (
-                  <Typography color="textSecondary" variant="body2">
-                    No relationships defined yet.
-                  </Typography>
-                ) : (
-                  <TableContainer>
-                    <Table size="small">
-                      <TableHead>
-                        <TableRow>
-                          <TableCell>From</TableCell>
-                          <TableCell>Relationship</TableCell>
-                          <TableCell>To</TableCell>
-                          <TableCell align="right" />
-                        </TableRow>
-                      </TableHead>
-                      <TableBody>
-                        {relationships.map((r) => (
-                          <TableRow key={r.id}>
-                            <TableCell>{namesById.get(r.from_sample_id) || r.from_sample_id}</TableCell>
-                            <TableCell>{RELATIONSHIP_LABELS[r.relationship]}</TableCell>
-                            <TableCell>{namesById.get(r.to_sample_id) || r.to_sample_id}</TableCell>
-                            <TableCell align="right">
-                              <IconButton size="small" color="error" onClick={() => removeRelationship(r.id)}>
-                                <DeleteIcon fontSize="small" />
-                              </IconButton>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </TableContainer>
-                )}
-              </>
-            )}
-          </Paper>
-        </Box>
       ) : (
         <Paper sx={{ p: 3 }}>
-          <HarrisMatrixDiagram
-            measurements={measurements}
-            groups={contexts}
-            relationships={relationships}
-            editable
-            onAddRelationship={(rel) => addRelationship({ ...rel, id: newId() })}
-            onUpdateRelationshipType={(id, relationship) => updateRelationshipType(id, relationship)}
-            onDeleteRelationship={(id) => removeRelationship(id)}
-          />
+          <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
+            A read-only view of the model structure as a Harris matrix: each Phase is a context,
+            and an arrow means the lower context is older. Boundaries and hiatuses are structural
+            and aren't drawn — the chain runs through them. Edit the structure on the Model
+            Structure tab.
+          </Typography>
+          {matrixView.groups.length === 0 ? (
+            <Alert severity="info">
+              No contexts to draw yet — add Phases on the Model Structure tab.
+            </Alert>
+          ) : (
+            <HarrisMatrixDiagram
+              measurements={matrixView.measurements}
+              groups={matrixView.groups}
+              relationships={matrixView.relationships}
+              editable={false}
+            />
+          )}
         </Paper>
       )}
 
@@ -592,26 +310,6 @@ export default function Stratigraphy() {
         </Button>
       </Box>
 
-      <Dialog open={newContextDialogOpen} onClose={() => setNewContextDialogOpen(false)} fullWidth maxWidth="sm">
-        <DialogTitle>New Context</DialogTitle>
-        <DialogContent>
-          <TextField
-            fullWidth
-            autoFocus
-            label="Context Name"
-            value={newContextName}
-            onChange={(e) => setNewContextName(e.target.value)}
-            placeholder="e.g., Context 104 -- hearth fill"
-            sx={{ mt: 1 }}
-          />
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setNewContextDialogOpen(false)}>Cancel</Button>
-          <Button variant="contained" onClick={handleCreateContext} disabled={!newContextName.trim()}>
-            Create
-          </Button>
-        </DialogActions>
-      </Dialog>
     </Container>
   )
 }
