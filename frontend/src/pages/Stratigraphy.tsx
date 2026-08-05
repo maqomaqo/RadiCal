@@ -35,7 +35,7 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import { useAnalysisDraftStore } from '@/stores/analysisStore'
 import type { ModelElement, MatrixMeasurement } from '@/types'
 import HarrisMatrixDiagram from '@/components/HarrisMatrixDiagram'
-import ModelTreeEditor, { newElementId } from '@/components/ModelTreeEditor'
+import ModelTreeEditor, { newElementId, validateTree } from '@/components/ModelTreeEditor'
 import { formatApiError } from '@/utils/apiError'
 import { treeToMatrix } from '@/utils/stratigraphy'
 
@@ -130,21 +130,25 @@ export default function Stratigraphy() {
       .finally(() => setLoadingStructure(false))
   }, [tab, editRouteId, modelTree])
 
-  // The Harris matrix is now a derived VIEW of the model tree rather than an
-  // editable source of its own -- whichever tree is in play (the saved
-  // analysis's, or the in-progress draft) is what it draws.
-  const matrixView = treeToMatrix(
-    editRouteId ? modelTree : draftTree,
-    editRouteId ? savedMeasurements : measurements,
-    editRouteId ? assignments : draftAssignments
-  )
-
+  const activeTree = editRouteId ? modelTree : draftTree
   const activeAssignments = editRouteId ? assignments : draftAssignments
   const activeMeasurements = editRouteId ? savedMeasurements : measurements
   const unassignedCount = activeMeasurements.filter((m) => !activeAssignments[m.id]).length
 
+  // The Harris matrix is a derived VIEW of the model tree rather than an
+  // editable source of its own -- whichever tree is in play (the saved
+  // analysis's, or the in-progress draft) is what it draws.
+  const matrixView = treeToMatrix(activeTree, activeMeasurements, activeAssignments)
+
+  // Same rules the backend enforces (services/model_tree.validate_tree), run
+  // here so an invalid structure can't be submitted at all. The editor shows
+  // what's wrong; this is what stops Save.
+  const structureProblems = activeTree
+    ? validateTree(activeTree, activeAssignments, activeMeasurements)
+    : []
+
   const saveStructure = async () => {
-    if (!editRouteId || !modelTree) return
+    if (!editRouteId || !modelTree || structureProblems.length > 0) return
     setSavingStructure(true)
     setStructureError(null)
     try {
@@ -264,14 +268,25 @@ export default function Stratigraphy() {
                 }}
               />
               <Box sx={{ mt: 3, display: 'flex', gap: 2, alignItems: 'center' }}>
-                <Button variant="contained" onClick={saveStructure} disabled={savingStructure}>
+                <Button
+                  variant="contained"
+                  onClick={saveStructure}
+                  disabled={savingStructure || structureProblems.length > 0}
+                >
                   {savingStructure ? 'Saving…' : 'Save Model Structure'}
                 </Button>
-                {structureDirty && (
-                  <Typography variant="caption" color="textSecondary">
-                    Unsaved changes. Saving clears this analysis's current results — re-run it
-                    afterwards.
+                {structureProblems.length > 0 ? (
+                  <Typography variant="caption" color="error">
+                    Fix the {structureProblems.length === 1 ? 'problem' : 'problems'} listed above
+                    before saving.
                   </Typography>
+                ) : (
+                  structureDirty && (
+                    <Typography variant="caption" color="textSecondary">
+                      Unsaved changes. Saving clears this analysis's current results — re-run it
+                      afterwards.
+                    </Typography>
+                  )
                 )}
               </Box>
             </>

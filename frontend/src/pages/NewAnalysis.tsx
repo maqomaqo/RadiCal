@@ -42,6 +42,7 @@ import { formatApiError } from '@/utils/apiError'
 import { useAnalysisDraftStore } from '@/stores/analysisStore'
 import type { DraftMeasurement } from '@/types'
 import { expandRelationships, findCycle } from '@/utils/stratigraphy'
+import { validateTree } from '@/components/ModelTreeEditor'
 
 type Measurement = DraftMeasurement
 
@@ -240,6 +241,11 @@ export default function NewAnalysis() {
 
   const { olderYounger: draftOlderYounger } = expandRelationships(measurements, groups, relationships)
   const cycle = findCycle(draftOlderYounger.map((e) => ({ from: e.from, to: e.to })))
+  // Same rules the backend enforces, so an unbuildable model structure is
+  // caught here rather than coming back as a 422 after a submit.
+  const treeProblems = modelTree
+    ? validateTree(modelTree, elementAssignments, measurements)
+    : []
   const cycleLabels = (cycle || []).map((id) => {
     const m = measurements.find((mm) => mm.id === id)
     if (m) return m.sample_name
@@ -322,6 +328,17 @@ export default function NewAnalysis() {
         // a request that's already known to be invalid. Only relevant to
         // the legacy relationship path -- a model tree cannot contain a
         // cycle, which is one of the things authoring one directly buys.
+        // An invalid model structure would only be rejected with a 422 after
+        // submitting, so stop here and point back at the editor instead.
+        if (modelTree && treeProblems.length > 0) {
+          alert(
+            'Cannot run: the model structure has problems that must be fixed on the ' +
+              'Stratigraphy page first:\n\n' +
+              treeProblems.join('\n')
+          )
+          setLoading(false)
+          return
+        }
         if (!modelTree && cycle) {
           alert(
             'Cannot run: the stratigraphic relationships are circular (' +
