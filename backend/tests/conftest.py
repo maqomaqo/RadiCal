@@ -62,7 +62,15 @@ requires_pymc = pytest.mark.skipif(
 
 @pytest.fixture
 def client():
-    """FastAPI TestClient against a fresh throwaway SQLite database."""
+    """
+    FastAPI TestClient against a throwaway SQLite database.
+
+    The database is created once for the whole session (above) and shared
+    by every test, not rebuilt per test -- so anything a test persists
+    under a client-chosen id has to be unique across the entire suite.
+    Model element ids are the usual trap: they are a primary key, so two
+    tests posting a tree with an element called "p1" collide on the second.
+    """
     from fastapi.testclient import TestClient
     from app.main import app
     return TestClient(app)
