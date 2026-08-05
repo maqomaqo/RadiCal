@@ -185,3 +185,100 @@ class TestJsonExport:
 
     def test_unknown_analysis_404s(self, client):
         assert client.get("/api/results/ghost/export/json").status_code == 404
+
+
+class TestGraphs:
+    """
+    /graphs is the plot-data-only endpoint for API consumers; the Results
+    page renders from GET /api/analysis/{id} instead. Nothing in the app
+    calls it, so it is exactly the sort of route that rots unnoticed.
+    """
+
+    def test_returns_one_graph_per_result(self, client):
+        analysis_id = _calibration(client)
+        payload = client.get(f"/api/results/{analysis_id}/graphs").json()
+
+        assert payload["success"] is True
+        graphs = payload["data"]["graphs"]
+        assert len(graphs) == 1
+        assert set(graphs[0]) == {"sample_id", "probability_distribution"}
+        assert graphs[0]["sample_id"]
+
+    def test_distribution_is_a_series_of_age_probability_pairs(self, client):
+        analysis_id = _calibration(client)
+        distribution = client.get(
+            f"/api/results/{analysis_id}/graphs"
+        ).json()["data"]["graphs"][0]["probability_distribution"]
+
+        assert distribution, "expected a plottable distribution"
+        assert all(len(point) == 2 for point in distribution)
+        ages = [age for age, _prob in distribution]
+        probabilities = [prob for _age, prob in distribution]
+        assert all(isinstance(v, (int, float)) for v in ages + probabilities)
+        assert all(prob >= 0 for prob in probabilities)
+        # Ascending in calendar age: a consumer plots this straight onto an
+        # axis without sorting it first.
+        assert ages == sorted(ages)
+
+    def test_matches_the_distribution_the_results_page_renders(self, client):
+        """
+        The page reads its plot data from GET /api/analysis/{id}, so this
+        endpoint is a second path to the same column. Pin them together --
+        a consumer plotting from here should not get a different curve to
+        the one on screen.
+        """
+        analysis_id = _calibration(client)
+        graphs = client.get(f"/api/results/{analysis_id}/graphs").json()["data"]["graphs"]
+        page_results = client.get(f"/api/analysis/{analysis_id}").json()["data"]["results"]
+
+        by_sample = {g["sample_id"]: g["probability_distribution"] for g in graphs}
+        assert by_sample == {
+            r["sample_id"]: r["probability_distribution"] for r in page_results
+        }
+
+    def test_covers_the_same_samples_as_the_json_export(self, client):
+        analysis_id = _calibration(client)
+        graphs = client.get(f"/api/results/{analysis_id}/graphs").json()["data"]["graphs"]
+        rows = client.get(f"/api/results/{analysis_id}/export/json").json()["data"]["results"]
+
+        assert sorted(g["sample_id"] for g in graphs) == sorted(r["sample_id"] for r in rows)
+
+    @requires_pymc
+    def test_reports_dates_only_for_a_structured_analysis(self, client):
+        # Boundaries are modelled parameters with posteriors of their own,
+        # but they are not samples and have no AnalysisResult row, so they
+        # never appear here.
+        tree = {
+            "id": "groot", "element_type": "sequence", "name": "Site", "children": [
+                {"id": "gb0", "element_type": "boundary", "name": "Start", "children": []},
+                {"id": "gp1", "element_type": "phase", "name": "Only", "children": []},
+                {"id": "gb1", "element_type": "boundary", "name": "End", "children": []},
+            ],
+        }
+        created = client.post(
+            "/api/analysis/bayesian",
+            json={
+                "name": "Graphs structure",
+                "measurements": [
+                    {"id": "ga", "sample_name": "A", "age_bp": 3300, "error_1sigma": 30, "element_id": "gp1"},
+                    {"id": "gb", "sample_name": "B", "age_bp": 3200, "error_1sigma": 30, "element_id": "gp1"},
+                ],
+                "model_tree": tree,
+                "bayesian_config": {"mcmc_samples": 200, "mcmc_tune": 200, "mcmc_chains": 1},
+                "save": True,
+            },
+        )
+        assert created.status_code == 200, created.text
+        analysis_id = created.json()["data"]["id"]
+
+        graphs = client.get(f"/api/results/{analysis_id}/graphs").json()["data"]["graphs"]
+        assert len(graphs) == 2
+        assert all(g["probability_distribution"] for g in graphs)
+
+    def test_unknown_analysis_404s(self, client):
+        """
+        The handler's only use of _gather_export_rows is this check -- the
+        result is deliberately discarded. Without it a bad id would return
+        an empty graph list and look like a valid, empty analysis.
+        """
+        assert client.get("/api/results/ghost/graphs").status_code == 404
