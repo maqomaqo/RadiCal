@@ -5,7 +5,12 @@ from collections import defaultdict, deque
 from typing import List, Dict, Optional, Tuple
 
 from app.services.calibration import get_curve, CalibrationCurve, hpd_ranges_from_distribution
-from app.services.stratigraphy import expand_relationships, effective_bounds
+from app.services.stratigraphy import effective_bounds
+from app.services.model_tree import (
+    validate_tree,
+    plan_model,
+    inherited_bounds,
+)
 
 # How far beyond a sample's own calibration likelihood its Uniform prior
 # is allowed to extend by default (see _practical_bounds below) -- wide
@@ -72,36 +77,6 @@ def _practical_bounds(curve: CalibrationCurve, age_bp: float, error_1sigma: floa
     return lower, upper
 
 
-def _topological_order(node_ids: set, edges: List[Tuple[str, str]]) -> List[str]:
-    """
-    Kahn's topological sort of (older_id, younger_id) edges, oldest-first.
-    Assumes the edge set is acyclic -- callers (build_model, below) only
-    ever pass the already-cycle-validated older_younger edges from
-    expand_relationships (BayesianRequest rejects a cyclic request before
-    it reaches here). If it somehow isn't acyclic, nodes still stuck in a
-    cycle are simply omitted from the returned order rather than looping
-    forever.
-    """
-    adj = defaultdict(list)
-    indeg = defaultdict(int)
-    for u, v in edges:
-        adj[u].append(v)
-        indeg[v] += 1
-        indeg.setdefault(u, indeg.get(u, 0))
-
-    queue = deque(n for n in node_ids if indeg.get(n, 0) == 0)
-    order = []
-    indeg_remaining = dict(indeg)
-    while queue:
-        n = queue.popleft()
-        order.append(n)
-        for m in adj[n]:
-            indeg_remaining[m] -= 1
-            if indeg_remaining[m] == 0:
-                queue.append(m)
-    return order
-
-
 def _interp_curve(x, xp: np.ndarray, fp: np.ndarray):
     """
     Differentiable linear interpolation of a calibration curve, evaluated at
@@ -155,40 +130,48 @@ class BayesianChronology:
         self.tune = mcmc_tune
         self.chains = mcmc_chains
 
-    def build_model(self, measurements: List[Dict], relationships: List[Dict], groups: Optional[List[Dict]] = None):
+    def build_model(self, measurements: List[Dict], model_tree: Dict):
         """
-        Build PyMC model with radiocarbon measurements and stratigraphic constraints.
+        Build the PyMC model from an explicit OxCal-style model tree
+        (services/model_tree.py): nested Sequences, Phases, Boundaries and
+        Hiatuses, replacing the previous flat contexts + pairwise
+        above/below relationships.
 
         Each measurement's calendar-age prior is calibrated against its own
         selected curve (curve_id, defaulting to intcal20), so mixed
         terrestrial/marine samples in the same analysis are each compared
-        against the correct curve.
+        against the correct curve, and is tightened by TPQ/TAQ limiters --
+        the sample's own combined with every enclosing element's, tightest
+        winning (model_tree.inherited_bounds).
 
-        `groups` (optional) lets samples be organised into named
-        phases/groups -- see app.services.stratigraphy. A relationship in
-        `relationships` may reference a sample or a group on either side
-        (from_type/to_type); group references are expanded into pairwise
-        sample constraints here via expand_relationships(). A sample's
-        calendar-age prior is also tightened by TPQ/TAQ age limiters
-        (tpq_age_bp/taq_age_bp), combining its own limiter with its
-        group's if it belongs to one -- see effective_bounds().
+        The tree contributes two things:
 
-        Every group/context with 2 or more dated members also gets the
-        uniform-phase prior implied by OxCal's Boundary model, with the
-        boundaries analytically marginalized out -- see the comment above
-        the Potential loop below. The boundaries themselves are recovered
-        afterwards, exactly, in extract_results(); this method records each
-        context's calendar-age window in self.context_windows for it.
+        * **Ordering.** A sequence's children run oldest first, and
+          everything in one child must be older than everything in the next.
+          Emitted as one min/max constraint per adjacent pair rather than a
+          full pairwise cross-product. A phase orders nothing, so nesting
+          sequences inside a phase models parallel branches.
+        * **Uniform-scatter (Boundary) priors.** Each consecutive pair of
+          Boundary siblings encloses a group of K dates that are, conditional
+          on those boundaries, uniformly scattered between them -- density
+          (older - younger)^(-K). A boundary between two phases is therefore
+          a single SHARED transition, not two independent ones.
 
-        Callers are expected to have already validated that `relationships`
-        contains no stratigraphic cycle (BayesianRequest does this before
-        the request ever reaches here); this function does not re-check.
+        Boundaries are split by model_tree.classify_boundaries into ones
+        sampled as ordinary PyMC variables and ones integrated out
+        analytically; see the span-term loop below and that function's
+        docstring for why that split is what makes explicit boundaries
+        workable under SMC at all. Marginalized boundaries are recovered
+        exactly in extract_results(); this method records what it needs for
+        that in self.boundary_recovery.
         """
-        groups = groups or []
-        groups_by_id = {g['id']: g for g in groups}
-        # Per-context (window_lower, window_upper), consumed by
-        # extract_results() to sample that context's Boundary parameters.
-        self.context_windows: Dict[str, Tuple[float, float]] = {}
+        validate_tree(model_tree, measurements)
+        plan = plan_model(model_tree, measurements)
+        element_bounds = inherited_bounds(model_tree)
+        # What extract_results() needs to recover the marginalized boundaries:
+        # {boundary_id: (role, span-group info)}. Filled in below.
+        self.boundary_recovery: Dict[str, Dict] = {}
+        self.model_plan = plan
 
         # Load (and cache) each distinct curve referenced by the measurements
         # up front, so we don't re-parse the same .14c file per sample.
@@ -198,19 +181,10 @@ class BayesianChronology:
             if curve_id not in curves:
                 curves[curve_id] = get_curve(curve_id)
 
-        # Stratigraphic constraints. Group-to-group and group-to-sample
-        # relationships are expanded to plain sample-to-sample pairs (and
-        # deduplicated) here, so e.g. two relationships that both imply "A
-        # is above B" don't create two PyMC variables with the same name.
-        # Computed up front (rather than after building `ages`, as before)
-        # because the older_younger edges are also needed to choose a
-        # feasible starting point below.
-        older_younger, equal_pairs = expand_relationships(measurements, groups, relationships)
-
         # Bounds and a naive initial guess (own raw radiocarbon age, clipped
         # to bounds) for every sample, computed before creating any PyMC
-        # variable so the naive guesses can be repaired against the
-        # above/below constraints first -- see the initval repair below.
+        # variable so the naive guesses can be repaired against the ordering
+        # constraints first -- see the initval repair below.
         bounds: Dict[str, Tuple[float, float]] = {}
         naive_initvals: Dict[str, float] = {}
         for m in measurements:
@@ -218,8 +192,10 @@ class BayesianChronology:
             curve_lower = float(curve.cal_ages[0])
             curve_upper = float(curve.cal_ages[-1])
 
-            group = groups_by_id.get(m.get('group_id'))
-            taq, tpq = effective_bounds(m, group)  # taq=min bound, tpq=max bound
+            # The sample's own limiters combined with every enclosing model
+            # element's, tightest winning.
+            el_taq, el_tpq = element_bounds.get(m.get('element_id'), (None, None))
+            taq, tpq = effective_bounds(m, {'taq_age_bp': el_taq, 'tpq_age_bp': el_tpq})
 
             practical_lower, practical_upper = _practical_bounds(curve, m['age_bp'], m['error_1sigma'])
 
@@ -251,25 +227,27 @@ class BayesianChronology:
         # failed!", well before any real MCMC sampling of the posterior
         # this model is supposed to correct that inversion against).
         #
-        # This only changes the STARTING point, in topological (oldest
-        # constrained sample first) order: each sample's guess is capped
-        # just below the tightest of its direct "older than me" neighbors'
-        # (already-repaired) guesses. It does not touch the Potential
-        # constraints themselves or the posterior they define.
-        node_ids = {m['id'] for m in measurements}
-        relevant_edges = [(o, y) for o, y in older_younger if o in node_ids and y in node_ids]
-        predecessors: Dict[str, List[str]] = defaultdict(list)
-        for older_id, younger_id in relevant_edges:
-            predecessors[younger_id].append(older_id)
-
+        # This only changes the STARTING point: each constraint's younger
+        # side is pushed just below its older side's current guess, sweeping
+        # the constraints in tree order (which is already oldest-first within
+        # each sequence) a few times so nested structures settle. It does not
+        # touch the Potential constraints themselves or the posterior they
+        # define.
         initvals = dict(naive_initvals)
         margin = 1.0  # years -- keeps the repaired guess strictly inside the constraint, not right on its boundary
-        for node_id in _topological_order(node_ids, relevant_edges):
-            lower, upper = bounds[node_id]
-            ceiling = upper
-            for pred_id in predecessors.get(node_id, []):
-                ceiling = min(ceiling, initvals[pred_id] - margin)
-            initvals[node_id] = float(np.clip(min(initvals[node_id], ceiling), lower, upper))
+
+        def _date_ids(terms):
+            return [tid for kind, tid in terms if kind == 'date' and tid in initvals]
+
+        for _sweep in range(3):
+            for older_terms, younger_terms in plan.ordering:
+                older_ids, younger_ids = _date_ids(older_terms), _date_ids(younger_terms)
+                if not older_ids or not younger_ids:
+                    continue
+                ceiling = min(initvals[i] for i in older_ids) - margin
+                for yid in younger_ids:
+                    lower, upper = bounds[yid]
+                    initvals[yid] = float(np.clip(min(initvals[yid], ceiling), lower, upper))
 
         with pm.Model() as model:
             # Create calendar age variables for each sample, bounded to the
@@ -288,133 +266,177 @@ class BayesianChronology:
                     initval=initvals[m['id']]
                 )
 
-            # Uniform-phase (OxCal "Boundary") prior for each context, with
-            # the boundaries analytically MARGINALIZED OUT.
+            # Boundary parameters and the uniform-scatter (OxCal "Phase")
+            # priors they induce.
             #
             # The generative model is OxCal's (see
             # https://c14.arch.ox.ac.uk/oxcalhelp/hlp_analysis_oper.html;
             # Buck et al. 1992; Nicholls and Jones 2001, Appl. Statist.
-            # 50(4)):
-            #     ta, tb   ~ independent uniform priors over the window,
-            #                ordered tb <= ta          (the two Boundaries)
-            #     t_i | ta, tb ~iid Uniform(tb, ta)     (each dated member)
-            # i.e. a context's dates are a RANDOM SCATTER between its start
-            # and end boundary: conditional on the boundaries each date has
-            # density 1/(ta-tb), so K members contribute (ta-tb)^(-K).
+            # 50(4)): boundaries have uniform priors, and conditional on the
+            # pair enclosing it each dated event is uniform between them, so
+            # a group of K dates between boundaries O (older) and Y younger
+            # contributes (O - Y)^(-K). A boundary shared between two
+            # adjacent groups is ONE parameter serving as the end of the
+            # first and the start of the second.
             #
-            # Integrating ta, tb out of that (they appear nowhere else in
-            # the model) leaves an exact marginal prior on the member ages
-            # alone. With a = ta - max(t) >= 0 and b = min(t) - tb >= 0 and
-            # span w = max(t) - min(t), the integral is
-            #     \int\int (w + a + b)^(-K) da db  \propto  w^(2-K)
-            # in the wide-window limit -- so the entire effect of the two
-            # Boundaries on the member ages is the single Potential below.
-            # (The window here is thousands of years wide while a context's
-            # span is typically hundreds, so the finite-window correction
-            # to that integral is negligible; the boundaries themselves are
-            # recovered WITH the exact finite-window truncation in
-            # extract_results.)
+            # Which boundaries are sampled and which are integrated out is
+            # decided by model_tree.classify_boundaries -- read that
+            # docstring first, it explains why this split exists. In short:
+            # an interior boundary is pinned between its neighbouring
+            # groups' extreme dates and samples fine, whereas an outermost
+            # boundary runs off into a region with no data, giving the
+            # heavy tail that SMC provably collapses. An outermost boundary
+            # appears in exactly one span term, so it also integrates out in
+            # closed form -- which is what the four cases below are.
             #
-            # Why marginalize instead of sampling ta/tb as PyMC variables
-            # (as this code did previously): pm.sample_smc cannot sample
-            # them. Their posterior is heavy-tailed (p(a+b) ~ u^(1-K)) and
-            # SMC's IMH kernel collapses it onto the extreme member dates --
-            # measured at E[a+b] = 2.0 years against a true value of 150.9
-            # (exact grid integration of this very model), i.e. reporting a
-            # context's start as essentially just its oldest date, the
-            # order-statistic behaviour Boundaries exist to avoid. It does
-            # so silently: r_hat 1.00 and ess_bulk ~8000 on those variables.
-            # NUTS on the identical model gets 135.8, confirming the model
-            # was right and the sampler was at fault. Marginalizing removes
-            # them from the sampler entirely, and the exact conditional
-            # p(a, b | t) is then drawn directly in extract_results.
-            #
-            # Skipped for contexts with fewer than 2 dated members, since a
-            # span/boundary isn't meaningful for a single date (or none).
-            # For exactly 2 members the exponent (2-K) is 0, so the marginal
-            # is flat and no Potential is needed at all -- computing
-            # `0 * log(span)` would only risk a NaN as span -> 0.
-            group_members: Dict[str, List[str]] = defaultdict(list)
-            for m in measurements:
-                gid = m.get('group_id')
-                if gid and m['id'] in ages:
-                    group_members[gid].append(m['id'])
+            # Every integral is taken in the wide-window limit (the window
+            # is thousands of years wide against spans of hundreds), the
+            # same approximation the previous single-context implementation
+            # made; the marginalized boundaries are then recovered WITH the
+            # exact finite-window truncation in extract_results.
+            boundary_vars: Dict[str, object] = {}
+            marginalized = plan.marginalized_boundaries
 
-            for group_id, member_ids in group_members.items():
-                if len(member_ids) < 2:
-                    continue
-                num_members = len(member_ids)
+            # Bounds for the sampled boundaries: the union of every date's
+            # window, so a boundary is never confined more tightly than the
+            # evidence it sits among.
+            if bounds:
+                model_lower = min(b[0] for b in bounds.values())
+                model_upper = max(b[1] for b in bounds.values())
+            else:
+                model_lower, model_upper = 0.0, 55000.0
+            # extract_results() needs the same window to recover the
+            # marginalized boundaries with the correct truncation.
+            self.model_window = (model_lower, model_upper)
 
-                # The window this context's boundaries may range over -- the
-                # union of its members' own (already TPQ/TAQ- and curve-
-                # bounded) ranges, so a context isn't artificially narrowed
-                # just because e.g. one member uses a different calibration
-                # curve than another.
-                window_lower = min(bounds[mid][0] for mid in member_ids)
-                window_upper = max(bounds[mid][1] for mid in member_ids)
-                if window_upper <= window_lower:
-                    continue
-                self.context_windows[group_id] = (window_lower, window_upper)
+            for boundary_id in plan.sampled_boundaries:
+                # Start it in the middle of the dates it separates, so the
+                # ordering constraints are satisfiable from the first draw.
+                enclosing = [g for g in plan.span_groups
+                             if boundary_id in (g.older_boundary_id, g.younger_boundary_id)]
+                neighbour_vals = [initvals[d] for g in enclosing for d in g.date_ids if d in initvals]
+                init = float(np.mean(neighbour_vals)) if neighbour_vals else (model_lower + model_upper) / 2.0
+                boundary_vars[boundary_id] = pm.Uniform(
+                    f"boundary_{boundary_id}",
+                    lower=model_lower,
+                    upper=model_upper,
+                    initval=float(np.clip(init, model_lower + 1.0, model_upper - 1.0)),
+                )
 
-                if num_members > 2:
-                    member_ages = pt.stack([ages[mid] for mid in member_ids])
-                    span = pt.maximum(pt.max(member_ages) - pt.min(member_ages), 1e-6)
-                    pm.Potential(
-                        f"uniform_phase_{group_id}",
-                        (2 - num_members) * pt.log(span)
-                    )
+            for group in plan.span_groups:
+                date_ids = [d for d in group.date_ids if d in ages]
+                num_dates = len(date_ids)
+                older_id, younger_id = group.older_boundary_id, group.younger_boundary_id
+                older_marginal = older_id in marginalized
+                younger_marginal = younger_id in marginalized
 
-            # Above/below constraints as a smooth, steep penalty rather than
-            # a hard switch(..., 0, -inf). A literal -inf Potential gives
-            # SMC's beta-tempering nothing to work with: -inf * beta is
-            # still -inf for every beta > 0, so there's no smooth path from
+                if num_dates:
+                    stacked = pt.stack([ages[d] for d in date_ids])
+                    oldest, youngest = pt.max(stacked), pt.min(stacked)
+
+                if older_marginal and younger_marginal:
+                    # Both integrated out. Jointly this is the classic
+                    # result: \int\int (w + a + b)^(-K) da db  ~  w^(2-K),
+                    # w being the dates' own span. Exponent 2-K is 0 at K=2
+                    # (flat -- and computing 0*log(w) would only risk a NaN
+                    # as w -> 0), and a span means nothing below that.
+                    if num_dates > 2:
+                        span = pt.maximum(oldest - youngest, 1e-6)
+                        pm.Potential(f"phase_{older_id}_{younger_id}",
+                                     (2 - num_dates) * pt.log(span))
+                elif older_marginal or younger_marginal:
+                    # Exactly one boundary integrated out, over the interval
+                    # between the extreme date it must clear and the edge of
+                    # the model window:
+                    #     \int_{near}^{far} s^(-K) ds
+                    #         = [ near^(1-K) - far^(1-K) ] / (K - 1)
+                    # Kept EXACT rather than taking the wide-window limit
+                    # near^(1-K): unlike the two-sided case that limit is
+                    # weak at small K (at K=2 with a window ~10x the span it
+                    # is a >10% correction), and the exact form costs one
+                    # extra term. Written as
+                    #     e*log(near) + log1p(-exp(e*(log far - log near)))
+                    # with e = 1-K < 0, which is stable because far > near
+                    # makes the exponential lie strictly inside (0, 1).
+                    if num_dates >= 2:
+                        if older_marginal:
+                            anchor = boundary_vars[younger_id]
+                            near = pt.maximum(oldest - anchor, 1e-6)
+                            far = pt.maximum(model_upper - anchor, near + 1e-6)
+                        else:
+                            anchor = boundary_vars[older_id]
+                            near = pt.maximum(anchor - youngest, 1e-6)
+                            far = pt.maximum(anchor - model_lower, near + 1e-6)
+                        exponent = 1 - num_dates
+                        log_near = pt.log(near)
+                        pm.Potential(
+                            f"phase_{older_id}_{younger_id}",
+                            exponent * log_near
+                            + pt.log1p(-pt.exp(exponent * (pt.log(far) - log_near)))
+                        )
+                else:
+                    # Both sampled: the density applies directly.
+                    if num_dates >= 1:
+                        span = pt.maximum(
+                            boundary_vars[older_id] - boundary_vars[younger_id], 1e-6)
+                        pm.Potential(f"phase_{older_id}_{younger_id}",
+                                     -num_dates * pt.log(span))
+
+            # Ordering, as a smooth steep penalty rather than a hard
+            # switch(..., 0, -inf). A literal -inf Potential gives SMC's
+            # beta-tempering nothing to work with: -inf * beta is still
+            # -inf for every beta > 0, so there's no smooth path from
             # "unconstrained prior" to "constraint enforced" -- the
             # constraint switches on discontinuously at the very first
-            # tempering step. For a short chain of 1-2 constraints enough
-            # prior draws satisfy them by chance for SMC to proceed; for a
-            # longer chain (confirmed on a straightforward 11-sample/
-            # 10-constraint chain) the probability that a particle
-            # satisfies EVERY constraint simultaneously by chance becomes
-            # astronomically small (1/11! for a full strict ordering), so
-            # every particle's logp goes to -inf at once, and PyMC's SMC
-            # weight computation (a difference of logsumexps over -inf
-            # values) divides out to NaN and crashes outright with
+            # tempering step. For a short chain enough prior draws satisfy
+            # it by chance for SMC to proceed; for a longer one (confirmed
+            # on a straightforward 11-sample/10-constraint chain) the
+            # probability that a particle satisfies EVERY constraint at
+            # once becomes astronomically small (1/11! for a full strict
+            # ordering), so every particle's logp goes to -inf together and
+            # PyMC's SMC weight computation (a difference of logsumexps
+            # over -inf values) divides out to NaN and crashes with
             # "ValueError: cannot convert float NaN to integer" --
             # reproduced directly, and confirmed independent of SMC kernel
-            # choice (IMH or MH) and of the Boundary parameters above.
+            # choice (IMH or MH).
             #
             # -softplus(k * (younger - older)) is smooth everywhere, so
             # tempering has an actual gradient to climb from the first
             # stage on: a violating particle gets a large but FINITE
-            # penalty (worse the larger the violation), rather than every
+            # penalty (worse the larger the violation) rather than every
             # violating particle being equally, infinitely bad. k=10
             # (1/years) keeps compliant states at essentially zero penalty
-            # (softplus of a several-year-negative margin is already
-            # ~1e-4) while still making even a same-order-as-typical-
-            # measurement-error violation costly enough to be practically
-            # excluded from the posterior -- confirmed on the same
-            # 11-sample chain: 0 crashes, <1% ordering-violation rate in
-            # the final posterior draws, sensible per-sample results.
-            for older_id, younger_id in older_younger:
-                if older_id not in ages or younger_id not in ages:
-                    continue
-                pm.Potential(
-                    f"constraint_{older_id}_{younger_id}",
-                    -pt.softplus(ORDER_CONSTRAINT_STEEPNESS * (ages[younger_id] - ages[older_id]))
-                )
+            # (softplus of a several-year-negative margin is already ~1e-4)
+            # while still making even a same-order-as-typical-measurement-
+            # error violation costly enough to be practically excluded.
+            #
+            # One constraint per adjacent pair of sequence children, over
+            # the min of the older side and the max of the younger side --
+            # equivalent to the full pairwise cross-product and far cheaper
+            # for large groups.
+            def _terms_to_vars(terms):
+                out = []
+                for kind, tid in terms:
+                    if kind == 'date' and tid in ages:
+                        out.append(ages[tid])
+                    elif kind == 'boundary':
+                        if tid in boundary_vars:
+                            out.append(boundary_vars[tid])
+                        # A marginalized boundary carries no variable to
+                        # constrain: its ordering IS the limit of the
+                        # integral that removed it.
+                return out
 
-            for a_id, b_id in equal_pairs:
-                if a_id not in ages or b_id not in ages:
+            for index, (older_terms, younger_terms) in enumerate(plan.ordering):
+                older_vars = _terms_to_vars(older_terms)
+                younger_vars = _terms_to_vars(younger_terms)
+                if not older_vars or not younger_vars:
                     continue
-                # Soft constraint linking the two *latent* age variables.
-                # Passing observed=ages[b_id] wouldn't be a valid way to
-                # link two random variables (observed must be data, not
-                # another RV) -- Potential with an explicit logp evaluation
-                # is the correct way to add this as a soft constraint
-                # between two continuous latent variables.
+                min_older = pt.min(pt.stack(older_vars)) if len(older_vars) > 1 else older_vars[0]
+                max_younger = pt.max(pt.stack(younger_vars)) if len(younger_vars) > 1 else younger_vars[0]
                 pm.Potential(
-                    f"equal_{a_id}_{b_id}",
-                    pm.logp(pm.Normal.dist(mu=ages[a_id], sigma=100), ages[b_id])
+                    f"order_{index}",
+                    -pt.softplus(ORDER_CONSTRAINT_STEEPNESS * (max_younger - min_older))
                 )
 
             # Likelihood: compare each sample's OBSERVED radiocarbon age
@@ -674,6 +696,27 @@ class BayesianChronology:
             'posterior_samples': posterior.tolist()
         }
 
+    @staticmethod
+    def _sample_power_law_distance(c: np.ndarray, d: np.ndarray, K: int, u: np.ndarray) -> np.ndarray:
+        """
+        Draw the distance s between a marginalized boundary and the boundary
+        opposite it, from s ~ s^(-K) truncated to [c, d], by exact inverse
+        CDF. `u` is uniform(0,1), one per posterior draw.
+
+        This is the one-sided counterpart of _sample_boundaries: it applies
+        when only ONE of a group's two boundaries was integrated out (the
+        other is a sampled variable whose drawn value fixes the origin).
+        """
+        c = np.maximum(c, 1e-9)
+        d = np.maximum(d, c + 1e-9)
+        if K == 1:
+            # \int s^-1 ds = log s
+            return c * (d / c) ** u
+        if K == 0:
+            return c + u * (d - c)
+        e = 1.0 - K
+        return (c ** e + u * (d ** e - c ** e)) ** (1.0 / e)
+
     def extract_results(
         self,
         idata,
@@ -682,66 +725,99 @@ class BayesianChronology:
         groups: Optional[List[Dict]] = None,
     ) -> Dict:
         """
-        Extract and summarize posterior distributions: one entry per
-        sample's calendar age, plus -- for every context/group with 2 or
-        more dated members -- the MODELLED start and end of that
-        context's own span, i.e. its Boundary parameters (see the comment
-        above the Potential loop in build_model for what these are and how
-        they differ from the group's own member ages).
+        Summarize the posterior: one entry per sample's calendar age, plus
+        one per named Boundary in the model tree.
 
-        Start/end are drawn per posterior draw from their exact conditional
-        given that draw's member ages (see _sample_boundaries), completing
-        the marginalize-then-recover scheme build_model() sets up: the two
-        Boundaries are integrated out of the MCMC (which cannot sample them
-        reliably) and recovered afterwards in closed form. The result is a
-        genuine joint posterior sample of (member ages, start, end), free to
-        extend beyond the oldest/youngest dated member exactly as OxCal's
-        Boundary does. Requires build_model() to have been called on this
-        same instance first (it records each context's window); a context
-        it skipped is skipped here too, as is any context with fewer than 2
-        dated members, since a span/boundary isn't meaningful for a single
-        date (or none).
+        Boundaries that build_model() sampled are read straight out of the
+        trace. Boundaries it integrated out are drawn here, per posterior
+        draw, from their exact conditional given that draw -- completing the
+        marginalize-then-recover scheme (see model_tree.classify_boundaries
+        for why they had to be integrated out at all). Either way the result
+        is a genuine joint posterior sample of (dates, boundaries), with the
+        boundaries free to extend beyond the outermost dated sample exactly
+        as OxCal's do.
 
-        Returns {'measurements': {sample_id: {...}}, 'contexts': {group_id:
-        {'name': ..., 'start': {...}, 'end': {...}}}}, where every {...}
-        stats dict has the shape documented in _summarize_posterior.
+        Two recovery cases, matching the span terms in build_model:
+          * both of a group's boundaries marginalized -> the joint
+            conditional p(a, b) ~ (w + a + b)^(-K), via _sample_boundaries.
+          * one marginalized, the other sampled -> a one-sided power law
+            anchored on the sampled one, via _sample_power_law_distance.
+
+        Returns {'measurements': {...}, 'boundaries': {boundary_id:
+        {'name': ..., 'posterior': {...}}}}, every stats dict having the
+        shape documented in _summarize_posterior.
         """
         measurements = measurements or []
-        groups = groups or []
 
         posteriors: Dict[str, np.ndarray] = {
             age_id: idata.posterior[age_var.name].values.flatten()
             for age_id, age_var in ages.items()
         }
-
         measurement_results = {
             age_id: self._summarize_posterior(posterior)
             for age_id, posterior in posteriors.items()
         }
 
-        group_members: Dict[str, List[str]] = defaultdict(list)
-        for m in measurements:
-            gid = m.get('group_id')
-            if gid and m['id'] in posteriors:
-                group_members[gid].append(m['id'])
+        plan = getattr(self, 'model_plan', None)
+        if plan is None:
+            return {'measurements': measurement_results, 'boundaries': {}}
 
-        groups_by_id = {g['id']: g for g in groups}
-        context_windows = getattr(self, 'context_windows', {})
-        context_results = {}
-        for group_id, member_ids in group_members.items():
-            if len(member_ids) < 2:
+        num_draws = len(next(iter(posteriors.values()))) if posteriors else 0
+        rng = np.random.default_rng(42)
+        window_lower = getattr(self, 'model_window', (0.0, 55000.0))[0]
+        window_upper = getattr(self, 'model_window', (0.0, 55000.0))[1]
+
+        boundary_draws: Dict[str, np.ndarray] = {}
+        # Sampled boundaries come straight from the trace.
+        for boundary_id in plan.sampled_boundaries:
+            name = f"boundary_{boundary_id}"
+            if name in idata.posterior:
+                boundary_draws[boundary_id] = idata.posterior[name].values.flatten()
+
+        for group in plan.span_groups:
+            date_ids = [d for d in group.date_ids if d in posteriors]
+            older_id, younger_id = group.older_boundary_id, group.younger_boundary_id
+            older_marginal = older_id in plan.marginalized_boundaries
+            younger_marginal = younger_id in plan.marginalized_boundaries
+            if not (older_marginal or younger_marginal):
                 continue
-            window = context_windows.get(group_id)
-            if window is None:
-                # build_model() skipped this context (no usable window), so
-                # there are no boundaries to report for it.
+            if not date_ids:
+                # Nothing between these boundaries to pin them to; leave any
+                # marginalized one unreported rather than invent a value.
                 continue
-            member_draws = np.stack([posteriors[mid] for mid in member_ids])
-            start_draws, end_draws = self._sample_boundaries(member_draws, window[0], window[1])
-            context_results[group_id] = {
-                'name': groups_by_id.get(group_id, {}).get('name'),
-                'start': self._summarize_posterior(start_draws),
-                'end': self._summarize_posterior(end_draws),
+
+            member_draws = np.stack([posteriors[d] for d in date_ids])
+            oldest = member_draws.max(axis=0)
+            youngest = member_draws.min(axis=0)
+            num_dates = len(date_ids)
+
+            if older_marginal and younger_marginal:
+                start, end = self._sample_boundaries(member_draws, window_lower, window_upper)
+                boundary_draws[older_id] = start
+                boundary_draws[younger_id] = end
+            elif older_marginal:
+                anchor = boundary_draws.get(younger_id)
+                if anchor is None:
+                    continue
+                s = self._sample_power_law_distance(
+                    oldest - anchor, np.full(num_draws, window_upper) - anchor,
+                    num_dates, rng.random(num_draws))
+                boundary_draws[older_id] = anchor + s
+            else:
+                anchor = boundary_draws.get(older_id)
+                if anchor is None:
+                    continue
+                s = self._sample_power_law_distance(
+                    anchor - youngest, anchor - np.full(num_draws, window_lower),
+                    num_dates, rng.random(num_draws))
+                boundary_draws[younger_id] = anchor - s
+
+        boundary_results = {
+            boundary_id: {
+                'name': plan.boundary_names.get(boundary_id, 'Boundary'),
+                'posterior': self._summarize_posterior(draws),
             }
+            for boundary_id, draws in boundary_draws.items()
+        }
 
-        return {'measurements': measurement_results, 'contexts': context_results}
+        return {'measurements': measurement_results, 'boundaries': boundary_results}

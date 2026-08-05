@@ -4,6 +4,7 @@ from app.database import get_db
 from app.schemas.sample import CalibrateRequest, BayesianRequest
 from app.services.calibration import get_curve, CalibrationCurve
 from app.services.bayesian import BayesianChronology
+from app.services.model_tree import migrate_from_relationships
 from app.models import Analysis, RadiocarbonSample, AnalysisResult, StratigraphicRelationship, SampleGroup, Project
 from typing import List, Dict, Optional, Tuple
 import numpy as np
@@ -89,14 +90,55 @@ def _run_bayesian(
         mcmc_tune=bayesian_config.get('mcmc_tune', 1000),
         mcmc_chains=bayesian_config.get('mcmc_chains', 4),
     )
-    model, ages = bayesian.build_model(measurements, relationships, groups)
+
+    # The model engine now works from an explicit OxCal-style model tree
+    # (services/model_tree.py). Contexts + pairwise above/below relationships
+    # are translated into one here -- a site-wide Sequence with each context
+    # as a Phase, bracketed by Boundaries -- so existing analyses and the
+    # existing request shape keep working unchanged while the tree becomes
+    # directly editable.
+    root, _linearized, group_boundaries = migrate_from_relationships(
+        measurements, groups, relationships, lambda: str(uuid.uuid4()),
+    )
+    # build_model matches dates to elements by element_id; the migration puts
+    # each context's samples in the phase carrying that context's own id.
+    tree_measurements = [
+        {**m, 'element_id': m.get('element_id') or m.get('group_id')}
+        for m in measurements
+    ]
+    unassigned = [m for m in tree_measurements if not m.get('element_id')]
+    if unassigned:
+        # Dates with no context still need somewhere to live; give them their
+        # own phase at the end of the sequence rather than rejecting the run.
+        loose_id = str(uuid.uuid4())
+        root['children'].append({
+            'id': loose_id, 'element_type': 'phase', 'name': 'Unassigned dates',
+            'tpq_age_bp': None, 'taq_age_bp': None, 'children': [],
+        })
+        for m in unassigned:
+            m['element_id'] = loose_id
+
+    model, ages = bayesian.build_model(tree_measurements, root)
     idata, ages_dict = bayesian.sample(model, ages)
     extracted = bayesian.extract_results(
         idata, ages_dict,
-        measurements=measurements,
-        groups=groups,
+        measurements=tree_measurements,
     )
-    return extracted['measurements'], extracted['contexts']
+
+    # Report per-context start/end from the boundaries now bracketing each
+    # context, preserving the existing results shape.
+    boundaries = extracted['boundaries']
+    context_results = {}
+    for group_id, (start_bid, end_bid) in group_boundaries.items():
+        start, end = boundaries.get(start_bid), boundaries.get(end_bid)
+        if not start or not end:
+            continue
+        context_results[group_id] = {
+            'name': next((g.get('name') for g in groups if g['id'] == group_id), None),
+            'start': start['posterior'],
+            'end': end['posterior'],
+        }
+    return extracted['measurements'], context_results
 
 @router.post("/analysis/calibrate")
 async def calibrate_single(measurement: CalibrateRequest, db: Session = Depends(get_db)):

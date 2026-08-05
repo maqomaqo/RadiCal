@@ -28,14 +28,26 @@ from app.services.bayesian import BayesianChronology
 from conftest import requires_pymc
 
 
-def _measurement(sample_id, age_bp, group_id=None, error_1sigma=25):
+def _measurement(sample_id, age_bp, element_id=None, error_1sigma=25):
     return {
         "id": sample_id,
         "age_bp": age_bp,
         "error_1sigma": error_1sigma,
         "sample_name": f"Sample {sample_id}",
-        "group_id": group_id,
+        "element_id": element_id,
     }
+
+
+def _boundary(element_id, name):
+    return {"id": element_id, "element_type": "boundary", "name": name, "children": []}
+
+
+def _phase(element_id, name, **kwargs):
+    return {"id": element_id, "element_type": "phase", "name": name, "children": [], **kwargs}
+
+
+def _sequence(element_id, name, children):
+    return {"id": element_id, "element_type": "sequence", "name": name, "children": children}
 
 
 class TestBoundarySampler:
@@ -105,49 +117,111 @@ class TestBoundarySampler:
 
 @requires_pymc
 class TestBoundaryEndToEnd:
+    """
+    End-to-end behaviour of the model tree. A single Phase between two
+    Boundaries is the degenerate case that must keep reproducing exactly what
+    the previous per-context implementation did.
+    """
+
     def test_boundaries_extend_beyond_the_dated_range(self):
         measurements = [
-            _measurement(f"s{i}", 3000 + i * 40, group_id="g1") for i in range(5)
+            _measurement(f"s{i}", 3000 + i * 40, element_id="p1") for i in range(5)
         ]
-        groups = [{"id": "g1", "name": "Phase A", "tpq_age_bp": None, "taq_age_bp": None}]
+        tree = _sequence("root", "Site", [
+            _boundary("b0", "Start"), _phase("p1", "Phase A"), _boundary("b1", "End"),
+        ])
 
         bc = BayesianChronology(mcmc_samples=600, mcmc_tune=600, mcmc_chains=2)
-        model, ages = bc.build_model(measurements, [], groups)
+        model, ages = bc.build_model(measurements, tree)
 
-        # The boundaries are marginalized out, so they are NOT model variables.
+        # Both boundaries are outermost, so both are integrated out rather
+        # than sampled -- exactly the previous implementation's behaviour.
         assert not any("boundary" in v.name for v in model.free_RVs)
-        assert "g1" in bc.context_windows
+        assert bc.model_plan.marginalized_boundaries == {"b0", "b1"}
 
         idata, ages_dict = bc.sample(model, ages)
-        extracted = bc.extract_results(idata, ages_dict, measurements=measurements, groups=groups)
-        ctx = extracted["contexts"]["g1"]
+        extracted = bc.extract_results(idata, ages_dict, measurements=measurements)
 
         member = np.stack(
             [np.asarray(extracted["measurements"][m["id"]]["posterior_samples"]) for m in measurements]
         )
-        start = np.asarray(ctx["start"]["posterior_samples"])
-        end = np.asarray(ctx["end"]["posterior_samples"])
+        start = np.asarray(extracted["boundaries"]["b0"]["posterior"]["posterior_samples"])
+        end = np.asarray(extracted["boundaries"]["b1"]["posterior"]["posterior_samples"])
 
         a = start - member.max(axis=0)
         b = member.min(axis=0) - end
         w = (member.max(axis=0) - member.min(axis=0)).mean()
 
-        # Every draw must enclose that draw's dates...
         assert np.all(a >= -1e-6)
         assert np.all(b >= -1e-6)
-        # ...and on average extend substantially past them (theory: a+b ~ w).
-        # The old collapsed behaviour gave ~3 years here, so this both
-        # asserts correctness and locks out that regression.
+        # Theory for K=5: E[a+b] = 2w/(K-3) = w.
         assert (a + b).mean() == pytest.approx(w, rel=0.35)
         assert (a + b).mean() > 30
 
-    def test_single_member_context_reports_no_boundaries(self):
-        measurements = [_measurement("a", 3000, group_id="g1")]
-        groups = [{"id": "g1", "name": "Phase A", "tpq_age_bp": None, "taq_age_bp": None}]
+    def test_shared_transition_between_two_phases(self):
+        """
+        A Boundary between two Phases in a Sequence is ONE shared parameter:
+        it is sampled (being interior and therefore bounded), while the two
+        outermost boundaries are integrated out.
+        """
+        measurements = (
+            [_measurement(f"a{i}", 3300 + i * 30, element_id="p1") for i in range(4)]
+            + [_measurement(f"c{i}", 3000 + i * 30, element_id="p2") for i in range(4)]
+        )
+        tree = _sequence("root", "Site", [
+            _boundary("b0", "Start"), _phase("p1", "Layer 3"),
+            _boundary("b1", "Transition"), _phase("p2", "Pit 12"),
+            _boundary("b2", "End"),
+        ])
 
-        bc = BayesianChronology(mcmc_samples=200, mcmc_tune=200, mcmc_chains=2)
-        model, ages = bc.build_model(measurements, [], groups)
+        bc = BayesianChronology(mcmc_samples=800, mcmc_tune=800, mcmc_chains=2)
+        model, ages = bc.build_model(measurements, tree)
+
+        assert bc.model_plan.sampled_boundaries == ["b1"]
+        assert bc.model_plan.marginalized_boundaries == {"b0", "b2"}
+        assert sum("boundary" in v.name for v in model.free_RVs) == 1
+
         idata, ages_dict = bc.sample(model, ages)
-        extracted = bc.extract_results(idata, ages_dict, measurements=measurements, groups=groups)
+        extracted = bc.extract_results(idata, ages_dict, measurements=measurements)
 
-        assert "g1" not in extracted["contexts"]
+        start = extracted["boundaries"]["b0"]["posterior"]["posterior_mean"]
+        transition = extracted["boundaries"]["b1"]["posterior"]["posterior_mean"]
+        end = extracted["boundaries"]["b2"]["posterior"]["posterior_mean"]
+
+        older = [extracted["measurements"][f"a{i}"]["posterior_mean"] for i in range(4)]
+        younger = [extracted["measurements"][f"c{i}"]["posterior_mean"] for i in range(4)]
+
+        # Start is older than everything, end younger than everything, and the
+        # shared transition sits between the two phases.
+        assert start > max(older)
+        assert end < min(younger)
+        assert min(younger) < transition < max(older)
+
+    def test_phase_of_sequences_leaves_branches_unordered(self):
+        """Nested groups: two parallel branches, each internally ordered but
+        unordered with respect to each other."""
+        measurements = (
+            [_measurement("a1", 3200, element_id="pa1"), _measurement("a2", 3000, element_id="pa2")]
+            + [_measurement("b1", 3200, element_id="pb1"), _measurement("b2", 3000, element_id="pb2")]
+        )
+        branch_a = _sequence("sa", "Trench A", [_phase("pa1", "A1"), _phase("pa2", "A2")])
+        branch_b = _sequence("sb", "Trench B", [_phase("pb1", "B1"), _phase("pb2", "B2")])
+        tree = _sequence("root", "Site", [
+            {"id": "par", "element_type": "phase", "name": "Parallel", "children": [branch_a, branch_b]},
+        ])
+
+        bc = BayesianChronology(mcmc_samples=200, mcmc_tune=200, mcmc_chains=1)
+        model, _ages = bc.build_model(measurements, tree)
+
+        ordering = bc.model_plan.ordering
+        flat = [
+            ({t for _k, t in older}, {t for _k, t in younger})
+            for older, younger in ordering
+        ]
+        # A1 before A2 and B1 before B2 are constrained...
+        assert ({"a1"}, {"a2"}) in flat
+        assert ({"b1"}, {"b2"}) in flat
+        # ...but nothing orders a branch against the other.
+        for older, younger in flat:
+            assert not (older & {"a1", "a2"} and younger & {"b1", "b2"})
+            assert not (older & {"b1", "b2"} and younger & {"a1", "a2"})
