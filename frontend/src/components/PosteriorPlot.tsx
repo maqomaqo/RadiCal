@@ -226,6 +226,14 @@ export default function PosteriorPlot({
       xaxis: {
         title: calendarAxisTitle(dateFormat),
         zeroline: false,
+        // Time runs left to right, oldest to youngest, as a chronology is
+        // conventionally read. The data is plotted in cal BP, which counts
+        // BACKWARDS from the present, so plotting it on an ascending axis
+        // put the present on the left and the oldest date on the right --
+        // the reverse of every published calibration plot. Reversing the
+        // axis is also what BC/AD needs, since an ascending calendar year is
+        // the same direction.
+        autorange: 'reversed',
         // Null for cal BP -- the values already are cal BP, so Plotly's own
         // tick choice beats anything imposed here.
         ...(ticks ? { tickmode: 'array', tickvals: ticks.tickvals, ticktext: ticks.ticktext } : {}),
