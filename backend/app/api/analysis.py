@@ -712,6 +712,16 @@ async def get_analysis(analysis_id: str, db: Session = Depends(get_db)):
                     "sample_name": s.sample_name,
                     "age_bp": s.age_bp,
                     "error_1sigma": s.error_1sigma,
+                    # What the date was measured on and against. Returned
+                    # because the edit page rebuilds its draft from this
+                    # payload and resubmits it: omitting them made
+                    # loadFromAnalysis fall back to its defaults, so editing
+                    # an analysis rewrote every material as "unknown" and --
+                    # worse, since it changes the result -- recalibrated
+                    # marine samples against the terrestrial curve.
+                    "material_type": s.material_type,
+                    "sample_type": s.sample_type,
+                    "curve_id": s.curve_id,
                     "group_id": s.group_id,
                     "element_id": s.element_id,
                     "tpq_age_bp": s.tpq_age_bp,

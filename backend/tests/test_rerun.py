@@ -10,6 +10,10 @@ The rerun endpoints need a real MCMC run for a bayesian analysis, so those
 are @requires_pymc-marked like the rest of the MCMC-dependent test suite;
 the project-assignment test and the 404 checks don't touch pymc at all.
 """
+import csv
+import io
+import itertools
+
 import pytest
 
 from conftest import requires_pymc
@@ -149,3 +153,124 @@ class TestRerunProject:
         data = rerun_resp.json()["data"]
         assert data["rerun_count"] == 2
         assert data["failed"] == []
+
+
+_ROUND_TRIP_IDS = itertools.count(1)
+
+
+class TestEditRoundTrip:
+    """
+    The edit page rebuilds its draft from GET /api/analysis/{id} and
+    resubmits it, so anything that payload omits is silently replaced by the
+    client's default on save. That made editing an analysis rewrite every
+    material as "unknown" and -- because it changes the calibration, not
+    just a label -- recalibrate marine samples against the terrestrial
+    curve.
+    """
+
+    def _analysis(self, client):
+        """
+        A saved analysis with an explicit tree, so each date has a
+        well-defined phase to be resubmitted with.
+
+        Ids are made unique per call because model element ids are a global
+        primary key (see conftest.client) -- and each test needs its own
+        analysis rather than a shared one, since one of them edits it.
+        """
+        tag = f"rt{next(_ROUND_TRIP_IDS)}"
+        tree = {
+            "id": f"{tag}root", "element_type": "sequence", "name": "Site", "children": [
+                {"id": f"{tag}b0", "element_type": "boundary", "name": "Start", "children": []},
+                {"id": f"{tag}p1", "element_type": "phase", "name": "Only", "children": []},
+                {"id": f"{tag}b1", "element_type": "boundary", "name": "End", "children": []},
+            ],
+        }
+        return client.post(
+            "/api/analysis/bayesian",
+            json={
+                "name": "Round trip",
+                "measurements": [
+                    _measurement(f"{tag}s1", sample_name="Charcoal", material_type="charcoal",
+                                 sample_type="terrestrial", curve_id="shcal20",
+                                 element_id=f"{tag}p1"),
+                    _measurement(f"{tag}s2", age_bp=3100, sample_name="Shell",
+                                 material_type="marine shell", sample_type="marine",
+                                 curve_id="marine20", element_id=f"{tag}p1"),
+                ],
+                "model_tree": tree,
+                "bayesian_config": {"mcmc_samples": 200, "mcmc_tune": 200, "mcmc_chains": 1},
+                "save": True,
+            },
+        )
+
+    @requires_pymc
+    def test_get_returns_what_an_edit_needs_to_resubmit(self, client):
+        created = self._analysis(client)
+        assert created.status_code == 200, created.text
+        analysis_id = created.json()["data"]["id"]
+
+        measurements = client.get(f"/api/analysis/{analysis_id}").json()["data"]["measurements"]
+        by_name = {m["sample_name"]: m for m in measurements}
+
+        assert by_name["Charcoal"]["material_type"] == "charcoal"
+        assert by_name["Charcoal"]["curve_id"] == "shcal20"
+        assert by_name["Charcoal"]["sample_type"] == "terrestrial"
+        assert by_name["Shell"]["material_type"] == "marine shell"
+        assert by_name["Shell"]["curve_id"] == "marine20"
+        assert by_name["Shell"]["sample_type"] == "marine"
+
+    @requires_pymc
+    def test_editing_preserves_material_curve_and_sample_type(self, client):
+        created = self._analysis(client)
+        assert created.status_code == 200, created.text
+        analysis_id = created.json()["data"]["id"]
+        saved = client.get(f"/api/analysis/{analysis_id}").json()["data"]
+
+        # Resubmit exactly as the edit page does: whatever the payload gave
+        # it, falling back to the same defaults it uses for missing fields.
+        replaced = client.put(
+            f"/api/analysis/{analysis_id}/inputs",
+            json={
+                "name": saved["name"],
+                "measurements": [
+                    {
+                        "id": m["id"], "sample_name": m["sample_name"],
+                        "age_bp": m["age_bp"], "error_1sigma": m["error_1sigma"],
+                        "material_type": m.get("material_type") or "unknown",
+                        "sample_type": m.get("sample_type") or "terrestrial",
+                        "curve_id": m.get("curve_id") or "intcal20",
+                        "element_id": m.get("element_id") or m.get("group_id"),
+                    }
+                    for m in saved["measurements"]
+                ],
+                "groups": [], "relationships": [],
+                "model_tree": saved["model_tree"],
+                "bayesian_config": {"mcmc_samples": 200, "mcmc_tune": 200, "mcmc_chains": 1},
+            },
+        )
+        assert replaced.status_code == 200, replaced.text
+
+        after = {
+            m["sample_name"]: m
+            for m in client.get(f"/api/analysis/{analysis_id}").json()["data"]["measurements"]
+        }
+        assert after["Charcoal"]["material_type"] == "charcoal"
+        assert after["Shell"]["material_type"] == "marine shell"
+        # The curve is the part that changes the numbers, not just a label.
+        assert after["Charcoal"]["curve_id"] == "shcal20"
+        assert after["Shell"]["curve_id"] == "marine20"
+        assert after["Shell"]["sample_type"] == "marine"
+
+    @requires_pymc
+    def test_the_csv_reports_the_material_that_was_entered(self, client):
+        created = self._analysis(client)
+        assert created.status_code == 200, created.text
+        analysis_id = created.json()["data"]["id"]
+
+        rows = list(csv.reader(io.StringIO(
+            client.get(f"/api/results/{analysis_id}/export/csv").text)))
+        header = rows[0]
+        material, curve = header.index('Material'), header.index('Curve')
+        reported = {r[4]: (r[material], r[curve]) for r in rows[1:] if r[1] == 'Date'}
+        assert reported["Charcoal"] == ("charcoal", "shcal20")
+        assert reported["Shell"] == ("marine shell", "marine20")
