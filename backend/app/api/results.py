@@ -341,7 +341,9 @@ async def get_graphs(analysis_id: str, db: Session = Depends(get_db)):
     data already included in GET /api/analysis/{id}. This exists for API
     consumers that only want the plot data.
     """
-    data = _gather_export_rows(analysis_id, db)
+    # An unknown analysis is a 404, not an empty graph list.
+    if not db.query(Analysis.id).filter(Analysis.id == analysis_id).first():
+        raise HTTPException(status_code=404, detail="Analysis not found")
     results = db.query(AnalysisResult).filter(AnalysisResult.analysis_id == analysis_id).all()
     return {
         "success": True,
