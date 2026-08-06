@@ -581,3 +581,88 @@ class TestPdfExport:
         # Checked before the format is refused, so a bad id is reported as a
         # bad id rather than as an unbuilt feature.
         assert client.get("/api/results/ghost/pdf").status_code == 404
+
+
+class TestCsvDateFormat:
+    """
+    The download reports in whatever format the results page is showing,
+    carried on the query string. Formatted columns sit BESIDE the cal BP
+    ones rather than replacing them: "1247 BC" reads better than "3197.1"
+    but you cannot sort or compute on it.
+    """
+
+    def test_cal_bp_is_unchanged_from_no_format_at_all(self, client):
+        """
+        The numbers already are cal BP, so a formatted counterpart would
+        only restate them with a suffix. Nothing is added, and the default
+        export stays exactly what it was -- anything already parsing it
+        keeps working.
+        """
+        analysis_id = _calibration(client)
+        plain = client.get(f"/api/results/{analysis_id}/export/csv").text
+        explicit = client.get(f"/api/results/{analysis_id}/export/csv?date_format=calBP").text
+        assert explicit == plain
+        assert 'BC/AD' not in plain
+
+    def test_a_chosen_format_adds_a_column_beside_each_calendar_age(self, client):
+        analysis_id = _calibration(client)
+        base_header, _ = _csv_rows(client, analysis_id)
+        header, rows = _csv_rows(client, analysis_id, "export/csv?date_format=bcad")
+
+        # The original columns are untouched and still first.
+        assert header[:len(base_header)] == base_header
+        assert header[len(base_header):] == [
+            'Unmodelled 95% HPD (BC/AD)', 'Posterior Mean (BC/AD)',
+            'Posterior Median (BC/AD)', '68% HPD (BC/AD)', '95% HPD (BC/AD)',
+            'TPQ BP (BC/AD)', 'TAQ BP (BC/AD)',
+        ]
+
+        row = rows[0]
+        numeric = row[header.index('Posterior Mean')]
+        formatted = row[header.index('Posterior Mean (BC/AD)')]
+        # Both present: the numeric one still numeric, the other readable.
+        assert float(numeric) > 0
+        assert formatted.endswith(' BC') or formatted.startswith('AD ')
+
+    def test_only_calendar_ages_are_converted(self, client):
+        """
+        Age BP is a radiocarbon age, and the error and standard deviation
+        are durations in years. None is a calendar date, so none gets a
+        BC/AD counterpart -- converting a duration would be nonsense.
+        """
+        analysis_id = _calibration(client)
+        header, _ = _csv_rows(client, analysis_id, "export/csv?date_format=bcad")
+        for never_converted in ('Age BP', '1-Sigma Error', 'Posterior Std'):
+            assert f'{never_converted} (BC/AD)' not in header
+
+    def test_bce_ce_is_labelled_as_such(self, client):
+        analysis_id = _calibration(client)
+        header, rows = _csv_rows(client, analysis_id, "export/csv?date_format=bce_ce")
+        assert 'Posterior Mean (BCE/CE)' in header
+        value = rows[0][header.index('Posterior Mean (BCE/CE)')]
+        assert value.endswith(' BCE') or value.endswith(' CE')
+
+    def test_an_unrecognised_format_still_downloads(self, client):
+        # A bad query string shouldn't cost someone their export.
+        analysis_id = _calibration(client)
+        plain = client.get(f"/api/results/{analysis_id}/export/csv").text
+        assert client.get(
+            f"/api/results/{analysis_id}/export/csv?date_format=klingon"
+        ).text == plain
+
+    def test_the_table_alias_honours_it_too(self, client):
+        analysis_id = _calibration(client)
+        table = client.get(f"/api/results/{analysis_id}/table?date_format=bcad").text
+        exported = client.get(f"/api/results/{analysis_id}/export/csv?date_format=bcad").text
+        assert table == exported
+
+    def test_the_post_dispatcher_passes_it_through(self, client):
+        analysis_id = _calibration(client)
+        posted = client.post(
+            f"/api/results/{analysis_id}/export",
+            json={"format": "csv", "date_format": "bcad"},
+        )
+        assert posted.status_code == 200
+        assert posted.text == client.get(
+            f"/api/results/{analysis_id}/export/csv?date_format=bcad"
+        ).text

@@ -263,7 +263,12 @@ export default function Results() {
   const handleExportCSV = async () => {
     if (!analysisId) return
     try {
-      const response = await fetch(`/api/results/${analysisId}/export/csv`)
+      // Carry the reporting format being displayed, so the download reads
+      // in the same convention as the screen. The cal BP columns come
+      // regardless; the format only adds a counterpart beside each of them.
+      const response = await fetch(
+        `/api/results/${analysisId}/export/csv?date_format=${encodeURIComponent(dateFormat)}`
+      )
       const blob = await response.blob()
       const url = window.URL.createObjectURL(blob)
       const a = document.createElement('a')

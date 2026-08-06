@@ -5,6 +5,7 @@ from app.database import get_db
 from app.models import Analysis, RadiocarbonSample, AnalysisResult, ModelElement
 from app.services.model_tree import rows_to_tree, flatten_structure
 from app.services.calibration import get_curve
+from app.services import date_format as date_format_service
 from typing import Dict, List, Optional
 import io
 import csv
@@ -165,6 +166,31 @@ CSV_HEADER = [
     '68% HPD', '95% HPD', 'TPQ BP', 'TAQ BP',
 ]
 
+# The calendar-age columns, in the order their formatted counterparts are
+# appended. Everything else is left alone on purpose: Age BP is a
+# radiocarbon age, and 1-Sigma Error and Posterior Std are durations in
+# years -- none of them is a calendar date, so converting them to BC/AD
+# would be nonsense.
+_FORMATTED_COLUMNS = [
+    'Unmodelled 95% HPD', 'Posterior Mean', 'Posterior Median',
+    '68% HPD', '95% HPD', 'TPQ BP', 'TAQ BP',
+]
+
+
+def _csv_header(date_format: str) -> List[str]:
+    """
+    The header, with a formatted counterpart for each calendar-age column
+    when the chosen format isn't cal BP.
+
+    Nothing is added for cal BP: the numbers already are cal BP, so the
+    extra columns would only restate them with a suffix, and the default
+    export stays byte-for-byte what it was.
+    """
+    era = date_format_service.ERA_LABELS.get(date_format)
+    if not era:
+        return list(CSV_HEADER)
+    return list(CSV_HEADER) + [f"{name} ({era})" for name in _FORMATTED_COLUMNS]
+
 
 def _measurement_cells(row: Optional[Dict]) -> List:
     """The measured half of a date row; blank for a structural row."""
@@ -210,7 +236,51 @@ def _posterior_cells(row: Optional[Dict]) -> List:
     ]
 
 
-def _build_csv(analysis_id: str, db: Session) -> str:
+def _formatted_cells(
+    result: Optional[Dict],
+    tpq_age_bp: Optional[float],
+    taq_age_bp: Optional[float],
+    date_format: str,
+) -> List:
+    """
+    The same calendar ages again, in the user's reporting format -- what the
+    results page is showing them. Alongside the cal BP columns rather than
+    replacing them, so the file stays sortable and computable: "1247 BC" is
+    the readable form but arithmetic on it is not.
+
+    Order must match _FORMATTED_COLUMNS.
+    """
+    fmt = date_format_service
+    if not result:
+        result = {}
+    return [
+        fmt.format_hpd_ranges(result.get('unmodelled_hpd_95_ranges'), date_format),
+        fmt.format_age(result.get('posterior_mean'), date_format),
+        fmt.format_age(result.get('posterior_median'), date_format),
+        fmt.format_hpd_ranges(result.get('hpd_68_ranges'), date_format),
+        fmt.format_hpd_ranges(result.get('hpd_95_ranges'), date_format),
+        fmt.format_age(tpq_age_bp, date_format),
+        fmt.format_age(taq_age_bp, date_format),
+    ]
+
+
+def _boundary_as_result(posterior: Dict) -> Dict:
+    """A boundary's posterior reshaped like an export row, so it reports
+    through the same cells a date does."""
+    return {
+        'posterior_mean': posterior.get('posterior_mean'),
+        'posterior_median': posterior.get('posterior_median'),
+        'posterior_std': posterior.get('posterior_std'),
+        'hpd_68_ranges': posterior.get('hpd_68_ranges'),
+        'hpd_95_ranges': posterior.get('hpd_95_ranges'),
+        'hpd_68_min': (posterior.get('hpd_68') or [None, None])[0],
+        'hpd_68_max': (posterior.get('hpd_68') or [None, None])[1],
+        'hpd_95_min': (posterior.get('hpd_95') or [None, None])[0],
+        'hpd_95_max': (posterior.get('hpd_95') or [None, None])[1],
+    }
+
+
+def _build_csv(analysis_id: str, db: Session, date_format: Optional[str] = None) -> str:
     """
     One row per modelled entity -- sequences, phases, boundaries and dates
     -- in the model's own reading order, matching the results table
@@ -219,19 +289,30 @@ def _build_csv(analysis_id: str, db: Session) -> str:
     `Order` is written out because a spreadsheet sort would otherwise
     destroy the one thing the file exists to convey; re-sorting on it
     restores the structure.
+
+    `date_format` is the reporting format the results page is showing. When
+    it isn't cal BP, each calendar-age column gains a formatted counterpart
+    beside it -- see _csv_header. The cal BP columns are always present, so
+    the file remains numeric whatever the reader chose.
     """
+    date_format = date_format_service.normalise(date_format)
+    formatted = date_format in date_format_service.ERA_LABELS
+
     data = _gather_export_rows(analysis_id, db)
     analysis = data['analysis']
 
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(CSV_HEADER)
+    writer.writerow(_csv_header(date_format))
 
     structure = _structure_rows(analysis_id, db, data['rows'], data['samples_by_id'])
 
     if not data['rows'] and not structure:
         writer.writerow([f'No results for analysis "{analysis.name}" ({analysis.status})'])
         return output.getvalue()
+
+    def extra(result, tpq, taq):
+        return _formatted_cells(result, tpq, taq, date_format) if formatted else []
 
     # No stored structure (a calibration, or an analysis predating trees):
     # fall back to a flat list of dates so the export still carries the
@@ -242,31 +323,24 @@ def _build_csv(analysis_id: str, db: Session) -> str:
                 [order, 'Date', 0, '', row['sample_name'] or row['sample_id'] or '']
                 + _measurement_cells(row) + [_unmodelled_cell(row)]
                 + _posterior_cells(row) + ['', '']
+                + extra(row, None, None)
             )
         return output.getvalue()
 
     for order, row in enumerate(structure, start=1):
         posterior = row.get('posterior')
         unmodelled = ''
+        result = None
         if row['kind'] == 'date':
-            measured, modelled = _measurement_cells(row.get('result')), _posterior_cells(row.get('result'))
-            unmodelled = _unmodelled_cell(row.get('result'))
+            result = row.get('result')
+            measured, modelled = _measurement_cells(result), _posterior_cells(result)
+            unmodelled = _unmodelled_cell(result)
         elif posterior:
             # A boundary's posterior is summary-shaped, not a result row.
             # It has no unmodelled counterpart either -- a boundary exists
             # only as a modelled parameter.
-            measured = _measurement_cells(None)
-            modelled = _posterior_cells({
-                'posterior_mean': posterior.get('posterior_mean'),
-                'posterior_median': posterior.get('posterior_median'),
-                'posterior_std': posterior.get('posterior_std'),
-                'hpd_68_ranges': posterior.get('hpd_68_ranges'),
-                'hpd_95_ranges': posterior.get('hpd_95_ranges'),
-                'hpd_68_min': (posterior.get('hpd_68') or [None, None])[0],
-                'hpd_68_max': (posterior.get('hpd_68') or [None, None])[1],
-                'hpd_95_min': (posterior.get('hpd_95') or [None, None])[0],
-                'hpd_95_max': (posterior.get('hpd_95') or [None, None])[1],
-            })
+            result = _boundary_as_result(posterior)
+            measured, modelled = _measurement_cells(None), _posterior_cells(result)
         else:
             measured, modelled = _measurement_cells(None), _posterior_cells(None)
 
@@ -275,15 +349,16 @@ def _build_csv(analysis_id: str, db: Session) -> str:
             + measured + [unmodelled] + modelled
             + [row['tpq_age_bp'] if row['tpq_age_bp'] is not None else '',
                row['taq_age_bp'] if row['taq_age_bp'] is not None else '']
+            + extra(result, row['tpq_age_bp'], row['taq_age_bp'])
         )
 
     return output.getvalue()
 
 
 @router.get("/results/{analysis_id}/table")
-async def export_table(analysis_id: str, db: Session = Depends(get_db)):
+async def export_table(analysis_id: str, date_format: Optional[str] = None, db: Session = Depends(get_db)):
     """Export results as a CSV table (same content as /export/csv, kept as a separate route for backwards compatibility)."""
-    csv_content = _build_csv(analysis_id, db)
+    csv_content = _build_csv(analysis_id, db, date_format)
     return StreamingResponse(
         iter([csv_content]),
         media_type="text/csv",
@@ -292,9 +367,16 @@ async def export_table(analysis_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/results/{analysis_id}/export/csv")
-async def export_csv(analysis_id: str, db: Session = Depends(get_db)):
-    """Export an analysis's results as CSV -- one row per sample, with real posterior/HPD data."""
-    csv_content = _build_csv(analysis_id, db)
+async def export_csv(analysis_id: str, date_format: Optional[str] = None, db: Session = Depends(get_db)):
+    """
+    Export an analysis's results as CSV, in the model's own reading order.
+
+    `date_format` (calBP / bcad / bce_ce) is the reporting format the
+    results page is showing; when it isn't cal BP each calendar-age column
+    gains a formatted counterpart beside it. An unrecognised value falls
+    back to cal BP rather than failing the download.
+    """
+    csv_content = _build_csv(analysis_id, db, date_format)
     return StreamingResponse(
         iter([csv_content]),
         media_type="text/csv",
@@ -424,7 +506,7 @@ async def export_results(analysis_id: str, options: Dict, db: Session = Depends(
     format_type = options.get('format', 'csv')
 
     if format_type == 'csv':
-        return await export_csv(analysis_id, db)
+        return await export_csv(analysis_id, options.get('date_format'), db)
     elif format_type == 'json':
         return await export_json(analysis_id, db)
     elif format_type == 'pdf':
