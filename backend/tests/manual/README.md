@@ -34,6 +34,27 @@ Reference figures at the time of writing, for the model as it now stands:
 | `order` (pure ordering) | 1.01 | <1 yr | 1.0 |
 | `multiphase` (3 phases × 4 dates) | 0.94 | 21 yr | 1.02 |
 
+## If you write another cross-check
+
+Two traps, both found the hard way:
+
+- **Don't floor `(max - min)` at a tiny epsilon on a discrete grid.** The
+  `(max - min)^(2-K)` factor is integrable in the continuum because the
+  coincident-dates set has measure zero, but on a grid that set is a real
+  cell, and a `1e-9` floor hands it a weight of `1e9^(K-2)` that swamps the
+  whole integral — every date's marginal then comes back identical. Floor at
+  the grid spacing. The same spike is a real attractor for samplers: a
+  Metropolis chain started with all dates coincident never leaves.
+- **Match the boundary integration window** to the one `bayesian.py` used
+  (`BayesianChronology.model_window`) before comparing. `bayesian.py` takes
+  the wide-window limit for a two-sided marginalized group; integrating over
+  a different finite window shifts the answer by a few years at K = 6-8.
+
+`phase_marginals` has been checked against exhaustive K-dimensional
+integration of the same target at K = 3, 4 and 6 (agreeing to 1-2 years and
+to 0.02 in tail mass), and against an independent random-walk Metropolis
+chain, so it can be trusted at the group sizes tested here.
+
 ## Known gap: OxCal's UniformSpanPrior
 
 `bayesian.py` does not implement OxCal's `1/(b_1 - b_n)^(n-2)` span-prior

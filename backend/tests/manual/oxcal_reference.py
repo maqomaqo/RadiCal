@@ -31,6 +31,19 @@ passing over the boundaries (a sequence).
 import numpy as np
 
 
+def _rescaled(log_weights):
+    """
+    Shift a log-weight array by its own finite maximum, ready to exponentiate.
+    Entries that are -inf stay -inf (exp -> 0); an all -inf array is returned
+    unchanged. Doing this per-array rather than against a shared constant is
+    what keeps exp() from overflowing -- see the note in phase_marginals.
+    """
+    finite = np.isfinite(log_weights)
+    if not np.any(finite):
+        return np.where(finite, log_weights, -np.inf)
+    return np.where(finite, log_weights - log_weights[finite].max(), -np.inf)
+
+
 def likelihood_on_grid(curve, grid, age_bp, error_1sigma, delta_r=0.0, delta_r_error=0.0):
     """Unnormalised calibration likelihood L(t) on an arbitrary calendar grid."""
     c14, curve_err = curve.interpolate(grid)
@@ -96,7 +109,14 @@ def phase_marginals(curve, grid, samples):
     for j in range(K):
         # G = W / F_j: every other date's contribution, this one left free.
         log_G = np.where(np.isfinite(log_W), log_W - log_F[j], -np.inf)
-        G = np.exp(np.where(np.isfinite(log_G), log_G - shift, -np.inf))
+        # Rescaled by its own maximum rather than the joint's, purely
+        # defensively: dividing out F_j can only raise log_G above log_W
+        # (F_j <= 1), by hundreds of nats where date j has little mass in the
+        # interval, and the joint shift would let those entries overflow to
+        # inf and be zeroed just below. Not observed to bite at K <= 8 on
+        # real data -- the marginals are unchanged by this -- but each one is
+        # normalised separately anyway, so the safer shift is free.
+        G = np.exp(_rescaled(log_G))
         G = np.where(np.isfinite(G), G, 0.0)
         # S[k] = sum over {tb <= k} x {ta >= k}: cumulative down b, reverse-
         # cumulative up a, read off the diagonal.
@@ -220,7 +240,8 @@ def sequence_marginals(curve, grid, groups, span_correction=False):
             # Weight over (b_(i+1), b_i) with this date's own integral removed.
             with np.errstate(invalid='ignore'):
                 lg = np.where(np.isfinite(log_T[i]), log_T[i] - log_F[i][j], -np.inf)
-            G = np.exp(np.where(np.isfinite(lg), lg - scale, -np.inf))
+            # Per-date rescaling, for the overflow reason in phase_marginals.
+            G = np.exp(_rescaled(lg))
             G = np.where(np.isfinite(G), G, 0.0)
             W = G * alpha[i][None, :] * beta[i + 1][:, None]
             # Sum over {b_i >= t} x {b_(i+1) <= t}, read off the diagonal.
@@ -268,7 +289,7 @@ def _with_span_correction(curve, grid, groups, T, log_T, log_F, n_bounds, scale=
         for j, m in enumerate(members):
             with np.errstate(invalid='ignore'):
                 lg = np.where(np.isfinite(log_T[i]), log_T[i] - log_F[i][j], -np.inf)
-            G = np.exp(np.where(np.isfinite(lg), lg - scale, -np.inf))
+            G = np.exp(_rescaled(lg))
             G = np.where(np.isfinite(G), G, 0.0)
             # Sum the (b3, b2, b1) cube down to the pair of boundaries that
             # actually enclose this date, keeping [younger, older] order.
