@@ -51,7 +51,7 @@ import {
   saveDateFormatPreference,
   HPDRange,
 } from '@/utils/dateFormat'
-import { hpdRangesFromCurve, hpdEnvelopeFromHistogram } from '@/utils/hpd'
+import { hpdEnvelopeFromHistogram } from '@/utils/hpd'
 import type { MatrixMeasurement, DraftGroup, DraftRelationship, ModelElement, PosteriorSummary } from '@/types'
 
 interface AnalysisResult {
@@ -94,7 +94,25 @@ interface SampleResult {
   // GET /api/analysis/:id), so "unmodelled vs modelled" can be
   // compared side by side. For a calibration-only analysis,
   // probability_distribution above already *is* the unmodelled result.
-  unmodelled_probability_distribution?: Array<[number, number]> | null
+  //
+  // Served as finished HPD ranges, one entry per confidence level this
+  // page offers, rather than a series to derive them from: the server
+  // computes them over the calibration curve's full grid, where deriving
+  // them here would only have the plottable series, capped at 200 points.
+  // That difference showed up as the screen and the CSV disagreeing in
+  // their last digits about the same calibration.
+  unmodelled_hpd_ranges?: Array<{ confidence: number; ranges: HPDRange[] }> | null
+}
+
+/** The precomputed unmodelled ranges for the confidence currently selected. */
+function unmodelledRangesFor(
+  result: SampleResult | undefined,
+  confidence: number
+): HPDRange[] {
+  const match = result?.unmodelled_hpd_ranges?.find(
+    (entry) => Math.abs(entry.confidence - confidence) < 1e-6
+  )
+  return match ? match.ranges : []
 }
 
 // The three standard Gaussian-equivalent confidence levels radiocarbon
@@ -142,7 +160,7 @@ function StructureTableRow({
   const distribution = isDate ? result?.probability_distribution : posterior?.probability_distribution
   const envelope = distribution ? hpdEnvelopeFromHistogram(distribution, confidence) : null
   const unmodelledRanges = isDate && isBayesian
-    ? hpdRangesFromCurve(result?.unmodelled_probability_distribution, confidence)
+    ? unmodelledRangesFor(result, confidence)
     : []
 
   const limiters = [
@@ -751,7 +769,7 @@ export default function Results() {
                   ))
                 : analysis.results.map((result, idx) => {
                     const unmodelledRanges = isBayesian
-                      ? hpdRangesFromCurve(result.unmodelled_probability_distribution, confidence)
+                      ? unmodelledRangesFor(result, confidence)
                       : []
                     const modelledEnvelope = hpdEnvelopeFromHistogram(result.probability_distribution, confidence)
                     return (

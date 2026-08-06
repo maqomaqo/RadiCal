@@ -666,3 +666,66 @@ class TestCsvDateFormat:
         assert posted.text == client.get(
             f"/api/results/{analysis_id}/export/csv?date_format=bcad"
         ).text
+
+
+class TestUnmodelledRangesOnTheAnalysisPayload:
+    """
+    The results page reads its unmodelled figures from GET /api/analysis/{id}.
+    It used to be handed the plottable series and derive the HPD ranges
+    itself, from at most 200 points -- so the screen and the CSV disagreed in
+    their last digits about the same calibration. The ranges are now computed
+    server-side over the curve's full grid and served finished.
+    """
+
+    @requires_pymc
+    def test_serves_finished_ranges_at_each_level_the_page_offers(self, client):
+        from app.api.analysis import REPORTING_CONFIDENCE_LEVELS
+
+        analysis_id = TestJsonStructure()._structured(client)
+        results = client.get(f"/api/analysis/{analysis_id}").json()["data"]["results"]
+        row = results[0]
+
+        assert [e["confidence"] for e in row["unmodelled_hpd_ranges"]] == list(
+            REPORTING_CONFIDENCE_LEVELS
+        )
+        for entry in row["unmodelled_hpd_ranges"]:
+            assert entry["ranges"], entry["confidence"]
+            # An HPD set is built from whole grid points, so its coverage
+            # lands at or just above the level asked for -- never under.
+            total = sum(r["probability_percent"] for r in entry["ranges"])
+            assert entry["confidence"] * 100 <= total < entry["confidence"] * 100 + 2
+
+        # The series it used to derive them from is no longer sent: nothing
+        # read it any more, and it was 200 points per date.
+        assert "unmodelled_probability_distribution" not in row
+
+    @requires_pymc
+    def test_the_ranges_are_the_full_grid_calculation(self, client):
+        """
+        The whole point of moving this server-side. Asserted against the
+        curve directly, so a regression to deriving them from the downsampled
+        series would show up here rather than as a quiet last-digit drift
+        between the screen and the export.
+        """
+        from app.services.calibration import get_curve
+
+        analysis_id = TestJsonStructure()._structured(client)
+        data = client.get(f"/api/analysis/{analysis_id}").json()["data"]
+        samples = {m["id"]: m for m in data["measurements"]}
+
+        for row in data["results"]:
+            sample = samples[row["sample_id"]]
+            curve = get_curve(sample["curve_id"])
+            cal_ages, probs = curve.calibrate(
+                sample["age_bp"], sample["error_1sigma"],
+                sample.get("delta_r"), sample.get("delta_r_error"),
+            )
+            for entry in row["unmodelled_hpd_ranges"]:
+                expected = curve.get_hpd_ranges(cal_ages, probs, entry["confidence"])
+                assert entry["ranges"] == expected, entry["confidence"]
+
+    def test_a_plain_calibration_has_none(self, client):
+        # Its stored distribution already IS the unmodelled result.
+        analysis_id = _calibration(client)
+        row = client.get(f"/api/analysis/{analysis_id}").json()["data"]["results"][0]
+        assert row["unmodelled_hpd_ranges"] is None

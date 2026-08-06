@@ -20,6 +20,14 @@ import uuid
 
 router = APIRouter()
 
+# The confidence levels the Results page offers (its CONFIDENCE_OPTIONS):
+# the Gaussian-equivalent 1/2/3-sigma coverages radiocarbon results are
+# conventionally reported at. Unmodelled HPD ranges are precomputed at all
+# three so switching the selector doesn't need a refetch -- and so the page
+# never has to derive them from a downsampled plot series, which is what
+# used to make it disagree with the CSV in the last digit.
+REPORTING_CONFIDENCE_LEVELS = (0.682, 0.954, 0.997)
+
 
 def _validate_project_id(project_id: Optional[str], db: Session) -> Optional[str]:
     """Look up a project_id supplied on an analysis request. Returns it
@@ -696,6 +704,14 @@ async def get_analysis(analysis_id: str, db: Session = Depends(get_db)):
     # age_bp/error_1sigma/curve_id with nothing to keep in sync. Not
     # meaningful for a calibration-only analysis, where the single stored
     # `probability_distribution` already *is* the unmodelled result.
+    #
+    # The HPD ranges themselves are returned, not the plottable series they
+    # used to be derived from. The page only ever used that series to
+    # recompute these ranges, and doing so client-side worked from a
+    # distribution downsampled to at most 200 points -- so the figure on
+    # screen disagreed in its last digits with the CSV, which computes the
+    # same thing over the curve's full grid. Same calibration, two
+    # resolutions. Now there is one.
     unmodelled_by_sample_id: Dict[str, list] = {}
     if analysis.analysis_type == 'bayesian':
         for r in results:
@@ -708,7 +724,10 @@ async def get_analysis(analysis_id: str, db: Session = Depends(get_db)):
                     sample.age_bp, sample.error_1sigma,
                     sample.delta_r, sample.delta_r_error,
                 )
-                unmodelled_by_sample_id[r.sample_id] = curve.get_display_distribution(cal_ages, probs)
+                unmodelled_by_sample_id[r.sample_id] = [
+                    {'confidence': level, 'ranges': curve.get_hpd_ranges(cal_ages, probs, level)}
+                    for level in REPORTING_CONFIDENCE_LEVELS
+                ]
             except Exception:
                 # A sample whose curve_id can't be resolved (e.g. an old
                 # analysis predating a curve rename) shouldn't break the
@@ -805,7 +824,9 @@ async def get_analysis(analysis_id: str, db: Session = Depends(get_db)):
                     "hpd_68_ranges": r.hpd_68_ranges,
                     "hpd_95_ranges": r.hpd_95_ranges,
                     "probability_distribution": r.probability_distribution,
-                    "unmodelled_probability_distribution": unmodelled_by_sample_id.get(r.sample_id),
+                    # [{confidence, ranges}] at each level the page offers,
+                    # computed over the curve's full grid -- see above.
+                    "unmodelled_hpd_ranges": unmodelled_by_sample_id.get(r.sample_id),
                 }
                 for r in results
             ]
