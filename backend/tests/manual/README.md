@@ -17,7 +17,8 @@ Run inside the backend container:
 docker compose exec backend python tests/manual/verify_model.py all
 ```
 
-or one check at a time: `phase`, `sequence`, `order`, `multiphase`, `nuts`.
+or one check at a time: `phase`, `sequence`, `order`, `multiphase`, `nenthorn`,
+`nuts`.
 
 **Reading the output.** Look for `app vs reference: width ratio` near 1.0 and a
 small `max |mean diff|`. On `multiphase`, also check `worst r_hat` (should be
@@ -33,6 +34,43 @@ Reference figures at the time of writing, for the model as it now stands:
 | `sequence` (2 phases) | 0.97 | 5 yr | — (one boundary sampled) |
 | `order` (pure ordering) | 1.01 | <1 yr | 1.0 |
 | `multiphase` (3 phases × 4 dates) | 0.94 | 21 yr | 1.02 |
+
+## `nenthorn`: against a real OxCal 4.4 run
+
+`tests/fixtures/oxcal/` holds an actual OxCal analysis (Nenthorn, Otago;
+SHCal20; default UniformSpanPrior and resolution; no outlier model), including
+the `.oxcal` model definition and the full exported distributions. The
+UNMODELLED half of that comparison is asserted in
+`tests/test_oxcal_agreement.py` and passes tightly: distribution overlap
+0.978-0.983 and every reported range edge within 2 years, on eight bimodal
+dates.
+
+The MODELLED half does not yet agree, and `nenthorn` is where that is
+measured. The model is a Sequence holding two sibling Sequences (Quarry, then
+Rockshelter), so it orders every Quarry date before every Rockshelter date.
+Run as written, and with that ordering dropped:
+
+| | width ratio | overlap | secondary lobe (AD 1370-1420) |
+|---|---|---|---|
+| OxCal 4.4 | — | — | 0.126 |
+| app, ordered (as the file defines it) | 0.85 | 0.72 | 0.180 |
+| app, ordering dropped | 1.05 | 0.77 | 0.056 |
+
+Both app runs converge cleanly (r_hat 1.01, ess > 1500), so this is not a
+sampling failure. The ordered run satisfies the constraint by pushing Quarry
+entirely into the early calibration lobe (secondary-lobe mass 0.000-0.001) and
+Rockshelter largely into the late one (0.27-0.32) — a chronological break at
+AD 1350 that is an artefact of the calibration wiggle, not of the data. OxCal
+instead keeps both groups spanning both lobes with only about 11 years of
+separation between their means, which is a much weaker effect than a hard
+3-before-5 constraint produces.
+
+So OxCal 4.4 appears to order sibling groups that carry no Boundary of their
+own far more weakly than this app's hard constraint does, and how it does that
+is not established here. The experiment that would settle it is the same model
+re-run in OxCal with the two branches explicitly unordered (both inside one
+`Phase`): if that output matches what is in the fixture, OxCal was not
+enforcing the ordering at all.
 
 ## If you write another cross-check
 

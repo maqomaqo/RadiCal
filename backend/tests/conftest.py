@@ -30,10 +30,19 @@ _DB_FD, _DB_PATH = tempfile.mkstemp(suffix=".db", prefix="radiocarbon_test_")
 os.close(_DB_FD)
 os.environ["DATABASE_URL"] = f"sqlite:///{_DB_PATH}"
 
-os.environ.setdefault(
-    "INTCAL_CURVE_PATH",
-    os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "..", "calibration_data", "intcal20.14c")),
-)
+def _curve_path(filename):
+    return os.path.normpath(
+        os.path.join(os.path.dirname(__file__), "..", "..", "calibration_data", filename)
+    )
+
+
+# calibration.py's own fallbacks look inside backend/, where the curves are
+# not checked in -- they live at the repo root and are mounted to /app/data in
+# the container. Point every curve at the repo copy so tests find them whether
+# or not they run under docker compose.
+os.environ.setdefault("INTCAL_CURVE_PATH", _curve_path("intcal20.14c"))
+os.environ.setdefault("MARINE_CURVE_PATH", _curve_path("marine20.14c"))
+os.environ.setdefault("SHCAL_CURVE_PATH", _curve_path("shcal20.14c"))
 
 PYMC_AVAILABLE = importlib.util.find_spec("pymc") is not None
 

@@ -1,0 +1,665 @@
+"index","op","name","z","type","value","probability"
+3,"Boundary","Start Nenthorn",,"posterior",1060.5,0
+3,"Boundary","Start Nenthorn",,"posterior",1065.5,4.309e-7
+3,"Boundary","Start Nenthorn",,"posterior",1070.5,8.287e-7
+3,"Boundary","Start Nenthorn",,"posterior",1075.5,8.287e-7
+3,"Boundary","Start Nenthorn",,"posterior",1080.5,4.309e-7
+3,"Boundary","Start Nenthorn",,"posterior",1085.5,4.309e-7
+3,"Boundary","Start Nenthorn",,"posterior",1090.5,4.309e-7
+3,"Boundary","Start Nenthorn",,"posterior",1095.5,0
+3,"Boundary","Start Nenthorn",,"posterior",1100.5,8.287e-7
+3,"Boundary","Start Nenthorn",,"posterior",1105.5,8.287e-7
+3,"Boundary","Start Nenthorn",,"posterior",1110.5,4.309e-7
+3,"Boundary","Start Nenthorn",,"posterior",1115.5,8.287e-7
+3,"Boundary","Start Nenthorn",,"posterior",1120.5,4.309e-7
+3,"Boundary","Start Nenthorn",,"posterior",1125.5,4.309e-7
+3,"Boundary","Start Nenthorn",,"posterior",1130.5,8.287e-7
+3,"Boundary","Start Nenthorn",,"posterior",1135.5,4.309e-7
+3,"Boundary","Start Nenthorn",,"posterior",1140.5,0.0000020884
+3,"Boundary","Start Nenthorn",,"posterior",1145.5,0.0000012597
+3,"Boundary","Start Nenthorn",,"posterior",1150.5,4.309e-7
+3,"Boundary","Start Nenthorn",,"posterior",1155.5,8.287e-7
+3,"Boundary","Start Nenthorn",,"posterior",1160.5,0.000003348
+3,"Boundary","Start Nenthorn",,"posterior",1165.5,0.0000016575
+3,"Boundary","Start Nenthorn",,"posterior",1170.5,0.0000024862
+3,"Boundary","Start Nenthorn",,"posterior",1175.5,0.0000012597
+3,"Boundary","Start Nenthorn",,"posterior",1180.5,0.0000029172
+3,"Boundary","Start Nenthorn",,"posterior",1185.5,0.000003348
+3,"Boundary","Start Nenthorn",,"posterior",1190.5,0.000004177
+3,"Boundary","Start Nenthorn",,"posterior",1195.5,0.000007492
+3,"Boundary","Start Nenthorn",,"posterior",1200.5,0.000011238
+3,"Boundary","Start Nenthorn",,"posterior",1205.5,0.000006663
+3,"Boundary","Start Nenthorn",,"posterior",1210.5,0.000011238
+3,"Boundary","Start Nenthorn",,"posterior",1215.5,0.000014155
+3,"Boundary","Start Nenthorn",,"posterior",1220.5,0.000028741
+3,"Boundary","Start Nenthorn",,"posterior",1225.5,0.000017901
+3,"Boundary","Start Nenthorn",,"posterior",1230.5,0.00003
+3,"Boundary","Start Nenthorn",,"posterior",1235.5,0.00004293
+3,"Boundary","Start Nenthorn",,"posterior",1240.5,0.00004041
+3,"Boundary","Start Nenthorn",,"posterior",1245.5,0.00006249
+3,"Boundary","Start Nenthorn",,"posterior",1250.5,0.00009627
+3,"Boundary","Start Nenthorn",,"posterior",1255.5,0.00015292
+3,"Boundary","Start Nenthorn",,"posterior",1260.5,0.00019333
+3,"Boundary","Start Nenthorn",,"posterior",1265.5,0.0003225
+3,"Boundary","Start Nenthorn",,"posterior",1270.5,0.0004254
+3,"Boundary","Start Nenthorn",,"posterior",1275.5,0.0006033
+3,"Boundary","Start Nenthorn",,"posterior",1280.5,0.0010212
+3,"Boundary","Start Nenthorn",,"posterior",1285.5,0.0018063
+3,"Boundary","Start Nenthorn",,"posterior",1290.5,0.0031583
+3,"Boundary","Start Nenthorn",,"posterior",1295.5,0.005202
+3,"Boundary","Start Nenthorn",,"posterior",1300.5,0.007407
+3,"Boundary","Start Nenthorn",,"posterior",1305.5,0.0115
+3,"Boundary","Start Nenthorn",,"posterior",1310.5,0.016557
+3,"Boundary","Start Nenthorn",,"posterior",1315.5,0.027111
+3,"Boundary","Start Nenthorn",,"posterior",1320.5,0.03315
+3,"Boundary","Start Nenthorn",,"posterior",1325.5,0.014187
+3,"Boundary","Start Nenthorn",,"posterior",1330.5,0.00855
+3,"Boundary","Start Nenthorn",,"posterior",1335.5,0.01115
+3,"Boundary","Start Nenthorn",,"posterior",1340.5,0.015274
+3,"Boundary","Start Nenthorn",,"posterior",1345.5,0.01377
+3,"Boundary","Start Nenthorn",,"posterior",1350.5,0.0066
+3,"Boundary","Start Nenthorn",,"posterior",1355.5,0.0004479
+3,"Boundary","Start Nenthorn",,"posterior",1360.5,0.00006666
+3,"Boundary","Start Nenthorn",,"posterior",1365.5,0.00004959
+3,"Boundary","Start Nenthorn",,"posterior",1370.5,0.00019877
+3,"Boundary","Start Nenthorn",,"posterior",1375.5,0.0008304
+3,"Boundary","Start Nenthorn",,"posterior",1380.5,0.003573
+3,"Boundary","Start Nenthorn",,"posterior",1385.5,0.010928
+3,"Boundary","Start Nenthorn",,"posterior",1390.5,0.00534
+3,"Boundary","Start Nenthorn",,"posterior",1395.5,0.000022078
+3,"Boundary","Start Nenthorn",,"posterior",1400.5,0
+3,"Boundary","Start Nenthorn",,"posterior",1405.5,0
+6,"R_Date","WK51189",,"likelihood",1215.5,0
+6,"R_Date","WK51189",,"likelihood",1220.5,0
+6,"R_Date","WK51189",,"likelihood",1225.5,0
+6,"R_Date","WK51189",,"likelihood",1230.5,7.223e-8
+6,"R_Date","WK51189",,"likelihood",1235.5,2.7447e-7
+6,"R_Date","WK51189",,"likelihood",1240.5,5.056e-7
+6,"R_Date","WK51189",,"likelihood",1245.5,1.1557e-7
+6,"R_Date","WK51189",,"likelihood",1250.5,1.4446e-8
+6,"R_Date","WK51189",,"likelihood",1255.5,0
+6,"R_Date","WK51189",,"likelihood",1260.5,0
+6,"R_Date","WK51189",,"likelihood",1265.5,2.8892e-8
+6,"R_Date","WK51189",,"likelihood",1270.5,4.623e-7
+6,"R_Date","WK51189",,"likelihood",1275.5,0.000007887
+6,"R_Date","WK51189",,"likelihood",1280.5,0.0001041
+6,"R_Date","WK51189",,"likelihood",1285.5,0.0006796
+6,"R_Date","WK51189",,"likelihood",1290.5,0.0027426
+6,"R_Date","WK51189",,"likelihood",1295.5,0.006616
+6,"R_Date","WK51189",,"likelihood",1300.5,0.011278
+6,"R_Date","WK51189",,"likelihood",1305.5,0.01341
+6,"R_Date","WK51189",,"likelihood",1310.5,0.013456
+6,"R_Date","WK51189",,"likelihood",1315.5,0.014446
+6,"R_Date","WK51189",,"likelihood",1320.5,0.013036
+6,"R_Date","WK51189",,"likelihood",1325.5,0.005613
+6,"R_Date","WK51189",,"likelihood",1330.5,0.0030963
+6,"R_Date","WK51189",,"likelihood",1335.5,0.003462
+6,"R_Date","WK51189",,"likelihood",1340.5,0.004635
+6,"R_Date","WK51189",,"likelihood",1345.5,0.006274
+6,"R_Date","WK51189",,"likelihood",1350.5,0.010178
+6,"R_Date","WK51189",,"likelihood",1355.5,0.014236
+6,"R_Date","WK51189",,"likelihood",1360.5,0.013607
+6,"R_Date","WK51189",,"likelihood",1365.5,0.010564
+6,"R_Date","WK51189",,"likelihood",1370.5,0.008015
+6,"R_Date","WK51189",,"likelihood",1375.5,0.008362
+6,"R_Date","WK51189",,"likelihood",1380.5,0.012438
+6,"R_Date","WK51189",,"likelihood",1385.5,0.014079
+6,"R_Date","WK51189",,"likelihood",1390.5,0.007276
+6,"R_Date","WK51189",,"likelihood",1395.5,0.0020524
+6,"R_Date","WK51189",,"likelihood",1400.5,0.00029578
+6,"R_Date","WK51189",,"likelihood",1405.5,0.000030625
+6,"R_Date","WK51189",,"likelihood",1410.5,0.000005706
+6,"R_Date","WK51189",,"likelihood",1415.5,7.945e-7
+6,"R_Date","WK51189",,"likelihood",1420.5,2.1669e-7
+6,"R_Date","WK51189",,"likelihood",1425.5,2.8892e-8
+6,"R_Date","WK51189",,"likelihood",1430.5,1.4446e-8
+6,"R_Date","WK51189",,"likelihood",1435.5,0
+6,"R_Date","WK51189",,"likelihood",1440.5,0
+6,"R_Date","WK51189",,"posterior",1265.5,0
+6,"R_Date","WK51189",,"posterior",1270.5,0
+6,"R_Date","WK51189",,"posterior",1275.5,4.303e-7
+6,"R_Date","WK51189",,"posterior",1280.5,0.000003313
+6,"R_Date","WK51189",,"posterior",1285.5,0.0000321
+6,"R_Date","WK51189",,"posterior",1290.5,0.00022999
+6,"R_Date","WK51189",,"posterior",1295.5,0.0009275
+6,"R_Date","WK51189",,"posterior",1300.5,0.0024817
+6,"R_Date","WK51189",,"posterior",1305.5,0.005224
+6,"R_Date","WK51189",,"posterior",1310.5,0.009575
+6,"R_Date","WK51189",,"posterior",1315.5,0.020958
+6,"R_Date","WK51189",,"posterior",1320.5,0.04303
+6,"R_Date","WK51189",,"posterior",1325.5,0.025612
+6,"R_Date","WK51189",,"posterior",1330.5,0.010694
+6,"R_Date","WK51189",,"posterior",1335.5,0.011484
+6,"R_Date","WK51189",,"posterior",1340.5,0.016768
+6,"R_Date","WK51189",,"posterior",1345.5,0.018645
+6,"R_Date","WK51189",,"posterior",1350.5,0.010943
+6,"R_Date","WK51189",,"posterior",1355.5,0.0013758
+6,"R_Date","WK51189",,"posterior",1360.5,0.0003925
+6,"R_Date","WK51189",,"posterior",1365.5,0.00022667
+6,"R_Date","WK51189",,"posterior",1370.5,0.0001725
+6,"R_Date","WK51189",,"posterior",1375.5,0.00027792
+6,"R_Date","WK51189",,"posterior",1380.5,0.001585
+6,"R_Date","WK51189",,"posterior",1385.5,0.010785
+6,"R_Date","WK51189",,"posterior",1390.5,0.008414
+6,"R_Date","WK51189",,"posterior",1395.5,0.00016291
+6,"R_Date","WK51189",,"posterior",1400.5,0
+6,"R_Date","WK51189",,"posterior",1405.5,0
+6,"R_Date","WK51189",,"posterior",1410.5,0
+7,"R_Date","WK50102",,"likelihood",1260.5,0
+7,"R_Date","WK50102",,"likelihood",1265.5,0
+7,"R_Date","WK50102",,"likelihood",1270.5,0
+7,"R_Date","WK50102",,"likelihood",1275.5,8.538e-8
+7,"R_Date","WK50102",,"likelihood",1280.5,0.000003876
+7,"R_Date","WK50102",,"likelihood",1285.5,0.00005884
+7,"R_Date","WK50102",,"likelihood",1290.5,0.0005691
+7,"R_Date","WK50102",,"likelihood",1295.5,0.0023817
+7,"R_Date","WK50102",,"likelihood",1300.5,0.006883
+7,"R_Date","WK50102",,"likelihood",1305.5,0.010043
+7,"R_Date","WK50102",,"likelihood",1310.5,0.010136
+7,"R_Date","WK50102",,"likelihood",1315.5,0.012188
+7,"R_Date","WK50102",,"likelihood",1320.5,0.017075
+7,"R_Date","WK50102",,"likelihood",1325.5,0.010189
+7,"R_Date","WK50102",,"likelihood",1330.5,0.005954
+7,"R_Date","WK50102",,"likelihood",1335.5,0.006665
+7,"R_Date","WK50102",,"likelihood",1340.5,0.008552
+7,"R_Date","WK50102",,"likelihood",1345.5,0.011298
+7,"R_Date","WK50102",,"likelihood",1350.5,0.015673
+7,"R_Date","WK50102",,"likelihood",1355.5,0.016396
+7,"R_Date","WK50102",,"likelihood",1360.5,0.010927
+7,"R_Date","WK50102",,"likelihood",1365.5,0.005782
+7,"R_Date","WK50102",,"likelihood",1370.5,0.003376
+7,"R_Date","WK50102",,"likelihood",1375.5,0.003654
+7,"R_Date","WK50102",,"likelihood",1380.5,0.00859
+7,"R_Date","WK50102",,"likelihood",1385.5,0.016597
+7,"R_Date","WK50102",,"likelihood",1390.5,0.012357
+7,"R_Date","WK50102",,"likelihood",1395.5,0.004038
+7,"R_Date","WK50102",,"likelihood",1400.5,0.0005596
+7,"R_Date","WK50102",,"likelihood",1405.5,0.00004479
+7,"R_Date","WK50102",,"likelihood",1410.5,0.00000683
+7,"R_Date","WK50102",,"likelihood",1415.5,6.659e-7
+7,"R_Date","WK50102",,"likelihood",1420.5,1.5368e-7
+7,"R_Date","WK50102",,"likelihood",1425.5,1.7075e-8
+7,"R_Date","WK50102",,"likelihood",1430.5,0
+7,"R_Date","WK50102",,"likelihood",1435.5,0
+7,"R_Date","WK50102",,"posterior",1265.5,0
+7,"R_Date","WK50102",,"posterior",1270.5,0
+7,"R_Date","WK50102",,"posterior",1275.5,0
+7,"R_Date","WK50102",,"posterior",1280.5,8.46e-7
+7,"R_Date","WK50102",,"posterior",1285.5,0.000004185
+7,"R_Date","WK50102",,"posterior",1290.5,0.00005499
+7,"R_Date","WK50102",,"posterior",1295.5,0.0004146
+7,"R_Date","WK50102",,"posterior",1300.5,0.001725
+7,"R_Date","WK50102",,"posterior",1305.5,0.004087
+7,"R_Date","WK50102",,"posterior",1310.5,0.007555
+7,"R_Date","WK50102",,"posterior",1315.5,0.0177
+7,"R_Date","WK50102",,"posterior",1320.5,0.04453
+7,"R_Date","WK50102",,"posterior",1325.5,0.029344
+7,"R_Date","WK50102",,"posterior",1330.5,0.012192
+7,"R_Date","WK50102",,"posterior",1335.5,0.012308
+7,"R_Date","WK50102",,"posterior",1340.5,0.01718
+7,"R_Date","WK50102",,"posterior",1345.5,0.018927
+7,"R_Date","WK50102",,"posterior",1350.5,0.010962
+7,"R_Date","WK50102",,"posterior",1355.5,0.0013004
+7,"R_Date","WK50102",,"posterior",1360.5,0.00030709
+7,"R_Date","WK50102",,"posterior",1365.5,0.00014502
+7,"R_Date","WK50102",,"posterior",1370.5,0.00009043
+7,"R_Date","WK50102",,"posterior",1375.5,0.00017583
+7,"R_Date","WK50102",,"posterior",1380.5,0.0012825
+7,"R_Date","WK50102",,"posterior",1385.5,0.010766
+7,"R_Date","WK50102",,"posterior",1390.5,0.008787
+7,"R_Date","WK50102",,"posterior",1395.5,0.00016626
+7,"R_Date","WK50102",,"posterior",1400.5,0
+7,"R_Date","WK50102",,"posterior",1405.5,0
+7,"R_Date","WK50102",,"posterior",1410.5,0
+8,"R_Date","WK50105",,"likelihood",1270.5,0
+8,"R_Date","WK50105",,"likelihood",1275.5,0
+8,"R_Date","WK50105",,"likelihood",1280.5,0
+8,"R_Date","WK50105",,"likelihood",1285.5,2.4399e-7
+8,"R_Date","WK50105",,"likelihood",1290.5,0.000007586
+8,"R_Date","WK50105",,"likelihood",1295.5,0.0000673
+8,"R_Date","WK50105",,"likelihood",1300.5,0.0005325
+8,"R_Date","WK50105",,"likelihood",1305.5,0.0010972
+8,"R_Date","WK50105",,"likelihood",1310.5,0.0011203
+8,"R_Date","WK50105",,"likelihood",1315.5,0.0016091
+8,"R_Date","WK50105",,"likelihood",1320.5,0.007964
+8,"R_Date","WK50105",,"likelihood",1325.5,0.020424
+8,"R_Date","WK50105",,"likelihood",1330.5,0.021714
+8,"R_Date","WK50105",,"likelihood",1335.5,0.022181
+8,"R_Date","WK50105",,"likelihood",1340.5,0.021119
+8,"R_Date","WK50105",,"likelihood",1345.5,0.019768
+8,"R_Date","WK50105",,"likelihood",1350.5,0.013301
+8,"R_Date","WK50105",,"likelihood",1355.5,0.005156
+8,"R_Date","WK50105",,"likelihood",1360.5,0.0014951
+8,"R_Date","WK50105",,"likelihood",1365.5,0.0003375
+8,"R_Date","WK50105",,"likelihood",1370.5,0.0001237
+8,"R_Date","WK50105",,"likelihood",1375.5,0.00014249
+8,"R_Date","WK50105",,"likelihood",1380.5,0.0008509
+8,"R_Date","WK50105",,"likelihood",1385.5,0.00559
+8,"R_Date","WK50105",,"likelihood",1390.5,0.017943
+8,"R_Date","WK50105",,"likelihood",1395.5,0.020855
+8,"R_Date","WK50105",,"likelihood",1400.5,0.011529
+8,"R_Date","WK50105",,"likelihood",1405.5,0.003592
+8,"R_Date","WK50105",,"likelihood",1410.5,0.0010969
+8,"R_Date","WK50105",,"likelihood",1415.5,0.00026799
+8,"R_Date","WK50105",,"likelihood",1420.5,0.00009187
+8,"R_Date","WK50105",,"likelihood",1425.5,0.00001963
+8,"R_Date","WK50105",,"likelihood",1430.5,0.000005567
+8,"R_Date","WK50105",,"likelihood",1435.5,6.432e-7
+8,"R_Date","WK50105",,"likelihood",1440.5,1.109e-7
+8,"R_Date","WK50105",,"likelihood",1445.5,0
+8,"R_Date","WK50105",,"likelihood",1450.5,0
+8,"R_Date","WK50105",,"likelihood",1455.5,0
+8,"R_Date","WK50105",,"posterior",1280.5,0
+8,"R_Date","WK50105",,"posterior",1285.5,4.124e-7
+8,"R_Date","WK50105",,"posterior",1290.5,0.0000021035
+8,"R_Date","WK50105",,"posterior",1295.5,0.0000525
+8,"R_Date","WK50105",,"posterior",1300.5,0.0004412
+8,"R_Date","WK50105",,"posterior",1305.5,0.0014725
+8,"R_Date","WK50105",,"posterior",1310.5,0.0026021
+8,"R_Date","WK50105",,"posterior",1315.5,0.007655
+8,"R_Date","WK50105",,"posterior",1320.5,0.03791
+8,"R_Date","WK50105",,"posterior",1325.5,0.04124
+8,"R_Date","WK50105",,"posterior",1330.5,0.021844
+8,"R_Date","WK50105",,"posterior",1335.5,0.016779
+8,"R_Date","WK50105",,"posterior",1340.5,0.018445
+8,"R_Date","WK50105",,"posterior",1345.5,0.019047
+8,"R_Date","WK50105",,"posterior",1350.5,0.010298
+8,"R_Date","WK50105",,"posterior",1355.5,0.0010192
+8,"R_Date","WK50105",,"posterior",1360.5,0.00008001
+8,"R_Date","WK50105",,"posterior",1365.5,0.000023344
+8,"R_Date","WK50105",,"posterior",1370.5,0.000012497
+8,"R_Date","WK50105",,"posterior",1375.5,0.000025819
+8,"R_Date","WK50105",,"posterior",1380.5,0.0006612
+8,"R_Date","WK50105",,"posterior",1385.5,0.010275
+8,"R_Date","WK50105",,"posterior",1390.5,0.0099
+8,"R_Date","WK50105",,"posterior",1395.5,0.00021125
+8,"R_Date","WK50105",,"posterior",1400.5,0
+8,"R_Date","WK50105",,"posterior",1405.5,0
+8,"R_Date","WK50105",,"posterior",1410.5,0
+12,"R_Date","WK50099",,"likelihood",1260.5,0
+12,"R_Date","WK50099",,"likelihood",1265.5,0
+12,"R_Date","WK50099",,"likelihood",1270.5,0
+12,"R_Date","WK50099",,"likelihood",1275.5,3.53e-8
+12,"R_Date","WK50099",,"likelihood",1280.5,0.0000022944
+12,"R_Date","WK50099",,"likelihood",1285.5,0.00004107
+12,"R_Date","WK50099",,"likelihood",1290.5,0.0004699
+12,"R_Date","WK50099",,"likelihood",1295.5,0.0021488
+12,"R_Date","WK50099",,"likelihood",1300.5,0.006701
+12,"R_Date","WK50099",,"likelihood",1305.5,0.010008
+12,"R_Date","WK50099",,"likelihood",1310.5,0.010107
+12,"R_Date","WK50099",,"likelihood",1315.5,0.012294
+12,"R_Date","WK50099",,"likelihood",1320.5,0.017649
+12,"R_Date","WK50099",,"likelihood",1325.5,0.010164
+12,"R_Date","WK50099",,"likelihood",1330.5,0.005744
+12,"R_Date","WK50099",,"likelihood",1335.5,0.006459
+12,"R_Date","WK50099",,"likelihood",1340.5,0.008448
+12,"R_Date","WK50099",,"likelihood",1345.5,0.011336
+12,"R_Date","WK50099",,"likelihood",1350.5,0.016104
+12,"R_Date","WK50099",,"likelihood",1355.5,0.0169
+12,"R_Date","WK50099",,"likelihood",1360.5,0.010967
+12,"R_Date","WK50099",,"likelihood",1365.5,0.005546
+12,"R_Date","WK50099",,"likelihood",1370.5,0.0031205
+12,"R_Date","WK50099",,"likelihood",1375.5,0.003396
+12,"R_Date","WK50099",,"likelihood",1380.5,0.008486
+12,"R_Date","WK50099",,"likelihood",1385.5,0.017122
+12,"R_Date","WK50099",,"likelihood",1390.5,0.012504
+12,"R_Date","WK50099",,"likelihood",1395.5,0.003798
+12,"R_Date","WK50099",,"likelihood",1400.5,0.000453
+12,"R_Date","WK50099",,"likelihood",1405.5,0.000029085
+12,"R_Date","WK50099",,"likelihood",1410.5,0.000003918
+12,"R_Date","WK50099",,"likelihood",1415.5,3.177e-7
+12,"R_Date","WK50099",,"likelihood",1420.5,7.06e-8
+12,"R_Date","WK50099",,"likelihood",1425.5,0
+12,"R_Date","WK50099",,"likelihood",1430.5,0
+12,"R_Date","WK50099",,"likelihood",1435.5,0
+12,"R_Date","WK50099",,"posterior",1290.5,0
+12,"R_Date","WK50099",,"posterior",1295.5,0
+12,"R_Date","WK50099",,"posterior",1300.5,0.0000012543
+12,"R_Date","WK50099",,"posterior",1305.5,0.000020003
+12,"R_Date","WK50099",,"posterior",1310.5,0.00012999
+12,"R_Date","WK50099",,"posterior",1315.5,0.00081
+12,"R_Date","WK50099",,"posterior",1320.5,0.011548
+12,"R_Date","WK50099",,"posterior",1325.5,0.025192
+12,"R_Date","WK50099",,"posterior",1330.5,0.014709
+12,"R_Date","WK50099",,"posterior",1335.5,0.014589
+12,"R_Date","WK50099",,"posterior",1340.5,0.019992
+12,"R_Date","WK50099",,"posterior",1345.5,0.029024
+12,"R_Date","WK50099",,"posterior",1350.5,0.03301
+12,"R_Date","WK50099",,"posterior",1355.5,0.016615
+12,"R_Date","WK50099",,"posterior",1360.5,0.005192
+12,"R_Date","WK50099",,"posterior",1365.5,0.0016296
+12,"R_Date","WK50099",,"posterior",1370.5,0.0006642
+12,"R_Date","WK50099",,"posterior",1375.5,0.0006383
+12,"R_Date","WK50099",,"posterior",1380.5,0.0012329
+12,"R_Date","WK50099",,"posterior",1385.5,0.005566
+12,"R_Date","WK50099",,"posterior",1390.5,0.015959
+12,"R_Date","WK50099",,"posterior",1395.5,0.003337
+12,"R_Date","WK50099",,"posterior",1400.5,0.00013959
+12,"R_Date","WK50099",,"posterior",1405.5,0.0000025086
+12,"R_Date","WK50099",,"posterior",1410.5,4.291e-7
+12,"R_Date","WK50099",,"posterior",1415.5,0
+12,"R_Date","WK50099",,"posterior",1420.5,0
+13,"R_Date","WK50100",,"likelihood",1265.5,0
+13,"R_Date","WK50100",,"likelihood",1270.5,0
+13,"R_Date","WK50100",,"likelihood",1275.5,0
+13,"R_Date","WK50100",,"likelihood",1280.5,6.001e-8
+13,"R_Date","WK50100",,"likelihood",1285.5,0.0000017804
+13,"R_Date","WK50100",,"likelihood",1290.5,0.00003817
+13,"R_Date","WK50100",,"likelihood",1295.5,0.00026608
+13,"R_Date","WK50100",,"likelihood",1300.5,0.001492
+13,"R_Date","WK50100",,"likelihood",1305.5,0.0027663
+13,"R_Date","WK50100",,"likelihood",1310.5,0.0028141
+13,"R_Date","WK50100",,"likelihood",1315.5,0.003847
+13,"R_Date","WK50100",,"likelihood",1320.5,0.012391
+13,"R_Date","WK50100",,"likelihood",1325.5,0.019562
+13,"R_Date","WK50100",,"likelihood",1330.5,0.016872
+13,"R_Date","WK50100",,"likelihood",1335.5,0.017943
+13,"R_Date","WK50100",,"likelihood",1340.5,0.018683
+13,"R_Date","WK50100",,"likelihood",1345.5,0.020005
+13,"R_Date","WK50100",,"likelihood",1350.5,0.016954
+13,"R_Date","WK50100",,"likelihood",1355.5,0.009146
+13,"R_Date","WK50100",,"likelihood",1360.5,0.003465
+13,"R_Date","WK50100",,"likelihood",1365.5,0.0010483
+13,"R_Date","WK50100",,"likelihood",1370.5,0.0004486
+13,"R_Date","WK50100",,"likelihood",1375.5,0.0005062
+13,"R_Date","WK50100",,"likelihood",1380.5,0.0021959
+13,"R_Date","WK50100",,"likelihood",1385.5,0.009691
+13,"R_Date","WK50100",,"likelihood",1390.5,0.018945
+13,"R_Date","WK50100",,"likelihood",1395.5,0.014434
+13,"R_Date","WK50100",,"likelihood",1400.5,0.005134
+13,"R_Date","WK50100",,"likelihood",1405.5,0.0010396
+13,"R_Date","WK50100",,"likelihood",1410.5,0.00024944
+13,"R_Date","WK50100",,"likelihood",1415.5,0.00004529
+13,"R_Date","WK50100",,"likelihood",1420.5,0.000013603
+13,"R_Date","WK50100",,"likelihood",1425.5,0.0000022205
+13,"R_Date","WK50100",,"likelihood",1430.5,5.601e-7
+13,"R_Date","WK50100",,"likelihood",1435.5,4.001e-8
+13,"R_Date","WK50100",,"likelihood",1440.5,0
+13,"R_Date","WK50100",,"likelihood",1445.5,0
+13,"R_Date","WK50100",,"likelihood",1450.5,0
+13,"R_Date","WK50100",,"posterior",1295.5,0
+13,"R_Date","WK50100",,"posterior",1300.5,4.145e-7
+13,"R_Date","WK50100",,"posterior",1305.5,0.000011671
+13,"R_Date","WK50100",,"posterior",1310.5,0.00003957
+13,"R_Date","WK50100",,"posterior",1315.5,0.00029792
+13,"R_Date","WK50100",,"posterior",1320.5,0.008485
+13,"R_Date","WK50100",,"posterior",1325.5,0.025891
+13,"R_Date","WK50100",,"posterior",1330.5,0.019674
+13,"R_Date","WK50100",,"posterior",1335.5,0.019752
+13,"R_Date","WK50100",,"posterior",1340.5,0.024264
+13,"R_Date","WK50100",,"posterior",1345.5,0.03189
+13,"R_Date","WK50100",,"posterior",1350.5,0.030279
+13,"R_Date","WK50100",,"posterior",1355.5,0.01015
+13,"R_Date","WK50100",,"posterior",1360.5,0.0018475
+13,"R_Date","WK50100",,"posterior",1365.5,0.0003487
+13,"R_Date","WK50100",,"posterior",1370.5,0.0001096
+13,"R_Date","WK50100",,"posterior",1375.5,0.00011333
+13,"R_Date","WK50100",,"posterior",1380.5,0.0003833
+13,"R_Date","WK50100",,"posterior",1385.5,0.004058
+13,"R_Date","WK50100",,"posterior",1390.5,0.016028
+13,"R_Date","WK50100",,"posterior",1395.5,0.005578
+13,"R_Date","WK50100",,"posterior",1400.5,0.0007296
+13,"R_Date","WK50100",,"posterior",1405.5,0.0000625
+13,"R_Date","WK50100",,"posterior",1410.5,0.000008323
+13,"R_Date","WK50100",,"posterior",1415.5,0.0000012436
+13,"R_Date","WK50100",,"posterior",1420.5,0
+13,"R_Date","WK50100",,"posterior",1425.5,0
+14,"R_Date","WK50101",,"likelihood",1270.5,0
+14,"R_Date","WK50101",,"likelihood",1275.5,0
+14,"R_Date","WK50101",,"likelihood",1280.5,0
+14,"R_Date","WK50101",,"likelihood",1285.5,2.8512e-7
+14,"R_Date","WK50101",,"likelihood",1290.5,0.000008729
+14,"R_Date","WK50101",,"likelihood",1295.5,0.00007593
+14,"R_Date","WK50101",,"likelihood",1300.5,0.0005837
+14,"R_Date","WK50101",,"likelihood",1305.5,0.0011926
+14,"R_Date","WK50101",,"likelihood",1310.5,0.0012174
+14,"R_Date","WK50101",,"likelihood",1315.5,0.001742
+14,"R_Date","WK50101",,"likelihood",1320.5,0.008315
+14,"R_Date","WK50101",,"likelihood",1325.5,0.020481
+14,"R_Date","WK50101",,"likelihood",1330.5,0.021391
+14,"R_Date","WK50101",,"likelihood",1335.5,0.021932
+14,"R_Date","WK50101",,"likelihood",1340.5,0.02103
+14,"R_Date","WK50101",,"likelihood",1345.5,0.019922
+14,"R_Date","WK50101",,"likelihood",1350.5,0.013659
+14,"R_Date","WK50101",,"likelihood",1355.5,0.005442
+14,"R_Date","WK50101",,"likelihood",1360.5,0.0016131
+14,"R_Date","WK50101",,"likelihood",1365.5,0.0003732
+14,"R_Date","WK50101",,"likelihood",1370.5,0.00013859
+14,"R_Date","WK50101",,"likelihood",1375.5,0.00015936
+14,"R_Date","WK50101",,"likelihood",1380.5,0.0009264
+14,"R_Date","WK50101",,"likelihood",1385.5,0.00589
+14,"R_Date","WK50101",,"likelihood",1390.5,0.018133
+14,"R_Date","WK50101",,"likelihood",1395.5,0.020348
+14,"R_Date","WK50101",,"likelihood",1400.5,0.010851
+14,"R_Date","WK50101",,"likelihood",1405.5,0.003264
+14,"R_Date","WK50101",,"likelihood",1410.5,0.0009766
+14,"R_Date","WK50101",,"likelihood",1415.5,0.00023288
+14,"R_Date","WK50101",,"likelihood",1420.5,0.00007893
+14,"R_Date","WK50101",,"likelihood",1425.5,0.000016493
+14,"R_Date","WK50101",,"likelihood",1430.5,0.00000465
+14,"R_Date","WK50101",,"likelihood",1435.5,5.264e-7
+14,"R_Date","WK50101",,"likelihood",1440.5,8.773e-8
+14,"R_Date","WK50101",,"likelihood",1445.5,0
+14,"R_Date","WK50101",,"likelihood",1450.5,0
+14,"R_Date","WK50101",,"likelihood",1455.5,0
+14,"R_Date","WK50101",,"posterior",1300.5,0
+14,"R_Date","WK50101",,"posterior",1305.5,0.000008766
+14,"R_Date","WK50101",,"posterior",1310.5,0.000026655
+14,"R_Date","WK50101",,"posterior",1315.5,0.00019584
+14,"R_Date","WK50101",,"posterior",1320.5,0.007338
+14,"R_Date","WK50101",,"posterior",1325.5,0.025859
+14,"R_Date","WK50101",,"posterior",1330.5,0.021874
+14,"R_Date","WK50101",,"posterior",1335.5,0.02219
+14,"R_Date","WK50101",,"posterior",1340.5,0.025726
+14,"R_Date","WK50101",,"posterior",1345.5,0.03247
+14,"R_Date","WK50101",,"posterior",1350.5,0.02788
+14,"R_Date","WK50101",,"posterior",1355.5,0.008087
+14,"R_Date","WK50101",,"posterior",1360.5,0.0010758
+14,"R_Date","WK50101",,"posterior",1365.5,0.00014626
+14,"R_Date","WK50101",,"posterior",1370.5,0.00003584
+14,"R_Date","WK50101",,"posterior",1375.5,0.000026655
+14,"R_Date","WK50101",,"posterior",1380.5,0.00017126
+14,"R_Date","WK50101",,"posterior",1385.5,0.003345
+14,"R_Date","WK50101",,"posterior",1390.5,0.01566
+14,"R_Date","WK50101",,"posterior",1395.5,0.006441
+14,"R_Date","WK50101",,"posterior",1400.5,0.0012038
+14,"R_Date","WK50101",,"posterior",1405.5,0.00019084
+14,"R_Date","WK50101",,"posterior",1410.5,0.00004334
+14,"R_Date","WK50101",,"posterior",1415.5,0.000006266
+14,"R_Date","WK50101",,"posterior",1420.5,0.0000012662
+14,"R_Date","WK50101",,"posterior",1425.5,0
+16,"R_Date","ANU55209",,"likelihood",1215.5,0
+16,"R_Date","ANU55209",,"likelihood",1220.5,0
+16,"R_Date","ANU55209",,"likelihood",1225.5,0
+16,"R_Date","ANU55209",,"likelihood",1230.5,2.9077e-8
+16,"R_Date","ANU55209",,"likelihood",1235.5,1.3085e-7
+16,"R_Date","ANU55209",,"likelihood",1240.5,2.3262e-7
+16,"R_Date","ANU55209",,"likelihood",1245.5,5.815e-8
+16,"R_Date","ANU55209",,"likelihood",1250.5,1.4538e-8
+16,"R_Date","ANU55209",,"likelihood",1255.5,0
+16,"R_Date","ANU55209",,"likelihood",1260.5,0
+16,"R_Date","ANU55209",,"likelihood",1265.5,1.4538e-8
+16,"R_Date","ANU55209",,"likelihood",1270.5,2.1808e-7
+16,"R_Date","ANU55209",,"likelihood",1275.5,0.000003751
+16,"R_Date","ANU55209",,"likelihood",1280.5,0.00005283
+16,"R_Date","ANU55209",,"likelihood",1285.5,0.0003725
+16,"R_Date","ANU55209",,"likelihood",1290.5,0.0016894
+16,"R_Date","ANU55209",,"likelihood",1295.5,0.004535
+16,"R_Date","ANU55209",,"likelihood",1300.5,0.008874
+16,"R_Date","ANU55209",,"likelihood",1305.5,0.011297
+16,"R_Date","ANU55209",,"likelihood",1310.5,0.011359
+16,"R_Date","ANU55209",,"likelihood",1315.5,0.01272
+16,"R_Date","ANU55209",,"likelihood",1320.5,0.014358
+16,"R_Date","ANU55209",,"likelihood",1325.5,0.008487
+16,"R_Date","ANU55209",,"likelihood",1330.5,0.005356
+16,"R_Date","ANU55209",,"likelihood",1335.5,0.005909
+16,"R_Date","ANU55209",,"likelihood",1340.5,0.007289
+16,"R_Date","ANU55209",,"likelihood",1345.5,0.009283
+16,"R_Date","ANU55209",,"likelihood",1350.5,0.012691
+16,"R_Date","ANU55209",,"likelihood",1355.5,0.01451
+16,"R_Date","ANU55209",,"likelihood",1360.5,0.011773
+16,"R_Date","ANU55209",,"likelihood",1365.5,0.008047
+16,"R_Date","ANU55209",,"likelihood",1370.5,0.005698
+16,"R_Date","ANU55209",,"likelihood",1375.5,0.005998
+16,"R_Date","ANU55209",,"likelihood",1380.5,0.010189
+16,"R_Date","ANU55209",,"likelihood",1385.5,0.014539
+16,"R_Date","ANU55209",,"likelihood",1390.5,0.010108
+16,"R_Date","ANU55209",,"likelihood",1395.5,0.003877
+16,"R_Date","ANU55209",,"likelihood",1400.5,0.0008229
+16,"R_Date","ANU55209",,"likelihood",1405.5,0.00012808
+16,"R_Date","ANU55209",,"likelihood",1410.5,0.000029659
+16,"R_Date","ANU55209",,"likelihood",1415.5,0.000005554
+16,"R_Date","ANU55209",,"likelihood",1420.5,0.0000017592
+16,"R_Date","ANU55209",,"likelihood",1425.5,3.344e-7
+16,"R_Date","ANU55209",,"likelihood",1430.5,8.723e-8
+16,"R_Date","ANU55209",,"likelihood",1435.5,1.4538e-8
+16,"R_Date","ANU55209",,"likelihood",1440.5,0
+16,"R_Date","ANU55209",,"likelihood",1445.5,0
+16,"R_Date","ANU55209",,"posterior",1290.5,0
+16,"R_Date","ANU55209",,"posterior",1295.5,0
+16,"R_Date","ANU55209",,"posterior",1300.5,0.0000020751
+16,"R_Date","ANU55209",,"posterior",1305.5,0.000029585
+16,"R_Date","ANU55209",,"posterior",1310.5,0.00015708
+16,"R_Date","ANU55209",,"posterior",1315.5,0.0008762
+16,"R_Date","ANU55209",,"posterior",1320.5,0.011051
+16,"R_Date","ANU55209",,"posterior",1325.5,0.024947
+16,"R_Date","ANU55209",,"posterior",1330.5,0.015388
+16,"R_Date","ANU55209",,"posterior",1335.5,0.015206
+16,"R_Date","ANU55209",,"posterior",1340.5,0.019853
+16,"R_Date","ANU55209",,"posterior",1345.5,0.028243
+16,"R_Date","ANU55209",,"posterior",1350.5,0.03144
+16,"R_Date","ANU55209",,"posterior",1355.5,0.016329
+16,"R_Date","ANU55209",,"posterior",1360.5,0.005875
+16,"R_Date","ANU55209",,"posterior",1365.5,0.0024183
+16,"R_Date","ANU55209",,"posterior",1370.5,0.0011533
+16,"R_Date","ANU55209",,"posterior",1375.5,0.0010438
+16,"R_Date","ANU55209",,"posterior",1380.5,0.0014717
+16,"R_Date","ANU55209",,"posterior",1385.5,0.005312
+16,"R_Date","ANU55209",,"posterior",1390.5,0.015364
+16,"R_Date","ANU55209",,"posterior",1395.5,0.003603
+16,"R_Date","ANU55209",,"posterior",1400.5,0.00022084
+16,"R_Date","ANU55209",,"posterior",1405.5,0.000013739
+16,"R_Date","ANU55209",,"posterior",1410.5,4.087e-7
+16,"R_Date","ANU55209",,"posterior",1415.5,0
+17,"R_Date","ANU55206",,"likelihood",1265.5,0
+17,"R_Date","ANU55206",,"likelihood",1270.5,0
+17,"R_Date","ANU55206",,"likelihood",1275.5,0
+17,"R_Date","ANU55206",,"likelihood",1280.5,9.975e-8
+17,"R_Date","ANU55206",,"likelihood",1285.5,0.0000021547
+17,"R_Date","ANU55206",,"likelihood",1290.5,0.00003404
+17,"R_Date","ANU55206",,"likelihood",1295.5,0.00020842
+17,"R_Date","ANU55206",,"likelihood",1300.5,0.0010693
+17,"R_Date","ANU55206",,"likelihood",1305.5,0.001955
+17,"R_Date","ANU55206",,"likelihood",1310.5,0.0019883
+17,"R_Date","ANU55206",,"likelihood",1315.5,0.0027042
+17,"R_Date","ANU55206",,"likelihood",1320.5,0.009378
+17,"R_Date","ANU55206",,"likelihood",1325.5,0.019075
+17,"R_Date","ANU55206",,"likelihood",1330.5,0.019482
+17,"R_Date","ANU55206",,"likelihood",1335.5,0.019951
+17,"R_Date","ANU55206",,"likelihood",1340.5,0.019382
+17,"R_Date","ANU55206",,"likelihood",1345.5,0.01873
+17,"R_Date","ANU55206",,"likelihood",1350.5,0.013927
+17,"R_Date","ANU55206",,"likelihood",1355.5,0.006672
+17,"R_Date","ANU55206",,"likelihood",1360.5,0.0024544
+17,"R_Date","ANU55206",,"likelihood",1365.5,0.0007616
+17,"R_Date","ANU55206",,"likelihood",1370.5,0.0003402
+17,"R_Date","ANU55206",,"likelihood",1375.5,0.0003813
+17,"R_Date","ANU55206",,"likelihood",1380.5,0.0015603
+17,"R_Date","ANU55206",,"likelihood",1385.5,0.007109
+17,"R_Date","ANU55206",,"likelihood",1390.5,0.017346
+17,"R_Date","ANU55206",,"likelihood",1395.5,0.01854
+17,"R_Date","ANU55206",,"likelihood",1400.5,0.010763
+17,"R_Date","ANU55206",,"likelihood",1405.5,0.004008
+17,"R_Date","ANU55206",,"likelihood",1410.5,0.0014602
+17,"R_Date","ANU55206",,"likelihood",1415.5,0.0004589
+17,"R_Date","ANU55206",,"likelihood",1420.5,0.00018327
+17,"R_Date","ANU55206",,"likelihood",1425.5,0.00005275
+17,"R_Date","ANU55206",,"likelihood",1430.5,0.000017796
+17,"R_Date","ANU55206",,"likelihood",1435.5,0.000003192
+17,"R_Date","ANU55206",,"likelihood",1440.5,6.384e-7
+17,"R_Date","ANU55206",,"likelihood",1445.5,3.99e-8
+17,"R_Date","ANU55206",,"likelihood",1450.5,0
+17,"R_Date","ANU55206",,"likelihood",1455.5,0
+17,"R_Date","ANU55206",,"likelihood",1460.5,0
+17,"R_Date","ANU55206",,"posterior",1295.5,0
+17,"R_Date","ANU55206",,"posterior",1300.5,0
+17,"R_Date","ANU55206",,"posterior",1305.5,0.000013341
+17,"R_Date","ANU55206",,"posterior",1310.5,0.00003916
+17,"R_Date","ANU55206",,"posterior",1315.5,0.00026583
+17,"R_Date","ANU55206",,"posterior",1320.5,0.00774
+17,"R_Date","ANU55206",,"posterior",1325.5,0.025575
+17,"R_Date","ANU55206",,"posterior",1330.5,0.021347
+17,"R_Date","ANU55206",,"posterior",1335.5,0.021624
+17,"R_Date","ANU55206",,"posterior",1340.5,0.025111
+17,"R_Date","ANU55206",,"posterior",1345.5,0.03176
+17,"R_Date","ANU55206",,"posterior",1350.5,0.0285
+17,"R_Date","ANU55206",,"posterior",1355.5,0.009103
+17,"R_Date","ANU55206",,"posterior",1360.5,0.0014833
+17,"R_Date","ANU55206",,"posterior",1365.5,0.00024957
+17,"R_Date","ANU55206",,"posterior",1370.5,0.00008084
+17,"R_Date","ANU55206",,"posterior",1375.5,0.00007458
+17,"R_Date","ANU55206",,"posterior",1380.5,0.00030207
+17,"R_Date","ANU55206",,"posterior",1385.5,0.003536
+17,"R_Date","ANU55206",,"posterior",1390.5,0.015577
+17,"R_Date","ANU55206",,"posterior",1395.5,0.006135
+17,"R_Date","ANU55206",,"posterior",1400.5,0.0011804
+17,"R_Date","ANU55206",,"posterior",1405.5,0.0002279
+17,"R_Date","ANU55206",,"posterior",1410.5,0.00005416
+17,"R_Date","ANU55206",,"posterior",1415.5,0.000013754
+17,"R_Date","ANU55206",,"posterior",1420.5,0.000003335
+17,"R_Date","ANU55206",,"posterior",1425.5,4.129e-7
+17,"R_Date","ANU55206",,"posterior",1430.5,4.129e-7
+17,"R_Date","ANU55206",,"posterior",1435.5,0
+18,"Boundary","End Nenthorn",,"posterior",1305.5,0
+18,"Boundary","End Nenthorn",,"posterior",1310.5,0.000012904
+18,"Boundary","End Nenthorn",,"posterior",1315.5,0.000021262
+18,"Boundary","End Nenthorn",,"posterior",1320.5,0.0022583
+18,"Boundary","End Nenthorn",,"posterior",1325.5,0.013505
+18,"Boundary","End Nenthorn",,"posterior",1330.5,0.011518
+18,"Boundary","End Nenthorn",,"posterior",1335.5,0.010986
+18,"Boundary","End Nenthorn",,"posterior",1340.5,0.013712
+18,"Boundary","End Nenthorn",,"posterior",1345.5,0.021461
+18,"Boundary","End Nenthorn",,"posterior",1350.5,0.03178
+18,"Boundary","End Nenthorn",,"posterior",1355.5,0.027481
+18,"Boundary","End Nenthorn",,"posterior",1360.5,0.016167
+18,"Boundary","End Nenthorn",,"posterior",1365.5,0.008129
+18,"Boundary","End Nenthorn",,"posterior",1370.5,0.004138
+18,"Boundary","End Nenthorn",,"posterior",1375.5,0.0024908
+18,"Boundary","End Nenthorn",,"posterior",1380.5,0.0017291
+18,"Boundary","End Nenthorn",,"posterior",1385.5,0.0022437
+18,"Boundary","End Nenthorn",,"posterior",1390.5,0.010515
+18,"Boundary","End Nenthorn",,"posterior",1395.5,0.010606
+18,"Boundary","End Nenthorn",,"posterior",1400.5,0.004795
+18,"Boundary","End Nenthorn",,"posterior",1405.5,0.00224
+18,"Boundary","End Nenthorn",,"posterior",1410.5,0.0012587
+18,"Boundary","End Nenthorn",,"posterior",1415.5,0.0009083
+18,"Boundary","End Nenthorn",,"posterior",1420.5,0.0005713
+18,"Boundary","End Nenthorn",,"posterior",1425.5,0.0003888
+18,"Boundary","End Nenthorn",,"posterior",1430.5,0.0002404
+18,"Boundary","End Nenthorn",,"posterior",1435.5,0.00023376
+18,"Boundary","End Nenthorn",,"posterior",1440.5,0.00014041
+18,"Boundary","End Nenthorn",,"posterior",1445.5,0.0001004
+18,"Boundary","End Nenthorn",,"posterior",1450.5,0.00008375
+18,"Boundary","End Nenthorn",,"posterior",1455.5,0.00007043
+18,"Boundary","End Nenthorn",,"posterior",1460.5,0.00006166
+18,"Boundary","End Nenthorn",,"posterior",1465.5,0.0000375
+18,"Boundary","End Nenthorn",,"posterior",1470.5,0.000017512
+18,"Boundary","End Nenthorn",,"posterior",1475.5,0.000014588
+18,"Boundary","End Nenthorn",,"posterior",1480.5,0.000021675
+18,"Boundary","End Nenthorn",,"posterior",1485.5,0.000010838
+18,"Boundary","End Nenthorn",,"posterior",1490.5,0.0000025108
+18,"Boundary","End Nenthorn",,"posterior",1495.5,0.000006261
+18,"Boundary","End Nenthorn",,"posterior",1500.5,0.0000020976
+18,"Boundary","End Nenthorn",,"posterior",1505.5,0.000003337
+18,"Boundary","End Nenthorn",,"posterior",1510.5,0.000007914
+18,"Boundary","End Nenthorn",,"posterior",1515.5,0.000005848
+18,"Boundary","End Nenthorn",,"posterior",1520.5,0.00000499
+18,"Boundary","End Nenthorn",,"posterior",1525.5,0.0000016527
+18,"Boundary","End Nenthorn",,"posterior",1530.5,0.000002924
+18,"Boundary","End Nenthorn",,"posterior",1535.5,0.000002924
+18,"Boundary","End Nenthorn",,"posterior",1540.5,0.000002924
+18,"Boundary","End Nenthorn",,"posterior",1545.5,4.132e-7
+18,"Boundary","End Nenthorn",,"posterior",1550.5,8.263e-7
+18,"Boundary","End Nenthorn",,"posterior",1555.5,0.0000016527
+18,"Boundary","End Nenthorn",,"posterior",1560.5,0.0000020976
+18,"Boundary","End Nenthorn",,"posterior",1565.5,0.0000012395
