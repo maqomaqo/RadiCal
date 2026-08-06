@@ -48,6 +48,24 @@ class MeasurementInput(BaseModel):
     # caller doesn't specify a sample_type explicitly.
     sample_type: Optional[Literal["terrestrial", "marine"]] = None
     curve_id: Literal[VALID_CURVE_IDS] = "intcal20"
+    # Local marine reservoir offset (Delta-R) and its 1-sigma uncertainty,
+    # both in radiocarbon years.
+    #
+    # A marine curve already models the GLOBAL average reservoir effect, so
+    # what a sample needs on top of it is only the local deviation from that
+    # average -- which is what Delta-R is. Entering a whole reservoir age
+    # here (400-500 years for much of the ocean) would count the global
+    # effect twice and pull the result centuries too young.
+    #
+    # Sign follows the usual convention: a marine sample of calendar age t
+    # has expected radiocarbon age curve(t) + delta_r, so a positive Delta-R
+    # means the local water is more depleted than the global average and the
+    # sample dates YOUNGER than it would uncorrected.
+    #
+    # Supersedes `reservoir_age`, which was recorded but never applied to
+    # anything -- see models.RadiocarbonSample.
+    delta_r: Optional[float] = Field(default=None, ge=-5000, le=5000)
+    delta_r_error: Optional[float] = Field(default=None, ge=0, le=5000)
     reservoir_age: Optional[float] = Field(default=None, ge=-500, le=2000)
     depth_cm: Optional[float] = Field(default=None, ge=0, le=10000)
     location: Optional[str] = Field(default=None, max_length=500)
@@ -80,6 +98,22 @@ class MeasurementInput(BaseModel):
                     "quem); the valid range [taq_age_bp, tpq_age_bp] would be "
                     "empty"
                 )
+        return self
+
+    @model_validator(mode="after")
+    def _delta_r_has_an_uncertainty(self):
+        """
+        Delta-R is always published as a value with an uncertainty, and it
+        is combined into the measurement's error in quadrature. Accepting
+        one without the other would silently treat the offset as exactly
+        known and report a date more precise than the evidence supports.
+        """
+        if self.delta_r is not None and self.delta_r_error is None:
+            raise ValueError(
+                "delta_r_error is required when delta_r is given -- a "
+                "reservoir offset has its own uncertainty, and omitting it "
+                "would understate the uncertainty of the calibrated date"
+            )
         return self
 
 

@@ -68,6 +68,12 @@ export interface DraftMeasurement extends MatrixMeasurement {
   material_type: string
   sample_type: SampleType
   curve_id: string
+  // Local marine reservoir offset (Delta-R) and its 1-sigma uncertainty, in
+  // radiocarbon years. Applied to the calibration: a marine curve models
+  // only the global average reservoir effect, so this is the local deviation
+  // from it. The error is required whenever the offset is set.
+  delta_r?: number | null
+  delta_r_error?: number | null
   // Recorded against the date but not used in the calculation. Carried
   // through the draft so editing a saved analysis resubmits them instead
   // of blanking them -- dates deployed from a project collection arrive

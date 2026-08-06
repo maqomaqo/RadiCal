@@ -113,6 +113,16 @@ class RadiocarbonSample(Base):
     material_type = Column(String, nullable=False)  # e.g., 'bone', 'wood', 'charcoal'
     sample_type = Column(String, nullable=False)  # 'terrestrial' or 'marine'
     curve_id = Column(String, default='intcal20')
+    # Local marine reservoir offset (Delta-R) and its 1-sigma uncertainty,
+    # in radiocarbon years. A marine curve already models the global average
+    # reservoir effect, so only the local deviation from it belongs here --
+    # see schemas.MeasurementInput.delta_r for the sign convention.
+    delta_r = Column(Float, nullable=True)
+    delta_r_error = Column(Float, nullable=True)
+    # Superseded by delta_r. Kept because existing rows may hold a value,
+    # but never applied to a calibration -- it was ambiguous whether it
+    # meant a whole reservoir age or a local offset, and starting to apply
+    # it would have silently changed already-published results.
     reservoir_age = Column(Float, nullable=True)  # For marine samples
     depth_cm = Column(Float, nullable=True)
     location = Column(String, nullable=True)

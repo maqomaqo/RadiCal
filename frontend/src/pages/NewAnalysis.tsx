@@ -51,6 +51,16 @@ type Measurement = DraftMeasurement
 // convenience list, not a restriction). material_type is already
 // persisted and appears in the CSV export; this is just the form control
 // that was missing to actually set it away from the "unknown" default.
+// Which curves suit each sample type. The first is what selecting that
+// sample type switches to; the rest are other defensible choices that a
+// deliberate selection shouldn't be overridden. Marine carbon has to be
+// calibrated against a marine curve -- IntCal20 would be wrong by
+// centuries -- while a terrestrial sample picks between hemispheres.
+const CURVE_FOR_SAMPLE_TYPE: Record<'terrestrial' | 'marine', string[]> = {
+  terrestrial: ['intcal20', 'shcal20'],
+  marine: ['marine20'],
+}
+
 const COMMON_MATERIAL_TYPES = [
   'charcoal', 'wood', 'bone', 'shell', 'seed', 'antler', 'eggshell', 'peat', 'sediment',
 ]
@@ -184,6 +194,8 @@ export default function NewAnalysis() {
             // Carried straight through: the form doesn't surface these, but
             // a date deployed from a project collection arrives with them
             // set, and running the edit resubmits whatever the draft holds.
+            delta_r: m.delta_r ?? null,
+            delta_r_error: m.delta_r_error ?? null,
             reservoir_age: m.reservoir_age ?? null,
             depth_cm: m.depth_cm ?? null,
             location: m.location ?? null,
@@ -287,6 +299,17 @@ export default function NewAnalysis() {
   const structureDefined = modelTree ? true : groups.length > 0 || relationships.length > 0
   const structureInvalid = modelTree ? treeProblems.length > 0 : !!cycle
 
+  // The reservoir offset only applies to marine carbon, and only means
+  // anything against a marine curve -- so that is the only time it's asked
+  // for. An offset is useless without its uncertainty, since the two are
+  // combined in quadrature; the backend rejects one without the other, so
+  // catch it here rather than on submit.
+  const isMarine =
+    (currentMeasurement.sample_type || 'terrestrial') === 'marine' ||
+    currentMeasurement.curve_id === 'marine20'
+  const deltaRErrorMissing =
+    currentMeasurement.delta_r != null && currentMeasurement.delta_r_error == null
+
   const handleAddMeasurement = () => {
     if (
       !currentMeasurement.sample_name ||
@@ -294,6 +317,10 @@ export default function NewAnalysis() {
       currentMeasurement.error_1sigma === undefined
     ) {
       alert('Please fill in all required fields')
+      return
+    }
+    if (deltaRErrorMissing) {
+      alert('A ΔR reservoir offset needs its 1σ error -- the two are combined, so an offset on its own would understate the uncertainty of the date.')
       return
     }
 
@@ -305,6 +332,9 @@ export default function NewAnalysis() {
       material_type: currentMeasurement.material_type || 'unknown',
       sample_type: currentMeasurement.sample_type || 'terrestrial',
       curve_id: currentMeasurement.curve_id || 'intcal20',
+      // Only carried for marine carbon -- see isMarine above.
+      delta_r: isMarine ? currentMeasurement.delta_r ?? null : null,
+      delta_r_error: isMarine ? currentMeasurement.delta_r_error ?? null : null,
       reservoir_age: currentMeasurement.reservoir_age,
     }
 
@@ -322,15 +352,24 @@ export default function NewAnalysis() {
     setPreviewResult(null)
     try {
       if (analysisType === 'calibration') {
-        // For single calibration, send just the first measurement
+        // For single calibration, send just the first measurement -- but all
+        // of it. Sending only age/error/curve dropped everything else the
+        // form had collected: the sample's own name (so it saved as the
+        // schema default), its material, and its reservoir offset, which
+        // changes the date rather than just labelling it.
         const measurement = measurements[0]
         const response = await fetch('/api/analysis/calibrate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
+            sample_name: measurement.sample_name,
             age_bp: measurement.age_bp,
             error_1sigma: measurement.error_1sigma,
+            material_type: measurement.material_type,
+            sample_type: measurement.sample_type,
             curve_id: measurement.curve_id,
+            delta_r: measurement.delta_r ?? null,
+            delta_r_error: measurement.delta_r_error ?? null,
             project_id: saveResult ? projectId || null : null,
             save: saveResult,
           }),
@@ -658,12 +697,21 @@ export default function NewAnalysis() {
                 <Select
                   value={currentMeasurement.sample_type || 'terrestrial'}
                   label="Sample Type"
-                  onChange={(e) =>
-                    setCurrentMeasurement({
-                      ...currentMeasurement,
-                      sample_type: e.target.value as 'terrestrial' | 'marine',
-                    })
-                  }
+                  onChange={(e) => {
+                    const sampleType = e.target.value as 'terrestrial' | 'marine'
+                    setCurrentMeasurement((current) => ({
+                      ...current,
+                      sample_type: sampleType,
+                      // Follow the sample type with the curve that matches it,
+                      // unless a deliberate choice has already been made that
+                      // suits it. Marine carbon calibrated against IntCal20
+                      // is wrong by centuries, and the mismatch is invisible
+                      // once the analysis has run.
+                      curve_id: CURVE_FOR_SAMPLE_TYPE[sampleType].includes(current.curve_id || '')
+                        ? current.curve_id
+                        : CURVE_FOR_SAMPLE_TYPE[sampleType][0],
+                    }))
+                  }}
                 >
                   <MenuItem value="terrestrial">Terrestrial</MenuItem>
                   <MenuItem value="marine">Marine</MenuItem>
@@ -684,6 +732,49 @@ export default function NewAnalysis() {
                 </Select>
               </FormControl>
             </Box>
+
+            {/* Only for marine carbon: a marine curve already carries the
+                global average reservoir effect, so what a date needs on top
+                of it is the LOCAL deviation. Offered nowhere else, since a
+                stray offset on a terrestrial date would shift it silently. */}
+            {isMarine && (
+              <Box sx={{ mb: 2 }}>
+                <Box sx={{ display: 'flex', gap: 1 }}>
+                  <TextField
+                    type="number"
+                    label="ΔR (yr)"
+                    value={currentMeasurement.delta_r ?? ''}
+                    onChange={(e) =>
+                      setCurrentMeasurement({
+                        ...currentMeasurement,
+                        delta_r: e.target.value === '' ? null : parseFloat(e.target.value),
+                      })
+                    }
+                    size="small"
+                    sx={{ flex: 1 }}
+                  />
+                  <TextField
+                    type="number"
+                    label="ΔR 1σ error"
+                    value={currentMeasurement.delta_r_error ?? ''}
+                    onChange={(e) =>
+                      setCurrentMeasurement({
+                        ...currentMeasurement,
+                        delta_r_error: e.target.value === '' ? null : parseFloat(e.target.value),
+                      })
+                    }
+                    size="small"
+                    sx={{ flex: 1 }}
+                    error={deltaRErrorMissing}
+                    helperText={deltaRErrorMissing ? 'Required with ΔR' : undefined}
+                  />
+                </Box>
+                <Typography variant="caption" color="textSecondary">
+                  Local marine reservoir offset from the global average the curve already models --
+                  not a whole reservoir age. Leave blank to apply no correction.
+                </Typography>
+              </Box>
+            )}
 
             <Button variant="outlined" onClick={handleAddMeasurement} fullWidth>
               Add Measurement
@@ -716,6 +807,14 @@ export default function NewAnalysis() {
                         {m.material_type && m.material_type !== 'unknown' && (
                           <Typography variant="body2" color="textSecondary">
                             Material: {m.material_type}
+                          </Typography>
+                        )}
+                        {/* Shown because it changes the date -- a reader
+                            should be able to see a correction was applied
+                            without opening the export. */}
+                        {m.delta_r != null && (
+                          <Typography variant="body2" color="textSecondary">
+                            ΔR: {m.delta_r} ± {m.delta_r_error ?? 0} yr
                           </Typography>
                         )}
                       </Box>

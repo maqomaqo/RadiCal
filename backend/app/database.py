@@ -49,6 +49,9 @@ _COLUMN_MIGRATIONS = {
         # group_id. Backfilled from group_id when an old analysis's
         # stratigraphy is migrated to a tree.
         ('element_id', 'VARCHAR'),
+        # Local marine reservoir offset and its uncertainty.
+        ('delta_r', 'FLOAT'),
+        ('delta_r_error', 'FLOAT'),
     ],
     'stratigraphic_relationships': [
         ("from_type", "VARCHAR DEFAULT 'sample'"),

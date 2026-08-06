@@ -145,7 +145,13 @@ class CalibrationCurve:
 
         return self._grid_weights_cache
 
-    def calibrate(self, c14_age: float, c14_error: float) -> Tuple[np.ndarray, np.ndarray]:
+    def calibrate(
+        self,
+        c14_age: float,
+        c14_error: float,
+        delta_r: Optional[float] = None,
+        delta_r_error: Optional[float] = None,
+    ) -> Tuple[np.ndarray, np.ndarray]:
         """
         Calibrate radiocarbon age to calendar age using the probability method.
 
@@ -165,9 +171,19 @@ class CalibrationCurve:
           (trapezoidal rule) so uneven curve resolution doesn't bias the result
         - Normalize to get posterior probability distribution
 
+        A local marine reservoir offset (Delta-R) shifts the age the curve
+        predicts: a marine sample of calendar age t is expected to measure
+        curve(t) + delta_r, because the curve models only the global average
+        reservoir effect. Comparing (c14_age - delta_r) against the curve is
+        the same statement, and its uncertainty joins the quadrature sum --
+        so an offset that is poorly known widens the calibrated range rather
+        than just moving it.
+
         Args:
             c14_age: Measured radiocarbon age (years BP)
             c14_error: 1-sigma measurement uncertainty (years)
+            delta_r: Local marine reservoir offset in radiocarbon years
+            delta_r_error: 1-sigma uncertainty on delta_r
 
         Returns:
             (cal_ages, probabilities) - calendar ages and their posterior probabilities
@@ -175,15 +191,18 @@ class CalibrationCurve:
         if len(self.cal_ages) == 0:
             raise ValueError("Calibration curve data is empty")
 
-        # Combined uncertainty: sqrt(sigma_curve^2 + sigma_measurement^2)
-        combined_error = np.sqrt(self.c14_errors**2 + c14_error**2)
+        offset = delta_r or 0.0
+        offset_error = delta_r_error or 0.0
+
+        # Combined uncertainty: sqrt(sigma_curve^2 + sigma_measurement^2 + sigma_deltaR^2)
+        combined_error = np.sqrt(self.c14_errors**2 + c14_error**2 + offset_error**2)
 
         # Likelihood: P(c14_obs | cal_age) = exp(-0.5 * ((c14_obs - c14_model) / sigma)^2) / sigma
         # This is the (correctly normalized, up to the shared 1/sqrt(2*pi)
         # constant) Gaussian probability of observing c14_age given each
         # cal_age on the curve. The 1/sigma factor matters here because
         # sigma = combined_error varies from point to point along the curve.
-        log_likelihood = -0.5 * ((self.c14_ages - c14_age) / combined_error)**2
+        log_likelihood = -0.5 * ((self.c14_ages - (c14_age - offset)) / combined_error)**2
         likelihood = np.exp(log_likelihood) / combined_error
 
         # Weight by local grid spacing before normalizing so calendar-year

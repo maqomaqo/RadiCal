@@ -33,7 +33,13 @@ def _validate_project_id(project_id: Optional[str], db: Session) -> Optional[str
     return project_id
 
 
-def _compute_calibration_stats(curve: CalibrationCurve, age_bp: float, error_1sigma: float) -> Dict:
+def _compute_calibration_stats(
+    curve: CalibrationCurve,
+    age_bp: float,
+    error_1sigma: float,
+    delta_r: Optional[float] = None,
+    delta_r_error: Optional[float] = None,
+) -> Dict:
     """
     Calibrate one measurement against `curve` and return every derived
     stat the calibration-analysis path needs: point estimates, the overall
@@ -43,7 +49,7 @@ def _compute_calibration_stats(curve: CalibrationCurve, age_bp: float, error_1si
     with its current age_bp/error_1sigma/curve), so the two can't drift
     out of sync with each other.
     """
-    cal_ages, probs = curve.calibrate(age_bp, error_1sigma)
+    cal_ages, probs = curve.calibrate(age_bp, error_1sigma, delta_r, delta_r_error)
 
     # Full multi-range HPD breakdown (calibration curves are non-monotonic,
     # so the posterior for a single measurement can be genuinely multimodal
@@ -265,7 +271,10 @@ async def calibrate_single(measurement: CalibrateRequest, db: Session = Depends(
         # Point estimates, HPD ranges, and a plottable distribution -- see
         # _compute_calibration_stats for the full breakdown (shared with
         # the analysis rerun path so the two can't drift out of sync).
-        stats = _compute_calibration_stats(curve, measurement.age_bp, measurement.error_1sigma)
+        stats = _compute_calibration_stats(
+            curve, measurement.age_bp, measurement.error_1sigma,
+            measurement.delta_r, measurement.delta_r_error,
+        )
         calibrated_age_bp = stats['calibrated_age_bp']
         point_estimate = {'mean': stats['posterior_mean'], 'median': stats['posterior_median'], 'std': stats['posterior_std']}
         hpd_68, hpd_95 = stats['hpd_68'], stats['hpd_95']
@@ -328,6 +337,11 @@ async def calibrate_single(measurement: CalibrateRequest, db: Session = Depends(
             material_type=measurement.material_type,
             sample_type=sample_type,
             curve_id=curve_id,
+            # Persisted, not just applied above: a rerun recalibrates from
+            # the stored row, so an offset left off it would quietly undo
+            # the correction the first run made.
+            delta_r=measurement.delta_r,
+            delta_r_error=measurement.delta_r_error,
             reservoir_age=measurement.reservoir_age,
             depth_cm=measurement.depth_cm,
             location=measurement.location,
@@ -445,6 +459,8 @@ async def bayesian_analysis(request: BayesianRequest, db: Session = Depends(get_
                     # Accepted by the schema and carried by dates deployed
                     # from a project collection, so dropping them here lost
                     # data that had been recorded elsewhere.
+                    delta_r=measurement.delta_r,
+                    delta_r_error=measurement.delta_r_error,
                     reservoir_age=measurement.reservoir_age,
                     depth_cm=measurement.depth_cm,
                     location=measurement.location,
@@ -688,7 +704,10 @@ async def get_analysis(analysis_id: str, db: Session = Depends(get_db)):
                 continue
             try:
                 curve = get_curve(sample.curve_id)
-                cal_ages, probs = curve.calibrate(sample.age_bp, sample.error_1sigma)
+                cal_ages, probs = curve.calibrate(
+                    sample.age_bp, sample.error_1sigma,
+                    sample.delta_r, sample.delta_r_error,
+                )
                 unmodelled_by_sample_id[r.sample_id] = curve.get_display_distribution(cal_ages, probs)
             except Exception:
                 # A sample whose curve_id can't be resolved (e.g. an old
@@ -744,6 +763,8 @@ async def get_analysis(analysis_id: str, db: Session = Depends(get_db)):
                     "material_type": s.material_type,
                     "sample_type": s.sample_type,
                     "curve_id": s.curve_id,
+                    "delta_r": s.delta_r,
+                    "delta_r_error": s.delta_r_error,
                     "reservoir_age": s.reservoir_age,
                     "depth_cm": s.depth_cm,
                     "location": s.location,
@@ -921,7 +942,10 @@ def _rerun_analysis(analysis: Analysis, db: Session) -> None:
     if analysis.analysis_type == 'calibration':
         sample = samples[0]
         curve = get_curve(sample.curve_id)
-        stats = _compute_calibration_stats(curve, sample.age_bp, sample.error_1sigma)
+        stats = _compute_calibration_stats(
+            curve, sample.age_bp, sample.error_1sigma,
+            sample.delta_r, sample.delta_r_error,
+        )
 
         result = db.query(AnalysisResult).filter(AnalysisResult.analysis_id == analysis.id).first()
         if not result:
@@ -956,6 +980,8 @@ def _rerun_analysis(analysis: Analysis, db: Session) -> None:
                 'error_1sigma': s.error_1sigma,
                 'sample_name': s.sample_name,
                 'curve_id': s.curve_id,
+                'delta_r': s.delta_r,
+                'delta_r_error': s.delta_r_error,
                 'element_id': s.element_id or s.group_id,
                 'tpq_age_bp': s.tpq_age_bp,
                 'taq_age_bp': s.taq_age_bp,
@@ -1178,6 +1204,8 @@ async def duplicate_analysis(analysis_id: str, db: Session = Depends(get_db)):
             material_type=sample.material_type,
             sample_type=sample.sample_type,
             curve_id=sample.curve_id,
+            delta_r=sample.delta_r,
+            delta_r_error=sample.delta_r_error,
             reservoir_age=sample.reservoir_age,
             depth_cm=sample.depth_cm,
             location=sample.location,
@@ -1341,6 +1369,8 @@ async def replace_analysis_inputs(
                 curve_id=measurement.curve_id,
                 # Replacing the inputs must not quietly drop fields the
                 # request carried; these used to be nulled on every edit.
+                delta_r=measurement.delta_r,
+                delta_r_error=measurement.delta_r_error,
                 reservoir_age=measurement.reservoir_age,
                 depth_cm=measurement.depth_cm,
                 location=measurement.location,

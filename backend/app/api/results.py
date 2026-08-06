@@ -58,7 +58,9 @@ def _unmodelled_ranges(sample, analysis_type: str) -> Dict:
         return blank
     try:
         curve = get_curve(sample.curve_id)
-        cal_ages, probs = curve.calibrate(sample.age_bp, sample.error_1sigma)
+        cal_ages, probs = curve.calibrate(
+            sample.age_bp, sample.error_1sigma, sample.delta_r, sample.delta_r_error,
+        )
         return {
             'unmodelled_hpd_68_ranges': curve.get_hpd_ranges(cal_ages, probs, 0.68),
             'unmodelled_hpd_95_ranges': curve.get_hpd_ranges(cal_ages, probs, 0.95),

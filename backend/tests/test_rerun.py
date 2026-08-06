@@ -397,3 +397,134 @@ class TestEditRoundTrip:
             },
         )
         assert replaced.status_code == 200, replaced.text
+
+    @requires_pymc
+    def test_a_reservoir_offset_survives_and_is_applied(self, client):
+        """
+        Delta-R changes the date, so losing it across an edit would silently
+        change results -- and applying it in one code path but not another
+        would make the modelled and unmodelled figures disagree.
+        """
+        tag = f"dr{next(_ROUND_TRIP_IDS)}"
+        tree = {
+            "id": f"{tag}root", "element_type": "sequence", "name": "Site", "children": [
+                {"id": f"{tag}b0", "element_type": "boundary", "name": "Start", "children": []},
+                {"id": f"{tag}p1", "element_type": "phase", "name": "Only", "children": []},
+                {"id": f"{tag}b1", "element_type": "boundary", "name": "End", "children": []},
+            ],
+        }
+
+        def build(**offset):
+            return client.post(
+                "/api/analysis/bayesian",
+                json={
+                    "name": "Reservoir offset",
+                    "measurements": [
+                        _measurement(f"{tag}{offset.get('delta_r', 'no')}s", sample_name="Shell",
+                                     sample_type="marine", curve_id="marine20",
+                                     element_id=f"{tag}p1", **offset),
+                    ],
+                    "model_tree": tree,
+                    "bayesian_config": {"mcmc_samples": 200, "mcmc_tune": 200, "mcmc_chains": 1},
+                    "save": False,
+                },
+            )
+
+        # Applied: a positive offset dates the sample younger.
+        plain = build()
+        corrected = build(delta_r=400, delta_r_error=50)
+        assert plain.status_code == corrected.status_code == 200, corrected.text
+        plain_median = plain.json()["data"]["results"][f"{tag}nos"]["posterior_median"]
+        corrected_median = corrected.json()["data"]["results"][f"{tag}400s"]["posterior_median"]
+        assert corrected_median < plain_median - 100, (plain_median, corrected_median)
+
+        # Persisted, returned, and preserved by an edit.
+        saved_resp = client.post(
+            "/api/analysis/bayesian",
+            json={
+                "name": "Reservoir offset saved",
+                "measurements": [
+                    _measurement(f"{tag}s1", sample_name="Shell", sample_type="marine",
+                                 curve_id="marine20", element_id=f"{tag}p1x",
+                                 delta_r=400, delta_r_error=50),
+                ],
+                "model_tree": {**tree, "id": f"{tag}root2",
+                               "children": [{**c, "id": c["id"] + "x"} for c in tree["children"]]},
+                "bayesian_config": {"mcmc_samples": 200, "mcmc_tune": 200, "mcmc_chains": 1},
+                "save": True,
+            },
+        )
+        assert saved_resp.status_code == 200, saved_resp.text
+        analysis_id = saved_resp.json()["data"]["id"]
+
+        def stored():
+            m = client.get(f"/api/analysis/{analysis_id}").json()["data"]["measurements"][0]
+            return m["delta_r"], m["delta_r_error"]
+
+        assert stored() == (400, 50)
+
+        saved = client.get(f"/api/analysis/{analysis_id}").json()["data"]
+        replaced = client.put(
+            f"/api/analysis/{analysis_id}/inputs",
+            json={
+                "name": saved["name"],
+                "measurements": [
+                    {"id": m["id"], "sample_name": m["sample_name"], "age_bp": m["age_bp"],
+                     "error_1sigma": m["error_1sigma"], "material_type": m["material_type"],
+                     "sample_type": m["sample_type"], "curve_id": m["curve_id"],
+                     "delta_r": m["delta_r"], "delta_r_error": m["delta_r_error"],
+                     "element_id": m["element_id"]}
+                    for m in saved["measurements"]
+                ],
+                "groups": [], "relationships": [],
+                "model_tree": saved["model_tree"],
+                "bayesian_config": {"mcmc_samples": 200, "mcmc_tune": 200, "mcmc_chains": 1},
+            },
+        )
+        assert replaced.status_code == 200, replaced.text
+        assert stored() == (400, 50)
+
+    def test_an_offset_without_its_uncertainty_is_rejected(self, client):
+        response = client.post(
+            "/api/analysis/calibrate",
+            json={"sample_name": "Shell", "age_bp": 3000, "error_1sigma": 30,
+                  "curve_id": "marine20", "sample_type": "marine",
+                  "delta_r": 400, "save": False},
+        )
+        assert response.status_code == 422
+        assert "delta_r_error" in response.text
+
+    @requires_pymc
+    def test_a_rerun_reproduces_a_corrected_calibration(self, client):
+        """
+        The offset has to be stored, not just applied. A rerun recalibrates
+        from the saved row, so an offset that was applied on the first run
+        but never persisted would quietly undo itself -- the date would move
+        by centuries with nothing to show why.
+        """
+        created = client.post(
+            "/api/analysis/calibrate",
+            json={"sample_name": "Shell", "age_bp": 3000, "error_1sigma": 30,
+                  "material_type": "marine shell", "sample_type": "marine",
+                  "curve_id": "marine20", "delta_r": 400, "delta_r_error": 50,
+                  "save": True},
+        )
+        assert created.status_code == 200, created.text
+        analysis_id = created.json()["data"]["id"]
+        first_run = created.json()["data"]["posterior_median"]
+
+        stored = client.get(f"/api/analysis/{analysis_id}").json()["data"]["measurements"][0]
+        assert (stored["delta_r"], stored["delta_r_error"]) == (400, 50)
+
+        assert client.post(f"/api/analysis/{analysis_id}/rerun").status_code == 200
+        rerun = client.get(f"/api/analysis/{analysis_id}").json()["data"]["results"][0]
+        assert rerun["posterior_median"] == pytest.approx(first_run, rel=1e-6)
+
+        # And the correction really was in force -- an uncorrected date sits
+        # centuries older.
+        plain = client.post(
+            "/api/analysis/calibrate",
+            json={"sample_name": "Shell", "age_bp": 3000, "error_1sigma": 30,
+                  "sample_type": "marine", "curve_id": "marine20", "save": False},
+        )
+        assert plain.json()["data"]["posterior_median"] > first_run + 100

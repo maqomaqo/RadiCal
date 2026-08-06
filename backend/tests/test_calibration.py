@@ -161,3 +161,73 @@ class TestCalibrationCurve:
 
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
+
+
+class TestReservoirCorrection:
+    """
+    Delta-R: the local marine reservoir offset. A marine curve models only
+    the global average reservoir effect, so a sample's local deviation from
+    that average has to be applied on top of it.
+
+    The synthetic curve here has a known slope (c14 = 0.95 * cal), so the
+    expected shift can be stated exactly rather than eyeballed: subtracting
+    an offset of D from the measured age moves the calibrated age younger by
+    D / 0.95 calendar years.
+    """
+
+    @pytest.fixture
+    def curve(self):
+        cal_ages = np.arange(0, 5001, 20)
+        return CalibrationCurve(cal_ages, cal_ages * 0.95, np.ones_like(cal_ages) * 20)
+
+    def _peak(self, curve, c14_age, error, delta_r=None, delta_r_error=None):
+        cal_ages, probs = curve.calibrate(c14_age, error, delta_r, delta_r_error)
+        return cal_ages[np.argmax(probs)]
+
+    def test_no_offset_is_unchanged(self, curve):
+        """
+        The correction must be inert unless asked for -- every analysis that
+        predates it has to calibrate to exactly what it did before.
+        """
+        baseline = curve.calibrate(2500, 50)
+        for args in ((None, None), (0, 0), (0, None), (None, 0)):
+            cal_ages, probs = curve.calibrate(2500, 50, *args)
+            assert np.array_equal(cal_ages, baseline[0]), args
+            assert np.allclose(probs, baseline[1]), args
+
+    def test_a_positive_offset_dates_the_sample_younger(self, curve):
+        """
+        Positive Delta-R means the local water is more depleted than the
+        global average, so the sample measures older than the curve predicts
+        and its true calendar age is younger.
+        """
+        uncorrected = self._peak(curve, 2500, 50)
+        corrected = self._peak(curve, 2500, 50, 190, 0)
+        assert corrected < uncorrected
+        # 190 radiocarbon years / 0.95 = 200 calendar years, within a grid step.
+        assert uncorrected - corrected == pytest.approx(200, abs=20)
+
+    def test_a_negative_offset_dates_the_sample_older(self, curve):
+        uncorrected = self._peak(curve, 2500, 50)
+        corrected = self._peak(curve, 2500, 50, -190, 0)
+        assert corrected > uncorrected
+        assert corrected - uncorrected == pytest.approx(200, abs=20)
+
+    def test_the_offsets_uncertainty_widens_the_result(self, curve):
+        """
+        Delta-R is combined in quadrature with the measurement error, so a
+        poorly known offset must widen the calibrated range and not merely
+        move it. Treating the offset as exact would report a date more
+        precise than the evidence supports.
+        """
+        def spread(delta_r_error):
+            cal_ages, probs = curve.calibrate(2500, 50, 190, delta_r_error)
+            mean = np.sum(cal_ages * probs)
+            return float(np.sqrt(np.sum(probs * (cal_ages - mean) ** 2)))
+
+        tight, loose = spread(0), spread(100)
+        assert loose > tight * 1.5, (tight, loose)
+        # The centre is unmoved -- the uncertainty widens, it doesn't shift.
+        assert self._peak(curve, 2500, 50, 190, 0) == pytest.approx(
+            self._peak(curve, 2500, 50, 190, 100), abs=40
+        )

@@ -35,7 +35,13 @@ _PRACTICAL_WINDOW_MASS_THRESHOLD = 1e-6
 ORDER_CONSTRAINT_STEEPNESS = 10.0
 
 
-def _practical_bounds(curve: CalibrationCurve, age_bp: float, error_1sigma: float) -> Tuple[float, float]:
+def _practical_bounds(
+    curve: CalibrationCurve,
+    age_bp: float,
+    error_1sigma: float,
+    delta_r: float = 0.0,
+    delta_r_error: float = 0.0,
+) -> Tuple[float, float]:
     """
     The calendar-age window a sample's OWN calibration likelihood
     actually has non-negligible mass in, padded generously -- used as
@@ -63,7 +69,10 @@ def _practical_bounds(curve: CalibrationCurve, age_bp: float, error_1sigma: floa
     case that previously produced means in the tens of thousands of cal
     BP against true ages in the 500s-600s cal BP).
     """
-    cal_ages, probs = curve.calibrate(age_bp, error_1sigma)
+    # With the same reservoir correction the likelihood below uses --
+    # otherwise the prior would bracket the uncorrected date and could
+    # exclude where the corrected one actually falls.
+    cal_ages, probs = curve.calibrate(age_bp, error_1sigma, delta_r, delta_r_error)
     peak = float(np.max(probs))
     if peak <= 0:
         return float(curve.cal_ages[0]), float(curve.cal_ages[-1])
@@ -197,7 +206,10 @@ class BayesianChronology:
             el_taq, el_tpq = element_bounds.get(m.get('element_id'), (None, None))
             taq, tpq = effective_bounds(m, {'taq_age_bp': el_taq, 'tpq_age_bp': el_tpq})
 
-            practical_lower, practical_upper = _practical_bounds(curve, m['age_bp'], m['error_1sigma'])
+            practical_lower, practical_upper = _practical_bounds(
+                curve, m['age_bp'], m['error_1sigma'],
+                m.get('delta_r') or 0.0, m.get('delta_r_error') or 0.0,
+            )
 
             lower = max(curve_lower, practical_lower, taq if taq is not None else -np.inf)
             upper = min(curve_upper, practical_upper, tpq if tpq is not None else np.inf)
@@ -449,9 +461,19 @@ class BayesianChronology:
                 sample_id = m['id']
                 curve = curves[m.get('curve_id', 'intcal20')]
 
-                predicted_c14 = _interp_curve(ages[sample_id], curve.cal_ages, curve.c14_ages)
+                # A local marine reservoir offset shifts the age the curve
+                # predicts (the curve carries only the global average
+                # effect), and its uncertainty joins the quadrature sum --
+                # the same correction the single-sample path applies, so the
+                # modelled and unmodelled dates stay comparable.
+                delta_r = m.get('delta_r') or 0.0
+                delta_r_error = m.get('delta_r_error') or 0.0
+
+                predicted_c14 = _interp_curve(ages[sample_id], curve.cal_ages, curve.c14_ages) + delta_r
                 curve_error = _interp_curve(ages[sample_id], curve.cal_ages, curve.c14_errors)
-                combined_sigma = pt.sqrt(curve_error ** 2 + m['error_1sigma'] ** 2)
+                combined_sigma = pt.sqrt(
+                    curve_error ** 2 + m['error_1sigma'] ** 2 + delta_r_error ** 2
+                )
 
                 pm.Normal(
                     f"obs_{sample_id}",
