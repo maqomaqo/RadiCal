@@ -33,6 +33,43 @@ def _format_hpd_ranges(ranges: Optional[List[Dict]], fallback_min, fallback_max)
     return ''
 
 
+def _unmodelled_ranges(sample, analysis_type: str) -> Dict:
+    """
+    What this date calibrates to on its own, with no stratigraphic
+    constraint applied -- the "unmodelled vs modelled" comparison the
+    results page shows beside each date, and the standard way to see what
+    the model actually did.
+
+    Computed here rather than read from a column, for the same reason
+    GET /api/analysis/{id} computes it for the page: it is a cheap analytic
+    calibration determined entirely by the sample's current
+    age/error/curve, so deriving it cannot fall out of step with the
+    measurement the way a stored copy would.
+
+    Reported at the same two confidence levels as the modelled posterior,
+    so a reader can compare like with like within one export.
+
+    Only meaningful for a Bayesian analysis. For a plain calibration the
+    modelled figures already *are* the unmodelled result, so repeating them
+    would just invite the reader to compare a number with itself.
+    """
+    blank = {'unmodelled_hpd_68_ranges': None, 'unmodelled_hpd_95_ranges': None}
+    if analysis_type != 'bayesian' or sample is None:
+        return blank
+    try:
+        curve = get_curve(sample.curve_id)
+        cal_ages, probs = curve.calibrate(sample.age_bp, sample.error_1sigma)
+        return {
+            'unmodelled_hpd_68_ranges': curve.get_hpd_ranges(cal_ages, probs, 0.68),
+            'unmodelled_hpd_95_ranges': curve.get_hpd_ranges(cal_ages, probs, 0.95),
+        }
+    except Exception:
+        # A sample whose curve_id no longer resolves (say a renamed curve)
+        # shouldn't fail the whole export. The modelled figures are
+        # unaffected; this one just stays empty.
+        return blank
+
+
 def _gather_export_rows(analysis_id: str, db: Session) -> Dict:
     """
     Shared data assembly for every results export format (CSV/JSON/table).
@@ -41,6 +78,9 @@ def _gather_export_rows(analysis_id: str, db: Session) -> Dict:
     posterior -- and raises 404 up front so every export endpoint fails
     the same, obvious way for a bad analysis_id instead of silently
     returning an empty/placeholder file.
+
+    The unmodelled calibration is derived here too, so the CSV and the JSON
+    report the same figure by construction rather than by coincidence.
     """
     analysis = db.query(Analysis).filter(Analysis.id == analysis_id).first()
     if not analysis:
@@ -72,6 +112,7 @@ def _gather_export_rows(analysis_id: str, db: Session) -> Dict:
             'hpd_95_max': r.hpd_95_max,
             'hpd_68_ranges': r.hpd_68_ranges,
             'hpd_95_ranges': r.hpd_95_ranges,
+            **_unmodelled_ranges(sample, analysis.analysis_type),
         })
 
     return {'analysis': analysis, 'rows': rows, 'samples_by_id': samples_by_id}
@@ -136,34 +177,18 @@ def _measurement_cells(row: Optional[Dict]) -> List:
     ]
 
 
-def _unmodelled_cell(sample, analysis_type: str) -> str:
+def _unmodelled_cell(row: Optional[Dict]) -> str:
     """
-    What this date calibrates to on its own, with no stratigraphic
-    constraint applied -- the "unmodelled vs modelled" comparison the
-    results page shows beside each date, which is the standard way to see
-    what the model actually did.
+    The unmodelled calibration for the CSV, at 95% to match the file's own
+    "95% HPD" column. Reads what _gather_export_rows already derived, so
+    the number here and the one in the JSON export are the same figure.
 
-    Computed here rather than read from a column: it is a cheap analytic
-    calibration determined entirely by the sample's current
-    age/error/curve, so deriving it at export time cannot fall out of step
-    with the measurement the way a stored copy would. This is the same
-    reason GET /api/analysis/{id} computes it at read time for the page.
-
-    Only meaningful for a Bayesian analysis. For a plain calibration the
-    modelled columns already *are* the unmodelled result, so repeating it
-    would just invite the reader to compare a number with itself.
+    The JSON carries the 68% breakdown too; a column-per-level does not pay
+    for itself in a spreadsheet, where the 95% range is what gets quoted.
     """
-    if analysis_type != 'bayesian' or sample is None:
+    if not row:
         return ''
-    try:
-        curve = get_curve(sample.curve_id)
-        cal_ages, probs = curve.calibrate(sample.age_bp, sample.error_1sigma)
-        return _format_hpd_ranges(curve.get_hpd_ranges(cal_ages, probs, 0.95), None, None)
-    except Exception:
-        # A sample whose curve_id no longer resolves (say a renamed curve)
-        # shouldn't fail the whole export. The modelled columns are
-        # unaffected; this one just stays blank.
-        return ''
+    return _format_hpd_ranges(row.get('unmodelled_hpd_95_ranges'), None, None)
 
 
 def _posterior_cells(row: Optional[Dict]) -> List:
@@ -209,14 +234,11 @@ def _build_csv(analysis_id: str, db: Session) -> str:
     # No stored structure (a calibration, or an analysis predating trees):
     # fall back to a flat list of dates so the export still carries the
     # results rather than coming back empty.
-    samples_by_id = data['samples_by_id']
-
     if not structure:
         for order, row in enumerate(data['rows'], start=1):
             writer.writerow(
                 [order, 'Date', 0, '', row['sample_name'] or row['sample_id'] or '']
-                + _measurement_cells(row)
-                + [_unmodelled_cell(samples_by_id.get(row['sample_id']), analysis.analysis_type)]
+                + _measurement_cells(row) + [_unmodelled_cell(row)]
                 + _posterior_cells(row) + ['', '']
             )
         return output.getvalue()
@@ -226,8 +248,7 @@ def _build_csv(analysis_id: str, db: Session) -> str:
         unmodelled = ''
         if row['kind'] == 'date':
             measured, modelled = _measurement_cells(row.get('result')), _posterior_cells(row.get('result'))
-            sample_id = row['sample']['id'] if row['sample'] else None
-            unmodelled = _unmodelled_cell(samples_by_id.get(sample_id), analysis.analysis_type)
+            unmodelled = _unmodelled_cell(row.get('result'))
         elif posterior:
             # A boundary's posterior is summary-shaped, not a result row.
             # It has no unmodelled counterpart either -- a boundary exists

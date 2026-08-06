@@ -340,6 +340,72 @@ class TestJsonStructure:
         assert payload["structure"] == []
         assert len(payload["results"]) == 1
 
+    @requires_pymc
+    def test_a_date_carries_its_unmodelled_calibration(self, client):
+        """
+        The unconstrained calibration, at both levels the modelled posterior
+        reports, so a consumer can compare like with like. Structured as
+        ranges rather than the CSV's formatted string -- that is the point of
+        having a JSON export.
+        """
+        analysis_id = self._structured(client)
+        payload = client.get(f"/api/results/{analysis_id}/export/json").json()["data"]
+
+        row = next(r for r in payload["results"] if r["sample_name"] == "A")
+        for field in ("unmodelled_hpd_68_ranges", "unmodelled_hpd_95_ranges"):
+            assert row[field], field
+            assert all(
+                {"min", "max", "probability_percent"} <= set(r) for r in row[field]
+            ), field
+        # Genuinely unconstrained, not a copy of the posterior -- narrowing
+        # the date is what the model does, so the two must differ.
+        assert row["unmodelled_hpd_95_ranges"] != row["hpd_95_ranges"]
+
+        # And it reaches the structure view too, through the same result.
+        date = next(r for r in payload["structure"] if r["kind"] == "date" and r["name"] == "A")
+        assert date["result"]["unmodelled_hpd_95_ranges"] == row["unmodelled_hpd_95_ranges"]
+
+    @requires_pymc
+    def test_the_unmodelled_figure_agrees_with_the_csv(self, client):
+        """
+        Both exports derive it from one assembly, so they report the same
+        calibration -- the CSV formatted, the JSON structured. If these ever
+        disagree, one of the two files is misreporting the date.
+        """
+        analysis_id = self._structured(client)
+        rows = client.get(f"/api/results/{analysis_id}/export/json").json()["data"]["results"]
+        header, csv_rows = _csv_rows(client, analysis_id)
+        column = header.index('Unmodelled 95% HPD')
+
+        def formatted(ranges):
+            return '; '.join(
+                f"{r['max']:.0f}-{r['min']:.0f} ({r['probability_percent']:.1f}%)" for r in ranges
+            )
+
+        by_name = {r["sample_name"]: r for r in rows}
+        for csv_row in (r for r in csv_rows if r[1] == 'Date'):
+            assert csv_row[column] == formatted(by_name[csv_row[4]]["unmodelled_hpd_95_ranges"])
+
+    @requires_pymc
+    def test_a_boundary_has_no_unmodelled_counterpart(self, client):
+        # A boundary exists only as a modelled parameter, so there is no
+        # unconstrained version of it to report.
+        analysis_id = self._structured(client)
+        structure = client.get(
+            f"/api/results/{analysis_id}/export/json"
+        ).json()["data"]["structure"]
+
+        boundary = next(r for r in structure if r["kind"] == "boundary")
+        assert "result" not in boundary
+
+    def test_a_plain_calibration_reports_no_unmodelled(self, client):
+        # The modelled figures already ARE the unmodelled result there, so
+        # repeating them would invite comparing a number with itself.
+        analysis_id = _calibration(client)
+        row = client.get(f"/api/results/{analysis_id}/export/json").json()["data"]["results"][0]
+        assert row["unmodelled_hpd_68_ranges"] is None
+        assert row["unmodelled_hpd_95_ranges"] is None
+
 
 class TestGraphs:
     """
