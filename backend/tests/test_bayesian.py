@@ -225,3 +225,215 @@ class TestBoundaryEndToEnd:
         for older, younger in flat:
             assert not (older & {"a1", "a2"} and younger & {"b1", "b2"})
             assert not (older & {"b1", "b2"} and younger & {"a1", "a2"})
+
+
+@requires_pymc
+class TestSpanTermsArePresent:
+    """
+    Every bounded group must actually contribute its uniform-scatter term to
+    the model. These check the emitted pm.Potential names rather than a
+    posterior, so they pin down the maths without paying for an MCMC run.
+
+    The gap they exist for: the one-marginalized-boundary branch of
+    build_model was guarded by `num_dates >= 2`, because the closed form it
+    used divides by (K - 1) and so has no K = 1 case. The integral itself is
+    perfectly well defined at K = 1 -- it is just a logarithm instead of a
+    power -- so the guard silently dropped the prior for any outermost group
+    holding exactly one date. That is the ordinary shape of the first and
+    last phase of a stratigraphic sequence, and it left those dates free to
+    drift outward (82 and 50 years of posterior-mean error against an exact
+    grid reference on the same model window).
+    """
+
+    def _potentials(self, measurements, tree):
+        bc = BayesianChronology(mcmc_samples=50, mcmc_tune=50, mcmc_chains=1)
+        model, _ages = bc.build_model(measurements, tree)
+        return bc, {v.name for v in model.potentials}
+
+    def test_single_date_outermost_groups_get_a_span_term(self):
+        measurements = [
+            _measurement("sd_old", 3300, element_id="sd_q0"),
+            _measurement("sd_mid", 3150, element_id="sd_q1"),
+            _measurement("sd_new", 3000, element_id="sd_q2"),
+        ]
+        tree = _sequence("sd_root", "Site", [
+            _boundary("sd_b0", "Start"), _phase("sd_q0", "Lowest"),
+            _boundary("sd_b1", "T1"), _phase("sd_q1", "Middle"),
+            _boundary("sd_b2", "T2"), _phase("sd_q2", "Highest"),
+            _boundary("sd_b3", "End"),
+        ])
+
+        bc, potentials = self._potentials(measurements, tree)
+
+        # The two outermost boundaries are integrated out, so their groups are
+        # the one-sided case -- with one date each, exactly the dropped case.
+        assert bc.model_plan.marginalized_boundaries == {"sd_b0", "sd_b3"}
+        assert [len(g.date_ids) for g in bc.model_plan.span_groups] == [1, 1, 1]
+        assert "phase_sd_b0_sd_b1" in potentials
+        assert "phase_sd_b2_sd_b3" in potentials
+        # ...and the fully interior group, which was never affected.
+        assert "phase_sd_b1_sd_b2" in potentials
+
+    def test_every_group_with_dates_contributes_a_term(self):
+        """
+        The general statement, over group sizes 1-4 in one model: a bounded
+        group holding at least one date always contributes a span term. The
+        one documented exception is a two-sided marginalized group, where the
+        exponent 2-K really is zero at K = 2 (flat) and undefined at K = 1,
+        and that group is interior here.
+        """
+        measurements = []
+        children = [_boundary("eg_b0", "Start")]
+        for group, size in enumerate((1, 2, 3, 4)):
+            pid = f"eg_p{group}"
+            children.append(_phase(pid, f"Phase {group}"))
+            children.append(_boundary(f"eg_b{group + 1}", f"B{group + 1}"))
+            for i in range(size):
+                measurements.append(
+                    _measurement(f"eg_{group}_{i}", 3400 - group * 120 + i * 10, element_id=pid)
+                )
+
+        bc, potentials = self._potentials(measurements, _sequence("eg_root", "Site", children))
+
+        assert [len(g.date_ids) for g in bc.model_plan.span_groups] == [1, 2, 3, 4]
+        for group in bc.model_plan.span_groups:
+            name = f"phase_{group.older_boundary_id}_{group.younger_boundary_id}"
+            assert name in potentials, f"{name} missing for a {len(group.date_ids)}-date group"
+
+    def test_empty_group_contributes_nothing(self):
+        """A boundary pair with no dates between it has no scatter to model."""
+        measurements = [_measurement("ne_only", 3100, element_id="ne_p1")]
+        tree = _sequence("ne_root", "Site", [
+            _boundary("ne_b0", "Start"), _phase("ne_p1", "Dated"),
+            _boundary("ne_b1", "T"), _phase("ne_p2", "Undated"),
+            _boundary("ne_b2", "End"),
+        ])
+
+        bc, potentials = self._potentials(measurements, tree)
+
+        assert "phase_ne_b1_ne_b2" not in potentials
+        assert "phase_ne_b0_ne_b1" in potentials
+
+
+@requires_pymc
+class TestSpanTermCannotDiverge:
+    """
+    The uniform-scatter density (older - younger)^(-K) must stay bounded as a
+    group's two sampled boundaries close on each other.
+
+    In the correct model it is bounded because the group's K dates are hard-
+    confined between the boundaries, so the volume they can occupy shrinks as
+    eps^K and cancels the eps^(-K) exactly. build_model makes that
+    containment a soft softplus penalty (a hard -inf being unusable under SMC
+    tempering), which leaves the dates a fixed sliver of slack regardless of
+    eps -- so the cancellation fails and the density diverges. The posterior
+    is then improper, and samplers behave accordingly: NUTS collapsed three
+    adjacent boundaries onto one value and reported r_hat 2.3 / ess 3, and
+    SMC quietly degraded to r_hat 1.32 / ess 10 on a plain three-phase
+    sequence.
+
+    These tests read the model's own logp rather than sampling it, so they
+    pin the property down in milliseconds.
+    """
+
+    @staticmethod
+    def _point(model, values):
+        """
+        A model point built from calendar-year values, mapped through each
+        variable's OWN PyMC transform rather than any assumption about it.
+        """
+        import pytensor
+        import pytensor.tensor as pt
+
+        point = dict(model.initial_point())
+        for name, target in values.items():
+            rv = model.named_vars[name]
+            key = model.rvs_to_values[rv].name
+            transform = model.rvs_to_transforms.get(rv)
+            if transform is None:
+                point[key] = np.array(float(target))
+            else:
+                forward = transform.forward(
+                    pt.as_tensor_variable(float(target)), *rv.owner.inputs
+                )
+                point[key] = np.asarray(pytensor.function([], forward)())
+        return point
+
+    def _model(self):
+        """Three phases of four dates, boundary between each: the smallest
+        model with two ADJACENT sampled boundaries, hence a closable gap."""
+        measurements = []
+        children = [_boundary("cl_b0", "Start")]
+        for group in range(3):
+            pid = f"cl_p{group}"
+            children.append(_phase(pid, f"Phase {group}"))
+            children.append(_boundary(f"cl_b{group + 1}", f"B{group + 1}"))
+            for i in range(4):
+                measurements.append(
+                    _measurement(f"cl_{group}_{i}", 3300 - group * 200 + i * 30,
+                                 element_id=pid)
+                )
+
+        bc = BayesianChronology(mcmc_samples=50, mcmc_tune=50, mcmc_chains=1)
+        model, _ages = bc.build_model(measurements, _sequence("cl_root", "Site", children))
+        assert bc.model_plan.sampled_boundaries == ["cl_b1", "cl_b2"]
+        return model, measurements
+
+    def test_logp_does_not_grow_as_a_sampled_gap_closes(self):
+        """
+        With the middle phase's dates riding along at the collapse point --
+        which is what makes the soft containment cost nothing -- shrinking the
+        gap from 1 year to 1/10000 of a year must not buy any extra
+        probability. Unfloored it buys 4 * log(1e4) = 37 log units, and
+        without bound as the gap shrinks further.
+        """
+        model, _measurements = self._model()
+        logp = model.compile_logp()
+        centre = 3100.0
+
+        def at(gap):
+            values = {"boundary_cl_b1": centre + gap / 2.0,
+                      "boundary_cl_b2": centre - gap / 2.0}
+            values.update({f"age_cl_1_{i}": centre for i in range(4)})
+            return float(logp(self._point(model, values)))
+
+        wide, floored, collapsed = at(1.0), at(1e-2), at(1e-4)
+
+        assert np.isfinite(collapsed)
+        # Closing the gap past the floor gains nothing at all...
+        assert collapsed <= wide + 0.5
+        assert floored <= wide + 0.5
+        # ...and the sliver of soft-constraint violation it costs means the
+        # collapsed point is, if anything, slightly worse.
+        assert collapsed <= floored + 1e-6
+
+    def test_a_groups_own_dates_floor_its_span(self):
+        """
+        The floor is not an arbitrary epsilon: a group's boundaries enclose
+        all of its dates, so the dates' own span is a real lower bound on the
+        gap and is what the density is evaluated at. Two gaps both narrower
+        than the dates they supposedly enclose must therefore score
+        identically on the span term -- the only difference left between them
+        is the containment penalty.
+        """
+        model, _measurements = self._model()
+        term = next(v for v in model.potentials if v.name == "phase_cl_b1_cl_b2")
+        # replace_rvs_by_values is the step that makes the term a function of
+        # the point at all: compiled as-is it still refers to the random
+        # variables and would draw fresh values on every call. Compiled over
+        # the full set of value vars so the whole point dict is accepted.
+        (graph,) = model.replace_rvs_by_values([term])
+        value = model.compile_fn(graph, inputs=model.value_vars, point_fn=True,
+                                 on_unused_input="ignore")
+        # Dates spread over 90 years, so any gap below 90 is infeasible.
+        spread = {f"age_cl_1_{i}": 3100.0 + i * 30.0 for i in range(4)}
+
+        def at(gap):
+            values = {"boundary_cl_b1": 3145.0 + gap / 2.0,
+                      "boundary_cl_b2": 3145.0 - gap / 2.0}
+            values.update(spread)
+            return float(value(self._point(model, values)))
+
+        assert at(1.0) == pytest.approx(at(50.0))
+        # A feasible gap is scored on its own width, not the floor.
+        assert at(400.0) < at(90.0)

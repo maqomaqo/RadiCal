@@ -33,6 +33,35 @@ _PRACTICAL_WINDOW_MASS_THRESHOLD = 1e-6
 # comment above the above/below constraint loop in build_model for why a
 # smooth penalty is used instead of a hard switch(..., 0, -inf).
 ORDER_CONSTRAINT_STEEPNESS = 10.0
+# Smallest separation (years) a bounded group's two boundaries are ever
+# treated as having, when the uniform-scatter density (older - younger)^(-K)
+# is evaluated against a SAMPLED boundary.
+#
+# This is not a cosmetic guard against log(0) -- without it the posterior is
+# improper. In the correct model that density is exactly cancelled as the
+# gap closes, because the group's K dates are HARD-confined between the two
+# boundaries: squeeze the gap to eps and the dates' available volume shrinks
+# as eps^K, killing the eps^(-K) blow-up. This module deliberately makes
+# that containment a SOFT softplus penalty instead (see the ordering loop in
+# build_model for why -inf is unusable under SMC tempering), and a soft
+# constraint leaves the dates roughly 1/ORDER_CONSTRAINT_STEEPNESS of slack
+# no matter how small eps gets. The cancellation therefore fails and the
+# density diverges like eps^(-K) on the surface where two sampled
+# boundaries meet -- a spike of unbounded height and infinite mass.
+#
+# It is not a theoretical worry. On a five-phase sequence with a boundary
+# between each phase (four sampled boundaries), NUTS -- which finds this
+# geometry far more efficiently than SMC does -- collapsed three of them
+# onto a single value (median gap -0.1 yr) and dragged the dates with them,
+# reporting r_hat 2.3 and ess 3, with the youngest date landing 170 years
+# OLDER than the date above it. SMC merely degraded (r_hat 1.20, ess 14),
+# which is worse in practice for being silent.
+#
+# Flooring the gap caps the spurious reward at a finite value and is exact
+# wherever the ordering actually holds by more than this margin -- which is
+# everywhere archaeologically meaningful, the calibration curve's own grid
+# being 5-20 years.
+_MIN_GROUP_SPAN_YEARS = 1.0
 
 
 def _practical_bounds(
@@ -345,6 +374,12 @@ class BayesianChronology:
                 if num_dates:
                     stacked = pt.stack([ages[d] for d in date_ids])
                     oldest, youngest = pt.max(stacked), pt.min(stacked)
+                    # The gap the group's boundaries must at least span: in
+                    # the true model they enclose every one of its dates, so
+                    # the dates' own span is a hard lower bound on it. Used
+                    # to floor the densities below -- see
+                    # _MIN_GROUP_SPAN_YEARS for why that is load-bearing.
+                    least_span = pt.maximum(oldest - youngest, _MIN_GROUP_SPAN_YEARS)
 
                 if older_marginal and younger_marginal:
                     # Both integrated out. Jointly this is the classic
@@ -370,27 +405,50 @@ class BayesianChronology:
                     #     e*log(near) + log1p(-exp(e*(log far - log near)))
                     # with e = 1-K < 0, which is stable because far > near
                     # makes the exponential lie strictly inside (0, 1).
-                    if num_dates >= 2:
+                    #
+                    # K = 1 is a genuinely different integral, not a special
+                    # case of that formula: e = 0 makes near^(1-K) equal
+                    # far^(1-K) and the bracket collapses to zero. The
+                    # antiderivative of s^(-1) is a logarithm, so the term is
+                    # log(far/near) -- still a real constraint pulling the
+                    # group's single date toward the boundary anchoring it.
+                    # Skipping it (as this branch did while it was guarded by
+                    # num_dates >= 2) left the OUTERMOST group at each end of
+                    # a sequence with no phase prior at all whenever it held
+                    # exactly one date, which is the common case for the first
+                    # and last phase of a stratigraphic sequence: measured
+                    # against an exact grid reference on the same window, the
+                    # first and last dates' posterior means were 82 and 50
+                    # years too far out, drifting away from the rest of the
+                    # model in precisely the direction the boundary exists to
+                    # prevent.
+                    if num_dates >= 1:
                         if older_marginal:
                             anchor = boundary_vars[younger_id]
-                            near = pt.maximum(oldest - anchor, 1e-6)
+                            near = pt.maximum(oldest - anchor, least_span)
                             far = pt.maximum(model_upper - anchor, near + 1e-6)
                         else:
                             anchor = boundary_vars[older_id]
-                            near = pt.maximum(anchor - youngest, 1e-6)
+                            near = pt.maximum(anchor - youngest, least_span)
                             far = pt.maximum(anchor - model_lower, near + 1e-6)
-                        exponent = 1 - num_dates
-                        log_near = pt.log(near)
-                        pm.Potential(
-                            f"phase_{older_id}_{younger_id}",
-                            exponent * log_near
-                            + pt.log1p(-pt.exp(exponent * (pt.log(far) - log_near)))
-                        )
+                        log_near, log_far = pt.log(near), pt.log(far)
+                        if num_dates == 1:
+                            term = pt.log(log_far - log_near)
+                        else:
+                            exponent = 1 - num_dates
+                            term = (exponent * log_near
+                                    + pt.log1p(-pt.exp(exponent * (log_far - log_near))))
+                        pm.Potential(f"phase_{older_id}_{younger_id}", term)
                 else:
-                    # Both sampled: the density applies directly.
+                    # Both sampled: the density applies directly. This is the
+                    # branch the collapse described at _MIN_GROUP_SPAN_YEARS
+                    # actually exploited -- two ADJACENT sampled boundaries
+                    # are needed for a gap to close, so it takes three or
+                    # more phases in a sequence for the model to reach it.
                     if num_dates >= 1:
                         span = pt.maximum(
-                            boundary_vars[older_id] - boundary_vars[younger_id], 1e-6)
+                            boundary_vars[older_id] - boundary_vars[younger_id],
+                            least_span)
                         pm.Potential(f"phase_{older_id}_{younger_id}",
                                      -num_dates * pt.log(span))
 
