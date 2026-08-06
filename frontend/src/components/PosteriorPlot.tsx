@@ -1,5 +1,12 @@
 import React, { useMemo } from 'react'
 import { Box, Paper, Typography } from '@mui/material'
+import {
+  DateFormat,
+  DEFAULT_DATE_FORMAT,
+  calendarAxisTicks,
+  calendarAxisTitle,
+  formatCalendarAge,
+} from '@/utils/dateFormat'
 import type { HPDRange } from '@/utils/dateFormat'
 
 interface PosteriorPlotProps {
@@ -31,13 +38,15 @@ interface PosteriorPlotProps {
   showMedian?: boolean
   height?: number
   /**
-   * Optional formatter for displaying a cal BP value in the Point
-   * Estimates box (e.g. converting to BC/AD or BCE/CE). The chart itself
-   * always plots in cal BP, since that's the unit the calibration curve
-   * and posterior are computed in -- this only affects the text summary.
-   * Defaults to `${age.toFixed(0)} cal BP` if not provided.
+   * The reporting format to present calendar ages in -- axis ticks, the
+   * hover readout and the point-estimate summary all follow it.
+   *
+   * The chart still PLOTS in cal BP, which is what the calibration curve
+   * and the posterior are computed in; only the labelling changes. That
+   * matters: switching format never moves a curve or a shaded band, so the
+   * picture stays directly comparable between formats.
    */
-  formatAge?: (age: number) => string
+  dateFormat?: DateFormat
 }
 
 export default function PosteriorPlot({
@@ -52,8 +61,10 @@ export default function PosteriorPlot({
   showMean = true,
   showMedian = true,
   height = 400,
-  formatAge = (age: number) => (Number.isFinite(age) ? `${age.toFixed(0)} cal BP` : 'N/A'),
+  dateFormat = DEFAULT_DATE_FORMAT,
 }: PosteriorPlotProps) {
+  const formatAge = (age: number) =>
+    Number.isFinite(age) ? formatCalendarAge(age, dateFormat) : 'N/A'
   // The backend legitimately sends `null` (not `undefined`) for point
   // estimates that don't apply to a given result -- e.g. every
   // single-calibration result has posterior_mean/median/std = null, since
@@ -77,11 +88,14 @@ export default function PosteriorPlot({
     data.push({
       x: calAges,
       y: probabilities,
+      // Pre-formatted, because %{x} is always the cal BP the point is
+      // plotted at -- the hover should read in the chosen convention.
+      customdata: calAges.map((age) => formatCalendarAge(age, dateFormat)),
       fill: 'tozeroy',
       fillcolor: 'rgba(99, 110, 250, 0.2)',
       line: { color: 'rgb(99, 110, 250)', width: 2 },
       name: 'Posterior Distribution',
-      hovertemplate: '<b>%{x:.0f} cal BP</b><br>Probability: %{y:.4f}<extra></extra>',
+      hovertemplate: '<b>%{customdata}</b><br>Probability: %{y:.4f}<extra></extra>',
     })
 
     const bandHeight = probabilities.length > 0 ? Math.max(...probabilities) * 0.95 : 0
@@ -174,7 +188,14 @@ export default function PosteriorPlot({
     }
 
     return { data }
-  }, [calAges, probabilities, hpd68, hpd95, hpd68Ranges, hpd95Ranges, pointEstimates, showMean, showMedian])
+  }, [calAges, probabilities, hpd68, hpd95, hpd68Ranges, hpd95Ranges, pointEstimates, showMean, showMedian, dateFormat])
+
+  // Tick positions stay in cal BP (where the data is); only the labels are
+  // in the chosen convention. Null for cal BP, leaving Plotly to auto-tick.
+  const ticks = useMemo(() => {
+    if (!calAges || calAges.length === 0) return null
+    return calendarAxisTicks(Math.min(...calAges), Math.max(...calAges), dateFormat)
+  }, [calAges, dateFormat])
 
   // Use dynamic import for Plotly to avoid SSR issues
   const [plotlyLoaded, setPlotlyLoaded] = React.useState(false)
@@ -203,8 +224,11 @@ export default function PosteriorPlot({
     const layout = {
       title: sampleName ? `Posterior Distribution: ${sampleName}` : 'Posterior Distribution',
       xaxis: {
-        title: 'Calendar Age (years BP)',
+        title: calendarAxisTitle(dateFormat),
         zeroline: false,
+        // Null for cal BP -- the values already are cal BP, so Plotly's own
+        // tick choice beats anything imposed here.
+        ...(ticks ? { tickmode: 'array', tickvals: ticks.tickvals, ticktext: ticks.ticktext } : {}),
       },
       yaxis: {
         title: 'Probability Density',
@@ -224,7 +248,7 @@ export default function PosteriorPlot({
     }
 
     window.Plotly.newPlot(plotContainerId, plotData.data, layout, config)
-  }, [plotlyLoaded, plotData, plotContainerId, sampleName])
+  }, [plotlyLoaded, plotData, plotContainerId, sampleName, dateFormat, ticks])
 
   if (!plotData.data || plotData.data.length === 0) {
     return (

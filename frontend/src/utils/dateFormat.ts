@@ -150,3 +150,81 @@ export function loadDateFormatPreference(analysisId: string): DateFormat {
   }
   return DEFAULT_DATE_FORMAT
 }
+
+// --- Plot axis ---------------------------------------------------------
+//
+// Posterior distributions are plotted against cal BP, because that is what
+// the calibration curve and the model work in. Presenting them in another
+// convention is a labelling job: the points stay where they are and only
+// the ticks change, so switching format never moves a curve.
+
+/** Axis title for the chosen reporting format. */
+export function calendarAxisTitle(format: DateFormat): string {
+  if (format === 'bcad') return 'Calendar Age (BC / AD)'
+  if (format === 'bce_ce') return 'Calendar Age (BCE / CE)'
+  return 'Calendar Age (cal BP)'
+}
+
+/**
+ * A signed year in *display* numbering -- positive for AD/CE, negative for
+ * BC/BCE, and never zero, because the conventional calendar has no year
+ * zero. This is not the astronomical year: astronomical -1000 is 1001 BC,
+ * so labelling round astronomical years would produce ticks like "1001 BC".
+ */
+function displayYearFromCalBP(calBP: number): number {
+  const signedYear = RADIOCARBON_PRESENT - calBP
+  return signedYear > 0 ? signedYear : -(1 - signedYear)
+}
+
+function calBPFromDisplayYear(displayYear: number): number {
+  return displayYear > 0
+    ? RADIOCARBON_PRESENT - displayYear
+    : RADIOCARBON_PRESENT - 1 - displayYear
+}
+
+/** A round step (1/2/5 x 10^n) giving roughly `target` intervals across `span`. */
+function niceStep(span: number, target: number): number {
+  if (!(span > 0)) return 1
+  const rough = span / target
+  const magnitude = Math.pow(10, Math.floor(Math.log10(rough)))
+  for (const multiple of [1, 2, 5]) {
+    if (multiple * magnitude >= rough) return multiple * magnitude
+  }
+  return 10 * magnitude
+}
+
+/**
+ * Tick positions (in cal BP, where the data is plotted) and their labels in
+ * the chosen format.
+ *
+ * Returns null for cal BP: the values already are cal BP, so Plotly's own
+ * tick selection is better than anything imposed here. For BC/AD and BCE/CE
+ * the ticks are chosen as round years in that convention -- "1000 BC", not
+ * the "1051 BC" that rounding in cal BP would give -- and mapped back to the
+ * cal BP positions they sit at.
+ */
+export function calendarAxisTicks(
+  minCalBP: number,
+  maxCalBP: number,
+  format: DateFormat,
+  target = 7
+): { tickvals: number[]; ticktext: string[] } | null {
+  if (format === 'calBP') return null
+  if (!Number.isFinite(minCalBP) || !Number.isFinite(maxCalBP) || maxCalBP <= minCalBP) return null
+
+  // Older cal BP is a smaller display year, so the range flips.
+  const from = displayYearFromCalBP(maxCalBP)
+  const to = displayYearFromCalBP(minCalBP)
+  const step = niceStep(to - from, target)
+
+  const tickvals: number[] = []
+  const ticktext: string[] = []
+  for (let year = Math.ceil(from / step) * step; year <= to; year += step) {
+    if (year === 0) continue // no year zero
+    const calBP = calBPFromDisplayYear(year)
+    if (calBP < minCalBP || calBP > maxCalBP) continue
+    tickvals.push(calBP)
+    ticktext.push(formatCalendarAge(calBP, format))
+  }
+  return tickvals.length >= 2 ? { tickvals, ticktext } : null
+}

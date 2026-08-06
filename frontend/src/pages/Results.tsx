@@ -407,25 +407,11 @@ export default function Results() {
     )
   }
 
-  // Which context (if any) each sample belongs to -- both maps come
-  // straight from data GET /api/analysis/:id already returns (measurement
-  // element_id/group_id, group id/name), just cross-referenced here so the
-  // table and each plot can show a sample's context without re-deriving it
-  // per row.
-  //
-  // element_id first: a tree-authored analysis has no contexts at all, so
-  // its dates carry the phase they sit in on element_id and leave group_id
-  // null -- reading group_id alone reported every date as "Unassigned".
-  // group_id remains the fallback for a tree migrated from the old
-  // contexts, where each phase reuses its context's id.
-  const groupNameById = new Map((analysis.groups || []).map((g) => [g.id, g.name]))
-  const groupIdBySampleId = new Map(
-    (analysis.measurements || []).map((m) => [m.id, m.element_id || m.group_id])
-  )
-  const contextNameFor = (sampleId: string): string | null => {
-    const groupId = groupIdBySampleId.get(sampleId)
-    return groupId ? groupNameById.get(groupId) || null : null
-  }
+  // Where each date sits in the structure now comes from the structure walk
+  // itself (see plotOrder below and the results table), rather than from a
+  // separate sample -> context lookup. That lookup had to special-case
+  // element_id against group_id to work for both tree-authored and migrated
+  // analyses; flattenStructure already resolves that in one place.
   const contextsWithModeledSpan = (analysis.groups || []).filter((g) => g.modeled_start && g.modeled_end)
 
   // Every named Boundary in the model structure, in the order it appears
@@ -455,6 +441,23 @@ export default function Results() {
   // to the flat date list below.
   const structureRows = flattenStructure(analysis.model_tree, analysis.measurements || [])
   const resultBySampleId = new Map((analysis.results || []).map((r) => [r.sample_id, r]))
+
+  // The plots, in the same order. Walking structureRows means the sequence
+  // on screen is the sequence in the model -- oldest first -- and each plot
+  // can say where its date sits. Any result the structure doesn't mention is
+  // appended rather than dropped, so a plot never silently disappears.
+  const plotOrder: Array<{ result: SampleResult; path: string | null }> = []
+  const plotted = new Set<string>()
+  for (const row of structureRows) {
+    if (row.kind !== 'date' || !row.sampleId) continue
+    const result = resultBySampleId.get(row.sampleId)
+    if (!result) continue
+    plotOrder.push({ result, path: row.path })
+    plotted.add(row.sampleId)
+  }
+  for (const result of analysis.results || []) {
+    if (!plotted.has(result.sample_id)) plotOrder.push({ result, path: null })
+  }
   const CONFIDENCE_LABEL = CONFIDENCE_OPTIONS.find((o) => o.value === confidence)?.label ?? ''
 
   return (
@@ -570,38 +573,40 @@ export default function Results() {
         </Grid>
       </Grid>
 
-      {/* Posterior Distribution Plots */}
-      {analysis.results.map((result, idx) => {
-        const contextName = contextNameFor(result.sample_id)
-        return (
-          <Box key={result.sample_id} sx={{ mb: 4 }}>
-            {contextName && (
-              <Chip size="small" icon={<AccountTreeIcon />} label={`Context: ${contextName}`} sx={{ mb: 1 }} />
-            )}
-            {result.probability_distribution && result.probability_distribution.length > 0 ? (
-              <PosteriorPlot
-                calAges={result.probability_distribution.map(([age]) => age)}
-                probabilities={result.probability_distribution.map(([, prob]) => prob)}
-                hpd68={result.hpd_68}
-                hpd95={result.hpd_95}
-                hpd68Ranges={result.hpd_68_ranges}
-                hpd95Ranges={result.hpd_95_ranges}
-                sampleName={result.sample_name || `Sample ${idx + 1}`}
-                pointEstimates={{
-                  mean: result.posterior_mean,
-                  median: result.posterior_median,
-                  std: result.posterior_std,
-                }}
-                showMean={showMean}
-                showMedian={showMedian}
-                formatAge={(age) => formatCalendarAge(age, dateFormat)}
-              />
-            ) : (
-              <Alert severity="info">No posterior distribution data available for this sample</Alert>
-            )}
-          </Box>
-        )
-      })}
+      {/* Posterior distribution plots, in the model's own reading order --
+          the same order as the results table and both exports, so scrolling
+          the plots walks the sequence from oldest to youngest instead of
+          whatever order the results happened to come back in. Each plot is
+          captioned with the date's place in the structure. Falls back to
+          the results order for an analysis with no stored structure. */}
+      {plotOrder.map(({ result, path }, idx) => (
+        <Box key={result.sample_id} sx={{ mb: 4 }}>
+          {path && (
+            <Chip size="small" icon={<AccountTreeIcon />} label={path} sx={{ mb: 1 }} />
+          )}
+          {result.probability_distribution && result.probability_distribution.length > 0 ? (
+            <PosteriorPlot
+              calAges={result.probability_distribution.map(([age]) => age)}
+              probabilities={result.probability_distribution.map(([, prob]) => prob)}
+              hpd68={result.hpd_68}
+              hpd95={result.hpd_95}
+              hpd68Ranges={result.hpd_68_ranges}
+              hpd95Ranges={result.hpd_95_ranges}
+              sampleName={result.sample_name || `Sample ${idx + 1}`}
+              pointEstimates={{
+                mean: result.posterior_mean,
+                median: result.posterior_median,
+                std: result.posterior_std,
+              }}
+              showMean={showMean}
+              showMedian={showMedian}
+              dateFormat={dateFormat}
+            />
+          ) : (
+            <Alert severity="info">No posterior distribution data available for this sample</Alert>
+          )}
+        </Box>
+      ))}
 
       {/* Model Structure -- read-only view of the groups/relationships/TPQ-TAQ
           this bayesian analysis actually used, if any. Doubles as the

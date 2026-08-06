@@ -36,7 +36,6 @@ import {
   DATE_FORMAT_OPTIONS,
   DEFAULT_DATE_FORMAT,
   saveDateFormatPreference,
-  formatCalendarAge,
 } from '@/utils/dateFormat'
 import { formatApiError } from '@/utils/apiError'
 import { useAnalysisDraftStore } from '@/stores/analysisStore'
@@ -909,7 +908,7 @@ export default function NewAnalysis() {
               median: previewResult.posterior_median,
               std: previewResult.posterior_std,
             }}
-            formatAge={(age) => formatCalendarAge(age, dateFormat)}
+            dateFormat={dateFormat}
           />
         </Box>
       )}
