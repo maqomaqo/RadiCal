@@ -431,9 +431,9 @@ class TestGraphs:
 
     def test_unknown_analysis_404s(self, client):
         """
-        The handler's only use of _gather_export_rows is this check -- the
-        result is deliberately discarded. Without it a bad id would return
-        an empty graph list and look like a valid, empty analysis.
+        The handler checks the analysis exists before it reads any rows.
+        Without that check a bad id would return an empty graph list and
+        look like a valid, empty analysis.
         """
         assert client.get("/api/results/ghost/graphs").status_code == 404
 
