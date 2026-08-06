@@ -274,3 +274,126 @@ class TestEditRoundTrip:
         reported = {r[4]: (r[material], r[curve]) for r in rows[1:] if r[1] == 'Date'}
         assert reported["Charcoal"] == ("charcoal", "shcal20")
         assert reported["Shell"] == ("marine shell", "marine20")
+
+    @requires_pymc
+    def test_editing_preserves_the_fields_the_form_does_not_show(self, client):
+        """
+        reservoir_age, depth_cm, location and notes are recorded against a
+        date but take no part in the calculation, and the new-analysis form
+        does not surface them -- so nothing on screen would reveal that an
+        edit had blanked them. Dates deployed from a project collection
+        arrive with them set.
+        """
+        tag = f"ex{next(_ROUND_TRIP_IDS)}"
+        tree = {
+            "id": f"{tag}root", "element_type": "sequence", "name": "Site", "children": [
+                {"id": f"{tag}b0", "element_type": "boundary", "name": "Start", "children": []},
+                {"id": f"{tag}p1", "element_type": "phase", "name": "Only", "children": []},
+                {"id": f"{tag}b1", "element_type": "boundary", "name": "End", "children": []},
+            ],
+        }
+        extras = {"reservoir_age": 400, "depth_cm": 125.5,
+                  "location": "Trench 4", "notes": "possible bioturbation"}
+        created = client.post(
+            "/api/analysis/bayesian",
+            json={
+                "name": "Extra fields",
+                "measurements": [
+                    _measurement(f"{tag}s1", sample_name="Shell", material_type="marine shell",
+                                 sample_type="marine", curve_id="marine20",
+                                 element_id=f"{tag}p1", **extras),
+                ],
+                "model_tree": tree,
+                "bayesian_config": {"mcmc_samples": 200, "mcmc_tune": 200, "mcmc_chains": 1},
+                "save": True,
+            },
+        )
+        assert created.status_code == 200, created.text
+        analysis_id = created.json()["data"]["id"]
+
+        def stored():
+            m = client.get(f"/api/analysis/{analysis_id}").json()["data"]["measurements"][0]
+            return {k: m.get(k) for k in extras}
+
+        # Persisted on create, and returned so an edit can resubmit them.
+        assert stored() == extras
+
+        saved = client.get(f"/api/analysis/{analysis_id}").json()["data"]
+        replaced = client.put(
+            f"/api/analysis/{analysis_id}/inputs",
+            json={
+                "name": saved["name"],
+                "measurements": [
+                    {
+                        "id": m["id"], "sample_name": m["sample_name"],
+                        "age_bp": m["age_bp"], "error_1sigma": m["error_1sigma"],
+                        "material_type": m["material_type"], "sample_type": m["sample_type"],
+                        "curve_id": m["curve_id"],
+                        "reservoir_age": m.get("reservoir_age"),
+                        "depth_cm": m.get("depth_cm"),
+                        "location": m.get("location"),
+                        "notes": m.get("notes"),
+                        "element_id": m.get("element_id") or m.get("group_id"),
+                    }
+                    for m in saved["measurements"]
+                ],
+                "groups": [], "relationships": [],
+                "model_tree": saved["model_tree"],
+                "bayesian_config": {"mcmc_samples": 200, "mcmc_tune": 200, "mcmc_chains": 1},
+            },
+        )
+        assert replaced.status_code == 200, replaced.text
+        assert stored() == extras
+
+    @requires_pymc
+    def test_a_date_in_no_context_still_gets_a_phase(self, client):
+        """
+        Saved with neither groups nor a tree, every date is "loose".
+        _tree_from_request gives them a phase of their own, but the stored
+        element_id used to be derived from the context map instead -- which
+        has no entry for a loose date, so the date pointed at nothing and
+        the next edit was rejected as "not assigned to any model element".
+        """
+        tag = f"ls{next(_ROUND_TRIP_IDS)}"
+        created = client.post(
+            "/api/analysis/bayesian",
+            json={
+                "name": "Loose dates",
+                "measurements": [
+                    _measurement(f"{tag}s1", sample_name="Loose one"),
+                    _measurement(f"{tag}s2", age_bp=3100, sample_name="Loose two"),
+                ],
+                "bayesian_config": {"mcmc_samples": 200, "mcmc_tune": 200, "mcmc_chains": 1},
+                "save": True,
+            },
+        )
+        assert created.status_code == 200, created.text
+        analysis_id = created.json()["data"]["id"]
+
+        saved = client.get(f"/api/analysis/{analysis_id}").json()["data"]
+        phases = {
+            c["id"]: c.get("name") for c in saved["model_tree"]["children"]
+            if c["element_type"] == "phase"
+        }
+        for m in saved["measurements"]:
+            assert m["element_id"], f"{m['sample_name']} points at no element"
+            assert phases.get(m["element_id"]) == "Unassigned dates"
+
+        # Which is what makes the analysis editable at all.
+        replaced = client.put(
+            f"/api/analysis/{analysis_id}/inputs",
+            json={
+                "name": saved["name"],
+                "measurements": [
+                    {"id": m["id"], "sample_name": m["sample_name"], "age_bp": m["age_bp"],
+                     "error_1sigma": m["error_1sigma"], "material_type": m["material_type"],
+                     "sample_type": m["sample_type"], "curve_id": m["curve_id"],
+                     "element_id": m["element_id"]}
+                    for m in saved["measurements"]
+                ],
+                "groups": [], "relationships": [],
+                "model_tree": saved["model_tree"],
+                "bayesian_config": {"mcmc_samples": 200, "mcmc_tune": 200, "mcmc_chains": 1},
+            },
+        )
+        assert replaced.status_code == 200, replaced.text

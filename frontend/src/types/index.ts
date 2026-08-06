@@ -68,7 +68,14 @@ export interface DraftMeasurement extends MatrixMeasurement {
   material_type: string
   sample_type: SampleType
   curve_id: string
-  reservoir_age?: number
+  // Recorded against the date but not used in the calculation. Carried
+  // through the draft so editing a saved analysis resubmits them instead
+  // of blanking them -- dates deployed from a project collection arrive
+  // with these already filled in.
+  reservoir_age?: number | null
+  depth_cm?: number | null
+  location?: string | null
+  notes?: string | null
   // Stratigraphic phase/group this sample belongs to, if any -- must
   // match a DraftGroup.id.
   group_id?: string | null

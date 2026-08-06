@@ -442,6 +442,13 @@ async def bayesian_analysis(request: BayesianRequest, db: Session = Depends(get_
                     material_type=measurement.material_type,
                     sample_type=sample_type,
                     curve_id=measurement.curve_id,
+                    # Accepted by the schema and carried by dates deployed
+                    # from a project collection, so dropping them here lost
+                    # data that had been recorded elsewhere.
+                    reservoir_age=measurement.reservoir_age,
+                    depth_cm=measurement.depth_cm,
+                    location=measurement.location,
+                    notes=measurement.notes,
                     group_id=groups_map.get(measurement.group_id) if measurement.group_id else None,
                     tpq_age_bp=measurement.tpq_age_bp,
                     taq_age_bp=measurement.taq_age_bp,
@@ -541,6 +548,16 @@ async def bayesian_analysis(request: BayesianRequest, db: Session = Depends(get_
                     found = boundary_results.get(element['id'])
                     element['posterior'] = found['posterior'] if found else None
             _persist_tree(analysis.id, root, db)
+            # Which phase each date ended up in, as decided when the tree was
+            # built. Recomputing it from groups_map instead would lose the
+            # dates that belong to no context: _tree_from_request gives those
+            # a phase of their own ("Unassigned dates"), and that phase's id
+            # is not a context id, so a groups_map lookup yields nothing and
+            # the date is stored pointing at no element at all -- which the
+            # next edit rejects as "not assigned to any model element".
+            element_by_measurement = {
+                m['id']: m.get('element_id') for m in tree_measurements
+            }
             for measurement in request.measurements:
                 sample_id = samples_map.get(measurement.id)
                 if request.model_tree is not None:
@@ -548,7 +565,12 @@ async def bayesian_analysis(request: BayesianRequest, db: Session = Depends(get_
                     # the measurement's own element_id already points at one.
                     element_id = measurement.element_id
                 else:
-                    element_id = groups_map.get(measurement.group_id) if measurement.group_id else None
+                    # The tree carries client-side context ids, which
+                    # _relabel_tree has just rewritten to the ids the contexts
+                    # were saved under; a generated phase id isn't in that map
+                    # and passes through unchanged.
+                    assigned = element_by_measurement.get(measurement.id)
+                    element_id = groups_map.get(assigned, assigned)
                 if sample_id:
                     db.query(RadiocarbonSample).filter(
                         RadiocarbonSample.id == sample_id
@@ -722,6 +744,10 @@ async def get_analysis(analysis_id: str, db: Session = Depends(get_db)):
                     "material_type": s.material_type,
                     "sample_type": s.sample_type,
                     "curve_id": s.curve_id,
+                    "reservoir_age": s.reservoir_age,
+                    "depth_cm": s.depth_cm,
+                    "location": s.location,
+                    "notes": s.notes,
                     "group_id": s.group_id,
                     "element_id": s.element_id,
                     "tpq_age_bp": s.tpq_age_bp,
@@ -1313,6 +1339,12 @@ async def replace_analysis_inputs(
                 material_type=measurement.material_type,
                 sample_type=sample_type,
                 curve_id=measurement.curve_id,
+                # Replacing the inputs must not quietly drop fields the
+                # request carried; these used to be nulled on every edit.
+                reservoir_age=measurement.reservoir_age,
+                depth_cm=measurement.depth_cm,
+                location=measurement.location,
+                notes=measurement.notes,
                 group_id=groups_map.get(measurement.group_id) if measurement.group_id else None,
                 element_id=element_id,
                 tpq_age_bp=measurement.tpq_age_bp,

@@ -181,6 +181,13 @@ export default function NewAnalysis() {
             material_type: m.material_type || 'unknown',
             sample_type: m.sample_type || 'terrestrial',
             curve_id: m.curve_id || 'intcal20',
+            // Carried straight through: the form doesn't surface these, but
+            // a date deployed from a project collection arrives with them
+            // set, and running the edit resubmits whatever the draft holds.
+            reservoir_age: m.reservoir_age ?? null,
+            depth_cm: m.depth_cm ?? null,
+            location: m.location ?? null,
+            notes: m.notes ?? null,
             group_id: m.group_id ?? null,
             tpq_age_bp: m.tpq_age_bp ?? null,
             taq_age_bp: m.taq_age_bp ?? null,
