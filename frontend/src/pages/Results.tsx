@@ -104,6 +104,27 @@ interface SampleResult {
   unmodelled_hpd_ranges?: Array<{ confidence: number; ranges: HPDRange[] }> | null
 }
 
+/**
+ * One posterior to plot. Dates and boundaries are both modelled parameters
+ * with a distribution, so they are normalised to a single shape and drawn by
+ * the same component -- the sequence of plots then reads as the model does,
+ * rather than as two separate lists.
+ */
+interface PlottableSeries {
+  key: string
+  kind: 'date' | 'boundary'
+  /** Sample name, or the boundary's name. */
+  title: string
+  /** Where it sits in the structure; null for a date the structure omits. */
+  path: string | null
+  distribution?: Array<[number, number]>
+  hpd68?: [number, number]
+  hpd95?: [number, number]
+  hpd68Ranges?: HPDRange[]
+  hpd95Ranges?: HPDRange[]
+  pointEstimates: { mean?: number; median?: number; std?: number }
+}
+
 /** The precomputed unmodelled ranges for the confidence currently selected. */
 function unmodelledRangesFor(
   result: SampleResult | undefined,
@@ -444,19 +465,75 @@ export default function Results() {
 
   // The plots, in the same order. Walking structureRows means the sequence
   // on screen is the sequence in the model -- oldest first -- and each plot
-  // can say where its date sits. Any result the structure doesn't mention is
+  // can say where it sits.
+  //
+  // Boundaries are plotted alongside the dates, in their place between the
+  // phases they separate. A boundary is a modelled parameter with a
+  // posterior of its own, and it is usually the thing an analysis was built
+  // to estimate; reading its distribution against the dates on either side
+  // is the point of the sequence. Any date the structure doesn't mention is
   // appended rather than dropped, so a plot never silently disappears.
-  const plotOrder: Array<{ result: SampleResult; path: string | null }> = []
+  const plotOrder: PlottableSeries[] = []
   const plotted = new Set<string>()
   for (const row of structureRows) {
-    if (row.kind !== 'date' || !row.sampleId) continue
-    const result = resultBySampleId.get(row.sampleId)
-    if (!result) continue
-    plotOrder.push({ result, path: row.path })
-    plotted.add(row.sampleId)
+    if (row.kind === 'date' && row.sampleId) {
+      const result = resultBySampleId.get(row.sampleId)
+      if (!result) continue
+      plotOrder.push({
+        key: `date-${row.sampleId}`,
+        kind: 'date',
+        title: result.sample_name || 'Date',
+        path: row.path,
+        distribution: result.probability_distribution,
+        hpd68: result.hpd_68,
+        hpd95: result.hpd_95,
+        hpd68Ranges: result.hpd_68_ranges,
+        hpd95Ranges: result.hpd_95_ranges,
+        pointEstimates: {
+          mean: result.posterior_mean,
+          median: result.posterior_median,
+          std: result.posterior_std,
+        },
+      })
+      plotted.add(row.sampleId)
+    } else if (row.kind === 'boundary' && row.posterior) {
+      const p = row.posterior
+      plotOrder.push({
+        key: `boundary-${row.elementId}`,
+        kind: 'boundary',
+        title: row.name,
+        path: row.path,
+        distribution: p.probability_distribution,
+        hpd68: p.hpd_68,
+        hpd95: p.hpd_95,
+        hpd68Ranges: p.hpd_68_ranges,
+        hpd95Ranges: p.hpd_95_ranges,
+        pointEstimates: {
+          mean: p.posterior_mean,
+          median: p.posterior_median,
+          std: p.posterior_std,
+        },
+      })
+    }
   }
   for (const result of analysis.results || []) {
-    if (!plotted.has(result.sample_id)) plotOrder.push({ result, path: null })
+    if (plotted.has(result.sample_id)) continue
+    plotOrder.push({
+      key: `date-${result.sample_id}`,
+      kind: 'date',
+      title: result.sample_name || 'Date',
+      path: null,
+      distribution: result.probability_distribution,
+      hpd68: result.hpd_68,
+      hpd95: result.hpd_95,
+      hpd68Ranges: result.hpd_68_ranges,
+      hpd95Ranges: result.hpd_95_ranges,
+      pointEstimates: {
+        mean: result.posterior_mean,
+        median: result.posterior_median,
+        std: result.posterior_std,
+      },
+    })
   }
   const CONFIDENCE_LABEL = CONFIDENCE_OPTIONS.find((o) => o.value === confidence)?.label ?? ''
 
@@ -576,34 +653,46 @@ export default function Results() {
       {/* Posterior distribution plots, in the model's own reading order --
           the same order as the results table and both exports, so scrolling
           the plots walks the sequence from oldest to youngest instead of
-          whatever order the results happened to come back in. Each plot is
-          captioned with the date's place in the structure. Falls back to
-          the results order for an analysis with no stored structure. */}
-      {plotOrder.map(({ result, path }, idx) => (
-        <Box key={result.sample_id} sx={{ mb: 4 }}>
-          {path && (
-            <Chip size="small" icon={<AccountTreeIcon />} label={path} sx={{ mb: 1 }} />
+          whatever order the results happened to come back in.
+          Boundaries are drawn in their place between the phases they
+          separate, since a transition is usually what the model was built to
+          estimate and reads best against the dates either side. Falls back
+          to the results order for an analysis with no stored structure. */}
+      {plotOrder.map((series) => (
+        <Box key={series.key} sx={{ mb: 4 }}>
+          {(series.path || series.kind === 'boundary') && (
+            <Stack direction="row" spacing={1} sx={{ mb: 1 }} flexWrap="wrap" useFlexGap>
+              {series.path && (
+                <Chip size="small" icon={<AccountTreeIcon />} label={series.path} />
+              )}
+              {series.kind === 'boundary' && (
+                <Chip
+                  size="small"
+                  color="primary"
+                  variant="outlined"
+                  label="Boundary — modelled transition"
+                />
+              )}
+            </Stack>
           )}
-          {result.probability_distribution && result.probability_distribution.length > 0 ? (
+          {series.distribution && series.distribution.length > 0 ? (
             <PosteriorPlot
-              calAges={result.probability_distribution.map(([age]) => age)}
-              probabilities={result.probability_distribution.map(([, prob]) => prob)}
-              hpd68={result.hpd_68}
-              hpd95={result.hpd_95}
-              hpd68Ranges={result.hpd_68_ranges}
-              hpd95Ranges={result.hpd_95_ranges}
-              sampleName={result.sample_name || `Sample ${idx + 1}`}
-              pointEstimates={{
-                mean: result.posterior_mean,
-                median: result.posterior_median,
-                std: result.posterior_std,
-              }}
+              calAges={series.distribution.map(([age]) => age)}
+              probabilities={series.distribution.map(([, prob]) => prob)}
+              hpd68={series.hpd68}
+              hpd95={series.hpd95}
+              hpd68Ranges={series.hpd68Ranges}
+              hpd95Ranges={series.hpd95Ranges}
+              sampleName={series.title}
+              pointEstimates={series.pointEstimates}
               showMean={showMean}
               showMedian={showMedian}
               dateFormat={dateFormat}
             />
           ) : (
-            <Alert severity="info">No posterior distribution data available for this sample</Alert>
+            <Alert severity="info">
+              No posterior distribution data available for {series.title}
+            </Alert>
           )}
         </Box>
       ))}
