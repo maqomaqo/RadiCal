@@ -261,6 +261,11 @@ export default function Results() {
   // low-probability gap between two peaks).
   const [showMean, setShowMean] = useState(false)
   const [showMedian, setShowMedian] = useState(false)
+  // Boundary plots are on by default -- the transitions are usually the
+  // point of the model. But a real sequence has a boundary between every
+  // pair of phases, so on a large one they can outnumber the dates and make
+  // the page long to scroll; this hides them without hiding the dates.
+  const [showBoundaryPlots, setShowBoundaryPlots] = useState(true)
   // Confidence level for the HPD columns below -- default 95.4% (2-sigma),
   // the most commonly cited "95% confidence" convention in archaeological
   // reporting; switchable to 68.2% or 99.7% without a network round trip
@@ -535,6 +540,10 @@ export default function Results() {
       },
     })
   }
+  const boundaryPlotCount = plotOrder.filter((s) => s.kind === 'boundary').length
+  const visiblePlots = showBoundaryPlots
+    ? plotOrder
+    : plotOrder.filter((s) => s.kind !== 'boundary')
   const CONFIDENCE_LABEL = CONFIDENCE_OPTIONS.find((o) => o.value === confidence)?.label ?? ''
 
   return (
@@ -658,7 +667,24 @@ export default function Results() {
           separate, since a transition is usually what the model was built to
           estimate and reads best against the dates either side. Falls back
           to the results order for an analysis with no stored structure. */}
-      {plotOrder.map((series) => (
+      {/* Placed above the plots rather than with the table's controls, so the
+          switch that hides them isn't below everything it hides. Only shown
+          when there are boundary plots to hide. */}
+      {boundaryPlotCount > 0 && (
+        <FormControlLabel
+          sx={{ mb: 1 }}
+          control={
+            <Checkbox
+              size="small"
+              checked={showBoundaryPlots}
+              onChange={(e) => setShowBoundaryPlots(e.target.checked)}
+            />
+          }
+          label={`Show boundary plots (${boundaryPlotCount})`}
+        />
+      )}
+
+      {visiblePlots.map((series) => (
         <Box key={series.key} sx={{ mb: 4 }}>
           {(series.path || series.kind === 'boundary') && (
             <Stack direction="row" spacing={1} sx={{ mb: 1 }} flexWrap="wrap" useFlexGap>
