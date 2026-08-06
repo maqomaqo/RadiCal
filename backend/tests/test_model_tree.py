@@ -332,6 +332,68 @@ class TestCsvExport:
         assert rows[0][:5] == ['Order', 'Row Type', 'Depth', 'Structure Path', 'Name']
         assert [(r[1], r[4]) for r in rows[1:]] == [('Date', 'Solo')]
 
+        # No unmodelled column for a plain calibration: the modelled columns
+        # already ARE the unmodelled result, so filling it in would invite
+        # the reader to compare a number with itself.
+        unmodelled = rows[0].index('Unmodelled 95% HPD')
+        assert rows[1][unmodelled] == ''
+
+    @requires_pymc
+    def test_csv_reports_the_unmodelled_calibration_beside_the_modelled(self, client):
+        """
+        The column that used to be "Calibrated Age BP (mode)" -- never
+        populated for a Bayesian analysis, since that field is only written
+        on the calibration path -- now carries what each date calibrates to
+        on its own, the comparison the results page shows beside it.
+        """
+        tree = _sequence("uroot", "Site", [
+            _boundary("ub0", "Start"),
+            _phase("up1", "Lower"),
+            _boundary("ub1", "Mid"),
+            _phase("up2", "Upper"),
+            _boundary("ub2", "End"),
+        ])
+        created = client.post(
+            "/api/analysis/bayesian",
+            json={
+                "name": "Unmodelled column",
+                "measurements": [
+                    {"id": "ua", "sample_name": "A", "age_bp": 3300, "error_1sigma": 30, "element_id": "up1"},
+                    {"id": "ub", "sample_name": "B", "age_bp": 3000, "error_1sigma": 30, "element_id": "up2"},
+                ],
+                "model_tree": tree,
+                "bayesian_config": {"mcmc_samples": 200, "mcmc_tune": 200, "mcmc_chains": 1},
+                "save": True,
+            },
+        )
+        assert created.status_code == 200, created.text
+        analysis_id = created.json()["data"]["id"]
+
+        rows = list(csv.reader(io.StringIO(
+            client.get(f"/api/results/{analysis_id}/export/csv").text)))
+        header, data = rows[0], rows[1:]
+
+        assert 'Calibrated Age BP (mode)' not in header
+        unmodelled, modelled = header.index('Unmodelled 95% HPD'), header.index('95% HPD')
+        # Repurposed in place -- the column count is unchanged, so nothing
+        # downstream of it shifted.
+        assert len(header) == 18
+
+        by_name = {r[4]: r for r in data}
+        # Every date reports one, formatted like the other HPD columns.
+        for name in ('A', 'B'):
+            assert '(' in by_name[name][unmodelled] and '%' in by_name[name][unmodelled]
+            # And it is genuinely the unconstrained calibration, not a copy
+            # of the posterior -- constraining the date is what the model
+            # does, so the two must not agree.
+            assert by_name[name][unmodelled] != by_name[name][modelled]
+
+        # A boundary exists only as a modelled parameter, and a heading has
+        # no date of its own, so neither has an unmodelled counterpart.
+        assert by_name['Start'][unmodelled] == ''
+        assert by_name['Lower'][unmodelled] == ''
+        assert by_name['Site'][unmodelled] == ''
+
 
 class TestModelTreeApi:
     def _analysis(self, client):

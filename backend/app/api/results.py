@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import Analysis, RadiocarbonSample, AnalysisResult, ModelElement
 from app.services.model_tree import rows_to_tree, flatten_structure
+from app.services.calibration import get_curve
 from typing import Dict, List, Optional
 import io
 import csv
@@ -117,7 +118,7 @@ def _structure_rows(analysis_id: str, db: Session, export_rows: List[Dict],
 CSV_HEADER = [
     'Order', 'Row Type', 'Depth', 'Structure Path', 'Name',
     'Age BP', '1-Sigma Error', 'Material', 'Sample Type', 'Curve',
-    'Calibrated Age BP (mode)', 'Posterior Mean', 'Posterior Median', 'Posterior Std',
+    'Unmodelled 95% HPD', 'Posterior Mean', 'Posterior Median', 'Posterior Std',
     '68% HPD', '95% HPD', 'TPQ BP', 'TAQ BP',
 ]
 
@@ -135,6 +136,36 @@ def _measurement_cells(row: Optional[Dict]) -> List:
     ]
 
 
+def _unmodelled_cell(sample, analysis_type: str) -> str:
+    """
+    What this date calibrates to on its own, with no stratigraphic
+    constraint applied -- the "unmodelled vs modelled" comparison the
+    results page shows beside each date, which is the standard way to see
+    what the model actually did.
+
+    Computed here rather than read from a column: it is a cheap analytic
+    calibration determined entirely by the sample's current
+    age/error/curve, so deriving it at export time cannot fall out of step
+    with the measurement the way a stored copy would. This is the same
+    reason GET /api/analysis/{id} computes it at read time for the page.
+
+    Only meaningful for a Bayesian analysis. For a plain calibration the
+    modelled columns already *are* the unmodelled result, so repeating it
+    would just invite the reader to compare a number with itself.
+    """
+    if analysis_type != 'bayesian' or sample is None:
+        return ''
+    try:
+        curve = get_curve(sample.curve_id)
+        cal_ages, probs = curve.calibrate(sample.age_bp, sample.error_1sigma)
+        return _format_hpd_ranges(curve.get_hpd_ranges(cal_ages, probs, 0.95), None, None)
+    except Exception:
+        # A sample whose curve_id no longer resolves (say a renamed curve)
+        # shouldn't fail the whole export. The modelled columns are
+        # unaffected; this one just stays blank.
+        return ''
+
+
 def _posterior_cells(row: Optional[Dict]) -> List:
     """
     The modelled half. Dates and boundaries are both modelled parameters
@@ -142,9 +173,8 @@ def _posterior_cells(row: Optional[Dict]) -> List:
     the whole point of exporting the structure rather than only the dates.
     """
     if not row:
-        return ['', '', '', '', '', '']
+        return ['', '', '', '', '']
     return [
-        f"{row['calibrated_age_bp']:.0f}" if row.get('calibrated_age_bp') is not None else '',
         f"{row['posterior_mean']:.1f}" if row.get('posterior_mean') is not None else '',
         f"{row['posterior_median']:.1f}" if row.get('posterior_median') is not None else '',
         f"{row['posterior_std']:.1f}" if row.get('posterior_std') is not None else '',
@@ -179,20 +209,29 @@ def _build_csv(analysis_id: str, db: Session) -> str:
     # No stored structure (a calibration, or an analysis predating trees):
     # fall back to a flat list of dates so the export still carries the
     # results rather than coming back empty.
+    samples_by_id = data['samples_by_id']
+
     if not structure:
         for order, row in enumerate(data['rows'], start=1):
             writer.writerow(
                 [order, 'Date', 0, '', row['sample_name'] or row['sample_id'] or '']
-                + _measurement_cells(row) + _posterior_cells(row) + ['', '']
+                + _measurement_cells(row)
+                + [_unmodelled_cell(samples_by_id.get(row['sample_id']), analysis.analysis_type)]
+                + _posterior_cells(row) + ['', '']
             )
         return output.getvalue()
 
     for order, row in enumerate(structure, start=1):
         posterior = row.get('posterior')
+        unmodelled = ''
         if row['kind'] == 'date':
             measured, modelled = _measurement_cells(row.get('result')), _posterior_cells(row.get('result'))
+            sample_id = row['sample']['id'] if row['sample'] else None
+            unmodelled = _unmodelled_cell(samples_by_id.get(sample_id), analysis.analysis_type)
         elif posterior:
             # A boundary's posterior is summary-shaped, not a result row.
+            # It has no unmodelled counterpart either -- a boundary exists
+            # only as a modelled parameter.
             measured = _measurement_cells(None)
             modelled = _posterior_cells({
                 'posterior_mean': posterior.get('posterior_mean'),
@@ -210,7 +249,7 @@ def _build_csv(analysis_id: str, db: Session) -> str:
 
         writer.writerow(
             [order, str(row['kind']).title(), row['depth'], row['path'], row['name']]
-            + measured + modelled
+            + measured + [unmodelled] + modelled
             + [row['tpq_age_bp'] if row['tpq_age_bp'] is not None else '',
                row['taq_age_bp'] if row['taq_age_bp'] is not None else '']
         )
