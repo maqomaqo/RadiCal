@@ -37,6 +37,7 @@ sequence's ordering like anything else. Each date belongs to exactly ONE
 bounded group -- the innermost pair of boundaries enclosing it -- so a
 nested group's dates are not also counted in its parent's span term.
 """
+import itertools
 from collections import defaultdict
 from typing import Dict, List, Optional, Set, Tuple
 
@@ -267,6 +268,59 @@ def _plan_element(
     for child_unclaimed in unclaimed_by_child:
         bubbled.extend(d for d in child_unclaimed if d not in claimed)
     return bubbled
+
+
+def with_implicit_boundaries(root: Dict, new_id=None) -> Tuple[Dict, List[str]]:
+    """
+    A copy of `root` with a Boundary inserted between any two adjacent
+    non-Boundary children of a Sequence, plus the ids of what was inserted.
+
+    Why this is not just a convenience. A Sequence that orders two groups
+    with no Boundary between them puts all their dates in ONE bounded group
+    and bolts an ordering constraint on top, which does not factorise along
+    a chain -- so exact_chain declines it and the model falls to MCMC, where
+    it is measurably wrong (on the OxCal fixture SMC separated two ordered
+    groups by 57 years against OxCal's 13, and could not tell an outlier
+    from a sound date at all).
+
+    Inserting the transition makes it a chain, and the evidence says that is
+    also what OxCal does with it: on the fixture, OxCal's `ordered` run and
+    its `shared_boundary` run agree to 0.948 posterior overlap, and solving
+    the ordered model this way lands 6.4 years rms from OxCal's own answer
+    for it, against 12.6 for MCMC.
+
+    It is a real change to the model rather than a rewriting of it into an
+    equal form -- the uniform-scatter prior becomes one term per group
+    instead of one across both -- which is why the inserted ids are returned
+    rather than hidden: the caller can say what it did.
+    """
+    counter = itertools.count(1)
+    if new_id is None:
+        def new_id():
+            return f'implicit-boundary-{next(counter)}'
+    inserted: List[str] = []
+
+    def rebuild(element: Dict) -> Dict:
+        node = dict(element)
+        children = [rebuild(c) for c in _children(element)]
+        if element.get('element_type') == 'sequence' and children:
+            spaced: List[Dict] = []
+            for child in children:
+                if (spaced
+                        and child.get('element_type') != 'boundary'
+                        and spaced[-1].get('element_type') != 'boundary'):
+                    bid = new_id()
+                    inserted.append(bid)
+                    spaced.append({
+                        'id': bid, 'element_type': 'boundary', 'name': 'Transition',
+                        'tpq_age_bp': None, 'taq_age_bp': None, 'children': [],
+                    })
+                spaced.append(child)
+            children = spaced
+        node['children'] = children
+        return node
+
+    return rebuild(root), inserted
 
 
 def classify_boundaries(

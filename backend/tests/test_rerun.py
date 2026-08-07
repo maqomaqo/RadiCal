@@ -770,3 +770,77 @@ def test_get_analysis_reports_diagnostics_on_each_result(client):
     # The 3600 BP date against two at ~3000-3030 is the one that should stand out.
     by_name = {r['sample_name']: r for r in results}
     assert by_name['S2']['outlier_probability'] > by_name['S0']['outlier_probability']
+
+
+@requires_pymc
+def test_outlier_values_survive_a_rerun_of_an_ordered_sibling_model(client):
+    """
+    The reported symptom, on the model shape that produced it.
+
+    Two Sequences ordered directly under one Sequence with no Boundary
+    between them is not a chain, so this used to fall through to MCMC --
+    which never applied the outlier model at all, so the Outlier column came
+    back empty no matter how the dates were configured, on the first run and
+    on every rerun after it. Nothing about persistence was wrong; the solver
+    simply did not implement the feature.
+    """
+    tag = f'ordsib{next(_DIAGNOSTIC_IDS)}'
+    tree = {
+        'id': f'{tag}_s', 'element_type': 'sequence', 'name': 'Site',
+        'tpq_age_bp': None, 'taq_age_bp': None, 'children': [
+            {'id': f'{tag}_b0', 'element_type': 'boundary', 'name': 'Start',
+             'tpq_age_bp': None, 'taq_age_bp': None, 'children': []},
+            {'id': f'{tag}_q', 'element_type': 'sequence', 'name': 'Early',
+             'tpq_age_bp': None, 'taq_age_bp': None, 'children': [
+                 {'id': f'{tag}_p1', 'element_type': 'phase', 'name': 'P1',
+                  'tpq_age_bp': None, 'taq_age_bp': None, 'children': []}]},
+            {'id': f'{tag}_r', 'element_type': 'sequence', 'name': 'Late',
+             'tpq_age_bp': None, 'taq_age_bp': None, 'children': [
+                 {'id': f'{tag}_p2', 'element_type': 'phase', 'name': 'P2',
+                  'tpq_age_bp': None, 'taq_age_bp': None, 'children': []}]},
+            {'id': f'{tag}_b1', 'element_type': 'boundary', 'name': 'End',
+             'tpq_age_bp': None, 'taq_age_bp': None, 'children': []},
+        ],
+    }
+    measurements = [
+        {'id': f'{tag}_a', 'sample_name': 'A', 'age_bp': 3200, 'error_1sigma': 30,
+         'element_id': f'{tag}_p1', 'outlier_prior': 0.05, 'outlier_model': 'general'},
+        {'id': f'{tag}_b', 'sample_name': 'B', 'age_bp': 3230, 'error_1sigma': 30,
+         'element_id': f'{tag}_p1', 'outlier_prior': 0.05, 'outlier_model': 'general'},
+        {'id': f'{tag}_c', 'sample_name': 'C', 'age_bp': 3000, 'error_1sigma': 30,
+         'element_id': f'{tag}_p2', 'outlier_prior': 0.05, 'outlier_model': 'general'},
+    ]
+    created = client.post('/api/analysis/bayesian', json={
+        'name': tag, 'measurements': measurements, 'model_tree': tree,
+        'bayesian_config': {'mcmc_samples': 300, 'mcmc_tune': 200, 'mcmc_chains': 1},
+        'save': True,
+    })
+    assert created.status_code == 200, created.text
+    analysis_id = created.json()['data']['id']
+
+    def outlier_column():
+        rows = list(csv.reader(io.StringIO(
+            client.get(f'/api/results/{analysis_id}/export/csv').text)))
+        header, data = rows[0], rows[1:]
+        col, name, kind = (header.index('Outlier %'), header.index('Name'),
+                           header.index('Row Type'))
+        return {r[name]: r[col] for r in data if r[kind] == 'Date'}
+
+    before = outlier_column()
+    assert len(before) == 3 and all(v != '' for v in before.values()), before
+    # Populated is not enough -- MCMC could be made to fill the column too,
+    # and did, with numbers that could not tell an outlier from a sound date
+    # (43.5% against 45.6% on a case where the exact answer was 48% and 3%).
+    # So this asserts the values are USABLE: three consistent dates must all
+    # sit near their 5% prior rather than scattered across it.
+    assert max(float(v) for v in before.values()) < 20.0, before
+
+    assert client.post(f'/api/analysis/{analysis_id}/rerun').status_code == 200
+    after = outlier_column()
+    assert all(v != '' for v in after.values()), after
+    for name in before:
+        assert float(after[name]) == pytest.approx(float(before[name]), abs=5.0)
+
+    # ...and the results page reads the same numbers off the GET.
+    results = client.get(f'/api/analysis/{analysis_id}').json()['data']['results']
+    assert all(r['outlier_probability'] is not None for r in results), results

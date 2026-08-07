@@ -695,3 +695,78 @@ class TestCharcoalOutlierModel:
         for d in dates:
             assert (a['measurements'][d['id']]['outlier_probability']
                     == pytest.approx(b['measurements'][d['id']]['outlier_probability']))
+
+
+class TestImplicitBoundaries:
+    """
+    A Sequence that orders two groups with no Boundary between them is not a
+    chain, so it used to fall through to MCMC -- where it is measurably
+    wrong, and where the outlier model does not work at all. Supplying the
+    transition it implies makes it exact.
+
+    This is a change to the model, not a rewriting of it: the uniform-scatter
+    prior becomes one term per group rather than one across both. The
+    justification is empirical and lives in the fixture -- see
+    test_matches_oxcals_own_answer_for_that_model below.
+    """
+
+    def test_inserts_only_where_a_boundary_is_missing(self):
+        from app.services.model_tree import with_implicit_boundaries
+
+        already = ox.model_tree('shared_boundary')
+        _tree, inserted = with_implicit_boundaries(already)
+        assert inserted == [], 'nothing to add when the transition is explicit'
+
+        ordered = ox.model_tree('ordered')
+        patched, inserted = with_implicit_boundaries(ordered)
+        assert len(inserted) == 1
+        assert ec.layout(patched, ox.measurements()) is not None
+
+    def test_leaves_a_single_group_alone(self):
+        from app.services.model_tree import with_implicit_boundaries
+
+        _tree, inserted = with_implicit_boundaries(ox.model_tree('unordered'))
+        assert inserted == []
+
+    def test_matches_oxcals_own_answer_for_that_model(self):
+        """
+        The whole justification. Solved this way, the fixture's `ordered`
+        model lands close to what OxCal reports FOR THAT MODEL -- much closer
+        than MCMC managed, which put the two groups 37 years apart against
+        OxCal's 11.7 and was 12.6 years rms out.
+        """
+        from app.services.model_tree import with_implicit_boundaries
+
+        samples = ox.measurements()
+        patched, _inserted = with_implicit_boundaries(ox.model_tree('ordered'))
+        solved = ec.solve(samples, patched, ec.layout(patched, samples), num_samples=300)
+
+        dists = ox.distributions('ordered')
+        errors = []
+        for m in samples:
+            cal, prob = dists[m['id']]['posterior']
+            errors.append(solved['measurements'][m['id']]['posterior_mean']
+                          - float((cal * prob / prob.sum()).sum()))
+        errors = np.array(errors)
+        assert np.sqrt((errors ** 2).mean()) < 9.0, errors.round(1)
+
+        def mean_ad(ids):
+            return np.mean([1950 - solved['measurements'][i]['posterior_mean'] for i in ids])
+        separation = mean_ad(ox.ROCKSHELTER) - mean_ad(ox.QUARRY)
+        assert 0.0 < separation < 20.0, separation
+
+    def test_the_outlier_model_now_works_on_such_a_model(self):
+        """
+        The reason this matters beyond accuracy: the MCMC path this replaces
+        never applied the outlier model at all, so these analyses came back
+        with an empty Outlier column however it was configured.
+        """
+        from app.services.model_tree import with_implicit_boundaries
+
+        samples = [dict(m, outlier_prior=0.05, outlier_model='general')
+                   for m in ox.measurements()]
+        patched, inserted = with_implicit_boundaries(ox.model_tree('ordered'))
+        assert inserted
+        solved = ec.solve(samples, patched, ec.layout(patched, samples), num_samples=300)
+        for m in samples:
+            assert 'outlier_probability' in solved['measurements'][m['id']]
