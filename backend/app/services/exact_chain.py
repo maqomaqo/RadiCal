@@ -76,6 +76,11 @@ from app.services.stratigraphy import effective_bounds
 # O(M^2) in space as well as time, so this caps one intermediate array at
 # about 30 MB and the whole solve at a few seconds.
 MAX_GRID_POINTS = 2000
+# How many groups fit at that point count before the grid starts coarsening.
+# One M x M array of doubles is 32 MB at M = 2000 and one is held per group,
+# so this is the memory budget in disguise: a long sequence trades calendar
+# resolution for staying inside it rather than being killed.
+GROUPS_AT_FULL_RESOLUTION = 6
 # Finest calendar step worth using. IntCal20/SHCal20 are themselves tabulated
 # at 1-20 year intervals, so going below a year buys nothing real.
 MIN_GRID_STEP_YEARS = 1.0
@@ -216,10 +221,16 @@ def _effective_date_bounds(measurement: Dict, element_bounds: Dict) -> Tuple:
     return effective_bounds(measurement, {'taq_age_bp': el_taq, 'tpq_age_bp': el_tpq})
 
 
-def _build_grid(measurements: List[Dict], element_bounds: Dict) -> np.ndarray:
+def _build_grid(measurements: List[Dict], element_bounds: Dict,
+                num_groups: int = 1) -> np.ndarray:
     """
     A calendar grid wide enough for both the dates and the boundaries either
-    side of them, at the finest step MAX_GRID_POINTS allows.
+    side of them, at the finest step the memory budget allows.
+
+    One M x M array of doubles is 32 MB at M = 2000, and a transfer matrix is
+    held per group, so the point count is scaled down as the model grows to
+    keep the total near that of a single-group solve. A long sequence gets a
+    coarser calendar step rather than an out-of-memory kill.
     """
     curve_lo, curve_hi = np.inf, -np.inf
     lo, hi = np.inf, -np.inf
@@ -246,7 +257,10 @@ def _build_grid(measurements: List[Dict], element_bounds: Dict) -> np.ndarray:
     lo = max(curve_lo, lo - pad)
     hi = min(curve_hi, hi + pad)
 
-    step = max(MIN_GRID_STEP_YEARS, (hi - lo) / MAX_GRID_POINTS)
+    # Only a long sequence needs coarsening: up to GROUPS_AT_FULL_RESOLUTION
+    # groups the full point count fits comfortably.
+    budget = MAX_GRID_POINTS / max(1.0, np.sqrt(num_groups / GROUPS_AT_FULL_RESOLUTION))
+    step = max(MIN_GRID_STEP_YEARS, (hi - lo) / budget)
     return np.arange(lo, hi + step, step)
 
 
@@ -292,7 +306,7 @@ def solve(measurements: List[Dict], root: Dict, chain: Chain,
     """
     element_bounds = inherited_bounds(root)
     by_id = {m['id']: m for m in measurements}
-    grid = _build_grid(measurements, element_bounds)
+    grid = _build_grid(measurements, element_bounds, len(chain.groups))
     dt = float(grid[1] - grid[0])
     M = len(grid)
 
@@ -337,17 +351,19 @@ def solve(measurements: List[Dict], root: Dict, chain: Chain,
         term = np.where(younger_ok[:, None] & older_ok[None, :], term, -np.inf)
         log_T.append(term)
 
-    T = [np.exp(_rescaled(t)) for t in log_T]
-    T = [np.where(np.isfinite(x), x, 0.0) for x in T]
+    def transfer(i):
+        """T_i, exponentiated on demand rather than kept alongside log_T."""
+        out = np.exp(_rescaled(log_T[i]))
+        return np.where(np.isfinite(out), out, 0.0)
 
     # Forward/backward over the boundaries.
     alpha = [np.where(allowed[chain.boundary_ids[0]], 1.0, 0.0)]
     for i in range(len(chain.groups)):
-        alpha.append((alpha[i][None, :] * T[i]).sum(axis=1))
+        alpha.append((alpha[i][None, :] * transfer(i)).sum(axis=1))
     beta = [None] * len(chain.boundary_ids)
     beta[-1] = np.where(allowed[chain.boundary_ids[-1]], 1.0, 0.0)
     for i in range(len(chain.groups) - 1, -1, -1):
-        beta[i] = (T[i] * beta[i + 1][:, None]).sum(axis=0)
+        beta[i] = (transfer(i) * beta[i + 1][:, None]).sum(axis=0)
 
     rng = np.random.default_rng(seed)
     results = {'measurements': {}, 'boundaries': {}}
