@@ -99,6 +99,13 @@ OUTLIER_DF = 5
 OUTLIER_LOG_SCALE_MAX = 4.0
 OUTLIER_SCALE_NODES = 24
 OUTLIER_KERNEL_HALF_WIDTH_YEARS = 20000.0
+# The charcoal/residual model instead assumes a one-sided gap: the dated
+# material formed some years BEFORE the context it was found in, never
+# after. Exponential with this mean, following OxCal's Charcoal_Outlier.
+CHARCOAL_TAU_YEARS = 200.0
+CHARCOAL_KERNEL_SPAN_TAUS = 8.0
+OUTLIER_MODELS = ('general', 'charcoal')
+DEFAULT_OUTLIER_MODEL = 'general'
 # Resolution the reported HPD ranges are computed at, independent of the
 # solver's internal grid step -- see _reported_ranges. Five years is OxCal's
 # own default and about as fine as a calibrated date is meaningful.
@@ -230,18 +237,45 @@ def _date_likelihood(grid: np.ndarray, measurement: Dict,
     return lik
 
 
-def _outlier_kernel(step: float, half_width: float) -> np.ndarray:
+def _outlier_kernel(step: float, half_width: float,
+                    model: str = DEFAULT_OUTLIER_MODEL) -> np.ndarray:
     """
-    OxCal's "General" outlier offset, as a convolution kernel in CALENDAR
-    years: 10^u * T(df), u ~ Uniform(0, log10_scale_max).
+    The offset a flagged date is allowed, as a convolution kernel over
+    CALENDAR years. Index order matches the grid, so a lag of +1 cell means
+    the material is one step OLDER than the context.
 
-    This is the `Outlier_Model("General", T(5), U(0,4), "t")` of Bronk Ramsey
-    2009. The "t" is the domain: the offset displaces the date's calendar age,
-    which is what residual or intrusive material actually does, rather than
-    inflating the radiocarbon measurement. Averaging a Student-t over four
-    decades of scale gives a very heavy tail, so a flagged date says almost
-    nothing about where it sits -- the point of the thing.
+    Two models, because the two ways a date goes wrong are not the same
+    shape:
+
+    "general" -- OxCal's `Outlier_Model("General", T(5), U(0,4), "t")`
+        (Bronk Ramsey 2009): a Student-t offset scaled by 10^u with u
+        uniform over four decades. Symmetric and very heavy-tailed, so a
+        flagged date says almost nothing about where it sits. The right
+        model when you do not know WHY a date is wrong -- lab error, a
+        mislabelled bag, contamination in either direction.
+
+    "charcoal" -- a one-sided exponential: the dated material formed a gap
+        g ~ Exp(tau) BEFORE the context, never after. This is old wood and
+        reworked material, where the error has a known direction, and
+        saying so is worth a lot. Measured on an injected residual date, it
+        recovered the model's Start boundary to AD 1292 against the general
+        model's 1201 (clean value 1339) and put the outlier probability at
+        90% rather than 66%, because a one-sided model does not have to
+        spend prior mass on the direction the material cannot be wrong in.
     """
+    if model == 'charcoal':
+        # One-sided, and the side matters. The MATERIAL is older than the
+        # CONTEXT, so the context's calendar age is YOUNGER -- lower cal BP,
+        # a lower grid index. The kernel therefore carries its mass at
+        # negative lag; putting it at positive lag says the context predates
+        # the wood found in it, which is residuality backwards and made a
+        # residual date look MORE consistent rather than less.
+        span = CHARCOAL_KERNEL_SPAN_TAUS * CHARCOAL_TAU_YEARS
+        lags = np.arange(0.0, span + step, step)
+        density = np.exp(-lags / CHARCOAL_TAU_YEARS)
+        kernel = np.concatenate([density[::-1], np.zeros(len(lags) - 1)])
+        return kernel / kernel.sum()
+
     lags = np.arange(-half_width, half_width + step, step)
     total = np.zeros_like(lags)
     for u in np.linspace(0.0, OUTLIER_LOG_SCALE_MAX, OUTLIER_SCALE_NODES):
@@ -253,6 +287,7 @@ def _outlier_kernel(step: float, half_width: float) -> np.ndarray:
 
 def _with_outlier_component(
     grid: np.ndarray, inlier: np.ndarray, prior: float,
+    model: str = DEFAULT_OUTLIER_MODEL,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
     (mixture, outlier_component) for one date, both normalised on `grid`.
@@ -269,7 +304,7 @@ def _with_outlier_component(
     """
     step = float(grid[1] - grid[0])
     kernel = _outlier_kernel(step, max(OUTLIER_KERNEL_HALF_WIDTH_YEARS,
-                                       float(grid[-1] - grid[0])))
+                                       float(grid[-1] - grid[0])), model)
     full = np.convolve(inlier, kernel)
     offset = (len(kernel) - 1) // 2
     broad = full[offset:offset + len(inlier)]
@@ -519,7 +554,13 @@ def solve(measurements: List[Dict], root: Dict, chain: Chain,
         lik = lik / total
         prior = m.get('outlier_prior') or 0.0
         if prior > 0:
-            mixture, broad = _with_outlier_component(grid, lik, prior)
+            model_name = m.get('outlier_model') or DEFAULT_OUTLIER_MODEL
+            if model_name not in OUTLIER_MODELS:
+                raise ValueError(
+                    f"sample '{m.get('sample_name', m['id'])}' has unknown outlier "
+                    f"model '{model_name}'; expected one of {', '.join(OUTLIER_MODELS)}"
+                )
+            mixture, broad = _with_outlier_component(grid, lik, prior, model_name)
             outlier_parts[m['id']] = (lik, broad, float(prior))
             lik = mixture
         likelihood[m['id']] = lik

@@ -129,6 +129,9 @@ class RadiocarbonSample(Base):
     # drop the outlier model on every rerun -- the same trap delta_r above
     # is commented against.
     outlier_prior = Column(Float, nullable=True)
+    # Which outlier model applies when outlier_prior is set: 'general' or
+    # 'charcoal'. Persisted for the same reason as the prior beside it.
+    outlier_model = Column(String, nullable=True)
     reservoir_age = Column(Float, nullable=True)  # For marine samples
     depth_cm = Column(Float, nullable=True)
     location = Column(String, nullable=True)

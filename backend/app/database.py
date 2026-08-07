@@ -55,6 +55,7 @@ _COLUMN_MIGRATIONS = {
         ('delta_r', 'FLOAT'),
         ('delta_r_error', 'FLOAT'),
         ('outlier_prior', 'FLOAT'),
+        ('outlier_model', 'VARCHAR'),
     ],
     'stratigraphic_relationships': [
         ("from_type", "VARCHAR DEFAULT 'sample'"),

@@ -231,6 +231,12 @@ class BayesianMeasurementInput(MeasurementInput):
     # alternative, and the result carries the posterior probability that it
     # was the alternative -- see services/exact_chain.
     outlier_prior: float = Field(default=0.0, ge=0.0, le=0.5)
+    # Which outlier model, when one is applied. "general" is OxCal's
+    # symmetric heavy-tailed default, for a date wrong in an unknown way.
+    # "charcoal" is one-sided -- the material formed before its context,
+    # never after -- for old wood and reworked material. See
+    # services/exact_chain._outlier_kernel.
+    outlier_model: Literal["general", "charcoal"] = "general"
 
 
 class SampleGroupInput(BaseModel):

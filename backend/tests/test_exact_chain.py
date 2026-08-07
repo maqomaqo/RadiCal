@@ -626,3 +626,72 @@ class TestOutlierModel:
             b = on['measurements'][d['id']]['posterior_mean']
             assert b == pytest.approx(a, abs=5.0), d['id']
             assert on['measurements'][d['id']]['outlier_probability'] < 0.05
+
+
+class TestCharcoalOutlierModel:
+    """
+    The one-sided model, for residual and old-wood material.
+
+    The general model is symmetric: it lets a flagged date be wrong in
+    either direction. Charcoal knows the direction -- the material formed
+    BEFORE the context it was found in, never after -- and saying so is
+    worth real precision.
+    """
+
+    def _residual_case(self, model):
+        """Four contemporary dates plus one 400 radiocarbon years too old."""
+        dates = [dict(d, outlier_prior=0.05, outlier_model=model) for d in _dates(
+            ('ch_a', 3000, 30, 'p'), ('ch_b', 3020, 30, 'p'), ('ch_c', 3040, 30, 'p'),
+            ('ch_d', 3060, 30, 'p'), ('ch_e', 3460, 30, 'p'))]
+        tree = _sequence('s', [_boundary('b0'), _phase('p'), _boundary('b1')])
+        return dates, ec.solve(dates, tree, ec.layout(tree, dates), num_samples=300)
+
+    def test_kernel_only_shifts_the_context_younger(self):
+        """
+        Direction is the whole point and is easy to get backwards. The
+        material is older than its context, so the CONTEXT age the kernel
+        produces must be younger -- lower cal BP, negative lag. Pointed the
+        other way it says the context predates the wood in it, and a
+        residual date comes out looking MORE consistent than it is.
+        """
+        step = 5.0
+        kernel = ec._outlier_kernel(step, 5000.0, 'charcoal')
+        centre = (len(kernel) - 1) // 2
+        assert kernel[:centre + 1].sum() == pytest.approx(1.0)
+        assert kernel[centre + 1:].sum() == pytest.approx(0.0)
+        # ...and the general model is symmetric, which is the difference.
+        general = ec._outlier_kernel(step, 5000.0, 'general')
+        mid = (len(general) - 1) // 2
+        assert general[:mid].sum() == pytest.approx(general[mid + 1:].sum(), rel=1e-6)
+
+    def test_detects_a_residual_date_more_confidently_than_the_general_model(self):
+        _dg, general = self._residual_case('general')
+        _dc, charcoal = self._residual_case('charcoal')
+        assert (charcoal['measurements']['ch_e']['outlier_probability']
+                > general['measurements']['ch_e']['outlier_probability'])
+
+    def test_leaves_the_sound_dates_alone(self):
+        dates, solved = self._residual_case('charcoal')
+        for d in dates:
+            if d['id'] == 'ch_e':
+                continue
+            assert solved['measurements'][d['id']]['outlier_probability'] < 0.2, d['id']
+
+    def test_an_unknown_model_is_refused_rather_than_guessed(self):
+        dates = [dict(d, outlier_prior=0.05, outlier_model='wishful')
+                 for d in _dates(('ch_x', 3000, 30, 'p'))]
+        tree = _sequence('s', [_boundary('b0'), _phase('p'), _boundary('b1')])
+        with pytest.raises(ValueError, match='outlier model'):
+            ec.solve(dates, tree, ec.layout(tree, dates), num_samples=50)
+
+    def test_defaults_to_general_when_unspecified(self):
+        dates = [dict(d, outlier_prior=0.05) for d in _dates(
+            ('cd_a', 3000, 30, 'p'), ('cd_b', 3030, 30, 'p'))]
+        explicit = [dict(d, outlier_model='general') for d in dates]
+        tree = _sequence('s', [_boundary('b0'), _phase('p'), _boundary('b1')])
+        chain = ec.layout(tree, dates)
+        a = ec.solve(dates, tree, chain, num_samples=200)
+        b = ec.solve(explicit, tree, chain, num_samples=200)
+        for d in dates:
+            assert (a['measurements'][d['id']]['outlier_probability']
+                    == pytest.approx(b['measurements'][d['id']]['outlier_probability']))

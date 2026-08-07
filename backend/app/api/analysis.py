@@ -515,6 +515,7 @@ async def bayesian_analysis(request: BayesianRequest, db: Session = Depends(get_
                     sample_type=sample_type,
                     curve_id=measurement.curve_id,
                     outlier_prior=measurement.outlier_prior,
+                    outlier_model=measurement.outlier_model,
                     # Accepted by the schema and carried by dates deployed
                     # from a project collection, so dropping them here lost
                     # data that had been recorded elsewhere.
@@ -820,6 +821,11 @@ async def get_analysis(analysis_id: str, db: Session = Depends(get_db)):
                     "curve_id": s.curve_id,
                     "delta_r": s.delta_r,
                     "delta_r_error": s.delta_r_error,
+                    # Same reason: the edit page resubmits this payload, so
+                    # an outlier setting left out here would be silently
+                    # switched off by editing the analysis.
+                    "outlier_prior": s.outlier_prior,
+                    "outlier_model": s.outlier_model,
                     "reservoir_age": s.reservoir_age,
                     "depth_cm": s.depth_cm,
                     "location": s.location,
@@ -1043,6 +1049,7 @@ def _rerun_analysis(analysis: Analysis, db: Session) -> None:
                 'tpq_age_bp': s.tpq_age_bp,
                 'taq_age_bp': s.taq_age_bp,
                 'outlier_prior': s.outlier_prior,
+                'outlier_model': s.outlier_model,
             }
             for s in samples
         ]
