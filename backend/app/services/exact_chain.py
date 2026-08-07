@@ -93,6 +93,14 @@ MIN_BOUNDARY_PAD_YEARS = 800.0
 # Likelihood below this fraction of a date's peak is treated as absent when
 # working out where the grid needs to reach.
 SUPPORT_THRESHOLD = 1e-6
+# Resolution the reported HPD ranges are computed at, independent of the
+# solver's internal grid step -- see _reported_ranges. Five years is OxCal's
+# own default and about as fine as a calibrated date is meaningful.
+REPORTING_STEP_YEARS = 5.0
+# Density below this fraction of the peak is left off the plotted series, and
+# this much padding is kept either side of what remains -- see _plottable.
+DISPLAY_THRESHOLD = 1e-4
+PLOT_MARGIN_YEARS = 50.0
 
 
 class Chain:
@@ -542,12 +550,73 @@ def _edge_mass(densities: List[np.ndarray], grid: np.ndarray) -> float:
     return worst
 
 
+def _reported_ranges(grid: np.ndarray, mass: np.ndarray, confidence: float) -> List[Dict]:
+    """
+    HPD ranges at REPORTING_STEP_YEARS rather than at the solver's internal
+    grid step.
+
+    Two reasons, both measured on the OxCal fixture. The internal step is
+    chosen from the date range and the number of groups (1.0 to 7.7 years
+    across the cases here), so reporting at it would make a published range
+    depend on an implementation detail -- the same dates in a longer sequence
+    would come back with different widths. And a modelled posterior on a
+    wiggly curve is genuinely multi-peaked, so a fine grid picks out the tops
+    of the peaks and skips the dips: at 1 year Wk-51189's 68.3% region came
+    back as three fragments totalling 24 years, including two ranges split by
+    a single excluded year, where OxCal reports 35 years. Rebinned to 5 years
+    the same posterior gives 30, and the eight dates' 95.4% widths average
+    51.2 against OxCal's 55.6.
+
+    Five years is OxCal's own default reporting resolution and is about as
+    fine as a calibrated date is meaningful, so it is the convention this
+    reports in. The full-resolution density is still what gets plotted and
+    what the point estimates come from.
+    """
+    step = REPORTING_STEP_YEARS
+    lo = np.floor(grid[0] / step) * step
+    hi = np.ceil(grid[-1] / step) * step + step
+    edges = np.arange(lo, hi + step, step)
+    binned, _ = np.histogram(grid, bins=edges, weights=mass)
+    centres = (edges[:-1] + edges[1:]) / 2.0
+
+    keep = binned > 0
+    if not np.any(keep):
+        return [{'min': float(grid[0]), 'max': float(grid[-1]),
+                 'probability_percent': 100.0}]
+    ranges = hpd_ranges_from_distribution(centres[keep], binned[keep], confidence)
+    for r in ranges:
+        r['min'] -= step / 2.0
+        r['max'] += step / 2.0
+    return ranges
+
+
+def _plottable(grid: np.ndarray, density: np.ndarray) -> List[List[float]]:
+    """
+    The density trimmed to where it actually has mass.
+
+    The solver's grid deliberately runs far wider than the dates, because the
+    boundaries need room -- on the OxCal fixture it spans 2031 years while
+    the posterior occupies about 100 of them. Handing the whole grid to the
+    plot drew every modelled date as a spike in a mostly-empty axis, which is
+    what this trim fixes. The MCMC path never had the problem because it
+    histogrammed its own draws.
+    """
+    peak = density.max()
+    if peak <= 0:
+        return [[float(a), float(p)] for a, p in zip(grid, density)]
+    significant = np.where(density >= peak * DISPLAY_THRESHOLD)[0]
+    margin = max(1, int(round(PLOT_MARGIN_YEARS / (grid[1] - grid[0]))))
+    lo = max(0, int(significant[0]) - margin)
+    hi = min(len(grid), int(significant[-1]) + margin + 1)
+    return [[float(a), float(p)] for a, p in zip(grid[lo:hi], density[lo:hi])]
+
+
 def _summarize(grid: np.ndarray, density: np.ndarray, rng, num_samples: int) -> Dict:
     """
     An exact density turned into the summary shape the rest of the app
-    expects. Point estimates and HPD ranges come from the density itself
-    rather than from draws, so they carry no Monte Carlo error at all; the
-    draws exist only so downstream code that wants samples still works.
+    expects. Point estimates come from the density itself rather than from
+    draws, so they carry no Monte Carlo error at all; the draws exist only so
+    downstream code that wants samples still works.
     """
     dt = float(grid[1] - grid[0])
     total = density.sum() * dt
@@ -561,14 +630,8 @@ def _summarize(grid: np.ndarray, density: np.ndarray, rng, num_samples: int) -> 
     cdf = np.cumsum(mass)
     median = float(np.interp(0.5, cdf, grid))
 
-    hpd_68 = hpd_ranges_from_distribution(grid, mass, 0.683)
-    hpd_95 = hpd_ranges_from_distribution(grid, mass, 0.954)
-    # Half a step either side, so a single-cell range gets the width the cell
-    # stands for rather than zero.
-    for ranges in (hpd_68, hpd_95):
-        for r in ranges:
-            r['min'] -= dt / 2.0
-            r['max'] += dt / 2.0
+    hpd_68 = _reported_ranges(grid, mass, 0.683)
+    hpd_95 = _reported_ranges(grid, mass, 0.954)
 
     draws = np.interp(rng.random(num_samples), cdf, grid)
 
@@ -580,6 +643,6 @@ def _summarize(grid: np.ndarray, density: np.ndarray, rng, num_samples: int) -> 
         'hpd_95': (min(r['min'] for r in hpd_95), max(r['max'] for r in hpd_95)),
         'hpd_68_ranges': hpd_68,
         'hpd_95_ranges': hpd_95,
-        'probability_distribution': [[float(a), float(p)] for a, p in zip(grid, density)],
+        'probability_distribution': _plottable(grid, density),
         'posterior_samples': draws.tolist(),
     }

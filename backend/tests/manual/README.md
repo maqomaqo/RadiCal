@@ -152,6 +152,28 @@ slightly away, with OxCal's separation sitting between the two settings. It
 also couples the ends of the chain, so the solve goes from O(M^2) to O(M^3)
 per group -- about 0.9s to 4.5s on this fixture.
 
+### Reporting resolution
+
+Two defects surfaced by running the recommended shared-Boundary model through
+the app itself, both now fixed and pinned in `tests/test_exact_chain.py`:
+
+* **Every modelled date plotted as a narrow spike.** The solver's grid runs
+  far wider than the dates because the boundaries need room -- 2031 years on
+  this fixture for a posterior about 100 years wide -- and the whole grid was
+  being handed to the plot. The series is now trimmed to where the density
+  has mass. The MCMC path never had this, because it histogrammed its own
+  draws.
+* **68.3% and 95.4% ranges looked nearly the same.** Ranges were computed at
+  the solver's internal step, which is derived from the date range and the
+  group count (1.0 to 7.7 years across the cases here) -- so a published
+  range depended on an implementation detail. Worse, a modelled posterior on
+  a wiggly curve is genuinely multi-peaked, so a 1-year grid picks out the
+  peak tops and skips the dips: Wk-51189's 68.3% region came back as three
+  fragments totalling 24 years, two of them split by a single excluded year,
+  where OxCal reports 35. Reporting now happens at a fixed 5 years, OxCal's
+  own default. Rebinned that way the eight dates' 95.4% widths average 51.2
+  against OxCal's 55.6.
+
 ### An open question this raised
 
 For a SINGLE group the exact solver and the samplers disagree, and the

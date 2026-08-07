@@ -171,10 +171,13 @@ class TestMatchesBruteForce:
         expected = _brute_force(get_curve('intcal20'), grid, dates)
 
         for j, d in enumerate(dates):
-            got = np.array(solved['measurements'][d['id']]['probability_distribution'])[:, 1]
-            assert len(got) == len(grid)
-            # Overlapping coefficient; 1.0 is identical.
-            overlap = float(np.minimum(got / got.sum(), expected[j] / expected[j].sum()).sum())
+            # The series is trimmed to where it has mass, so line it up with
+            # the brute force by calendar age rather than by position.
+            pairs = np.array(solved['measurements'][d['id']]['probability_distribution'])
+            where = np.searchsorted(grid, pairs[:, 0] - solved['grid']['step'] / 2)
+            got, mine = pairs[:, 1], expected[j][where]
+            # Overlapping coefficient over the shared support; 1.0 is identical.
+            overlap = float(np.minimum(got / got.sum(), mine / mine.sum()).sum())
             assert overlap > 0.999, f'{d["id"]} overlap {overlap}'
 
 
@@ -439,7 +442,93 @@ class TestUniformSpanPrior:
                 expected = lik[d] * np.diagonal(q)
                 expected = expected / expected.sum()
 
-                got = np.array(solved['measurements'][d]['probability_distribution'])[:, 1]
-                got = got / got.sum()
-                overlap = float(np.minimum(got, expected).sum())
+                pairs = np.array(solved['measurements'][d]['probability_distribution'])
+                where = np.searchsorted(grid, pairs[:, 0] - solved['grid']['step'] / 2)
+                got = pairs[:, 1] / pairs[:, 1].sum()
+                mine = expected[where] / expected[where].sum()
+                overlap = float(np.minimum(got, mine).sum())
                 assert overlap > 0.999, f'{d} overlap {overlap}'
+
+
+class TestReportingIsIndependentOfTheInternalGrid:
+    """
+    Two defects found by running the recommended shared-Boundary model
+    through the app: every modelled date plotted as a narrow spike, and 68.3%
+    and 95.4% ranges that looked nearly the same.
+    """
+
+    def _solve(self, **overrides):
+        dates = _dates(('rp_a', 3000, 30, 'p'), ('rp_b', 3040, 30, 'p'),
+                       ('rp_c', 3080, 30, 'p'))
+        tree = _sequence('s', [_boundary('b0'), _phase('p'), _boundary('b1')])
+        chain = ec.layout(tree, dates)
+        if not overrides:
+            return dates, ec.solve(dates, tree, chain, num_samples=200)
+        import unittest.mock as mock
+        with mock.patch.multiple(ec, **overrides):
+            return dates, ec.solve(dates, tree, chain, num_samples=200)
+
+    def test_plotted_series_is_trimmed_to_where_the_mass_is(self):
+        """
+        The solver's grid runs far wider than the dates because the
+        boundaries need room -- on the OxCal fixture it spanned 2031 years
+        for a posterior about 100 years wide, so every date drew as a spike
+        in a mostly empty axis. The series must cover the posterior, not the
+        grid.
+        """
+        dates, solved = self._solve()
+        span = solved['grid']['upper'] - solved['grid']['lower']
+        for d in dates:
+            pairs = np.array(solved['measurements'][d['id']]['probability_distribution'])
+            plotted = pairs[-1, 0] - pairs[0, 0]
+            assert plotted < span / 2, 'series still spans most of the solver grid'
+            # ...and nothing meaningful was cut off either side.
+            edge = pairs[:, 1][[0, -1]].max() / pairs[:, 1].max()
+            assert edge < 1e-3
+
+    def test_reported_ranges_do_not_move_with_the_internal_step(self):
+        """
+        The internal step is derived from the date range and the group count,
+        so a range computed at it would change when neither the dates nor the
+        model did. Reporting happens at REPORTING_STEP_YEARS instead.
+
+        Asserted on the envelope and the total width rather than range by
+        range: on a wiggly stretch of curve the posterior has shallow dips
+        right at the HPD threshold, so how many fragments a region breaks
+        into is genuinely borderline and shifts by one either way. Where the
+        region sits and how much of the calendar it covers are not.
+        """
+        dates, fine = self._solve(MAX_GRID_POINTS=2000)
+        _again, coarse = self._solve(MAX_GRID_POINTS=1000)
+        assert coarse['grid']['step'] > fine['grid']['step'] * 1.5, 'steps not different'
+
+        tolerance = 2 * ec.REPORTING_STEP_YEARS
+        for d in dates:
+            a = fine['measurements'][d['id']]['hpd_95_ranges']
+            b = coarse['measurements'][d['id']]['hpd_95_ranges']
+            assert min(r['min'] for r in a) == pytest.approx(
+                min(r['min'] for r in b), abs=tolerance)
+            assert max(r['max'] for r in a) == pytest.approx(
+                max(r['max'] for r in b), abs=tolerance)
+            wa = sum(r['max'] - r['min'] for r in a)
+            wb = sum(r['max'] - r['min'] for r in b)
+            assert wa == pytest.approx(wb, rel=0.15)
+
+    def test_ranges_land_on_the_reporting_grid(self):
+        dates, solved = self._solve()
+        step = ec.REPORTING_STEP_YEARS
+        for d in dates:
+            for key in ('hpd_68_ranges', 'hpd_95_ranges'):
+                for r in solved['measurements'][d['id']][key]:
+                    assert r['min'] % step == pytest.approx(0.0, abs=1e-6)
+                    assert r['max'] % step == pytest.approx(0.0, abs=1e-6)
+                    assert r['max'] - r['min'] >= step, 'a zero-width range'
+
+    def test_95_is_wider_than_68(self):
+        """The symptom that prompted this: the two looked nearly the same."""
+        dates, solved = self._solve()
+        for d in dates:
+            e = solved['measurements'][d['id']]
+            w68 = sum(r['max'] - r['min'] for r in e['hpd_68_ranges'])
+            w95 = sum(r['max'] - r['min'] for r in e['hpd_95_ranges'])
+            assert w95 > w68 * 1.3, f'{d["id"]}: 68% {w68} vs 95% {w95}'
