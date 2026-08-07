@@ -1,0 +1,58 @@
+ // Nenthorn_sites_3, with Quarry and Rockshelter made explicitly UNORDERED.
+ // Identical to Nenthorn_sites_3.oxcal except that the two branch Sequences
+ // are wrapped in a single Phase("Sites"), so the outer Sequence sees one
+ // unordered group instead of two consecutive ones.
+ Plot()
+ {
+  Curve("SHCal20","SHCal20.14c");
+  Sequence("Nenthorn")
+  {
+   Boundary("Start Nenthorn");
+   Phase("Sites")
+   {
+    Sequence("Quarry")
+    {
+     Phase("Fire_Feature_J")
+     {
+      R_Date("WK51189", 685, 25)
+      {
+      };
+      R_Date("WK50102", 671, 21)
+      {
+      };
+      R_Date("WK50105", 635, 21)
+      {
+      };
+     };
+    };
+    Sequence("Rockshelter")
+    {
+     Phase("Fires")
+     {
+      Phase("Fire_Feature_K")
+      {
+       R_Date("WK50099", 671, 20)
+       {
+       };
+       R_Date("WK50100", 647, 21)
+       {
+       };
+       R_Date("WK50101", 636, 21)
+       {
+       };
+      };
+      Phase("Fire_Feature_A")
+      {
+       R_Date("ANU55209", 676, 26)
+       {
+       };
+       R_Date("ANU55206", 637, 24)
+       {
+       };
+      };
+     };
+    };
+   };
+   Boundary("End Nenthorn");
+  };
+ };

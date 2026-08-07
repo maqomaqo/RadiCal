@@ -1,0 +1,57 @@
+ // Nenthorn_sites_3, with the Quarry -> Rockshelter ordering made EXPLICIT.
+ // Identical to Nenthorn_sites_3.oxcal except for one added Boundary between
+ // the two branch Sequences, so the transition between them is a single
+ // shared parameter rather than something the outer Sequence has to infer
+ // from two groups that carry no boundaries of their own.
+ Plot()
+ {
+  Curve("SHCal20","SHCal20.14c");
+  Sequence("Nenthorn")
+  {
+   Boundary("Start Nenthorn");
+   Sequence("Quarry")
+   {
+    Phase("Fire_Feature_J")
+    {
+     R_Date("WK51189", 685, 25)
+     {
+     };
+     R_Date("WK50102", 671, 21)
+     {
+     };
+     R_Date("WK50105", 635, 21)
+     {
+     };
+    };
+   };
+   Boundary("Quarry to Rockshelter");
+   Sequence("Rockshelter")
+   {
+    Phase("Fires")
+    {
+     Phase("Fire_Feature_K")
+     {
+      R_Date("WK50099", 671, 20)
+      {
+      };
+      R_Date("WK50100", 647, 21)
+      {
+      };
+      R_Date("WK50101", 636, 21)
+      {
+      };
+     };
+     Phase("Fire_Feature_A")
+     {
+      R_Date("ANU55209", 676, 26)
+      {
+      };
+      R_Date("ANU55206", 637, 24)
+      {
+      };
+     };
+    };
+   };
+   Boundary("End Nenthorn");
+  };
+ };

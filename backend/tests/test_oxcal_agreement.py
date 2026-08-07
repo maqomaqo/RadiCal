@@ -17,6 +17,8 @@ AD 1350 splits each likelihood into roughly AD 1300-1360 and AD 1380-1410 --
 so this fixture exercises the multi-range machinery rather than just a
 single-peak case.
 """
+import re
+
 import numpy as np
 import pytest
 
@@ -37,8 +39,20 @@ def oxcal():
     return ox.distributions(), ox.table_ranges()
 
 
+@pytest.fixture(scope='module', params=sorted(ox.RUNS))
+def run(request):
+    """Each of the three OxCal runs in turn."""
+    return request.param
+
+
 def _calibrated(curve, m):
     return curve.calibrate(m['age_bp'], m['error_1sigma'])
+
+
+def _model_body(path):
+    """A .oxcal file with its // comments stripped."""
+    with open(path, encoding='utf-8') as fh:
+        return '\n'.join(re.sub(r'//.*', '', line) for line in fh)
 
 
 @pytest.mark.parametrize('sample', ox.measurements(), ids=lambda m: m['sample_name'])
@@ -198,25 +212,56 @@ class TestFixtureIntegrity:
         assert ox.as_ad([ox.envelope(ox.hpd_from_distribution(calbp, prob, 0.683))])[0][0] == \
             pytest.approx(table[name]['modelled'][68][0][0], abs=3.0)
 
-    def test_model_tree_matches_the_oxcal_file(self):
+    def test_model_tree_matches_the_oxcal_file(self, run):
         """
-        The tree in oxcal_fixture mirrors Nenthorn_sites_3.oxcal by hand, so
-        check it against the file: same element names, same nesting order,
-        and every date assigned to the phase the file puts it in.
+        Each tree in oxcal_fixture mirrors its .oxcal file by hand, so check
+        it against the file: same element names, in the same order, and every
+        date under the phase the file puts it in.
         """
         from app.services.model_tree import iter_elements, validate_tree
 
-        text = open(ox.MODEL, encoding='utf-8').read()
-        root = ox.model_tree()
+        # Comments first: the files carry a header describing the variant,
+        # which names elements and would confuse the position check below.
+        text = _model_body(ox.paths(run)[0])
+        root = ox.model_tree(run)
         validate_tree(root, ox.measurements())
 
-        names = [e['name'] for e in iter_elements(root)]
-        assert names == ['Nenthorn', 'Start Nenthorn', 'Quarry', 'Fire_Feature_J',
-                         'Rockshelter', 'Fires', 'Fire_Feature_K', 'Fire_Feature_A',
-                         'End Nenthorn']
-        for name in names:
-            assert f'"{name}"' in text, f'{name} is not in the .oxcal file'
-        # Order in the file, which is what makes Quarry older than Rockshelter.
-        assert text.index('"Quarry"') < text.index('"Rockshelter"')
+        expected = {
+            'ordered': ['Nenthorn', 'Start Nenthorn', 'Quarry', 'Fire_Feature_J',
+                        'Rockshelter', 'Fires', 'Fire_Feature_K', 'Fire_Feature_A',
+                        'End Nenthorn'],
+            'unordered': ['Nenthorn', 'Start Nenthorn', 'Sites', 'Quarry',
+                          'Fire_Feature_J', 'Rockshelter', 'Fires', 'Fire_Feature_K',
+                          'Fire_Feature_A', 'End Nenthorn'],
+            'shared_boundary': ['Nenthorn', 'Start Nenthorn', 'Quarry',
+                                'Fire_Feature_J', 'Quarry to Rockshelter',
+                                'Rockshelter', 'Fires', 'Fire_Feature_K',
+                                'Fire_Feature_A', 'End Nenthorn'],
+        }[run]
+        assert [e['name'] for e in iter_elements(root)] == expected
+
+        # Every element appears in the file, and in the tree's own order --
+        # which is what determines what is older than what.
+        positions = []
+        for name in expected:
+            assert f'"{name}"' in text, f'{name} is not in {run}.oxcal'
+            positions.append(text.index(f'"{name}"'))
+        assert positions[1:] == sorted(positions[1:]), 'tree order != file order'
         for date_id in ox.FIRE_FEATURE_J:
             assert text.index('"Fire_Feature_J"') < text.index(f'"{date_id}"')
+
+    def test_runs_differ_only_in_the_branch_relationship(self, run):
+        """
+        All three runs must be the same eight dates on the same curve -- if a
+        value drifted between runs the comparison is meaningless. The
+        unmodelled ranges are therefore identical across runs too.
+        """
+        text = _model_body(ox.paths(run)[0])
+        assert 'SHCal20' in text
+        for m in ox.measurements():
+            assert f'"{m["id"]}", {m["age_bp"]:.0f}, {m["error_1sigma"]:.0f}' in text
+
+        table = ox.table_ranges(run)
+        baseline = ox.table_ranges('ordered')
+        for m in ox.measurements():
+            assert table[m['id']]['unmodelled'] == baseline[m['id']]['unmodelled']

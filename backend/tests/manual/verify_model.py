@@ -292,34 +292,35 @@ def check_nuts(per_phase=1, draws=3000, tune=2000):
               f"1st pct {np.percentile(gap, 1):.2f}, median {np.median(gap):.1f}")
 
 
-def check_nenthorn(draws=4000):
+def check_nenthorn(draws=4000, runs=None):
     """
-    The app's modelled result against a real OxCal 4.4 run
-    (tests/fixtures/oxcal; SHCal20, default UniformSpanPrior and resolution,
-    no outlier model). The unmodelled half of this comparison is asserted in
-    tests/test_oxcal_agreement.py; only the modelled half needs an MCMC and
-    so lives here.
+    The app against the three real OxCal 4.4 runs in tests/fixtures/oxcal --
+    the same eight dates and curve, differing only in how Quarry relates to
+    Rockshelter (implied ordering / none / an explicit shared Boundary).
 
-    Runs the model as the .oxcal file defines it (Quarry and Rockshelter are
-    sibling Sequences, hence ordered) and also with that constraint dropped,
-    because the two differ sharply and only one resembles OxCal's output.
+    The unmodelled half of this comparison is asserted in
+    tests/test_oxcal_agreement.py; only the modelled half needs an MCMC.
+
+    OxCal's `ordered` and `shared_boundary` runs agree with each other and
+    `unordered` does not, so OxCal does enforce the implied ordering. The app
+    is run on each of the three so the divergence can be attributed.
     """
     sys.path.insert(0, os.path.join('/app', 'tests'))
     import oxcal_fixture as ox
 
     samples = ox.measurements()
-    table = ox.table_ranges()
-    dists = ox.distributions()
     late = (1950 - 1420, 1950 - 1370)          # the secondary lobe, in cal BP
 
-    for ordered in (True, False):
-        chron, idata, results = run_app(samples, ox.model_tree(ordered), draws=draws)
-        label = ('as the .oxcal file defines it: Quarry ordered before Rockshelter'
-                 if ordered else 'with the Quarry/Rockshelter ordering dropped')
-        print(f"\n{'=' * 100}\nNENTHORN vs OxCal 4.4 -- {label}\n{'=' * 100}")
-        print(f"{'date':>10} {'phase':>16} | {'OxCal 95.4% AD':>16} {'app 95.4% AD':>16}"
-              f" | {'ox w':>5} {'app w':>5} | {'overlap':>7} | {'late lobe ox/app':>17}")
-        ow, aw, ov, ol_ox, ol_app = [], [], [], [], []
+    for run in (runs or sorted(ox.RUNS)):
+        table, dists = ox.table_ranges(run), ox.distributions(run)
+        chron, idata, results = run_app(samples, ox.model_tree(run), draws=draws)
+        print(f"\n{'=' * 104}\nNENTHORN vs OxCal 4.4 -- {run}\n{'=' * 104}")
+        print(f"  app span groups: "
+              f"{[(g.older_boundary_id, g.younger_boundary_id, len(g.date_ids)) for g in chron.model_plan.span_groups]}")
+        print(f"{'date':>10} {'phase':>16} | {'OxCal 95.4% AD':>17} {'app 95.4% AD':>17}"
+              f" | {'ox w':>5} {'app w':>5} | {'ovl':>5} | {'ox mean':>8} {'app mean':>8}"
+              f" | {'late ox/app':>13}")
+        ow, aw, ov, dm, lo, la = [], [], [], [], [], []
         for m in samples:
             post = results['measurements'][m['id']]
             d = np.asarray(post['posterior_samples'])
@@ -332,33 +333,50 @@ def check_nenthorn(draws=4000):
             hist = hist / max(hist.sum(), 1)
             om = op_ / op_.sum()
             inlobe = (oc >= late[0]) & (oc <= late[1])
-            ol_ox.append(float(om[inlobe].sum()))
-            ol_app.append(float(hist[inlobe].sum()))
-            ov.append(ox.overlap(oc, op_, *[np.asarray(x) for x in (oc, hist)]))
-            ow.append((1950 - ox_from) - (1950 - ox_to))
+            lo.append(float(om[inlobe].sum()))
+            la.append(float(hist[inlobe].sum()))
+            ov.append(ox.overlap(oc, op_, oc, hist))
+            ox_mean = 1950 - float((oc * om).sum())
+            app_mean = 1950 - float(d.mean())
+            dm.append(app_mean - ox_mean)
+            ow.append(ox_to - ox_from)
             aw.append(app_env[1] - app_env[0])
             print(f"{m['sample_name']:>10} {m['oxcal_phase']:>16} | "
-                  f"{ox_from:7.0f}-{ox_to:<8.0f} "
-                  f"{1950-app_env[1]:7.0f}-{1950-app_env[0]:<8.0f} | "
-                  f"{ow[-1]:5.0f} {aw[-1]:5.0f} | {ov[-1]:7.3f} | "
-                  f"{ol_ox[-1]:7.3f} {ol_app[-1]:8.3f}")
-        ow, aw = np.array(ow), np.array(aw)
+                  f"{ox_from:7.0f}-{ox_to:<9.0f} {1950-app_env[1]:7.0f}-{1950-app_env[0]:<9.0f}"
+                  f" | {ow[-1]:5.0f} {aw[-1]:5.0f} | {ov[-1]:5.2f} | {ox_mean:8.0f} {app_mean:8.0f}"
+                  f" | {lo[-1]:6.3f} {la[-1]:6.3f}")
+        ow, aw, dm = np.array(ow), np.array(aw), np.array(dm)
         print(f"\n  mean 95.4% width: OxCal {ow.mean():.1f} yr, app {aw.mean():.1f} yr"
               f" (ratio {aw.mean()/ow.mean():.3f})")
+        print(f"  posterior mean vs OxCal: max |diff| {np.abs(dm).max():.1f} yr, "
+              f"rms {np.sqrt((dm**2).mean()):.1f} yr")
         print(f"  posterior overlap with OxCal: mean {np.mean(ov):.3f}")
-        print(f"  secondary lobe (AD 1370-1420): OxCal {np.mean(ol_ox):.3f}, "
-              f"app {np.mean(ol_app):.3f}")
-        for bid, nm in (('b_start', 'STARTNENTHORN'), ('b_end', 'ENDNENTHORN')):
+        print(f"  secondary lobe (AD 1370-1420): OxCal {np.mean(lo):.3f}, app {np.mean(la):.3f}")
+        # Group separation is what the ordering is supposed to produce.
+        def gmean(ids, source):
+            return float(np.mean([source[i] for i in ids]))
+        oxm = {m['id']: 1950 - float((dists[m['id']]['posterior'][0]
+                                      * (dists[m['id']]['posterior'][1]
+                                         / dists[m['id']]['posterior'][1].sum())).sum())
+               for m in samples}
+        apm = {m['id']: 1950 - float(np.asarray(
+            results['measurements'][m['id']]['posterior_samples']).mean()) for m in samples}
+        print(f"  Quarry vs Rockshelter mean separation: "
+              f"OxCal {gmean(ox.ROCKSHELTER, oxm) - gmean(ox.QUARRY, oxm):.1f} yr, "
+              f"app {gmean(ox.ROCKSHELTER, apm) - gmean(ox.QUARRY, apm):.1f} yr")
+        for bid, nm in (('b_start', 'STARTNENTHORN'), ('b_mid', 'QUARRYTOROCKSHELTER'),
+                        ('b_end', 'ENDNENTHORN')):
             got = results['boundaries'].get(bid)
-            if not got:
+            if not got or nm not in table:
                 continue
             d = np.asarray(got['posterior']['posterior_samples'])
             for conf, level in ((68, 0.683), (95, 0.954)):
                 e = ox.envelope(ox.hpd_from_draws(d, level))
                 f, t = table[nm]['modelled'][conf][0]
-                print(f"  {table[nm]['label']:<16} {conf}%  OxCal {f:.0f}-{t:.0f}"
+                print(f"  {table[nm]['label']:<22} {conf}%  OxCal {f:.0f}-{t:.0f}"
                       f"   app {1950-e[1]:.0f}-{1950-e[0]:.0f}")
-        convergence(idata, samples, ['boundary_b_start', 'boundary_b_end'])
+        convergence(idata, samples,
+                    ['boundary_b_start', 'boundary_b_mid', 'boundary_b_end'])
 
 
 CHECKS = {

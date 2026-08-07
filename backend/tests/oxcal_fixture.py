@@ -1,5 +1,5 @@
 """
-Reader for the checked-in OxCal run in tests/fixtures/oxcal/ -- a real
+Reader for the checked-in OxCal runs in tests/fixtures/oxcal/ -- a real
 analysis (Nenthorn, Otago; SHCal20; OxCal 4.4, default UniformSpanPrior and
 resolution, no outlier model) exported from OxCal itself, so the app can be
 held against the field-standard tool rather than only against its own maths.
@@ -7,13 +7,30 @@ held against the field-standard tool rather than only against its own maths.
 Not named test_* on purpose: it is a helper, used by test_oxcal_agreement.py
 and by tests/manual/verify_model.py.
 
-Four files:
-  *.oxcal      the model definition, exactly as OxCal ran it
-  Raw.csv      one row per (element, distribution, calendar year): the full
+THREE runs of the same eight dates, differing only in how the two branches
+(Quarry and Rockshelter) relate to each other:
+
+  ordered          the original. Quarry and Rockshelter are sibling Sequences
+                   inside Sequence("Nenthorn") and carry no boundaries of
+                   their own, so the ordering is implied by the structure.
+  unordered        both branches wrapped in one Phase("Sites"), so nothing
+                   orders them.
+  shared_boundary  a Boundary("Quarry to Rockshelter") added between them, so
+                   the transition is one explicit shared parameter.
+
+`ordered` and `shared_boundary` come out nearly identical (Fire_Feature_J at
+AD 1311-1350 in both; Amodel 96 and 95.5), while `unordered` differs
+(Amodel 106.6). That is what establishes that OxCal DOES order sibling groups
+carrying no boundaries of their own -- the implied ordering and the explicit
+one agree, and dropping the ordering changes the answer.
+
+Each run has four files:
+  *.oxcal      the model definition as OxCal actually ran it
+  * Raw.csv    one row per (element, distribution, calendar year): the full
                likelihood and posterior distributions at 5-year steps, in AD
-  Table.csv    the summary ranges OxCal reports, unmodelled and modelled, at
+  * Table.csv  the summary ranges OxCal reports, unmodelled and modelled, at
                68.3% and 95.4%, also in AD
-  *_c14.csv    the input dates
+plus one shared Nenthorn_c14.csv holding the input dates.
 
 Note on Table.csv: its from/to columns are the ENVELOPE of the HPD region,
 not one range per lobe. OxCal's own raw distribution for WK51189 is
@@ -26,14 +43,27 @@ import re
 import numpy as np
 
 FIXTURES = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'fixtures', 'oxcal')
-MODEL = os.path.join(FIXTURES, 'Nenthorn_sites_3.oxcal')
-RAW = os.path.join(FIXTURES, 'Nenthorn_sites_3 Raw.csv')
-TABLE = os.path.join(FIXTURES, 'Nenthorn_sites_3 Table.csv')
 C14 = os.path.join(FIXTURES, 'Nenthorn_c14.csv')
 
-# The model's own grouping, read off Nenthorn_sites_3.oxcal. Quarry and
-# Rockshelter are sibling Sequences inside Sequence("Nenthorn"), so the model
-# does order them: everything in Quarry before everything in Rockshelter.
+# run name -> the stem its three files share
+RUNS = {
+    'ordered': 'Nenthorn_sites_3',
+    'unordered': 'Nenthorn_sites_3_unordered',
+    'shared_boundary': 'Nenthorn_sites_3_shared_boundary',
+}
+DEFAULT_RUN = 'ordered'
+
+
+def paths(run=DEFAULT_RUN):
+    """(model, raw, table) file paths for one run."""
+    stem = RUNS[run]
+    return (os.path.join(FIXTURES, f'{stem}.oxcal'),
+            os.path.join(FIXTURES, f'{stem} Raw.csv'),
+            os.path.join(FIXTURES, f'{stem} Table.csv'))
+
+
+# The dates' grouping, read off the .oxcal files -- identical in all three
+# runs; only the relationship between Quarry and Rockshelter changes.
 FIRE_FEATURE_J = ['WK51189', 'WK50102', 'WK50105']
 FIRE_FEATURE_K = ['WK50099', 'WK50100', 'WK50101']
 FIRE_FEATURE_A = ['ANU55209', 'ANU55206']
@@ -78,12 +108,10 @@ def measurements():
     return out
 
 
-def model_tree(ordered=True):
+def model_tree(run=DEFAULT_RUN):
     """
-    The .oxcal model as one of the app's model trees. `ordered=False` drops
-    the Quarry-before-Rockshelter constraint (both branches inside one Phase),
-    which is only for probing how much of OxCal's output that constraint
-    explains -- the fixture's own model is the ordered one.
+    One of the three .oxcal models as the app's model tree. Element names
+    match the .oxcal files, which test_oxcal_agreement checks.
     """
     def el(eid, etype, name, children=None):
         return {'id': eid, 'element_type': etype, 'name': name,
@@ -97,9 +125,16 @@ def model_tree(ordered=True):
             el('ff_a', 'phase', 'Fire_Feature_A'),
         ]),
     ])
-    middle = [quarry, rockshelter] if ordered else [
-        el('sites', 'phase', 'Sites', [quarry, rockshelter])
-    ]
+    if run == 'ordered':
+        middle = [quarry, rockshelter]
+    elif run == 'unordered':
+        middle = [el('sites', 'phase', 'Sites', [quarry, rockshelter])]
+    elif run == 'shared_boundary':
+        middle = [quarry,
+                  el('b_mid', 'boundary', 'Quarry to Rockshelter'),
+                  rockshelter]
+    else:
+        raise ValueError(f'unknown run {run!r}')
     return el('nenthorn', 'sequence', 'Nenthorn', [
         el('b_start', 'boundary', 'Start Nenthorn'),
         *middle,
@@ -107,13 +142,13 @@ def model_tree(ordered=True):
     ])
 
 
-def distributions():
+def distributions(run=DEFAULT_RUN):
     """
     {name: {'likelihood': (calbp, prob), 'posterior': (calbp, prob)}}, each
     ascending in cal BP and normalised to integrate to 1.
     """
     grouped = {}
-    with open(RAW, encoding='utf-8-sig') as fh:
+    with open(paths(run)[1], encoding='utf-8-sig') as fh:
         for row in csv.DictReader(fh):
             grouped.setdefault(key(row['name']), {}).setdefault(row['type'], []).append(
                 (float(row['value']), float(row['probability']))
@@ -132,13 +167,13 @@ def distributions():
     return out
 
 
-def table_ranges():
+def table_ranges(run=DEFAULT_RUN):
     """
     {name: {'unmodelled': {68: [(from_ad, to_ad)], 95: [...]}, 'modelled':
     {...}, 'label': ..., 'op': ...}} -- OxCal's own reported ranges, in AD.
     """
     out, current = {}, None
-    with open(TABLE, encoding='utf-8-sig') as fh:
+    with open(paths(run)[2], encoding='utf-8-sig') as fh:
         rows = list(csv.reader(fh))
     for row in rows[2:]:
         if len(row) < 9:

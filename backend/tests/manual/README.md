@@ -37,40 +37,63 @@ Reference figures at the time of writing, for the model as it now stands:
 
 ## `nenthorn`: against a real OxCal 4.4 run
 
-`tests/fixtures/oxcal/` holds an actual OxCal analysis (Nenthorn, Otago;
-SHCal20; default UniformSpanPrior and resolution; no outlier model), including
-the `.oxcal` model definition and the full exported distributions. The
-UNMODELLED half of that comparison is asserted in
-`tests/test_oxcal_agreement.py` and passes tightly: distribution overlap
-0.978-0.983 and every reported range edge within 2 years, on eight bimodal
-dates.
+`tests/fixtures/oxcal/` holds three actual OxCal 4.4 analyses of the same
+eight dates (Nenthorn, Otago; SHCal20; default UniformSpanPrior and
+resolution; no outlier model), each with its `.oxcal` definition and the full
+exported distributions. They differ only in how the two branches relate:
 
-The MODELLED half does not yet agree, and `nenthorn` is where that is
-measured. The model is a Sequence holding two sibling Sequences (Quarry, then
-Rockshelter), so it orders every Quarry date before every Rockshelter date.
-Run as written, and with that ordering dropped:
+- **ordered** — the original. `Quarry` and `Rockshelter` are sibling
+  Sequences inside `Sequence("Nenthorn")`, carrying no boundaries of their own.
+- **unordered** — both wrapped in one `Phase("Sites")`.
+- **shared_boundary** — a `Boundary("Quarry to Rockshelter")` between them.
 
-| | width ratio | overlap | secondary lobe (AD 1370-1420) |
-|---|---|---|---|
-| OxCal 4.4 | — | — | 0.126 |
-| app, ordered (as the file defines it) | 0.85 | 0.72 | 0.180 |
-| app, ordering dropped | 1.05 | 0.77 | 0.056 |
+The UNMODELLED half is asserted in `tests/test_oxcal_agreement.py` and passes
+tightly: distribution overlap 0.978-0.983, every reported range edge within 2
+years, on eight bimodal dates.
 
-Both app runs converge cleanly (r_hat 1.01, ess > 1500), so this is not a
-sampling failure. The ordered run satisfies the constraint by pushing Quarry
-entirely into the early calibration lobe (secondary-lobe mass 0.000-0.001) and
-Rockshelter largely into the late one (0.27-0.32) — a chronological break at
-AD 1350 that is an artefact of the calibration wiggle, not of the data. OxCal
-instead keeps both groups spanning both lobes with only about 11 years of
-separation between their means, which is a much weaker effect than a hard
-3-before-5 constraint produces.
+**OxCal orders sibling groups even without boundaries.** Its `ordered` and
+`shared_boundary` runs agree with each other (Fire_Feature_J at AD 1311-1350
+in both; Amodel 96 and 95.5) while `unordered` differs (Amodel 106.6). So the
+implied ordering and the explicit one are the same model to OxCal.
 
-So OxCal 4.4 appears to order sibling groups that carry no Boundary of their
-own far more weakly than this app's hard constraint does, and how it does that
-is not established here. The experiment that would settle it is the same model
-re-run in OxCal with the two branches explicitly unordered (both inside one
-`Phase`): if that output matches what is in the fixture, OxCal was not
-enforcing the ordering at all.
+The MODELLED comparison then localises the app's error precisely:
+
+| run | ordering? | width ratio | mean error vs OxCal | group separation (OxCal / app) |
+|---|---|---|---|---|
+| `unordered` | no | 1.01 | 3.4 yr rms | −0.1 / −0.2 yr |
+| `ordered` | implied | 0.85 | 12.6 yr rms | 11.7 / 37.0 yr |
+| `shared_boundary` | explicit | 0.75 | 25.3 yr rms | 13.2 / 57.3 yr |
+
+With no ordering constraint the app reproduces OxCal to within 4 years. Add
+one and it over-separates the groups by three to four times, satisfying the
+constraint by pushing Quarry entirely into the early calibration lobe
+(secondary-lobe mass 0.000-0.001) and Rockshelter into the late one
+(0.27-0.77) — a chronological break at AD 1350 that is an artefact of the
+SHCal20 wiggle, not of the data.
+
+**This is a sampling failure, not a modelling one.** `shared_boundary` is two
+groups sharing a boundary, exactly what `sequence_marginals` computes, so the
+exact answer for the app's own model is available:
+
+| | Quarry mean AD | Rockshelter mean AD | separation | Rockshelter late-lobe mass |
+|---|---|---|---|---|
+| OxCal 4.4 | 1335.7 | 1348.9 | 13.2 yr | 0.169 |
+| exact reference | 1334.6 | 1354.1 | 19.4 yr | 0.262 |
+| app (SMC) | ~1321 | ~1379 | 57.3 yr | 0.71 |
+
+The maths agrees with OxCal to within about 5 years; the sampler does not.
+Two things are ruled out: the boundary integration window (widening the
+reference's to match the app's 0-5722 cal BP moves it *closer* to OxCal —
+separation 17.1, late lobe 0.204), and the sampling budget (4x the draws
+moves separation only 57.3 → 50.8 and rms 25.3 → 20.9). It moves the right
+way with more draws, so SMC is mis-weighting the two modes rather than being
+hard-trapped in one.
+
+Note that `r_hat` 1.01 and `ess` in the hundreds-to-thousands are reported
+throughout: all four chains agree on the same wrong answer, so convergence
+diagnostics give no warning here. This is exactly the multimodality SMC was
+chosen over NUTS to handle (see `BayesianChronology.sample`), failing when a
+hard ordering constraint is layered on top of it.
 
 ## If you write another cross-check
 
