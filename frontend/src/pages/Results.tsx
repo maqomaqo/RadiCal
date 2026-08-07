@@ -1018,7 +1018,15 @@ export default function Results() {
               {structureRows.length > 0
                 ? structureRows.map((row, idx) => (
                     <StructureTableRow
-                      key={`${row.kind}-${row.elementId ?? row.sampleId ?? idx}`}
+                      // sampleId first, elementId only as the fallback. A
+                      // date row's elementId is the PHASE it sits in, which
+                      // every date in that phase shares -- so preferring it
+                      // gave all of them one key. React's warning about that
+                      // says duplicate keys may leave children "duplicated
+                      // and/or omitted", meaning this table could silently
+                      // drop or repeat a date. Element rows carry
+                      // sampleId: null, so they still key on elementId.
+                      key={`${row.kind}-${row.sampleId ?? row.elementId ?? idx}`}
                       row={row}
                       result={row.sampleId ? resultBySampleId.get(row.sampleId) : undefined}
                       isBayesian={isBayesian}
