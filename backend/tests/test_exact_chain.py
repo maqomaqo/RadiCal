@@ -178,6 +178,21 @@ class TestMatchesBruteForce:
             assert overlap > 0.999, f'{d["id"]} overlap {overlap}'
 
 
+# What the solver actually produces on the shared_boundary fixture, with
+# OxCal's UniformSpanPrior on (the default) and off. Both are recorded
+# because the correction is a measured trade-off rather than an improvement:
+# it pulls the outermost boundaries in towards OxCal's, and moves the dates
+# slightly away. For scale, pm.sample_smc gave 25.3 rms and a separation of
+# 57 against OxCal's 13.2.
+_SOLVED_CACHE = {}
+
+SPAN_PRIOR_EXPECTED = {
+    True:  {'rms': 6.5, 'max': 11.0, 'separation': (2.0, 12.0)},
+    False: {'rms': 5.5, 'max': 7.0, 'separation': (13.0, 26.0)},
+}
+
+
+@pytest.mark.parametrize('span_prior', [True, False], ids=['span-prior', 'no-span-prior'])
 class TestAgainstOxCalModelled:
     """
     The modelled half of the OxCal comparison, on the shared_boundary run.
@@ -185,20 +200,26 @@ class TestAgainstOxCalModelled:
     two groups by 57 years against OxCal's 13; the solver is what closed that.
     """
 
-    @pytest.fixture(scope='class')
-    def solved(self):
-        tree = ox.model_tree('shared_boundary')
-        samples = ox.measurements()
-        chain = ec.layout(tree, samples)
-        assert chain is not None
-        return ec.solve(samples, tree, chain, num_samples=2000)
+    @pytest.fixture
+    def solved(self, span_prior):
+        # Cached per setting: the span-prior solve is O(M^3) and every test
+        # in the class wants the same result.
+        if span_prior not in _SOLVED_CACHE:
+            tree = ox.model_tree('shared_boundary')
+            samples = ox.measurements()
+            chain = ec.layout(tree, samples)
+            assert chain is not None
+            _SOLVED_CACHE[span_prior] = ec.solve(
+                samples, tree, chain, num_samples=2000,
+                uniform_span_prior=span_prior)
+        return _SOLVED_CACHE[span_prior]
 
-    def test_grid_covers_the_posterior(self, solved):
+    def test_grid_covers_the_posterior(self, solved, span_prior):
         """A heavy boundary tail running off the end of the grid would bias
         everything, so the solver reports how much mass sits at the edges."""
         assert solved['edge_mass'] < 0.01
 
-    def test_date_means_match_oxcal(self, solved):
+    def test_date_means_match_oxcal(self, solved, span_prior):
         dists = ox.distributions('shared_boundary')
         errors = []
         for m in ox.measurements():
@@ -206,22 +227,23 @@ class TestAgainstOxCalModelled:
             oxcal_mean = float((cal * prob / prob.sum()).sum())
             errors.append(solved['measurements'][m['id']]['posterior_mean'] - oxcal_mean)
         errors = np.array(errors)
-        # OxCal applies span-prior corrections this model does not, so a few
-        # years of systematic offset is expected and is not what this guards.
-        assert np.abs(errors).max() < 10.0
-        assert np.sqrt((errors ** 2).mean()) < 7.0
+        expected = SPAN_PRIOR_EXPECTED[span_prior]
+        assert np.abs(errors).max() < expected['max']
+        assert np.sqrt((errors ** 2).mean()) < expected['rms']
 
-    def test_group_separation_matches_oxcal(self, solved):
+    def test_group_separation_matches_oxcal(self, solved, span_prior):
         """
         The number SMC got wrong. OxCal separates the two groups' means by
-        13 years; SMC said 57.
+        13 years; SMC said 57. The span prior undershoots it and leaving the
+        prior off overshoots it, so OxCal sits between the two settings.
         """
         def mean_ad(ids):
             return np.mean([1950 - solved['measurements'][i]['posterior_mean'] for i in ids])
         separation = mean_ad(ox.ROCKSHELTER) - mean_ad(ox.QUARRY)
-        assert 5.0 < separation < 30.0
+        low, high = SPAN_PRIOR_EXPECTED[span_prior]['separation']
+        assert low < separation < high
 
-    def test_no_spurious_lobe_split(self, solved):
+    def test_no_spurious_lobe_split(self, solved, span_prior):
         """
         SMC satisfied the ordering by pushing Quarry into the early
         calibration lobe and Rockshelter into the late one -- 0.00 and 0.71
@@ -241,7 +263,7 @@ class TestAgainstOxCalModelled:
         assert 0.02 < share['rockshelter'] < 0.35
         assert abs(share['quarry'] - share['rockshelter']) < 0.20
 
-    def test_boundary_ranges_match_oxcal(self, solved):
+    def test_boundary_ranges_match_oxcal(self, solved, span_prior):
         """The shared transition is the one boundary the dates pin down well."""
         table = ox.table_ranges('shared_boundary')
         got = solved['boundaries']['b_mid']['posterior']
@@ -251,7 +273,7 @@ class TestAgainstOxCalModelled:
         assert 1950 - envelope[1] == pytest.approx(want_from, abs=10.0)
         assert 1950 - envelope[0] == pytest.approx(want_to, abs=10.0)
 
-    def test_output_shape_matches_the_sampler_path(self, solved):
+    def test_output_shape_matches_the_sampler_path(self, solved, span_prior):
         """
         Callers must not have to know which solver ran, so every key
         BayesianChronology.extract_results produces has to be present.
@@ -267,7 +289,7 @@ class TestAgainstOxCalModelled:
             assert set(entry) == {'name', 'posterior'}
             assert expected <= set(entry['posterior'])
 
-    def test_draws_agree_with_the_density_they_came_from(self, solved):
+    def test_draws_agree_with_the_density_they_came_from(self, solved, span_prior):
         """The synthesised samples exist for downstream code; they must not
         tell a different story from the exact density beside them."""
         for entry in solved['measurements'].values():
@@ -298,3 +320,126 @@ class TestLimiters:
         chain = ec.layout(tree, dates)
         with pytest.raises(ValueError):
             ec.solve(dates, tree, chain, num_samples=100)
+
+
+class TestUniformSpanPrior:
+    """
+    OxCal's UniformSpanPrior, on by default here as there.
+
+    It divides the prior by (b_first - b_last)^(n-2), which stops a
+    sequence's span prior depending on how many sub-groups it is cut into.
+    That couples the two ends of the chain, so it needs a different and more
+    expensive computation than the plain forward/backward pass -- these check
+    that the expensive one computes the same thing a brute-force sum does,
+    and that the cheap one is still used when the correction cannot matter.
+    """
+
+    def _two_group_model(self):
+        dates = _dates(('sp_a', 3300, 30, 'p0'), ('sp_b', 3270, 30, 'p0'),
+                       ('sp_c', 3050, 30, 'p1'), ('sp_d', 3020, 30, 'p1'))
+        tree = _sequence('s', [_boundary('b0'), _phase('p0'), _boundary('b1'),
+                               _phase('p1'), _boundary('b2')])
+        return dates, tree
+
+    def test_no_effect_with_two_boundaries(self):
+        """
+        The exponent is n - 2, so a single Phase between two Boundaries --
+        the app's default shape -- is untouched, and the cheap chain is kept.
+        """
+        dates = _dates(('sp1_a', 3000, 30, 'p'), ('sp1_b', 3040, 30, 'p'))
+        tree = _sequence('s', [_boundary('b0'), _phase('p'), _boundary('b1')])
+        chain = ec.layout(tree, dates)
+
+        on = ec.solve(dates, tree, chain, num_samples=100, uniform_span_prior=True)
+        off = ec.solve(dates, tree, chain, num_samples=100, uniform_span_prior=False)
+
+        assert on['uniform_span_prior'] is False, 'nothing to apply at n = 2'
+        for d in dates:
+            a = np.array(on['measurements'][d['id']]['probability_distribution'])
+            b = np.array(off['measurements'][d['id']]['probability_distribution'])
+            assert np.allclose(a, b)
+
+    def test_applies_with_three_boundaries_and_can_be_switched_off(self):
+        dates, tree = self._two_group_model()
+        chain = ec.layout(tree, dates)
+
+        on = ec.solve(dates, tree, chain, num_samples=100, uniform_span_prior=True)
+        off = ec.solve(dates, tree, chain, num_samples=100, uniform_span_prior=False)
+
+        assert on['uniform_span_prior'] is True
+        assert off['uniform_span_prior'] is False
+        # It pulls the outermost boundaries in -- that is the point of it.
+        def width(res, bid):
+            r = res['boundaries'][bid]['posterior']['hpd_95_ranges']
+            return max(x['max'] for x in r) - min(x['min'] for x in r)
+        assert width(on, 'b0') < width(off, 'b0')
+
+    def test_matches_a_brute_force_sum_over_the_boundary_cube(self):
+        """
+        The correction turns the chain into a coupled sum over every
+        (b0, b1, b2) triple. The solver does that with matrix products; this
+        does it by explicit summation, on a grid coarse enough to afford the
+        cube.
+        """
+        dates, tree = self._two_group_model()
+        chain = ec.layout(tree, dates)
+
+        # Small grid: the cube below is M^3.
+        import unittest.mock as mock
+        with mock.patch.object(ec, 'MAX_GRID_POINTS', 70), \
+             mock.patch.object(ec, 'MIN_BOUNDARY_PAD_YEARS', 250.0), \
+             mock.patch.object(ec, 'BOUNDARY_WINDOW_FACTOR', 1.0):
+            solved = ec.solve(dates, tree, chain, num_samples=100,
+                              uniform_span_prior=True)
+            grid = np.arange(solved['grid']['lower'],
+                             solved['grid']['upper'] + solved['grid']['step'] / 2,
+                             solved['grid']['step'])
+            element_bounds = {}
+            from app.services.model_tree import inherited_bounds
+            element_bounds = inherited_bounds(tree)
+            dt = grid[1] - grid[0]
+            lik, cum = {}, {}
+            for d in dates:
+                l = ec._date_likelihood(grid, d, ec._effective_date_bounds(d, element_bounds))
+                l = l / (l.sum() * dt)
+                lik[d['id']], cum[d['id']] = l, np.cumsum(l) * dt
+
+        M = len(grid)
+        span = grid[None, :] - grid[:, None]
+        valid = span > 0
+
+        def log_transfer(ids):
+            with np.errstate(divide='ignore', invalid='ignore'):
+                t = np.where(valid, -len(ids) * np.log(np.where(valid, span, 1.0)), -np.inf)
+            for i in ids:
+                t = t + ec._log_interval_integral(cum[i])
+            return t
+
+        logT = [log_transfer(g) for g in chain.groups]
+        T = [np.where(np.isfinite(np.exp(ec._rescaled(t))), np.exp(ec._rescaled(t)), 0.0)
+             for t in logT]
+        outer = grid[None, :] - grid[:, None]                  # [b2, b0]
+        with np.errstate(divide='ignore', invalid='ignore'):
+            corr = np.where(outer > 0, 1.0 / np.where(outer > 0, outer, 1.0), 0.0)
+
+        # Explicit cube, axes (b2, b1, b0).
+        for gi, ids in enumerate(chain.groups):
+            for d in ids:
+                with np.errstate(invalid='ignore'):
+                    lg = np.where(np.isfinite(logT[gi]),
+                                  logT[gi] - ec._log_interval_integral(cum[d]), -np.inf)
+                G = np.exp(ec._rescaled(lg))
+                G = np.where(np.isfinite(G), G, 0.0)
+                if gi == 0:
+                    pair = (G[None, :, :] * T[1][:, :, None] * corr[:, None, :]).sum(axis=0)
+                else:
+                    pair = (T[0][None, :, :] * G[:, :, None] * corr[:, None, :]).sum(axis=2)
+                q = np.cumsum(pair, axis=0)
+                q = np.cumsum(q[:, ::-1], axis=1)[:, ::-1]
+                expected = lik[d] * np.diagonal(q)
+                expected = expected / expected.sum()
+
+                got = np.array(solved['measurements'][d]['probability_distribution'])[:, 1]
+                got = got / got.sum()
+                overlap = float(np.minimum(got, expected).sum())
+                assert overlap > 0.999, f'{d} overlap {overlap}'

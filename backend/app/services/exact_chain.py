@@ -289,8 +289,128 @@ def _log_interval_integral(cumulative: np.ndarray) -> np.ndarray:
         return np.where(F > 0, np.log(np.where(F > 0, F, 1.0)), -np.inf)
 
 
+def _span_prior_correction(grid: np.ndarray, num_boundaries: int,
+                           enabled: bool) -> Optional[np.ndarray]:
+    """
+    OxCal's UniformSpanPrior factor over the outermost pair, as a matrix
+    indexed [youngest boundary, oldest boundary], or None when it would do
+    nothing and the cheap chain can be used.
+
+        1 / (b_first - b_last)^(n - 2)
+
+    Placing n boundaries in order across a span leaves the n-2 interior ones
+    uniform within it, so the induced prior on the overall span carries a
+    factor span^(n-2) -- it favours long sequences purely because a longer
+    one has more room to arrange its interior boundaries in. Dividing that
+    out makes the span prior independent of how finely the sequence is
+    subdivided, which is Nicholls and Jones (2001)'s recommendation and
+    OxCal's default.
+
+    Two things this deliberately does NOT do, both measured on the OxCal
+    fixture rather than assumed:
+
+    * There is no separate limit correction. OxCal also divides by
+      ((ulim - llim) - span) to keep the span prior flat inside its finite
+      computational window, but a real span (tens of years) is negligible
+      against any sane window, so that factor is a constant: identical
+      results at windows of 2,031 / 3,000 / 10,000 / 55,000 years.
+    * At n = 2 the exponent is zero, so a single Phase between two
+      Boundaries -- the app's default shape -- is untouched. Nothing to
+      apply, and the O(M^2) chain is kept.
+
+    What it costs, on the fixture's two-group model: the outermost boundary
+    ranges improve markedly (Start 95.4% AD 1222-1390 -> 1294-1390 against
+    OxCal's 1277-1394) while the dates move slightly the wrong way (3.4 ->
+    4.7 years rms from OxCal, group separation 17.7 -> 6.5 against OxCal's
+    13.2). It also couples the two ends of the chain, so the solve stops
+    factorising and goes from O(M^2) to O(M^3) per group.
+    """
+    exponent = num_boundaries - 2
+    if not enabled or exponent <= 0:
+        return None
+    outer = grid[None, :] - grid[:, None]          # [youngest, oldest]
+    with np.errstate(divide='ignore', invalid='ignore'):
+        corr = np.where(outer > 0, np.where(outer > 0, outer, 1.0) ** -exponent, 0.0)
+    return np.where(np.isfinite(corr), corr, 0.0)
+
+
+def _messages(chain: Chain, allowed: Dict, transfer):
+    """
+    Forward/backward over the boundaries, the O(M^2) case.
+
+    Returns (pair_weight, boundary_density): pair_weight(k) is everything
+    outside group k as a matrix indexed [younger boundary, older boundary],
+    and boundary_density(i) is boundary i's unnormalised marginal.
+    """
+    alpha = [np.where(allowed[chain.boundary_ids[0]], 1.0, 0.0)]
+    for i in range(len(chain.groups)):
+        alpha.append((alpha[i][None, :] * transfer(i)).sum(axis=1))
+    beta = [None] * len(chain.boundary_ids)
+    beta[-1] = np.where(allowed[chain.boundary_ids[-1]], 1.0, 0.0)
+    for i in range(len(chain.groups) - 1, -1, -1):
+        beta[i] = (transfer(i) * beta[i + 1][:, None]).sum(axis=0)
+
+    return (lambda k: alpha[k][None, :] * beta[k + 1][:, None],
+            lambda i: alpha[i] * beta[i])
+
+
+def _normalised(matrix: np.ndarray) -> np.ndarray:
+    """Scale a matrix by its own peak. Every quantity built from these is
+    normalised per-distribution at the end, so the discarded factors are
+    irrelevant -- but without this a chain of matrix products underflows."""
+    peak = matrix.max()
+    return matrix / peak if peak > 0 else matrix
+
+
+def _messages_with_span_prior(chain: Chain, allowed: Dict, transfer,
+                              correction: np.ndarray):
+    """
+    The same, once the span correction couples the first boundary to the
+    last. That breaks the forward/backward recursion -- a message can no
+    longer be a vector, because everything downstream still depends on where
+    b_first was -- so each message becomes a MATRIX carrying that dependence
+    and each step becomes a matrix product.
+
+    With S_i[older, younger] = T_i:
+        A_k[b_first, b_k]  = (S_0 ... S_(k-1))     everything before group k
+        D_k[b_k, b_last]   = (S_k ... S_(n-2))     from b_k to the end
+    and the weight outside group k, with the correction C[b_last, b_first]:
+        P_k[b_k, b_(k+1)] = A_k^T C^T D_(k+1)^T
+
+    O(M^3) per group instead of O(M^2), which is why it is only built when
+    the correction is actually going to change something.
+    """
+    num_groups = len(chain.groups)
+    first_ok = np.where(allowed[chain.boundary_ids[0]], 1.0, 0.0)
+    last_ok = np.where(allowed[chain.boundary_ids[-1]], 1.0, 0.0)
+    # C indexed [oldest, youngest], restricted to allowed ends.
+    C = _normalised(correction.T * first_ok[:, None] * last_ok[None, :])
+
+    # A[k]: from the first boundary to boundary k. A[0] is the identity, so
+    # that a chain of one group reduces to the plain case.
+    identity = np.diag(first_ok)
+    A = [identity]
+    for i in range(num_groups):
+        A.append(_normalised(A[i] @ transfer(i).T))
+    # D[k]: from boundary k to the last.
+    D = [None] * (num_groups + 1)
+    D[num_groups] = np.diag(last_ok)
+    for i in range(num_groups - 1, -1, -1):
+        D[i] = _normalised(transfer(i).T @ D[i + 1])
+
+    def pair_weight(k):
+        # [older, younger] -> transposed to the [younger, older] the caller uses.
+        return (A[k].T @ C @ D[k + 1].T).T
+
+    def boundary_density(i):
+        return np.diagonal(A[i].T @ C @ D[i].T).copy()
+
+    return pair_weight, boundary_density
+
+
 def solve(measurements: List[Dict], root: Dict, chain: Chain,
-          num_samples: int = 4000, seed: int = 42) -> Dict:
+          num_samples: int = 4000, seed: int = 42,
+          uniform_span_prior: bool = True) -> Dict:
     """
     Exact marginal posteriors for every date and every boundary in `chain`.
 
@@ -303,6 +423,10 @@ def solve(measurements: List[Dict], root: Dict, chain: Chain,
     joint correlation between dates. Nothing downstream uses the joint
     structure, but a future caller wanting, say, P(date A older than date B)
     must not read it off these.
+
+    `uniform_span_prior` applies OxCal's correction of the same name (on by
+    default there too); see _span_prior_correction for what it does and what
+    it measurably costs.
     """
     element_bounds = inherited_bounds(root)
     by_id = {m['id']: m for m in measurements}
@@ -356,14 +480,13 @@ def solve(measurements: List[Dict], root: Dict, chain: Chain,
         out = np.exp(_rescaled(log_T[i]))
         return np.where(np.isfinite(out), out, 0.0)
 
-    # Forward/backward over the boundaries.
-    alpha = [np.where(allowed[chain.boundary_ids[0]], 1.0, 0.0)]
-    for i in range(len(chain.groups)):
-        alpha.append((alpha[i][None, :] * transfer(i)).sum(axis=1))
-    beta = [None] * len(chain.boundary_ids)
-    beta[-1] = np.where(allowed[chain.boundary_ids[-1]], 1.0, 0.0)
-    for i in range(len(chain.groups) - 1, -1, -1):
-        beta[i] = (transfer(i) * beta[i + 1][:, None]).sum(axis=0)
+    correction = _span_prior_correction(grid, len(chain.boundary_ids),
+                                        uniform_span_prior)
+    if correction is None:
+        pair_weight, boundary_density = _messages(chain, allowed, transfer)
+    else:
+        pair_weight, boundary_density = _messages_with_span_prior(
+            chain, allowed, transfer, correction)
 
     rng = np.random.default_rng(seed)
     results = {'measurements': {}, 'boundaries': {}}
@@ -378,7 +501,7 @@ def solve(measurements: List[Dict], root: Dict, chain: Chain,
                                    -np.inf)
             G = np.exp(_rescaled(weights))
             G = np.where(np.isfinite(G), G, 0.0)
-            W = G * alpha[index][None, :] * beta[index + 1][:, None]
+            W = G * pair_weight(index)
             # Sum over {older boundary >= t} x {younger boundary <= t}, which
             # a pair of cumulative sums leaves on the diagonal.
             quadrant = np.cumsum(W, axis=0)
@@ -388,7 +511,7 @@ def solve(measurements: List[Dict], root: Dict, chain: Chain,
             results['measurements'][date_id] = _summarize(grid, density, rng, num_samples)
 
     for i, bid in enumerate(chain.boundary_ids):
-        density = alpha[i] * beta[i]
+        density = boundary_density(i)
         if density.sum() <= 0:
             continue
         densities.append(density)
@@ -398,6 +521,7 @@ def solve(measurements: List[Dict], root: Dict, chain: Chain,
         }
 
     results['method'] = 'exact'
+    results['uniform_span_prior'] = correction is not None
     results['grid'] = {'lower': float(grid[0]), 'upper': float(grid[-1]), 'step': dt}
     results['edge_mass'] = _edge_mass(densities, grid)
     return results

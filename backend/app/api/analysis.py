@@ -205,6 +205,7 @@ def _run_bayesian(
         solved = exact_chain.solve(
             measurements, model_tree, chain,
             num_samples=bayesian_config.get('mcmc_samples', 2000),
+            uniform_span_prior=bayesian_config.get('uniform_span_prior', True),
         )
         return solved['measurements'], solved['boundaries']
 

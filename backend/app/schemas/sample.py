@@ -282,6 +282,13 @@ class BayesianConfigInput(BaseModel):
     mcmc_samples: int = Field(default=4000, ge=100, le=20000)
     mcmc_tune: int = Field(default=1000, ge=100, le=20000)
     mcmc_chains: int = Field(default=4, ge=1, le=16)
+    # OxCal's UniformSpanPrior, on by default there and here: it stops a
+    # sequence's overall span prior depending on how many sub-groups it is
+    # divided into (Nicholls and Jones 2001). It is the identity unless the
+    # sequence has three or more boundaries, and it only applies on the
+    # exact solver -- see services/exact_chain._span_prior_correction, which
+    # records what it measurably changes.
+    uniform_span_prior: bool = True
 
 
 class BayesianRequest(BaseModel):

@@ -120,6 +120,38 @@ goes to SMC and is still wrong. Adding an explicit Boundary between such
 groups makes it exact, and OxCal gives essentially the same answer either
 way (posterior overlap 0.948 between its own two runs).
 
+### OxCal's UniformSpanPrior
+
+Implemented in `exact_chain`, on by default as it is in OxCal, and
+switchable via `bayesian_config.uniform_span_prior`. It divides the prior by
+`(b_first - b_last)^(n-2)`, which stops a sequence's span prior depending on
+how finely it is subdivided (Nicholls and Jones 2001).
+
+Two measured facts shape what it is worth:
+
+* **It cannot affect a single Phase.** The exponent is n-2, so at two
+  boundaries -- the app's default shape -- it is the identity.
+* **OxCal's companion limit correction is a no-op in practice.** Dividing by
+  `((ulim - llim) - span)` to keep the span prior flat inside a finite window
+  only matters when the span approaches the window; a real span of tens of
+  years against a window of thousands makes it a constant. Measured
+  identical at windows of 2,031 / 3,000 / 10,000 / 55,000 years, so it is
+  not implemented.
+
+On the fixture's two-group model it is a trade-off rather than an
+improvement, which is why both settings are pinned in
+`tests/test_exact_chain.py`:
+
+| | dates vs OxCal | group separation (OxCal 13.2) | Start boundary 95.4% (OxCal AD 1277-1394) |
+|---|---|---|---|
+| span prior on | 5.4 yr rms | 5.7 yr | AD 1294-1392 |
+| span prior off | 4.2 yr rms | 19.4 yr | AD 1211-1392 |
+
+It pulls the outermost boundaries markedly towards OxCal and moves the dates
+slightly away, with OxCal's separation sitting between the two settings. It
+also couples the ends of the chain, so the solve goes from O(M^2) to O(M^3)
+per group -- about 0.9s to 4.5s on this fixture.
+
 ### An open question this raised
 
 For a SINGLE group the exact solver and the samplers disagree, and the
