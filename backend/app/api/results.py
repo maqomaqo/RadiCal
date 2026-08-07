@@ -116,6 +116,7 @@ def _gather_export_rows(analysis_id: str, db: Session) -> Dict:
             'hpd_68_ranges': r.hpd_68_ranges,
             'hpd_95_ranges': r.hpd_95_ranges,
             'agreement_index': r.agreement_index,
+            'outlier_probability': r.outlier_probability,
             **_unmodelled_ranges(sample, analysis.analysis_type),
         })
 
@@ -164,7 +165,7 @@ CSV_HEADER = [
     'Order', 'Row Type', 'Depth', 'Structure Path', 'Name',
     'Age BP', '1-Sigma Error', 'Material', 'Sample Type', 'Curve',
     'Unmodelled 95% HPD', 'Posterior Mean', 'Posterior Median', 'Posterior Std',
-    '68% HPD', '95% HPD', 'Agreement %', 'TPQ BP', 'TAQ BP',
+    '68% HPD', '95% HPD', 'Agreement %', 'Outlier %', 'TPQ BP', 'TAQ BP',
 ]
 
 # The calendar-age columns, in the order their formatted counterparts are
@@ -227,8 +228,9 @@ def _posterior_cells(row: Optional[Dict]) -> List:
     the whole point of exporting the structure rather than only the dates.
     """
     if not row:
-        return ['', '', '', '', '', '']
+        return ['', '', '', '', '', '', '']
     agreement = row.get('agreement_index')
+    outlier = row.get('outlier_probability')
     return [
         f"{row['posterior_mean']:.1f}" if row.get('posterior_mean') is not None else '',
         f"{row['posterior_median']:.1f}" if row.get('posterior_median') is not None else '',
@@ -239,6 +241,9 @@ def _posterior_cells(row: Optional[Dict]) -> List:
         # unmodelled counterpart to agree with, and a plain calibration has
         # no model. Neither is a score of zero.
         f"{agreement:.1f}" if agreement is not None else '',
+        # Blank when no outlier model was applied to this date, which is a
+        # different statement from a zero probability that it is one.
+        f"{100 * outlier:.1f}" if outlier is not None else '',
     ]
 
 
@@ -284,8 +289,10 @@ def _boundary_as_result(posterior: Dict) -> Dict:
         'hpd_95_min': (posterior.get('hpd_95') or [None, None])[0],
         'hpd_95_max': (posterior.get('hpd_95') or [None, None])[1],
         # A boundary is a modelled parameter with no measurement behind it,
-        # so there is nothing for it to agree or disagree with.
+        # so there is nothing for it to agree or disagree with, and nothing
+        # for it to be an outlier from.
         'agreement_index': None,
+        'outlier_probability': None,
     }
 
 

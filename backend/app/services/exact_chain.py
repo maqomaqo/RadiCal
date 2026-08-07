@@ -93,6 +93,12 @@ MIN_BOUNDARY_PAD_YEARS = 800.0
 # Likelihood below this fraction of a date's peak is treated as absent when
 # working out where the grid needs to reach.
 SUPPORT_THRESHOLD = 1e-6
+# OxCal's "General" outlier model: a Student-t offset on the calendar age,
+# scaled by 10^u with u uniform over four decades (Bronk Ramsey 2009).
+OUTLIER_DF = 5
+OUTLIER_LOG_SCALE_MAX = 4.0
+OUTLIER_SCALE_NODES = 24
+OUTLIER_KERNEL_HALF_WIDTH_YEARS = 20000.0
 # Resolution the reported HPD ranges are computed at, independent of the
 # solver's internal grid step -- see _reported_ranges. Five years is OxCal's
 # own default and about as fine as a calibrated date is meaningful.
@@ -222,6 +228,62 @@ def _date_likelihood(grid: np.ndarray, measurement: Dict,
     if tpq is not None:
         lik = np.where(grid <= tpq, lik, 0.0)
     return lik
+
+
+def _outlier_kernel(step: float, half_width: float) -> np.ndarray:
+    """
+    OxCal's "General" outlier offset, as a convolution kernel in CALENDAR
+    years: 10^u * T(df), u ~ Uniform(0, log10_scale_max).
+
+    This is the `Outlier_Model("General", T(5), U(0,4), "t")` of Bronk Ramsey
+    2009. The "t" is the domain: the offset displaces the date's calendar age,
+    which is what residual or intrusive material actually does, rather than
+    inflating the radiocarbon measurement. Averaging a Student-t over four
+    decades of scale gives a very heavy tail, so a flagged date says almost
+    nothing about where it sits -- the point of the thing.
+    """
+    lags = np.arange(-half_width, half_width + step, step)
+    total = np.zeros_like(lags)
+    for u in np.linspace(0.0, OUTLIER_LOG_SCALE_MAX, OUTLIER_SCALE_NODES):
+        x = lags / (10.0 ** u)
+        density = (1 + x * x / OUTLIER_DF) ** (-(OUTLIER_DF + 1) / 2.0)
+        total += density / density.sum()
+    return total / total.sum()
+
+
+def _with_outlier_component(
+    grid: np.ndarray, inlier: np.ndarray, prior: float,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    (mixture, outlier_component) for one date, both normalised on `grid`.
+
+    Integrating out a Bernoulli outlier indicator is exact and costs the
+    solver nothing, because the indicator touches only this date's own
+    likelihood:
+
+        L_mix(t) = (1 - p) * L_inlier(t)  +  p * L_outlier(t)
+
+    Every date enters the chain through its likelihood alone, so the message
+    passing is untouched -- the outlier model is a property of a date, not of
+    the inference.
+    """
+    step = float(grid[1] - grid[0])
+    kernel = _outlier_kernel(step, max(OUTLIER_KERNEL_HALF_WIDTH_YEARS,
+                                       float(grid[-1] - grid[0])))
+    full = np.convolve(inlier, kernel)
+    offset = (len(kernel) - 1) // 2
+    broad = full[offset:offset + len(inlier)]
+    # Deliberately NOT renormalised over the grid. The convolution of two
+    # normalised densities is already proper on the real line; most of its
+    # mass lies off this grid, which is exactly the statement that a flagged
+    # date's calendar age could be anywhere. Rescaling what remains back to
+    # one would inflate the component by the reciprocal of the retained mass
+    # and make the outlier probability depend on how wide the grid happens to
+    # be -- measured, it put the fifteen sound Shag River dates at 9-14%
+    # against OxCal's 0.6-1.5%, above their own 5% prior. The mixture is
+    # therefore also sub-unit here, which is correct: the missing mass is the
+    # outlier possibility that the window does not cover.
+    return (1.0 - prior) * inlier + prior * broad, broad
 
 
 def _effective_date_bounds(measurement: Dict, element_bounds: Dict) -> Tuple:
@@ -445,6 +507,7 @@ def solve(measurements: List[Dict], root: Dict, chain: Chain,
     # Per-date likelihood, normalised so every interval integral lands in
     # [0, 1] and the products below cannot underflow.
     likelihood, cumulative = {}, {}
+    outlier_parts: Dict[str, Tuple[np.ndarray, np.ndarray, float]] = {}
     for m in measurements:
         lik = _date_likelihood(grid, m, _effective_date_bounds(m, element_bounds))
         total = lik.sum() * dt
@@ -453,8 +516,14 @@ def solve(measurements: List[Dict], root: Dict, chain: Chain,
                 f"sample '{m.get('sample_name', m['id'])}' has no probability inside "
                 'its allowed calendar range'
             )
-        likelihood[m['id']] = lik / total
-        cumulative[m['id']] = np.cumsum(likelihood[m['id']]) * dt
+        lik = lik / total
+        prior = m.get('outlier_prior') or 0.0
+        if prior > 0:
+            mixture, broad = _with_outlier_component(grid, lik, prior)
+            outlier_parts[m['id']] = (lik, broad, float(prior))
+            lik = mixture
+        likelihood[m['id']] = lik
+        cumulative[m['id']] = np.cumsum(lik) * dt
 
     span = grid[None, :] - grid[:, None]              # [younger, older]
     valid = span > 0
@@ -516,7 +585,11 @@ def solve(measurements: List[Dict], root: Dict, chain: Chain,
             quadrant = np.cumsum(quadrant[:, ::-1], axis=1)[:, ::-1]
             density = likelihood[date_id] * np.diagonal(quadrant)
             densities.append(density)
-            results['measurements'][date_id] = _summarize(grid, density, rng, num_samples)
+            summary = _summarize(grid, density, rng, num_samples)
+            if date_id in outlier_parts:
+                summary['outlier_probability'] = _outlier_probability(
+                    density, likelihood[date_id], *outlier_parts[date_id])
+            results['measurements'][date_id] = summary
 
     for i, bid in enumerate(chain.boundary_ids):
         density = boundary_density(i)
@@ -533,6 +606,28 @@ def solve(measurements: List[Dict], root: Dict, chain: Chain,
     results['grid'] = {'lower': float(grid[0]), 'upper': float(grid[-1]), 'step': dt}
     results['edge_mass'] = _edge_mass(densities, grid)
     return results
+
+
+def _outlier_probability(density: np.ndarray, mixture: np.ndarray,
+                         inlier: np.ndarray, broad: np.ndarray,
+                         prior: float) -> float:
+    """
+    P(this date is an outlier | all the data).
+
+    Given the date landed at t, its probability of being an outlier is
+    p*L_out(t)/L_mix(t) -- the responsibility of the outlier component there.
+    Averaging that over the date's own posterior marginalises t out:
+
+        P(outlier) = integral of posterior(t) * p*L_out(t)/L_mix(t) dt
+
+    Both pieces are already computed, so detection costs two array products
+    and no sampling.
+    """
+    weight = density.sum()
+    if weight <= 0:
+        return 0.0
+    responsibility = np.where(mixture > 0, prior * broad / np.maximum(mixture, 1e-300), 0.0)
+    return float((density / weight * responsibility).sum())
 
 
 def _edge_mass(densities: List[np.ndarray], grid: np.ndarray) -> float:

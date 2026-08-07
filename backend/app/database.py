@@ -41,6 +41,7 @@ _COLUMN_MIGRATIONS = {
         ('hpd_68_ranges', 'JSON'),
         ('hpd_95_ranges', 'JSON'),
         ('agreement_index', 'FLOAT'),
+        ('outlier_probability', 'FLOAT'),
     ],
     'radiocarbon_samples': [
         ('group_id', 'VARCHAR'),

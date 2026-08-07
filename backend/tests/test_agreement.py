@@ -316,3 +316,81 @@ class TestWhatItCanAndCannotSee:
         analysis_id = self._run(client, 'agbnd', [[3000, 3030, 3060]], ordered=False)
         _scores, boundaries = self._scores(client, analysis_id)
         assert boundaries and all(v == '' for v in boundaries), boundaries
+
+
+class TestAgainstTheOutlierFixture:
+    """
+    services/agreement.py against the SECOND OxCal run
+    (tests/fixtures/oxcal_outlier: Shag River Mouth, 16 dates, one phase,
+    Outlier_Model active). An independent site, structure and curve region
+    from the fixture the formula was identified on.
+
+    It also pins something the first fixture could not show: with an outlier
+    model running, OxCal judges each posterior against the OUTLIER-ADJUSTED
+    likelihood rather than the raw one, so our raw-likelihood index reads
+    systematically low against it.
+    """
+
+    def test_agreement_flags_the_outlier_and_nothing_else(self):
+        import shag_fixture as sf
+        dists, table = sf.distributions(), sf.table()
+        scores = {
+            m['id']: agreement.agreement_index(
+                m, np.column_stack(dists[m['id']]['posterior']),
+                unmodelled=np.column_stack(dists[m['id']]['likelihood']))
+            for m in sf.measurements()
+        }
+        assert scores[sf.OUTLIER] < agreement.POOR_AGREEMENT_BELOW, scores
+        others = [v for k, v in scores.items() if k != sf.OUTLIER]
+        assert min(others) > agreement.POOR_AGREEMENT_BELOW, scores
+        # OxCal's own ordering of the dates by agreement must be reproduced.
+        assert min(scores, key=scores.get) == sf.OUTLIER
+
+    def test_reads_low_against_oxcal_because_an_outlier_model_is_running(self):
+        """
+        The measured size of that difference, so a future change that makes
+        the index outlier-aware shows up here as an improvement rather than
+        passing unnoticed.
+
+        On the fixture WITHOUT an outlier model we match OxCal to rms 0.81.
+        Here the fifteen sound dates read about 5 low, because OxCal is
+        comparing against a likelihood broadened by the 5% outlier component
+        and we are not. Feeding a mixture in closes most of it -- measured
+        mean +0.6 against -4.9 -- which is what identified the cause.
+        """
+        import shag_fixture as sf
+        dists, table = sf.distributions(), sf.table()
+        errors = []
+        for m in sf.measurements():
+            if m['id'] == sf.OUTLIER:
+                continue
+            got = agreement.agreement_index(
+                m, np.column_stack(dists[m['id']]['posterior']),
+                unmodelled=np.column_stack(dists[m['id']]['likelihood']))
+            errors.append(got - table[m['id']]['agreement'])
+        errors = np.array(errors)
+        assert -8.0 < errors.mean() < -1.0, errors.mean()
+        assert np.abs(errors).max() < 8.0
+
+    def test_the_outlier_reads_zero_where_oxcal_reads_five(self):
+        """
+        A date the model has pushed entirely off its likelihood has no
+        overlap left to measure, so the index bottoms out. OxCal reports 5.3
+        because its comparison likelihood carries the outlier component's
+        tail; ours reports ~0 against the raw likelihood. Both say the same
+        thing for screening, but the overall index is built from a product
+        and is therefore hypersensitive to the difference -- 82.9 against
+        OxCal's own value, 15.6 from ours.
+        """
+        import shag_fixture as sf
+        dists, table = sf.distributions(), sf.table()
+        m = next(x for x in sf.measurements() if x['id'] == sf.OUTLIER)
+        got = agreement.agreement_index(
+            m, np.column_stack(dists[m['id']]['posterior']),
+            unmodelled=np.column_stack(dists[m['id']]['likelihood']))
+        assert got < 1.0
+        assert table[sf.OUTLIER]['agreement'] < 10.0
+
+        from_oxcal = agreement.overall_agreement(
+            [table[x['id']]['agreement'] for x in sf.measurements()])
+        assert from_oxcal == pytest.approx(table['model']['Aoverall'], abs=1.0)

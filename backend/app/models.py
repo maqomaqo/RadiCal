@@ -274,6 +274,11 @@ class AnalysisResult(Base):
     # where there is no model to disagree with.
     agreement_index = Column(Float, nullable=True)
 
+    # Posterior probability (0-1) that this date does not belong to the
+    # population being modelled, when an outlier prior was set on it. Null
+    # when no outlier model was applied, which is not the same as zero.
+    outlier_probability = Column(Float, nullable=True)
+
     # Full HPD breakdown as one or more disjoint calendar-age ranges, each
     # with its own probability share -- e.g.
     # [{"min": 3300, "max": 3360, "probability_percent": 13.5}, ...].

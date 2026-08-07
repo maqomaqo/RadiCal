@@ -221,6 +221,16 @@ class BayesianMeasurementInput(MeasurementInput):
     # The model-tree phase this date belongs to, when the request carries a
     # `model_tree`. Supersedes group_id; see BayesianRequest.
     element_id: Optional[str] = None
+    # Prior probability that this date does not belong to the population
+    # being modelled -- residual charcoal, intrusive material, lab error.
+    # OxCal's `Outlier("General", 0.05)`, and 0.05 is its convention too.
+    #
+    # Left at 0 (off) rather than defaulted on: it changes reported dates,
+    # and turning it on should be the analyst's decision. When set, the
+    # date's likelihood becomes a mixture of itself and a heavy-tailed
+    # alternative, and the result carries the posterior probability that it
+    # was the alternative -- see services/exact_chain.
+    outlier_prior: float = Field(default=0.0, ge=0.0, le=0.5)
 
 
 class SampleGroupInput(BaseModel):

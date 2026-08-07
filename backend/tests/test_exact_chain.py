@@ -532,3 +532,97 @@ class TestReportingIsIndependentOfTheInternalGrid:
             w68 = sum(r['max'] - r['min'] for r in e['hpd_68_ranges'])
             w95 = sum(r['max'] - r['min'] for r in e['hpd_95_ranges'])
             assert w95 > w68 * 1.3, f'{d["id"]}: 68% {w68} vs 95% {w95}'
+
+
+class TestOutlierModel:
+    """
+    The outlier model, against the OxCal 4.4 run in
+    tests/fixtures/oxcal_outlier -- Shag River Mouth, 16 dates in one phase,
+    NZ7756 at 970 +/- 47 BP against the rest at 537-660, with
+    Outlier_Model("General", T(5), U(0,4), "t") and a 5% prior on each date.
+
+    A Bernoulli indicator per date, integrated out exactly, which is what
+    makes it free: the indicator touches only that date's own likelihood, so
+    the mixture substitutes straight in and the chain never changes.
+    """
+
+    @pytest.fixture(scope='class')
+    def solved(self):
+        import shag_fixture as sf
+        samples, tree = sf.measurements(), sf.model_tree()
+        chain = ec.layout(tree, samples)
+        assert chain is not None
+        return sf, ec.solve(samples, tree, chain, num_samples=500)
+
+    def test_finds_the_outlier_oxcal_found(self, solved):
+        sf, res = solved
+        probabilities = {m['id']: res['measurements'][m['id']]['outlier_probability']
+                         for m in sf.measurements()}
+        assert probabilities[sf.OUTLIER] > 0.95, probabilities
+        others = [v for k, v in probabilities.items() if k != sf.OUTLIER]
+        # Every sound date must land BELOW its own prior -- the evidence
+        # should argue them down, not merely leave them where they started.
+        assert max(others) < sf.OUTLIER_PRIOR, probabilities
+
+    def test_probabilities_track_oxcals(self, solved):
+        sf, res = solved
+        table = sf.table()
+        errors = np.array([
+            res['measurements'][m['id']]['outlier_probability']
+            - table[m['id']]['outlier_probability']
+            for m in sf.measurements()
+        ])
+        assert np.abs(errors).max() < 0.05, dict(zip(
+            [m['id'] for m in sf.measurements()], errors.round(4)))
+
+    def test_the_outlier_component_keeps_its_own_scale(self, solved):
+        """
+        The trap this walked into once. The outlier component is a proper
+        density whose mass mostly lies off the solver's grid -- that IS the
+        statement that a flagged date could be anywhere. Renormalising what
+        remains inflates it by the reciprocal of the retained mass and makes
+        the answer depend on the grid width: it put these fifteen sound
+        dates at 9-14%, above their own 5% prior, against OxCal's 0.6-1.5%.
+
+        So the same dates solved on a much wider grid must give much the
+        same probabilities.
+        """
+        sf, res = solved
+        import unittest.mock as mock
+        samples, tree = sf.measurements(), sf.model_tree()
+        chain = ec.layout(tree, samples)
+        with mock.patch.object(ec, 'BOUNDARY_WINDOW_FACTOR', 30.0):
+            wide = ec.solve(samples, tree, chain, num_samples=500)
+        assert wide['grid']['upper'] - wide['grid']['lower'] > \
+            2 * (res['grid']['upper'] - res['grid']['lower'])
+        for m in samples:
+            narrow_p = res['measurements'][m['id']]['outlier_probability']
+            wide_p = wide['measurements'][m['id']]['outlier_probability']
+            assert wide_p == pytest.approx(narrow_p, abs=0.05), m['id']
+
+    def test_off_by_default(self):
+        """It changes reported dates, so it is the analyst's call."""
+        dates = _dates(('ol_a', 3000, 30, 'p'), ('ol_b', 3030, 30, 'p'))
+        tree = _sequence('s', [_boundary('b0'), _phase('p'), _boundary('b1')])
+        solved = ec.solve(dates, tree, ec.layout(tree, dates), num_samples=100)
+        for d in dates:
+            assert 'outlier_probability' not in solved['measurements'][d['id']]
+
+    def test_costs_nothing_when_there_is_no_outlier(self):
+        """
+        Turning it on must not move a clean model, or nobody can afford to
+        leave it on.
+        """
+        plain = _dates(('oc_a', 3000, 30, 'p'), ('oc_b', 3020, 30, 'p'),
+                       ('oc_c', 3040, 30, 'p'), ('oc_d', 3060, 30, 'p'))
+        flagged = [dict(d, outlier_prior=0.05) for d in plain]
+        tree = _sequence('s', [_boundary('b0'), _phase('p'), _boundary('b1')])
+        chain = ec.layout(tree, plain)
+
+        off = ec.solve(plain, tree, chain, num_samples=200)
+        on = ec.solve(flagged, tree, chain, num_samples=200)
+        for d in plain:
+            a = off['measurements'][d['id']]['posterior_mean']
+            b = on['measurements'][d['id']]['posterior_mean']
+            assert b == pytest.approx(a, abs=5.0), d['id']
+            assert on['measurements'][d['id']]['outlier_probability'] < 0.05

@@ -381,7 +381,8 @@ class TestCsvExport:
         # Agreement joins the modelled block, right after the HPD columns it
         # is judging.
         assert header.index('Agreement %') == modelled + 1
-        assert len(header) == 19
+        assert header.index('Outlier %') == modelled + 2
+        assert len(header) == 20
 
         by_name = {r[4]: r for r in data}
         # Every date reports one, formatted like the other HPD columns.

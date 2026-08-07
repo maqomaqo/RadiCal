@@ -572,6 +572,7 @@ async def bayesian_analysis(request: BayesianRequest, db: Session = Depends(get_
                     posterior_samples=result['posterior_samples'],
                     probability_distribution=result['probability_distribution'],
                     agreement_index=result.get('agreement_index'),
+                    outlier_probability=result.get('outlier_probability'),
                 )
                 db.add(analysis_result)
 
