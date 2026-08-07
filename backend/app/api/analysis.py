@@ -892,6 +892,14 @@ async def get_analysis(analysis_id: str, db: Session = Depends(get_db)):
                     # [{confidence, ranges}] at each level the page offers,
                     # computed over the curve's full grid -- see above.
                     "unmodelled_hpd_ranges": unmodelled_by_sample_id.get(r.sample_id),
+                    # Diagnostics, so the results page can flag a suspect
+                    # date in place rather than making someone download the
+                    # CSV to find out. Null means not computed -- for
+                    # agreement, an analysis that predates it; for the
+                    # outlier probability, a date with no outlier model --
+                    # which is not the same as a clean result.
+                    "agreement_index": r.agreement_index,
+                    "outlier_probability": r.outlier_probability,
                 }
                 for r in results
             ]

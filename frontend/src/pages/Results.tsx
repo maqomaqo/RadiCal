@@ -27,6 +27,7 @@ import {
   Checkbox,
   Chip,
   Stack,
+  Tooltip,
 } from '@mui/material'
 import DownloadIcon from '@mui/icons-material/Download'
 import AccountTreeIcon from '@mui/icons-material/AccountTree'
@@ -89,6 +90,14 @@ interface SampleResult {
   hpd_68_ranges?: HPDRange[]
   hpd_95_ranges?: HPDRange[]
   probability_distribution?: Array<[number, number]>
+  // How well the modelled posterior still fits this date's own unmodelled
+  // likelihood, as a percentage (Bronk Ramsey 1995). Null for an analysis
+  // computed before this existed.
+  agreement_index?: number | null
+  // Posterior probability (0-1) that the date does not belong to the
+  // population being modelled. Null when no outlier model was applied to
+  // it, which is not the same as a zero.
+  outlier_probability?: number | null
   // The plain/unmodelled calibration for this sample (no stratigraphic
   // constraints applied) -- present only for a Bayesian analysis (see
   // GET /api/analysis/:id), so "unmodelled vs modelled" can be
@@ -152,6 +161,50 @@ const STRUCTURE_MARKER: Record<string, string> = {
   sequence: '▸', phase: '▪', boundary: '◆', hiatus: '⋯', unassigned: '⚠', date: '·',
 }
 
+// Below this, OxCal's convention is that a date is worth re-examining
+// (Bronk Ramsey 1995).
+const POOR_AGREEMENT = 60
+// A date the outlier model thinks is more likely than not an outlier.
+const OUTLIER_LIKELY = 0.5
+// ...and one it is unsure about. Reported separately rather than folded in,
+// because "probably wrong" and "worth a look" are different messages and a
+// single threshold would have to pick one.
+const OUTLIER_ELEVATED = 0.2
+
+type Concern = { level: 'suspect' | 'check'; reasons: string[] }
+
+/**
+ * Whether a date's own diagnostics say something is wrong with it, and what.
+ *
+ * Colour alone would not do: the reasons are shown as text beside it, since
+ * a red row tells a reader something is wrong without telling them what, and
+ * the two diagnostics mean genuinely different things. Agreement says the
+ * model had to move the date; the outlier probability says the model thinks
+ * it does not belong. A date can trip either without the other.
+ */
+function concernFor(result?: SampleResult): Concern | null {
+  if (!result) return null
+  const reasons: string[] = []
+  let level: 'suspect' | 'check' | null = null
+
+  const outlier = result.outlier_probability
+  if (outlier != null && outlier >= OUTLIER_LIKELY) {
+    level = 'suspect'
+    reasons.push(`${Math.round(outlier * 100)}% likely an outlier`)
+  } else if (outlier != null && outlier >= OUTLIER_ELEVATED) {
+    level = 'check'
+    reasons.push(`${Math.round(outlier * 100)}% chance of being an outlier`)
+  }
+
+  const agreement = result.agreement_index
+  if (agreement != null && agreement < POOR_AGREEMENT) {
+    level = 'suspect'
+    reasons.push(`agreement ${agreement.toFixed(0)}, below ${POOR_AGREEMENT}`)
+  }
+
+  return level ? { level, reasons } : null
+}
+
 /**
  * One row of the structure-ordered results table. A boundary reports
  * through the same columns as a date deliberately: both are modelled
@@ -190,9 +243,25 @@ function StructureTableRow({
   ].filter(Boolean).join(' · ')
 
   const cell = (value: string) => (isHeading ? '' : value)
+  const concern = isDate ? concernFor(result) : null
+  // A tint carries the flag across the whole row so it is findable when
+  // scanning a long table; the chip in the diagnostics column says what it
+  // actually is, since colour on its own is not a message.
+  const tint = concern
+    ? concern.level === 'suspect'
+      ? 'rgba(211, 47, 47, 0.08)'
+      : 'rgba(237, 108, 2, 0.08)'
+    : undefined
 
   return (
-    <TableRow sx={isHeading ? { backgroundColor: '#fafafa' } : undefined}>
+    <TableRow
+      sx={{
+        backgroundColor: tint ?? (isHeading ? '#fafafa' : undefined),
+        ...(concern
+          ? { borderLeft: 3, borderColor: concern.level === 'suspect' ? 'error.main' : 'warning.main' }
+          : {}),
+      }}
+    >
       <TableCell sx={{ pl: 2 + row.depth * 2.5 }}>
         <Box component="span" sx={{ color: 'text.secondary', mr: 1 }}>
           {STRUCTURE_MARKER[row.kind] ?? '·'}
@@ -235,6 +304,33 @@ function StructureTableRow({
       <TableCell align="right">
         {cell(envelope ? formatCalendarRange(envelope[0], envelope[1], dateFormat) : 'N/A')}
       </TableCell>
+      {isBayesian && (
+        <TableCell align="right">
+          {isDate && (
+            <Stack direction="column" spacing={0.5} alignItems="flex-end">
+              {concern && (
+                <Chip
+                  size="small"
+                  color={concern.level === 'suspect' ? 'error' : 'warning'}
+                  variant={concern.level === 'suspect' ? 'filled' : 'outlined'}
+                  label={concern.level === 'suspect' ? 'Suspect' : 'Check'}
+                />
+              )}
+              <Box component="span" sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>
+                {/* Both numbers, always, so a reader can see a date is fine
+                    rather than only seeing the ones that are not. An em dash
+                    where a diagnostic was not computed -- an older analysis,
+                    or a date with no outlier model -- which is not zero. */}
+                {result?.agreement_index != null ? `A ${result.agreement_index.toFixed(0)}` : 'A —'}
+                {'  ·  '}
+                {result?.outlier_probability != null
+                  ? `O ${Math.round(result.outlier_probability * 100)}%`
+                  : 'O —'}
+              </Box>
+            </Stack>
+          )}
+        </TableCell>
+      )}
     </TableRow>
   )
 }
@@ -467,6 +563,16 @@ export default function Results() {
   // to the flat date list below.
   const structureRows = flattenStructure(analysis.model_tree, analysis.measurements || [])
   const resultBySampleId = new Map((analysis.results || []).map((r) => [r.sample_id, r]))
+
+  // Dates whose own diagnostics object to them, worst first so the banner
+  // leads with the one most worth looking at.
+  const flaggedDates = (analysis.results || [])
+    .map((r, idx) => ({
+      name: r.sample_name || `Sample ${idx + 1}`,
+      concern: concernFor(r),
+    }))
+    .filter((f): f is { name: string; concern: Concern } => f.concern !== null)
+    .sort((a, b) => (a.concern.level === b.concern.level ? 0 : a.concern.level === 'suspect' ? -1 : 1))
 
   // The plots, in the same order. Walking structureRows means the sequence
   // on screen is the sequence in the model -- oldest first -- and each plot
@@ -859,6 +965,34 @@ export default function Results() {
           </Button>
         </Box>
 
+        {/* Said once at the top as well as marked on each row: a long table
+            can hide a flagged date below the fold, and the point of the
+            diagnostics is that nobody should have to go looking. */}
+        {isBayesian && flaggedDates.length > 0 && (
+          <Alert
+            severity={flaggedDates.some((f) => f.concern.level === 'suspect') ? 'error' : 'warning'}
+            sx={{ mb: 2 }}
+            action={
+              <Button
+                size="small"
+                startIcon={<EditIcon />}
+                onClick={() => navigate(`/analysis/${analysisId}/edit`)}
+              >
+                Edit analysis
+              </Button>
+            }
+          >
+            <Typography variant="body2" sx={{ fontWeight: 600 }}>
+              {flaggedDates.length} of {analysis.results.length} dates look suspect
+            </Typography>
+            <Typography variant="body2">
+              {flaggedDates
+                .map((f) => `${f.name} (${f.concern.reasons.join(', ')})`)
+                .join(' · ')}
+            </Typography>
+          </Alert>
+        )}
+
         <TableContainer>
           <Table>
             <TableHead>
@@ -871,6 +1005,13 @@ export default function Results() {
                 <TableCell align="right">
                   {isBayesian ? 'Posterior' : 'Calibrated'} {CONFIDENCE_LABEL} HPD Range
                 </TableCell>
+                {isBayesian && (
+                  <Tooltip
+                    title="A = agreement index: how well the modelled date still fits its own measurement (below 60 is worth re-examining). O = posterior probability the date is an outlier, when an outlier model was applied to it."
+                  >
+                    <TableCell align="right">Diagnostics</TableCell>
+                  </Tooltip>
+                )}
               </TableRow>
             </TableHead>
             <TableBody>

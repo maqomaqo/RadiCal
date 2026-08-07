@@ -724,3 +724,49 @@ class TestEditingKeepsTheOutlierSetting:
         assert copied, 'the duplicate has no measurements'
         assert all(m['outlier_prior'] == 0.05 for m in copied), copied
         assert all(m['outlier_model'] == 'charcoal' for m in copied), copied
+
+
+@requires_pymc
+def test_get_analysis_reports_diagnostics_on_each_result(client):
+    """
+    GET /analysis/{id} is what the results page reads. Agreement and
+    outlier probability were computed and persisted correctly but never
+    added to this endpoint's response shape, so the page had no way to see
+    them short of the CSV -- reproducing the second half of the report this
+    guards against.
+    """
+    tag = f'getdiag{next(_DIAGNOSTIC_IDS)}'
+    payload = {
+        'name': tag,
+        'measurements': [
+            {'id': f'{tag}_{i}', 'sample_name': f'S{i}', 'age_bp': age,
+             'error_1sigma': 30, 'element_id': f'{tag}_p',
+             'outlier_prior': 0.05, 'outlier_model': 'general'}
+            for i, age in enumerate((3000, 3030, 3600))
+        ],
+        'model_tree': {
+            'id': f'{tag}_s', 'element_type': 'sequence', 'name': 'Site',
+            'tpq_age_bp': None, 'taq_age_bp': None, 'children': [
+                {'id': f'{tag}_b0', 'element_type': 'boundary', 'name': 'Start',
+                 'tpq_age_bp': None, 'taq_age_bp': None, 'children': []},
+                {'id': f'{tag}_p', 'element_type': 'phase', 'name': 'Phase',
+                 'tpq_age_bp': None, 'taq_age_bp': None, 'children': []},
+                {'id': f'{tag}_b1', 'element_type': 'boundary', 'name': 'End',
+                 'tpq_age_bp': None, 'taq_age_bp': None, 'children': []},
+            ],
+        },
+        'bayesian_config': {'mcmc_samples': 300, 'mcmc_tune': 200, 'mcmc_chains': 1},
+        'save': True,
+    }
+    created = client.post('/api/analysis/bayesian', json=payload)
+    assert created.status_code == 200, created.text
+    analysis_id = created.json()['data']['id']
+
+    results = client.get(f'/api/analysis/{analysis_id}').json()['data']['results']
+    assert len(results) == 3
+    for r in results:
+        assert 'agreement_index' in r and r['agreement_index'] is not None
+        assert 'outlier_probability' in r and r['outlier_probability'] is not None
+    # The 3600 BP date against two at ~3000-3030 is the one that should stand out.
+    by_name = {r['sample_name']: r for r in results}
+    assert by_name['S2']['outlier_probability'] > by_name['S0']['outlier_probability']
