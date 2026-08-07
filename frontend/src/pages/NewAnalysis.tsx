@@ -18,6 +18,7 @@ import {
   Switch,
   Alert,
   CircularProgress,
+  Checkbox,
   Dialog,
   DialogTitle,
   DialogContent,
@@ -44,11 +45,28 @@ import {
 } from '@/utils/dateFormat'
 import { formatApiError } from '@/utils/apiError'
 import { useAnalysisDraftStore } from '@/stores/analysisStore'
-import type { DraftMeasurement } from '@/types'
+import type { DraftMeasurement, ModelElement } from '@/types'
 import { expandRelationships, findCycle, treeToMatrix } from '@/utils/stratigraphy'
 import { validateTree } from '@/components/ModelTreeEditor'
 
 type Measurement = DraftMeasurement
+
+/**
+ * Name of a model-tree element by id, for labelling the "apply to the rest
+ * of this phase" action. Returns null when the tree has no such element --
+ * an assignment can outlive the phase it pointed at if the structure was
+ * edited afterwards.
+ */
+function elementName(tree: ModelElement | null, id: string | null): string | null {
+  if (!tree || !id) return null
+  const stack: ModelElement[] = [tree]
+  while (stack.length) {
+    const el = stack.pop()!
+    if (el.id === id) return el.name || el.element_type
+    for (const child of el.children || []) stack.push(child)
+  }
+  return null
+}
 
 interface ProjectOption {
   id: string
@@ -114,7 +132,25 @@ export default function NewAnalysis() {
   const [loading, setLoading] = useState(false)
   // The date currently open in the edit dialog, held as a working copy so
   // Cancel really discards. Committed to the store only on Save.
-  const [editing, setEditing] = useState<{ id: string; draft: Measurement } | null>(null)
+  const [editing, setEditing] = useState<
+    { id: string; draft: Measurement; applyToPhase: boolean } | null
+  >(null)
+  // The other dates the outlier setting would be copied to: everything in
+  // the same phase, or -- before a model structure exists, when there are no
+  // phases to speak of -- every other date.
+  const editPhaseId = editing
+    ? elementAssignments[editing.id] || editing.draft.group_id || null
+    : null
+  const editPhaseName = elementName(modelTree, editPhaseId)
+  const editSiblings = editing
+    ? measurements.filter(
+        (m) =>
+          m.id !== editing.id &&
+          (editPhaseId
+            ? (elementAssignments[m.id] || m.group_id || null) === editPhaseId
+            : true)
+      )
+    : []
   const editInvalid =
     !!editing &&
     (!editing.draft.sample_name ||
@@ -676,6 +712,38 @@ export default function NewAnalysis() {
               showOutlier={analysisType === 'bayesian'}
             />
           )}
+          {/* Setting an outlier model one date at a time is the usual case
+              -- OxCal asks for it per date too -- but a phase of sixteen
+              charcoal samples is one decision, not sixteen. Only the outlier
+              settings travel; everything else on this form describes the
+              individual sample. */}
+          {analysisType === 'bayesian' && editing && editSiblings.length > 0 && (
+            <FormControlLabel
+              sx={{ mt: 1 }}
+              control={
+                <Checkbox
+                  size="small"
+                  checked={editing.applyToPhase}
+                  onChange={(e) =>
+                    setEditing((current) =>
+                      current ? { ...current, applyToPhase: e.target.checked } : current
+                    )
+                  }
+                />
+              }
+              label={
+                <Typography variant="body2">
+                  {editPhaseName
+                    ? `Also apply this outlier setting to the other ${editSiblings.length} date${
+                        editSiblings.length === 1 ? '' : 's'
+                      } in ${editPhaseName}`
+                    : `Also apply this outlier setting to the other ${editSiblings.length} date${
+                        editSiblings.length === 1 ? '' : 's'
+                      } (no phases assigned yet)`}
+                </Typography>
+              }
+            />
+          )}
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setEditing(null)}>Cancel</Button>
@@ -693,6 +761,14 @@ export default function NewAnalysis() {
                 delta_r: isMarineMeasurement(draft) ? draft.delta_r ?? null : null,
                 delta_r_error: isMarineMeasurement(draft) ? draft.delta_r_error ?? null : null,
               })
+              if (editing.applyToPhase) {
+                for (const sibling of editSiblings) {
+                  updateMeasurement(sibling.id, {
+                    outlier_prior: draft.outlier_prior ?? 0,
+                    outlier_model: draft.outlier_model ?? 'general',
+                  })
+                }
+              }
               setEditing(null)
             }}
           >
@@ -749,7 +825,7 @@ export default function NewAnalysis() {
                         <Tooltip title="Edit this date">
                           <IconButton
                             size="small"
-                            onClick={() => setEditing({ id: m.id, draft: { ...m } })}
+                            onClick={() => setEditing({ id: m.id, draft: { ...m }, applyToPhase: false })}
                           >
                             <EditIcon fontSize="small" />
                           </IconButton>
