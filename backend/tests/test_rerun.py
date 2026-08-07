@@ -528,3 +528,108 @@ class TestEditRoundTrip:
                   "sample_type": "marine", "curve_id": "marine20", "save": False},
         )
         assert plain.json()["data"]["posterior_median"] > first_run + 100
+
+
+# Model element ids are a global primary key and the test database is shared
+# across the session, so each tree built here needs its own prefix.
+_DIAGNOSTIC_IDS = itertools.count(1)
+
+
+class TestRerunKeepsDiagnostics:
+    """
+    A rerun must produce the same columns a fresh run does.
+
+    It did not: the two paths built their AnalysisResult rows independently,
+    and when agreement_index and outlier_probability were added only the
+    fresh one got them -- so rerunning an analysis silently blanked both in
+    every export. Worse for the outlier probability, which also needs its
+    PRIOR to survive: that was never persisted on the sample at all, so a
+    rerun could not have recomputed it even with the row fixed.
+
+    Asserted through the CSV rather than the database, because that is where
+    the loss was visible and what people actually read.
+    """
+
+    def _tag(self, name):
+        return f'rk{next(_DIAGNOSTIC_IDS)}{name}'
+
+    def _create(self, client, tag, outlier_prior):
+        dates = [(f'{tag}_a', 3000), (f'{tag}_b', 3020), (f'{tag}_c', 3040),
+                 (f'{tag}_d', 3060), (f'{tag}_e', 3600)]
+        created = client.post('/api/analysis/bayesian', json={
+            'name': tag,
+            'measurements': [
+                {'id': i, 'sample_name': i, 'age_bp': a, 'error_1sigma': 30,
+                 'element_id': f'{tag}_p', 'outlier_prior': outlier_prior}
+                for i, a in dates
+            ],
+            'model_tree': {
+                'id': f'{tag}_s', 'element_type': 'sequence', 'name': 'Site',
+                'tpq_age_bp': None, 'taq_age_bp': None, 'children': [
+                    {'id': f'{tag}_b0', 'element_type': 'boundary', 'name': 'Start',
+                     'tpq_age_bp': None, 'taq_age_bp': None, 'children': []},
+                    {'id': f'{tag}_p', 'element_type': 'phase', 'name': 'Phase',
+                     'tpq_age_bp': None, 'taq_age_bp': None, 'children': []},
+                    {'id': f'{tag}_b1', 'element_type': 'boundary', 'name': 'End',
+                     'tpq_age_bp': None, 'taq_age_bp': None, 'children': []},
+                ],
+            },
+            'bayesian_config': {'mcmc_samples': 300, 'mcmc_tune': 200, 'mcmc_chains': 1},
+            'save': True,
+        })
+        assert created.status_code == 200, created.text
+        return created.json()['data']['id']
+
+    def _columns(self, client, analysis_id):
+        rows = list(csv.reader(io.StringIO(
+            client.get(f'/api/results/{analysis_id}/export/csv').text)))
+        header, data = rows[0], rows[1:]
+        kind, name = header.index('Row Type'), header.index('Name')
+        out = {}
+        for column in ('Agreement %', 'Outlier %'):
+            out[column] = {r[name]: r[header.index(column)]
+                           for r in data if r[kind] == 'Date'}
+        return out
+
+    def test_agreement_survives_a_rerun(self, client):
+        tag = self._tag('ag')
+        analysis_id = self._create(client, tag, outlier_prior=0.0)
+
+        before = self._columns(client, analysis_id)['Agreement %']
+        assert before and all(v != '' for v in before.values()), before
+
+        assert client.post(f'/api/analysis/{analysis_id}/rerun').status_code == 200
+        after = self._columns(client, analysis_id)['Agreement %']
+        assert set(after) == set(before)
+        assert all(v != '' for v in after.values()), after
+        for name in before:
+            assert float(after[name]) == pytest.approx(float(before[name]), abs=2.0)
+
+    def test_outlier_probability_survives_a_rerun(self, client):
+        """
+        This one also proves the prior itself is persisted: the rerun rebuilds
+        the model from the stored sample rows, so a blank here means the
+        outlier model never ran the second time.
+        """
+        tag = self._tag('ol')
+        analysis_id = self._create(client, tag, outlier_prior=0.05)
+
+        before = self._columns(client, analysis_id)['Outlier %']
+        assert before and all(v != '' for v in before.values()), before
+        # The 3600 BP date among four at ~3000 is the one that should stand out.
+        assert float(before[f'{tag}_e']) > max(
+            float(v) for k, v in before.items() if k != f'{tag}_e')
+
+        assert client.post(f'/api/analysis/{analysis_id}/rerun').status_code == 200
+        after = self._columns(client, analysis_id)['Outlier %']
+        assert all(v != '' for v in after.values()), after
+        for name in before:
+            assert float(after[name]) == pytest.approx(float(before[name]), abs=5.0)
+
+    def test_no_outlier_model_leaves_the_column_blank_both_times(self, client):
+        """Blank means "not applied", and must not become 0.0 on a rerun."""
+        tag = self._tag('no')
+        analysis_id = self._create(client, tag, outlier_prior=0.0)
+        assert all(v == '' for v in self._columns(client, analysis_id)['Outlier %'].values())
+        assert client.post(f'/api/analysis/{analysis_id}/rerun').status_code == 200
+        assert all(v == '' for v in self._columns(client, analysis_id)['Outlier %'].values())

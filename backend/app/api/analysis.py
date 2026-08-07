@@ -181,6 +181,34 @@ def _get_or_migrate_tree(analysis: Analysis, db: Session) -> Tuple[Optional[Dict
     return root, linearized
 
 
+def _analysis_result_row(analysis_id: str, sample_id: str, result: Dict) -> AnalysisResult:
+    """
+    One per-date result as a database row.
+
+    Shared by the fresh run and the rerun deliberately. The two used to build
+    this independently and drifted: agreement_index and outlier_probability
+    were added to one and not the other, so a rerun silently blanked both
+    columns in every export.
+    """
+    return AnalysisResult(
+        analysis_id=analysis_id,
+        sample_id=sample_id,
+        posterior_mean=result['posterior_mean'],
+        posterior_median=result['posterior_median'],
+        posterior_std=result['posterior_std'],
+        hpd_68_min=result['hpd_68'][0],
+        hpd_68_max=result['hpd_68'][1],
+        hpd_95_min=result['hpd_95'][0],
+        hpd_95_max=result['hpd_95'][1],
+        hpd_68_ranges=result['hpd_68_ranges'],
+        hpd_95_ranges=result['hpd_95_ranges'],
+        posterior_samples=result['posterior_samples'],
+        probability_distribution=result['probability_distribution'],
+        agreement_index=result.get('agreement_index'),
+        outlier_probability=result.get('outlier_probability'),
+    )
+
+
 def _run_bayesian(
     measurements: List[Dict],
     model_tree: Dict,
@@ -486,6 +514,7 @@ async def bayesian_analysis(request: BayesianRequest, db: Session = Depends(get_
                     material_type=measurement.material_type,
                     sample_type=sample_type,
                     curve_id=measurement.curve_id,
+                    outlier_prior=measurement.outlier_prior,
                     # Accepted by the schema and carried by dates deployed
                     # from a project collection, so dropping them here lost
                     # data that had been recorded elsewhere.
@@ -557,24 +586,7 @@ async def bayesian_analysis(request: BayesianRequest, db: Session = Depends(get_
             # Store results in database using the sample IDs
             for measurement_id, result in results.items():
                 sample_id = samples_map.get(measurement_id, measurement_id)
-                analysis_result = AnalysisResult(
-                    analysis_id=analysis.id,
-                    sample_id=sample_id,
-                    posterior_mean=result['posterior_mean'],
-                    posterior_median=result['posterior_median'],
-                    posterior_std=result['posterior_std'],
-                    hpd_68_min=result['hpd_68'][0],
-                    hpd_68_max=result['hpd_68'][1],
-                    hpd_95_min=result['hpd_95'][0],
-                    hpd_95_max=result['hpd_95'][1],
-                    hpd_68_ranges=result['hpd_68_ranges'],
-                    hpd_95_ranges=result['hpd_95_ranges'],
-                    posterior_samples=result['posterior_samples'],
-                    probability_distribution=result['probability_distribution'],
-                    agreement_index=result.get('agreement_index'),
-                    outlier_probability=result.get('outlier_probability'),
-                )
-                db.add(analysis_result)
+                db.add(_analysis_result_row(analysis.id, sample_id, result))
 
             # Persist each context's modelled start/end onto its SampleGroup
             # row (client-side group id -> persisted DB id via groups_map).
@@ -1030,6 +1042,7 @@ def _rerun_analysis(analysis: Analysis, db: Session) -> None:
                 'element_id': s.element_id or s.group_id,
                 'tpq_age_bp': s.tpq_age_bp,
                 'taq_age_bp': s.taq_age_bp,
+                'outlier_prior': s.outlier_prior,
             }
             for s in samples
         ]
@@ -1065,21 +1078,7 @@ def _rerun_analysis(analysis: Analysis, db: Session) -> None:
 
         db.query(AnalysisResult).filter(AnalysisResult.analysis_id == analysis.id).delete(synchronize_session=False)
         for sample_id, result in results.items():
-            db.add(AnalysisResult(
-                analysis_id=analysis.id,
-                sample_id=sample_id,
-                posterior_mean=result['posterior_mean'],
-                posterior_median=result['posterior_median'],
-                posterior_std=result['posterior_std'],
-                hpd_68_min=result['hpd_68'][0],
-                hpd_68_max=result['hpd_68'][1],
-                hpd_95_min=result['hpd_95'][0],
-                hpd_95_max=result['hpd_95'][1],
-                hpd_68_ranges=result['hpd_68_ranges'],
-                hpd_95_ranges=result['hpd_95_ranges'],
-                posterior_samples=result['posterior_samples'],
-                probability_distribution=result['probability_distribution'],
-            ))
+            db.add(_analysis_result_row(analysis.id, sample_id, result))
 
         # Refresh every group's modelled start/end -- explicitly cleared
         # for a group no longer in context_results (shouldn't happen since

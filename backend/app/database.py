@@ -54,6 +54,7 @@ _COLUMN_MIGRATIONS = {
         # Local marine reservoir offset and its uncertainty.
         ('delta_r', 'FLOAT'),
         ('delta_r_error', 'FLOAT'),
+        ('outlier_prior', 'FLOAT'),
     ],
     'stratigraphic_relationships': [
         ("from_type", "VARCHAR DEFAULT 'sample'"),

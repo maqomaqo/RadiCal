@@ -123,6 +123,12 @@ class RadiocarbonSample(Base):
     # but never applied to a calibration -- it was ambiguous whether it
     # meant a whole reservoir age or a local offset, and starting to apply
     # it would have silently changed already-published results.
+    # Prior probability this date does not belong to the population being
+    # modelled (OxCal's Outlier()). Persisted, not just applied: a rerun
+    # rebuilds the model from these rows, so leaving it off would silently
+    # drop the outlier model on every rerun -- the same trap delta_r above
+    # is commented against.
+    outlier_prior = Column(Float, nullable=True)
     reservoir_age = Column(Float, nullable=True)  # For marine samples
     depth_cm = Column(Float, nullable=True)
     location = Column(String, nullable=True)
