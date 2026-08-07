@@ -181,6 +181,51 @@ def _get_or_migrate_tree(analysis: Analysis, db: Session) -> Tuple[Optional[Dict
     return root, linearized
 
 
+def _sample_row(
+    analysis_id: str,
+    measurement,
+    group_id: Optional[str] = None,
+    element_id: Optional[str] = None,
+) -> RadiocarbonSample:
+    """
+    One measurement as a database row.
+
+    Shared by the two endpoints that write measurements -- creating a
+    Bayesian analysis and replacing a saved one's inputs. They used to build
+    this separately and drifted twice: first the reservoir offset, then the
+    outlier settings, each added to one and not the other. The second time
+    it meant editing an analysis silently switched its outlier model off,
+    and the only symptom was an empty column in the export.
+
+    sample_type falls back to whatever the curve implies, because a marine
+    curve with a terrestrial label is a contradiction the calibration would
+    resolve the wrong way.
+    """
+    return RadiocarbonSample(
+        analysis_id=analysis_id,
+        sample_name=measurement.sample_name,
+        age_bp=measurement.age_bp,
+        error_1sigma=measurement.error_1sigma,
+        material_type=measurement.material_type,
+        sample_type=measurement.sample_type or (
+            'marine' if measurement.curve_id == 'marine20' else 'terrestrial'
+        ),
+        curve_id=measurement.curve_id,
+        delta_r=measurement.delta_r,
+        delta_r_error=measurement.delta_r_error,
+        outlier_prior=getattr(measurement, 'outlier_prior', 0.0),
+        outlier_model=getattr(measurement, 'outlier_model', None),
+        reservoir_age=measurement.reservoir_age,
+        depth_cm=measurement.depth_cm,
+        location=measurement.location,
+        notes=measurement.notes,
+        group_id=group_id,
+        element_id=element_id,
+        tpq_age_bp=measurement.tpq_age_bp,
+        taq_age_bp=measurement.taq_age_bp,
+    )
+
+
 def _analysis_result_row(analysis_id: str, sample_id: str, result: Dict) -> AnalysisResult:
     """
     One per-date result as a database row.
@@ -503,31 +548,9 @@ async def bayesian_analysis(request: BayesianRequest, db: Session = Depends(get_
         samples_map = {}
         for measurement in request.measurements:
             if save:
-                sample_type = measurement.sample_type or (
-                    'marine' if measurement.curve_id == 'marine20' else 'terrestrial'
-                )
-                sample = RadiocarbonSample(
-                    analysis_id=analysis.id,
-                    sample_name=measurement.sample_name,
-                    age_bp=measurement.age_bp,
-                    error_1sigma=measurement.error_1sigma,
-                    material_type=measurement.material_type,
-                    sample_type=sample_type,
-                    curve_id=measurement.curve_id,
-                    outlier_prior=measurement.outlier_prior,
-                    outlier_model=measurement.outlier_model,
-                    # Accepted by the schema and carried by dates deployed
-                    # from a project collection, so dropping them here lost
-                    # data that had been recorded elsewhere.
-                    delta_r=measurement.delta_r,
-                    delta_r_error=measurement.delta_r_error,
-                    reservoir_age=measurement.reservoir_age,
-                    depth_cm=measurement.depth_cm,
-                    location=measurement.location,
-                    notes=measurement.notes,
+                sample = _sample_row(
+                    analysis.id, measurement,
                     group_id=groups_map.get(measurement.group_id) if measurement.group_id else None,
-                    tpq_age_bp=measurement.tpq_age_bp,
-                    taq_age_bp=measurement.taq_age_bp,
                 )
                 db.add(sample)
                 db.flush()
@@ -1247,25 +1270,14 @@ async def duplicate_analysis(analysis_id: str, db: Session = Depends(get_db)):
 
     samples_map: Dict[str, str] = {}
     for sample in source.measurements:
-        new_sample = RadiocarbonSample(
-            analysis_id=copy.id,
-            sample_name=sample.sample_name,
-            age_bp=sample.age_bp,
-            error_1sigma=sample.error_1sigma,
-            material_type=sample.material_type,
-            sample_type=sample.sample_type,
-            curve_id=sample.curve_id,
-            delta_r=sample.delta_r,
-            delta_r_error=sample.delta_r_error,
-            reservoir_age=sample.reservoir_age,
-            depth_cm=sample.depth_cm,
-            location=sample.location,
-            notes=sample.notes,
+        # A stored row carries the same attribute names a request
+        # measurement does, so duplicating goes through the one builder too
+        # -- this copy had already fallen behind on the outlier settings.
+        new_sample = _sample_row(
+            copy.id, sample,
             group_id=groups_map.get(sample.group_id) if sample.group_id else None,
             element_id=groups_map.get(sample.element_id or sample.group_id)
             if (sample.element_id or sample.group_id) else None,
-            tpq_age_bp=sample.tpq_age_bp,
-            taq_age_bp=sample.taq_age_bp,
         )
         db.add(new_sample)
         db.flush()
@@ -1399,9 +1411,6 @@ async def replace_analysis_inputs(
 
         samples_map: Dict[str, str] = {}
         for measurement in request.measurements:
-            sample_type = measurement.sample_type or (
-                'marine' if measurement.curve_id == 'marine20' else 'terrestrial'
-            )
             if request.model_tree is not None:
                 # Client-authored tree: its phase ids are stored as-is, so the
                 # measurement's own element_id already names the phase it sits
@@ -1410,26 +1419,10 @@ async def replace_analysis_inputs(
                 element_id = measurement.element_id
             else:
                 element_id = groups_map.get(measurement.group_id) if measurement.group_id else None
-            row = RadiocarbonSample(
-                analysis_id=analysis.id,
-                sample_name=measurement.sample_name,
-                age_bp=measurement.age_bp,
-                error_1sigma=measurement.error_1sigma,
-                material_type=measurement.material_type,
-                sample_type=sample_type,
-                curve_id=measurement.curve_id,
-                # Replacing the inputs must not quietly drop fields the
-                # request carried; these used to be nulled on every edit.
-                delta_r=measurement.delta_r,
-                delta_r_error=measurement.delta_r_error,
-                reservoir_age=measurement.reservoir_age,
-                depth_cm=measurement.depth_cm,
-                location=measurement.location,
-                notes=measurement.notes,
+            row = _sample_row(
+                analysis.id, measurement,
                 group_id=groups_map.get(measurement.group_id) if measurement.group_id else None,
                 element_id=element_id,
-                tpq_age_bp=measurement.tpq_age_bp,
-                taq_age_bp=measurement.taq_age_bp,
             )
             db.add(row)
             db.flush()

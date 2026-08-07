@@ -633,3 +633,94 @@ class TestRerunKeepsDiagnostics:
         assert all(v == '' for v in self._columns(client, analysis_id)['Outlier %'].values())
         assert client.post(f'/api/analysis/{analysis_id}/rerun').status_code == 200
         assert all(v == '' for v in self._columns(client, analysis_id)['Outlier %'].values())
+
+
+@requires_pymc
+class TestEditingKeepsTheOutlierSetting:
+    """
+    Editing an analysis must not switch its outlier model off.
+
+    It did. Three endpoints build a RadiocarbonSample row -- create, replace
+    inputs, and duplicate -- and only the first was given the outlier fields,
+    so an edit wrote them back as null and the export's Outlier column went
+    blank. The same three had already drifted once over the reservoir
+    offset, which is why they now share one builder.
+
+    Asserted on both the stored inputs and the exported column: the setting
+    surviving in the database is no use if the result computed from it does
+    not come back.
+    """
+
+    def _tag(self):
+        return f'eo{next(_DIAGNOSTIC_IDS)}'
+
+    def _payload(self, tag, model='charcoal'):
+        return {
+            'name': tag,
+            'measurements': [
+                {'id': f'{tag}_{i}', 'sample_name': f'S{i}', 'age_bp': age,
+                 'error_1sigma': 30, 'element_id': f'{tag}_p',
+                 'outlier_prior': 0.05, 'outlier_model': model}
+                for i, age in enumerate((3000, 3030, 3600))
+            ],
+            'model_tree': {
+                'id': f'{tag}_s', 'element_type': 'sequence', 'name': 'Site',
+                'tpq_age_bp': None, 'taq_age_bp': None, 'children': [
+                    {'id': f'{tag}_b0', 'element_type': 'boundary', 'name': 'Start',
+                     'tpq_age_bp': None, 'taq_age_bp': None, 'children': []},
+                    {'id': f'{tag}_p', 'element_type': 'phase', 'name': 'Phase',
+                     'tpq_age_bp': None, 'taq_age_bp': None, 'children': []},
+                    {'id': f'{tag}_b1', 'element_type': 'boundary', 'name': 'End',
+                     'tpq_age_bp': None, 'taq_age_bp': None, 'children': []},
+                ],
+            },
+            'groups': [], 'relationships': [],
+            'bayesian_config': {'mcmc_samples': 300, 'mcmc_tune': 200, 'mcmc_chains': 1},
+        }
+
+    def _outlier_column(self, client, analysis_id):
+        rows = list(csv.reader(io.StringIO(
+            client.get(f'/api/results/{analysis_id}/export/csv').text)))
+        header, data = rows[0], rows[1:]
+        column, name, kind = (header.index('Outlier %'), header.index('Name'),
+                              header.index('Row Type'))
+        return {r[name]: r[column] for r in data if r[kind] == 'Date'}
+
+    def test_replacing_inputs_keeps_it(self, client):
+        tag = self._tag()
+        payload = dict(self._payload(tag), save=True)
+        created = client.post('/api/analysis/bayesian', json=payload)
+        assert created.status_code == 200, created.text
+        analysis_id = created.json()['data']['id']
+        before = self._outlier_column(client, analysis_id)
+        assert all(v != '' for v in before.values()), before
+
+        # The edit page resubmits the payload it was given and re-runs.
+        replaced = client.put(f'/api/analysis/{analysis_id}/inputs', json=self._payload(tag))
+        assert replaced.status_code == 200, replaced.text
+        assert client.post(f'/api/analysis/{analysis_id}/rerun').status_code == 200
+
+        stored = client.get(f'/api/analysis/{analysis_id}').json()['data']['measurements']
+        assert all(m['outlier_prior'] == 0.05 for m in stored), stored
+        assert all(m['outlier_model'] == 'charcoal' for m in stored), stored
+
+        after = self._outlier_column(client, analysis_id)
+        assert all(v != '' for v in after.values()), after
+        for name in before:
+            assert float(after[name]) == pytest.approx(float(before[name]), abs=5.0)
+
+    def test_duplicating_keeps_it(self, client):
+        """The third copy of the row builder, and the one nothing else covers."""
+        tag = self._tag()
+        created = client.post('/api/analysis/bayesian', json=dict(self._payload(tag), save=True))
+        assert created.status_code == 200, created.text
+        source_id = created.json()['data']['id']
+
+        duplicated = client.post(f'/api/analysis/{source_id}/duplicate')
+        assert duplicated.status_code == 200, duplicated.text
+        copy_id = duplicated.json()['data']['id']
+
+        copied = client.get(f'/api/analysis/{copy_id}').json()['data']['measurements']
+        assert copied, 'the duplicate has no measurements'
+        assert all(m['outlier_prior'] == 0.05 for m in copied), copied
+        assert all(m['outlier_model'] == 'charcoal' for m in copied), copied
