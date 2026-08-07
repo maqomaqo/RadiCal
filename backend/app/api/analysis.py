@@ -4,6 +4,7 @@ from app.database import get_db
 from app.schemas.sample import CalibrateRequest, BayesianRequest
 from app.services.calibration import get_curve, CalibrationCurve
 from app.services.bayesian import BayesianChronology
+from app.services import exact_chain
 from app.services.model_tree import (
     migrate_from_relationships,
     rows_to_tree,
@@ -185,11 +186,28 @@ def _run_bayesian(
     bayesian_config: Dict,
 ) -> Tuple[Dict, Dict]:
     """
-    Run BayesianChronology's build/sample/extract sequence against an
-    explicit model tree, returning (per-sample results, per-boundary
-    results). Shared between a fresh run and a rerun so the two can't drift
-    apart.
+    Solve the model against an explicit model tree, returning (per-sample
+    results, per-boundary results). Shared between a fresh run and a rerun so
+    the two can't drift apart.
+
+    A chain-shaped model -- a Sequence of Phases separated by Boundaries, the
+    ordinary archaeological shape -- is integrated EXACTLY by
+    services/exact_chain.py rather than sampled. That is not an optimisation:
+    pm.sample_smc systematically mis-weights the calibration lobes of a
+    wiggly curve once ordering constraints are involved, because PyMC tempers
+    pm.Potential terms along with the likelihood, so the model structure is
+    absent at the start of the annealing path. Read exact_chain's module
+    docstring for the measurement against OxCal. Anything the exact solver
+    cannot express falls back to MCMC.
     """
+    chain = exact_chain.layout(model_tree, measurements)
+    if chain is not None:
+        solved = exact_chain.solve(
+            measurements, model_tree, chain,
+            num_samples=bayesian_config.get('mcmc_samples', 2000),
+        )
+        return solved['measurements'], solved['boundaries']
+
     bayesian = BayesianChronology(
         mcmc_samples=bayesian_config.get('mcmc_samples', 2000),
         mcmc_tune=bayesian_config.get('mcmc_tune', 1000),

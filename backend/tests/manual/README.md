@@ -71,9 +71,10 @@ constraint by pushing Quarry entirely into the early calibration lobe
 (0.27-0.77) — a chronological break at AD 1350 that is an artefact of the
 SHCal20 wiggle, not of the data.
 
-**This is a sampling failure, not a modelling one.** `shared_boundary` is two
-groups sharing a boundary, exactly what `sequence_marginals` computes, so the
-exact answer for the app's own model is available:
+**This is a sampling failure, not a modelling one** — and it is why
+`services/exact_chain.py` now exists. `shared_boundary` is two groups sharing
+a boundary, exactly what `sequence_marginals` computes, so the exact answer
+for the app's own model is available:
 
 | | Quarry mean AD | Rockshelter mean AD | separation | Rockshelter late-lobe mass |
 |---|---|---|---|---|
@@ -94,6 +95,49 @@ throughout: all four chains agree on the same wrong answer, so convergence
 diagnostics give no warning here. This is exactly the multimodality SMC was
 chosen over NUTS to handle (see `BayesianChronology.sample`), failing when a
 hard ordering constraint is layered on top of it.
+
+
+### Fixed by solving instead of sampling
+
+`services/exact_chain.py` integrates chain-shaped models exactly, and
+`_run_bayesian` uses it whenever `exact_chain.layout()` recognises the model.
+On the `shared_boundary` fixture, against OxCal:
+
+| | mean error vs OxCal | group separation | Rockshelter late-lobe mass |
+|---|---|---|---|
+| OxCal 4.4 | — | 13.2 yr | 0.169 |
+| pm.sample_smc | 25.3 yr rms | 57.3 yr | 0.71 |
+| exact solver | **4.2 yr rms** | **19.4 yr** | **0.262** |
+
+It runs in about a second, is deterministic, and has no convergence
+diagnostics to misread. Because it is that fast, the modelled comparison is
+now an actual assertion in `tests/test_exact_chain.py` rather than something
+only this harness could check.
+
+`layout()` declines the `ordered` fixture — two groups ordered against each
+other while sharing one boundary pair is not a chain — so that model still
+goes to SMC and is still wrong. Adding an explicit Boundary between such
+groups makes it exact, and OxCal gives essentially the same answer either
+way (posterior overlap 0.948 between its own two runs).
+
+### An open question this raised
+
+For a SINGLE group the exact solver and the samplers disagree, and the
+disagreement grows with group size: they agree within a year at K = 3-4, and
+by K = 8 the solver says the eight Nenthorn dates average AD 1348.3 while
+SMC, a random-walk Metropolis chain and importance sampling all say ~1341.
+The evidence says the solver is right — it converges under grid refinement,
+matches an explicit double loop, and is bracketed by both analytic limits
+(the unconstrained average is AD 1348.6, the fully-collapsed product of all
+eight likelihoods AD 1349.9, and ~1341 lies outside both). All three samplers
+struggle with the same tight ridge; the importance sampler's ESS was 128 out
+of 4 million.
+
+OxCal sits at AD 1344, between the two. That residual is a MODELLING
+difference, not a sampling one: OxCal applies span-prior corrections
+(`UniformSpanPrior` and a limit correction for its own computational bounds)
+that this app does not, and their effect should grow with group size, which
+matches the pattern. Worth settling if single large phases matter.
 
 ## If you write another cross-check
 
