@@ -24,13 +24,18 @@ import {
   DialogActions,
   Chip,
   Stack,
-  Autocomplete,
+  Tooltip,
 } from '@mui/material'
 import { useNavigate, useSearchParams, useParams } from 'react-router-dom'
 import DeleteIcon from '@mui/icons-material/Delete'
+import EditIcon from '@mui/icons-material/Edit'
 import AddIcon from '@mui/icons-material/Add'
 import AccountTreeIcon from '@mui/icons-material/AccountTree'
 import PosteriorPlot from '@/components/PosteriorPlot'
+import MeasurementFields, {
+  deltaRErrorMissing,
+  isMarineMeasurement,
+} from '@/components/MeasurementFields'
 import {
   DateFormat,
   DATE_FORMAT_OPTIONS,
@@ -44,25 +49,6 @@ import { expandRelationships, findCycle, treeToMatrix } from '@/utils/stratigrap
 import { validateTree } from '@/components/ModelTreeEditor'
 
 type Measurement = DraftMeasurement
-
-// Common radiocarbon-datable material types, offered as suggestions in
-// the Material field below (free text is still allowed -- this is a
-// convenience list, not a restriction). material_type is already
-// persisted and appears in the CSV export; this is just the form control
-// that was missing to actually set it away from the "unknown" default.
-// Which curves suit each sample type. The first is what selecting that
-// sample type switches to; the rest are other defensible choices that a
-// deliberate selection shouldn't be overridden. Marine carbon has to be
-// calibrated against a marine curve -- IntCal20 would be wrong by
-// centuries -- while a terrestrial sample picks between hemispheres.
-const CURVE_FOR_SAMPLE_TYPE: Record<'terrestrial' | 'marine', string[]> = {
-  terrestrial: ['intcal20', 'shcal20'],
-  marine: ['marine20'],
-}
-
-const COMMON_MATERIAL_TYPES = [
-  'charcoal', 'wood', 'bone', 'shell', 'seed', 'antler', 'eggshell', 'peat', 'sediment',
-]
 
 interface ProjectOption {
   id: string
@@ -104,6 +90,7 @@ export default function NewAnalysis() {
     measurements,
     addMeasurement,
     removeMeasurement,
+    updateMeasurement,
     groups,
     relationships,
     mcmc,
@@ -125,6 +112,15 @@ export default function NewAnalysis() {
     curve_id: 'intcal20',
   })
   const [loading, setLoading] = useState(false)
+  // The date currently open in the edit dialog, held as a working copy so
+  // Cancel really discards. Committed to the store only on Save.
+  const [editing, setEditing] = useState<{ id: string; draft: Measurement } | null>(null)
+  const editInvalid =
+    !!editing &&
+    (!editing.draft.sample_name ||
+      !Number.isFinite(editing.draft.age_bp) ||
+      !Number.isFinite(editing.draft.error_1sigma) ||
+      deltaRErrorMissing(editing.draft))
 
   const [projects, setProjects] = useState<ProjectOption[]>([])
   const [projectId, setProjectId] = useState<string>(searchParams.get('project') || '')
@@ -195,6 +191,11 @@ export default function NewAnalysis() {
             // set, and running the edit resubmits whatever the draft holds.
             delta_r: m.delta_r ?? null,
             delta_r_error: m.delta_r_error ?? null,
+            // Loaded so editing an analysis does not silently switch the
+            // outlier model off -- the edit resubmits whatever the draft
+            // holds, so anything missing here is anything removed.
+            outlier_prior: m.outlier_prior ?? 0,
+            outlier_model: m.outlier_model ?? 'general',
             reservoir_age: m.reservoir_age ?? null,
             depth_cm: m.depth_cm ?? null,
             location: m.location ?? null,
@@ -303,11 +304,8 @@ export default function NewAnalysis() {
   // for. An offset is useless without its uncertainty, since the two are
   // combined in quadrature; the backend rejects one without the other, so
   // catch it here rather than on submit.
-  const isMarine =
-    (currentMeasurement.sample_type || 'terrestrial') === 'marine' ||
-    currentMeasurement.curve_id === 'marine20'
-  const deltaRErrorMissing =
-    currentMeasurement.delta_r != null && currentMeasurement.delta_r_error == null
+  const isMarine = isMarineMeasurement(currentMeasurement)
+  const missingDeltaRError = deltaRErrorMissing(currentMeasurement)
 
   const handleAddMeasurement = () => {
     if (
@@ -318,7 +316,7 @@ export default function NewAnalysis() {
       alert('Please fill in all required fields')
       return
     }
-    if (deltaRErrorMissing) {
+    if (missingDeltaRError) {
       alert('A ΔR reservoir offset needs its 1σ error -- the two are combined, so an offset on its own would understate the uncertainty of the date.')
       return
     }
@@ -334,6 +332,11 @@ export default function NewAnalysis() {
       // Only carried for marine carbon -- see isMarine above.
       delta_r: isMarine ? currentMeasurement.delta_r ?? null : null,
       delta_r_error: isMarine ? currentMeasurement.delta_r_error ?? null : null,
+      // Only meaningful for a Bayesian run; a single calibration has no
+      // model for the date to be an outlier from.
+      outlier_prior:
+        analysisType === 'bayesian' ? currentMeasurement.outlier_prior ?? 0 : 0,
+      outlier_model: currentMeasurement.outlier_model ?? 'general',
       reservoir_age: currentMeasurement.reservoir_age,
     }
 
@@ -637,143 +640,11 @@ export default function NewAnalysis() {
               Add Measurement
             </Typography>
 
-            <Box sx={{ mb: 2 }}>
-              <TextField
-                fullWidth
-                label="Sample Name"
-                value={currentMeasurement.sample_name || ''}
-                onChange={(e) =>
-                  setCurrentMeasurement({ ...currentMeasurement, sample_name: e.target.value })
-                }
-                size="small"
-                sx={{ mb: 1 }}
-              />
-            </Box>
-
-            <Box sx={{ mb: 2 }}>
-              <Autocomplete
-                freeSolo
-                options={COMMON_MATERIAL_TYPES}
-                value={currentMeasurement.material_type || ''}
-                onInputChange={(_, newValue) =>
-                  setCurrentMeasurement({ ...currentMeasurement, material_type: newValue })
-                }
-                renderInput={(params) => (
-                  <TextField {...params} label="Material" placeholder="e.g., charcoal, bone, shell" size="small" />
-                )}
-              />
-            </Box>
-
-            <Box sx={{ display: 'flex', gap: 1, mb: 2 }}>
-              <TextField
-                type="number"
-                label="Age (BP)"
-                value={currentMeasurement.age_bp || ''}
-                onChange={(e) =>
-                  setCurrentMeasurement({ ...currentMeasurement, age_bp: parseFloat(e.target.value) })
-                }
-                size="small"
-                sx={{ flex: 1 }}
-              />
-              <TextField
-                type="number"
-                label="1σ Error"
-                value={currentMeasurement.error_1sigma || ''}
-                onChange={(e) =>
-                  setCurrentMeasurement({
-                    ...currentMeasurement,
-                    error_1sigma: parseFloat(e.target.value),
-                  })
-                }
-                size="small"
-                sx={{ flex: 1 }}
-              />
-            </Box>
-
-            <Box sx={{ display: 'flex', gap: 1, mb: 2 }}>
-              <FormControl size="small" sx={{ flex: 1 }}>
-                <InputLabel>Sample Type</InputLabel>
-                <Select
-                  value={currentMeasurement.sample_type || 'terrestrial'}
-                  label="Sample Type"
-                  onChange={(e) => {
-                    const sampleType = e.target.value as 'terrestrial' | 'marine'
-                    setCurrentMeasurement((current) => ({
-                      ...current,
-                      sample_type: sampleType,
-                      // Follow the sample type with the curve that matches it,
-                      // unless a deliberate choice has already been made that
-                      // suits it. Marine carbon calibrated against IntCal20
-                      // is wrong by centuries, and the mismatch is invisible
-                      // once the analysis has run.
-                      curve_id: CURVE_FOR_SAMPLE_TYPE[sampleType].includes(current.curve_id || '')
-                        ? current.curve_id
-                        : CURVE_FOR_SAMPLE_TYPE[sampleType][0],
-                    }))
-                  }}
-                >
-                  <MenuItem value="terrestrial">Terrestrial</MenuItem>
-                  <MenuItem value="marine">Marine</MenuItem>
-                </Select>
-              </FormControl>
-              <FormControl size="small" sx={{ flex: 1 }}>
-                <InputLabel>Curve</InputLabel>
-                <Select
-                  value={currentMeasurement.curve_id || 'intcal20'}
-                  label="Curve"
-                  onChange={(e) =>
-                    setCurrentMeasurement({ ...currentMeasurement, curve_id: e.target.value })
-                  }
-                >
-                  <MenuItem value="intcal20">IntCal20</MenuItem>
-                  <MenuItem value="marine20">Marine20</MenuItem>
-                  <MenuItem value="shcal20">SHCal20</MenuItem>
-                </Select>
-              </FormControl>
-            </Box>
-
-            {/* Only for marine carbon: a marine curve already carries the
-                global average reservoir effect, so what a date needs on top
-                of it is the LOCAL deviation. Offered nowhere else, since a
-                stray offset on a terrestrial date would shift it silently. */}
-            {isMarine && (
-              <Box sx={{ mb: 2 }}>
-                <Box sx={{ display: 'flex', gap: 1 }}>
-                  <TextField
-                    type="number"
-                    label="ΔR (yr)"
-                    value={currentMeasurement.delta_r ?? ''}
-                    onChange={(e) =>
-                      setCurrentMeasurement({
-                        ...currentMeasurement,
-                        delta_r: e.target.value === '' ? null : parseFloat(e.target.value),
-                      })
-                    }
-                    size="small"
-                    sx={{ flex: 1 }}
-                  />
-                  <TextField
-                    type="number"
-                    label="ΔR 1σ error"
-                    value={currentMeasurement.delta_r_error ?? ''}
-                    onChange={(e) =>
-                      setCurrentMeasurement({
-                        ...currentMeasurement,
-                        delta_r_error: e.target.value === '' ? null : parseFloat(e.target.value),
-                      })
-                    }
-                    size="small"
-                    sx={{ flex: 1 }}
-                    error={deltaRErrorMissing}
-                    helperText={deltaRErrorMissing ? 'Required with ΔR' : undefined}
-                  />
-                </Box>
-                <Typography variant="caption" color="textSecondary">
-                  Local marine reservoir offset from the global average the curve already models --
-                  not a whole reservoir age. Leave blank to apply no correction.
-                </Typography>
-              </Box>
-            )}
+            <MeasurementFields
+              value={currentMeasurement}
+              onChange={setCurrentMeasurement}
+              showOutlier={analysisType === 'bayesian'}
+            />
 
             <Button variant="outlined" onClick={handleAddMeasurement} fullWidth>
               Add Measurement
@@ -781,6 +652,54 @@ export default function NewAnalysis() {
           </Paper>
         </Grid>
       </Grid>
+
+      {/* Editing a date already in the list. Uses the same fields as adding
+          one, so the two cannot offer different things -- which is how the
+          outlier settings came to be missing from half the app in the first
+          place. */}
+      <Dialog
+        open={!!editing}
+        onClose={() => setEditing(null)}
+        fullWidth
+        maxWidth="sm"
+      >
+        <DialogTitle>Edit date</DialogTitle>
+        <DialogContent dividers>
+          {editing && (
+            <MeasurementFields
+              value={editing.draft}
+              onChange={(next) =>
+                setEditing((current) =>
+                  current ? { ...current, draft: next as Measurement } : current
+                )
+              }
+              showOutlier={analysisType === 'bayesian'}
+            />
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setEditing(null)}>Cancel</Button>
+          <Button
+            variant="contained"
+            disabled={editInvalid}
+            onClick={() => {
+              if (!editing) return
+              const { draft } = editing
+              updateMeasurement(editing.id, {
+                ...draft,
+                // A reservoir offset means nothing off a marine curve, so
+                // switching a date back to terrestrial has to clear it
+                // rather than leave it applied invisibly.
+                delta_r: isMarineMeasurement(draft) ? draft.delta_r ?? null : null,
+                delta_r_error: isMarineMeasurement(draft) ? draft.delta_r_error ?? null : null,
+              })
+              setEditing(null)
+            }}
+          >
+            Save
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       <Box sx={{ mt: 3 }}>
         <Typography variant="h6" gutterBottom>
@@ -816,14 +735,33 @@ export default function NewAnalysis() {
                             ΔR: {m.delta_r} ± {m.delta_r_error ?? 0} yr
                           </Typography>
                         )}
+                        {/* Shown for the same reason as ΔR: it changes what
+                            the model does with the date, so it should be
+                            visible without opening anything. */}
+                        {(m.outlier_prior ?? 0) > 0 && (
+                          <Typography variant="body2" color="textSecondary">
+                            Outlier: {m.outlier_model === 'charcoal' ? 'charcoal' : 'general'}
+                            {' '}({Math.round((m.outlier_prior ?? 0) * 1000) / 10}% prior)
+                          </Typography>
+                        )}
                       </Box>
-                      <IconButton
-                        size="small"
-                        onClick={() => removeMeasurement(m.id)}
-                        color="error"
-                      >
-                        <DeleteIcon />
-                      </IconButton>
+                      <Box>
+                        <Tooltip title="Edit this date">
+                          <IconButton
+                            size="small"
+                            onClick={() => setEditing({ id: m.id, draft: { ...m } })}
+                          >
+                            <EditIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                        <IconButton
+                          size="small"
+                          onClick={() => removeMeasurement(m.id)}
+                          color="error"
+                        >
+                          <DeleteIcon />
+                        </IconButton>
+                      </Box>
                     </Box>
                   </CardContent>
                 </Card>
