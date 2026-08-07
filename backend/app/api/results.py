@@ -115,6 +115,7 @@ def _gather_export_rows(analysis_id: str, db: Session) -> Dict:
             'hpd_95_max': r.hpd_95_max,
             'hpd_68_ranges': r.hpd_68_ranges,
             'hpd_95_ranges': r.hpd_95_ranges,
+            'agreement_index': r.agreement_index,
             **_unmodelled_ranges(sample, analysis.analysis_type),
         })
 
@@ -163,7 +164,7 @@ CSV_HEADER = [
     'Order', 'Row Type', 'Depth', 'Structure Path', 'Name',
     'Age BP', '1-Sigma Error', 'Material', 'Sample Type', 'Curve',
     'Unmodelled 95% HPD', 'Posterior Mean', 'Posterior Median', 'Posterior Std',
-    '68% HPD', '95% HPD', 'TPQ BP', 'TAQ BP',
+    '68% HPD', '95% HPD', 'Agreement %', 'TPQ BP', 'TAQ BP',
 ]
 
 # The calendar-age columns, in the order their formatted counterparts are
@@ -226,13 +227,18 @@ def _posterior_cells(row: Optional[Dict]) -> List:
     the whole point of exporting the structure rather than only the dates.
     """
     if not row:
-        return ['', '', '', '', '']
+        return ['', '', '', '', '', '']
+    agreement = row.get('agreement_index')
     return [
         f"{row['posterior_mean']:.1f}" if row.get('posterior_mean') is not None else '',
         f"{row['posterior_median']:.1f}" if row.get('posterior_median') is not None else '',
         f"{row['posterior_std']:.1f}" if row.get('posterior_std') is not None else '',
         _format_hpd_ranges(row.get('hpd_68_ranges'), row.get('hpd_68_min'), row.get('hpd_68_max')),
         _format_hpd_ranges(row.get('hpd_95_ranges'), row.get('hpd_95_min'), row.get('hpd_95_max')),
+        # Blank rather than 0 where there is none: a boundary has no
+        # unmodelled counterpart to agree with, and a plain calibration has
+        # no model. Neither is a score of zero.
+        f"{agreement:.1f}" if agreement is not None else '',
     ]
 
 
@@ -277,6 +283,9 @@ def _boundary_as_result(posterior: Dict) -> Dict:
         'hpd_68_max': (posterior.get('hpd_68') or [None, None])[1],
         'hpd_95_min': (posterior.get('hpd_95') or [None, None])[0],
         'hpd_95_max': (posterior.get('hpd_95') or [None, None])[1],
+        # A boundary is a modelled parameter with no measurement behind it,
+        # so there is nothing for it to agree or disagree with.
+        'agreement_index': None,
     }
 
 

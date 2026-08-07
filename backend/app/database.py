@@ -40,6 +40,7 @@ _COLUMN_MIGRATIONS = {
     'analysis_results': [
         ('hpd_68_ranges', 'JSON'),
         ('hpd_95_ranges', 'JSON'),
+        ('agreement_index', 'FLOAT'),
     ],
     'radiocarbon_samples': [
         ('group_id', 'VARCHAR'),

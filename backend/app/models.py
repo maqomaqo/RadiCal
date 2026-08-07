@@ -265,6 +265,15 @@ class AnalysisResult(Base):
     hpd_95_min = Column(Float, nullable=True)
     hpd_95_max = Column(Float, nullable=True)
 
+    # How well this date's MODELLED posterior still fits its own UNMODELLED
+    # likelihood, as a percentage (Bronk Ramsey 1995; see
+    # services/agreement.py). 100 means the model left it alone, above 100
+    # that the model sharpened it onto its own peak, and below about 60 that
+    # the model had to move it far enough to be worth re-examining. Null for
+    # results computed before this existed, and for a plain calibration,
+    # where there is no model to disagree with.
+    agreement_index = Column(Float, nullable=True)
+
     # Full HPD breakdown as one or more disjoint calendar-age ranges, each
     # with its own probability share -- e.g.
     # [{"min": 3300, "max": 3360, "probability_percent": 13.5}, ...].

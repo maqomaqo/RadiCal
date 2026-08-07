@@ -375,9 +375,13 @@ class TestCsvExport:
 
         assert 'Calibrated Age BP (mode)' not in header
         unmodelled, modelled = header.index('Unmodelled 95% HPD'), header.index('95% HPD')
-        # Repurposed in place -- the column count is unchanged, so nothing
-        # downstream of it shifted.
-        assert len(header) == 18
+        # The unmodelled column was repurposed in place rather than appended,
+        # so it sits before the modelled ones and nothing downstream shifted.
+        assert unmodelled < modelled
+        # Agreement joins the modelled block, right after the HPD columns it
+        # is judging.
+        assert header.index('Agreement %') == modelled + 1
+        assert len(header) == 19
 
         by_name = {r[4]: r for r in data}
         # Every date reports one, formatted like the other HPD columns.

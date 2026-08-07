@@ -5,6 +5,7 @@ from app.schemas.sample import CalibrateRequest, BayesianRequest
 from app.services.calibration import get_curve, CalibrationCurve
 from app.services.bayesian import BayesianChronology
 from app.services import exact_chain
+from app.services import agreement as agreement_service
 from app.services.model_tree import (
     migrate_from_relationships,
     rows_to_tree,
@@ -207,6 +208,7 @@ def _run_bayesian(
             num_samples=bayesian_config.get('mcmc_samples', 2000),
             uniform_span_prior=bayesian_config.get('uniform_span_prior', True),
         )
+        agreement_service.attach(solved['measurements'], measurements)
         return solved['measurements'], solved['boundaries']
 
     bayesian = BayesianChronology(
@@ -217,6 +219,7 @@ def _run_bayesian(
     model, ages = bayesian.build_model(measurements, model_tree)
     idata, ages_dict = bayesian.sample(model, ages)
     extracted = bayesian.extract_results(idata, ages_dict, measurements=measurements)
+    agreement_service.attach(extracted['measurements'], measurements)
     return extracted['measurements'], extracted['boundaries']
 
 
@@ -567,7 +570,8 @@ async def bayesian_analysis(request: BayesianRequest, db: Session = Depends(get_
                     hpd_68_ranges=result['hpd_68_ranges'],
                     hpd_95_ranges=result['hpd_95_ranges'],
                     posterior_samples=result['posterior_samples'],
-                    probability_distribution=result['probability_distribution']
+                    probability_distribution=result['probability_distribution'],
+                    agreement_index=result.get('agreement_index'),
                 )
                 db.add(analysis_result)
 
