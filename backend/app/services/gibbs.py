@@ -149,6 +149,15 @@ ADAPT_INTERVAL = 50
 # is the expected outcome, not a fault to adapt away.
 WIDE_MOVE_FRACTION = 0.3
 WIDE_MOVE_YEARS = 120.0
+# Sweeps the run starts with, and the ceiling it will extend to when the
+# convergence measure is not met. See run() for why the length is not fixed.
+DEFAULT_SWEEPS = 20000
+MAX_SWEEPS = 200000
+# OxCal's own target for its convergence measure.
+TARGET_CONVERGENCE = 0.95
+# Rounds the accumulation is split into, which sets both the granularity of the
+# first-half/second-half comparison and how often the run can stop.
+ROUNDS = 8
 
 
 class _State:
@@ -684,30 +693,45 @@ class Model:
         return state, current_lp, False, wide
 
 
-def run(model: Model, sweeps: int = 4000, seed: int = 42,
-        burn_in: Optional[int] = None) -> Dict:
+def run(model: Model, sweeps: int = DEFAULT_SWEEPS, seed: int = 42,
+        burn_in: Optional[int] = None,
+        target_convergence: float = TARGET_CONVERGENCE,
+        max_sweeps: Optional[int] = None) -> Dict:
     """
     Sweep the sampler and accumulate each parameter's marginal as a histogram
-    over the calendar grid.
+    over the calendar grid, extending the run until it has converged.
 
     Histograms rather than stored draw arrays: the grid is the natural
     resolution of the whole problem, a count per cell is all _summarize needs,
     and it makes the memory cost independent of how long the chain runs.
 
-    Returns {'histograms', 'accepted_group_moves', 'proposed_group_moves',
-    'convergence'} -- convergence being OxCal's own diagnostic, the overlap
-    integral between the first and second halves of the accumulated run (their
-    "convergence %"; 95% is the usual target).
+    The run EXTENDS rather than being a fixed length because how many sweeps a
+    model needs is not something a caller can be expected to know, and does not
+    follow from its size. Measured against exact answers: 9 dates in 3 phases
+    reached 0.65 years at 20,000 sweeps, while 30 dates in 6 phases was still 32
+    years out there and needed 100,000 to reach 1.5 -- and 50 dates in 10 phases
+    did BETTER than the 30-date model at the same length. It depends on how
+    tightly the structure couples the parameters, not on how much of it there is.
+    A fixed default would therefore be either wasteful on small models or
+    quietly wrong on awkward ones, which is the failure this whole exercise is
+    about.
+
+    Stopping when the convergence measure is met is a data-dependent rule and so
+    is not perfectly unbiased in principle. It is what OxCal itself does, the
+    effect is far below the Monte Carlo error it is there to control, and the
+    alternative -- stopping at an arbitrary length and hoping -- is the thing
+    being replaced. `max_sweeps` bounds the work regardless, and the achieved
+    convergence is always reported rather than assumed.
+
+    Returns {'histograms', 'sweeps', 'sweeps_kept', 'convergence', 'acceptance',
+    ...} -- convergence being OxCal's own diagnostic, per parameter.
     """
     rng = np.random.default_rng(seed)
     state = model.initial_state()
     if burn_in is None:
         burn_in = int(sweeps * BURN_IN_FRACTION)
-    halfway = burn_in + (sweeps - burn_in) // 2
-
-    counts = {p: np.zeros(model.M) for p in model.params}
-    first_half = {p: np.zeros(model.M) for p in model.params}
-    kept = 0
+    if max_sweeps is None:
+        max_sweeps = max(sweeps, MAX_SWEEPS)
 
     move_sets = model.move_sets()
     # One proposal scale per move set, in grid steps, adapted during burn-in
@@ -718,8 +742,20 @@ def run(model: Model, sweeps: int = 4000, seed: int = 42,
     accepted = [0] * len(move_sets)
     since_adapt = [0] * len(move_sets)
     took_since_adapt = [0] * len(move_sets)
+    swept = 0
 
-    for sweep in range(sweeps):
+    # Accumulated in rounds rather than one total, so the run can be EXTENDED
+    # and the first-half/second-half convergence comparison recomputed over
+    # whatever length it ended up being. Halving pairs of rounds when there are
+    # too many keeps the memory flat however long it runs.
+    rounds: List[Dict[str, np.ndarray]] = []
+
+    def new_round() -> Dict[str, np.ndarray]:
+        return {p: np.zeros(model.M) for p in model.params}
+
+    def sweep_once():
+        # `state` is rebound by the translation moves below, not just mutated.
+        nonlocal swept, state
         # Dates, one blocked update per colour class.
         for block in model.blocks:
             draws = rng.random(len(block))
@@ -745,7 +781,7 @@ def run(model: Model, sweeps: int = 4000, seed: int = 42,
                     since_adapt[index] += 1
                     took_since_adapt[index] += int(took)
 
-            if sweep < burn_in and since_adapt[index] >= ADAPT_INTERVAL:
+            if swept < burn_in and since_adapt[index] >= ADAPT_INTERVAL:
                 rate = took_since_adapt[index] / since_adapt[index]
                 # Standard random-walk tuning: widen when accepting too often,
                 # narrow when not. Floored at one grid step, since a proposal
@@ -753,27 +789,47 @@ def run(model: Model, sweeps: int = 4000, seed: int = 42,
                 scales[index] = max(1.0, scales[index] * (
                     1.3 if rate > TARGET_ACCEPTANCE else 0.75))
                 since_adapt[index] = took_since_adapt[index] = 0
+        swept += 1
 
-        if sweep >= burn_in:
-            kept += 1
+    round_length = max(1, (sweeps - burn_in) // ROUNDS)
+    for _ in range(burn_in):
+        sweep_once()
+
+    while True:
+        current = new_round()
+        for _ in range(round_length):
+            sweep_once()
             for param in model.params:
-                counts[param][state.index[param]] += 1.0
-                if sweep < halfway:
-                    first_half[param][state.index[param]] += 1.0
+                current[param][state.index[param]] += 1.0
+        rounds.append(current)
 
-    convergence = {}
-    for param in model.params:
-        second = counts[param] - first_half[param]
-        a, b = first_half[param].sum(), second.sum()
-        if a > 0 and b > 0:
-            convergence[param] = float(
-                np.minimum(first_half[param] / a, second / b).sum())
-        else:
-            convergence[param] = 0.0
+        if len(rounds) > 2 * ROUNDS:
+            # Fold adjacent pairs: same accumulated distribution, half the
+            # bookkeeping, and the halves stay comparable.
+            merged = []
+            for i in range(0, len(rounds) - 1, 2):
+                for param in model.params:
+                    rounds[i][param] += rounds[i + 1][param]
+                merged.append(rounds[i])
+            if len(rounds) % 2:
+                merged.append(rounds[-1])
+            rounds = merged
+            round_length *= 2
 
+        kept_rounds = _after_burn_in(rounds)
+        convergence = _convergence(kept_rounds, model.params)
+        worst = min(convergence.values()) if convergence else 0.0
+        if len(kept_rounds) < 2:
+            continue
+        if worst >= target_convergence or swept >= max_sweeps:
+            break
+
+    kept_rounds = _after_burn_in(rounds)
+    counts = {p: sum(r[p] for r in kept_rounds) for p in model.params}
     return {
         'histograms': counts,
-        'sweeps_kept': kept,
+        'sweeps': swept,
+        'sweeps_kept': int(sum(counts[model.params[0]])) if model.params else 0,
         'proposed_moves': sum(proposed),
         'accepted_moves': sum(accepted),
         # Per move set, so a set that never gets accepted is visible rather
@@ -784,21 +840,72 @@ def run(model: Model, sweeps: int = 4000, seed: int = 42,
     }
 
 
-def solve(measurements: List[Dict], root: Dict, sweeps: int = 4000,
+def _after_burn_in(
+    rounds: List[Dict[str, np.ndarray]],
+) -> List[Dict[str, np.ndarray]]:
+    """
+    The rounds to actually report from, dropping the earliest as burn-in.
+
+    Discarded as a FRACTION OF ROUNDS rather than a fixed number of sweeps at
+    the start, so that burn-in scales with however long the run turned out to be.
+    The sweeps up front are fixed before the length is known -- they exist to
+    tune the proposal scales -- and on a slowly-mixing model they are nowhere
+    near enough: the 30-date fixture accumulated its whole non-stationary head
+    and came out 6.17 years from the exact answer after 214,000 sweeps, WORSE
+    than 1.46 at a fixed 100,000. Scaling the discard fixed that.
+    """
+    if len(rounds) < 3:
+        return rounds
+    return rounds[int(len(rounds) * BURN_IN_FRACTION):]
+
+
+def _convergence(rounds: List[Dict[str, np.ndarray]],
+                 params: List[str]) -> Dict[str, float]:
+    """
+    OxCal's convergence measure per parameter: the overlap integral between the
+    distribution accumulated over the first half of the run and the second half.
+    1.0 is perfect agreement, and OxCal's usual target is 0.95.
+
+    Their version compares each pass against the running total; halves are the
+    same idea with a cleaner interpretation, and are what a run assembled from
+    rounds gives directly.
+    """
+    if len(rounds) < 2:
+        return {p: 0.0 for p in params}
+    split = len(rounds) // 2
+    out = {}
+    for param in params:
+        early = sum(r[param] for r in rounds[:split])
+        late = sum(r[param] for r in rounds[split:])
+        a, b = early.sum(), late.sum()
+        out[param] = float(np.minimum(early / a, late / b).sum()) if a > 0 and b > 0 else 0.0
+    return out
+
+
+def solve(measurements: List[Dict], root: Dict, sweeps: int = DEFAULT_SWEEPS,
           num_samples: int = 4000, seed: int = 42,
           uniform_span_prior: bool = True,
-          grid: Optional[np.ndarray] = None) -> Dict:
+          grid: Optional[np.ndarray] = None,
+          target_convergence: float = TARGET_CONVERGENCE,
+          max_sweeps: Optional[int] = None) -> Dict:
     """
     Posterior summaries for every date and boundary, in the same shape
     exact_chain.solve and BayesianChronology.extract_results return -- so a
     caller does not need to know which produced it.
+
+    `sweeps` is where the run starts, not where it ends: it extends until the
+    convergence measure reaches `target_convergence` or `max_sweeps` is reached
+    (see run). The result reports both what was achieved and how long it took to
+    get there, so a run that ran out of budget is visible rather than silently
+    under-converged.
 
     `grid` is accepted so a caller can force exact_chain's own grid and compare
     the two solvers without a resolution difference confounding the answer.
     """
     model = Model(measurements, root, grid=grid,
                   uniform_span_prior=uniform_span_prior)
-    chain = run(model, sweeps=sweeps, seed=seed)
+    chain = run(model, sweeps=sweeps, seed=seed,
+                target_convergence=target_convergence, max_sweeps=max_sweeps)
     rng = np.random.default_rng(seed)
 
     results: Dict = {'measurements': {}, 'boundaries': {}}
@@ -821,8 +928,12 @@ def solve(measurements: List[Dict], root: Dict, sweeps: int = 4000,
 
     results['method'] = 'gibbs'
     results['uniform_span_prior'] = bool(model.span_priors)
-    results['sweeps'] = sweeps
-    results['convergence'] = min(chain['convergence'].values()) if chain['convergence'] else 0.0
+    results['sweeps'] = chain['sweeps']
+    # The WORST parameter's convergence, not the average: one badly-mixed
+    # boundary is exactly what a mean would hide.
+    results['convergence'] = (min(chain['convergence'].values())
+                              if chain['convergence'] else 0.0)
+    results['converged'] = results['convergence'] >= target_convergence
     results['acceptance'] = chain['acceptance']
     results['grid'] = {'lower': float(model.grid[0]), 'upper': float(model.grid[-1]),
                        'step': model.dt}

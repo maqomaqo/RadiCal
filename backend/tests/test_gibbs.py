@@ -45,6 +45,19 @@ def _exact_grid(exact):
                      exact['grid']['step'])
 
 
+def _fixed(measurements, tree, sweeps=20000, **kwargs):
+    """
+    Run exactly `sweeps` sweeps, with the convergence-driven extension disabled.
+
+    solve() extends until it converges, which is what production wants and what
+    TestRunLength covers -- but it makes every other test's runtime depend on how
+    hard its model happens to be, and the tolerances here are calibrated against
+    a known length.
+    """
+    return gibbs.solve(measurements, tree, sweeps=sweeps, max_sweeps=sweeps,
+                       **kwargs)
+
+
 class TestAgreesWithTheExactSolver:
     """
     The chain models, where an exact answer exists. Both solvers are given the
@@ -66,8 +79,8 @@ class TestAgreesWithTheExactSolver:
         chain = ec.layout(tree, measurements)
         exact = ec.solve(measurements, tree, chain, num_samples=100)
 
-        sampled = gibbs.solve(measurements, tree, sweeps=20000, num_samples=100,
-                              grid=_exact_grid(exact))
+        sampled = _fixed(measurements, tree, sweeps=20000, num_samples=100,
+                         grid=_exact_grid(exact))
         errors = np.array([
             sampled['measurements'][m['id']]['posterior_mean']
             - exact['measurements'][m['id']]['posterior_mean']
@@ -88,8 +101,8 @@ class TestAgreesWithTheExactSolver:
         assert inserted
         chain = ec.layout(tree, measurements)
         exact = ec.solve(measurements, tree, chain, num_samples=100)
-        sampled = gibbs.solve(measurements, tree, sweeps=20000, num_samples=100,
-                              grid=_exact_grid(exact))
+        sampled = _fixed(measurements, tree, sweeps=20000, num_samples=100,
+                         grid=_exact_grid(exact))
 
         def mean_ad(results, ids):
             return np.mean([1950 - results['measurements'][i]['posterior_mean']
@@ -111,8 +124,8 @@ class TestAgreesWithTheExactSolver:
         tree = ox.model_tree('shared_boundary')
         chain = ec.layout(tree, measurements)
         exact = ec.solve(measurements, tree, chain, num_samples=100)
-        sampled = gibbs.solve(measurements, tree, sweeps=20000, num_samples=100,
-                              grid=_exact_grid(exact))
+        sampled = _fixed(measurements, tree, sweeps=20000, num_samples=100,
+                         grid=_exact_grid(exact))
 
         interior = chain.boundary_ids[1:-1]
         assert interior, 'this fixture should have a shared interior boundary'
@@ -170,8 +183,8 @@ class TestBranchingModels:
                            num_samples=100, uniform_span_prior=uniform_span_prior)
         exact_b = ec.solve(dates_b, branch_b, ec.layout(branch_b, dates_b),
                            num_samples=100, uniform_span_prior=uniform_span_prior)
-        sampled = gibbs.solve(dates_a + dates_b, combined, sweeps=20000,
-                              num_samples=100, uniform_span_prior=uniform_span_prior)
+        sampled = _fixed(dates_a + dates_b, combined, sweeps=20000,
+                         num_samples=100, uniform_span_prior=uniform_span_prior)
 
         errors = []
         for exact, subset in ((exact_a, dates_a), (exact_b, dates_b)):
@@ -217,8 +230,8 @@ class TestBranchingModels:
                            num_samples=100, uniform_span_prior=False)
         exact_b = ec.solve(dates_b, branch_b, ec.layout(branch_b, dates_b),
                            num_samples=100, uniform_span_prior=False)
-        sampled = gibbs.solve(dates_a + dates_b, combined, sweeps=20000,
-                              num_samples=100, uniform_span_prior=False)
+        sampled = _fixed(dates_a + dates_b, combined, sweeps=20000,
+                         num_samples=100, uniform_span_prior=False)
 
         def separation(results_a, results_b):
             mean_a = np.mean([results_a['measurements'][m['id']]['posterior_mean']
@@ -390,11 +403,11 @@ class TestTheChainCanActuallyMove:
             ])
             return float(np.sqrt((errors ** 2).mean()))
 
-        with_wide = rms(gibbs.solve(measurements, tree, sweeps=20000,
-                                    num_samples=100, grid=grid, seed=2))
+        with_wide = rms(_fixed(measurements, tree, sweeps=20000,
+                               num_samples=100, grid=grid, seed=2))
         monkeypatch.setattr(gibbs, 'WIDE_MOVE_FRACTION', 0.0)
-        without = rms(gibbs.solve(measurements, tree, sweeps=20000,
-                                  num_samples=100, grid=grid, seed=2))
+        without = rms(_fixed(measurements, tree, sweeps=20000,
+                             num_samples=100, grid=grid, seed=2))
         assert with_wide < 3.0, with_wide
         assert without > with_wide, (without, with_wide)
 
@@ -423,8 +436,8 @@ class TestOutlierModel:
         chain = ec.layout(tree, samples)
         assert chain is not None
         exact = ec.solve(samples, tree, chain, num_samples=200)
-        sampled = gibbs.solve(samples, tree, sweeps=20000, num_samples=200,
-                              grid=_exact_grid(exact))
+        sampled = _fixed(samples, tree, sweeps=20000, num_samples=200,
+                         grid=_exact_grid(exact))
         return sf, exact, sampled
 
     def test_finds_the_outlier_oxcal_found(self, solved):
@@ -478,7 +491,7 @@ class TestOutlierModel:
         import unittest.mock as mock
         samples, tree = sf.measurements(), sf.model_tree()
         with mock.patch.object(ec, 'BOUNDARY_WINDOW_FACTOR', 30.0):
-            wide = gibbs.solve(samples, tree, sweeps=20000, num_samples=200)
+            wide = _fixed(samples, tree, sweeps=20000, num_samples=200)
         assert (wide['grid']['upper'] - wide['grid']['lower']) > 2 * (
             sampled['grid']['upper'] - sampled['grid']['lower'])
         for m in samples:
@@ -496,8 +509,8 @@ class TestOutlierModel:
                  for age in (3000, 3020, 3040, 3060, 3460)]
         residual = dates[-1]['id']
         exact = ec.solve(dates, tree, ec.layout(tree, dates), num_samples=200)
-        sampled = gibbs.solve(dates, tree, sweeps=sweeps, num_samples=200,
-                              grid=_exact_grid(exact))
+        sampled = _fixed(dates, tree, sweeps=sweeps, num_samples=200,
+                         grid=_exact_grid(exact))
         return dates, residual, exact, sampled
 
     def test_the_one_sided_charcoal_model_is_more_confident(self):
@@ -547,6 +560,60 @@ class TestOutlierModel:
         assert not any(plain['id'] in s for s in pairs), 'an unflagged one does not'
 
 
+class TestRunLength:
+    """
+    The run extends until it converges rather than stopping at a fixed length,
+    because how many sweeps a model needs does not follow from its size -- it
+    depends on how tightly the structure couples the parameters. Measured against
+    exact answers: 9 dates in 3 phases reached 0.65 years at 20,000 sweeps, while
+    30 dates in 6 phases was still 32 years out there, and 50 dates in 10 phases
+    did BETTER than the 30-date model at the same length.
+    """
+
+    def _easy_model(self):
+        phase = _element('phase', 'Only')
+        tree = _element('sequence', 'Site', [
+            _element('boundary', 'Start'), phase, _element('boundary', 'End')])
+        return [_date(phase['id'], 3000), _date(phase['id'], 3020)], tree
+
+    def test_it_reports_the_length_it_actually_ran(self):
+        measurements, tree = self._easy_model()
+        sampled = gibbs.solve(measurements, tree, sweeps=2000, num_samples=50)
+        assert sampled['sweeps'] >= 2000
+        assert sampled['converged'] is True
+        assert sampled['convergence'] >= gibbs.TARGET_CONVERGENCE
+
+    def test_it_extends_a_run_that_has_not_converged(self):
+        """An unreachable target forces the extension path, which must then stop
+        at the cap and say so rather than running forever or claiming success."""
+        measurements, tree = self._easy_model()
+        sampled = gibbs.solve(measurements, tree, sweeps=2000, num_samples=50,
+                              target_convergence=1.01, max_sweeps=8000)
+        assert sampled['sweeps'] > 2000
+        assert sampled['sweeps'] <= 8000 + 2000, sampled['sweeps']
+        assert sampled['converged'] is False
+        assert sampled['convergence'] < 1.01
+
+    def test_burn_in_scales_with_the_run_rather_than_the_starting_budget(self):
+        """
+        The regression that made a longer run WORSE. The sweeps discarded up
+        front are fixed before the length is known -- they are there to tune the
+        proposal scales -- so an extended run kept its whole non-stationary head
+        and the 30-date fixture came out 6.17 years from the exact answer after
+        214,000 sweeps, against 1.46 at a fixed 100,000.
+
+        Asserted on the mechanism: the reported draw count must be materially
+        less than the sweeps run, because a fraction of rounds is dropped
+        whatever the length.
+        """
+        measurements, tree = self._easy_model()
+        model = gibbs.Model(measurements, tree)
+        chain = gibbs.run(model, sweeps=4000, target_convergence=1.01,
+                          max_sweeps=16000)
+        assert chain['sweeps'] > 4000
+        assert chain['sweeps_kept'] < chain['sweeps'] * (1 - gibbs.BURN_IN_FRACTION / 2)
+
+
 class TestReportedShape:
     def test_it_returns_what_the_other_solvers_do(self):
         """
@@ -557,7 +624,7 @@ class TestReportedShape:
         tree = _element('sequence', 'Site', [
             _element('boundary', 'Start'), phase, _element('boundary', 'End')])
         measurements = [_date(phase['id'], 3000), _date(phase['id'], 3050)]
-        sampled = gibbs.solve(measurements, tree, sweeps=2000, num_samples=50)
+        sampled = _fixed(measurements, tree, sweeps=2000, num_samples=50)
 
         assert sampled['method'] == 'gibbs'
         assert set(sampled['measurements']) == {m['id'] for m in measurements}
@@ -579,7 +646,7 @@ class TestReportedShape:
             dict(_date(phase['id'], 3000), outlier_prior=0.05, outlier_model='general'),
             dict(_date(phase['id'], 3050), outlier_prior=0.05, outlier_model='general'),
         ]
-        sampled = gibbs.solve(measurements, tree, sweeps=2000, num_samples=50)
+        sampled = _fixed(measurements, tree, sweeps=2000, num_samples=50)
         for m in measurements:
             probability = sampled['measurements'][m['id']]['outlier_probability']
             assert 0.0 <= probability <= 1.0

@@ -77,9 +77,15 @@ interface AnalysisResult {
   // this was recorded, which is reported as unknown rather than assumed to be
   // either method -- see the solver notice below.
   solver?: {
-    method: 'exact' | 'smc'
+    method: 'exact' | 'gibbs' | 'smc'
     reason?: string | null
     implicit_boundaries?: number
+    // Sampled path only. `converged` is against OxCal's own 0.95 target for the
+    // overlap-integral convergence measure.
+    sweeps?: number
+    convergence?: number
+    converged?: boolean
+    // Only ever set on analyses run before the SMC fallback was replaced.
     draws?: number
     chains?: number
   } | null
@@ -778,14 +784,12 @@ export default function Results() {
       {/* Which solver produced every number below it. Placed here, above the
           plots, because it qualifies all of them rather than any one.
 
-          The exact case is a quiet chip: it is the normal outcome and a
-          permanent banner announcing it would be noise. The fallback gets a
-          real warning, because the SMC path has a KNOWN and measured failure
-          on wiggly curves -- it mis-weights calibration lobes once ordering
-          constraints are involved (see services/exact_chain.py's module
-          docstring), which is exactly the case a Bayesian model is usually
-          built to resolve. That used to happen with no indication at all, so
-          an affected result was indistinguishable from an exact one. */}
+          Both good outcomes are quiet chips -- they are the normal cases, and a
+          permanent banner announcing one would be noise. What earns a warning is
+          not "this was sampled" but "this was sampled and did not converge",
+          plus the legacy SMC path, which had a known and measured failure on
+          wiggly curves (see services/gibbs.py's module docstring for what
+          replaced it and why). */}
       {isBayesian && (
         <Box sx={{ mb: 3 }}>
           {!analysis.solver ? (
@@ -804,23 +808,58 @@ export default function Results() {
             >
               <Chip size="small" variant="outlined" color="success" label="Exact solver" />
             </Tooltip>
-          ) : (
+          ) : analysis.solver.method === 'smc' ? (
             <Alert severity="warning">
               <Typography variant="subtitle2" gutterBottom>
-                Computed by MCMC (SMC), not the exact solver
+                Computed by the old SMC sampler
+              </Typography>
+              <Typography variant="body2">
+                That sampler mis-weighted the separate calendar ranges a wiggly
+                calibration curve produces once stratigraphic ordering was involved,
+                and has since been replaced. Re-run this analysis to recompute it.
+              </Typography>
+            </Alert>
+          ) : analysis.solver.converged === false ? (
+            <Alert severity="warning">
+              <Typography variant="subtitle2" gutterBottom>
+                Sampled, but not fully converged
               </Typography>
               {analysis.solver.reason && (
                 <Typography variant="body2" sx={{ mb: 1 }}>
-                  Why: {analysis.solver.reason}.
+                  This model cannot be solved exactly because {analysis.solver.reason}.
                 </Typography>
               )}
               <Typography variant="body2">
-                This sampler is known to mis-weight the separate calendar ranges a
-                wiggly calibration curve produces once stratigraphic ordering is
-                involved, so treat these results as provisional — particularly any
-                date whose unmodelled calibration has more than one range.
+                The sampler reached{' '}
+                {analysis.solver.convergence !== undefined
+                  ? `${(analysis.solver.convergence * 100).toFixed(0)}%`
+                  : 'less than 95%'}{' '}
+                convergence after {analysis.solver.sweeps?.toLocaleString()} passes,
+                short of the 95% usually wanted. The ranges below are probably a few
+                years out rather than wrong, but adding a Boundary where the model
+                needs one would let it be solved exactly instead.
               </Typography>
             </Alert>
+          ) : (
+            <Tooltip
+              title={
+                'This model cannot be integrated exactly, so it was sampled with OxCal’s ' +
+                'Metropolis-Hastings/Gibbs scheme' +
+                (analysis.solver.reason ? ` — ${analysis.solver.reason}. ` : '. ') +
+                `It converged to ${
+                  analysis.solver.convergence !== undefined
+                    ? (analysis.solver.convergence * 100).toFixed(1) + '%'
+                    : 'the 95% target'
+                } over ${analysis.solver.sweeps?.toLocaleString()} passes.`
+              }
+            >
+              <Chip size="small" variant="outlined" color="success"
+                label={`Sampled (MH/Gibbs) — ${
+                  analysis.solver.convergence !== undefined
+                    ? (analysis.solver.convergence * 100).toFixed(0) + '% converged'
+                    : 'converged'
+                }`} />
+            </Tooltip>
           )}
         </Box>
       )}

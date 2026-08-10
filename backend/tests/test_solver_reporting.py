@@ -102,30 +102,14 @@ class TestExactPath:
 
 
 class TestFallbackIsRecorded:
-    def test_it_says_smc_and_why(self, monkeypatch):
-        """
-        The record for a model that cannot be solved exactly. The sampler is
-        stubbed -- a real SMC run takes minutes and none of it is what this
-        asserts.
-        """
+    """
+    The sampled path. It runs for real here -- services/gibbs.py is pure numpy
+    and fast, where the SMC sampler it replaced took minutes and had to be
+    stubbed out to test any of this.
+    """
+
+    def _sampled(self, sweeps=2000):
         from app.api import analysis as analysis_api
-
-        class _StubChronology:
-            def __init__(self, **kwargs):
-                self.kwargs = kwargs
-
-            def build_model(self, measurements, model_tree):
-                return object(), {m['id']: object() for m in measurements}
-
-            def sample(self, model, ages):
-                return object(), ages
-
-            def extract_results(self, idata, ages, measurements=None):
-                return {'measurements': {mid: {} for mid in ages}, 'boundaries': {}}
-
-        monkeypatch.setattr(analysis_api, 'BayesianChronology', _StubChronology)
-        monkeypatch.setattr(analysis_api.agreement_service, 'attach',
-                            lambda results, measurements: None)
 
         tag = f'sr{next(_IDS)}'
         tree = _unbounded_tree(tag)
@@ -134,15 +118,29 @@ class TestFallbackIsRecorded:
             _measurement(f'{tag}s2', f'{tag}p2', age_bp=3100),
             _measurement(f'{tag}s3', f'{tag}p3', age_bp=3000),
         ]
-        _results, _boundaries, solver = analysis_api._run_bayesian(
-            measurements, tree, {'mcmc_samples': 200, 'mcmc_chains': 1},
+        results, boundaries, solver = analysis_api._run_bayesian(
+            measurements, tree, {'mcmc_samples': 200},
         )
-        assert solver['method'] == 'smc'
-        assert solver['reason'], 'a fallback with no reason is barely better than a silent one'
-        assert solver['draws'] == 200 and solver['chains'] == 1
-        assert solver['implicit_boundaries'] == 0
+        return measurements, tree, results, boundaries, solver
 
-    def test_the_reason_describes_the_model_as_it_stands_after_patching(self, monkeypatch):
+    def test_it_says_it_sampled_and_why(self):
+        measurements, _tree, results, _boundaries, solver = self._sampled()
+        assert solver['method'] == 'gibbs'
+        assert solver['reason'], 'a fallback with no reason is barely better than a silent one'
+        assert solver['implicit_boundaries'] == 0
+        # The record has to carry enough to judge the answer, not just name the
+        # method -- a sampled result with no convergence figure is a result the
+        # user cannot weigh.
+        assert solver['sweeps'] > 0
+        assert 0.0 <= solver['convergence'] <= 1.0
+        assert isinstance(solver['converged'], bool)
+        # And it really did produce results, which the stubbed version could not
+        # establish.
+        assert set(results) == {m['id'] for m in measurements}
+        for summary in results.values():
+            assert summary['posterior_mean'] > 0
+
+    def test_the_reason_describes_the_model_as_it_stands_after_patching(self):
         """
         Implicit transitions are supplied BEFORE giving up, so the reason must
         describe what is wrong with the PATCHED model, not the original
@@ -153,38 +151,11 @@ class TestFallbackIsRecorded:
         after, the interior transitions exist and what remains is precisely
         which dates are still left outside them.
         """
-        from app.api import analysis as analysis_api
-
-        tag = f'sr{next(_IDS)}'
-        tree = _unbounded_tree(tag)
-        measurements = [
-            _measurement(f'{tag}s1', f'{tag}p1', age_bp=3200),
-            _measurement(f'{tag}s2', f'{tag}p2', age_bp=3100),
-            _measurement(f'{tag}s3', f'{tag}p3', age_bp=3000),
-        ]
-        # The unpatched complaint, for contrast.
         from app.services import exact_chain
+
+        measurements, tree, _results, _boundaries, solver = self._sampled()
         _chain, original = exact_chain.layout_with_reason(tree, measurements)
         assert 'no Boundary encloses any date' in original
-
-        class _StubChronology:
-            def __init__(self, **kwargs):
-                pass
-
-            def build_model(self, measurements, model_tree):
-                return object(), {m['id']: object() for m in measurements}
-
-            def sample(self, model, ages):
-                return object(), ages
-
-            def extract_results(self, idata, ages, measurements=None):
-                return {'measurements': {mid: {} for mid in ages}, 'boundaries': {}}
-
-        monkeypatch.setattr(analysis_api, 'BayesianChronology', _StubChronology)
-        monkeypatch.setattr(analysis_api.agreement_service, 'attach',
-                            lambda results, measurements: None)
-
-        _r, _b, solver = analysis_api._run_bayesian(measurements, tree, {})
         assert solver['reason'] != original
         assert 'outside every Boundary' in solver['reason']
 

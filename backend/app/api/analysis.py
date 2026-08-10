@@ -3,8 +3,8 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.schemas.sample import CalibrateRequest, BayesianRequest
 from app.services.calibration import get_curve, CalibrationCurve
-from app.services.bayesian import BayesianChronology
 from app.services import exact_chain
+from app.services import gibbs
 from app.services import agreement as agreement_service
 from app.services.model_tree import (
     migrate_from_relationships,
@@ -267,24 +267,30 @@ def _run_bayesian(
 
     A chain-shaped model -- a Sequence of Phases separated by Boundaries, the
     ordinary archaeological shape -- is integrated EXACTLY by
-    services/exact_chain.py rather than sampled. That is not an optimisation:
-    pm.sample_smc systematically mis-weights the calibration lobes of a
-    wiggly curve once ordering constraints are involved, because PyMC tempers
-    pm.Potential terms along with the likelihood, so the model structure is
-    absent at the start of the annealing path. Read exact_chain's module
-    docstring for the measurement against OxCal. Anything the exact solver
-    cannot express falls back to MCMC.
+    services/exact_chain.py rather than sampled. There is no sampler to
+    converge and no calibration lobe to miss, so that stays the default
+    wherever it applies.
 
-    The returned solver record is what makes that fallback visible. It used to
-    happen silently, so a result carrying the known SMC lobe-weighting error
-    was indistinguishable from an exact one, and the shapes that trigger it
-    are not exotic -- a sequence of phases with no Boundary anywhere, or two
-    parallel excavation areas, both land on SMC. Shape:
+    Everything else goes to services/gibbs.py, OxCal's own MH/Gibbs scheme.
+    That replaces pm.sample_smc, which was wrong here for a structural reason
+    rather than a tuning one: PyMC tempers pm.Potential along with the
+    likelihood, and services/bayesian.py expressed the entire model structure
+    as pm.Potential, so the ordering and phase priors were simply absent at the
+    start of the annealing path. On the Nenthorn fixture it separated two
+    ordered groups by 57 years where the answer is 19 and OxCal reports 13 --
+    at r_hat 1.01, every chain agreeing on the same wrong answer. The Gibbs
+    sampler targets the true posterior from the first sweep and reproduces the
+    exact solver to under a year wherever the exact solver can be asked.
 
-        {'method': 'exact' | 'smc',
+    The returned solver record is what makes the choice visible; the fallback
+    used to be silent, and the shapes that trigger it are not exotic -- a
+    sequence of phases with no Boundary anywhere, or two parallel excavation
+    areas. Shape:
+
+        {'method': 'exact' | 'gibbs',
          'reason': why it is not exactly solvable (None when it is),
          'implicit_boundaries': how many transitions were supplied,
-         plus the sampler settings actually used, for the SMC path}
+         and for the sampled path: 'sweeps', 'convergence', 'converged'}
     """
     chain, reason = exact_chain.layout_with_reason(model_tree, measurements)
     solve_tree = model_tree
@@ -323,23 +329,22 @@ def _run_bayesian(
             'implicit_boundaries': implicit_boundaries,
         }
 
-    mcmc_samples = bayesian_config.get('mcmc_samples', 2000)
-    mcmc_chains = bayesian_config.get('mcmc_chains', 4)
-    bayesian = BayesianChronology(
-        mcmc_samples=mcmc_samples,
-        mcmc_tune=bayesian_config.get('mcmc_tune', 1000),
-        mcmc_chains=mcmc_chains,
+    # The model tree is passed as authored, NOT the patched candidate: the
+    # implicit transitions exist only to make a model exactly solvable, and this
+    # sampler needs no help with the shape they were working around.
+    sampled = gibbs.solve(
+        measurements, model_tree,
+        num_samples=bayesian_config.get('mcmc_samples', 2000),
+        uniform_span_prior=bayesian_config.get('uniform_span_prior', True),
     )
-    model, ages = bayesian.build_model(measurements, model_tree)
-    idata, ages_dict = bayesian.sample(model, ages)
-    extracted = bayesian.extract_results(idata, ages_dict, measurements=measurements)
-    agreement_service.attach(extracted['measurements'], measurements)
-    return extracted['measurements'], extracted['boundaries'], {
-        'method': 'smc',
+    agreement_service.attach(sampled['measurements'], measurements)
+    return sampled['measurements'], sampled['boundaries'], {
+        'method': 'gibbs',
         'reason': reason,
         'implicit_boundaries': 0,
-        'draws': mcmc_samples,
-        'chains': mcmc_chains,
+        'sweeps': sampled['sweeps'],
+        'convergence': sampled['convergence'],
+        'converged': sampled['converged'],
     }
 
 
