@@ -96,6 +96,13 @@ class Analysis(Base):
     # Configuration
     bayesian_config = Column(JSON, nullable=True)  # MCMC parameters if bayesian
 
+    # How this analysis's results were actually computed -- the exact solver
+    # or the SMC fallback -- and, when it fell back, why the model was not
+    # exactly solvable. Written on every bayesian run and rerun; see
+    # api/analysis._run_bayesian for the shape. NULL on a calibration-only
+    # analysis, and on any bayesian analysis run before this was recorded.
+    solver = Column(JSON, nullable=True)
+
     # Relations
     project = relationship('Project', back_populates='analyses')
     measurements = relationship('RadiocarbonSample', back_populates='analysis', cascade='all, delete-orphan')

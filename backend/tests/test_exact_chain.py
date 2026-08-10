@@ -106,6 +106,60 @@ class TestLayout:
         assert ec.layout(tree, _dates(('d1', 3200, 30, 'p0'), ('d2', 3000, 30, 'p1'))) is None
 
 
+class TestLayoutExplainsItself:
+    """
+    Every refusal carries a reason, because the API shows it to the user: a
+    fallback the user cannot act on is barely better than a silent one. The
+    reason comes from layout_with_reason, which layout() itself delegates to,
+    so the two can never disagree about whether a model is a chain.
+    """
+
+    def test_a_chain_has_no_reason(self):
+        tree = _sequence('s', [_boundary('b0'), _phase('p'), _boundary('b1')])
+        chain, reason = ec.layout_with_reason(tree, _dates(('d1', 3000, 30, 'p')))
+        assert chain is not None
+        assert reason is None
+
+    def test_every_refusal_carries_one(self):
+        no_boundaries = _sequence('s', [_phase('p0'), _phase('p1')])
+        left = _sequence('l', [_boundary('lb0'), _phase('lp'), _boundary('lb1')])
+        right = _sequence('r', [_boundary('rb0'), _phase('rp'), _boundary('rb1')])
+        parallel = _sequence('s2', [{'id': 'par', 'element_type': 'phase',
+                                     'name': 'Parallel', 'tpq_age_bp': None,
+                                     'taq_age_bp': None, 'children': [left, right]}])
+        loose = _sequence('s3', [_boundary('b0'), _phase('p0'), _boundary('b1'), _phase('p1')])
+
+        cases = [
+            (no_boundaries, _dates(('d1', 3200, 30, 'p0'), ('d2', 3000, 30, 'p1'))),
+            (parallel, _dates(('d1', 3200, 30, 'lp'), ('d2', 3000, 30, 'rp'))),
+            (loose, _dates(('d1', 3200, 30, 'p0'), ('d2', 3000, 30, 'p1'))),
+            (ox.model_tree('ordered'), ox.measurements()),
+            (None, []),
+        ]
+        for tree, dates in cases:
+            chain, reason = ec.layout_with_reason(tree, dates)
+            assert chain is None
+            assert reason, f'no reason given for {tree and tree.get("name")}'
+            # Written for an archaeologist reading the results page, not for a
+            # developer reading a traceback.
+            assert 'None' not in reason and '_' not in reason, reason
+
+    def test_the_reason_names_the_dates_left_outside(self):
+        """
+        The actionable case: which dates need bracketing. Naming them is the
+        difference between a fixable message and a puzzle.
+        """
+        tree = _sequence('s', [_boundary('b0'), _phase('p0'), _boundary('b1'), _phase('p1')])
+        dates = _dates(('d1', 3200, 30, 'p0'), ('loose', 3000, 30, 'p1'))
+        _chain, reason = ec.layout_with_reason(tree, dates)
+        assert 'loose' in reason
+        assert 'd1' not in reason, 'only the unenclosed dates should be named'
+
+    def test_groups_ordered_with_no_boundary_says_to_add_one(self):
+        _chain, reason = ec.layout_with_reason(ox.model_tree('ordered'), ox.measurements())
+        assert 'Boundary' in reason
+
+
 def _brute_force(curve, grid, dates):
     """
     One bounded group's exact marginals, by explicit summation over every

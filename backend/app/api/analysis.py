@@ -259,11 +259,11 @@ def _run_bayesian(
     measurements: List[Dict],
     model_tree: Dict,
     bayesian_config: Dict,
-) -> Tuple[Dict, Dict]:
+) -> Tuple[Dict, Dict, Dict]:
     """
     Solve the model against an explicit model tree, returning (per-sample
-    results, per-boundary results). Shared between a fresh run and a rerun so
-    the two can't drift apart.
+    results, per-boundary results, solver record). Shared between a fresh run
+    and a rerun so the two can't drift apart.
 
     A chain-shaped model -- a Sequence of Phases separated by Boundaries, the
     ordinary archaeological shape -- is integrated EXACTLY by
@@ -274,9 +274,21 @@ def _run_bayesian(
     absent at the start of the annealing path. Read exact_chain's module
     docstring for the measurement against OxCal. Anything the exact solver
     cannot express falls back to MCMC.
+
+    The returned solver record is what makes that fallback visible. It used to
+    happen silently, so a result carrying the known SMC lobe-weighting error
+    was indistinguishable from an exact one, and the shapes that trigger it
+    are not exotic -- a sequence of phases with no Boundary anywhere, or two
+    parallel excavation areas, both land on SMC. Shape:
+
+        {'method': 'exact' | 'smc',
+         'reason': why it is not exactly solvable (None when it is),
+         'implicit_boundaries': how many transitions were supplied,
+         plus the sampler settings actually used, for the SMC path}
     """
-    chain = exact_chain.layout(model_tree, measurements)
+    chain, reason = exact_chain.layout_with_reason(model_tree, measurements)
     solve_tree = model_tree
+    implicit_boundaries = 0
     if chain is None:
         # A Sequence that orders two groups with no Boundary between them is
         # not a chain, so it would fall to MCMC -- where it is measurably
@@ -287,9 +299,17 @@ def _run_bayesian(
         # See model_tree.with_implicit_boundaries.
         candidate, inserted = with_implicit_boundaries(model_tree)
         if inserted:
-            chain = exact_chain.layout(candidate, measurements)
-            if chain is not None:
-                solve_tree = candidate
+            patched, patched_reason = exact_chain.layout_with_reason(candidate, measurements)
+            if patched is not None:
+                chain, reason, solve_tree = patched, None, candidate
+                implicit_boundaries = len(inserted)
+            else:
+                # Report why the model is still not a chain AFTER the
+                # transitions were supplied -- the original reason was
+                # "groups ordered with no Boundary between them", which
+                # inserting them has already dealt with, so repeating it
+                # would send the user to fix something that is now fixed.
+                reason = patched_reason
     if chain is not None:
         solved = exact_chain.solve(
             measurements, solve_tree, chain,
@@ -297,18 +317,30 @@ def _run_bayesian(
             uniform_span_prior=bayesian_config.get('uniform_span_prior', True),
         )
         agreement_service.attach(solved['measurements'], measurements)
-        return solved['measurements'], solved['boundaries']
+        return solved['measurements'], solved['boundaries'], {
+            'method': 'exact',
+            'reason': None,
+            'implicit_boundaries': implicit_boundaries,
+        }
 
+    mcmc_samples = bayesian_config.get('mcmc_samples', 2000)
+    mcmc_chains = bayesian_config.get('mcmc_chains', 4)
     bayesian = BayesianChronology(
-        mcmc_samples=bayesian_config.get('mcmc_samples', 2000),
+        mcmc_samples=mcmc_samples,
         mcmc_tune=bayesian_config.get('mcmc_tune', 1000),
-        mcmc_chains=bayesian_config.get('mcmc_chains', 4),
+        mcmc_chains=mcmc_chains,
     )
     model, ages = bayesian.build_model(measurements, model_tree)
     idata, ages_dict = bayesian.sample(model, ages)
     extracted = bayesian.extract_results(idata, ages_dict, measurements=measurements)
     agreement_service.attach(extracted['measurements'], measurements)
-    return extracted['measurements'], extracted['boundaries']
+    return extracted['measurements'], extracted['boundaries'], {
+        'method': 'smc',
+        'reason': reason,
+        'implicit_boundaries': 0,
+        'draws': mcmc_samples,
+        'chains': mcmc_chains,
+    }
 
 
 def _tree_from_request(request: BayesianRequest) -> Tuple[Dict, Dict, List[Dict]]:
@@ -603,7 +635,7 @@ async def bayesian_analysis(request: BayesianRequest, db: Session = Depends(get_
         # DB ids), since build_model() needs to match against the internal
         # `ages` dict, which is also keyed by the client-side measurement id.
         root, group_boundaries, tree_measurements = _tree_from_request(request)
-        results, boundary_results = _run_bayesian(
+        results, boundary_results, solver = _run_bayesian(
             tree_measurements, root, request.bayesian_config.model_dump(),
         )
         # Report per-context start/end from the boundaries now bracketing each
@@ -675,6 +707,7 @@ async def bayesian_analysis(request: BayesianRequest, db: Session = Depends(get_
                         RadiocarbonSample.id == sample_id
                     ).update({'element_id': element_id}, synchronize_session=False)
 
+            analysis.solver = solver
             analysis.status = 'completed'
             db.commit()
 
@@ -709,6 +742,7 @@ async def bayesian_analysis(request: BayesianRequest, db: Session = Depends(get_
                 "project_id": (analysis.project_id if save else None),
                 "results": results_summary,
                 "contexts": context_summary,
+                "solver": solver,
                 "measurements_count": len(request.measurements)
             }
         }
@@ -826,6 +860,11 @@ async def get_analysis(analysis_id: str, db: Session = Depends(get_db)):
             # so duplicating or editing it round-trips them instead of
             # silently resetting to the schema defaults.
             "bayesian_config": analysis.bayesian_config or {},
+            # How these results were actually computed: the exact solver, or
+            # the SMC fallback and why the model needed it. NULL for an
+            # analysis run before this was recorded, which the Results page
+            # renders as "not recorded" rather than claiming either method.
+            "solver": analysis.solver,
             # The explicit model structure (nested sequences/phases/
             # boundaries/hiatuses), migrated from the old contexts +
             # relationships on first access. Boundary elements carry their
@@ -1100,9 +1139,10 @@ def _rerun_analysis(analysis: Analysis, db: Session) -> None:
             for s in samples
         ]
 
-        results, boundary_results = _run_bayesian(
+        results, boundary_results, solver = _run_bayesian(
             measurement_dicts, root, analysis.bayesian_config or {},
         )
+        analysis.solver = solver
 
         # Store each boundary's posterior on its element, and mirror it onto
         # the old per-context start/end for anything still reading that.
@@ -1480,6 +1520,11 @@ async def replace_analysis_inputs(
         analysis.bayesian_config = request.bayesian_config.model_dump()
         analysis.status = 'pending'
         analysis.error_message = None
+        # The recorded solver describes the structure just replaced, and
+        # editing the structure is exactly what changes which solver applies
+        # -- keeping it would label the pending analysis "exact" on the
+        # strength of a model that no longer exists. The rerun sets it again.
+        analysis.solver = None
         db.commit()
     except HTTPException:
         raise

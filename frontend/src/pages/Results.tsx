@@ -73,6 +73,16 @@ interface AnalysisResult {
   // Explicit model structure; boundary elements carry their own posterior.
   model_tree?: ModelElement | null
   relationships?: DraftRelationship[]
+  // How the results were actually computed. Null for an analysis run before
+  // this was recorded, which is reported as unknown rather than assumed to be
+  // either method -- see the solver notice below.
+  solver?: {
+    method: 'exact' | 'smc'
+    reason?: string | null
+    implicit_boundaries?: number
+    draws?: number
+    chains?: number
+  } | null
   results: SampleResult[]
 }
 
@@ -764,6 +774,56 @@ export default function Results() {
           </Card>
         </Grid>
       </Grid>
+
+      {/* Which solver produced every number below it. Placed here, above the
+          plots, because it qualifies all of them rather than any one.
+
+          The exact case is a quiet chip: it is the normal outcome and a
+          permanent banner announcing it would be noise. The fallback gets a
+          real warning, because the SMC path has a KNOWN and measured failure
+          on wiggly curves -- it mis-weights calibration lobes once ordering
+          constraints are involved (see services/exact_chain.py's module
+          docstring), which is exactly the case a Bayesian model is usually
+          built to resolve. That used to happen with no indication at all, so
+          an affected result was indistinguishable from an exact one. */}
+      {isBayesian && (
+        <Box sx={{ mb: 3 }}>
+          {!analysis.solver ? (
+            <Tooltip title="This analysis was run before the solver was recorded. Re-run it to find out which method its model uses.">
+              <Chip size="small" variant="outlined" label="Solver not recorded" />
+            </Tooltip>
+          ) : analysis.solver.method === 'exact' ? (
+            <Tooltip
+              title={
+                'The posterior was integrated exactly on a calendar grid -- no sampler, ' +
+                'so nothing to converge and no calibration lobe to miss.' +
+                (analysis.solver.implicit_boundaries
+                  ? ` ${analysis.solver.implicit_boundaries} implied transition(s) were supplied to make the model solvable this way.`
+                  : '')
+              }
+            >
+              <Chip size="small" variant="outlined" color="success" label="Exact solver" />
+            </Tooltip>
+          ) : (
+            <Alert severity="warning">
+              <Typography variant="subtitle2" gutterBottom>
+                Computed by MCMC (SMC), not the exact solver
+              </Typography>
+              {analysis.solver.reason && (
+                <Typography variant="body2" sx={{ mb: 1 }}>
+                  Why: {analysis.solver.reason}.
+                </Typography>
+              )}
+              <Typography variant="body2">
+                This sampler is known to mis-weight the separate calendar ranges a
+                wiggly calibration curve produces once stratigraphic ordering is
+                involved, so treat these results as provisional — particularly any
+                date whose unmodelled calibration has more than one range.
+              </Typography>
+            </Alert>
+          )}
+        </Box>
+      )}
 
       {/* Posterior distribution plots, in the model's own reading order --
           the same order as the results table and both exports, so scrolling

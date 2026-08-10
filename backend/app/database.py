@@ -36,6 +36,8 @@ Base = declarative_base()
 _COLUMN_MIGRATIONS = {
     'analyses': [
         ('project_id', 'VARCHAR'),
+        # Which solver produced the results, and why it fell back if it did.
+        ('solver', 'JSON'),
     ],
     'analysis_results': [
         ('hpd_68_ranges', 'JSON'),

@@ -139,51 +139,92 @@ def layout(root: Dict, measurements: List[Dict]) -> Optional[Chain]:
     single Phase, a Phase holding two parallel Phases) is still recognised as
     a chain.
     """
+    return layout_with_reason(root, measurements)[0]
+
+
+def layout_with_reason(
+    root: Dict, measurements: List[Dict]
+) -> Tuple[Optional[Chain], Optional[str]]:
+    """
+    layout(), plus a plain-English reason when the model is not a chain.
+
+    The reason exists so the API can tell the user WHY their model fell back
+    to sampling rather than only that it did -- a silent fallback is the whole
+    problem, and "this shape is not exactly solvable" is not actionable on its
+    own. It is produced here, at the point of decision, rather than by a
+    separate diagnostic that inspects the tree afterwards: a second
+    implementation of these rules would drift from this one, and would then
+    confidently explain a fallback that did not happen for that reason.
+
+    Phrase each reason as what the model does, and where practical what to
+    change -- these strings are shown to an archaeologist, not a developer.
+    """
     if root is None:
-        return None
+        return None, 'the analysis has no model structure'
     plan = plan_model(root, measurements)
     if not plan.span_groups:
-        return None
+        return None, (
+            'no Boundary encloses any date. Add a Boundary at the start and '
+            'end of the sequence so each phase has a transition either side '
+            'of it'
+        )
 
     # Link the groups into one path: each group's younger boundary must be the
     # next group's older boundary, and no boundary may be reused elsewhere.
+    branched = (
+        'the model branches: it has parallel groups rather than one line of '
+        'phases, so the phases do not share a single chain of Boundaries'
+    )
     by_older = {}
     for group in plan.span_groups:
         if group.older_boundary_id in by_older:
-            return None                      # a boundary starting two groups
+            return None, branched            # a boundary starting two groups
         by_older[group.older_boundary_id] = group
     younger = {g.younger_boundary_id for g in plan.span_groups}
     heads = [g for g in plan.span_groups if g.older_boundary_id not in younger]
     if len(heads) != 1:
-        return None
+        return None, branched
 
     ordered_groups, seen = [], set()
     current = heads[0]
     while current is not None:
         if id(current) in seen:
-            return None
+            return None, branched
         seen.add(id(current))
         ordered_groups.append(current)
         current = by_older.get(current.younger_boundary_id)
     if len(ordered_groups) != len(plan.span_groups):
-        return None                          # more than one disjoint chain
+        return None, branched                # more than one disjoint chain
 
     boundary_ids = ([g.older_boundary_id for g in ordered_groups]
                     + [ordered_groups[-1].younger_boundary_id])
     if len(set(boundary_ids)) != len(boundary_ids):
-        return None
+        return None, branched
     if set(boundary_ids) != set(plan.boundary_names):
-        return None                          # a boundary outside the chain
+        return None, (
+            'a Boundary sits outside the sequence of phases, so it is not '
+            'part of a single chain of transitions'
+        )
 
     # Every date must sit in exactly one group.
     placed: Dict[str, int] = {}
     for index, group in enumerate(ordered_groups):
         for date_id in group.date_ids:
             if date_id in placed:
-                return None
+                return None, branched
             placed[date_id] = index
-    if any(m['id'] not in placed for m in measurements):
-        return None
+    unenclosed = [m for m in measurements if m['id'] not in placed]
+    if unenclosed:
+        names = ', '.join(
+            sorted(m.get('sample_name') or m['id'] for m in unenclosed[:4])
+        )
+        if len(unenclosed) > 4:
+            names += f' and {len(unenclosed) - 4} more'
+        return None, (
+            f'{len(unenclosed)} date(s) sit outside every Boundary '
+            f'({names}). Add a Boundary either side of the phases holding '
+            'them so they fall inside the chain'
+        )
 
     # Finally: the chain must already imply every ordering constraint the tree
     # asks for. Rank boundary i at 2i and group i at 2i+1, oldest first; a
@@ -203,12 +244,16 @@ def layout(root: Dict, measurements: List[Dict]) -> Optional[Chain]:
         older_ranks = [rank(k, t) for k, t in older_terms]
         younger_ranks = [rank(k, t) for k, t in younger_terms]
         if any(r is None for r in older_ranks + younger_ranks):
-            return None
+            return None, branched
         if max(older_ranks) >= min(younger_ranks):
-            return None
+            return None, (
+                'two groups are ordered against each other with no Boundary '
+                'between them. Add a Boundary at that transition to make the '
+                'model exactly solvable'
+            )
 
     return Chain(boundary_ids, [list(g.date_ids) for g in ordered_groups],
-                 dict(plan.boundary_names))
+                 dict(plan.boundary_names)), None
 
 
 # --------------------------------------------------------------------------
