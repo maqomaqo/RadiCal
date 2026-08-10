@@ -1,0 +1,334 @@
+"""
+The OxCal-style MH/Gibbs sampler (services/gibbs.py).
+
+The oracle is services/exact_chain.py. On a chain-shaped model it integrates the
+same posterior exactly, so the sampler can be held to a real answer rather than
+to its own convergence diagnostics -- which is the whole reason to build it in
+that order. A branching model is checked the one way it can be without an exact
+solver for it: two INDEPENDENT branches, each of which is separately a chain, so
+exact_chain solves them one at a time while the sampler has to solve the
+combined model that layout() refuses.
+
+Sweep counts are kept modest so the suite stays quick, with tolerances set from
+the measured agreement rather than from what happens to pass -- see the
+docstrings for the numbers each was chosen against. No pymc anywhere: the
+sampler is pure numpy.
+"""
+import itertools
+
+import numpy as np
+import pytest
+
+from app.services import exact_chain as ec
+from app.services import gibbs
+from app.services.model_tree import with_implicit_boundaries
+
+import oxcal_fixture as ox
+
+_IDS = itertools.count()
+
+
+def _element(kind, name, children=None):
+    return {'id': f'g{next(_IDS)}', 'element_type': kind, 'name': name,
+            'tpq_age_bp': None, 'taq_age_bp': None, 'children': children or []}
+
+
+def _date(element_id, age_bp, name=None):
+    tag = f'gd{next(_IDS)}'
+    return {'id': tag, 'sample_name': name or tag, 'age_bp': age_bp,
+            'error_1sigma': 30, 'curve_id': 'shcal20', 'element_id': element_id,
+            'material_type': 'charcoal', 'sample_type': 'terrestrial'}
+
+
+def _exact_grid(exact):
+    return np.arange(exact['grid']['lower'], exact['grid']['upper'] + 1e-9,
+                     exact['grid']['step'])
+
+
+class TestAgreesWithTheExactSolver:
+    """
+    The chain models, where an exact answer exists. Both solvers are given the
+    same grid so a resolution difference cannot be mistaken for a difference in
+    inference.
+    """
+
+    @pytest.mark.parametrize('run', ['shared_boundary', 'unordered'])
+    def test_posterior_means_match(self, run):
+        """
+        Measured at 20,000 sweeps across five seeds: 0.19-1.23 years from the
+        exact answer on `unordered`, 0.21-0.41 on `shared_boundary`. 3 years is
+        comfortably above that and still far below the ~40-year separation
+        between this fixture's two calibration lobes, which is the error that
+        would actually matter.
+        """
+        measurements = ox.measurements()
+        tree = ox.model_tree(run)
+        chain = ec.layout(tree, measurements)
+        exact = ec.solve(measurements, tree, chain, num_samples=100)
+
+        sampled = gibbs.solve(measurements, tree, sweeps=20000, num_samples=100,
+                              grid=_exact_grid(exact))
+        errors = np.array([
+            sampled['measurements'][m['id']]['posterior_mean']
+            - exact['measurements'][m['id']]['posterior_mean']
+            for m in measurements
+        ])
+        assert np.sqrt((errors ** 2).mean()) < 3.0, errors.round(2)
+
+    def test_it_gets_the_calibration_lobes_right(self):
+        """
+        The point of the exercise. These dates calibrate to two ranges about 40
+        years apart, and SMC mis-weights them -- it put two ordered groups 57
+        years apart where the exact answer is 19 and OxCal says 13. Landing
+        within a few years of the exact answer means the lobe weights are right,
+        since getting them wrong moves the mean by tens of years.
+        """
+        measurements = ox.measurements()
+        tree, inserted = with_implicit_boundaries(ox.model_tree('ordered'))
+        assert inserted
+        chain = ec.layout(tree, measurements)
+        exact = ec.solve(measurements, tree, chain, num_samples=100)
+        sampled = gibbs.solve(measurements, tree, sweeps=20000, num_samples=100,
+                              grid=_exact_grid(exact))
+
+        def mean_ad(results, ids):
+            return np.mean([1950 - results['measurements'][i]['posterior_mean']
+                            for i in ids])
+
+        exact_gap = mean_ad(exact, ox.ROCKSHELTER) - mean_ad(exact, ox.QUARRY)
+        sampled_gap = mean_ad(sampled, ox.ROCKSHELTER) - mean_ad(sampled, ox.QUARRY)
+        assert abs(sampled_gap - exact_gap) < 5.0, (sampled_gap, exact_gap)
+
+    def test_interior_boundaries_match(self):
+        """
+        Interior boundaries only. An OUTERMOST boundary's posterior is genuinely
+        heavy-tailed (sd of 240+ years on the branching case below), so its mean
+        depends on how wide the calendar window is -- exact_chain reports
+        edge_mass for exactly that reason. Pinning it here would be pinning the
+        window, not the sampler.
+        """
+        measurements = ox.measurements()
+        tree = ox.model_tree('shared_boundary')
+        chain = ec.layout(tree, measurements)
+        exact = ec.solve(measurements, tree, chain, num_samples=100)
+        sampled = gibbs.solve(measurements, tree, sweeps=20000, num_samples=100,
+                              grid=_exact_grid(exact))
+
+        interior = chain.boundary_ids[1:-1]
+        assert interior, 'this fixture should have a shared interior boundary'
+        for bid in interior:
+            a = exact['boundaries'][bid]['posterior']['posterior_mean']
+            b = sampled['boundaries'][bid]['posterior']['posterior_mean']
+            assert abs(a - b) < 5.0, (bid, a, b)
+
+
+class TestBranchingModels:
+    """
+    The models this sampler exists for -- the ones exact_chain declines.
+    """
+
+    def _two_branches(self):
+        a1, a2 = _element('phase', 'A1'), _element('phase', 'A2')
+        branch_a = _element('sequence', 'Trench A', [
+            _element('boundary', 'sA'), a1, _element('boundary', 'mA'),
+            a2, _element('boundary', 'eA')])
+        b1, b2 = _element('phase', 'B1'), _element('phase', 'B2')
+        branch_b = _element('sequence', 'Trench B', [
+            _element('boundary', 'sB'), b1, _element('boundary', 'mB'),
+            b2, _element('boundary', 'eB')])
+        combined = _element('phase', 'Site', [branch_a, branch_b])
+        dates_a = [_date(a1['id'], 600), _date(a1['id'], 620),
+                   _date(a2['id'], 540), _date(a2['id'], 560)]
+        dates_b = [_date(b1['id'], 900), _date(b1['id'], 920),
+                   _date(b2['id'], 840), _date(b2['id'], 860)]
+        return branch_a, branch_b, combined, dates_a, dates_b
+
+    def test_two_parallel_trenches_are_not_exactly_solvable(self):
+        """The premise: this is the shape that has no exact answer to fall back
+        on, and the shape that used to reach SMC silently."""
+        _a, _b, combined, dates_a, dates_b = self._two_branches()
+        assert ec.layout(combined, dates_a + dates_b) is None
+
+    def test_it_reproduces_each_branch_solved_separately(self):
+        """
+        Two branches with nothing ordering them and no enclosing boundary are
+        independent, so solving them one at a time is exact -- and the sampler,
+        given the combined model it cannot decompose, must agree.
+
+        The span prior is off on both sides deliberately. It is applied over a
+        Sequence's outermost boundaries, and the sampler currently applies it
+        globally rather than per Sequence (see its module docstring), so leaving
+        it on would compare two different priors: measured, that alone moved the
+        dates from 0.79 to 9.92 years rms. With the same prior on both sides the
+        agreement is 0.79 years.
+        """
+        branch_a, branch_b, combined, dates_a, dates_b = self._two_branches()
+        exact_a = ec.solve(dates_a, branch_a, ec.layout(branch_a, dates_a),
+                           num_samples=100, uniform_span_prior=False)
+        exact_b = ec.solve(dates_b, branch_b, ec.layout(branch_b, dates_b),
+                           num_samples=100, uniform_span_prior=False)
+        sampled = gibbs.solve(dates_a + dates_b, combined, sweeps=20000,
+                              num_samples=100, uniform_span_prior=False)
+
+        errors = []
+        for exact, subset in ((exact_a, dates_a), (exact_b, dates_b)):
+            for m in subset:
+                errors.append(sampled['measurements'][m['id']]['posterior_mean']
+                              - exact['measurements'][m['id']]['posterior_mean'])
+        errors = np.array(errors)
+        assert np.sqrt((errors ** 2).mean()) < 3.0, errors.round(2)
+
+    def test_the_two_branches_stay_where_their_own_dates_put_them(self):
+        """
+        A sanity check on the thing most likely to go wrong structurally: the
+        branches are unordered, so nothing should drag one towards the other. A
+        sampler that coupled them -- through a global span term, say -- would
+        pull them together, and that would still be invisible in a per-date
+        comparison if both branches moved by similar amounts.
+
+        The separation is taken from the two branches' own exact solves rather
+        than from the radiocarbon ages, which are 300 years apart: calibration
+        does not preserve that gap (it comes out near 190 calendar years), so a
+        threshold read off the inputs would be measuring the curve, not the
+        sampler.
+        """
+        branch_a, branch_b, combined, dates_a, dates_b = self._two_branches()
+        exact_a = ec.solve(dates_a, branch_a, ec.layout(branch_a, dates_a),
+                           num_samples=100, uniform_span_prior=False)
+        exact_b = ec.solve(dates_b, branch_b, ec.layout(branch_b, dates_b),
+                           num_samples=100, uniform_span_prior=False)
+        sampled = gibbs.solve(dates_a + dates_b, combined, sweeps=20000,
+                              num_samples=100, uniform_span_prior=False)
+
+        def separation(results_a, results_b):
+            mean_a = np.mean([results_a['measurements'][m['id']]['posterior_mean']
+                              for m in dates_a])
+            mean_b = np.mean([results_b['measurements'][m['id']]['posterior_mean']
+                              for m in dates_b])
+            return mean_b - mean_a
+
+        expected = separation(exact_a, exact_b)
+        assert expected > 100.0, 'the fixture should keep the branches well apart'
+        assert abs(separation(sampled, sampled) - expected) < 3.0, (
+            separation(sampled, sampled), expected)
+
+
+class TestTheChainCanActuallyMove:
+    """
+    Two failures found while building this, both of which produced a sampler
+    that ran, reported healthy-looking diagnostics, and was wrong.
+    """
+
+    def test_the_starting_state_is_feasible_despite_a_date_inversion(self):
+        """
+        Raw radiocarbon ages that contradict the stratigraphy are ordinary --
+        resolving that inversion is much of why the model is built -- so the
+        naive "every date at its own likelihood mode" state is usually
+        infeasible. With HARD constraints that does not merely mix badly: every
+        conditional collapses onto a single allowed index and the chain cannot
+        move at all. The first version of this repaired the state locally and
+        drove whole groups onto one index, leaving the log posterior at -inf.
+        """
+        early, late = _element('phase', 'Early'), _element('phase', 'Late')
+        tree = _element('sequence', 'Site', [
+            _element('boundary', 'Start'), early, _element('boundary', 'Mid'),
+            late, _element('boundary', 'End')])
+        # Inverted: the stratigraphically EARLIER phase holds the YOUNGER date.
+        measurements = [_date(early['id'], 500), _date(late['id'], 900)]
+
+        model = gibbs.Model(measurements, tree)
+        state = model.initial_state()
+        assert np.isfinite(model.log_posterior(state))
+
+    def test_a_phase_of_unordered_dates_updates_as_one_block(self):
+        """
+        Dates in a phase are unordered with respect to each other, so they are
+        conditionally independent given the boundaries and belong in one blocked
+        update -- fewer steps and better mixing than sweeping them singly.
+        """
+        phase = _element('phase', 'Only')
+        tree = _element('sequence', 'Site', [
+            _element('boundary', 'Start'), phase, _element('boundary', 'End')])
+        measurements = [_date(phase['id'], 3000 + 20 * i) for i in range(5)]
+        model = gibbs.Model(measurements, tree)
+        assert len(model.blocks) == 1
+        assert len(model.blocks[0]) == 5
+
+    def test_ordered_groups_are_never_in_the_same_block(self):
+        early, late = _element('phase', 'Early'), _element('phase', 'Late')
+        tree = _element('sequence', 'Site', [early, late])
+        measurements = [_date(early['id'], 3200), _date(late['id'], 3000)]
+        model = gibbs.Model(measurements, tree)
+        for block in model.blocks:
+            assert len(block) == 1, 'these two dates constrain each other'
+
+    def test_the_wide_proposal_is_what_makes_it_usable(self, monkeypatch):
+        """
+        Why WIDE_MOVE_FRACTION exists, as a measurement rather than a comment.
+
+        Adaptation tunes the translation proposal to ~30% acceptance, which on
+        these targets is a step of a few years -- so moving between calibration
+        lobes 40 years apart happens only by diffusion and the lobe WEIGHTS
+        converge far too slowly. With the wide component switched off, the same
+        run was 1.5-32.6 years from the exact answer across five seeds; with it,
+        0.19-1.23.
+        """
+        measurements = ox.measurements()
+        tree = ox.model_tree('unordered')
+        exact = ec.solve(measurements, tree, ec.layout(tree, measurements),
+                         num_samples=100)
+        grid = _exact_grid(exact)
+
+        def rms(sampled):
+            errors = np.array([
+                sampled['measurements'][m['id']]['posterior_mean']
+                - exact['measurements'][m['id']]['posterior_mean']
+                for m in measurements
+            ])
+            return float(np.sqrt((errors ** 2).mean()))
+
+        with_wide = rms(gibbs.solve(measurements, tree, sweeps=20000,
+                                    num_samples=100, grid=grid, seed=2))
+        monkeypatch.setattr(gibbs, 'WIDE_MOVE_FRACTION', 0.0)
+        without = rms(gibbs.solve(measurements, tree, sweeps=20000,
+                                  num_samples=100, grid=grid, seed=2))
+        assert with_wide < 3.0, with_wide
+        assert without > with_wide, (without, with_wide)
+
+
+class TestReportedShape:
+    def test_it_returns_what_the_other_solvers_do(self):
+        """
+        Same shape as exact_chain.solve and BayesianChronology.extract_results,
+        so nothing downstream needs to know which produced a result.
+        """
+        phase = _element('phase', 'Only')
+        tree = _element('sequence', 'Site', [
+            _element('boundary', 'Start'), phase, _element('boundary', 'End')])
+        measurements = [_date(phase['id'], 3000), _date(phase['id'], 3050)]
+        sampled = gibbs.solve(measurements, tree, sweeps=2000, num_samples=50)
+
+        assert sampled['method'] == 'gibbs'
+        assert set(sampled['measurements']) == {m['id'] for m in measurements}
+        for summary in sampled['measurements'].values():
+            for key in ('posterior_mean', 'posterior_median', 'posterior_std',
+                        'hpd_68', 'hpd_95', 'hpd_68_ranges', 'hpd_95_ranges',
+                        'probability_distribution', 'posterior_samples'):
+                assert key in summary, key
+        assert len(sampled['boundaries']) == 2
+        assert 0.0 <= sampled['convergence'] <= 1.0
+
+    def test_an_outlier_probability_is_reported_when_asked_for(self):
+        """The outlier model is a property of a date, not of how the model is
+        solved, so it comes through the shared likelihood tables unchanged."""
+        phase = _element('phase', 'Only')
+        tree = _element('sequence', 'Site', [
+            _element('boundary', 'Start'), phase, _element('boundary', 'End')])
+        measurements = [
+            dict(_date(phase['id'], 3000), outlier_prior=0.05, outlier_model='general'),
+            dict(_date(phase['id'], 3050), outlier_prior=0.05, outlier_model='general'),
+        ]
+        sampled = gibbs.solve(measurements, tree, sweeps=2000, num_samples=50)
+        for m in measurements:
+            probability = sampled['measurements'][m['id']]['outlier_probability']
+            assert 0.0 <= probability <= 1.0

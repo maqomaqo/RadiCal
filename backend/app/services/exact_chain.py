@@ -371,6 +371,59 @@ def _effective_date_bounds(measurement: Dict, element_bounds: Dict) -> Tuple:
     return effective_bounds(measurement, {'taq_age_bp': el_taq, 'tpq_age_bp': el_tpq})
 
 
+def date_tables(
+    grid: np.ndarray, measurements: List[Dict], element_bounds: Dict,
+) -> Tuple[Dict[str, np.ndarray], Dict[str, np.ndarray],
+           Dict[str, Tuple[np.ndarray, np.ndarray, float]]]:
+    """
+    Every date's likelihood on `grid`, its cumulative integral, and the parts
+    needed to report an outlier probability: ({id: likelihood},
+    {id: cumulative}, {id: (inlier, outlier component, prior)}).
+
+    Each likelihood is normalised to integrate to one over the grid, so every
+    interval integral lands in [0, 1] and long products of them cannot
+    underflow. A date carrying an outlier prior has its Bernoulli indicator
+    integrated out here (_with_outlier_component), which is exact and leaves
+    the rest of the inference untouched -- the outlier model is a property of a
+    date, not of how the model is solved.
+
+    Shared with services/gibbs.py rather than written out twice. Both solvers
+    need the identical table for their answers to be comparable at all, and a
+    second copy of the normalisation, the TPQ/TAQ truncation and the outlier
+    mixture would drift -- which would show up as the two solvers disagreeing
+    for a reason that has nothing to do with either one's inference.
+    """
+    dt = float(grid[1] - grid[0])
+    likelihood: Dict[str, np.ndarray] = {}
+    cumulative: Dict[str, np.ndarray] = {}
+    outlier_parts: Dict[str, Tuple[np.ndarray, np.ndarray, float]] = {}
+
+    for m in measurements:
+        lik = _date_likelihood(grid, m, _effective_date_bounds(m, element_bounds))
+        total = lik.sum() * dt
+        if total <= 0 or not np.isfinite(total):
+            raise ValueError(
+                f"sample '{m.get('sample_name', m['id'])}' has no probability inside "
+                'its allowed calendar range'
+            )
+        lik = lik / total
+        prior = m.get('outlier_prior') or 0.0
+        if prior > 0:
+            model_name = m.get('outlier_model') or DEFAULT_OUTLIER_MODEL
+            if model_name not in OUTLIER_MODELS:
+                raise ValueError(
+                    f"sample '{m.get('sample_name', m['id'])}' has unknown outlier "
+                    f"model '{model_name}'; expected one of {', '.join(OUTLIER_MODELS)}"
+                )
+            mixture, broad = _with_outlier_component(grid, lik, prior, model_name)
+            outlier_parts[m['id']] = (lik, broad, float(prior))
+            lik = mixture
+        likelihood[m['id']] = lik
+        cumulative[m['id']] = np.cumsum(lik) * dt
+
+    return likelihood, cumulative, outlier_parts
+
+
 def _build_grid(measurements: List[Dict], element_bounds: Dict,
                 num_groups: int = 1) -> np.ndarray:
     """
@@ -584,32 +637,8 @@ def solve(measurements: List[Dict], root: Dict, chain: Chain,
     dt = float(grid[1] - grid[0])
     M = len(grid)
 
-    # Per-date likelihood, normalised so every interval integral lands in
-    # [0, 1] and the products below cannot underflow.
-    likelihood, cumulative = {}, {}
-    outlier_parts: Dict[str, Tuple[np.ndarray, np.ndarray, float]] = {}
-    for m in measurements:
-        lik = _date_likelihood(grid, m, _effective_date_bounds(m, element_bounds))
-        total = lik.sum() * dt
-        if total <= 0 or not np.isfinite(total):
-            raise ValueError(
-                f"sample '{m.get('sample_name', m['id'])}' has no probability inside "
-                'its allowed calendar range'
-            )
-        lik = lik / total
-        prior = m.get('outlier_prior') or 0.0
-        if prior > 0:
-            model_name = m.get('outlier_model') or DEFAULT_OUTLIER_MODEL
-            if model_name not in OUTLIER_MODELS:
-                raise ValueError(
-                    f"sample '{m.get('sample_name', m['id'])}' has unknown outlier "
-                    f"model '{model_name}'; expected one of {', '.join(OUTLIER_MODELS)}"
-                )
-            mixture, broad = _with_outlier_component(grid, lik, prior, model_name)
-            outlier_parts[m['id']] = (lik, broad, float(prior))
-            lik = mixture
-        likelihood[m['id']] = lik
-        cumulative[m['id']] = np.cumsum(lik) * dt
+    likelihood, cumulative, outlier_parts = date_tables(
+        grid, measurements, element_bounds)
 
     span = grid[None, :] - grid[:, None]              # [younger, older]
     valid = span > 0
