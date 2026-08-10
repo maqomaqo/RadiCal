@@ -149,26 +149,29 @@ class TestBranchingModels:
         _a, _b, combined, dates_a, dates_b = self._two_branches()
         assert ec.layout(combined, dates_a + dates_b) is None
 
-    def test_it_reproduces_each_branch_solved_separately(self):
+    @pytest.mark.parametrize('uniform_span_prior', [True, False])
+    def test_it_reproduces_each_branch_solved_separately(self, uniform_span_prior):
         """
         Two branches with nothing ordering them and no enclosing boundary are
         independent, so solving them one at a time is exact -- and the sampler,
         given the combined model it cannot decompose, must agree.
 
-        The span prior is off on both sides deliberately. It is applied over a
-        Sequence's outermost boundaries, and the sampler currently applies it
-        globally rather than per Sequence (see its module docstring), so leaving
-        it on would compare two different priors: measured, that alone moved the
-        dates from 0.79 to 9.92 years rms. With the same prior on both sides the
-        agreement is 0.79 years.
+        Run with the span prior both on and off. On is the case that used to
+        fail: the correction was applied once over the whole model, so the
+        combined solve got no correction at all (there is no unique outermost
+        boundary across two independent branches) while the oracle applied one
+        per branch. That mismatch alone put the dates 9.92 years out and the
+        boundaries 70. Grouping the correction per component of the boundary
+        ordering gives each branch its own, and both now agree to about 0.5
+        years -- see Model._span_priors.
         """
         branch_a, branch_b, combined, dates_a, dates_b = self._two_branches()
         exact_a = ec.solve(dates_a, branch_a, ec.layout(branch_a, dates_a),
-                           num_samples=100, uniform_span_prior=False)
+                           num_samples=100, uniform_span_prior=uniform_span_prior)
         exact_b = ec.solve(dates_b, branch_b, ec.layout(branch_b, dates_b),
-                           num_samples=100, uniform_span_prior=False)
+                           num_samples=100, uniform_span_prior=uniform_span_prior)
         sampled = gibbs.solve(dates_a + dates_b, combined, sweeps=20000,
-                              num_samples=100, uniform_span_prior=False)
+                              num_samples=100, uniform_span_prior=uniform_span_prior)
 
         errors = []
         for exact, subset in ((exact_a, dates_a), (exact_b, dates_b)):
@@ -177,6 +180,23 @@ class TestBranchingModels:
                               - exact['measurements'][m['id']]['posterior_mean'])
         errors = np.array(errors)
         assert np.sqrt((errors ** 2).mean()) < 3.0, errors.round(2)
+
+    def test_each_independent_branch_gets_its_own_span_prior(self):
+        """
+        The structural claim behind the fix, asserted directly rather than only
+        through its effect on the numbers: two independent branches produce two
+        corrections, each over its own branch's outermost boundaries.
+        """
+        branch_a, branch_b, combined, dates_a, dates_b = self._two_branches()
+        model = gibbs.Model(dates_a + dates_b, combined)
+        assert len(model.span_priors) == 2
+
+        branch_boundaries = []
+        for branch in (branch_a, branch_b):
+            chain = ec.layout(branch, dates_a if branch is branch_a else dates_b)
+            branch_boundaries.append((chain.boundary_ids[0], chain.boundary_ids[-1],
+                                      len(chain.boundary_ids) - 2))
+        assert sorted(model.span_priors) == sorted(branch_boundaries)
 
     def test_the_two_branches_stay_where_their_own_dates_put_them(self):
         """
@@ -211,6 +231,89 @@ class TestBranchingModels:
         assert expected > 100.0, 'the fixture should keep the branches well apart'
         assert abs(separation(sampled, sampled) - expected) < 3.0, (
             separation(sampled, sampled), expected)
+
+
+class TestUniformSpanPriorGrouping:
+    """
+    Which boundaries the correction is applied over. The exponent counts
+    boundaries left FREE inside a span, so the grouping is by component of the
+    boundary ordering rather than by Sequence element -- see
+    Model._span_priors for the derivation this follows.
+    """
+
+    @pytest.mark.parametrize('run', ['shared_boundary', 'ordered', 'unordered'])
+    def test_it_reduces_to_the_exact_solver_on_a_chain(self, run):
+        """
+        The load-bearing check. exact_chain applies 1/(first - last)^(n-2) over
+        the chain's own ends, so on any chain this must produce exactly that:
+        one correction, the chain's ends, that exponent. `unordered` has only
+        two boundaries, where the exponent is zero and there is nothing to
+        apply -- exact_chain skips it there too.
+        """
+        measurements = ox.measurements()
+        tree = ox.model_tree(run)
+        chain = ec.layout(tree, measurements)
+        if chain is None:
+            tree, _inserted = with_implicit_boundaries(tree)
+            chain = ec.layout(tree, measurements)
+
+        model = gibbs.Model(measurements, tree)
+        exponent = len(chain.boundary_ids) - 2
+        if exponent <= 0:
+            assert model.span_priors == []
+        else:
+            assert model.span_priors == [
+                (chain.boundary_ids[0], chain.boundary_ids[-1], exponent)]
+
+    def test_switching_it_off_removes_every_correction(self):
+        measurements = ox.measurements()
+        tree = ox.model_tree('shared_boundary')
+        assert gibbs.Model(measurements, tree, uniform_span_prior=True).span_priors
+        assert gibbs.Model(measurements, tree,
+                           uniform_span_prior=False).span_priors == []
+
+    def test_parallel_branches_inside_one_outer_pair_share_one_correction(self):
+        """
+        Two branches bracketed by a single outer Start/End take ONE correction
+        over that outer pair, counting every boundary between them. They are
+        comparable to the same outer pair even though they are not comparable to
+        each other, and the exponent is a count of free interior boundaries --
+        which does not care whether those are ordered among themselves.
+        """
+        left_phase, right_phase = _element('phase', 'L'), _element('phase', 'R')
+        left = _element('sequence', 'Left', [
+            _element('boundary', 'lStart'), left_phase, _element('boundary', 'lEnd')])
+        right = _element('sequence', 'Right', [
+            _element('boundary', 'rStart'), right_phase, _element('boundary', 'rEnd')])
+        start, end = _element('boundary', 'Start'), _element('boundary', 'End')
+        tree = _element('sequence', 'Site', [
+            start, _element('phase', 'Both', [left, right]), end])
+        measurements = [_date(left_phase['id'], 3000), _date(right_phase['id'], 3100)]
+
+        model = gibbs.Model(measurements, tree)
+        assert len(model.span_priors) == 1
+        oldest, youngest, exponent = model.span_priors[0]
+        assert (oldest, youngest) == (start['id'], end['id'])
+        # Six boundaries in the component, four of them interior.
+        assert exponent == 4
+
+    def test_a_component_with_no_unique_outermost_pair_is_skipped(self):
+        """
+        Nothing to be about: with no single span, applying a correction would
+        change the model rather than de-bias it. Two branches inside an
+        unordered Phase, with no outer boundaries, is that case at the top
+        level -- each branch still gets its own.
+        """
+        a = _element('phase', 'A')
+        branch = _element('sequence', 'A seq', [
+            _element('boundary', 'aStart'), a, _element('boundary', 'aEnd')])
+        loose = _element('phase', 'Loose')
+        tree = _element('phase', 'Site', [branch, loose])
+        measurements = [_date(a['id'], 3000), _date(loose['id'], 3100)]
+
+        model = gibbs.Model(measurements, tree)
+        # aStart/aEnd are only two boundaries, so exponent 0 -- nothing at all.
+        assert model.span_priors == []
 
 
 class TestTheChainCanActuallyMove:

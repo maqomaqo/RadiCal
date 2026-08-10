@@ -88,16 +88,13 @@ from the full log posterior.
 Validation status
 -----------------
 Measured against exact_chain on chain-shaped models, where the exact marginals
-are ground truth: see tests/test_gibbs.py. NOT yet validated on the branching
-models that are the actual reason for it, because there is no independent oracle
-for those -- the plan is to trust it there only once it reproduces the exact
-answer wherever an exact answer exists.
-
-The UniformSpanPrior correction here uses the globally oldest and youngest
-boundary with n = the total boundary count, which reduces exactly to
-exact_chain._span_prior_correction on a chain. OxCal applies it per Sequence, so
-a model with several Sequences needs per-sequence treatment that this does not
-yet do.
+are ground truth, and on branching models against the one oracle available for
+those: two INDEPENDENT branches, each separately a chain, so exact_chain can
+solve them one at a time while the sampler has to solve the combined model it
+declines. See tests/test_gibbs.py for both, and _span_priors for how the
+UniformSpanPrior correction is grouped so that it reduces exactly to
+exact_chain's on a chain and to the per-branch corrections on independent
+branches.
 """
 from typing import Dict, List, Optional, Tuple
 
@@ -267,25 +264,101 @@ class Model:
 
         self.window = {p: self._own_window(p, p in self.likelihood) for p in self.params}
 
-        # The outermost pair the UniformSpanPrior correction applies over. It is
-        # a property of the boundary SET, not of the current state, so which two
-        # boundaries it is cannot be read off positions -- on a chain they are
-        # the ends, which is what the ordering makes them.
-        self.span_prior_exponent = max(0, len(self.boundary_ids) - 2)
-        self.oldest_boundary, self.youngest_boundary = self._outermost_boundaries()
+        self.span_priors = self._span_priors() if self.uniform_span_prior else []
 
-    def _outermost_boundaries(self) -> Tuple[Optional[str], Optional[str]]:
+    def _younger_reachable(self) -> Dict[str, set]:
         """
-        The boundary nothing is older than, and the one nothing is younger than,
-        by the ordering alone. None when the ordering does not single one out --
-        a branching model, where a global span prior would be the wrong shape
-        anyway (OxCal applies it per Sequence).
+        For every parameter, everything the ordering forces to be YOUNGER than
+        it, transitively.
+
+        Transitively matters: a sequence's ordering is emitted between adjacent
+        children, so the two boundaries either side of a phase are never
+        directly related to each other -- only through that phase's dates. A
+        direct-edges-only view would see a chain's boundaries as unrelated.
         """
-        oldest = [b for b in self.boundary_ids if not self.below[b]]
-        youngest = [b for b in self.boundary_ids if not self.above[b]]
-        if len(oldest) == 1 and len(youngest) == 1 and oldest[0] != youngest[0]:
-            return oldest[0], youngest[0]
-        return None, None
+        reachable: Dict[str, set] = {}
+
+        def walk(param: str) -> set:
+            if param in reachable:
+                return reachable[param]
+            reachable[param] = set()          # guards against revisiting
+            found = set()
+            for younger in self.above[param]:
+                found.add(younger)
+                found |= walk(younger)
+            reachable[param] = found
+            return found
+
+        for param in self.params:
+            walk(param)
+        return reachable
+
+    def _span_priors(self) -> List[Tuple[str, str, int]]:
+        """
+        The UniformSpanPrior corrections to apply, as (oldest boundary, youngest
+        boundary, exponent) -- one per group of boundaries that share a span.
+
+        OxCal applies the correction per Sequence, not once per model. The
+        derivation says why, and says what "per Sequence" has to mean here:
+        placing n ordered boundaries across a span leaves n-2 of them free
+        INSIDE it, so the induced prior on the span carries a factor
+        span^(n-2), which is what makes it depend on how finely the sequence was
+        subdivided (Nicholls and Jones 2001). Dividing it out needs the count of
+        free interior boundaries and the pair spanning them.
+
+        So the grouping is by connected component of the boundary ordering, with
+        the component's own outermost pair and its own count -- not by Sequence
+        element in the tree. That is the faithful reading rather than a
+        convenient one: the exponent counts free interior parameters, and an
+        interior boundary is free within the span whether or not it is ordered
+        against the other interior ones. Two parallel branches inside one outer
+        boundary pair therefore take a single correction over that outer pair,
+        while two INDEPENDENT branches take one each.
+
+        It reduces exactly to exact_chain._span_prior_correction on a chain:
+        one component, the ends as the pair, exponent len(boundaries) - 2.
+
+        A component with no unique outermost pair is skipped. There is then no
+        single span for the correction to be about, and inventing one would
+        change the model rather than de-bias it.
+        """
+        if len(self.boundary_ids) < 3:
+            return []
+
+        reachable = self._younger_reachable()
+        younger_boundaries = {
+            b: reachable[b] & set(self.boundary_ids) for b in self.boundary_ids
+        }
+
+        # Connected components of "is comparable to", by union-find.
+        parent = {b: b for b in self.boundary_ids}
+
+        def find(b):
+            while parent[b] != b:
+                parent[b] = parent[parent[b]]
+                b = parent[b]
+            return b
+
+        for b in self.boundary_ids:
+            for other in younger_boundaries[b]:
+                parent[find(other)] = find(b)
+
+        components: Dict[str, List[str]] = {}
+        for b in self.boundary_ids:
+            components.setdefault(find(b), []).append(b)
+
+        priors: List[Tuple[str, str, int]] = []
+        for members in components.values():
+            exponent = len(members) - 2
+            if exponent <= 0:
+                continue
+            rest = set(members)
+            oldest = [b for b in members if rest - {b} <= younger_boundaries[b]]
+            youngest = [b for b in members
+                        if all(b in younger_boundaries[o] for o in rest - {b})]
+            if len(oldest) == 1 and len(youngest) == 1 and oldest[0] != youngest[0]:
+                priors.append((oldest[0], youngest[0], exponent))
+        return priors
 
     def _build_blocks(self):
         """
@@ -367,18 +440,17 @@ class Model:
             with np.errstate(divide='ignore', invalid='ignore'):
                 log_dens += np.where(span > 0, -K * np.log(np.where(span > 0, span, 1.0)), -np.inf)
 
-        if self.uniform_span_prior and self.span_prior_exponent > 0:
-            n = self.span_prior_exponent
-            if boundary_id == self.oldest_boundary and self.youngest_boundary:
-                outer = candidates - self.grid[state.index[self.youngest_boundary]]
-            elif boundary_id == self.youngest_boundary and self.oldest_boundary:
-                outer = self.grid[state.index[self.oldest_boundary]] - candidates
+        for oldest_id, youngest_id, exponent in self.span_priors:
+            if boundary_id == oldest_id:
+                outer = candidates - self.grid[state.index[youngest_id]]
+            elif boundary_id == youngest_id:
+                outer = self.grid[state.index[oldest_id]] - candidates
             else:
-                outer = None
-            if outer is not None:
-                with np.errstate(divide='ignore', invalid='ignore'):
-                    log_dens += np.where(
-                        outer > 0, -n * np.log(np.where(outer > 0, outer, 1.0)), -np.inf)
+                continue
+            with np.errstate(divide='ignore', invalid='ignore'):
+                log_dens += np.where(
+                    outer > 0, -exponent * np.log(np.where(outer > 0, outer, 1.0)),
+                    -np.inf)
 
         finite = np.isfinite(log_dens)
         if not np.any(finite):
@@ -417,13 +489,12 @@ class Model:
                 return -np.inf
             total -= K * float(np.log(span))
 
-        if (self.uniform_span_prior and self.span_prior_exponent > 0
-                and self.oldest_boundary and self.youngest_boundary):
-            outer = (self.grid[state.index[self.oldest_boundary]]
-                     - self.grid[state.index[self.youngest_boundary]])
+        for oldest_id, youngest_id, exponent in self.span_priors:
+            outer = (self.grid[state.index[oldest_id]]
+                     - self.grid[state.index[youngest_id]])
             if outer <= 0:
                 return -np.inf
-            total -= self.span_prior_exponent * float(np.log(outer))
+            total -= exponent * float(np.log(outer))
 
         return total
 
@@ -710,9 +781,7 @@ def solve(measurements: List[Dict], root: Dict, sweeps: int = 4000,
         }
 
     results['method'] = 'gibbs'
-    results['uniform_span_prior'] = bool(
-        uniform_span_prior and model.span_prior_exponent > 0
-        and model.oldest_boundary is not None)
+    results['uniform_span_prior'] = bool(model.span_priors)
     results['sweeps'] = sweeps
     results['convergence'] = min(chain['convergence'].values()) if chain['convergence'] else 0.0
     results['acceptance'] = chain['acceptance']
