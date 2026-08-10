@@ -40,7 +40,6 @@ import MeasurementFields, {
 import {
   DateFormat,
   DATE_FORMAT_OPTIONS,
-  DEFAULT_DATE_FORMAT,
   saveDateFormatPreference,
 } from '@/utils/dateFormat'
 import { formatApiError } from '@/utils/apiError'
@@ -92,19 +91,23 @@ interface PreviewResult {
 export default function NewAnalysis() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
-  const [dateFormat, setDateFormat] = useState<DateFormat>(DEFAULT_DATE_FORMAT)
-  // Name, type, measurements, and (for Bayesian analyses) groups/
-  // relationships/TPQ-TAQ defined on the Model Structure page all live in a
-  // shared store rather than local state, so navigating to
-  // /new-analysis/model-structure and back doesn't lose anything that was
-  // already entered -- local useState here would reset to its initial
+  // Name, type, project, date format, measurements, and (for Bayesian
+  // analyses) groups/relationships/TPQ-TAQ defined on the Model Structure
+  // page all live in a shared store rather than local state, so navigating
+  // to /new-analysis/model-structure and back doesn't lose anything that
+  // was already entered -- local useState here would reset to its initial
   // value on every remount, silently reverting analysisType to
-  // "calibration" and losing whatever name was typed.
+  // "calibration" and losing whatever name, project, or date format had
+  // been chosen.
   const {
     name: analysisName,
     setName: setAnalysisName,
     analysisType,
     setAnalysisType,
+    projectId,
+    setProjectId,
+    dateFormat,
+    setDateFormat,
     measurements,
     addMeasurement,
     removeMeasurement,
@@ -159,7 +162,6 @@ export default function NewAnalysis() {
       deltaRErrorMissing(editing.draft))
 
   const [projects, setProjects] = useState<ProjectOption[]>([])
-  const [projectId, setProjectId] = useState<string>(searchParams.get('project') || '')
   // Only offered for single calibration -- a quick way to try a
   // measurement without it showing up in a project or the analysis list.
   const [saveResult, setSaveResult] = useState(true)
@@ -184,6 +186,17 @@ export default function NewAnalysis() {
 
   useEffect(() => {
     fetchProjects()
+  }, [])
+
+  // Arriving via a project's own "New Analysis" link (?project=<id>)
+  // preselects that project. Only applies when the draft doesn't already
+  // have one -- returning here from /new-analysis/model-structure re-mounts
+  // this component but carries no query param, so this must not clobber
+  // the project already sitting in the shared draft store.
+  useEffect(() => {
+    const fromQuery = searchParams.get('project')
+    if (fromQuery && !projectId) setProjectId(fromQuery)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // Editing an existing analysis: pull its saved inputs into the shared
@@ -255,6 +268,7 @@ export default function NewAnalysis() {
             relationship: r.relationship,
           })),
           mcmc: a.bayesian_config || undefined,
+          projectId: a.project_id || '',
           // Carry the saved structure into the draft, so running the edit
           // resubmits the tree it was saved with. Without it the draft has
           // no tree, the submit falls back to groups/relationships, and the
@@ -271,7 +285,6 @@ export default function NewAnalysis() {
               .filter(([, elementId]: [string, string | null]) => !!elementId)
           ),
         })
-        setProjectId(a.project_id || '')
       } catch (err) {
         if (!cancelled) alert('Error loading analysis: ' + (err as Error).message)
       } finally {

@@ -8,6 +8,7 @@
 // applies).
 import { create } from 'zustand'
 import type { DraftMeasurement, DraftGroup, DraftRelationship, ModelElement } from '@/types'
+import { DateFormat, DEFAULT_DATE_FORMAT } from '@/utils/dateFormat'
 
 export interface McmcConfig {
   mcmc_samples: number
@@ -27,6 +28,13 @@ export const DEFAULT_MCMC: McmcConfig = {
 interface AnalysisDraftState {
   name: string
   analysisType: 'calibration' | 'bayesian'
+  // Project and Result Date Format live here rather than as local useState
+  // on NewAnalysis.tsx for the same reason as everything else in this
+  // store: navigating to /new-analysis/model-structure and back remounts
+  // that page, and local state would silently reset to "no project" /
+  // cal BP on the way back.
+  projectId: string
+  dateFormat: DateFormat
   measurements: DraftMeasurement[]
   groups: DraftGroup[]
   relationships: DraftRelationship[]
@@ -46,6 +54,8 @@ interface AnalysisDraftState {
 
   setName: (name: string) => void
   setAnalysisType: (analysisType: 'calibration' | 'bayesian') => void
+  setProjectId: (projectId: string) => void
+  setDateFormat: (dateFormat: DateFormat) => void
   setMcmc: (mcmc: Partial<McmcConfig>) => void
   loadFromAnalysis: (payload: {
     analysisId: string
@@ -55,6 +65,7 @@ interface AnalysisDraftState {
     groups: DraftGroup[]
     relationships: DraftRelationship[]
     mcmc?: Partial<McmcConfig>
+    projectId?: string
     // The saved analysis's own structure. Hydrating these is what lets an
     // edit keep the tree it was saved with: submitting without them sends
     // the legacy groups/relationships instead, and the backend rebuilds a
@@ -82,6 +93,8 @@ interface AnalysisDraftState {
 export const useAnalysisDraftStore = create<AnalysisDraftState>((set) => ({
   name: '',
   analysisType: 'calibration',
+  projectId: '',
+  dateFormat: DEFAULT_DATE_FORMAT,
   measurements: [],
   groups: [],
   relationships: [],
@@ -98,16 +111,19 @@ export const useAnalysisDraftStore = create<AnalysisDraftState>((set) => ({
 
   setName: (name) => set({ name }),
   setAnalysisType: (analysisType) => set({ analysisType }),
+  setProjectId: (projectId) => set({ projectId }),
+  setDateFormat: (dateFormat) => set({ dateFormat }),
   setMcmc: (mcmc) => set((state) => ({ mcmc: { ...state.mcmc, ...mcmc } })),
 
   loadFromAnalysis: ({
     analysisId, name, analysisType, measurements, groups, relationships, mcmc,
-    modelTree, elementAssignments,
+    projectId, modelTree, elementAssignments,
   }) =>
     set({
       editingAnalysisId: analysisId,
       name,
       analysisType,
+      projectId: projectId ?? '',
       measurements,
       groups,
       relationships,
@@ -168,6 +184,8 @@ export const useAnalysisDraftStore = create<AnalysisDraftState>((set) => ({
     set({
       name: '',
       analysisType: 'calibration',
+      projectId: '',
+      dateFormat: DEFAULT_DATE_FORMAT,
       measurements: [],
       groups: [],
       relationships: [],
