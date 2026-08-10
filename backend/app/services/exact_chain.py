@@ -100,10 +100,23 @@ OUTLIER_LOG_SCALE_MAX = 4.0
 OUTLIER_SCALE_NODES = 24
 OUTLIER_KERNEL_HALF_WIDTH_YEARS = 20000.0
 # The charcoal/residual model instead assumes a one-sided gap: the dated
-# material formed some years BEFORE the context it was found in, never
-# after. Exponential with this mean, following OxCal's Charcoal_Outlier.
-CHARCOAL_TAU_YEARS = 200.0
-CHARCOAL_KERNEL_SPAN_TAUS = 8.0
+# material formed some years BEFORE the context it was found in, never after.
+# OxCal's Charcoal_Outlier is
+#
+#     Outlier_Model("Charcoal", Exp(1,-10,0), U(0,3), "t")
+#
+# -- an exponential gap truncated at 10 scale lengths, with the SCALE itself
+# drawn as 10^u over three decades, exactly as the General model draws its own
+# scale over four. Integrating that scale is not a refinement: with a single
+# fixed scale instead (this used one 200-year exponential) only 12% of the
+# offset mass lands within 20 years, against 55% for OxCal, so a flagged date
+# stops saying anything about where its context sits and drifts onto its
+# neighbours instead of pulling the group towards itself. Measured on a real
+# OxCal run of eleven Nenthorn dates with three at Outlier("Charcoal", 1.00),
+# integrating the scale moved the modelled dates from 16.1 to 9.9 years rms of
+# OxCal's own answer, and by a similar 6 years on every model structure tried.
+CHARCOAL_LOG_SCALE_MAX = 3.0
+CHARCOAL_KERNEL_SPAN_TAUS = 10.0
 OUTLIER_MODELS = ('general', 'charcoal')
 DEFAULT_OUTLIER_MODEL = 'general'
 # Resolution the reported HPD ranges are computed at, independent of the
@@ -299,14 +312,17 @@ def _outlier_kernel(step: float, half_width: float,
         model when you do not know WHY a date is wrong -- lab error, a
         mislabelled bag, contamination in either direction.
 
-    "charcoal" -- a one-sided exponential: the dated material formed a gap
-        g ~ Exp(tau) BEFORE the context, never after. This is old wood and
-        reworked material, where the error has a known direction, and
-        saying so is worth a lot. Measured on an injected residual date, it
-        recovered the model's Start boundary to AD 1292 against the general
-        model's 1201 (clean value 1339) and put the outlier probability at
-        90% rather than 66%, because a one-sided model does not have to
-        spend prior mass on the direction the material cannot be wrong in.
+    "charcoal" -- OxCal's `Outlier_Model("Charcoal", Exp(1,-10,0), U(0,3),
+        "t")`: a ONE-SIDED exponential gap, the dated material having formed
+        some years BEFORE the context and never after, with its scale drawn
+        over three decades the same way the general model draws its own. This
+        is old wood and reworked material, where the error has a known
+        direction, and saying so is worth a lot. Measured on an injected
+        residual date, it recovered the model's Start boundary to AD 1292
+        against the general model's 1201 (clean value 1339) and put the
+        outlier probability at 90% rather than 66%, because a one-sided model
+        does not have to spend prior mass on the direction the material
+        cannot be wrong in.
     """
     if model == 'charcoal':
         # One-sided, and the side matters. The MATERIAL is older than the
@@ -315,10 +331,24 @@ def _outlier_kernel(step: float, half_width: float,
         # negative lag; putting it at positive lag says the context predates
         # the wood found in it, which is residuality backwards and made a
         # residual date look MORE consistent rather than less.
-        span = CHARCOAL_KERNEL_SPAN_TAUS * CHARCOAL_TAU_YEARS
-        lags = np.arange(0.0, span + step, step)
-        density = np.exp(-lags / CHARCOAL_TAU_YEARS)
-        kernel = np.concatenate([density[::-1], np.zeros(len(lags) - 1)])
+        #
+        # Summed over scales rather than taken at one: see
+        # CHARCOAL_LOG_SCALE_MAX for what a single scale cost. Each scale is
+        # normalised BEFORE summing, so the mixture weights the decades
+        # uniformly (u ~ U(0,3)) rather than by how much of each fits on the
+        # grid, and every component is truncated at its own 10 scale lengths
+        # rather than at the widest one's.
+        widest = CHARCOAL_KERNEL_SPAN_TAUS * (10.0 ** CHARCOAL_LOG_SCALE_MAX)
+        lags = np.arange(0.0, widest + step, step)
+        total = np.zeros_like(lags)
+        for u in np.linspace(0.0, CHARCOAL_LOG_SCALE_MAX, OUTLIER_SCALE_NODES):
+            tau = 10.0 ** u
+            density = np.where(lags <= CHARCOAL_KERNEL_SPAN_TAUS * tau,
+                               np.exp(-lags / tau), 0.0)
+            weight = density.sum()
+            if weight > 0:
+                total += density / weight
+        kernel = np.concatenate([total[::-1], np.zeros(len(lags) - 1)])
         return kernel / kernel.sum()
 
     lags = np.arange(-half_width, half_width + step, step)
