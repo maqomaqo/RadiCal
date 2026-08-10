@@ -135,7 +135,7 @@ class TestBayesianValidation:
     def test_unknown_relationship_type_rejected(self, client):
         """Previously an unrecognized relationship (e.g. a typo like
         "beneath" instead of "below") was silently dropped with no error
-        and no effect on the model -- bayesian.py's if/elif chain has no
+        and no effect on the model -- the constraint builder's if/elif chain had no
         else branch. Now it's rejected before the request is even
         processed."""
         response = client.post(

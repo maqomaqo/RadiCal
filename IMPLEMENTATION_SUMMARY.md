@@ -68,7 +68,10 @@ def load_intcal20() -> CalibrationCurve:
 ---
 
 ### 4. ✅ Bayesian Constraint Handling
-**File:** `backend/app/services/bayesian.py`
+**File:** `backend/app/services/bayesian.py` — *since deleted; the PyMC model
+described here was replaced by `exact_chain.py` (exact integration) and
+`gibbs.py` (OxCal's MH/Gibbs sampler). Constraints are now hard truncations
+rather than Potential penalties.*
 
 **Before:**
 ```python
@@ -202,15 +205,11 @@ CalibrationCurve.calibrate()
   ├─ Compute likelihood: P(c14_obs | cal_age)
   ├─ Calculate HPD intervals
   ↓
-BayesianChronology.build_model() [if Bayesian]
-  ├─ Create age priors (Uniform 0-50,000 BP)
-  ├─ Add stratigraphic constraints (Potential)
-  ├─ Add likelihood from measurements (Normal)
-  ↓
-BayesianChronology.sample()
-  ├─ Run PyMC MCMC (4 chains, 2000 draws, 1000 tune)
-  ├─ Extract posterior samples
-  ├─ Calculate HPD intervals via ArviZ
+_run_bayesian() [if Bayesian]          # superseded flow; see note below
+  ├─ exact_chain.layout() — is the model a chain?
+  ├─ yes: exact_chain.solve()  — exact integration on a calendar grid
+  ├─ no:  gibbs.solve()        — MH/Gibbs, extended until converged
+  ├─ Calculate HPD intervals
   ↓
 Store in Database
   ├─ Analysis record (metadata)
@@ -237,7 +236,8 @@ backend/
 │   │   └── results.py               ✓ stub (placeholder exports)
 │   └── services/
 │       ├── calibration.py           ✅ FIXED: curve loading + calibration
-│       └── bayesian.py              ✅ FIXED: constraints via Potential
+│       ├── exact_chain.py          ✅ exact integration for chain models
+│       └── gibbs.py                 ✅ OxCal's MH/Gibbs for everything else
 ├── requirements.txt                 ✓ already complete
 ├── Dockerfile                       ✓ no changes needed
 └── calibration_data/                ✅ NEW: curve data files

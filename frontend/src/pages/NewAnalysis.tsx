@@ -445,7 +445,7 @@ export default function NewAnalysis() {
         // Model Structure page too (groups, relationships, and any TPQ/TAQ
         // limiters set there or inline on a measurement) -- previously
         // this always sent relationships: [], so the working constraint
-        // logic in bayesian.py was unreachable from the UI entirely.
+        // logic on the backend was unreachable from the UI entirely.
         //
         // The backend rejects a circular relationship set with a 422
         // before running any MCMC, but checking here too avoids sending
@@ -642,42 +642,28 @@ export default function NewAnalysis() {
               </FormControl>
             </Box>
 
-            {/* MCMC settings -- previously hardcoded here and unreachable
-                from the UI. Exposed now because duplicating an analysis to
-                compare model variants is exactly when varying them (e.g.
-                more draws for a chain that converged poorly) becomes
-                useful. */}
+            {/* Tune and Chains used to sit beside Draws here, from when the
+                fallback was PyMC's SMC sampler. Neither means anything now:
+                a chain-shaped model is integrated exactly, with no run at
+                all, and anything else goes to a Gibbs sampler that extends
+                its own run until it converges rather than taking a length on
+                trust. They are still accepted in the payload so saved
+                analyses round-trip, but presenting spinners that change
+                nothing would just be misleading. */}
             {analysisType === 'bayesian' && (
               <Box sx={{ mb: 2 }}>
                 <Typography variant="subtitle2" gutterBottom>
-                  MCMC Settings
+                  Model Settings
                 </Typography>
-                <Box sx={{ display: 'flex', gap: 2 }}>
-                  <TextField
-                    fullWidth
-                    size="small"
-                    type="number"
-                    label="Draws"
-                    value={mcmc.mcmc_samples}
-                    onChange={(e) => setMcmc({ mcmc_samples: Number(e.target.value) })}
-                  />
-                  <TextField
-                    fullWidth
-                    size="small"
-                    type="number"
-                    label="Tune"
-                    value={mcmc.mcmc_tune}
-                    onChange={(e) => setMcmc({ mcmc_tune: Number(e.target.value) })}
-                  />
-                  <TextField
-                    fullWidth
-                    size="small"
-                    type="number"
-                    label="Chains"
-                    value={mcmc.mcmc_chains}
-                    onChange={(e) => setMcmc({ mcmc_chains: Number(e.target.value) })}
-                  />
-                </Box>
+                <TextField
+                  fullWidth
+                  size="small"
+                  type="number"
+                  label="Posterior draws"
+                  value={mcmc.mcmc_samples}
+                  onChange={(e) => setMcmc({ mcmc_samples: Number(e.target.value) })}
+                  helperText="How many samples each date's posterior is reported with."
+                />
                 <FormControlLabel
                   sx={{ mt: 1 }}
                   control={
@@ -687,7 +673,7 @@ export default function NewAnalysis() {
                     />
                   }
                   label={
-                    <Tooltip title="OxCal's UniformSpanPrior correction (Nicholls and Jones 2001), on by default. Only affects sequences with three or more boundaries, and only the exact solver.">
+                    <Tooltip title="OxCal's UniformSpanPrior correction (Nicholls and Jones 2001), on by default. Only affects a sequence with three or more boundaries.">
                       <span>Uniform span prior</span>
                     </Tooltip>
                   }

@@ -274,8 +274,8 @@ def _run_bayesian(
     Everything else goes to services/gibbs.py, OxCal's own MH/Gibbs scheme.
     That replaces pm.sample_smc, which was wrong here for a structural reason
     rather than a tuning one: PyMC tempers pm.Potential along with the
-    likelihood, and services/bayesian.py expressed the entire model structure
-    as pm.Potential, so the ordering and phase priors were simply absent at the
+    likelihood, and the model it sampled expressed the entire structure as
+    pm.Potential, so the ordering and phase priors were simply absent at the
     start of the annealing path. On the Nenthorn fixture it separated two
     ordered groups by 57 years where the answer is 19 and OxCal reports 13 --
     at r_hat 1.01, every chain agreeing on the same wrong answer. The Gibbs
@@ -549,7 +549,7 @@ async def bayesian_analysis(request: BayesianRequest, db: Session = Depends(get_
     every measurement goes through the same checks as /analysis/calibrate
     (age_bp/error_1sigma bounds, known curve_id, non-blank sample_name),
     at least one measurement is required, relationship values are
-    restricted to the three bayesian.py actually implements
+    restricted to the three the solvers actually implement
     (above/below/equal -- previously an unrecognized value like a typo'd
     "beneath" was silently dropped with no error and no effect on the
     model, since the if/elif chain that applies constraints has no else
@@ -635,7 +635,7 @@ async def bayesian_analysis(request: BayesianRequest, db: Session = Depends(get_
         # _run_bayesian works with plain dicts (measurements keyed by
         # 'id'/'age_bp'/etc, relationships keyed by 'from_sample_id' etc)
         # -- converting the validated Pydantic models to dicts here keeps
-        # bayesian.py's existing dict-based interface untouched. This uses
+        # the solvers' existing dict-based interface untouched. This uses
         # the request's own client-side ids throughout (not the persisted
         # DB ids), since build_model() needs to match against the internal
         # `ages` dict, which is also keyed by the client-side measurement id.

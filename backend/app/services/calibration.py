@@ -35,7 +35,7 @@ def hpd_ranges_from_distribution(ages, weights, confidence: float = 0.95) -> Lis
 
     Shared by CalibrationCurve.get_hpd_ranges() (grid points from a
     calibration curve) and the Bayesian posterior extraction in
-    bayesian.py (bins from a histogram of MCMC draws) -- both are just
+    the samplers (bins from a histogram of draws) -- both are just
     (age, weight) series at that point, so the same logic applies to
     either.
 

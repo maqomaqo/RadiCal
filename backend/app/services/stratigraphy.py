@@ -8,7 +8,7 @@ A relationship's from_sample_id/to_sample_id can each name either a single
 sample or a group (a named phase containing zero or more samples), tagged
 by from_type/to_type. This module expands any group reference into the
 full cross-product of its member samples, so the rest of the codebase
-(services/bayesian.py, and the BayesianRequest validator in
+(services/exact_chain.py, and the BayesianRequest validator in
 schemas/sample.py) only ever has to deal with plain sample-to-sample
 edges.
 """
@@ -16,7 +16,7 @@ from collections import defaultdict, deque
 from typing import Dict, List, Optional, Tuple
 
 # A directed edge (u, v) means "u must be strictly OLDER than v" -- i.e.
-# age_u > age_v in cal BP. This is the same direction bayesian.py's
+# age_u > age_v in cal BP. This is the same direction the solvers'
 # 'above'/'below' Potentials already enforce; normalizing both relationship
 # types to this one direction here means the rest of this module (and
 # cycle detection) only has to reason about one kind of edge.

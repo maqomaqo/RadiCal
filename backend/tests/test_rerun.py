@@ -6,9 +6,8 @@ Tests for:
     results in place from its own persisted inputs.
   - POST /api/projects/{id}/rerun -- rerun every analysis in a project.
 
-The rerun endpoints need a real MCMC run for a bayesian analysis, so those
-are @requires_pymc-marked like the rest of the MCMC-dependent test suite;
-the project-assignment test and the 404 checks don't touch pymc at all.
+The bayesian reruns here solve a real model, which is affordable now that both
+solvers are pure numpy -- they used to be skipped unless pymc was installed.
 """
 import csv
 import io
@@ -16,7 +15,6 @@ import itertools
 
 import pytest
 
-from conftest import requires_pymc
 
 
 def _measurement(sample_id, age_bp=3000, **overrides):
@@ -85,7 +83,6 @@ class TestRerunNotFound:
         assert response.status_code == 404
 
 
-@requires_pymc
 class TestRerunAnalysis:
     def test_rerun_calibration_analysis(self, client):
         create_resp = client.post(
@@ -133,7 +130,6 @@ class TestRerunAnalysis:
         assert len(get_resp.json()["data"]["results"]) == 2
 
 
-@requires_pymc
 class TestRerunProject:
     def test_rerun_all_analyses_in_project(self, client):
         project_resp = client.post("/api/projects", json={"name": "Batch Rerun"})
@@ -203,7 +199,6 @@ class TestEditRoundTrip:
             },
         )
 
-    @requires_pymc
     def test_get_returns_what_an_edit_needs_to_resubmit(self, client):
         created = self._analysis(client)
         assert created.status_code == 200, created.text
@@ -219,7 +214,6 @@ class TestEditRoundTrip:
         assert by_name["Shell"]["curve_id"] == "marine20"
         assert by_name["Shell"]["sample_type"] == "marine"
 
-    @requires_pymc
     def test_editing_preserves_material_curve_and_sample_type(self, client):
         created = self._analysis(client)
         assert created.status_code == 200, created.text
@@ -261,7 +255,6 @@ class TestEditRoundTrip:
         assert after["Shell"]["curve_id"] == "marine20"
         assert after["Shell"]["sample_type"] == "marine"
 
-    @requires_pymc
     def test_the_csv_reports_the_material_that_was_entered(self, client):
         created = self._analysis(client)
         assert created.status_code == 200, created.text
@@ -275,7 +268,6 @@ class TestEditRoundTrip:
         assert reported["Charcoal"] == ("charcoal", "shcal20")
         assert reported["Shell"] == ("marine shell", "marine20")
 
-    @requires_pymc
     def test_editing_preserves_the_fields_the_form_does_not_show(self, client):
         """
         reservoir_age, depth_cm, location and notes are recorded against a
@@ -345,7 +337,6 @@ class TestEditRoundTrip:
         assert replaced.status_code == 200, replaced.text
         assert stored() == extras
 
-    @requires_pymc
     def test_a_date_in_no_context_still_gets_a_phase(self, client):
         """
         Saved with neither groups nor a tree, every date is "loose".
@@ -398,7 +389,6 @@ class TestEditRoundTrip:
         )
         assert replaced.status_code == 200, replaced.text
 
-    @requires_pymc
     def test_a_reservoir_offset_survives_and_is_applied(self, client):
         """
         Delta-R changes the date, so losing it across an edit would silently
@@ -494,7 +484,6 @@ class TestEditRoundTrip:
         assert response.status_code == 422
         assert "delta_r_error" in response.text
 
-    @requires_pymc
     def test_a_rerun_reproduces_a_corrected_calibration(self, client):
         """
         The offset has to be stored, not just applied. A rerun recalibrates
@@ -635,7 +624,6 @@ class TestRerunKeepsDiagnostics:
         assert all(v == '' for v in self._columns(client, analysis_id)['Outlier %'].values())
 
 
-@requires_pymc
 class TestEditingKeepsTheOutlierSetting:
     """
     Editing an analysis must not switch its outlier model off.
@@ -726,7 +714,6 @@ class TestEditingKeepsTheOutlierSetting:
         assert all(m['outlier_model'] == 'charcoal' for m in copied), copied
 
 
-@requires_pymc
 def test_get_analysis_reports_diagnostics_on_each_result(client):
     """
     GET /analysis/{id} is what the results page reads. Agreement and
@@ -772,7 +759,6 @@ def test_get_analysis_reports_diagnostics_on_each_result(client):
     assert by_name['S2']['outlier_probability'] > by_name['S0']['outlier_probability']
 
 
-@requires_pymc
 def test_outlier_values_survive_a_rerun_of_an_ordered_sibling_model(client):
     """
     The reported symptom, on the model shape that produced it.

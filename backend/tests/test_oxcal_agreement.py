@@ -8,9 +8,9 @@ foundation everything else stands on -- curve loading, interpolation, the
 1/sigma normalisation, trapezoidal grid weighting and the multi-range HPD
 search all have to be right before a modelled range can mean anything.
 
-The modelled comparison needs a real MCMC run and lives in
-tests/manual/verify_model.py (`nenthorn`), together with what it currently
-shows.
+The modelled comparison is asserted directly in tests/test_exact_chain.py and
+tests/test_gibbs.py -- both solvers are fast enough for that, where the MCMC
+path this predates had to be checked by hand (see tests/manual/README.md).
 
 Every one of these eight dates is bimodal on SHCal20 -- the wiggle around
 AD 1350 splits each likelihood into roughly AD 1300-1360 and AD 1380-1410 --

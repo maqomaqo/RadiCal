@@ -333,7 +333,7 @@ class TestAgainstOxCalModelled:
     def test_output_shape_matches_the_sampler_path(self, solved, span_prior):
         """
         Callers must not have to know which solver ran, so every key
-        BayesianChronology.extract_results produces has to be present.
+        services/gibbs.py's solve produces has to be present.
         """
         expected = {'posterior_mean', 'posterior_median', 'posterior_std',
                     'hpd_68', 'hpd_95', 'hpd_68_ranges', 'hpd_95_ranges',

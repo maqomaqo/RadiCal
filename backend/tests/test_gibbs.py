@@ -560,6 +560,82 @@ class TestOutlierModel:
         assert not any(plain['id'] in s for s in pairs), 'an unflagged one does not'
 
 
+class TestBoundariesBehaveLikeOxCals:
+    """
+    Carried over from the deleted test_bayesian.py, which is where this property
+    used to be pinned. It is the whole reason Boundary is a separate parameter
+    rather than just the oldest and youngest date in a phase: a phase's dates are
+    modelled as a uniform scatter BETWEEN its start and end, so the transitions
+    themselves sit outside the dated range.
+
+    Its regression note is worth keeping too. An earlier implementation sampled
+    the boundaries under SMC, which collapsed them onto the extreme member dates
+    -- and the test meant to catch that only asserted start >= max(dates), which
+    a boundary pinned 1.7 years out satisfies just as well as a correct one 79
+    years out. Hence the quantitative assertion here.
+    """
+
+    def _phase_of_five(self):
+        phase = _element('phase', 'A')
+        tree = _element('sequence', 'Site', [
+            _element('boundary', 'Start'), phase, _element('boundary', 'End')])
+        dates = [_date(phase['id'], 3000 + i * 40) for i in range(5)]
+        return tree, dates, phase
+
+    def test_boundaries_extend_well_beyond_the_dated_range(self):
+        tree, dates, _phase = self._phase_of_five()
+        chain = ec.layout(tree, dates)
+        exact = ec.solve(dates, tree, chain, num_samples=200)
+        sampled = _fixed(dates, tree, sweeps=20000, num_samples=200,
+                         grid=_exact_grid(exact))
+
+        means = [sampled['measurements'][d['id']]['posterior_mean'] for d in dates]
+        start = sampled['boundaries'][chain.boundary_ids[0]]['posterior']['posterior_mean']
+        end = sampled['boundaries'][chain.boundary_ids[-1]]['posterior']['posterior_mean']
+
+        # Measured at 78 and 86 years on this model, against the exact solver's
+        # 76 and 84. Far above the couple of years a collapsed boundary gives.
+        assert start - max(means) > 40.0, (start, max(means))
+        assert min(means) - end > 40.0, (end, min(means))
+
+    def test_it_puts_them_where_the_exact_solver_does(self):
+        """
+        The quantitative half: not merely outside the dates, but the same
+        distance outside that exact integration of the same span density gives.
+        """
+        tree, dates, _phase = self._phase_of_five()
+        chain = ec.layout(tree, dates)
+        exact = ec.solve(dates, tree, chain, num_samples=200)
+        sampled = _fixed(dates, tree, sweeps=20000, num_samples=200,
+                         grid=_exact_grid(exact))
+        for bid in (chain.boundary_ids[0], chain.boundary_ids[-1]):
+            a = exact['boundaries'][bid]['posterior']['posterior_mean']
+            b = sampled['boundaries'][bid]['posterior']['posterior_mean']
+            assert b == pytest.approx(a, abs=10.0), bid
+
+    def test_more_dates_pull_the_boundaries_in(self):
+        """
+        A phase's duration is weakly constrained by few dates and tightly by
+        many, which is a real property of the uniform-scatter model rather than
+        an artefact: the span density is (older - younger)^(-K), so a larger K
+        penalises a long span harder.
+        """
+        def offset(count):
+            phase = _element('phase', 'A')
+            tree = _element('sequence', 'Site', [
+                _element('boundary', 'Start'), phase, _element('boundary', 'End')])
+            # Same calendar spread however many dates, so only K changes.
+            dates = [_date(phase['id'], 3000 + int(160 * i / (count - 1)))
+                     for i in range(count)]
+            chain = ec.layout(tree, dates)
+            sampled = _fixed(dates, tree, sweeps=20000, num_samples=200)
+            means = [sampled['measurements'][d['id']]['posterior_mean'] for d in dates]
+            start = sampled['boundaries'][chain.boundary_ids[0]]['posterior']['posterior_mean']
+            return start - max(means)
+
+        assert offset(4) > offset(9), (offset(4), offset(9))
+
+
 class TestRunLength:
     """
     The run extends until it converges rather than stopping at a fixed length,
@@ -617,7 +693,7 @@ class TestRunLength:
 class TestReportedShape:
     def test_it_returns_what_the_other_solvers_do(self):
         """
-        Same shape as exact_chain.solve and BayesianChronology.extract_results,
+        Same shape as exact_chain.solve returns,
         so nothing downstream needs to know which produced a result.
         """
         phase = _element('phase', 'Only')

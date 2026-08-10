@@ -18,7 +18,6 @@ from app.services.model_tree import (
     flatten_structure,
 )
 
-from conftest import requires_pymc
 
 
 def _boundary(element_id, name="Boundary"):
@@ -264,7 +263,6 @@ class TestFlattenStructure:
 
 
 class TestCsvExport:
-    @requires_pymc
     def test_csv_follows_the_model_structure(self, client):
         tree = _sequence("croot", "Site", [
             _boundary("cb0", "Start"),
@@ -338,7 +336,6 @@ class TestCsvExport:
         unmodelled = rows[0].index('Unmodelled 95% HPD')
         assert rows[1][unmodelled] == ''
 
-    @requires_pymc
     def test_csv_reports_the_unmodelled_calibration_beside_the_modelled(self, client):
         """
         The column that used to be "Calibrated Age BP (mode)" -- never
@@ -418,7 +415,6 @@ class TestModelTreeApi:
             },
         ).json()["data"]["id"]
 
-    @requires_pymc
     def test_get_returns_a_tree_with_boundary_posteriors(self, client):
         analysis_id = self._analysis(client)
         data = client.get(f"/api/analysis/{analysis_id}").json()["data"]
@@ -433,7 +429,6 @@ class TestModelTreeApi:
         # The shared transition is a single element carrying one posterior.
         assert boundaries[1]["posterior"]["posterior_mean"] > 0
 
-    @requires_pymc
     def test_put_replaces_the_tree_and_clears_results(self, client):
         analysis_id = self._analysis(client)
         data = client.get(f"/api/analysis/{analysis_id}").json()["data"]
@@ -461,7 +456,6 @@ class TestModelTreeApi:
         rerun = client.get(f"/api/analysis/{analysis_id}").json()["data"]
         assert len(rerun["results"]) == 2
 
-    @requires_pymc
     def test_put_rejects_an_invalid_tree(self, client):
         analysis_id = self._analysis(client)
         bad = _sequence("r2", "Site", [
@@ -472,7 +466,6 @@ class TestModelTreeApi:
             f"/api/analysis/{analysis_id}/model-tree", json={"model_tree": bad})
         assert response.status_code == 422
 
-    @requires_pymc
     def test_create_an_analysis_from_a_tree_directly(self, client):
         """
         A client can author the structure itself rather than sending contexts
@@ -517,7 +510,6 @@ class TestModelTreeApi:
         boundaries = [c for c in stored["children"] if c["element_type"] == "boundary"]
         assert all(b["posterior"] is not None for b in boundaries)
 
-    @requires_pymc
     def test_replacing_inputs_keeps_an_authored_tree(self, client):
         """
         Editing a tree-authored analysis and re-running it must keep the

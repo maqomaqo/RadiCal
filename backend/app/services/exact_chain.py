@@ -14,9 +14,9 @@ much of the reason to build a Bayesian model at all.
 pm.sample_smc gets that wrong here, and the reason is structural. PyMC splits
 a model into `varlogp` (free variables) and `datalogp`, and SMC tempers the
 second: it anneals p(x) * L(x)^beta from beta = 0 to 1. But `datalogp` is
-`observedlogp + potentiallogp`, and services/bayesian.py expresses the entire
-model structure -- ordering constraints and uniform-scatter priors alike -- as
-pm.Potential. So at beta = 0 the particles are drawn from unconstrained
+`observedlogp + potentiallogp`, and the PyMC model this replaced expressed the
+entire model structure -- ordering constraints and uniform-scatter priors alike
+-- as pm.Potential. So at beta = 0 the particles are drawn from unconstrained
 uniform priors thousands of years wide, with no ordering and no phase prior
 at all, and the constraints only switch on as beta approaches 1.
 
@@ -617,7 +617,7 @@ def solve(measurements: List[Dict], root: Dict, chain: Chain,
     """
     Exact marginal posteriors for every date and every boundary in `chain`.
 
-    Returns the same shape BayesianChronology.extract_results does, so callers
+    Returns the same shape services/gibbs.py's solve does, so callers
     do not need to know which produced it -- including `posterior_samples`,
     drawn from each exact marginal by inverse-CDF so that plotting and export
     code is unchanged.

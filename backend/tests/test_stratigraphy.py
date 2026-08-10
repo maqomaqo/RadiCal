@@ -7,20 +7,16 @@ Split into three layers:
     app.services.stratigraphy's expand_relationships/find_cycle/
     effective_bounds, independent of pymc or the API.
   - TestBayesianRequestValidation: POST /api/analysis/bayesian with bad
-    stratigraphy input, verifying it's rejected with a 422 *before* any
-    MCMC run is attempted (so these pass even in environments -- like this
-    one -- without a real pymc installed, since request validation always
-    runs first).
-  - TestStratigraphyPersistence: requires_pymc-marked full round trip
-    (save a bayesian analysis with groups/relationships/TPQ-TAQ, then GET
-    it back and confirm they were actually persisted) -- skipped unless
-    pymc is installed, same as any other test that needs a real MCMC run.
+    stratigraphy input, verifying it's rejected with a 422 *before* the
+    model is solved at all, since request validation always runs first.
+  - TestStratigraphyPersistence: the full round trip (save a bayesian
+    analysis with groups/relationships/TPQ-TAQ, then GET it back and
+    confirm they were actually persisted).
 """
 import pytest
 
 from app.services.stratigraphy import expand_relationships, find_cycle, effective_bounds, group_members
 
-from conftest import requires_pymc
 
 
 class TestStratigraphyServiceUnit:
@@ -208,7 +204,6 @@ class TestBayesianRequestValidation:
         assert response.status_code != 422
 
 
-@requires_pymc
 class TestStratigraphyPersistence:
     def test_groups_and_relationships_round_trip(self, client):
         response = client.post(

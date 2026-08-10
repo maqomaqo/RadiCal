@@ -2,31 +2,28 @@
 OxCal's sampler: a Metropolis-Hastings / Gibbs hybrid over the model's dates
 and boundaries, for models services/exact_chain.py cannot integrate.
 
-PROTOTYPE. Not wired into the API yet -- see the validation notes at the end of
-this docstring for what has and has not been measured.
-
-Why not just keep SMC
+Why this replaced SMC
 ---------------------
-The SMC fallback fails for a structural reason, not a tuning one. PyMC tempers
-`observedlogp + potentiallogp` from beta = 0, and services/bayesian.py expresses
-the whole model structure as pm.Potential, so at beta = 0 the particles carry no
-ordering and no phase prior at all. Each date settles into one of its own
-calibration lobes independently, and configurations putting different groups in
-different lobes vastly outnumber the correlated one, so by the time beta reaches
-1 the correct arrangement has too few particles left to be weighted properly.
-Measured against OxCal 4.4 on the Nenthorn fixture it separated two ordered
-groups by 57 years where the answer is 19 and OxCal says 13 -- at r_hat 1.01,
-all four chains agreeing on the same wrong answer.
+The pm.sample_smc fallback it took over from failed for a structural reason, not
+a tuning one. PyMC tempers `observedlogp + potentiallogp` from beta = 0, and that
+model expressed the whole structure as pm.Potential, so at beta = 0 the particles
+carried no ordering and no phase prior at all. Each date settled into one of its
+own calibration lobes independently, and configurations putting different groups
+in different lobes vastly outnumber the correlated one, so by the time beta
+reached 1 the correct arrangement had too few particles left to be weighted
+properly. Measured against OxCal 4.4 on the Nenthorn fixture it separated two
+ordered groups by 57 years where the answer is 19 and OxCal says 13 -- at r_hat
+1.01, all four chains agreeing on the same wrong answer.
 
 MH/Gibbs has no annealing path. It targets the true posterior from the first
 sweep, so that failure mode does not exist here. Two consequences beyond
 accuracy, both of which delete a hack that only existed to survive tempering:
 
-  * constraints are HARD (an interval truncation), not the softplus penalty
-    bayesian.py needs because -inf * beta is -inf for every beta > 0.
-  * the (older - younger)^(-K) span density needs no floor. bayesian.py's
-    _MIN_GROUP_SPAN_YEARS exists because SOFT containment breaks the exact
-    cancellation that makes the posterior proper: squeezing a group's boundaries
+  * constraints are HARD (an interval truncation), not the softplus penalty the
+    PyMC model needed because -inf * beta is -inf for every beta > 0.
+  * the (older - younger)^(-K) span density needs no floor. That model had to
+    floor it, because SOFT containment breaks the exact cancellation that makes
+    the posterior proper: squeezing a group's boundaries
     together must shrink its dates' available volume as eps^K, killing the
     eps^(-K) blow-up, and a soft penalty leaves the dates slack so it does not.
     Hard containment restores it -- here the cancellation happens by
@@ -81,9 +78,9 @@ Single-site Gibbs cannot move a tightly-constrained group between calibration
 lobes: every member would have to cross at once, and each one alone is blocked
 by the others. This is the classic sticky behaviour of constrained order
 statistics, and it is what OxCal's "changes to the duration and timing of whole
-groups" exist for. _group_shift proposes translating a whole span group -- its
-dates and its boundaries together -- and accepts on the exact MH ratio computed
-from the full log posterior.
+groups" exist for. `shift` proposes translating a whole set of parameters at once
+and accepts on the exact MH ratio from the full log posterior; `move_sets`
+decides which sets are worth offering, and documents what each one is for.
 
 Validation status
 -----------------
@@ -218,8 +215,8 @@ class Model:
         self.date_ids = [m['id'] for m in measurements]
         self.boundary_ids = list(self.plan.boundary_names)
         # Every boundary is sampled. exact_chain marginalises the outermost
-        # ones and bayesian.py has to, because an outermost boundary's tail is
-        # heavy and SMC collapses on it -- but a Gibbs draw from a truncated
+        # ones and the SMC model had to, because an outermost boundary's tail
+        # is heavy and SMC collapses on it -- but a Gibbs draw from a truncated
         # power law is exact however heavy the tail, so there is nothing to
         # avoid here.
         self.params = self.date_ids + self.boundary_ids
@@ -266,8 +263,9 @@ class Model:
                     add(younger, older)
 
         # Containment: a group's dates sit between its two boundaries. This is
-        # the hard version of what bayesian.py has to make soft, and it is what
-        # makes the span density proper without a floor (see module docstring).
+        # the hard version of what the SMC model had to make soft, and it is
+        # what makes the span density proper without a floor (see module
+        # docstring).
         self.group_dates: List[Tuple[str, str, List[str]]] = []
         for group in self.plan.span_groups:
             dates = [d for d in group.date_ids if d in self.likelihood]
@@ -890,8 +888,8 @@ def solve(measurements: List[Dict], root: Dict, sweeps: int = DEFAULT_SWEEPS,
           max_sweeps: Optional[int] = None) -> Dict:
     """
     Posterior summaries for every date and boundary, in the same shape
-    exact_chain.solve and BayesianChronology.extract_results return -- so a
-    caller does not need to know which produced it.
+    exact_chain.solve returns -- so a caller does not need to know which
+    produced it.
 
     `sweeps` is where the run starts, not where it ends: it extends until the
     convergence measure reaches `target_convergence` or `max_sweeps` is reached

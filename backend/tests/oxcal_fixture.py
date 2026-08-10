@@ -5,7 +5,7 @@ resolution, no outlier model) exported from OxCal itself, so the app can be
 held against the field-standard tool rather than only against its own maths.
 
 Not named test_* on purpose: it is a helper, used by test_oxcal_agreement.py
-and by tests/manual/verify_model.py.
+and by tests/test_gibbs.py.
 
 THREE runs of the same eight dates, differing only in how the two branches
 (Quarry and Rockshelter) relate to each other:

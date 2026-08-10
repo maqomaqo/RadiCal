@@ -20,10 +20,12 @@ previous revisions of this file understated parts of it.
   matching current OxCal/CALIB practice.
 - **Multi-range HPD reporting** — disjoint calendar-age ranges with per-range
   probabilities, on both the direct-calibration and MCMC paths.
-- **Bayesian chronological model** (`backend/app/services/bayesian.py`) —
-  calibration-curve-aware likelihood, stratigraphic order constraints as
-  smooth (SMC-safe) penalties, TPQ/TAQ limiters, per-sample practical prior
-  bounds, and SMC sampling chosen for multimodal posteriors.
+- **Bayesian chronological model** — calibration-curve-aware likelihood,
+  stratigraphic order constraints, TPQ/TAQ limiters and per-sample practical
+  prior bounds. Solved two ways: `backend/app/services/exact_chain.py`
+  integrates a chain-shaped model exactly, and
+  `backend/app/services/gibbs.py` samples anything else with OxCal's MH/Gibbs
+  scheme. Both are pure numpy; the PyMC/SMC sampler they replaced is gone.
 - **OxCal-style context Boundaries** — a context's dates are modelled as a
   random uniform scatter between a start and end Boundary; the Boundaries
   are analytically marginalized out of the MCMC and recovered from their
@@ -186,13 +188,15 @@ each is a real edge.
   - `test_calibration.py` (10) — calibration and HPD logic.
   - `test_validation.py` (15) — request validation.
   - `test_stratigraphy.py` (16) — cycle detection, group expansion, TPQ/TAQ.
-  - `test_bayesian.py` (9) — Boundary conditional against its closed form,
-    plus end-to-end MCMC behaviour.
+  - `test_exact_chain.py`, `test_gibbs.py` — the two solvers, against a
+    brute-force integration, against each other, and against real OxCal 4.4
+    runs. (`test_bayesian.py` covered the deleted PyMC model.)
   - `test_rerun.py` (8) — project assignment, rerun, project batch rerun.
   - `test_project_samples.py` (21) — date collection CRUD, deploy, snapshot
     semantics, duplicate, edit-inputs.
-  - `conftest.py` provides a throwaway SQLite DB and a `requires_pymc` skip
-    marker; tests needing a real MCMC run are marked with it.
+  - `conftest.py` provides a throwaway SQLite DB. There is no longer a
+    `requires_pymc` skip marker: both solvers are pure numpy, so every test
+    runs everywhere and a Bayesian analysis in the suite is a real one.
 - **Not covered:** `results.py`, `curves.py`, `harris_matrix.py` have no
   tests at all (14 endpoints between them).
 - **Frontend tests: none.** No Vitest/Jest/Testing Library in `package.json`.

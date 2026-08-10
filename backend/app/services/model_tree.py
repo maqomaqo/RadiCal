@@ -1,7 +1,7 @@
 """
 The explicit model structure -- OxCal's Sequence / Phase / Boundary / Hiatus
 as a nested, ordered tree -- and the translation of that tree into the
-pieces services/bayesian.py needs to build a PyMC model.
+pieces the solvers in services/ need to turn it into a posterior.
 
 This replaces the previous flat arrangement (a list of Contexts plus
 pairwise above/below relationships, with a start/end Boundary pair silently
@@ -67,7 +67,7 @@ class SpanGroup:
 
 
 class ModelPlan:
-    """Everything bayesian.py needs to turn a tree into a PyMC model."""
+    """Everything a solver needs to turn a tree into a posterior."""
 
     def __init__(
         self,
@@ -333,7 +333,7 @@ def classify_boundaries(
     those that must be sampled. This is the crux of making explicit
     boundaries work at all, so it is worth spelling out.
 
-    services/bayesian.py documents that pm.sample_smc CANNOT sample a
+    The SMC sampler this predates could not sample a
     boundary parameter: its posterior is heavy-tailed and SMC's IMH kernel
     collapses it onto the extreme dates (measured E[a+b] = 2.0 against a true
     150.9, silently, at r_hat 1.00). That is why the previous implementation

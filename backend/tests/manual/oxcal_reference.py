@@ -1,9 +1,9 @@
 """
-An exact, MCMC-free reference for the OxCal-style uniform-phase model, used
-to verify what app/services/bayesian.py actually samples.
+An exact, MCMC-free reference for the OxCal-style uniform-phase model, used to
+verify what the solvers in app/services/ actually compute.
 
-Deliberately independent of that module: the boundaries are integrated
-NUMERICALLY over a finite window here, where bayesian.py marginalises the
+Deliberately independent of them: the boundaries are integrated
+NUMERICALLY over a finite window here, where the deleted PyMC model marginalised the
 outermost ones analytically and samples the interior ones. Agreement between
 the two is therefore evidence about the model rather than a shared-bug
 tautology. See tests/manual/README.md for how to drive it.

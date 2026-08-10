@@ -20,9 +20,9 @@ export interface McmcConfig {
   uniform_span_prior: boolean
 }
 
-// 4000 (not the more typical 2000) because convergence for a realistic
-// multi-sample chained analysis was noticeably better at 4000 -- see
-// BayesianChronology.sample's docstring on the backend.
+// 4000 draws is how many posterior samples a result carries, not how long the
+// sampler runs: services/gibbs.py on the backend extends its own run until it
+// converges, and the exact solver has no run length at all.
 export const DEFAULT_MCMC: McmcConfig = {
   mcmc_samples: 4000,
   mcmc_tune: 1000,

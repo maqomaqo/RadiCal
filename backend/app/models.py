@@ -97,8 +97,8 @@ class Analysis(Base):
     bayesian_config = Column(JSON, nullable=True)  # MCMC parameters if bayesian
 
     # How this analysis's results were actually computed -- the exact solver
-    # or the SMC fallback -- and, when it fell back, why the model was not
-    # exactly solvable. Written on every bayesian run and rerun; see
+    # or the MH/Gibbs sampler -- and, when it was sampled, why the model was
+    # not exactly solvable, plus the convergence it reached. Written on every bayesian run and rerun; see
     # api/analysis._run_bayesian for the shape. NULL on a calibration-only
     # analysis, and on any bayesian analysis run before this was recorded.
     solver = Column(JSON, nullable=True)
@@ -165,7 +165,7 @@ class RadiocarbonSample(Base):
     # bound -- "terminus ante quem", the sample cannot be YOUNGER than this
     # (it predates the terminus). Valid range is [taq_age_bp, tpq_age_bp];
     # see schemas/sample.py's cross-field validator for the sanity check on
-    # that ordering, and services/bayesian.py for how these tighten each
+    # that ordering, and services/exact_chain.py for how these tighten each
     # sample's calendar-age prior.
     tpq_age_bp = Column(Float, nullable=True)
     taq_age_bp = Column(Float, nullable=True)
@@ -210,7 +210,7 @@ class ModelElement(Base):
     taq_age_bp = Column(Float, nullable=True)
 
     # For a boundary: its posterior after a run, same shape as a per-sample
-    # result (see BayesianChronology._summarize_posterior). Null for every
+    # result (see exact_chain._summarize). Null for every
     # other element type, and until the analysis has been run.
     posterior = Column(JSON, nullable=True)
 
@@ -238,7 +238,7 @@ class SampleGroup(Base):
     # Same semantics as RadiocarbonSample.tpq_age_bp/taq_age_bp above, just
     # applied to every sample in the group. If a sample has its own limiter
     # AND belongs to a group with one, the tighter of the two bounds wins
-    # (see services/bayesian.py).
+    # (see services/stratigraphy.effective_bounds).
     tpq_age_bp = Column(Float, nullable=True)
     taq_age_bp = Column(Float, nullable=True)
 
@@ -247,9 +247,8 @@ class SampleGroup(Base):
     # same sense as OxCal's Boundary command: the context's dates are
     # modelled as a random uniform scatter between these two, so they may
     # extend beyond the oldest/youngest dated member rather than just
-    # reproducing it (see BayesianChronology.build_model/._sample_boundaries
-    # in services/bayesian.py for the generative model and how these are
-    # recovered). Each is a JSON dict with the same shape as a per-sample result
+    # reproducing it -- see services/exact_chain.py for the generative model
+    # and how a Boundary is solved. Each is a JSON dict with the same shape as a per-sample result
     # (posterior_mean/median/std/hpd_68/hpd_95/hpd_68_ranges/hpd_95_ranges/
     # probability_distribution), so the frontend can render it with the
     # exact same component used for a sample's age. Left null for

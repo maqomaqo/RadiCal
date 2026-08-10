@@ -17,8 +17,7 @@
 //    Returns the full multi-range breakdown (a calibration curve is
 //    non-monotonic, so this can be several disjoint ranges).
 //  - hpdEnvelopeFromHistogram: for a Bayesian posterior distribution
-//    (bayesian.py's _summarize_posterior), whose points are centers of a
-//    uniform-width histogram over raw MCMC draws -- using a center as a
+//    whose points are centers of a uniform-width histogram over draws -- using a center as a
 //    boundary would silently shrink the range by half a bin on each
 //    side, so this widens by half the bin width. Returns a single
 //    overall envelope (the user's preferred "as a single range" report

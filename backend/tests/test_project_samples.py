@@ -6,12 +6,10 @@ make "same dates, different model" possible.
 The load-bearing test here is TestSnapshotSemantics: deploying a date into
 an analysis must COPY it, so editing the collection afterwards can never
 mutate an already-run analysis or silently invalidate its stored results.
-Everything else is CRUD and validation, which needs no MCMC; only the
-tests that actually run a model are marked @requires_pymc.
+Everything else is CRUD and validation.
 """
 import pytest
 
-from conftest import requires_pymc
 
 
 def _date(name="OxA-1", age_bp=3000, **overrides):
@@ -215,7 +213,6 @@ class TestDuplicate:
             },
         )
 
-    @requires_pymc
     def test_duplicate_copies_inputs_but_not_results(self, client):
         original_id = self._saved_bayesian(client).json()["data"]["id"]
 
@@ -246,7 +243,6 @@ class TestDuplicate:
         assert rel["from_sample_id"] in copy_group_ids
         assert rel["to_sample_id"] in copy_group_ids
 
-    @requires_pymc
     def test_running_a_duplicate_leaves_the_original_untouched(self, client):
         original_id = self._saved_bayesian(client).json()["data"]["id"]
         before = client.get(f"/api/analysis/{original_id}").json()["data"]
@@ -277,7 +273,6 @@ class TestReplaceInputs:
         body.update(overrides)
         return body
 
-    @requires_pymc
     def test_replacing_inputs_clears_stale_results(self, client):
         created = client.post(
             "/api/analysis/bayesian",

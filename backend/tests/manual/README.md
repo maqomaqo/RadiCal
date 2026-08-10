@@ -1,32 +1,28 @@
 # Manual model verification
 
-Not collected by pytest — every check here runs a real MCMC and takes minutes.
-The fast regression guards that came out of these checks live in
-`tests/test_bayesian.py` (`TestSpanTermsArePresent`, `TestSpanTermCannotDiverge`).
+**Historical.** This directory recorded the investigation into the PyMC/SMC
+sampler, which has since been removed: a chain-shaped model is now integrated
+exactly by `app/services/exact_chain.py`, and anything else is sampled by
+`app/services/gibbs.py`, OxCal's own MH/Gibbs scheme. Both are pure numpy and
+fast enough to assert in the suite, so `tests/test_exact_chain.py` and
+`tests/test_gibbs.py` now cover as ordinary tests what used to need a manual
+run taking minutes.
+
+The findings below are kept because much of the reasoning in those modules cites
+them, and because they are the measurements that justified replacing the sampler
+rather than tuning it. Read them as a record of what SMC did, not as a
+description of what the app does now.
 
 - `oxcal_reference.py` — an exact, MCMC-free reference for the OxCal
   uniform-phase model, by direct numerical integration over the boundaries.
-  Independent of `app/services/bayesian.py` by construction, so agreement
-  between them is evidence about the model rather than a shared bug.
-- `verify_model.py` — drives the reference against what `bayesian.py` actually
-  samples and prints the comparison.
+  Written independently of any solver in `app/services/`, so agreement with one
+  is evidence about the model rather than a shared bug. Still current, and still
+  the independent check behind the exact solver's own tests.
+- `verify_model.py` — deleted along with the SMC path it drove. Its subject was
+  `BayesianChronology`; the equivalent comparison now runs in
+  `tests/test_gibbs.py`, against the exact solver as the oracle.
 
-Run inside the backend container:
-
-```bash
-docker compose exec backend python tests/manual/verify_model.py all
-```
-
-or one check at a time: `phase`, `sequence`, `order`, `multiphase`, `nenthorn`,
-`nuts`.
-
-**Reading the output.** Look for `app vs reference: width ratio` near 1.0 and a
-small `max |mean diff|`. On `multiphase`, also check `worst r_hat` (should be
-≤ ~1.05) and that the `adjacent sampled-boundary gaps` do not approach zero —
-a collapsing gap is the signature of the divergence documented at
-`_MIN_GROUP_SPAN_YEARS` in `app/services/bayesian.py`.
-
-Reference figures at the time of writing, for the model as it now stands:
+Figures below are from the model as it stood under SMC:
 
 | check | width ratio | max mean diff | worst r_hat |
 |---|---|---|---|
@@ -93,8 +89,8 @@ hard-trapped in one.
 Note that `r_hat` 1.01 and `ess` in the hundreds-to-thousands are reported
 throughout: all four chains agree on the same wrong answer, so convergence
 diagnostics give no warning here. This is exactly the multimodality SMC was
-chosen over NUTS to handle (see `BayesianChronology.sample`), failing when a
-hard ordering constraint is layered on top of it.
+chosen over NUTS to handle, failing when a hard ordering constraint is layered
+on top of it.
 
 
 ### Fixed by solving instead of sampling
@@ -115,15 +111,18 @@ now an actual assertion in `tests/test_exact_chain.py` rather than something
 only this harness could check.
 
 `layout()` declines the `ordered` fixture — two groups ordered against each
-other while sharing one boundary pair is not a chain — so that model still
-goes to SMC and is still wrong. Adding an explicit Boundary between such
-groups makes it exact, and OxCal gives essentially the same answer either
-way (posterior overlap 0.948 between its own two runs).
+other while sharing one boundary pair is not a chain. That was the remaining
+wrong answer when this was written; since then `model_tree.with_implicit_boundaries`
+supplies the transition such a model implies, which makes it exact (6.4 yr rms
+from OxCal, against 12.6 for SMC), and OxCal gives essentially the same answer
+either way (posterior overlap 0.948 between its own two runs). Models that are
+still not chains — a branching site, say — now go to `services/gibbs.py` rather
+than SMC.
 
 ### OxCal's UniformSpanPrior
 
-Implemented in `exact_chain`, on by default as it is in OxCal, and
-switchable via `bayesian_config.uniform_span_prior`. It divides the prior by
+Implemented in both `exact_chain` and `gibbs`, on by default as it is in OxCal,
+and switchable via `bayesian_config.uniform_span_prior`. It divides the prior by
 `(b_first - b_last)^(n-2)`, which stops a sequence's span prior depending on
 how finely it is subdivided (Nicholls and Jones 2001).
 
@@ -204,10 +203,12 @@ Two traps, both found the hard way:
   whole integral — every date's marginal then comes back identical. Floor at
   the grid spacing. The same spike is a real attractor for samplers: a
   Metropolis chain started with all dates coincident never leaves.
-- **Match the boundary integration window** to the one `bayesian.py` used
-  (`BayesianChronology.model_window`) before comparing. `bayesian.py` takes
-  the wide-window limit for a two-sided marginalized group; integrating over
-  a different finite window shifts the answer by a few years at K = 6-8.
+- **Match the boundary integration window** to the solver's own before
+  comparing. The SMC model took the wide-window limit for a two-sided
+  marginalized group; integrating over a different finite window shifts the
+  answer by a few years at K = 6-8. The same caution applies to
+  `exact_chain.solve` and `gibbs.solve`, which report their grid in the result
+  (`grid`) so a comparison can use it.
 
 `phase_marginals` has been checked against exhaustive K-dimensional
 integration of the same target at K = 3, 4 and 6 (agreeing to 1-2 years and
@@ -216,11 +217,12 @@ chain, so it can be trusted at the group sizes tested here.
 
 ## Known gap: OxCal's UniformSpanPrior
 
-`bayesian.py` does not implement OxCal's `1/(b_1 - b_n)^(n-2)` span-prior
-correction (OxCal analysis operations; Nicholls and Jones 2001), which keeps a
-sequence's overall span prior independent of how many sub-groups it is divided
-into. `verify_model.py sequence` reports the size of the effect: on the dates
-it is around 1%, but it tightens the two OUTERMOST boundaries substantially
-(95% width 597 → 420 yr on that fixture). So reported Start/End boundary
+**Closed.** Both current solvers implement OxCal's `1/(b_1 - b_n)^(n-2)`
+span-prior correction (OxCal analysis operations; Nicholls and Jones 2001),
+which keeps a sequence's overall span prior independent of how many sub-groups
+it is divided into; it is switchable via `bayesian_config.uniform_span_prior`
+and on by default, as in OxCal. The measurement below is why it mattered: on
+the dates the effect is around 1%, but it tightens the two OUTERMOST boundaries
+substantially (95% width 597 → 420 yr on that fixture). So reported Start/End boundary
 ranges are wider here than OxCal would give; the dates themselves are
 unaffected. It applies only when a sequence has three or more boundaries.

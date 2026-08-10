@@ -18,7 +18,6 @@ exercises the whole export assembly without needing an MCMC run.
 import csv
 import io
 
-from conftest import requires_pymc
 
 
 def _calibration(client, **overrides) -> str:
@@ -153,7 +152,6 @@ class TestJsonExport:
         csv_dates = [r[4] for r in csv_rows if r[1] == 'Date']
         assert csv_dates == [r["sample_name"] for r in rows] == ["Charcoal A"]
 
-    @requires_pymc
     def test_covers_exactly_the_dates_of_a_structured_analysis(self, client):
         """
         JSON is a per-date export: it reports every date the CSV does, and
@@ -244,7 +242,6 @@ class TestJsonStructure:
         _STRUCTURED["id"] = created.json()["data"]["id"]
         return _STRUCTURED["id"]
 
-    @requires_pymc
     def test_reads_in_model_order(self, client):
         analysis_id = self._structured(client)
         structure = client.get(
@@ -264,7 +261,6 @@ class TestJsonStructure:
         assert [r["depth"] for r in structure] == [0, 1, 1, 2, 1, 1, 2, 1]
         assert structure[3]["path"] == "Site > Lower"
 
-    @requires_pymc
     def test_matches_the_csv_row_for_row(self, client):
         """
         The two exports describe one model; if they ever disagree on the
@@ -280,7 +276,6 @@ class TestJsonStructure:
             (row[1], row[4], row[2], row[3]) for row in csv_rows
         ]
 
-    @requires_pymc
     def test_a_date_carries_its_measured_and_modelled_result(self, client):
         analysis_id = self._structured(client)
         structure = client.get(
@@ -294,7 +289,6 @@ class TestJsonStructure:
         assert date["result"]["posterior_mean"] is not None
         assert date["result"]["hpd_95_ranges"]
 
-    @requires_pymc
     def test_a_boundary_carries_a_posterior_without_the_raw_chain(self, client):
         """
         The stored boundary posterior also holds the full MCMC chain, which
@@ -321,7 +315,6 @@ class TestJsonStructure:
         )
         assert "posterior_samples" in stored_boundary["posterior"]
 
-    @requires_pymc
     def test_headings_carry_their_limiters_but_no_result(self, client):
         analysis_id = self._structured(client)
         structure = client.get(
@@ -340,7 +333,6 @@ class TestJsonStructure:
         assert payload["structure"] == []
         assert len(payload["results"]) == 1
 
-    @requires_pymc
     def test_a_date_carries_its_unmodelled_calibration(self, client):
         """
         The unconstrained calibration, at both levels the modelled posterior
@@ -365,7 +357,6 @@ class TestJsonStructure:
         date = next(r for r in payload["structure"] if r["kind"] == "date" and r["name"] == "A")
         assert date["result"]["unmodelled_hpd_95_ranges"] == row["unmodelled_hpd_95_ranges"]
 
-    @requires_pymc
     def test_the_unmodelled_figure_agrees_with_the_csv(self, client):
         """
         Both exports derive it from one assembly, so they report the same
@@ -386,7 +377,6 @@ class TestJsonStructure:
         for csv_row in (r for r in csv_rows if r[1] == 'Date'):
             assert csv_row[column] == formatted(by_name[csv_row[4]]["unmodelled_hpd_95_ranges"])
 
-    @requires_pymc
     def test_a_boundary_has_no_unmodelled_counterpart(self, client):
         # A boundary exists only as a modelled parameter, so there is no
         # unconstrained version of it to report.
@@ -463,7 +453,6 @@ class TestGraphs:
 
         assert sorted(g["sample_id"] for g in graphs) == sorted(r["sample_id"] for r in rows)
 
-    @requires_pymc
     def test_reports_dates_only_for_a_structured_analysis(self, client):
         # Boundaries are modelled parameters with posteriors of their own,
         # but they are not samples and have no AnalysisResult row, so they
@@ -677,7 +666,6 @@ class TestUnmodelledRangesOnTheAnalysisPayload:
     server-side over the curve's full grid and served finished.
     """
 
-    @requires_pymc
     def test_serves_finished_ranges_at_each_level_the_page_offers(self, client):
         from app.api.analysis import REPORTING_CONFIDENCE_LEVELS
 
@@ -699,7 +687,6 @@ class TestUnmodelledRangesOnTheAnalysisPayload:
         # read it any more, and it was 200 points per date.
         assert "unmodelled_probability_distribution" not in row
 
-    @requires_pymc
     def test_the_ranges_are_the_full_grid_calculation(self, client):
         """
         The whole point of moving this server-side. Asserted against the
