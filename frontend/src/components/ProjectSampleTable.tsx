@@ -104,12 +104,16 @@ function formToPayload(form: DraftForm) {
   }
 }
 
+const VALID_CURVE_IDS = new Set(CURVES.map((c) => c.value))
+
 /**
  * Parse the bulk-paste textarea: one date per line, comma or tab separated,
- * as `name, age, error[, material[, context]]`. Deliberately forgiving --
- * this is for pasting a column range out of a spreadsheet or a lab report,
- * so blank lines are skipped and a malformed line is reported by number
- * rather than silently dropped.
+ * as `name, age, error[, material[, context[, curve]]]`. Deliberately
+ * forgiving -- this is for pasting a column range out of a spreadsheet or a
+ * lab report, so blank lines are skipped and a malformed line is reported by
+ * number rather than silently dropped. Curve is optional and defaults to
+ * IntCal20 -- most pasted batches are a single terrestrial curve, so it
+ * would be noise to require it on every line.
  */
 export function parsePastedDates(text: string): { rows: ReturnType<typeof formToPayload>[]; errors: string[] } {
   const rows: ReturnType<typeof formToPayload>[] = []
@@ -119,7 +123,7 @@ export function parsePastedDates(text: string): { rows: ReturnType<typeof formTo
     const line = rawLine.trim()
     if (!line) return
     const parts = line.split(/[\t,;]/).map((p) => p.trim())
-    const [name, age, error, material, context] = parts
+    const [name, age, error, material, context, curve] = parts
     if (!name || !age || !error) {
       errors.push(`Line ${index + 1}: expected at least "name, age, error"`)
       return
@@ -128,12 +132,17 @@ export function parsePastedDates(text: string): { rows: ReturnType<typeof formTo
       errors.push(`Line ${index + 1}: age and error must be numbers`)
       return
     }
+    const curveId = curve ? curve.toLowerCase() : 'intcal20'
+    if (!VALID_CURVE_IDS.has(curveId)) {
+      errors.push(`Line ${index + 1}: unknown curve "${curve}" (expected intcal20, shcal20, or marine20)`)
+      return
+    }
     rows.push({
       sample_name: name,
       age_bp: Number(age),
       error_1sigma: Number(error),
       material_type: material || 'unknown',
-      curve_id: 'intcal20',
+      curve_id: curveId,
       default_context_name: context || null,
       tpq_age_bp: null,
       taq_age_bp: null,
@@ -510,13 +519,15 @@ export default function ProjectSampleTable({ projectId }: Props) {
           <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
             One date per line, comma or tab separated:
             <br />
-            <code>name, age BP, 1σ error[, material[, context]]</code>
+            <code>name, age BP, 1σ error[, material[, context[, curve]]]</code>
+            <br />
+            Curve defaults to IntCal20 if omitted (intcal20, shcal20, or marine20).
           </Typography>
           <TextField
             fullWidth
             multiline
             minRows={8}
-            placeholder={'OxA-1234, 3000, 25, charcoal, Pit 12\nOxA-1235, 3120, 30, bone, Pit 12'}
+            placeholder={'OxA-1234, 3000, 25, charcoal, Pit 12, intcal20\nOxA-1235, 3120, 30, bone, Pit 12'}
             value={pasteText}
             onChange={(e) => setPasteText(e.target.value)}
           />
