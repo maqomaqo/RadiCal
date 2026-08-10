@@ -53,6 +53,7 @@ export interface BayesianRequest {
     mcmc_samples: number
     mcmc_tune: number
     mcmc_chains: number
+    uniform_span_prior: boolean
   }
 }
 

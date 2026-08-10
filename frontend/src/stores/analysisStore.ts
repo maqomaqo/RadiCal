@@ -14,6 +14,10 @@ export interface McmcConfig {
   mcmc_samples: number
   mcmc_tune: number
   mcmc_chains: number
+  // OxCal's UniformSpanPrior (Nicholls and Jones 2001) -- see
+  // BayesianConfigInput.uniform_span_prior on the backend for what it does.
+  // On by default there and here.
+  uniform_span_prior: boolean
 }
 
 // 4000 (not the more typical 2000) because convergence for a realistic
@@ -23,6 +27,7 @@ export const DEFAULT_MCMC: McmcConfig = {
   mcmc_samples: 4000,
   mcmc_tune: 1000,
   mcmc_chains: 4,
+  uniform_span_prior: true,
 }
 
 interface AnalysisDraftState {

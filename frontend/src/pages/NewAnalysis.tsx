@@ -678,6 +678,20 @@ export default function NewAnalysis() {
                     onChange={(e) => setMcmc({ mcmc_chains: Number(e.target.value) })}
                   />
                 </Box>
+                <FormControlLabel
+                  sx={{ mt: 1 }}
+                  control={
+                    <Switch
+                      checked={mcmc.uniform_span_prior}
+                      onChange={(e) => setMcmc({ uniform_span_prior: e.target.checked })}
+                    />
+                  }
+                  label={
+                    <Tooltip title="OxCal's UniformSpanPrior correction (Nicholls and Jones 2001), on by default. Only affects sequences with three or more boundaries, and only the exact solver.">
+                      <span>Uniform span prior</span>
+                    </Tooltip>
+                  }
+                />
               </Box>
             )}
           </Paper>
