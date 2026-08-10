@@ -282,27 +282,47 @@ def _run_bayesian(
     sampler targets the true posterior from the first sweep and reproduces the
     exact solver to under a year wherever the exact solver can be asked.
 
+    Either choice can be overridden per analysis via bayesian_config.solver --
+    see BayesianConfigInput.solver for what each value means and why the
+    override exists. `exact` on a model that cannot be integrated raises rather
+    than sampling instead: asking for an exact answer and quietly getting a
+    sampled one is the silent-fallback problem this all exists to remove.
+
     The returned solver record is what makes the choice visible; the fallback
     used to be silent, and the shapes that trigger it are not exotic -- a
     sequence of phases with no Boundary anywhere, or two parallel excavation
     areas. Shape:
 
         {'method': 'exact' | 'gibbs',
-         'reason': why it is not exactly solvable (None when it is),
+         'requested': what the config asked for ('auto' unless overridden),
+         'reason': why the model is not exactly solvable (None when it is,
+                   whichever solver actually ran),
          'implicit_boundaries': how many transitions were supplied,
          and for the sampled path: 'sweeps', 'convergence', 'converged'}
     """
+    requested = bayesian_config.get('solver') or 'auto'
+
+    # Which tree to solve is decided ONCE, before the solver is chosen, and both
+    # solvers then get the same one. That matters specifically for the override:
+    # cross-checking the exact solver against the sampler is only meaningful if
+    # the two are given the same model, and the earlier version handed the
+    # sampler the tree as authored while the exact solver got the patched
+    # candidate -- so on a model needing implicit transitions the two would have
+    # disagreed for a modelling reason and looked like a solver discrepancy.
+    #
+    # It is also the better answer for reproducing OxCal, which is the other
+    # reason the override exists: OxCal orders sibling groups whether or not a
+    # Boundary is written between them (its `ordered` and `shared_boundary` runs
+    # of the Nenthorn fixture agree to 0.948 posterior overlap), so supplying the
+    # transition is closer to what OxCal did than leaving it out.
     chain, reason = exact_chain.layout_with_reason(model_tree, measurements)
     solve_tree = model_tree
     implicit_boundaries = 0
     if chain is None:
         # A Sequence that orders two groups with no Boundary between them is
-        # not a chain, so it would fall to MCMC -- where it is measurably
-        # wrong: on the OxCal fixture that path separated two ordered groups
-        # by 57 years against OxCal's 13, and could not distinguish an
-        # outlier from a sound date. Supplying the transition it implies
-        # makes it exact and lands 6.4 years rms from OxCal's own answer.
-        # See model_tree.with_implicit_boundaries.
+        # not a chain. Supplying the transition it implies makes it exact and
+        # lands 6.4 years rms from OxCal's own answer, against 12.6 for the
+        # sampler this replaced. See model_tree.with_implicit_boundaries.
         candidate, inserted = with_implicit_boundaries(model_tree)
         if inserted:
             patched, patched_reason = exact_chain.layout_with_reason(candidate, measurements)
@@ -316,7 +336,15 @@ def _run_bayesian(
                 # inserting them has already dealt with, so repeating it
                 # would send the user to fix something that is now fixed.
                 reason = patched_reason
-    if chain is not None:
+
+    if requested == 'exact' and chain is None:
+        raise ValueError(
+            'this model cannot be integrated exactly, so the exact solver was '
+            f'not used: {reason}. Either fix that, or choose the MH/Gibbs '
+            'sampler, which has no such restriction.'
+        )
+
+    if chain is not None and requested != 'gibbs':
         solved = exact_chain.solve(
             measurements, solve_tree, chain,
             num_samples=bayesian_config.get('mcmc_samples', 2000),
@@ -325,23 +353,26 @@ def _run_bayesian(
         agreement_service.attach(solved['measurements'], measurements)
         return solved['measurements'], solved['boundaries'], {
             'method': 'exact',
+            'requested': requested,
             'reason': None,
             'implicit_boundaries': implicit_boundaries,
         }
 
-    # The model tree is passed as authored, NOT the patched candidate: the
-    # implicit transitions exist only to make a model exactly solvable, and this
-    # sampler needs no help with the shape they were working around.
     sampled = gibbs.solve(
-        measurements, model_tree,
+        measurements, solve_tree,
         num_samples=bayesian_config.get('mcmc_samples', 2000),
         uniform_span_prior=bayesian_config.get('uniform_span_prior', True),
     )
     agreement_service.attach(sampled['measurements'], measurements)
     return sampled['measurements'], sampled['boundaries'], {
         'method': 'gibbs',
+        'requested': requested,
+        # None when the model WAS exactly solvable and the sampler ran by
+        # choice. Reporting a "why it could not be solved exactly" against a
+        # model that could would be simply false, and would make the results
+        # page warn about a deliberate, valid decision.
         'reason': reason,
-        'implicit_boundaries': 0,
+        'implicit_boundaries': implicit_boundaries,
         'sweeps': sampled['sweeps'],
         'convergence': sampled['convergence'],
         'converged': sampled['converged'],
@@ -857,6 +888,12 @@ async def get_analysis(analysis_id: str, db: Session = Depends(get_db)):
             "name": analysis.name,
             "analysis_type": analysis.analysis_type,
             "status": analysis.status,
+            # Why a failed run failed. Stored on the row since reruns existed,
+            # but never returned until now, so a 'failed' analysis gave the page
+            # nothing to show beyond the word "failed" -- and one of the ways to
+            # fail is now a deliberate choice (requiring the exact solver on a
+            # model that cannot support it), where the reason is the whole point.
+            "error_message": analysis.error_message,
             "created_at": analysis.created_at.isoformat(),
             "measurements_count": len(analysis.measurements),
             "project_id": analysis.project_id,

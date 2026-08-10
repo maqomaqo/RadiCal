@@ -160,6 +160,225 @@ class TestFallbackIsRecorded:
         assert 'outside every Boundary' in solver['reason']
 
 
+class TestSolverOverride:
+    """
+    bayesian_config.solver lets an analyst override the automatic choice. OxCal
+    is the reference implementation, so there are two real reasons to want its
+    method even where exact integration is available: reproducing a published
+    analysis, and cross-checking the exact solver against an independent route
+    to the same posterior.
+    """
+
+    def _chain(self, solver=None, tag=None):
+        from app.api import analysis as analysis_api
+
+        tag = tag or f'so{next(_IDS)}'
+        config = {'mcmc_samples': 200}
+        if solver is not None:
+            config['solver'] = solver
+        measurements = [
+            _measurement(f'{tag}s1', f'{tag}p1', age_bp=3000),
+            _measurement(f'{tag}s2', f'{tag}p1', age_bp=3040),
+        ]
+        return analysis_api._run_bayesian(measurements, _chain_tree(tag), config)
+
+    def test_auto_still_integrates_a_chain_exactly(self):
+        _r, _b, solver = self._chain()
+        assert solver['method'] == 'exact'
+        assert solver['requested'] == 'auto'
+
+    def test_gibbs_can_be_forced_on_an_exactly_solvable_model(self):
+        """
+        The reproduce-OxCal and cross-check case. It must sample, and it must NOT
+        report a reason -- there is nothing wrong with this model, so claiming it
+        "cannot be solved exactly" would be false and would make the results page
+        warn about a deliberate, valid decision.
+        """
+        _r, _b, solver = self._chain(solver='gibbs')
+        assert solver['method'] == 'gibbs'
+        assert solver['requested'] == 'gibbs'
+        assert solver['reason'] is None
+        assert solver['sweeps'] > 0
+
+    def test_exact_can_be_required(self):
+        _r, _b, solver = self._chain(solver='exact')
+        assert solver['method'] == 'exact'
+        assert solver['requested'] == 'exact'
+
+    def test_requiring_exact_on_an_unsolvable_model_fails_loudly(self):
+        """
+        Refusing is the point. Quietly sampling when the analyst asked for an
+        exact answer is the silent-fallback problem this whole area exists to
+        remove, so it raises -- and the message says why the model cannot be
+        integrated and what the alternative is.
+        """
+        from app.api import analysis as analysis_api
+
+        tag = f'so{next(_IDS)}'
+        measurements = [
+            _measurement(f'{tag}s1', f'{tag}p1', age_bp=3200),
+            _measurement(f'{tag}s2', f'{tag}p2', age_bp=3100),
+            _measurement(f'{tag}s3', f'{tag}p3', age_bp=3000),
+        ]
+        with pytest.raises(ValueError) as raised:
+            analysis_api._run_bayesian(
+                measurements, _unbounded_tree(tag),
+                {'mcmc_samples': 200, 'solver': 'exact'},
+            )
+        message = str(raised.value)
+        assert 'outside every Boundary' in message, message
+        assert 'MH/Gibbs' in message, 'the message should name the way forward'
+
+    def test_the_two_solvers_agree_on_the_same_model(self):
+        """
+        What makes the cross-check worth offering: run the same model both ways
+        and the answers match. Sub-year on this model, against calibrated ranges
+        reported to 5 years.
+        """
+        tag = f'so{next(_IDS)}'
+        exact_results, _eb, exact_solver = self._chain(solver='exact', tag=tag)
+        sampled_results, _sb, sampled_solver = self._chain(solver='gibbs', tag=tag)
+        assert exact_solver['method'] == 'exact'
+        assert sampled_solver['method'] == 'gibbs'
+
+        for sample_id, exact in exact_results.items():
+            got = sampled_results[sample_id]['posterior_mean']
+            assert got == pytest.approx(exact['posterior_mean'], abs=2.0), sample_id
+
+    def test_both_solvers_are_given_the_same_model(self):
+        """
+        A cross-check is only meaningful if the two solvers see the same thing.
+
+        Implicit transitions are supplied to make an ordered-without-boundaries
+        model exactly solvable, and an earlier version handed the SAMPLER the
+        tree as authored while the exact solver got the patched one -- so on such
+        a model the two would have disagreed for a modelling reason and it would
+        have looked like a solver discrepancy. Both must now report the same
+        patch count.
+        """
+        tag = f'so{next(_IDS)}'
+        tree = _chain_tree(tag)
+        tree['children'].insert(2, {'id': f'{tag}p2', 'element_type': 'phase',
+                                    'name': 'Later', 'children': []})
+        measurements = [
+            _measurement(f'{tag}s1', f'{tag}p1', age_bp=3200),
+            _measurement(f'{tag}s2', f'{tag}p2', age_bp=3000),
+        ]
+
+        from app.api import analysis as analysis_api
+        records = {}
+        for choice in ('exact', 'gibbs'):
+            _r, _b, records[choice] = analysis_api._run_bayesian(
+                measurements, tree, {'mcmc_samples': 200, 'solver': choice})
+        assert records['exact']['implicit_boundaries'] == 1
+        assert records['gibbs']['implicit_boundaries'] == 1
+
+    def test_it_round_trips_through_a_saved_analysis(self, client):
+        """The override has to survive being saved, or a rerun would silently
+        revert to the automatic choice."""
+        tag = f'so{next(_IDS)}'
+        created = client.post('/api/analysis/bayesian', json={
+            'name': f'Override {tag}',
+            'measurements': [_measurement(f'{tag}s1', f'{tag}p1')],
+            'model_tree': _chain_tree(tag),
+            'bayesian_config': {'solver': 'gibbs', 'mcmc_samples': 200},
+            'save': True,
+        })
+        assert created.status_code == 200, created.text
+        assert created.json()['data']['solver']['method'] == 'gibbs'
+
+        analysis_id = created.json()['data']['id']
+        fetched = client.get(f'/api/analysis/{analysis_id}').json()['data']
+        assert fetched['bayesian_config']['solver'] == 'gibbs'
+
+        rerun = client.post(f'/api/analysis/{analysis_id}/rerun')
+        assert rerun.status_code == 200, rerun.text
+        after = client.get(f'/api/analysis/{analysis_id}').json()['data']
+        assert after['solver']['method'] == 'gibbs', 'the rerun reverted to automatic'
+        assert after['solver']['requested'] == 'gibbs'
+
+    def test_an_impossible_override_is_refused_when_creating(self, client):
+        """The refusal reaches the client as an error carrying the reason, rather
+        than a result quietly computed some other way."""
+        tag = f'so{next(_IDS)}'
+        created = client.post('/api/analysis/bayesian', json={
+            'name': f'Impossible {tag}',
+            'measurements': [
+                _measurement(f'{tag}s1', f'{tag}p1', age_bp=3200),
+                _measurement(f'{tag}s2', f'{tag}p2', age_bp=3100),
+                _measurement(f'{tag}s3', f'{tag}p3', age_bp=3000),
+            ],
+            'model_tree': _unbounded_tree(tag),
+            'bayesian_config': {'solver': 'exact', 'mcmc_samples': 200},
+            'save': True,
+        })
+        assert created.status_code == 400, created.text
+        assert 'outside every Boundary' in created.json()['detail']
+
+    def test_an_impossible_override_marks_a_saved_analysis_failed(self, client):
+        """
+        The other way in: an analysis that solved fine, then edited to require
+        the exact solver on a structure that cannot support it. The rerun must
+        fail visibly with the reason stored, not fall back to sampling.
+        """
+        tag = f'so{next(_IDS)}'
+        measurements = [
+            _measurement(f'{tag}s1', f'{tag}p1', age_bp=3200),
+            _measurement(f'{tag}s2', f'{tag}p2', age_bp=3100),
+            _measurement(f'{tag}s3', f'{tag}p3', age_bp=3000),
+        ]
+        created = client.post('/api/analysis/bayesian', json={
+            'name': f'Then broken {tag}',
+            'measurements': measurements,
+            'model_tree': _unbounded_tree(tag),
+            'bayesian_config': {'mcmc_samples': 200},
+            'save': True,
+        })
+        assert created.status_code == 200, created.text
+        assert created.json()['data']['solver']['method'] == 'gibbs'
+        analysis_id = created.json()['data']['id']
+        saved = client.get(f'/api/analysis/{analysis_id}').json()['data']
+
+        replaced = client.put(f'/api/analysis/{analysis_id}/inputs', json={
+            'name': saved['name'],
+            'measurements': [
+                {
+                    'id': m['id'], 'sample_name': m['sample_name'],
+                    'age_bp': m['age_bp'], 'error_1sigma': m['error_1sigma'],
+                    'material_type': m.get('material_type') or 'unknown',
+                    'sample_type': m.get('sample_type') or 'terrestrial',
+                    'curve_id': m.get('curve_id') or 'intcal20',
+                    'element_id': m.get('element_id'),
+                }
+                for m in saved['measurements']
+            ],
+            'groups': [], 'relationships': [],
+            'model_tree': saved['model_tree'],
+            'bayesian_config': {'solver': 'exact', 'mcmc_samples': 200},
+        })
+        assert replaced.status_code == 200, replaced.text
+
+        rerun = client.post(f'/api/analysis/{analysis_id}/rerun')
+        assert rerun.status_code == 400, rerun.text
+
+        after = client.get(f'/api/analysis/{analysis_id}').json()['data']
+        assert after['status'] == 'failed'
+        assert 'outside every Boundary' in (after.get('error_message') or ''), after
+        # No stale record claiming a method it never managed to use.
+        assert after['solver'] is None
+
+    def test_an_unknown_solver_is_refused_rather_than_guessed(self, client):
+        tag = f'so{next(_IDS)}'
+        response = client.post('/api/analysis/bayesian', json={
+            'name': f'Bad {tag}',
+            'measurements': [_measurement(f'{tag}s1', f'{tag}p1')],
+            'model_tree': _chain_tree(tag),
+            'bayesian_config': {'solver': 'whatever'},
+            'save': False,
+        })
+        assert response.status_code == 422
+
+
 class TestStaleRecords:
     def test_editing_the_inputs_clears_it(self, client):
         """

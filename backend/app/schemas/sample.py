@@ -290,6 +290,24 @@ class RelationshipInput(BaseModel):
 
 
 class BayesianConfigInput(BaseModel):
+    # Which solver to use.
+    #
+    #   auto   pick per model: integrate exactly where that is possible,
+    #          otherwise sample. The right default -- exact integration has no
+    #          sampler to converge and no calibration lobe to miss.
+    #   exact  require exact integration, and FAIL rather than silently
+    #          sampling if this model cannot be integrated. Refusing is the
+    #          point: a request for an exact answer that quietly returns a
+    #          sampled one is the silent-fallback problem all over again.
+    #   gibbs  sample with OxCal's MH/Gibbs scheme even where exact
+    #          integration was available.
+    #
+    # `gibbs` exists because OxCal is the reference implementation, so an
+    # analyst has two reasons to want the same method it uses: reproducing a
+    # published analysis, and cross-checking this app's exact solver against an
+    # independent route to the same posterior. Both are legitimate, and neither
+    # is served by the app insisting it knows better.
+    solver: Literal["auto", "exact", "gibbs"] = "auto"
     # How many samples each date's posterior is REPORTED with, not how long
     # anything runs: a chain-shaped model is integrated exactly and has no run
     # length, and services/gibbs.py extends its own run until it converges

@@ -60,6 +60,8 @@ interface AnalysisResult {
   name: string
   analysis_type: string
   status: string
+  // Why a failed run failed. Null unless status is 'failed'.
+  error_message?: string | null
   created_at: string
   measurements_count: number
   project_id?: string | null
@@ -78,6 +80,10 @@ interface AnalysisResult {
   // either method -- see the solver notice below.
   solver?: {
     method: 'exact' | 'gibbs' | 'smc'
+    // What the analysis asked for. 'gibbs' here means the analyst chose OxCal's
+    // method deliberately, so a sampled result is not a fallback and must not be
+    // labelled as one.
+    requested?: 'auto' | 'exact' | 'gibbs'
     reason?: string | null
     implicit_boundaries?: number
     // Sampled path only. `converged` is against OxCal's own 0.95 target for the
@@ -790,7 +796,22 @@ export default function Results() {
           plus the legacy SMC path, which had a known and measured failure on
           wiggly curves (see services/gibbs.py's module docstring for what
           replaced it and why). */}
-      {isBayesian && (
+      {/* A failed run, with the reason. Before this the page showed only the word
+          "failed" in the status card, leaving the user to guess -- and one way to
+          fail is now a deliberate choice (requiring the exact solver on a model
+          that cannot support it), where the reason names exactly what to change. */}
+      {analysis.status === 'failed' && (
+        <Alert severity="error" sx={{ mb: 3 }}>
+          <Typography variant="subtitle2" gutterBottom>
+            This analysis did not complete
+          </Typography>
+          <Typography variant="body2">
+            {analysis.error_message || 'No reason was recorded. Re-running it may report one.'}
+          </Typography>
+        </Alert>
+      )}
+
+      {isBayesian && analysis.status !== 'failed' && (
         <Box sx={{ mb: 3 }}>
           {!analysis.solver ? (
             <Tooltip title="This analysis was run before the solver was recorded. Re-run it to find out which method its model uses.">
@@ -824,28 +845,40 @@ export default function Results() {
               <Typography variant="subtitle2" gutterBottom>
                 Sampled, but not fully converged
               </Typography>
-              {analysis.solver.reason && (
+              {analysis.solver.reason ? (
                 <Typography variant="body2" sx={{ mb: 1 }}>
                   This model cannot be solved exactly because {analysis.solver.reason}.
+                </Typography>
+              ) : (
+                <Typography variant="body2" sx={{ mb: 1 }}>
+                  The MH/Gibbs sampler was chosen for this analysis. This model can
+                  also be integrated exactly, which needs no sampling at all — switch
+                  the solver to Automatic if you don’t need OxCal’s method
+                  specifically.
                 </Typography>
               )}
               <Typography variant="body2">
                 The sampler reached{' '}
+                {/* One decimal place, not none: a run stopping at 0.945 rounds
+                    to "95%", which reads as a contradiction against the 95%
+                    target it just missed. */}
                 {analysis.solver.convergence !== undefined
-                  ? `${(analysis.solver.convergence * 100).toFixed(0)}%`
+                  ? `${(analysis.solver.convergence * 100).toFixed(1)}%`
                   : 'less than 95%'}{' '}
                 convergence after {analysis.solver.sweeps?.toLocaleString()} passes,
                 short of the 95% usually wanted. The ranges below are probably a few
-                years out rather than wrong, but adding a Boundary where the model
-                needs one would let it be solved exactly instead.
+                years out rather than wrong
+                {analysis.solver.reason
+                  ? ', but adding a Boundary where the model needs one would let it be solved exactly instead.'
+                  : '.'}
               </Typography>
             </Alert>
           ) : (
             <Tooltip
               title={
-                'This model cannot be integrated exactly, so it was sampled with OxCal’s ' +
-                'Metropolis-Hastings/Gibbs scheme' +
-                (analysis.solver.reason ? ` — ${analysis.solver.reason}. ` : '. ') +
+                (analysis.solver.reason
+                  ? `This model cannot be integrated exactly — ${analysis.solver.reason} — so it was sampled with OxCal’s Metropolis-Hastings/Gibbs scheme. `
+                  : 'OxCal’s Metropolis-Hastings/Gibbs sampler was chosen for this analysis. This model could also have been integrated exactly; the two agree to well under a year on the models where both can be run. ') +
                 `It converged to ${
                   analysis.solver.convergence !== undefined
                     ? (analysis.solver.convergence * 100).toFixed(1) + '%'
@@ -853,8 +886,16 @@ export default function Results() {
                 } over ${analysis.solver.sweeps?.toLocaleString()} passes.`
               }
             >
+              {/* A run the analyst asked for is labelled as their choice, not as
+                  a fallback -- they may have picked OxCal's method to reproduce a
+                  published analysis or to cross-check the exact solver, and
+                  calling that "sampled because we had to" would be false. */}
               <Chip size="small" variant="outlined" color="success"
-                label={`Sampled (MH/Gibbs) — ${
+                label={`${
+                  analysis.solver.requested === 'gibbs'
+                    ? 'MH/Gibbs (chosen)'
+                    : 'Sampled (MH/Gibbs)'
+                } — ${
                   analysis.solver.convergence !== undefined
                     ? (analysis.solver.convergence * 100).toFixed(0) + '% converged'
                     : 'converged'

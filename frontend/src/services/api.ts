@@ -50,6 +50,7 @@ export interface BayesianRequest {
     relationship: string
   }>
   bayesian_config?: {
+    solver: 'auto' | 'exact' | 'gibbs'
     mcmc_samples: number
     mcmc_tune: number
     mcmc_chains: number

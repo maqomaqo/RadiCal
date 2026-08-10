@@ -15,6 +15,7 @@ import {
   Grid,
   IconButton,
   FormControlLabel,
+  FormHelperText,
   Switch,
   Alert,
   CircularProgress,
@@ -44,6 +45,7 @@ import {
 } from '@/utils/dateFormat'
 import { formatApiError } from '@/utils/apiError'
 import { useAnalysisDraftStore } from '@/stores/analysisStore'
+import type { SolverChoice } from '@/stores/analysisStore'
 import type { DraftMeasurement, ModelElement } from '@/types'
 import { expandRelationships, findCycle, treeToMatrix } from '@/utils/stratigraphy'
 import { validateTree } from '@/components/ModelTreeEditor'
@@ -655,6 +657,32 @@ export default function NewAnalysis() {
                 <Typography variant="subtitle2" gutterBottom>
                   Model Settings
                 </Typography>
+                {/* Solver override. Automatic is right almost always -- exact
+                    integration has no sampler to converge and no calibration
+                    lobe to miss -- but OxCal is the reference implementation, so
+                    forcing its method is how you reproduce a published analysis
+                    or cross-check the exact solver against an independent route
+                    to the same posterior. */}
+                <FormControl fullWidth size="small" sx={{ mb: 2 }}>
+                  <InputLabel>Solver</InputLabel>
+                  <Select
+                    value={mcmc.solver}
+                    label="Solver"
+                    onChange={(e) => setMcmc({ solver: e.target.value as SolverChoice })}
+                  >
+                    <MenuItem value="auto">Automatic (recommended)</MenuItem>
+                    <MenuItem value="exact">Exact solver only</MenuItem>
+                    <MenuItem value="gibbs">MH/Gibbs sampler (as OxCal)</MenuItem>
+                  </Select>
+                  <FormHelperText>
+                    {mcmc.solver === 'auto' &&
+                      'Integrates the posterior exactly where the model allows it, and samples otherwise.'}
+                    {mcmc.solver === 'exact' &&
+                      'Fails rather than sampling if this model cannot be integrated exactly.'}
+                    {mcmc.solver === 'gibbs' &&
+                      'Uses OxCal’s own method throughout — for reproducing a published analysis, or cross-checking the exact solver.'}
+                  </FormHelperText>
+                </FormControl>
                 <TextField
                   fullWidth
                   size="small"

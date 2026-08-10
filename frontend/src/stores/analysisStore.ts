@@ -10,7 +10,12 @@ import { create } from 'zustand'
 import type { DraftMeasurement, DraftGroup, DraftRelationship, ModelElement } from '@/types'
 import { DateFormat, DEFAULT_DATE_FORMAT } from '@/utils/dateFormat'
 
+export type SolverChoice = 'auto' | 'exact' | 'gibbs'
+
 export interface McmcConfig {
+  // Which solver to use: 'auto' picks per model, the others override it. See
+  // BayesianConfigInput.solver on the backend for what each one does.
+  solver: SolverChoice
   mcmc_samples: number
   mcmc_tune: number
   mcmc_chains: number
@@ -24,6 +29,7 @@ export interface McmcConfig {
 // sampler runs: services/gibbs.py on the backend extends its own run until it
 // converges, and the exact solver has no run length at all.
 export const DEFAULT_MCMC: McmcConfig = {
+  solver: 'auto',
   mcmc_samples: 4000,
   mcmc_tune: 1000,
   mcmc_chains: 4,
