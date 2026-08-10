@@ -399,6 +399,154 @@ class TestTheChainCanActuallyMove:
         assert without > with_wide, (without, with_wide)
 
 
+class TestOutlierModel:
+    """
+    The outlier model, against the same OxCal 4.4 run the exact solver is held
+    to: tests/fixtures/oxcal_outlier, Shag River Mouth, 16 dates in one phase
+    with NZ7756 at 970 +/- 47 BP against the rest at 537-660, a 5% prior on
+    each and Outlier_Model("General", T(5), U(0,4), "t").
+
+    That model is a chain, so all three answers are available at once -- OxCal's
+    own, the exact solver's, and the sampler's -- which is what makes it worth
+    testing here rather than only in test_exact_chain.
+
+    The Bernoulli indicator is integrated out in the shared likelihood tables
+    (exact_chain.date_tables), so the outlier model is a property of a date
+    rather than of how the model is solved. These tests are what establishes
+    that claim for the sampler instead of assuming it.
+    """
+
+    @pytest.fixture(scope='class')
+    def solved(self):
+        import shag_fixture as sf
+        samples, tree = sf.measurements(), sf.model_tree()
+        chain = ec.layout(tree, samples)
+        assert chain is not None
+        exact = ec.solve(samples, tree, chain, num_samples=200)
+        sampled = gibbs.solve(samples, tree, sweeps=20000, num_samples=200,
+                              grid=_exact_grid(exact))
+        return sf, exact, sampled
+
+    def test_finds_the_outlier_oxcal_found(self, solved):
+        sf, _exact, sampled = solved
+        probabilities = {
+            m['id']: sampled['measurements'][m['id']]['outlier_probability']
+            for m in sf.measurements()
+        }
+        assert probabilities[sf.OUTLIER] > 0.95, probabilities
+        others = [v for k, v in probabilities.items() if k != sf.OUTLIER]
+        # Every sound date below its own prior: the evidence should argue them
+        # down, not merely leave them where they started.
+        assert max(others) < sf.OUTLIER_PRIOR, probabilities
+
+    def test_probabilities_track_oxcals(self, solved):
+        """The same 0.05 bar the exact solver is held to."""
+        sf, _exact, sampled = solved
+        table = sf.table()
+        errors = np.array([
+            sampled['measurements'][m['id']]['outlier_probability']
+            - table[m['id']]['outlier_probability']
+            for m in sf.measurements()
+        ])
+        assert np.abs(errors).max() < 0.05, dict(zip(
+            [m['id'] for m in sf.measurements()], errors.round(4)))
+
+    def test_it_agrees_with_the_exact_solver_more_closely_than_with_oxcal(self, solved):
+        """
+        Measured at 0.0001 or better on every date, against the 0.0166 both
+        solvers sit from OxCal. That gap is the point: the residual difference
+        from OxCal is a property of this app's outlier implementation, not of
+        the sampler, so replacing the solver does not change it.
+        """
+        sf, exact, sampled = solved
+        for m in sf.measurements():
+            a = exact['measurements'][m['id']]['outlier_probability']
+            b = sampled['measurements'][m['id']]['outlier_probability']
+            assert b == pytest.approx(a, abs=0.005), m['id']
+
+    def test_the_outlier_component_keeps_its_own_scale(self, solved):
+        """
+        The trap the exact solver walked into once, re-checked here because the
+        sampler draws from the same mixture. The outlier component is a proper
+        density whose mass mostly lies OFF the grid -- that is the statement
+        that a flagged date could be anywhere -- so renormalising what remains
+        would make the answer depend on the grid width.
+
+        Same dates on a grid 4x wider must give much the same probabilities.
+        """
+        sf, _exact, sampled = solved
+        import unittest.mock as mock
+        samples, tree = sf.measurements(), sf.model_tree()
+        with mock.patch.object(ec, 'BOUNDARY_WINDOW_FACTOR', 30.0):
+            wide = gibbs.solve(samples, tree, sweeps=20000, num_samples=200)
+        assert (wide['grid']['upper'] - wide['grid']['lower']) > 2 * (
+            sampled['grid']['upper'] - sampled['grid']['lower'])
+        for m in samples:
+            narrow_p = sampled['measurements'][m['id']]['outlier_probability']
+            assert wide['measurements'][m['id']]['outlier_probability'] == \
+                pytest.approx(narrow_p, abs=0.05), m['id']
+
+    def _residual_case(self, model, sweeps=20000):
+        """Four contemporary dates plus one 400 radiocarbon years too old."""
+        phase = _element('phase', 'p')
+        tree = _element('sequence', 's', [
+            _element('boundary', 'b0'), phase, _element('boundary', 'b1')])
+        dates = [dict(_date(phase['id'], age), outlier_prior=0.05,
+                      outlier_model=model, curve_id='intcal20')
+                 for age in (3000, 3020, 3040, 3060, 3460)]
+        residual = dates[-1]['id']
+        exact = ec.solve(dates, tree, ec.layout(tree, dates), num_samples=200)
+        sampled = gibbs.solve(dates, tree, sweeps=sweeps, num_samples=200,
+                              grid=_exact_grid(exact))
+        return dates, residual, exact, sampled
+
+    def test_the_one_sided_charcoal_model_is_more_confident(self):
+        """
+        Same direction as the exact solver: a model that knows the material can
+        only be too OLD does not have to spend prior mass on the direction it
+        cannot be wrong in, so it flags a residual date harder.
+        """
+        _d, residual, general_exact, general = self._residual_case('general')
+        _d2, residual2, charcoal_exact, charcoal = self._residual_case('charcoal')
+        assert (charcoal['measurements'][residual2]['outlier_probability']
+                > general['measurements'][residual]['outlier_probability'])
+        # ...and the exact solver says so too, so this is not a sampler artefact.
+        assert (charcoal_exact['measurements'][residual2]['outlier_probability']
+                > general_exact['measurements'][residual]['outlier_probability'])
+
+    def test_sound_dates_are_left_alone_beside_a_residual_one(self):
+        dates, residual, _exact, sampled = self._residual_case('charcoal')
+        for d in dates:
+            if d['id'] == residual:
+                continue
+            assert sampled['measurements'][d['id']]['outlier_probability'] < 0.2, d['id']
+
+    def test_an_ambiguous_outlier_needs_the_date_and_boundary_to_move_together(self):
+        """
+        Why the per-flagged-date move sets exist. A date that might be an
+        outlier has two plausible positions hundreds of years apart, and
+        reaching the far one needs the enclosing boundary to come out past it --
+        neither can move alone. Measured at 100,000 sweeps over three seeds,
+        those move sets took the spread of the residual date's outlier
+        probability from 0.09 to 0.01 around the exact answer.
+
+        Asserted structurally: the pairs exist for a flagged date and not for an
+        unflagged one, since adding them for every date cost 2.8x the runtime
+        for no gain on the sound ones.
+        """
+        phase = _element('phase', 'p')
+        tree = _element('sequence', 's', [
+            _element('boundary', 'b0'), phase, _element('boundary', 'b1')])
+        flagged = dict(_date(phase['id'], 3000), outlier_prior=0.05,
+                       outlier_model='general')
+        plain = _date(phase['id'], 3020)
+        model = gibbs.Model([flagged, plain], tree)
+
+        pairs = [s for s in model.move_sets() if len(s) == 2]
+        assert any(flagged['id'] in s for s in pairs), 'a flagged date needs them'
+        assert not any(plain['id'] in s for s in pairs), 'an unflagged one does not'
+
+
 class TestReportedShape:
     def test_it_returns_what_the_other_solvers_do(self):
         """

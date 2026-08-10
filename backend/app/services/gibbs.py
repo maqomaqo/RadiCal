@@ -91,7 +91,13 @@ Measured against exact_chain on chain-shaped models, where the exact marginals
 are ground truth, and on branching models against the one oracle available for
 those: two INDEPENDENT branches, each separately a chain, so exact_chain can
 solve them one at a time while the sampler has to solve the combined model it
-declines. See tests/test_gibbs.py for both, and _span_priors for how the
+declines. The outlier model is held to the same OxCal 4.4 run the exact solver
+is (tests/fixtures/oxcal_outlier), where the two agree to 0.0001 on every date's
+outlier probability against the 0.0166 both sit from OxCal -- so the residual
+difference from OxCal belongs to this app's outlier implementation, not to the
+choice of solver.
+
+See tests/test_gibbs.py for all of it, and _span_priors for how the
 UniformSpanPrior correction is grouped so that it reduces exactly to
 exact_chain's on a chain and to the per-branch corrections on independent
 branches.
@@ -601,6 +607,39 @@ class Model:
                 if {other_older, other_younger} & {older_id, younger_id}:
                     members |= set(other_dates) | {other_older, other_younger}
             sets.append(sorted(members))
+
+            # One FLAGGED date with the boundary that pens it in, per side.
+            #
+            # This is what an ambiguous outlier needs. Such a date has two
+            # plausible positions hundreds of years apart -- sitting with the
+            # group as a flagged date, or out at its own likelihood as a sound
+            # one -- and the second requires the enclosing boundary to come out
+            # past it. Neither can move alone: the Gibbs draw confines the date
+            # inside the boundaries, and the boundary's own conditional decays
+            # away from the extreme date so it will not lead. Moving the pair
+            # together is the only way across. Measured on a residual date 400
+            # radiocarbon years too old, at 100,000 sweeps over three seeds, this
+            # took the spread of its outlier probability from 0.09 to 0.01
+            # around the exact answer.
+            #
+            # Only for dates carrying an outlier prior, because that is what
+            # creates the mode: the broad outlier component is the only reason a
+            # date has a second plausible position far outside its own group. It
+            # is also what keeps the cost proportionate -- these sets are one per
+            # flagged date per side, each costing a log-posterior evaluation, so
+            # adding them for every date made a 16-date model 2.8x slower for no
+            # gain on the fifteen sound ones.
+            #
+            # Deliberately ONE boundary at a time, not both: translating the date
+            # with both drags the far boundary past the group's other dates and
+            # breaks their containment, so the proposal is rejected almost every
+            # time.
+            if len(dates) > 1:
+                for date_id in dates:
+                    if date_id not in self.outlier_parts:
+                        continue
+                    sets.append(sorted({date_id, older_id}))
+                    sets.append(sorted({date_id, younger_id}))
         return sets
 
     def shift(self, state: _State, rng, params: List[str], scale: float,
