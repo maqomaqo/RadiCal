@@ -122,10 +122,50 @@ OxCal's 29.2. It was still wrong, for reasons worth not rediscovering:
   * it degraded uniform_span_prior=False (4.17 -> 5.86). A real correction should
     help both settings; one tuned against a single setting helps only that one.
 
-So the honest state is: the diagnosis above is sound, it is incomplete, and the
-narrowness on models with NO outlier model is the open question. That is a
-well-posed target -- our span posterior is hypersensitive near zero on every model
--- and it is where the next attempt should start, not at a threshold.
+THE NO-OUTLIER CASE, investigated separately
+--------------------------------------------
+The narrowness on models with no outlier model was then investigated on
+tests/fixtures/oxcal's `unordered` run -- ONE phase, eight dates, no ordering, no
+outlier model, the simplest thing in the suite. What it established:
+
+  * it is NOT the boundaries being individually too tight. Their standard
+    deviations match OxCal's to within 5% (24.4 against 23.3, 23.3 against 22.1).
+    Only their MEANS are pulled inward, so nothing is over-constraining either
+    boundary on its own.
+  * so the span is small because our two boundaries are strongly CORRELATED: each
+    is as uncertain as OxCal's, but they move together, and the span is their
+    difference. OxCal's are less correlated. (The mean span itself is not a
+    reconstruction artefact -- E[S] - E[E] = E[S - E] whatever the correlation --
+    so 5.8 years against OxCal's 29.6 is real.)
+  * both we AND OxCal homogenise the date POSITIONS on a single phase (spread 0.2
+    years for OxCal, 0.0 for us). The difference is how far the boundaries then
+    extend beyond them.
+  * OxCal preserves each date's own calibration-lobe weighting almost exactly as
+    the unmodelled likelihood has it (spread across dates 0.065 against the
+    unmodelled 0.066); we homogenise that too (0.007). But OxCal simultaneously
+    pushes the MEAN weight further into the early lobe (0.136) than we do (0.205),
+    so it is not simply doing less coupling than us -- it is doing something
+    different.
+  * no exponent reproduces OxCal here either. On this clean single phase K x 0.75
+    gives the best date agreement of any setting tried anywhere (0.79 years rms)
+    but a span of 86.6 against OxCal's 29.6, so the two cannot be fitted at once.
+  * a POORLY MIXED sampler on our model does not reproduce OxCal. Turning the wide
+    and group moves off gives span 2.0 and a late-lobe weight of 0.953 -- stuck in
+    the wrong lobe entirely -- nothing like OxCal's answer. So "OxCal's MCMC
+    under-explores the coupling" was the leading hypothesis and it is wrong.
+
+The sharpest statement available: our posterior couples a phase's parameters far
+more tightly than OxCal's -- same marginal uncertainties, much higher correlation
+between the boundaries, and lobe weights homogenised across dates where OxCal's
+stay individual. That is a property of the JOINT posterior rather than of any
+single prior factor, which is why factor-by-factor comparison against the
+published equations keeps coming back clean.
+
+What would settle it: an OxCal run that exports the span DIRECTLY. OxCal has
+Span(), Interval() and Difference() commands, and any of them would give the
+posterior of the joint quantity instead of leaving it to be inferred from two
+marginals -- which is the one thing the current fixtures cannot show, and exactly
+where the disagreement now sits.
 
 Practical consequence meanwhile: modelled positions are good (6.3 years rms from
 OxCal on this fixture with the sampler) but reported RANGES are tighter than
