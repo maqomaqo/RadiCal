@@ -30,20 +30,28 @@ accuracy, both of which delete a hack that only existed to survive tempering:
     construction, because a date's allowed interval IS the gap between its
     boundaries.
 
-KNOWN GAP against exact_chain
-----------------------------
-exact_chain's interval quadrature was corrected -- it had been giving an interval
-of span k*step (k+1) cells of likelihood mass, a factor of two per date at the
-smallest span, which inflated near-coincident configurations by 2^K. This sampler
-has not had the equivalent treatment: it evaluates the (span)^(-K) factor on grid
-positions directly, so it has its own version of the same bias, and the two now
-disagree by 5-6 years on a chain where they used to agree to under one. On the
-eight-date Nenthorn fixture the corrected solver gives a span of 34.9 years and
-this sampler still gives 5.3.
+Discretisation, and staying in step with exact_chain
+---------------------------------------------------
+Both solvers integrate a date over its group's interval, and they have to do it
+the SAME way or they answer different questions. exact_chain does it in closed
+form (_interval_integral); here it is implicit in where a date is allowed to sit.
+The rule in both is trapezoidal -- half weight on the two endpoint cells -- and in
+this file that is Model.endpoint_weight, applied in draw_date, draw_boundary and
+log_posterior alike.
 
-Until that is settled, exact_chain is the one to trust wherever it applies, and
-the tests comparing the two carry strict xfail markers that will fail as soon as
-the gap closes.
+It is not a refinement. Without it a date confined between boundaries k cells
+apart may occupy k+1 grid CELLS while the (span)^(-K) factor charges only k*step
+of span, so near-coincident configurations -- exactly the ones the span prior
+already favours -- gain ((k+1)/k)^K, which is 2^K at the smallest span and 256 for
+a group of eight. The chain then parks there and every modelled phase comes out
+several times too narrow. This was found and fixed in exact_chain first; for the
+interval that this sampler only had it a commit later, the two disagreed by 5-6
+years on chain fixtures where they otherwise agree to about 0.6, and the sampler
+reported a span of 5.3 years where the corrected solver gives 34.9.
+
+tests/test_gibbs.py's TestTheEndpointWeighting pins it from both directions: the
+span against exact_chain's, and grid refinement, which is the diagnostic that
+exposed the original bug and which no step-dependent error survives.
 
 The maths
 ---------
@@ -57,14 +65,16 @@ with c the indicator that every ordering constraint and every containment holds
 (OxCal's `p(t)c(t)`, Buck et al. 1992). Two things make each full conditional
 one-dimensional and exactly samplable:
 
-  * A DATE's conditional is just its own likelihood truncated to the interval
-    its neighbours and its enclosing boundaries allow. The span factor does not
+  * A DATE's conditional is just its own likelihood over the interval its
+    neighbours and its enclosing boundaries allow. The span factor does not
     appear: conditional on the boundaries, the dates are uniform between them,
     so (b_older - b_younger)^(-K) does not depend on where within them a date
-    sits. Drawn by inverse CDF on the precomputed cumulative table.
+    sits. Drawn by inverse CDF on the precomputed cumulative table, with the
+    endpoint cells at half weight (see Discretisation above).
   * A BOUNDARY's conditional is the product of the span factors of the (at most
     two) groups it bounds, over its allowed interval. It carries no likelihood
-    of its own. Evaluated in logs over the interval and drawn the same way.
+    of its own -- only the half weight it imposes on any date sitting exactly on
+    it. Evaluated in logs over the interval and drawn the same way.
   * An OUTLIER MODEL's offset scale is one more such conditional. OxCal shares
     that scale across every date using the model and lets the data constrain it,
     which does not factorise along exact_chain's message passing but is nothing
@@ -409,6 +419,9 @@ class Model:
         # what makes the span density proper without a floor (see module
         # docstring).
         self.group_dates: List[Tuple[str, str, List[str]]] = []
+        # The same relation from the date's side, so endpoint_weight does not
+        # have to scan every group on every draw.
+        self.date_groups: Dict[str, List[Tuple[str, str]]] = {}
         for group in self.plan.span_groups:
             dates = [d for d in group.date_ids if d in self.likelihood]
             self.group_dates.append(
@@ -416,6 +429,8 @@ class Model:
             for date_id in dates:
                 add(date_id, group.older_boundary_id)
                 add(group.younger_boundary_id, date_id)
+                self.date_groups.setdefault(date_id, []).append(
+                    (group.older_boundary_id, group.younger_boundary_id))
 
         self.window = {p: self._own_window(p, p in self.likelihood) for p in self.params}
 
@@ -551,25 +566,70 @@ class Model:
             lo = max(lo, state.index[younger])
         return lo, hi
 
+    def endpoint_weight(self, date_id: str, state: _State) -> float:
+        """
+        The weight a date carries for sitting exactly ON one of its group's
+        boundaries: a half rather than a whole.
+
+        This is the sampler's half of the correction described in
+        exact_chain._interval_integral, and it is needed for exactly the same
+        reason. A date confined between boundaries k cells apart can occupy k+1
+        grid CELLS, while the (span)^(-K) factor charges only k*step of span. Left
+        alone, the volume available to the dates exceeds the span they are charged
+        for by ((k+1)/k)^K -- 2^K at the smallest span, which is 256 for eight
+        dates -- and the posterior piles onto near-coincident configurations.
+
+        Halving the two endpoint cells makes the sum over a date's positions equal
+        the trapezoidal integral the exact solver now uses, so the two solvers
+        discretise the same integrals the same way and agree by construction
+        rather than by coincidence.
+        """
+        weight = 1.0
+        index = state.index[date_id]
+        for older_id, younger_id in self.date_groups.get(date_id, ()):
+            if index == state.index[older_id] or index == state.index[younger_id]:
+                weight *= 0.5
+        return weight
+
     def draw_date(self, date_id: str, state: _State, u: float) -> int:
         """
-        Exact draw from a date's full conditional: its own likelihood truncated
-        to the allowed interval, by inverse CDF.
+        Exact draw from a date's full conditional: its own likelihood over the
+        allowed interval, with the endpoint cells at half weight (see
+        endpoint_weight), by inverse CDF.
+
+        The half weights are applied by splitting the draw rather than by
+        rebuilding a cumulative table per sweep: the interior is drawn from the
+        precomputed cumulative in one searchsorted, and the two endpoints are
+        handled as their own outcomes. Same distribution, still O(log M).
         """
         lo, hi = self.allowed(date_id, state)
         if hi <= lo:
             return max(lo, min(hi, state.index[date_id])) if hi >= 0 else state.index[date_id]
         node = self._scale_of(date_id, state)
         cdf = self.cdf[date_id] if node is None else self.cdf_at[date_id][node]
-        base = cdf[lo - 1] if lo > 0 else 0.0
-        total = cdf[hi] - base
+        density = (self.likelihood[date_id] if node is None
+                   else self.likelihood_at[date_id][node])
+
+        # Interior cells lo+1 .. hi-1 at full weight, the two endpoints at half.
+        interior = float(cdf[hi - 1] - cdf[lo]) if hi - 1 >= lo + 1 else 0.0
+        low_end = 0.5 * float(density[lo])
+        high_end = 0.5 * float(density[hi])
+        total = interior + low_end + high_end
         if total <= 0:
             # No likelihood anywhere it is allowed to be. Uniform keeps the
             # chain moving instead of freezing it at an arbitrary index; the
             # state is improbable either way and the group moves exist to get
             # out of it.
             return int(lo + u * (hi - lo))
-        return int(np.clip(np.searchsorted(cdf, base + u * total), lo, hi))
+
+        target = u * total
+        if target < low_end:
+            return lo
+        if target < low_end + interior:
+            base = float(cdf[lo])
+            return int(np.clip(np.searchsorted(cdf, base + (target - low_end)),
+                               lo + 1, hi - 1))
+        return hi
 
     def draw_boundary(self, boundary_id: str, state: _State, u: float) -> int:
         """
@@ -595,6 +655,18 @@ class Model:
                 continue
             with np.errstate(divide='ignore', invalid='ignore'):
                 log_dens += np.where(span > 0, -K * np.log(np.where(span > 0, span, 1.0)), -np.inf)
+
+            # Any date of this group sitting exactly ON the candidate position is
+            # an endpoint there, so it counts a half (see endpoint_weight). Only
+            # coincidences with THIS boundary vary with the candidate; a date on
+            # the group's other boundary is halved whatever this one does, and
+            # cancels in the normalisation below.
+            on_candidate = np.zeros(hi - lo + 1)
+            for date_id in dates:
+                index = state.index[date_id]
+                if lo <= index <= hi:
+                    on_candidate[index - lo] += 1.0
+            log_dens -= np.log(2.0) * on_candidate
 
         for oldest_id, youngest_id, exponent in self.span_priors:
             if boundary_id == oldest_id:
@@ -630,6 +702,7 @@ class Model:
             table = (self.log_likelihood[date_id] if node is None
                      else self.log_likelihood_at[date_id][node])
             total += float(table[state.index[date_id]])
+            total += float(np.log(self.endpoint_weight(date_id, state)))
 
         for param in self.params:
             lo, hi = self.window[param]

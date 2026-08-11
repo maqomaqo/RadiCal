@@ -64,17 +64,16 @@ class TestAgreesWithTheExactSolver:
     same grid so a resolution difference cannot be mistaken for a difference in
     inference.
 
-    CURRENTLY EXPECTED TO FAIL. exact_chain's interval quadrature was corrected
-    (see exact_chain._interval_integral) and the sampler's equivalent treatment of
-    the near-coincident region has not been, so the two now disagree by 5-6 years
-    where they used to agree to under one. The markers below are strict: when the
-    sampler is corrected they will fail as unexpected passes, which is the signal
-    to remove them and tighten these bounds back down.
+    These comparisons are also what pins the two solvers' DISCRETISATION together,
+    not merely their inference. Both integrate a date over its group's interval
+    with the same trapezoidal rule -- exact_chain._interval_integral does it in
+    closed form, Model.endpoint_weight does it by halving the endpoint cells -- so
+    they agree by construction. When only one of the two had the rule they
+    disagreed by 5-6 years on these same fixtures, having previously agreed to
+    under one, which is the size of error this bound is set to catch.
     """
 
     @pytest.mark.parametrize('run', ['shared_boundary', 'unordered'])
-    @pytest.mark.xfail(reason=(
-        "the sampler has not had the interval-quadrature correction applied to its own near-coincident region yet, so it still returns the old narrow phases (span 5.3 against the corrected solver's 34.9). Agreement is the goal and this marker must be removed when that lands -- it is strict, so it fails if the test starts passing."), strict=True)
     def test_posterior_means_match(self, run):
         """
         Measured at 20,000 sweeps across five seeds: 0.19-1.23 years from the
@@ -97,8 +96,6 @@ class TestAgreesWithTheExactSolver:
         ])
         assert np.sqrt((errors ** 2).mean()) < 3.0, errors.round(2)
 
-    @pytest.mark.xfail(reason=(
-        "the sampler has not had the interval-quadrature correction applied to its own near-coincident region yet, so it still returns the old narrow phases (span 5.3 against the corrected solver's 34.9). Agreement is the goal and this marker must be removed when that lands -- it is strict, so it fails if the test starts passing."), strict=True)
     def test_it_gets_the_calibration_lobes_right(self):
         """
         The point of the exercise. These dates calibrate to two ranges about 40
@@ -123,8 +120,6 @@ class TestAgreesWithTheExactSolver:
         sampled_gap = mean_ad(sampled, ox.ROCKSHELTER) - mean_ad(sampled, ox.QUARRY)
         assert abs(sampled_gap - exact_gap) < 5.0, (sampled_gap, exact_gap)
 
-    @pytest.mark.xfail(reason=(
-        "the sampler has not had the interval-quadrature correction applied to its own near-coincident region yet, so it still returns the old narrow phases (span 5.3 against the corrected solver's 34.9). Agreement is the goal and this marker must be removed when that lands -- it is strict, so it fails if the test starts passing."), strict=True)
     def test_interior_boundaries_match(self):
         """
         Interior boundaries only. An OUTERMOST boundary's posterior is genuinely
@@ -146,6 +141,146 @@ class TestAgreesWithTheExactSolver:
             a = exact['boundaries'][bid]['posterior']['posterior_mean']
             b = sampled['boundaries'][bid]['posterior']['posterior_mean']
             assert abs(a - b) < 5.0, (bid, a, b)
+
+
+class TestTheEndpointWeighting:
+    """
+    Model.endpoint_weight, which is the sampler's half of the interval-quadrature
+    correction (see exact_chain._interval_integral for the other half and for why
+    either is needed at all).
+
+    Worth its own class because the symptom is remote from the cause. Nothing in
+    the sampler computes an interval integral, so the bug does not look like a
+    quadrature bug from here: it looks like the phases coming out several times
+    too narrow. What goes wrong is a volume mismatch. A date confined between
+    boundaries k cells apart can occupy k+1 grid CELLS while the (span)^(-K)
+    factor charges k*step of span, so the near-coincident configurations the span
+    prior already favours get an extra ((k+1)/k)^K -- 2^K at the smallest span --
+    and the chain parks there.
+    """
+
+    def _phase(self, count=5, step=1.0):
+        phase = _element('phase', 'Only')
+        tree = _element('sequence', 'Site', [
+            _element('boundary', 'Start'), phase, _element('boundary', 'End')])
+        dates = [_date(phase['id'], 3000 + 15 * i) for i in range(count)]
+        return tree, dates
+
+    def _span(self, result, chain=None, ids=None):
+        ids = ids or (chain.boundary_ids[0], chain.boundary_ids[-1])
+        older = result['boundaries'][ids[0]]['posterior']['posterior_mean']
+        younger = result['boundaries'][ids[1]]['posterior']['posterior_mean']
+        return abs(older - younger)
+
+    def test_the_span_matches_the_exact_solver_not_just_the_means(self):
+        """
+        The span is the sharp test and the means are the blunt one. With the
+        weighting missing the dates' means were 5-6 years from the exact answer,
+        which reads as ordinary sampling error; the span was out by a factor of
+        SEVEN (5.3 years against 34.9). Anything that biases the sampler toward
+        coincident configurations shows up here first.
+        """
+        tree, dates = self._phase()
+        chain = ec.layout(tree, dates)
+        exact = ec.solve(dates, tree, chain, num_samples=200)
+        sampled = _fixed(dates, tree, sweeps=20000, num_samples=200,
+                         grid=_exact_grid(exact))
+        assert self._span(sampled, chain) == pytest.approx(
+            self._span(exact, chain), rel=0.15)
+
+    def test_refining_the_grid_does_not_move_the_answer(self):
+        """
+        The diagnostic that found this in the exact solver, applied to the
+        sampler. A discretisation error that scales with the step size cannot
+        survive halving the step: uncorrected, the exact solver's span went
+        5.8 -> 8.1 -> 12.2 as the step went 1.0 -> 0.5 -> 0.25, with no sign of
+        settling. A correct answer is a property of the model, not of the grid.
+
+        Two steps rather than three, and a loose bound, because each run is a
+        full 20,000-sweep solve; the failure this guards against is a drift of
+        tens of percent, not of one.
+        """
+        tree, dates = self._phase()
+        chain = ec.layout(tree, dates)
+        exact = ec.solve(dates, tree, chain, num_samples=200)
+        coarse = _exact_grid(exact)
+        fine = np.arange(coarse[0], coarse[-1] + 1e-9,
+                         (coarse[1] - coarse[0]) / 2.0)
+        spans = [self._span(_fixed(dates, tree, sweeps=20000, num_samples=200,
+                                   grid=grid), chain)
+                 for grid in (coarse, fine)]
+        assert spans[1] == pytest.approx(spans[0], rel=0.2), spans
+
+    def test_a_date_on_a_boundary_counts_a_half(self):
+        """endpoint_weight itself, on the three cases it distinguishes."""
+        tree, dates = self._phase(count=2)
+        model = gibbs.Model(dates, tree)
+        state = model.initial_state()
+        older, younger, group = model.group_dates[0]
+        date_id = group[0]
+
+        state.index[younger] = 100
+        state.index[older] = 110
+        state.index[date_id] = 105
+        assert model.endpoint_weight(date_id, state) == 1.0
+        state.index[date_id] = 100
+        assert model.endpoint_weight(date_id, state) == 0.5
+        state.index[date_id] = 110
+        assert model.endpoint_weight(date_id, state) == 0.5
+
+    def test_the_split_draw_is_the_weighted_distribution(self):
+        """
+        draw_date applies the half weights by splitting the draw into interior
+        and two endpoints rather than by rebuilding a cumulative table per sweep,
+        so that it stays one searchsorted. That is an optimisation, and this
+        checks it against the distribution it is meant to be: the date's
+        likelihood over the allowed cells with the two ends halved.
+        """
+        tree, dates = self._phase(count=2)
+        model = gibbs.Model(dates, tree)
+        state = model.initial_state()
+        older, younger, group = model.group_dates[0]
+        date_id = group[0]
+        # Somewhere the date actually has likelihood, or every weight is zero
+        # and draw_date takes its uniform escape hatch instead.
+        peak = int(np.argmax(model.likelihood[date_id]))
+        lo, hi = peak - 4, peak + 5
+        state.index[younger], state.index[older] = lo, hi
+
+        weights = model.likelihood[date_id][lo:hi + 1].astype(float).copy()
+        weights[0] *= 0.5
+        weights[-1] *= 0.5
+        expected = np.cumsum(weights) / weights.sum()
+
+        for u in np.linspace(1e-9, 1 - 1e-9, 200):
+            assert model.draw_date(date_id, state, float(u)) == (
+                lo + int(np.searchsorted(expected, u)))
+
+    def test_the_smallest_span_is_not_free(self):
+        """
+        The mechanism, at the one configuration where it is largest. Boundaries
+        one cell apart leave a date two cells to sit in, both of them endpoints,
+        so the weighting must remove exactly a factor of two per date -- the
+        2^K that inflated the near-coincident region for a group of K.
+        """
+        tree, dates = self._phase(count=4)
+        model = gibbs.Model(dates, tree)
+        state = model.initial_state()
+        older, younger, group = model.group_dates[0]
+
+        peak = int(np.argmax(model.likelihood[group[0]]))
+        state.index[younger], state.index[older] = peak, peak + 1
+        for date_id in group:
+            state.index[date_id] = peak
+            assert model.endpoint_weight(date_id, state) == 0.5
+
+        # What log_posterior would report with no weighting: the raw likelihoods
+        # and the span factor, nothing else.
+        span = model.grid[peak + 1] - model.grid[peak]
+        unweighted = sum(float(model.log_likelihood[d][peak]) for d in group)
+        unweighted -= len(group) * float(np.log(span))
+        assert model.log_posterior(state) == pytest.approx(
+            unweighted - len(group) * np.log(2.0))
 
 
 class TestBranchingModels:
@@ -175,11 +310,7 @@ class TestBranchingModels:
         _a, _b, combined, dates_a, dates_b = self._two_branches()
         assert ec.layout(combined, dates_a + dates_b) is None
 
-    @pytest.mark.parametrize('uniform_span_prior', [
-        pytest.param(True, marks=pytest.mark.xfail(reason=(
-            "the sampler has not had the interval-quadrature correction applied to its own near-coincident region yet, so it still returns the old narrow phases (span 5.3 against the corrected solver's 34.9). Agreement is the goal and this marker must be removed when that lands -- it is strict, so it fails if the test starts passing."), strict=True)),
-        False,
-    ])
+    @pytest.mark.parametrize('uniform_span_prior', [True, False])
     def test_it_reproduces_each_branch_solved_separately(self, uniform_span_prior):
         """
         Two branches with nothing ordering them and no enclosing boundary are
@@ -641,8 +772,6 @@ class TestBoundariesBehaveLikeOxCals:
         assert start - max(means) > 40.0, (start, max(means))
         assert min(means) - end > 40.0, (end, min(means))
 
-    @pytest.mark.xfail(reason=(
-        "the sampler has not had the interval-quadrature correction applied to its own near-coincident region yet, so it still returns the old narrow phases (span 5.3 against the corrected solver's 34.9). Agreement is the goal and this marker must be removed when that lands -- it is strict, so it fails if the test starts passing."), strict=True)
     def test_it_puts_them_where_the_exact_solver_does(self):
         """
         The quantitative half: not merely outside the dates, but the same

@@ -84,9 +84,11 @@ What remains is on models with a date declared an outright outlier
 against OxCal's 29.2. That is the separate degenerate mode described in
 tests/nenthorn_charcoal_fixture's PHASE WIDTH note, not the phase model.
 
-services/gibbs.py has NOT had the equivalent correction and still returns the old
-narrow phases, so the two solvers currently disagree by 5-6 years on a chain. The
-tests that compare them are marked strict xfail for exactly that reason.
+services/gibbs.py carries the same rule, as Model.endpoint_weight -- it has no
+interval integrals to correct, but the mismatch between a date's available CELLS
+and the span it is charged for is identical there. The two agree to about 0.6
+years on the chain fixtures; while only this file had the rule they were 5-6 years
+apart, which is what those comparisons are set to catch.
 
 `layout()` returns None for anything that is not a single chain, and the
 caller falls back to the sampler. In particular a Sequence that orders two groups

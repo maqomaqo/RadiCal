@@ -33,12 +33,13 @@ Two structural notes, both mattering when comparing:
     ordering implies (model_tree.with_implicit_boundaries), which is a real
     change to the model -- it splits one span term over 11 dates into two over 4
     and 7.
-  * OxCal's own span is wider than anything the app produces on this model (29.2
-    years between the boundary means, against 9-20 depending on how the
-    structure is expressed), and its dates are more spread (14.1 years against
-    5-6). That is why the agreement asserted in tests/test_charcoal_outlier.py is
-    a bound of a few years rather than the sub-year agreement the other fixtures
-    get. See PHASE WIDTH below for how far that is understood.
+  * The app's span on this model no longer UNDERSHOOTS OxCal's 29.2 years, as it
+    did on every model before the quadrature fix -- it overshoots, at 43-55
+    depending on the solver. This is the one fixture where that happens, and the
+    reason is the outright-outlier declaration rather than the phase model. That
+    is why the agreement asserted in tests/test_charcoal_outlier.py is a bound of
+    a few years rather than the sub-year agreement the other fixtures get. See
+    PHASE WIDTH below for how far it is understood.
 
 PHASE WIDTH: mostly RESOLVED, and it was a numerical bug
 -------------------------------------------------------
@@ -113,10 +114,14 @@ for commit 5e0aed3 and its revert. It was fitted rather than derived, it fired
 hardest on models with no outlier at all, and it is now clear WHY it appeared to
 work: it was masking the quadrature bug.
 
-Practical consequence meanwhile: modelled positions are good (6.3 years rms from
-OxCal on this fixture with the sampler) but reported RANGES are tighter than
-OxCal's, so a boundary's HPD from this app is narrower than the same model's in
-OxCal.
+Practical consequence meanwhile: modelled positions are good (6.7 years rms from
+OxCal on this fixture with the sampler, 10.6 with the exact solver) but the span is
+too WIDE here rather than too narrow -- 43.3 sampled and 54.9 exact against OxCal's
+29.2 -- so on a model with a date declared an outright outlier a boundary's HPD
+from this app is wider than the same model's in OxCal. Everywhere else the two now
+agree closely; the 4-year gap between the solvers on this fixture is the shared
+outlier scale, which the sampler infers and the exact solver integrates out per
+date (see exact_chain's module docstring), not the quadrature.
 """
 import csv
 import os
