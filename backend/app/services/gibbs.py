@@ -30,6 +30,21 @@ accuracy, both of which delete a hack that only existed to survive tempering:
     construction, because a date's allowed interval IS the gap between its
     boundaries.
 
+KNOWN GAP against exact_chain
+----------------------------
+exact_chain's interval quadrature was corrected -- it had been giving an interval
+of span k*step (k+1) cells of likelihood mass, a factor of two per date at the
+smallest span, which inflated near-coincident configurations by 2^K. This sampler
+has not had the equivalent treatment: it evaluates the (span)^(-K) factor on grid
+positions directly, so it has its own version of the same bias, and the two now
+disagree by 5-6 years on a chain where they used to agree to under one. On the
+eight-date Nenthorn fixture the corrected solver gives a span of 34.9 years and
+this sampler still gives 5.3.
+
+Until that is settled, exact_chain is the one to trust wherever it applies, and
+the tests comparing the two carry strict xfail markers that will fail as soon as
+the gap closes.
+
 The maths
 ---------
 The posterior is

@@ -40,132 +40,78 @@ Two structural notes, both mattering when comparing:
     a bound of a few years rather than the sub-year agreement the other fixtures
     get. See PHASE WIDTH below for how far that is understood.
 
-PHASE WIDTH: why the app's phases are narrower than OxCal's
-----------------------------------------------------------
-PARTLY DIAGNOSED. One fix was implemented and REVERTED -- see "the attempt" below,
-which is the more useful half of this note.
+PHASE WIDTH: mostly RESOLVED, and it was a numerical bug
+-------------------------------------------------------
+The app's modelled phases were several times narrower than OxCal's, on every model
+rather than just this one. The cause was a first-order error in the interval
+quadrature, not the phase prior, not the outlier model, and not the sampler:
+exact_chain._interval_integral summed grid cells y THROUGH o inclusive, so an
+interval whose span is k*step received (k+1) cells of likelihood mass while the
+(span)^(-K) factor used k*step. That is a factor of two per date at the smallest
+span -- 2^K over a group, 256 for eight dates and 65536 for sixteen -- landing
+exactly on the near-coincident configurations the span prior already favours.
 
-The app's modelled phases come out several times narrower than OxCal's. It is not
-specific to this fixture, to nesting, or to declared outliers: it reproduces on
-the simplest model available, tests/fixtures/oxcal_outlier (Shag River: ONE phase,
-sixteen dates, a 5% General prior, no nesting and no ordering), where our span is
-4.2 years against OxCal's 19.3 and our dates spread 0.8 against 5.9.
+How it was caught, since every earlier attempt missed it:
 
-A degenerate mode accounts for part of it. Under Bronk Ramsey 2009b eq 12-16 an
-outlier's event age is free of its own measurement -- the offset absorbs the
-difference -- so its likelihood gains a broad, nearly flat component. That floors
-every flagged date's likelihood everywhere, and "every date at the same instant,
-every date an outlier" stops being astronomically unlikely: it costs q^K in prior
-but gains more back from the floor, because at a common instant most dates sit far
-into their own tails where the floor beats the inlier density by orders of
-magnitude. On Shag River a prior of 0.001 already flips which region holds the
-mass, and the answer is then IDENTICAL from 0.001 to 0.1 -- saturation, the tell
-of an artefact rather than a graded inference.
+  * your Span() export. OxCal's Span() is E[max t - min t], which the boundary
+    marginals cannot give (Jensen), and comparing the same quantity on both sides
+    showed our tail reached where OxCal's did but with a spike at zero that OxCal
+    lacked -- 85% of our mass below five years, with the median span exactly ONE
+    GRID CELL. A spike at the grid step is a numerical signature.
+  * refining the grid then moved the answer (span 5.81 -> 8.12 -> 12.16 as the
+    step went 1.0 -> 0.5 -> 0.25), which a real feature of the model would not do.
+  * a continuum reference with no quadrature at all -- three Gaussian likelihoods,
+    so the interval integrals are exact error functions -- settled it. Truth 181.5
+    years; the old form gave 126.4 at a ten-year step and converged only as the
+    step vanished, the trapezoidal form 186.3 and then 181.9 at one year. Now
+    pinned in tests/test_exact_chain.py's TestIntervalQuadrature.
 
-Ruled out as causes, each by measurement:
+Why it hid for so long: the brute-force checks in the suite and the "independent"
+reference in tests/manual/oxcal_reference.py both used the same cumulative-sum
+trick, so they agreed with the solver exactly and confirmed the ALGORITHM while
+sharing its quadrature. Comparisons against OxCal could see the symptom but cannot
+distinguish a discretisation error from a modelling difference -- which is why the
+priors kept checking out against Bronk Ramsey 2001 eq 5-7 and 2009a eq 26-30 (they
+were right) and why a minimum-span floor appeared to help (it excluded precisely
+the region the artefact inflated).
 
-  * the uniform-scatter exponent, multiplicatively AND additively. The response is
-    a cliff (Shag River: K=16 gives 4.1, K=14.4 gives 4.5, K=12 jumps to 91.7), and
-    K-1 and K-2 -- the forms Bronk Ramsey 2001's "combinations proportional to
-    s^(n-2)" might suggest -- are much worse (shared_boundary 5.45 -> 7.88 -> 15.29).
-  * our implementation of the phase model. exact_chain agrees with the independent
-    grid integration in tests/manual/oxcal_reference.py to 0.00 years on BOTH
-    boundary marginals and every date, with and without the outlier mixture. That
-    check had never been run on the boundaries before.
-  * our reading of the priors. Bronk Ramsey 2001 eq 5-7 and 2009a eq 26-30 were
-    obtained and checked: the (span)^(-n) phase factor, the (t_m - t_a)^-(m-2)
-    correction and its sign, and the limits factor (which applies only when the
-    outer boundaries carry chronological constraints, so not here). All match.
-  * our reading of the outlier model. 2009b eq 12-16 put the offset INSIDE
-    r(t_i + phi_i 10^u delta_i), so convolving in t is right, and eq 11 confirms u
-    is "a scaling parameter common to the model as a whole" -- the shared scale
-    services/gibbs.py samples.
-  * the calibration likelihood. Per-date means agree with OxCal's exported
-    likelihoods to 0.5 years and their standard deviations and 68% widths to 0.3%.
-  * the sampler. exact_chain integrates rather than sampling and agrees with the
-    sampler to 0.1 years on the span, so both find the same narrow answer.
-  * tightening the outlier model to lower the floor at source. The span does not
-    respond until the model is effectively off (offsets capped near 3 years) and
-    then it overshoots; lighter tails do nothing at all (identical from T(5) to
-    T(1000)); and even a modest tightening triples the date error and doubles the
-    outlier-probability error.
+What the correction bought, rms of modelled dates against OxCal's:
 
-THE ATTEMPT, and why it was reverted
-------------------------------------
-A minimum phase span was implemented, set to a fraction of the median calendar
-precision of the dates in the group, and calibrated at 0.10. It improved all five
-OxCal comparisons (rms of modelled dates: 5.45 -> 1.73, 6.45 -> 2.24, 5.11 -> 1.06,
-2.51 -> 2.51, 9.92 -> 8.08) and took this fixture's span from 10.6 to 28.7 against
-OxCal's 29.2. It was still wrong, for reasons worth not rediscovering:
+    oxcal/shared_boundary   5.45 -> 1.26
+    oxcal/ordered           6.45 -> 2.51
+    oxcal/unordered         5.11 -> 0.20
+    outlier/Shag            2.51 -> 0.18   (span 4.2 -> 20.7, OxCal 19.3)
+    charcoal/Nenthorn       9.92 -> 10.63  (span 10.6 -> 54.9, OxCal 29.2)
 
-  * it did not remove an unresolvable region, it changed the inference. A 2.9-year
-    floor tripled a 12.7-year span. Had it only been discarding configurations the
-    data cannot distinguish, the answers would not have moved.
-  * it fired hardest where there is no pathology. The three fixtures with NO
-    outlier model have no floored likelihood and so no degenerate mode, yet they
-    improved the most (3-5x). On those models it was not implementing the
-    diagnosis at all -- it was compensating for the same unexplained narrowness by
-    a different route.
-  * no missing algebra could justify it. The exponent tests above rule out a
-    factor the floor might have been standing in for, and eq 27 matches what is
-    implemented, so the floor was an ADDITION to OxCal's model rather than an
-    implementation of it.
-  * it encodes something false as a prior. A near-instantaneous phase is
-    physically possible (a single depositional event); "we cannot resolve it" is a
-    statement about inference and belongs in the reporting.
-  * it made the prior data-dependent: re-dating the same site more precisely would
-    change the prior, and so the inference about the same reality.
-  * it was fitted and fragile. Per-fixture optima ranged 0.05-0.25, the response
-    to the constant was a cliff rather than a gradient, and five comparisons with
-    one free parameter is a thin validation set. Models outside the fixtures moved
-    in both directions, which is what overfitting looks like.
-  * it degraded uniform_span_prior=False (4.17 -> 5.86). A real correction should
-    help both settings; one tuned against a single setting helps only that one.
+WHAT IS LEFT, on this fixture
+-----------------------------
+This is now the only fixture that disagrees, and it has flipped sign: the span
+OVERSHOOTS at 54.9 years against OxCal's 29.2. That points at the degenerate mode,
+which is unchanged by any of the above and remains diagnosed but not addressed:
 
-THE NO-OUTLIER CASE, investigated separately
---------------------------------------------
-The narrowness on models with no outlier model was then investigated on
-tests/fixtures/oxcal's `unordered` run -- ONE phase, eight dates, no ordering, no
-outlier model, the simplest thing in the suite. What it established:
+Under Bronk Ramsey 2009b eq 12-16 an outlier's event age is free of its own
+measurement -- the offset absorbs the difference -- so its likelihood gains a
+broad, nearly flat component. That floors every flagged date's likelihood
+everywhere, and "every date at the same instant, every date an outlier" stops
+being astronomically unlikely: it costs q^K in prior but gains more back from the
+floor. On Shag River a prior of 0.001 already flipped which region held the mass,
+and the answer was then IDENTICAL from 0.001 to 0.1 -- saturation, the tell of an
+artefact rather than a graded inference.
 
-  * it is NOT the boundaries being individually too tight. Their standard
-    deviations match OxCal's to within 5% (24.4 against 23.3, 23.3 against 22.1).
-    Only their MEANS are pulled inward, so nothing is over-constraining either
-    boundary on its own.
-  * so the span is small because our two boundaries are strongly CORRELATED: each
-    is as uncertain as OxCal's, but they move together, and the span is their
-    difference. OxCal's are less correlated. (The mean span itself is not a
-    reconstruction artefact -- E[S] - E[E] = E[S - E] whatever the correlation --
-    so 5.8 years against OxCal's 29.6 is real.)
-  * both we AND OxCal homogenise the date POSITIONS on a single phase (spread 0.2
-    years for OxCal, 0.0 for us). The difference is how far the boundaries then
-    extend beyond them.
-  * OxCal preserves each date's own calibration-lobe weighting almost exactly as
-    the unmodelled likelihood has it (spread across dates 0.065 against the
-    unmodelled 0.066); we homogenise that too (0.007). But OxCal simultaneously
-    pushes the MEAN weight further into the early lobe (0.136) than we do (0.205),
-    so it is not simply doing less coupling than us -- it is doing something
-    different.
-  * no exponent reproduces OxCal here either. On this clean single phase K x 0.75
-    gives the best date agreement of any setting tried anywhere (0.79 years rms)
-    but a span of 86.6 against OxCal's 29.6, so the two cannot be fitted at once.
-  * a POORLY MIXED sampler on our model does not reproduce OxCal. Turning the wide
-    and group moves off gives span 2.0 and a late-lobe weight of 0.953 -- stuck in
-    the wrong lobe entirely -- nothing like OxCal's answer. So "OxCal's MCMC
-    under-explores the coupling" was the leading hypothesis and it is wrong.
+Ruled out as causes of that, each by measurement: the uniform-scatter exponent
+(multiplicatively and additively -- the response is a cliff, and K-1 and K-2 are
+both much worse); our reading of the priors (2001 eq 5-7, 2009a eq 26-30, all
+matching); our reading of the outlier model (2009b eq 12-16 put the offset inside
+r(t_i + phi_i 10^u delta_i), so convolving in t is right, and eq 11 confirms u is
+shared across the model -- which services/gibbs.py samples); the calibration
+likelihood (means within 0.5 years of OxCal's, widths within 0.3%); and tightening
+the outlier model itself (the span does not respond until the model is effectively
+off, and lighter tails do nothing at all).
 
-The sharpest statement available: our posterior couples a phase's parameters far
-more tightly than OxCal's -- same marginal uncertainties, much higher correlation
-between the boundaries, and lobe weights homogenised across dates where OxCal's
-stay individual. That is a property of the JOINT posterior rather than of any
-single prior factor, which is why factor-by-factor comparison against the
-published equations keeps coming back clean.
-
-What would settle it: an OxCal run that exports the span DIRECTLY. OxCal has
-Span(), Interval() and Difference() commands, and any of them would give the
-posterior of the joint quantity instead of leaving it to be inferred from two
-marginals -- which is the one thing the current fixtures cannot show, and exactly
-where the disagreement now sits.
+A minimum-span floor was implemented for this and REVERTED -- see the git history
+for commit 5e0aed3 and its revert. It was fitted rather than derived, it fired
+hardest on models with no outlier at all, and it is now clear WHY it appeared to
+work: it was masking the quadrature bug.
 
 Practical consequence meanwhile: modelled positions are good (6.3 years rms from
 OxCal on this fixture with the sampler) but reported RANGES are tighter than

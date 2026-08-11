@@ -73,22 +73,20 @@ land 9.9 years rms from OxCal against the sampler's 6.3. So it matters most
 exactly where an outlier prior is large, and hardly at all where it is the usual
 few percent.
 
-PHASE WIDTH differs from OxCal, and it belongs to the MODEL rather than to this
-solver -- which has been verified exactly against the independent integration in
-tests/manual/oxcal_reference.py, boundaries included. A modelled phase comes out
-several times narrower here (on tests/fixtures/oxcal_outlier, one phase of sixteen
-dates, a span of 4.2 years against OxCal's 19.3).
+PHASE WIDTH used to differ from OxCal by a factor of several, and the cause was a
+first-order error in the interval quadrature -- see _interval_integral, which
+carries the measurements. Correcting it took a single phase of sixteen dates from
+a span of 4.2 years against OxCal's 19.3 to 20.7, and the modelled dates on the
+eight-date fixture from 5.11 years rms of OxCal to 0.20.
 
-One cause is understood -- a degenerate mode where an outlier's event age, being
-free of its own measurement, floors its likelihood everywhere, so "every date at
-one instant, every date an outlier" carries real mass. But that is NOT the whole
-of it: the same narrowness appears on models with no outlier model at all, where
-no such mode exists. Excluding short spans was implemented and then REVERTED for
-that reason; see tests/nenthorn_charcoal_fixture's PHASE WIDTH note for the
-diagnosis, the attempt, and why it did not survive scrutiny.
+What remains is on models with a date declared an outright outlier
+(tests/fixtures/oxcal_charcoal), where the span now OVERSHOOTS -- 54.9 years
+against OxCal's 29.2. That is the separate degenerate mode described in
+tests/nenthorn_charcoal_fixture's PHASE WIDTH note, not the phase model.
 
-Positions are good (1.5-6 years rms from OxCal across the fixtures); reported
-RANGES are tighter than OxCal's, so quote OxCal's for a boundary or a span.
+services/gibbs.py has NOT had the equivalent correction and still returns the old
+narrow phases, so the two solvers currently disagree by 5-6 years on a chain. The
+tests that compare them are marked strict xfail for exactly that reason.
 
 `layout()` returns None for anything that is not a single chain, and the
 caller falls back to the sampler. In particular a Sequence that orders two groups
@@ -587,14 +585,53 @@ def _rescaled(log_weights: np.ndarray) -> np.ndarray:
     return np.where(finite, log_weights - log_weights[finite].max(), -np.inf)
 
 
-def _interval_integral(cumulative: np.ndarray) -> np.ndarray:
-    """F[y, o] = integral of one date's likelihood over [grid[y], grid[o]]."""
+def _interval_integral(cumulative: np.ndarray, density: np.ndarray,
+                       step: float) -> np.ndarray:
+    """
+    F[y, o] = integral of one date's likelihood over [grid[y], grid[o]],
+    TRAPEZOIDALLY -- half weight on each endpoint cell.
+
+    The half-weights are not a refinement, they are the difference between right
+    and wrong here, and the reason is the (span)^(-K) factor this gets multiplied
+    by. A cumulative difference alone, cum[o] - cum[y-1], sums cells y THROUGH o
+    inclusive, so an interval whose span is k*step receives (k+1) cells of mass.
+    The span prior meanwhile uses k*step. At the smallest span the likelihood is
+    therefore too large by a factor of two PER DATE -- 2^K over a group, which is
+    256 for eight dates and 65536 for sixteen -- and that lands squarely on the
+    near-coincident configurations the span prior already favours. The posterior
+    piled up there: on the eight-date Nenthorn fixture 85% of the mass sat below a
+    five-year span, with the median span exactly one grid cell, and a modelled
+    phase came out 5.8 years wide against OxCal's 29.3.
+
+    Measured against a continuum reference with no quadrature at all (three
+    Gaussian likelihoods, so the interval integrals are exact error functions;
+    truth 181.5 years):
+
+        grid step      cum[o] - cum[y-1]      trapezoidal
+           10.0                   126.4            186.3
+            5.0                   141.5            183.8
+            2.5                   155.2            182.6
+            1.0                   167.8            181.9
+
+    So the plain difference is biased low by 30% at a ten-year step and converges
+    only as the step vanishes, while the trapezoidal form is within 3% at ten
+    years. On the fixture that made this visible it takes the modelled dates from
+    5.11 years rms of OxCal to 0.20, and makes the answer grid-independent
+    (34.9/34.7/34.6 across a fourfold refinement, against 5.8/8.1/12.2 before).
+
+    `density` and `step` are required rather than optional because the uncorrected
+    form is wrong wherever it is used, and an optional argument invites reaching
+    it by accident.
+    """
     padded = np.concatenate([[0.0], cumulative])
-    return np.clip(padded[None, 1:] - padded[:-1, None], 0.0, None)
+    half = 0.5 * step * density
+    F = (padded[None, 1:] - padded[:-1, None]) - half[None, :] - half[:, None]
+    return np.clip(F, 0.0, None)
 
 
-def _log_interval_integral(cumulative: np.ndarray) -> np.ndarray:
-    F = _interval_integral(cumulative)
+def _log_interval_integral(cumulative: np.ndarray, density: np.ndarray,
+                           step: float) -> np.ndarray:
+    F = _interval_integral(cumulative, density, step)
     with np.errstate(divide='ignore'):
         return np.where(F > 0, np.log(np.where(F > 0, F, 1.0)), -np.inf)
 
@@ -768,7 +805,8 @@ def solve(measurements: List[Dict], root: Dict, chain: Chain,
         with np.errstate(divide='ignore', invalid='ignore'):
             term = np.where(valid, -K * np.log(np.where(valid, span, 1.0)), -np.inf)
         for date_id in date_ids:
-            term = term + _log_interval_integral(cumulative[date_id])
+            term = term + _log_interval_integral(
+                cumulative[date_id], likelihood[date_id], dt)
         older_ok = allowed[chain.boundary_ids[index]]
         younger_ok = allowed[chain.boundary_ids[index + 1]]
         term = np.where(younger_ok[:, None] & older_ok[None, :], term, -np.inf)
@@ -796,7 +834,8 @@ def solve(measurements: List[Dict], root: Dict, chain: Chain,
             # This date's own integral divided back out, leaving it free.
             with np.errstate(invalid='ignore'):
                 weights = np.where(np.isfinite(log_T[index]),
-                                   log_T[index] - _log_interval_integral(cumulative[date_id]),
+                                   log_T[index] - _log_interval_integral(
+                                       cumulative[date_id], likelihood[date_id], dt),
                                    -np.inf)
             G = np.exp(_rescaled(weights))
             G = np.where(np.isfinite(G), G, 0.0)

@@ -171,6 +171,12 @@ def _brute_force(curve, grid, dates):
 
     so that agreement with the vectorised solver is evidence about the code
     rather than a restatement of it.
+
+    What it checks is the MESSAGE PASSING, not the quadrature: F below uses the
+    same trapezoidal interval integral the solver does, because a different
+    quadrature here would make the two disagree for a reason that has nothing to
+    do with the algorithm being compared. The quadrature has its own test against
+    a continuum reference -- see TestIntervalQuadrature.
     """
     dt = grid[1] - grid[0]
     K = len(dates)
@@ -184,7 +190,8 @@ def _brute_force(curve, grid, dates):
     cum = np.cumsum(L, axis=1) * dt
 
     def F(j, b, a):
-        return cum[j, a] - (cum[j, b - 1] if b > 0 else 0.0)
+        whole = cum[j, a] - (cum[j, b - 1] if b > 0 else 0.0)
+        return max(whole - 0.5 * dt * (L[j, a] + L[j, b]), 0.0)
 
     M = len(grid)
     out = np.zeros((K, M))
@@ -201,6 +208,102 @@ def _brute_force(curve, grid, dates):
                     out[j, b:a + 1] += weight
     out = L * out
     return out / (out.sum(axis=1, keepdims=True) * dt)
+
+
+class TestIntervalQuadrature:
+    """
+    The interval integral, against a continuum reference with NO quadrature in it
+    at all: Gaussian likelihoods, so the integral of each over [b, a] is an exact
+    error function, and the only approximation left is the 2-D integration over
+    the boundaries, which is refined until it stops moving.
+
+    This is the check that was missing, and its absence cost a lot. Every other
+    comparison in this suite either shares the solver's quadrature (the
+    brute-force tests, and tests/manual/oxcal_reference.py, all of which use the
+    same cumulative-sum trick) or is against OxCal, which cannot tell a
+    discretisation error from a modelling difference. A first-order error in this
+    one function therefore went unnoticed while being amplified to the K-th power
+    by the (span)^(-K) factor it feeds -- see _interval_integral for the story.
+    """
+
+    MU = np.array([100.0, 130.0, 160.0])
+    SD = np.array([30.0, 30.0, 30.0])
+    WINDOW = (-400.0, 700.0)
+
+    def _gaussians(self, grid):
+        return (np.exp(-0.5 * ((grid[None, :] - self.MU[:, None]) / self.SD[:, None]) ** 2)
+                / (self.SD[:, None] * np.sqrt(2 * np.pi)))
+
+    def _continuum_span(self, points):
+        """E[boundary span] with exact interval integrals."""
+        from scipy.special import erf
+        grid = np.linspace(*self.WINDOW, points)
+        younger, older = np.meshgrid(grid, grid, indexing='ij')
+        span = older - younger
+        ok = span > 0
+
+        def cdf(x):
+            return erf((x[None, ...] - self.MU[:, None, None])
+                       / (self.SD[:, None, None] * np.sqrt(2)))
+
+        integrals = 0.5 * (cdf(np.where(ok, older, 1.0)) - cdf(np.where(ok, younger, 0.0)))
+        with np.errstate(divide='ignore', invalid='ignore'):
+            logw = np.where(ok, -len(self.MU) * np.log(np.where(ok, span, 1.0))
+                            + np.log(np.clip(integrals, 1e-300, None)).sum(0), -np.inf)
+        weight = np.exp(logw - logw[np.isfinite(logw)].max())
+        weight = np.where(np.isfinite(weight), weight, 0.0)
+        return float((span * weight).sum() / weight.sum())
+
+    def _solver_span(self, step):
+        """The same quantity via exact_chain's own interval integral."""
+        grid = np.arange(self.WINDOW[0], self.WINDOW[1] + step, step)
+        density = self._gaussians(grid)
+        cumulative = np.cumsum(density, axis=1) * step
+        span = grid[None, :] - grid[:, None]
+        ok = span > 0
+        with np.errstate(divide='ignore', invalid='ignore'):
+            logw = np.where(ok, -len(self.MU) * np.log(np.where(ok, span, 1.0)), -np.inf)
+        for i in range(len(self.MU)):
+            logw = logw + ec._log_interval_integral(cumulative[i], density[i], step)
+        weight = np.exp(logw - logw[np.isfinite(logw)].max())
+        weight = np.where(np.isfinite(weight), weight, 0.0)
+        return float((span * weight).sum() / weight.sum())
+
+    def test_it_matches_the_continuum_answer(self):
+        """
+        Truth is 181.5 years. The trapezoidal form gives 186.3 at a ten-year step
+        and 181.9 at one year; the plain cumulative difference this replaced gave
+        126.4 and 167.8 -- 30% low at ten years, and converging only as the step
+        vanishes.
+        """
+        truth = self._continuum_span(3000)
+        assert truth == pytest.approx(181.5, abs=1.0), truth
+        for step, tolerance in ((10.0, 0.05), (5.0, 0.03), (1.0, 0.01)):
+            got = self._solver_span(step)
+            assert got == pytest.approx(truth, rel=tolerance), (step, got, truth)
+
+    def test_a_zero_width_interval_integrates_to_zero(self):
+        """
+        The defect in one line. A cumulative difference gives a zero-width
+        interval one whole cell of probability mass, which is what handed the
+        near-coincident configurations a factor of two per date.
+        """
+        grid = np.arange(0.0, 100.0, 5.0)
+        density = self._gaussians(grid)[0]
+        cumulative = np.cumsum(density) * 5.0
+        F = ec._interval_integral(cumulative, density, 5.0)
+        assert np.allclose(np.diagonal(F), 0.0)
+
+    def test_it_is_the_true_width_that_is_integrated(self):
+        """
+        A flat density over k cells' span must integrate to k * step, not
+        (k + 1) * step. Stated on a uniform density where the answer is obvious.
+        """
+        step = 2.0
+        flat = np.ones(60) / (60 * step)
+        F = ec._interval_integral(np.cumsum(flat) * step, flat, step)
+        for k in (1, 5, 20):
+            assert F[0, k] == pytest.approx(k * step * flat[0], rel=1e-12), k
 
 
 class TestMatchesBruteForce:
@@ -235,17 +338,29 @@ class TestMatchesBruteForce:
             assert overlap > 0.999, f'{d["id"]} overlap {overlap}'
 
 
-# What the solver actually produces on the shared_boundary fixture, with
-# OxCal's UniformSpanPrior on (the default) and off. Both are recorded
-# because the correction is a measured trade-off rather than an improvement:
-# it pulls the outermost boundaries in towards OxCal's, and moves the dates
-# slightly away. For scale, pm.sample_smc gave 25.3 rms and a separation of
-# 57 against OxCal's 13.2.
+# What the solver actually produces on the shared_boundary fixture, with OxCal's
+# UniformSpanPrior on (the default) and off. Both are recorded because the two
+# settings moved in OPPOSITE directions when the interval quadrature was corrected
+# (see _interval_integral), which is worth being able to see:
+#
+#                        rms          max        separation (OxCal 13.2)
+#   span prior on    5.45 -> 1.26  9.30 -> 2.03    5.7 -> 15.8
+#   span prior off   4.17 -> 6.67  5.30 -> 8.61   19.4 -> 26.7
+#
+# On -- the default, and what OxCal does -- is now clearly better on every
+# measure, where the two used to be a trade-off. Off moved further away, which is
+# the expected direction: with the quadrature right, the correction OxCal applies
+# is doing real work, so omitting it costs more than it did.
+#
+# `lobe_gap` bounds how differently the two ordered groups may be weighted between
+# the calibration lobes. With the prior on, ours are 0.101 and 0.182 against
+# OxCal's 0.12 and 0.17. For scale, pm.sample_smc gave 25.3 rms, a separation of
+# 57, and lobe shares of 0.00 and 0.71.
 _SOLVED_CACHE = {}
 
 SPAN_PRIOR_EXPECTED = {
-    True:  {'rms': 6.5, 'max': 11.0, 'separation': (2.0, 12.0)},
-    False: {'rms': 5.5, 'max': 7.0, 'separation': (13.0, 26.0)},
+    True:  {'rms': 2.0, 'max': 3.0, 'separation': (12.0, 19.0), 'lobe_gap': 0.15},
+    False: {'rms': 8.0, 'max': 10.0, 'separation': (22.0, 31.0), 'lobe_gap': 0.30},
 }
 
 
@@ -318,7 +433,8 @@ class TestAgainstOxCalModelled:
             share[group] = float(np.mean(masses))
         assert 0.02 < share['quarry'] < 0.35
         assert 0.02 < share['rockshelter'] < 0.35
-        assert abs(share['quarry'] - share['rockshelter']) < 0.20
+        assert abs(share['quarry'] - share['rockshelter']) < \
+            SPAN_PRIOR_EXPECTED[span_prior]['lobe_gap']
 
     def test_boundary_ranges_match_oxcal(self, solved, span_prior):
         """The shared transition is the one boundary the dates pin down well."""
@@ -469,7 +585,7 @@ class TestUniformSpanPrior:
             with np.errstate(divide='ignore', invalid='ignore'):
                 t = np.where(valid, -len(ids) * np.log(np.where(valid, span, 1.0)), -np.inf)
             for i in ids:
-                t = t + ec._log_interval_integral(cum[i])
+                t = t + ec._log_interval_integral(cum[i], lik[i], dt)
             return t
 
         logT = [log_transfer(g) for g in chain.groups]
@@ -484,7 +600,7 @@ class TestUniformSpanPrior:
             for d in ids:
                 with np.errstate(invalid='ignore'):
                     lg = np.where(np.isfinite(logT[gi]),
-                                  logT[gi] - ec._log_interval_integral(cum[d]), -np.inf)
+                                  logT[gi] - ec._log_interval_integral(cum[d], lik[d], dt), -np.inf)
                 G = np.exp(ec._rescaled(lg))
                 G = np.where(np.isfinite(G), G, 0.0)
                 if gi == 0:

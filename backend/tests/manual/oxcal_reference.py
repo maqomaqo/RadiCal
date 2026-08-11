@@ -87,10 +87,9 @@ def phase_marginals(curve, grid, samples):
     L /= (L.sum(axis=1, keepdims=True) * dt)
 
     # F[j][b, a] = integral of L_j over [grid[b], grid[a]], via cumulative sum.
-    cum = np.cumsum(L, axis=1) * dt                       # (K, M)
-    padded = np.concatenate([np.zeros((K, 1)), cum], axis=1)
-    F = padded[:, None, 1:] - padded[:, :-1, None]        # (K, M_b, M_a)
-    np.clip(F, 0.0, None, out=F)
+    # Trapezoidal: half weight on each endpoint cell. See _interval_integrals
+    # below for why that is not optional.
+    F = _interval_integrals(L, dt)                        # (K, M_b, M_a)
 
     span = grid[None, :] - grid[:, None]                  # (M_b, M_a), >0 where a > b
     upper = span > 0
@@ -159,10 +158,24 @@ def summarise(grid, density):
 
 
 def _interval_integrals(L, dt):
-    """F[j][y, o] = integral of L_j over [grid[y], grid[o]] (y younger index)."""
+    """
+    F[j][y, o] = integral of L_j over [grid[y], grid[o]] (y younger index),
+    trapezoidally -- half weight on each endpoint cell.
+
+    The half-weights matter, and this file is where NOT having them hid for a
+    long time. A plain cumulative difference sums cells y through o inclusive, so
+    an interval of span k*dt gets (k+1) cells of mass while the (span)^(-K) factor
+    uses k*dt; the error is a factor of two per date at the smallest span. Because
+    this "independent" reference made the same choice as the solver it checks, the
+    two agreed exactly and the bias was invisible. See
+    exact_chain._interval_integral and tests/test_exact_chain.py's
+    TestIntervalQuadrature, which checks it against a continuum reference instead.
+    """
     cum = np.cumsum(L, axis=1) * dt
     padded = np.concatenate([np.zeros((L.shape[0], 1)), cum], axis=1)
     F = padded[:, None, 1:] - padded[:, :-1, None]
+    half = 0.5 * dt * L
+    F = F - half[:, None, :] - half[:, :, None]
     return np.clip(F, 0.0, None)
 
 
