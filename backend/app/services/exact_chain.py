@@ -73,6 +73,15 @@ land 9.9 years rms from OxCal against the sampler's 6.3. So it matters most
 exactly where an outlier prior is large, and hardly at all where it is the usual
 few percent.
 
+PHASE WIDTH is a known open difference from OxCal, and it belongs to the model
+rather than to this solver: a modelled phase comes out several times narrower
+here than in OxCal (on tests/fixtures/oxcal_outlier, one phase of sixteen dates,
+a span of 4.2 years against OxCal's 19.3). The exponent, the calibration
+likelihood, the outlier scale and the sampler are all ruled out by measurement --
+see tests/nenthorn_charcoal_fixture's PHASE WIDTH note for the whole list and for
+the two equations needed to settle it. Positions are unaffected; reported RANGES
+are tighter than OxCal's.
+
 `layout()` returns None for anything that is not a single chain, and the
 caller falls back to the sampler. In particular a Sequence that orders two groups
 with NO boundary between them is not a chain: its dates share one enclosing

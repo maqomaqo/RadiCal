@@ -38,13 +38,50 @@ Two structural notes, both mattering when comparing:
     structure is expressed), and its dates are more spread (14.1 years against
     5-6). That difference is UNRESOLVED, and it is why the agreement asserted in
     tests/test_charcoal_outlier.py is a bound of a few years rather than the
-    sub-year agreement the other fixtures get.
+    sub-year agreement the other fixtures get. See PHASE WIDTH below.
 
-    It is not the uniform-scatter exponent, which was the obvious suspect and was
-    measured: scaling that exponent takes the span from 1.7 years straight to 222
-    with nothing near OxCal's 29 in between, and barely moves the calibration-lobe
-    weights. Whatever it is acts on the WIDTH of a phase rather than on where the
-    phase sits.
+PHASE WIDTH: what is known about the one difference still open
+--------------------------------------------------------------
+The app's modelled phases come out several times narrower than OxCal's. It is
+NOT specific to this fixture, to nesting, or to declared outliers -- it
+reproduces on the simplest model available, tests/fixtures/oxcal_outlier (Shag
+River: ONE phase, sixteen dates, a 5% General prior, no nesting and no ordering):
+
+    boundary means      OxCal Start 560.4  End 541.1  span 19.3   spread 5.9
+    exact solver              554.9      550.7        4.2         0.8
+    MH/Gibbs                  553.8      549.7        4.1         0.8
+
+Ruled out, each by measurement rather than argument:
+
+  * the uniform-scatter EXPONENT. Scaled on both fixtures, and the response is a
+    cliff rather than a gradient -- on Shag River K=16 gives a span of 4.1, K=14.4
+    gives 4.5, and K=12 jumps to 91.7. No value reproduces 19.3. (That cliff is
+    itself worth noting: a span posterior with no stable intermediate scale
+    suggests the missing ingredient stabilises the span rather than just
+    reweighting it.)
+  * the calibration likelihood. Per-date means agree with OxCal's exported
+    likelihoods to 0.5 years and their standard deviations and 68% widths to 0.3%.
+  * the shared outlier scale. Implemented (gibbs.Model._build_outlier_tables) and
+    validated against OxCal's own inferred hyperparameter; the width did not move.
+  * the sampler. exact_chain integrates rather than sampling and agrees with the
+    sampler to 0.1 years on the span, so the narrow answer is the target's, not a
+    mixing failure.
+  * the UniformSpanPrior groups correction. Shag River has two boundaries, so its
+    exponent is zero and the correction is off there anyway.
+
+So it is in the BASE phase/span prior, and OxCal's published documentation does
+not contain that algebra: hlp_analysis_oper.html and hlp_analysis_detail.html
+both only point at "equation 6 of Bronk Ramsey 2001 and equation 30 of Bronk
+Ramsey 2009a", and the math_gi.htm page carries the formulas as images. Those two
+equations are what is needed to settle it. Worth knowing while reading them: what
+this app calls one UniformSpanPrior flag is two options in current OxCal
+(UniformSpanLimits and UniformSpanGroups), and both are CORRECTIONS to that base
+prior rather than the prior itself.
+
+Practical consequence meanwhile: modelled positions are good (6.3 years rms from
+OxCal on this fixture with the sampler) but reported RANGES are tighter than
+OxCal's, so a boundary's HPD from this app is narrower than the same model's in
+OxCal.
 """
 import csv
 import os

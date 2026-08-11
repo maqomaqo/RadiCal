@@ -271,3 +271,49 @@ class TestTheSharedScale:
                 assert probability == pytest.approx(1.0, abs=1e-6), m['id']
             else:
                 assert probability < 0.2, m['id']
+
+
+class TestPhaseWidthIsStillNarrow:
+    """
+    The one difference from OxCal still open, pinned so it cannot drift
+    unnoticed in either direction -- and pinned on the SIMPLEST fixture rather
+    than this one, because that is what shows it is not about nesting, ordering
+    or declared outliers. See nenthorn_charcoal_fixture's PHASE WIDTH note for
+    everything ruled out and for the two published equations needed to settle it.
+
+    A test asserting a known shortfall is deliberate: if someone fixes the phase
+    prior, this fails, and that failure is the signal to update the note and
+    tighten the bounds elsewhere.
+    """
+
+    def test_a_single_phase_comes_out_narrower_than_oxcals(self):
+        import csv
+
+        import shag_fixture as sf
+
+        measurements, tree = sf.measurements(), sf.model_tree()
+        solved = ec.solve(measurements, tree, ec.layout(tree, measurements),
+                          num_samples=200)
+        span = (solved['boundaries']['shag_start']['posterior']['posterior_mean']
+                - solved['boundaries']['shag_end']['posterior']['posterior_mean'])
+
+        # OxCal's own boundary posteriors, from the same export.
+        rows = {}
+        with open(sf.RAW, encoding='utf-8-sig') as fh:
+            for row in csv.DictReader(fh):
+                if row['op'] == 'Boundary' and row['type'] == 'posterior':
+                    rows.setdefault(row['name'], []).append(
+                        (float(row['value']), float(row['probability'])))
+        oxcal = {}
+        for name, pairs in rows.items():
+            pairs.sort()
+            calbp = (1950.0 - np.array([p[0] for p in pairs]))[::-1]
+            weight = np.array([p[1] for p in pairs])[::-1]
+            oxcal[name] = float((calbp * weight / weight.sum()).sum())
+        oxcal_span = oxcal['Start'] - oxcal['End']
+
+        assert oxcal_span == pytest.approx(19.3, abs=1.0), oxcal_span
+        # Measured at 4.2. Asserted as a band rather than a single number so the
+        # test is about the shortfall, not about the third decimal place.
+        assert 2.0 < span < 8.0, span
+        assert span < oxcal_span / 2
