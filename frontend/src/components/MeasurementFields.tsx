@@ -223,6 +223,10 @@ export default function MeasurementFields({ value, onChange, showOutlier = false
                   <MenuItem value="charcoal">Charcoal — older than its context</MenuItem>
                 </Select>
               </FormControl>
+              {/* Up to 100%, not 50: OxCal's Outlier(model, 1.00) declares
+                  material residual outright rather than suspecting it, which is
+                  ordinary for charcoal known to be old wood. Capping it made a
+                  published model of that shape impossible to enter. */}
               <TextField
                 type="number"
                 label="Prior %"
@@ -235,15 +239,19 @@ export default function MeasurementFields({ value, onChange, showOutlier = false
                 }}
                 size="small"
                 sx={{ flex: 1 }}
-                inputProps={{ min: 0, max: 50, step: 1 }}
+                inputProps={{ min: 0, max: 100, step: 1 }}
               />
             </Box>
           )}
           <Typography variant="caption" color="textSecondary" component="div" sx={{ mt: 0.5 }}>
             {outlierOn
-              ? value.outlier_model === 'charcoal'
-                ? 'For old wood and reworked material: the sample can be older than the context it was found in, never younger.'
-                : 'For a date wrong in an unknown way — lab error, contamination, a mislabelled bag.'
+              ? (value.outlier_prior ?? 0) >= 1
+                ? value.outlier_model === 'charcoal'
+                  ? 'Declared residual: the sample IS older than its context, not merely suspected of it. The model fits the offset rather than weighing whether there is one.'
+                  : 'Declared an outlier outright: the date is treated as wrong, and the model fits how wrong rather than whether.'
+                : value.outlier_model === 'charcoal'
+                  ? 'For old wood and reworked material: the sample can be older than the context it was found in, never younger.'
+                  : 'For a date wrong in an unknown way — lab error, contamination, a mislabelled bag.'
               : 'Off. The date is taken at face value, and the model will move it to fit its neighbours however far that is.'}
           </Typography>
         </Box>

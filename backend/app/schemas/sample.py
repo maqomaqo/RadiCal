@@ -230,7 +230,15 @@ class BayesianMeasurementInput(MeasurementInput):
     # date's likelihood becomes a mixture of itself and a heavy-tailed
     # alternative, and the result carries the posterior probability that it
     # was the alternative -- see services/exact_chain.
-    outlier_prior: float = Field(default=0.0, ge=0.0, le=0.5)
+    #
+    # Up to 1.0, not 0.5. A prior of 1.0 is not a mistake or an over-confident
+    # guess: it is how OxCal declares material residual OUTRIGHT rather than
+    # suspecting it, which is ordinary practice for charcoal known to be old
+    # wood -- `Outlier("Charcoal", 1.00)` appears three times in
+    # tests/fixtures/oxcal_charcoal. Capping at 0.5 made a published model of
+    # that shape impossible to enter at all, which is a worse failure than
+    # allowing a strong prior the analyst meant.
+    outlier_prior: float = Field(default=0.0, ge=0.0, le=1.0)
     # Which outlier model, when one is applied. "general" is OxCal's
     # symmetric heavy-tailed default, for a date wrong in an unknown way.
     # "charcoal" is one-sided -- the material formed before its context,

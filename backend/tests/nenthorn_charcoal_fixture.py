@@ -35,10 +35,16 @@ Two structural notes, both mattering when comparing:
     and 7.
   * OxCal's own span is wider than anything the app produces on this model (29.2
     years between the boundary means, against 9-20 depending on how the
-    structure is expressed). That is a separate, unresolved difference in how
-    the uniform-scatter exponent is counted for NESTED groups, and it is why the
-    agreement asserted in tests/test_charcoal_outlier.py is a bound of about ten
-    years rather than the sub-year agreement the other fixtures get.
+    structure is expressed), and its dates are more spread (14.1 years against
+    5-6). That difference is UNRESOLVED, and it is why the agreement asserted in
+    tests/test_charcoal_outlier.py is a bound of a few years rather than the
+    sub-year agreement the other fixtures get.
+
+    It is not the uniform-scatter exponent, which was the obvious suspect and was
+    measured: scaling that exponent takes the span from 1.7 years straight to 222
+    with nothing near OxCal's 29 in between, and barely moves the calibration-lobe
+    weights. Whatever it is acts on the WIDTH of a phase rather than on where the
+    phase sits.
 """
 import csv
 import os

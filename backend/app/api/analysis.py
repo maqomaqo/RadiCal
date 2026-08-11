@@ -298,7 +298,9 @@ def _run_bayesian(
          'reason': why the model is not exactly solvable (None when it is,
                    whichever solver actually ran),
          'implicit_boundaries': how many transitions were supplied,
-         and for the sampled path: 'sweeps', 'convergence', 'converged'}
+         and for the sampled path: 'sweeps', 'convergence', 'converged', and
+         'outlier_scale' -- the shared offset scale each outlier model's dates
+         inferred, which only the sampler estimates (see services/gibbs.py)}
     """
     requested = bayesian_config.get('solver') or 'auto'
 
@@ -376,6 +378,11 @@ def _run_bayesian(
         'sweeps': sampled['sweeps'],
         'convergence': sampled['convergence'],
         'converged': sampled['converged'],
+        # What the data said about each outlier model's shared offset scale, in
+        # the log10(years) OxCal reports its own U(0,n) posterior in -- so an
+        # analyst reproducing a published run can compare the inferred
+        # hyperparameter, not just the dates it fed into.
+        'outlier_scale': sampled['outlier_scale'],
     }
 
 

@@ -56,8 +56,25 @@ and exact up to the grid step.
 
 What it does NOT cover
 ----------------------
+The OUTLIER SCALE is approximated. OxCal's Outlier_Model carries one offset
+scale shared by every date using it, constrained by the data; this solver
+marginalises that scale independently per date over its prior instead, because a
+shared hyperparameter couples the dates and the message passing above needs each
+to enter through its own likelihood alone. Deliberately left that way: the
+approximation is what makes the exact integration possible at all, and
+services/gibbs.py samples the shared scale properly for callers who need it
+(bayesian_config.solver = "gibbs").
+
+What it costs, measured: on tests/fixtures/oxcal_outlier the per-date
+marginalisation puts the reported outlier probabilities 0.0166 from OxCal's
+where the sampler gets to 0.0016, and on tests/fixtures/oxcal_charcoal -- three
+dates declared residual outright, the case that exposes it -- the modelled dates
+land 9.9 years rms from OxCal against the sampler's 6.3. So it matters most
+exactly where an outlier prior is large, and hardly at all where it is the usual
+few percent.
+
 `layout()` returns None for anything that is not a single chain, and the
-caller falls back to MCMC. In particular a Sequence that orders two groups
+caller falls back to the sampler. In particular a Sequence that orders two groups
 with NO boundary between them is not a chain: its dates share one enclosing
 boundary pair while an extra constraint orders them against each other, and
 that constraint does not factorise along the chain. Adding an explicit
@@ -67,6 +84,7 @@ practice anyway.
 from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
+from scipy.signal import fftconvolve
 
 from app.services.calibration import get_curve, hpd_ranges_from_distribution
 from app.services.model_tree import inherited_bounds, plan_model
@@ -323,7 +341,42 @@ def _outlier_kernel(step: float, half_width: float,
         outlier probability at 90% rather than 66%, because a one-sided model
         does not have to spend prior mass on the direction the material
         cannot be wrong in.
+
+    Both are summed over their scale here, which is an APPROXIMATION to what
+    OxCal does: OxCal treats the scale as one hyperparameter SHARED by every date
+    using that model and lets the data constrain it, where summing marginalises it
+    independently per date over the whole prior. services/gibbs.py samples the
+    shared scale properly; see scale_nodes below, and that module's
+    Model._build_outlier_tables for what the difference is worth.
     """
+    total = None
+    for log_scale in scale_nodes(model):
+        component = _outlier_kernel_at_scale(step, half_width, model, log_scale)
+        total = component if total is None else total + component
+    return total / total.sum()
+
+
+def scale_nodes(model: str = DEFAULT_OUTLIER_MODEL) -> np.ndarray:
+    """
+    The offset scales an outlier model is allowed, as log10(years).
+
+    OxCal writes these as the second argument of Outlier_Model: U(0,4) for
+    General, U(0,3) for Charcoal. Uniform on the LOG scale, so every decade is
+    equally likely a priori -- which is what makes a third of the charcoal prior
+    sit at ten years or less.
+    """
+    top = CHARCOAL_LOG_SCALE_MAX if model == 'charcoal' else OUTLIER_LOG_SCALE_MAX
+    return np.linspace(0.0, top, OUTLIER_SCALE_NODES)
+
+
+def _outlier_kernel_at_scale(step: float, half_width: float, model: str,
+                             log_scale: float) -> np.ndarray:
+    """
+    One scale's kernel, normalised, on a lag axis that does not depend on the
+    scale -- so kernels for different scales are directly comparable and can be
+    summed or selected between.
+    """
+    tau = 10.0 ** log_scale
     if model == 'charcoal':
         # One-sided, and the side matters. The MATERIAL is older than the
         # CONTEXT, so the context's calendar age is YOUNGER -- lower cal BP,
@@ -332,32 +385,41 @@ def _outlier_kernel(step: float, half_width: float,
         # the wood found in it, which is residuality backwards and made a
         # residual date look MORE consistent rather than less.
         #
-        # Summed over scales rather than taken at one: see
-        # CHARCOAL_LOG_SCALE_MAX for what a single scale cost. Each scale is
-        # normalised BEFORE summing, so the mixture weights the decades
-        # uniformly (u ~ U(0,3)) rather than by how much of each fits on the
-        # grid, and every component is truncated at its own 10 scale lengths
-        # rather than at the widest one's.
+        # The lag axis runs to the WIDEST scale's reach so every scale shares
+        # it, but each is truncated at its own 10 scale lengths -- OxCal's
+        # Exp(1,-10,0) -- rather than at the widest one's.
         widest = CHARCOAL_KERNEL_SPAN_TAUS * (10.0 ** CHARCOAL_LOG_SCALE_MAX)
         lags = np.arange(0.0, widest + step, step)
-        total = np.zeros_like(lags)
-        for u in np.linspace(0.0, CHARCOAL_LOG_SCALE_MAX, OUTLIER_SCALE_NODES):
-            tau = 10.0 ** u
-            density = np.where(lags <= CHARCOAL_KERNEL_SPAN_TAUS * tau,
-                               np.exp(-lags / tau), 0.0)
-            weight = density.sum()
-            if weight > 0:
-                total += density / weight
-        kernel = np.concatenate([total[::-1], np.zeros(len(lags) - 1)])
-        return kernel / kernel.sum()
+        density = np.where(lags <= CHARCOAL_KERNEL_SPAN_TAUS * tau,
+                           np.exp(-lags / tau), 0.0)
+        kernel = np.concatenate([density[::-1], np.zeros(len(lags) - 1)])
+    else:
+        lags = np.arange(-half_width, half_width + step, step)
+        x = lags / tau
+        kernel = (1 + x * x / OUTLIER_DF) ** (-(OUTLIER_DF + 1) / 2.0)
+    total = kernel.sum()
+    return kernel / total if total > 0 else kernel
 
-    lags = np.arange(-half_width, half_width + step, step)
-    total = np.zeros_like(lags)
-    for u in np.linspace(0.0, OUTLIER_LOG_SCALE_MAX, OUTLIER_SCALE_NODES):
-        x = lags / (10.0 ** u)
-        density = (1 + x * x / OUTLIER_DF) ** (-(OUTLIER_DF + 1) / 2.0)
-        total += density / density.sum()
-    return total / total.sum()
+
+def convolve_on_grid(values: np.ndarray, kernel: np.ndarray) -> np.ndarray:
+    """
+    `values` smeared by `kernel`, returned on the same grid.
+
+    The kernel is trimmed to the lags that can actually reach a grid point from
+    a grid point before convolving. That is exact rather than an economy -- a
+    lag longer than the grid contributes to no on-grid output at all -- and it
+    matters because these kernels deliberately run to 10,000-40,000 years while
+    the grid is a few thousand. Trimming happens AFTER normalisation, so the
+    mass the kernel throws off the grid stays thrown off; see
+    _with_outlier_component for why that is the point rather than a defect.
+    """
+    centre = (len(kernel) - 1) // 2
+    reach = len(values) - 1
+    trimmed = kernel[max(0, centre - reach):centre + reach + 1]
+    offset = min(centre, reach)
+    full = fftconvolve(values, trimmed)
+    # FFT convolution leaves tiny negative values where the true answer is zero.
+    return np.maximum(full[offset:offset + len(values)], 0.0)
 
 
 def _with_outlier_component(
@@ -380,9 +442,7 @@ def _with_outlier_component(
     step = float(grid[1] - grid[0])
     kernel = _outlier_kernel(step, max(OUTLIER_KERNEL_HALF_WIDTH_YEARS,
                                        float(grid[-1] - grid[0])), model)
-    full = np.convolve(inlier, kernel)
-    offset = (len(kernel) - 1) // 2
-    broad = full[offset:offset + len(inlier)]
+    broad = convolve_on_grid(inlier, kernel)
     # Deliberately NOT renormalised over the grid. The convolution of two
     # normalised densities is already proper on the real line; most of its
     # mass lies off this grid, which is exactly the statement that a flagged

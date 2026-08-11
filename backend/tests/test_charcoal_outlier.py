@@ -9,13 +9,17 @@ OxCal's `Outlier_Model("Charcoal", Exp(1,-10,0), U(0,3), "t")` draws the scale
 over three decades -- the general model beside it had integrated its own scale
 all along.
 
-The bound asserted here (about ten years) is much looser than the sub-year
-agreement the other fixtures get, and that is deliberate rather than
-accommodating: a separate, unresolved difference in how the uniform-scatter
-exponent is counted for NESTED groups leaves the app's modelled span narrower
-than OxCal's on this model (see the fixture's docstring). Pinning the number
-that the charcoal fix actually moved, and separately pinning the kernel's own
-shape, keeps this test about the kernel instead of about that.
+Two things are checked separately, because they were two different faults: the
+kernel's SHAPE (the scale is drawn over three decades, not fixed at 200 years)
+and the fact that the scale is ONE parameter shared by the dates using the model
+rather than marginalised per date. The second is what services/gibbs.py samples
+and exact_chain deliberately approximates, so the two solvers are held to
+different bounds here on purpose.
+
+Those bounds are looser than the sub-year agreement the other fixtures get, and
+that is deliberate rather than accommodating: an unresolved difference leaves the
+app's modelled phase narrower than OxCal's on this model (see the fixture's
+docstring, which also records what it is NOT).
 """
 import numpy as np
 import pytest
@@ -179,15 +183,91 @@ class TestAgainstOxCalsOwnRun:
             assert ours < unmodelled - 15.0, (name, ours, unmodelled)
             assert theirs < unmodelled - 15.0, (name, theirs, unmodelled)
 
-    def test_the_sampler_agrees_with_the_exact_solver_here_too(self):
+class TestTheSharedScale:
+    """
+    OxCal's Outlier_Model carries ONE offset scale for all the dates using it and
+    lets the data constrain it. services/gibbs.py samples that shared scale;
+    exact_chain marginalises it independently per date, because a shared
+    hyperparameter does not factorise along its message passing. So the two
+    solvers implement different models here, deliberately, and the sampler is the
+    faithful one.
+
+    This fixture is what made the difference visible and is the only place it can
+    be checked against an inferred quantity rather than an answer: OxCal exports
+    the posterior of the scale itself.
+    """
+
+    def test_it_recovers_the_scale_oxcal_inferred(self):
         """
-        The outlier model is a property of a date rather than of how the model
-        is solved, so choosing OxCal's own sampler must not change it. This is
-        the shape that needs the per-flagged-date move sets to mix at all.
+        The strongest check available anywhere in this suite. OxCal's export gives
+        the Charcoal model's U(0,3) posterior as mean 1.79 with a 68% range of
+        1.49-2.06 -- pinned well inside a prior that runs to 1000 years. The
+        sampler is given the same eleven dates and must find the same thing,
+        having been told only the prior.
         """
-        measurements, tree, solved = _solved()
+        measurements = fx.measurements()
+        tree, _inserted = with_implicit_boundaries(fx.model_tree())
+        sampled = gibbs.solve(measurements, tree, num_samples=200)
+
+        charcoal = sampled['outlier_scale']['charcoal']
+        assert charcoal['log10_mean'] == pytest.approx(1.79, abs=0.15), charcoal
+        low, high = charcoal['log10_hpd_68']
+        assert low == pytest.approx(1.49, abs=0.2), charcoal
+        assert high == pytest.approx(2.06, abs=0.2), charcoal
+        # And the data really has constrained it: the posterior is far narrower
+        # than the U(0,3) prior it started from.
+        assert high - low < 1.0, charcoal
+
+        # The General model's scale is a separate shared parameter, and OxCal puts
+        # it at 1.81 -- but with only 5% priors the data barely moves it, so the
+        # posterior stays about as wide as its U(0,4) prior. Both facts matter:
+        # the value agrees, and the width says why it agrees so easily.
+        general = sampled['outlier_scale']['general']
+        assert general['log10_mean'] == pytest.approx(1.81, abs=0.4), general
+
+    def test_the_scale_is_one_parameter_per_model_not_per_date(self):
+        """The structural claim. Eleven dates, two outlier models, so exactly two
+        shared scales -- if these were per-date there would be eleven."""
+        measurements = fx.measurements()
+        model = gibbs.Model(measurements, fx.model_tree())
+        assert sorted(model.outlier_models) == ['charcoal', 'general']
+        assert len(model.scaled_dates['charcoal']) == 3
+        assert len(model.scaled_dates['general']) == 8
+
+        state = model.initial_state()
+        assert sorted(state.scale) == ['charcoal', 'general']
+
+    def test_a_model_with_no_outlier_priors_builds_no_tables(self):
+        """The per-scale tables are the cost of this, so a model that flags
+        nothing must not pay it."""
+        plain = [dict(m, outlier_prior=0.0) for m in fx.measurements()]
+        model = gibbs.Model(plain, fx.model_tree())
+        assert model.outlier_models == []
+        assert model.likelihood_at == {}
+
+    def test_the_sampler_is_closer_to_oxcal_than_the_exact_solver(self):
+        """
+        The consequence, and the reason the override in bayesian_config exists:
+        on a model with a declared-residual date, choosing OxCal's own method
+        gets nearer OxCal's answer. Measured 6.3 years rms against the exact
+        solver's 9.9.
+        """
+        measurements, tree, exact = _solved()
+        sampled = gibbs.solve(measurements, tree, num_samples=200)
+        exact_rms, _e = _rms_against_oxcal(measurements, exact)
+        sampled_rms, _s = _rms_against_oxcal(measurements, sampled)
+        assert sampled_rms < exact_rms, (sampled_rms, exact_rms)
+        assert sampled_rms < 8.0, sampled_rms
+
+    def test_the_declared_outliers_are_still_certain(self):
+        """P(outlier) is now read from the run rather than from the reported
+        density, since it depends on the sampled scale. At prior 1.00 it must
+        still come back as certainty."""
+        measurements, tree, _exact = _solved()
         sampled = gibbs.solve(measurements, tree, num_samples=200)
         for m in measurements:
-            a = solved['measurements'][m['id']]['posterior_mean']
-            b = sampled['measurements'][m['id']]['posterior_mean']
-            assert b == pytest.approx(a, abs=4.0), m['id']
+            probability = sampled['measurements'][m['id']]['outlier_probability']
+            if m['id'] in fx.CHARCOAL:
+                assert probability == pytest.approx(1.0, abs=1e-6), m['id']
+            else:
+                assert probability < 0.2, m['id']

@@ -50,6 +50,11 @@ one-dimensional and exactly samplable:
   * A BOUNDARY's conditional is the product of the span factors of the (at most
     two) groups it bounds, over its allowed interval. It carries no likelihood
     of its own. Evaluated in logs over the interval and drawn the same way.
+  * An OUTLIER MODEL's offset scale is one more such conditional. OxCal shares
+    that scale across every date using the model and lets the data constrain it,
+    which does not factorise along exact_chain's message passing but is nothing
+    to a sampler -- see Model._build_outlier_tables, which is also where the
+    measurements are.
 
 Where this deliberately differs from OxCal
 ------------------------------------------
@@ -88,26 +93,35 @@ Measured against exact_chain on chain-shaped models, where the exact marginals
 are ground truth, and on branching models against the one oracle available for
 those: two INDEPENDENT branches, each separately a chain, so exact_chain can
 solve them one at a time while the sampler has to solve the combined model it
-declines. The outlier model is held to the same OxCal 4.4 run the exact solver
-is (tests/fixtures/oxcal_outlier), where the two agree to 0.0001 on every date's
-outlier probability against the 0.0166 both sit from OxCal -- so the residual
-difference from OxCal belongs to this app's outlier implementation, not to the
-choice of solver.
+declines.
 
-See tests/test_gibbs.py for all of it, and _span_priors for how the
-UniformSpanPrior correction is grouped so that it reduces exactly to
-exact_chain's on a chain and to the per-branch corrections on independent
-branches.
+The outlier model is held to two real OxCal runs, and this is where the sampler
+and the exact solver deliberately part company. On tests/fixtures/oxcal_outlier
+(General model, sixteen dates) sampling the shared scale lands within 0.0016 of
+OxCal's own outlier probabilities where marginalising it per date sits at 0.0166
+-- ten times closer. On tests/fixtures/oxcal_charcoal (three dates declared
+residual outright) it recovers the scale OxCal itself inferred, log10 1.82
+against OxCal's 1.79, having been given only the U(0,3) prior; the modelled dates
+land 6.3 years rms from OxCal against the exact solver's 9.9.
+
+See tests/test_gibbs.py and tests/test_charcoal_outlier.py for all of it, and
+_span_priors for how the UniformSpanPrior correction is grouped so that it
+reduces exactly to exact_chain's on a chain and to the per-branch corrections on
+independent branches.
 """
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
 from app.services.exact_chain import (
+    DEFAULT_OUTLIER_MODEL,
+    OUTLIER_KERNEL_HALF_WIDTH_YEARS,
     _build_grid,
-    _outlier_probability,
+    _outlier_kernel_at_scale,
     _summarize,
+    convolve_on_grid,
     date_tables,
+    scale_nodes,
 )
 from app.services.model_tree import inherited_bounds, plan_model
 from app.services.stratigraphy import effective_bounds
@@ -165,13 +179,19 @@ class _State:
     slice bounds, a conditional draw is a searchsorted on a precomputed
     cumulative row, and there is no repeated float comparison to get the
     inclusive/exclusive convention wrong on.
+
+    `scale` holds, per outlier model in use, the index of that model's current
+    offset scale on its own node grid -- one shared value per model rather than
+    one per date, which is the whole point of it being here (see
+    Model._build_outlier_tables).
     """
 
-    def __init__(self, index: Dict[str, int]):
+    def __init__(self, index: Dict[str, int], scale: Optional[Dict[str, int]] = None):
         self.index = index
+        self.scale = dict(scale or {})
 
     def copy(self) -> '_State':
-        return _State(dict(self.index))
+        return _State(dict(self.index), self.scale)
 
 
 class Model:
@@ -211,6 +231,7 @@ class Model:
             did: np.log(np.maximum(lik, 1e-300)) for did, lik in self.likelihood.items()
         }
         self.cdf = {did: np.cumsum(lik) for did, lik in self.likelihood.items()}
+        self._build_outlier_tables()
 
         self.date_ids = [m['id'] for m in measurements]
         self.boundary_ids = list(self.plan.boundary_names)
@@ -223,6 +244,112 @@ class Model:
 
         self._build_constraints()
         self._build_blocks()
+
+    # -- the shared outlier scale ------------------------------------------
+
+    def _build_outlier_tables(self):
+        """
+        For every flagged date, its likelihood at each candidate offset SCALE --
+        and one shared scale parameter per outlier model, which the sampler draws
+        from its own conditional like anything else.
+
+        Why this is not a refinement. OxCal's Outlier_Model carries one scale for
+        all the dates using it, written as U(0,4) for General and U(0,3) for
+        Charcoal, and lets the DATA constrain it. exact_chain instead marginalises
+        that scale independently per date over the whole prior, which is not the
+        same model: each flagged date is then free to take its own offset,
+        anywhere from one year to a thousand, with no reference to what the others
+        took.
+
+        Measured on the OxCal run in tests/fixtures/oxcal_charcoal, where three
+        dates carry Outlier("Charcoal", 1.00): OxCal's exported posterior for that
+        scale is 10^1.49..10^2.06, about 31 to 115 years, pinned well inside its
+        0-to-1000 prior. With the scale marginalised per date instead, the three
+        flagged dates slide independently until they sit on top of the well-dated
+        ones -- which welds all eleven dates into one clump, and a clump has three
+        places it can sit on a wiggly curve, so 20% of the posterior ends up in a
+        late calibration lobe that OxCal gives 1.7%.
+
+        A shared scale does not factorise over dates, which is exactly why
+        exact_chain cannot do it: its message passing needs each date to enter
+        through its own likelihood alone. A sampler has no such difficulty -- the
+        scale is one more parameter with a one-dimensional conditional.
+        """
+        # Which models are actually in play, and the scales each allows. Only
+        # dates that date_tables gave an outlier component appear here, so a
+        # model nobody uses -- or a zero prior -- costs nothing.
+        self.outlier_models = sorted({
+            m.get('outlier_model') or DEFAULT_OUTLIER_MODEL
+            for m in self.measurements if m['id'] in self.outlier_parts
+        })
+        self.scale_grid: Dict[str, np.ndarray] = {
+            model: scale_nodes(model) for model in self.outlier_models
+        }
+        # Which flagged dates belong to each model.
+        self.scaled_dates: Dict[str, List[str]] = {m: [] for m in self.outlier_models}
+        for m in self.measurements:
+            if m['id'] in self.outlier_parts:
+                self.scaled_dates[m.get('outlier_model') or DEFAULT_OUTLIER_MODEL].append(m['id'])
+
+        # Per flagged date: the mixture likelihood at each scale, its cumulative
+        # sum for inverse-CDF draws, and the outlier component's responsibility
+        # for reporting P(outlier) later.
+        self.likelihood_at: Dict[str, np.ndarray] = {}
+        self.log_likelihood_at: Dict[str, np.ndarray] = {}
+        self.cdf_at: Dict[str, np.ndarray] = {}
+        self.responsibility_at: Dict[str, np.ndarray] = {}
+        half_width = max(OUTLIER_KERNEL_HALF_WIDTH_YEARS,
+                         float(self.grid[-1] - self.grid[0]))
+
+        for model in self.outlier_models:
+            nodes = self.scale_grid[model]
+            for date_id in self.scaled_dates[model]:
+                inlier, _broad_marginal, prior = self.outlier_parts[date_id]
+                mixtures = np.empty((len(nodes), self.M))
+                responsibility = np.empty((len(nodes), self.M))
+                for index, log_scale in enumerate(nodes):
+                    kernel = _outlier_kernel_at_scale(self.dt, half_width, model, log_scale)
+                    broad = convolve_on_grid(inlier, kernel)
+                    mixture = (1.0 - prior) * inlier + prior * broad
+                    mixtures[index] = mixture
+                    responsibility[index] = np.where(
+                        mixture > 0, prior * broad / np.maximum(mixture, 1e-300), 0.0)
+                self.likelihood_at[date_id] = mixtures
+                self.log_likelihood_at[date_id] = np.log(np.maximum(mixtures, 1e-300))
+                self.cdf_at[date_id] = np.cumsum(mixtures, axis=1)
+                self.responsibility_at[date_id] = responsibility
+
+    def _scale_of(self, date_id: str, state: _State) -> Optional[int]:
+        """The node this date's outlier model currently sits at, or None if the
+        date carries no outlier model."""
+        if date_id not in self.likelihood_at:
+            return None
+        for model, dates in self.scaled_dates.items():
+            if date_id in dates:
+                return state.scale.get(model, 0)
+        return None
+
+    def draw_scale(self, model: str, state: _State, u: float) -> int:
+        """
+        Exact draw of one outlier model's shared scale from its full conditional:
+        the product of its dates' likelihoods at their current positions, over a
+        uniform prior on the log scale. One-dimensional and tabulated, so this is
+        a discrete inverse-CDF draw rather than anything approximate.
+        """
+        dates = self.scaled_dates.get(model) or []
+        nodes = self.scale_grid[model]
+        if not dates:
+            return state.scale.get(model, 0)
+        log_weights = np.zeros(len(nodes))
+        for date_id in dates:
+            log_weights += self.log_likelihood_at[date_id][:, state.index[date_id]]
+        log_weights -= log_weights.max()
+        weights = np.exp(log_weights)
+        total = weights.sum()
+        if not np.isfinite(total) or total <= 0:
+            return state.scale.get(model, 0)
+        return int(np.searchsorted(np.cumsum(weights) / total, u, side='left')
+                   .clip(0, len(nodes) - 1))
 
     # -- structure ---------------------------------------------------------
 
@@ -417,7 +544,8 @@ class Model:
         lo, hi = self.allowed(date_id, state)
         if hi <= lo:
             return max(lo, min(hi, state.index[date_id])) if hi >= 0 else state.index[date_id]
-        cdf = self.cdf[date_id]
+        node = self._scale_of(date_id, state)
+        cdf = self.cdf[date_id] if node is None else self.cdf_at[date_id][node]
         base = cdf[lo - 1] if lo > 0 else 0.0
         total = cdf[hi] - base
         if total <= 0:
@@ -483,7 +611,10 @@ class Model:
         """
         total = 0.0
         for date_id in self.date_ids:
-            total += float(self.log_likelihood[date_id][state.index[date_id]])
+            node = self._scale_of(date_id, state)
+            table = (self.log_likelihood[date_id] if node is None
+                     else self.log_likelihood_at[date_id][node])
+            total += float(table[state.index[date_id]])
 
         for param in self.params:
             lo, hi = self.window[param]
@@ -575,7 +706,12 @@ class Model:
                 )
             index[param] = int(np.clip(preferred[param], lo, hi))
 
-        state = _State(index)
+        # Each shared scale starts mid-prior: with u uniform on its range there
+        # is no better guess, and its conditional is drawn exactly on the first
+        # sweep anyway.
+        scale = {model: len(self.scale_grid[model]) // 2
+                 for model in self.outlier_models}
+        state = _State(index, scale)
         if not np.isfinite(self.log_posterior(state)):
             raise ValueError('could not find a feasible starting state for this model')
         return state
@@ -747,6 +883,17 @@ def run(model: Model, sweeps: int = DEFAULT_SWEEPS, seed: int = 42,
     # whatever length it ended up being. Halving pairs of rounds when there are
     # too many keeps the memory flat however long it runs.
     rounds: List[Dict[str, np.ndarray]] = []
+    # How often each shared scale node was visited, which IS its posterior --
+    # directly comparable to the U(0,n) posterior OxCal exports. Not split into
+    # rounds: it plays no part in the convergence measure, whose job is the
+    # calendar parameters.
+    scale_counts = {m: np.zeros(len(model.scale_grid[m])) for m in model.outlier_models}
+    # P(outlier) accumulated as a running mean of the outlier component's
+    # responsibility. With the scale sampled, that responsibility depends on it,
+    # so it has to be read while the state is known rather than derived from the
+    # reported density afterwards.
+    outlier_total = {d: 0.0 for d in model.likelihood_at}
+    accumulated = 0
 
     def new_round() -> Dict[str, np.ndarray]:
         return {p: np.zeros(model.M) for p in model.params}
@@ -765,6 +912,12 @@ def run(model: Model, sweeps: int = DEFAULT_SWEEPS, seed: int = 42,
         for boundary_id in model.boundary_ids:
             state.index[boundary_id] = model.draw_boundary(
                 boundary_id, state, float(rng.random()))
+
+        # Each outlier model's shared offset scale, from its own exact
+        # conditional. This is the parameter exact_chain cannot have.
+        for outlier_model in model.outlier_models:
+            state.scale[outlier_model] = model.draw_scale(
+                outlier_model, state, float(rng.random()))
 
         # Translation moves. The Gibbs sweep above cannot move a correlated
         # block as a unit -- see Model.move_sets.
@@ -799,6 +952,13 @@ def run(model: Model, sweeps: int = DEFAULT_SWEEPS, seed: int = 42,
             sweep_once()
             for param in model.params:
                 current[param][state.index[param]] += 1.0
+            for outlier_model in model.outlier_models:
+                scale_counts[outlier_model][state.scale[outlier_model]] += 1.0
+            for date_id in outlier_total:
+                node = model._scale_of(date_id, state)
+                outlier_total[date_id] += float(
+                    model.responsibility_at[date_id][node][state.index[date_id]])
+            accumulated += 1
         rounds.append(current)
 
         if len(rounds) > 2 * ROUNDS:
@@ -826,6 +986,9 @@ def run(model: Model, sweeps: int = DEFAULT_SWEEPS, seed: int = 42,
     counts = {p: sum(r[p] for r in kept_rounds) for p in model.params}
     return {
         'histograms': counts,
+        'scale_histograms': scale_counts,
+        'outlier_probability': {d: (v / accumulated if accumulated else 0.0)
+                                for d, v in outlier_total.items()},
         'sweeps': swept,
         'sweeps_kept': int(sum(counts[model.params[0]])) if model.params else 0,
         'proposed_moves': sum(proposed),
@@ -911,8 +1074,10 @@ def solve(measurements: List[Dict], root: Dict, sweeps: int = DEFAULT_SWEEPS,
         density = chain['histograms'][date_id]
         summary = _summarize(model.grid, density, rng, num_samples)
         if date_id in model.outlier_parts:
-            summary['outlier_probability'] = _outlier_probability(
-                density, model.likelihood[date_id], *model.outlier_parts[date_id])
+            # Taken from the run rather than recomputed from the reported
+            # density: the outlier component's responsibility depends on the
+            # shared scale, so it has to be read while that is known.
+            summary['outlier_probability'] = chain['outlier_probability'][date_id]
         results['measurements'][date_id] = summary
 
     for boundary_id in model.boundary_ids:
@@ -933,6 +1098,25 @@ def solve(measurements: List[Dict], root: Dict, sweeps: int = DEFAULT_SWEEPS,
                               if chain['convergence'] else 0.0)
     results['converged'] = results['convergence'] >= target_convergence
     results['acceptance'] = chain['acceptance']
+    # What the data said about each outlier model's shared offset scale, in the
+    # same log10(years) OxCal reports its U(0,n) posterior in -- so the two can
+    # be compared directly, which is how the per-date marginalisation this
+    # replaced was caught.
+    results['outlier_scale'] = {}
+    for outlier_model, visits in chain['scale_histograms'].items():
+        total = visits.sum()
+        if total <= 0:
+            continue
+        nodes = model.scale_grid[outlier_model]
+        weights = visits / total
+        mean = float((nodes * weights).sum())
+        cdf = np.cumsum(weights)
+        results['outlier_scale'][outlier_model] = {
+            'log10_mean': mean,
+            'log10_hpd_68': (float(np.interp(0.16, cdf, nodes)),
+                             float(np.interp(0.84, cdf, nodes))),
+            'years_mean': float(10.0 ** mean),
+        }
     results['grid'] = {'lower': float(model.grid[0]), 'upper': float(model.grid[-1]),
                        'step': model.dt}
     return results

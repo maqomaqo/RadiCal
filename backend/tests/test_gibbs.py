@@ -423,10 +423,13 @@ class TestOutlierModel:
     own, the exact solver's, and the sampler's -- which is what makes it worth
     testing here rather than only in test_exact_chain.
 
-    The Bernoulli indicator is integrated out in the shared likelihood tables
-    (exact_chain.date_tables), so the outlier model is a property of a date
-    rather than of how the model is solved. These tests are what establishes
-    that claim for the sampler instead of assuming it.
+    The two solvers deliberately implement DIFFERENT outlier models, so these no
+    longer check that they agree. OxCal's Outlier_Model carries one offset scale
+    shared by every date using it, constrained by the data; this sampler does
+    that (Model._build_outlier_tables), while exact_chain marginalises the scale
+    independently per date because a shared hyperparameter does not factorise
+    along its message passing. The sampler is therefore the faithful path, and
+    what these tests pin is that it is closer to OxCal than the approximation.
     """
 
     @pytest.fixture(scope='class')
@@ -464,18 +467,39 @@ class TestOutlierModel:
         assert np.abs(errors).max() < 0.05, dict(zip(
             [m['id'] for m in sf.measurements()], errors.round(4)))
 
-    def test_it_agrees_with_the_exact_solver_more_closely_than_with_oxcal(self, solved):
+    def test_sharing_the_scale_is_what_closes_the_gap_to_oxcal(self, solved):
         """
-        Measured at 0.0001 or better on every date, against the 0.0166 both
-        solvers sit from OxCal. That gap is the point: the residual difference
-        from OxCal is a property of this app's outlier implementation, not of
-        the sampler, so replacing the solver does not change it.
+        This gap used to be attributed to "this app's outlier implementation" in
+        general, since both solvers sat the same 0.0166 from OxCal and agreed
+        with each other to 0.0001. Sampling the SHARED scale instead of
+        marginalising it per date turns out to be the whole of it: the sampler
+        now lands within 0.0016 on all sixteen dates, ten times closer, while the
+        exact solver keeps its 0.0166.
         """
         sf, exact, sampled = solved
-        for m in sf.measurements():
-            a = exact['measurements'][m['id']]['outlier_probability']
-            b = sampled['measurements'][m['id']]['outlier_probability']
-            assert b == pytest.approx(a, abs=0.005), m['id']
+        table = sf.table()
+
+        def worst(results):
+            return max(abs(results['measurements'][m['id']]['outlier_probability']
+                           - table[m['id']]['outlier_probability'])
+                       for m in sf.measurements())
+
+        assert worst(sampled) < 0.005, worst(sampled)
+        assert worst(sampled) < worst(exact) / 3
+
+    def test_it_recovers_the_scale_oxcal_inferred(self, solved):
+        """
+        The shared scale is a parameter with a posterior, and OxCal exports its
+        own -- so this is a direct comparison of an inferred quantity rather than
+        of an answer it feeds into. On the Nenthorn charcoal fixture the two agree
+        to 0.03 in log10; here the General model's 5% priors leave the data barely
+        able to constrain it, so all that can be asked is that it stays inside its
+        U(0,4) prior.
+        """
+        _sf, _exact, sampled = solved
+        scale = sampled['outlier_scale']['general']
+        assert 0.0 <= scale['log10_mean'] <= 4.0, scale
+        assert scale['years_mean'] > 1.0
 
     def test_the_outlier_component_keeps_its_own_scale(self, solved):
         """
