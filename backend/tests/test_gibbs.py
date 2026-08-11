@@ -671,10 +671,20 @@ class TestRunLength:
     """
 
     def _easy_model(self):
+        """
+        Three dates, not two. A TWO-date phase barely determines its own span, so
+        its boundary marginals are genuinely heavy-tailed and the overlap
+        diagnostic sits right on the 0.95 target: measured 0.9501 before the
+        minimum span existed and 0.9487 after, both after running to the sweep
+        cap. That is a real property of a two-date phase rather than anything this
+        class is about, and pinning a boolean to it makes the test a coin toss.
+        Three dates reach 0.954 in a third of the sweeps.
+        """
         phase = _element('phase', 'Only')
         tree = _element('sequence', 'Site', [
             _element('boundary', 'Start'), phase, _element('boundary', 'End')])
-        return [_date(phase['id'], 3000), _date(phase['id'], 3020)], tree
+        return ([_date(phase['id'], 3000), _date(phase['id'], 3020),
+                 _date(phase['id'], 3040)], tree)
 
     def test_it_reports_the_length_it_actually_ran(self):
         measurements, tree = self._easy_model()

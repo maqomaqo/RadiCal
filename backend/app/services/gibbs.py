@@ -116,6 +116,7 @@ import numpy as np
 from app.services.exact_chain import (
     DEFAULT_OUTLIER_MODEL,
     OUTLIER_KERNEL_HALF_WIDTH_YEARS,
+    minimum_span,
     _build_grid,
     _outlier_kernel_at_scale,
     _summarize,
@@ -402,6 +403,15 @@ class Model:
                 add(date_id, group.older_boundary_id)
                 add(group.younger_boundary_id, date_id)
 
+        # Shortest span each group may occupy, in whole grid cells -- see
+        # exact_chain.MIN_SPAN_ERROR_FRACTION for why there is a floor at all.
+        # Held as a cell count so it composes with the index arithmetic the rest
+        # of the constraints use.
+        self.min_gap: Dict[Tuple[str, str], int] = {}
+        for older_id, younger_id, dates in self.group_dates:
+            floor = minimum_span(self.grid, dates, self.likelihood, self.outlier_parts)
+            self.min_gap[(older_id, younger_id)] = max(1, int(np.ceil(floor / self.dt)))
+
         self.window = {p: self._own_window(p, p in self.likelihood) for p in self.params}
 
         self.span_priors = self._span_priors() if self.uniform_span_prior else []
@@ -534,6 +544,15 @@ class Model:
             hi = min(hi, state.index[older])
         for younger in self.above[param]:
             lo = max(lo, state.index[younger])
+        # A boundary must also stay at least its group's minimum span from the
+        # boundary opposite it. Applied here rather than only in log_posterior so
+        # the exact conditional draws never propose inside the excluded region --
+        # a truncation the sampler has to see, not a penalty it discovers.
+        for (older_id, younger_id), gap in self.min_gap.items():
+            if param == older_id:
+                lo = max(lo, state.index[younger_id] + gap)
+            elif param == younger_id:
+                hi = min(hi, state.index[older_id] - gap)
         return lo, hi
 
     def draw_date(self, date_id: str, state: _State, u: float) -> int:
@@ -628,9 +647,10 @@ class Model:
             K = len(dates)
             if K == 0:
                 continue
-            span = self.grid[state.index[older_id]] - self.grid[state.index[younger_id]]
-            if span <= 0:
+            gap = self.min_gap.get((older_id, younger_id), 1)
+            if state.index[older_id] - state.index[younger_id] < gap:
                 return -np.inf
+            span = self.grid[state.index[older_id]] - self.grid[state.index[younger_id]]
             total -= K * float(np.log(span))
 
         for oldest_id, youngest_id, exponent in self.span_priors:
@@ -693,11 +713,16 @@ class Model:
             preferred[boundary_id] = (int(np.mean(neighbours)) if neighbours
                                       else self.M // 2)
 
+        # Step the topological walk down by the largest minimum gap rather than
+        # one cell, so the starting state already clears every group's floor.
+        # Starting inside an excluded region leaves every conditional empty and
+        # the chain unable to move at all.
+        step = max([1] + list(self.min_gap.values()))
         index: Dict[str, int] = {}
         for param in sorted(self.params, key=lambda p: depth[p]):
             lo, hi = self.window[param]
             for older in self.below[param]:
-                hi = min(hi, index[older] - 1)
+                hi = min(hi, index[older] - step)
             if hi < lo:
                 raise ValueError(
                     'the model has no state satisfying all of its constraints: '
@@ -1092,6 +1117,7 @@ def solve(measurements: List[Dict], root: Dict, sweeps: int = DEFAULT_SWEEPS,
     results['method'] = 'gibbs'
     results['uniform_span_prior'] = bool(model.span_priors)
     results['sweeps'] = chain['sweeps']
+    results['minimum_span'] = [float(gap * model.dt) for gap in model.min_gap.values()]
     # The WORST parameter's convergence, not the average: one badly-mixed
     # boundary is exactly what a mean would hide.
     results['convergence'] = (min(chain['convergence'].values())

@@ -358,6 +358,10 @@ def _run_bayesian(
             'requested': requested,
             'reason': None,
             'implicit_boundaries': implicit_boundaries,
+            # Shortest span each phase was allowed, in years. Reported because it
+            # is a deliberate restriction of the published model, applied to
+            # exclude a degenerate mode -- see exact_chain.MIN_SPAN_ERROR_FRACTION.
+            'minimum_span': solved.get('minimum_span'),
         }
 
     sampled = gibbs.solve(
@@ -383,6 +387,7 @@ def _run_bayesian(
         # analyst reproducing a published run can compare the inferred
         # hyperparameter, not just the dates it fed into.
         'outlier_scale': sampled['outlier_scale'],
+        'minimum_span': sampled.get('minimum_span'),
     }
 
 
