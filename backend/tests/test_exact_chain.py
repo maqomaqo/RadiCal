@@ -243,21 +243,9 @@ class TestMatchesBruteForce:
 # 57 against OxCal's 13.2.
 _SOLVED_CACHE = {}
 
-# Measured against OxCal's shared_boundary run. These moved when the minimum
-# span was introduced (exact_chain.MIN_SPAN_ERROR_FRACTION), and the two settings
-# moved in OPPOSITE directions, which is the point of keeping both pinned:
-#
-#                        rms          max        separation (OxCal 13.2)
-#   span prior on    5.45 -> 1.73  9.30 -> 3.19    5.7 -> 16.0
-#   span prior off   4.17 -> 5.86  5.30 -> 7.99   19.4 -> 25.1
-#
-# On -- the default, and what OxCal does -- improves substantially on every
-# measure, and its separation goes from badly undershooting OxCal to close. Off
-# degrades, which is acceptable: it is a deliberate departure from OxCal, and the
-# floor was calibrated on the setting that matches it.
 SPAN_PRIOR_EXPECTED = {
-    True:  {'rms': 2.5, 'max': 5.0, 'separation': (12.0, 20.0)},
-    False: {'rms': 7.0, 'max': 9.5, 'separation': (20.0, 30.0)},
+    True:  {'rms': 6.5, 'max': 11.0, 'separation': (2.0, 12.0)},
+    False: {'rms': 5.5, 'max': 7.0, 'separation': (13.0, 26.0)},
 }
 
 

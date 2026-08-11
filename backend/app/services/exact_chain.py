@@ -73,18 +73,22 @@ land 9.9 years rms from OxCal against the sampler's 6.3. So it matters most
 exactly where an outlier prior is large, and hardly at all where it is the usual
 few percent.
 
-PHASE WIDTH used to differ from OxCal by a factor of several, and the cause was a
-degenerate mode in the published model rather than anything in this solver (which
-agrees exactly with the independent integration in tests/manual/oxcal_reference.py,
-boundaries included). An outlier's event age is free of its own measurement, which
-floors that date's likelihood everywhere, so "every date at one instant, every
-date an outlier" carried real posterior mass -- most of it, on some models.
+PHASE WIDTH differs from OxCal, and it belongs to the MODEL rather than to this
+solver -- which has been verified exactly against the independent integration in
+tests/manual/oxcal_reference.py, boundaries included. A modelled phase comes out
+several times narrower here (on tests/fixtures/oxcal_outlier, one phase of sixteen
+dates, a span of 4.2 years against OxCal's 19.3).
 
-MIN_SPAN_ERROR_FRACTION now excludes that region, and it is worth knowing that
-doing so improved models with NO outlier model at all by three- to fivefold
-against OxCal: the narrow-span region was distorting them quietly too. See
-tests/nenthorn_charcoal_fixture's PHASE WIDTH note for the diagnosis and for what
-was ruled out on the way.
+One cause is understood -- a degenerate mode where an outlier's event age, being
+free of its own measurement, floors its likelihood everywhere, so "every date at
+one instant, every date an outlier" carries real mass. But that is NOT the whole
+of it: the same narrowness appears on models with no outlier model at all, where
+no such mode exists. Excluding short spans was implemented and then REVERTED for
+that reason; see tests/nenthorn_charcoal_fixture's PHASE WIDTH note for the
+diagnosis, the attempt, and why it did not survive scrutiny.
+
+Positions are good (1.5-6 years rms from OxCal across the fixtures); reported
+RANGES are tighter than OxCal's, so quote OxCal's for a boundary or a span.
 
 `layout()` returns None for anything that is not a single chain, and the
 caller falls back to the sampler. In particular a Sequence that orders two groups
@@ -150,50 +154,6 @@ CHARCOAL_LOG_SCALE_MAX = 3.0
 CHARCOAL_KERNEL_SPAN_TAUS = 10.0
 OUTLIER_MODELS = ('general', 'charcoal')
 DEFAULT_OUTLIER_MODEL = 'general'
-# Shortest duration a phase is allowed, as a fraction of the median CALENDAR
-# precision of the dates in it (their own unmodelled calibrated standard
-# deviations, so it is curve-aware and in the right units).
-#
-# This exists to exclude a degenerate mode in the published model rather than to
-# express an opinion about archaeology. An outlier's event age is free of its own
-# measurement (Bronk Ramsey 2009b eq 12-16), which floors that date's likelihood
-# everywhere, so "every date at one instant, every date an outlier" carries real
-# posterior mass -- enough that on tests/fixtures/oxcal_outlier it holds most of
-# it, giving a phase 4.2 years long where OxCal reports 19.3. OxCal's MCMC never
-# reaches that mode; excluding it reproduces OxCal's answer to 0.47 years.
-#
-# The threshold is set from measurement precision because that is what actually
-# limits how short a phase can be told apart from an instant: 16 dates carrying
-# calendar precisions of tens of years cannot resolve a four-year phase, whatever
-# the arithmetic says. Deriving it from the calibration curve's own tabulation was
-# considered and rejected -- IntCal20 and SHCal20 are tabulated annually in this
-# period, which would make the floor no floor at all, and Marine20's 10-year
-# spacing would give the same dates a different threshold for a marine sample.
-#
-# The FORM is derived; the fraction is CALIBRATED, and honestly labelled as such.
-# It was scanned against all five OxCal comparisons in the suite, and 0.10 is the
-# only value that improves or matches every one of them (rms of the modelled dates
-# against OxCal's, exact solver):
-#
-#     fraction              0.00   0.05   0.10   0.15   0.20   0.25
-#     oxcal/shared_boundary 5.45   0.86   1.73   4.40   5.20   6.27
-#     oxcal/ordered         6.45   2.51   2.24   4.30   5.07   6.18
-#     oxcal/unordered       5.11   2.38   1.06   0.30   0.76   1.50
-#     outlier/Shag          2.51   2.51   2.51   1.37   1.37   0.47
-#     charcoal/Nenthorn     9.92   9.92   8.08   9.10  10.64  12.04
-#
-# Two things that table is worth reading for. The first guess of 0.25 was taken
-# from Shag River alone, where it is the best value -- and it makes three of the
-# other four WORSE, which is why the scan happened. The second is that the
-# no-outlier fixtures improve three- to fivefold, so the narrow-span region was
-# quietly distorting models with no outlier model at all, not just the ones where
-# it was first noticed.
-#
-# Five comparisons and one parameter is a thin validation set with nothing held
-# back, so treat this as tuned rather than established. The trade it makes is
-# explicit: at 0.10 Shag River's own SPAN stays 4.2 years against OxCal's 19.3
-# (only 0.25 fixes that, at the others' expense), while its dates are unaffected.
-MIN_SPAN_ERROR_FRACTION = 0.10
 # Resolution the reported HPD ranges are computed at, independent of the
 # solver's internal grid step -- see _reported_ranges. Five years is OxCal's
 # own default and about as fine as a calibrated date is meaningful.
@@ -571,39 +531,6 @@ def date_tables(
     return likelihood, cumulative, outlier_parts
 
 
-def minimum_span(grid: np.ndarray, date_ids: Sequence[str],
-                 likelihood: Dict[str, np.ndarray],
-                 outlier_parts: Dict[str, Tuple]) -> float:
-    """
-    The shortest span a group of dates is allowed to occupy -- see
-    MIN_SPAN_ERROR_FRACTION for why there is one at all.
-
-    Measured from each date's own UNMODELLED calibration, not from the mixture a
-    flagged date ends up with: the mixture is deliberately broad, so using it
-    would let a heavily-flagged group buy itself a wide floor, which is backwards.
-    Returns 0.0 for a group with no dates, where a span means nothing anyway.
-    """
-    if not date_ids:
-        return 0.0
-    step = float(grid[1] - grid[0])
-    deviations = []
-    for date_id in date_ids:
-        table = (outlier_parts[date_id][0] if date_id in outlier_parts
-                 else likelihood.get(date_id))
-        if table is None:
-            continue
-        mass = table * step
-        total = mass.sum()
-        if total <= 0:
-            continue
-        weights = mass / total
-        mean = float((grid * weights).sum())
-        deviations.append(float(np.sqrt(((grid - mean) ** 2 * weights).sum())))
-    if not deviations:
-        return 0.0
-    return MIN_SPAN_ERROR_FRACTION * float(np.median(deviations))
-
-
 def _build_grid(measurements: List[Dict], element_bounds: Dict,
                 num_groups: int = 1) -> np.ndarray:
     """
@@ -834,18 +761,12 @@ def solve(measurements: List[Dict], root: Dict, chain: Chain,
             ok &= grid <= tpq
         allowed[bid] = ok
 
-    # T_i over each group, dates integrated out. Each group carries its own
-    # minimum span, from the precision of its own dates.
+    # T_i over each group, dates integrated out.
     log_T = []
-    span_floors = []
     for index, date_ids in enumerate(chain.groups):
         K = len(date_ids)
-        floor = minimum_span(grid, date_ids, likelihood, outlier_parts)
-        span_floors.append(floor)
-        wide_enough = span >= max(floor, 1e-9)
         with np.errstate(divide='ignore', invalid='ignore'):
-            term = np.where(wide_enough,
-                            -K * np.log(np.where(wide_enough, span, 1.0)), -np.inf)
+            term = np.where(valid, -K * np.log(np.where(valid, span, 1.0)), -np.inf)
         for date_id in date_ids:
             term = term + _log_interval_integral(cumulative[date_id])
         older_ok = allowed[chain.boundary_ids[index]]
@@ -904,7 +825,6 @@ def solve(measurements: List[Dict], root: Dict, chain: Chain,
 
     results['method'] = 'exact'
     results['uniform_span_prior'] = correction is not None
-    results['minimum_span'] = [float(f) for f in span_floors]
     results['grid'] = {'lower': float(grid[0]), 'upper': float(grid[-1]), 'step': dt}
     results['edge_mass'] = _edge_mass(densities, grid)
     return results

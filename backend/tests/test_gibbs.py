@@ -673,12 +673,11 @@ class TestRunLength:
     def _easy_model(self):
         """
         Three dates, not two. A TWO-date phase barely determines its own span, so
-        its boundary marginals are genuinely heavy-tailed and the overlap
-        diagnostic sits right on the 0.95 target: measured 0.9501 before the
-        minimum span existed and 0.9487 after, both after running to the sweep
-        cap. That is a real property of a two-date phase rather than anything this
-        class is about, and pinning a boolean to it makes the test a coin toss.
-        Three dates reach 0.954 in a third of the sweeps.
+        its boundary marginals are heavy-tailed and the overlap diagnostic lands
+        right on the 0.95 target -- measured 0.9501, after running to the sweep
+        cap. Pinning a boolean to a margin of 0.0001 is a coin toss, and it did
+        flip when an unrelated change moved it by 0.0014. Three dates reach 0.954
+        in a third of the sweeps.
         """
         phase = _element('phase', 'Only')
         tree = _element('sequence', 'Site', [

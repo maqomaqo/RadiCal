@@ -31,29 +31,6 @@ from app.services.model_tree import with_implicit_boundaries
 import nenthorn_charcoal_fixture as fx
 
 
-def _one_phase_tree():
-    def el(eid, etype, name, children=None):
-        return {'id': eid, 'element_type': etype, 'name': name,
-                'tpq_age_bp': None, 'taq_age_bp': None, 'children': children or []}
-    return el('s', 'sequence', 'Site', [
-        el('b0', 'boundary', 'Start'), el('p', 'phase', 'Only'),
-        el('b1', 'boundary', 'End')])
-
-
-def _plain_dates(count=4, error=30):
-    return [{'id': f'mf{i}', 'sample_name': f'mf{i}', 'age_bp': 3000 + 20 * i,
-             'error_1sigma': error, 'curve_id': 'shcal20', 'element_id': 'p',
-             'material_type': 'charcoal', 'sample_type': 'terrestrial'}
-            for i in range(count)]
-
-
-def _floor(dates, tree):
-    bounds = ec.inherited_bounds(tree)
-    grid = ec._build_grid(dates, bounds, 1)
-    likelihood, _cumulative, outliers = ec.date_tables(grid, dates, bounds)
-    return ec.minimum_span(grid, [d['id'] for d in dates], likelihood, outliers)
-
-
 def _solved():
     """The fixture's model as the app actually solves it: not a chain as
     written, so the implied transition is supplied and it goes to the exact
@@ -172,11 +149,7 @@ class TestAgainstOxCalsOwnRun:
         chain = ec.layout(tree, measurements)
         worse, _e2 = _rms_against_oxcal(
             measurements, ec.solve(measurements, tree, chain, num_samples=200))
-        # 11.90 against 8.08. The margin narrowed from 6.2 years to 3.8 when the
-        # minimum span was introduced -- the floor repairs some of the same damage
-        # -- so the bound is 3.0 rather than the original 4.0. The claim is
-        # unchanged: integrating the scale is worth a third of the total error.
-        assert worse > good + 3.0, (worse, good)
+        assert worse > good + 4.0, (worse, good)
 
     def test_the_declared_outliers_are_reported_as_outliers(self):
         """
@@ -300,42 +273,17 @@ class TestTheSharedScale:
                 assert probability < 0.2, m['id']
 
 
-class TestPhaseWidth:
+class TestPhaseWidthIsStillNarrow:
     """
-    The phase-width difference from OxCal, now largely closed by the minimum span
-    (exact_chain.MIN_SPAN_ERROR_FRACTION). Pinned on the SIMPLEST fixture as well
-    as this one, because that is what showed the cause was not nesting, ordering
-    or declared outliers. See nenthorn_charcoal_fixture's PHASE WIDTH note.
+    The difference from OxCal that remains, pinned so it cannot drift unnoticed in
+    either direction -- and pinned on the SIMPLEST fixture rather than this one,
+    because that is what shows it is not about nesting, ordering or declared
+    outliers. See nenthorn_charcoal_fixture's PHASE WIDTH note for the diagnosis.
 
-    Shag River's own span is deliberately still short -- the calibrated fraction
-    trades it for the other four comparisons -- so that shortfall is pinned too,
-    and will fail if anyone changes the trade without revisiting the note.
+    A test asserting a known shortfall is deliberate: if someone acts on that
+    diagnosis, this fails, and that failure is the signal to update the note and
+    tighten the bounds elsewhere.
     """
-
-    def test_the_floor_comes_from_the_dates_own_calendar_precision(self):
-        """
-        The form of the threshold, independent of its calibrated size: it scales
-        with how precisely the dates are known, so a group of sharp dates may
-        occupy a shorter phase than a group of vague ones.
-        """
-        tree = _one_phase_tree()
-        sharp = _floor(_plain_dates(error=15), tree)
-        vague = _floor(_plain_dates(error=60), tree)
-        assert 0 < sharp < vague, (sharp, vague)
-        # A fraction of that precision, not the whole of it: a phase as long as
-        # its dates' own uncertainty is entirely plausible and must be allowed.
-        assert vague < 60.0, vague
-
-    def test_a_flagged_date_cannot_buy_itself_a_wider_floor(self):
-        """
-        The floor is measured from each date's own UNMODELLED calibration, not
-        from the broad mixture a flagged date ends up with -- otherwise declaring
-        dates residual would widen the very floor that exists to constrain them.
-        """
-        tree = _one_phase_tree()
-        plain = _plain_dates()
-        flagged = [dict(d, outlier_prior=1.0, outlier_model='general') for d in plain]
-        assert _floor(flagged, tree) == pytest.approx(_floor(plain, tree), rel=0.05)
 
     def test_a_single_phase_comes_out_narrower_than_oxcals(self):
         import csv
