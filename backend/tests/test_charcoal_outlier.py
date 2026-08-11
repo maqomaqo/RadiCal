@@ -275,14 +275,13 @@ class TestTheSharedScale:
 
 class TestPhaseWidthIsStillNarrow:
     """
-    The one difference from OxCal still open, pinned so it cannot drift
-    unnoticed in either direction -- and pinned on the SIMPLEST fixture rather
-    than this one, because that is what shows it is not about nesting, ordering
-    or declared outliers. See nenthorn_charcoal_fixture's PHASE WIDTH note for
-    everything ruled out and for the two published equations needed to settle it.
+    The difference from OxCal that remains, pinned so it cannot drift unnoticed in
+    either direction -- and pinned on the SIMPLEST fixture rather than this one,
+    because that is what shows it is not about nesting, ordering or declared
+    outliers. See nenthorn_charcoal_fixture's PHASE WIDTH note for the diagnosis.
 
-    A test asserting a known shortfall is deliberate: if someone fixes the phase
-    prior, this fails, and that failure is the signal to update the note and
+    A test asserting a known shortfall is deliberate: if someone acts on that
+    diagnosis, this fails, and that failure is the signal to update the note and
     tighten the bounds elsewhere.
     """
 
@@ -317,3 +316,65 @@ class TestPhaseWidthIsStillNarrow:
         # test is about the shortfall, not about the third decimal place.
         assert 2.0 < span < 8.0, span
         assert span < oxcal_span / 2
+
+
+    def test_oxcal_is_this_posterior_without_its_degenerate_region(self):
+        """
+        The diagnosis, as an assertion rather than a note: OxCal's answer is this
+        solver's own posterior with the near-coincident region removed.
+
+        Reproduced by rebuilding the joint boundary weight the way exact_chain
+        does, zeroing spans below a floor, and reading the date marginals back
+        out. At a floor of ten years the dates land 0.47 years rms from OxCal's --
+        closer than anything else in this suite gets on this model -- against 2.51
+        with the region left in. That is what identifies the extra mass as the
+        whole of the discrepancy.
+        """
+        import csv
+
+        import shag_fixture as sf
+
+        measurements, tree = sf.measurements(), sf.model_tree()
+        chain = ec.layout(tree, measurements)
+        bounds = ec.inherited_bounds(tree)
+        grid = ec._build_grid(measurements, bounds, len(chain.groups))
+        likelihood, cumulative, _outliers = ec.date_tables(grid, measurements, bounds)
+
+        date_ids = chain.groups[0]
+        span = grid[None, :] - grid[:, None]
+        with np.errstate(divide='ignore', invalid='ignore'):
+            log_joint = np.where(span > 0,
+                                 -len(date_ids) * np.log(np.where(span > 0, span, 1.0)),
+                                 -np.inf)
+        log_F = {d: ec._log_interval_integral(cumulative[d]) for d in date_ids}
+        for d in date_ids:
+            log_joint = log_joint + log_F[d]
+
+        def date_means(floor):
+            restricted = np.where(span > floor, log_joint, -np.inf)
+            means = []
+            for d in date_ids:
+                with np.errstate(invalid='ignore'):
+                    log_g = np.where(np.isfinite(restricted), restricted - log_F[d], -np.inf)
+                weight = np.exp(ec._rescaled(log_g))
+                weight = np.where(np.isfinite(weight), weight, 0.0)
+                quadrant = np.cumsum(weight, axis=0)
+                quadrant = np.cumsum(quadrant[:, ::-1], axis=1)[:, ::-1]
+                density = likelihood[d] * np.diagonal(quadrant)
+                means.append(float((grid * density / density.sum()).sum()))
+            return np.array(means)
+
+        # OxCal's own modelled means, from the same export.
+        oxcal = sf.distributions()
+        theirs = np.array([
+            float((cal * prob / prob.sum()).sum())
+            for cal, prob in [oxcal[m['id']]['posterior'] for m in measurements]
+        ])
+
+        def rms(floor):
+            return float(np.sqrt(((date_means(floor) - theirs) ** 2).mean()))
+
+        as_now, excluded = rms(0.0), rms(10.0)
+        assert as_now > 2.0, as_now
+        assert excluded < 1.0, excluded
+        assert excluded < as_now / 2
