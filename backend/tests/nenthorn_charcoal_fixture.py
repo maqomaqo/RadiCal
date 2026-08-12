@@ -86,42 +86,96 @@ What the correction bought, rms of modelled dates against OxCal's:
 
 WHAT IS LEFT, on this fixture
 -----------------------------
-This is now the only fixture that disagrees, and it has flipped sign: the span
-OVERSHOOTS at 54.9 years against OxCal's 29.2. That points at the degenerate mode,
-which is unchanged by any of the above and remains diagnosed but not addressed:
+This is the only fixture that still disagrees, and it has flipped sign: the span
+OVERSHOOTS, at 43.3 sampled and 54.9 exact against OxCal's 29.2.
 
-Under Bronk Ramsey 2009b eq 12-16 an outlier's event age is free of its own
-measurement -- the offset absorbs the difference -- so its likelihood gains a
-broad, nearly flat component. That floors every flagged date's likelihood
-everywhere, and "every date at the same instant, every date an outlier" stops
-being astronomically unlikely: it costs q^K in prior but gains more back from the
-floor. On Shag River a prior of 0.001 already flipped which region held the mass,
-and the answer was then IDENTICAL from 0.001 to 0.1 -- saturation, the tell of an
-artefact rather than a graded inference.
+The "declared-outlier degeneracy" this note used to blame is NOT the cause, and
+the evidence for it did not survive the quadrature fix. That mechanism -- every
+date at the same instant, every date an outlier, paid for by the broad component's
+floor -- predicts spans that are too NARROW, which is the opposite of the symptom
+now, and the saturation that was its main evidence was measured while the
+quadrature bug was inflating exactly the coincident configurations it described.
+Three further measurements rule it out directly:
 
-Ruled out as causes of that, each by measurement: the uniform-scatter exponent
+  * the response is MONOTONE and in the helpful direction. Sweeping the three
+    declared dates' prior 0.00 -> 0.05 -> 0.20 -> 0.50 -> 1.00 gives spans of
+    169.2, 148.5, 115.2, 81.3, 54.9. The outlier model is doing real work here and
+    the best answer is at the maximum absorption the prior allows -- there is no
+    saturation and no flip. Pinned in test_charcoal_outlier.py.
+  * both offset scales are inferred correctly. OxCal's exported U() posteriors are
+    mean 1.79 (Charcoal, 68% 1.49-2.06) and 1.81 (General, 68% 0.50-3.20 -- barely
+    constrained); the sampler gets 1.797 (1.443-2.034) and 1.803 (0.365-3.196).
+  * the flagged dates are not the ones misbehaving. Their marginals are no wider
+    relative to OxCal's than their own phase-mates' under the general model
+    (WK50098 14.6 -> 20.1 against WK50099 14.2 -> 18.6).
+
+What the discrepancy actually IS, measured band by band. Every one of the eleven
+marginals is about a third too wide (1.34x OxCal's sd, on a common window), and
+the excess is a specific YOUNG TAIL that OxCal does not have, with a matching
+deficit in the oldest lobe. Averaged over the seven Rockshelter dates:
+
+    cal BP band     OxCal   gibbs   exact
+    540-580         0.028   0.100   0.246
+    620-640         0.406   0.296   0.274
+
+That tail is the charcoal kernel's one-sided smear -- correct in direction and
+scale -- and what should resist it is the span prior: a residual date wandering
+young has to drag a boundary with it, and (span)^(-K) makes that expensive. The
+resistance is what differs, which is why the exact solver is 2.5x worse than the
+sampler here rather than equally wrong: it can only solve this model after
+with_implicit_boundaries splits one span term over ELEVEN dates into two over four
+and seven, and K is the exponent doing the resisting. Same cause, smaller, on
+tests/fixtures/oxcal's `ordered` run: 2.51 years rms patched against the sampler's
+1.49 on the model as authored.
+
+A SECOND, independent gap of about 2.6 years sits underneath, and it has nothing
+to do with outliers: any two ORDERED groups come out further apart than OxCal puts
+them. Separation of Quarry from Rockshelter, no outlier model anywhere --
+
+    run               OxCal   exact   gibbs
+    unordered          -0.1     0.0    -0.1
+    ordered            11.7    15.8    14.4
+    shared_boundary    13.2    15.8    15.9
+
+Unordered is exact; ordering costs ~2.6 years whether the middle Boundary is
+written or implied. So it is not the implicit-boundary rewrite and not the
+UniformSpanPrior correction (without which shared_boundary separates by 26.7).
+Undiagnosed.
+
+Ruled out as causes, each by measurement: the uniform-scatter exponent
 (multiplicatively and additively -- the response is a cliff, and K-1 and K-2 are
 both much worse); our reading of the priors (2001 eq 5-7, 2009a eq 26-30, all
 matching); our reading of the outlier model (2009b eq 12-16 put the offset inside
 r(t_i + phi_i 10^u delta_i), so convolving in t is right, and eq 11 confirms u is
-shared across the model -- which services/gibbs.py samples); the calibration
-likelihood (means within 0.5 years of OxCal's, widths within 0.3%); and tightening
-the outlier model itself (the span does not respond until the model is effectively
-off, and lighter tails do nothing at all).
+shared across the model -- which services/gibbs.py samples, correctly, per model);
+the calibration likelihood (means within 0.5 years of OxCal's, widths within
+0.5%); tightening the outlier model itself; and the implicit boundary as the sole
+cause (the sampler on the model as authored still overshoots, 44.1 against 43.3
+patched).
 
 A minimum-span floor was implemented for this and REVERTED -- see the git history
 for commit 5e0aed3 and its revert. It was fitted rather than derived, it fired
 hardest on models with no outlier at all, and it is now clear WHY it appeared to
 work: it was masking the quadrature bug.
 
-Practical consequence meanwhile: modelled positions are good (6.7 years rms from
-OxCal on this fixture with the sampler, 10.6 with the exact solver) but the span is
-too WIDE here rather than too narrow -- 43.3 sampled and 54.9 exact against OxCal's
-29.2 -- so on a model with a date declared an outright outlier a boundary's HPD
-from this app is wider than the same model's in OxCal. Everywhere else the two now
-agree closely; the 4-year gap between the solvers on this fixture is the shared
-outlier scale, which the sampler infers and the exact solver integrates out per
-date (see exact_chain's module docstring), not the quadrature.
+A TRAP, if you measure widths here
+----------------------------------
+Do not compare the standard deviation of our exported curve against OxCal's
+without putting both on a common window first. OxCal exports about 250 years
+around each parameter; exact_chain._plottable trims at 1e-4 of the peak. For a
+date with a broad outlier component those two rules keep very different amounts of
+tail, and the difference is larger than the effect being measured -- on Shag River
+it manufactures a 30% discrepancy that does not exist (0.70x on their own
+supports, 0.97x on a common one). Comparing the unmodelled LIKELIHOODS does not
+catch this, because they have no broad component and agree to 0.5% either way.
+This is the same shape of error as the brute-force checks that shared the solver's
+quadrature: a reference that differs from the thing it is checking in a way the
+check cannot see.
+
+Practical consequence meanwhile: modelled positions are good (4.5 years rms from
+OxCal with the sampler on the model as authored, 6.7 patched, 10.6 exact) but on a
+model with a date declared an outright outlier a boundary's HPD from this app is
+WIDER than the same model's in OxCal, and the sampler is the one to prefer.
 """
 import csv
 import os

@@ -667,12 +667,18 @@ def _span_prior_correction(grid: np.ndarray, num_boundaries: int,
       Boundaries -- the app's default shape -- is untouched. Nothing to
       apply, and the O(M^2) chain is kept.
 
-    What it costs, on the fixture's two-group model: the outermost boundary
-    ranges improve markedly (Start 95.4% AD 1222-1390 -> 1294-1390 against
-    OxCal's 1277-1394) while the dates move slightly the wrong way (3.4 ->
-    4.7 years rms from OxCal, group separation 17.7 -> 6.5 against OxCal's
-    13.2). It also couples the two ends of the chain, so the solve stops
-    factorising and goes from O(M^2) to O(M^3) per group.
+    What it is worth, on the fixture's two-group model and re-measured after the
+    interval-quadrature fix (the numbers here previously predated it): it is not
+    optional. With it the group separation is 15.8 years against OxCal's 13.2 and
+    the dates 1.26 years rms; without it, 26.7 and 6.67. It also couples the two
+    ends of the chain, so the solve stops factorising and goes from O(M^2) to
+    O(M^3) per group -- worth paying.
+
+    The residual 2.6 years of extra separation is not this factor's doing. It
+    appears whenever two groups are ORDERED, at much the same size with an
+    explicit middle Boundary (15.8 against 13.2) as with an implied one, and it is
+    absent when nothing orders them (the unordered run agrees to 0.1 years). See
+    tests/nenthorn_charcoal_fixture's WHAT IS LEFT note.
     """
     exponent = num_boundaries - 2
     if not enabled or exponent <= 0:

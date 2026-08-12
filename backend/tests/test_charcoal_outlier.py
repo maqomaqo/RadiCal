@@ -285,8 +285,12 @@ class TestPhaseWidth:
     Phase width against OxCal. This used to be the suite's largest open
     disagreement -- a modelled phase came out several times narrower than OxCal's
     -- and correcting the interval quadrature closed it on every fixture without
-    a declared outlier. What is left is this fixture, where it now overshoots, and
-    that remainder is the outlier degeneracy rather than the phase model.
+    a declared outlier. What is left is this fixture, where it now OVERSHOOTS.
+
+    The tests below pin what that remainder is and, as much, what it is not. It
+    was blamed on a degeneracy in the outlier model; that diagnosis predicted
+    spans too NARROW, and the measurements here show the outlier model responding
+    monotonically and helpfully instead. See the fixture's WHAT IS LEFT note.
     """
 
     def test_a_single_phase_now_matches_oxcals_width(self):
@@ -323,17 +327,15 @@ class TestPhaseWidth:
         assert oxcal_span == pytest.approx(19.3, abs=1.0), oxcal_span
         assert span == pytest.approx(oxcal_span, rel=0.25), (span, oxcal_span)
 
-    def test_this_fixture_still_overshoots_and_that_is_the_outlier_degeneracy(self):
+    def test_this_fixture_still_overshoots(self):
         """
         The remaining disagreement, pinned so it cannot drift unnoticed. With
         three dates declared residual outright, this model's span comes out 54.9
         years against OxCal's 29.2 -- now too WIDE, where before the quadrature
-        fix everything was too narrow. That points at the degenerate mode
-        described in the fixture's PHASE WIDTH note, which is a separate problem
-        from the phase model and is not addressed.
+        fix everything was too narrow.
 
-        Asserted as a band: this fails if someone fixes the degeneracy, which is
-        the signal to revisit the note.
+        Asserted as a band: this fails if someone closes the gap, which is the
+        signal to revisit the fixture's note.
         """
         measurements, _tree, solved = _solved()
         boundaries = [b['posterior']['posterior_mean']
@@ -343,3 +345,132 @@ class TestPhaseWidth:
                       - fx.posterior_means()['End Nenthorn'])
         assert oxcal_span == pytest.approx(29.2, abs=1.0), oxcal_span
         assert 40.0 < span < 70.0, span
+
+    def test_absorbing_the_declared_outliers_narrows_the_span_monotonically(self):
+        """
+        Why the overshoot is NOT the degeneracy this fixture's note used to blame.
+
+        That mechanism -- every date at the same instant, every date an outlier,
+        paid for by the broad component's floor -- says the outlier model buys
+        near-coincidence, so raising the flagged dates' prior should COLLAPSE the
+        span, and its evidence was that the answer saturated once the prior passed
+        a threshold. The response is neither: it is monotone in the helpful
+        direction over four and a half decades of prior, with the best answer at
+        the maximum absorption the prior allows.
+
+            prior  0.00   0.05    0.20   0.50   1.00
+            span  169.2  148.5   115.2   81.3   54.9
+
+        A degenerate mode would not be graded like that, and it would not put its
+        minimum where the model is most confident the dates are residual. Three
+        priors are asserted rather than five to keep this to three solves.
+        """
+        base = fx.measurements()
+        tree, _inserted = with_implicit_boundaries(fx.model_tree())
+        chain = ec.layout(tree, base)
+        spans = []
+        for prior in (0.0, 0.2, 1.0):
+            measurements = [
+                dict(m, outlier_prior=(prior if m['id'] in fx.CHARCOAL
+                                       else m['outlier_prior']))
+                for m in base
+            ]
+            solved = ec.solve(measurements, tree, chain, num_samples=100)
+            means = [b['posterior']['posterior_mean']
+                     for b in solved['boundaries'].values()]
+            spans.append(max(means) - min(means))
+        assert spans[0] > spans[1] > spans[2], spans
+        # And by a wide margin, not within noise of each other.
+        assert spans[0] > 2 * spans[2], spans
+
+    def test_the_excess_is_a_young_tail_and_not_a_uniform_widening(self):
+        """
+        Where the extra width actually sits, which is what any future fix has to
+        move. Averaged over the seven Rockshelter dates, our marginals carry a
+        young tail OxCal does not have and are correspondingly short in the oldest
+        lobe:
+
+            cal BP band     OxCal   exact
+            540-580         0.028   0.246
+            620-640         0.406   0.274
+
+        That is the charcoal kernel's one-sided smear, which is correct in
+        direction and scale -- what differs is how hard the span prior resists it.
+        Asserted loosely, as an excess and a deficit rather than at these values.
+        """
+        measurements, _tree, solved = _solved()
+        oxcal = fx.distributions()
+        rockshelter = [m['id'] for m in measurements
+                       if m['element_id'] in ('K', 'A')]
+        axis = np.arange(520.0, 700.0, 1.0)
+
+        def stacked(pairs_for):
+            total = np.zeros_like(axis)
+            for date_id in rockshelter:
+                cal, prob = pairs_for(date_id)
+                density = np.interp(axis, cal, prob, left=0.0, right=0.0)
+                total += density / density.sum()
+            return total / len(rockshelter)
+
+        def ours(date_id):
+            pairs = np.asarray(
+                solved['measurements'][date_id]['probability_distribution'], float)
+            order = np.argsort(pairs[:, 0])
+            return pairs[order, 0], pairs[order, 1]
+
+        mine = stacked(ours)
+        theirs = stacked(lambda d: oxcal[d]['posterior'])
+        young = (axis >= 540) & (axis < 580)
+        oldest = (axis >= 620) & (axis < 640)
+        assert mine[young].sum() > 3 * theirs[young].sum(), (
+            mine[young].sum(), theirs[young].sum())
+        assert mine[oldest].sum() < theirs[oldest].sum(), (
+            mine[oldest].sum(), theirs[oldest].sum())
+
+    def test_widths_are_only_comparable_on_a_common_window(self):
+        """
+        A trap, pinned because it manufactured a 30% discrepancy that does not
+        exist and the obvious sanity check does not catch it.
+
+        OxCal exports about 250 years around each parameter; _plottable trims ours
+        at 1e-4 of the peak. For a date with a broad outlier component those rules
+        keep very different amounts of tail, so comparing the two curves' standard
+        deviations on their OWN supports compares truncation rules. On Shag River
+        that reads as 0.70x OxCal's width; on a common window the same solve is
+        0.97x. Comparing the unmodelled likelihoods cannot expose it -- they have
+        no broad component and agree either way.
+        """
+        import shag_fixture as sf
+
+        measurements, tree = sf.measurements(), sf.model_tree()
+        solved = ec.solve(measurements, tree, ec.layout(tree, measurements),
+                          num_samples=100)
+        oxcal = sf.distributions()
+
+        def sd(window, cal, prob):
+            axis = np.arange(window[0], window[1] + 1e-9, 1.0)
+            density = np.interp(axis, cal, prob, left=0.0, right=0.0)
+            density = density / density.sum()
+            mean = float((axis * density).sum())
+            return float(np.sqrt(((axis - mean) ** 2 * density).sum()))
+
+        own, common = [], []
+        for m in measurements:
+            if m['id'] not in oxcal or 'posterior' not in oxcal[m['id']]:
+                continue
+            their_cal, their_prob = oxcal[m['id']]['posterior']
+            pairs = np.asarray(
+                solved['measurements'][m['id']]['probability_distribution'], float)
+            order = np.argsort(pairs[:, 0])
+            our_cal, our_prob = pairs[order, 0], pairs[order, 1]
+            own.append(sd((our_cal[0], our_cal[-1]), our_cal, our_prob)
+                       / sd((their_cal[0], their_cal[-1]), their_cal, their_prob))
+            window = (max(our_cal[0], their_cal[0]),
+                      min(our_cal[-1], their_cal[-1]))
+            common.append(sd(window, our_cal, our_prob)
+                          / sd(window, their_cal, their_prob))
+        assert np.mean(common) == pytest.approx(1.0, abs=0.1), np.mean(common)
+        assert np.mean(own) < 0.85, (
+            'the naive comparison should still be the misleading one; if it has '
+            'come into agreement the trimming rules have changed and this test '
+            'no longer demonstrates anything', np.mean(own))

@@ -471,6 +471,79 @@ class TestAgainstOxCalModelled:
             assert draws.std() == pytest.approx(entry['posterior_std'], rel=0.15)
 
 
+class TestOrderingOverSeparates:
+    """
+    A small, open, well-localised disagreement with OxCal: two ORDERED groups come
+    out about 2.6 years further apart than OxCal puts them, and the effect appears
+    only when something orders them.
+
+        run               OxCal   exact   gibbs
+        unordered          -0.1     0.0    -0.1
+        ordered            11.7    15.8    14.4
+        shared_boundary    13.2    15.8    15.9
+
+    Worth its own class because of what the three rows exclude. It is not the
+    outlier model (no fixture here has one). It is not the interval quadrature
+    (that is what took the unordered row to 0.1). It is not the implicit-boundary
+    rewrite, since it is the same size when the middle Boundary is written out. And
+    it is not the UniformSpanPrior correction, without which shared_boundary
+    separates by 26.7 rather than 15.8 -- the correction removes most of the error
+    and leaves this.
+
+    It is also the floor under the charcoal fixture's larger overshoot, which is
+    why it is pinned separately from it -- see tests/nenthorn_charcoal_fixture.
+    """
+
+    def _separation(self, run, **kwargs):
+        measurements = ox.measurements()
+        tree = ox.model_tree(run)
+        chain = ec.layout(tree, measurements)
+        if chain is None:
+            from app.services.model_tree import with_implicit_boundaries
+            tree, inserted = with_implicit_boundaries(tree)
+            assert inserted
+            chain = ec.layout(tree, measurements)
+        solved = ec.solve(measurements, tree, chain, num_samples=100, **kwargs)
+        mean = lambda ids: np.mean(
+            [solved['measurements'][i]['posterior_mean'] for i in ids])
+        return mean(ox.QUARRY) - mean(ox.ROCKSHELTER)
+
+    def _oxcals(self, run):
+        dists = ox.distributions(run)
+        mean = lambda ids: np.mean([
+            float((cal * prob / prob.sum()).sum())
+            for i in ids for cal, prob in [dists[ox.key(i)]['posterior']]])
+        return mean(ox.QUARRY) - mean(ox.ROCKSHELTER)
+
+    def test_with_nothing_ordering_them_we_agree_exactly(self):
+        """The control. Same dates, same curve, same span prior -- only the
+        ordering removed -- and the separation matches to a tenth of a year."""
+        assert self._separation('unordered') == pytest.approx(
+            self._oxcals('unordered'), abs=0.5)
+
+    @pytest.mark.parametrize('run', ['ordered', 'shared_boundary'])
+    def test_ordering_costs_about_two_and_a_half_years(self, run):
+        """
+        Pinned as a band on the EXCESS, so it fails both if the gap widens and if
+        someone closes it -- the latter being the more interesting failure and the
+        signal to rewrite this docstring.
+        """
+        excess = self._separation(run) - self._oxcals(run)
+        assert 1.0 < excess < 5.0, (run, excess)
+
+    def test_the_span_prior_correction_is_not_what_causes_it(self):
+        """
+        Switching the correction off makes the separation much WORSE (26.7 against
+        15.8), so the residual is not an artefact of applying it. Recorded because
+        the correction is the obvious suspect and this rules it out.
+        """
+        with_it = self._separation('shared_boundary', uniform_span_prior=True)
+        without = self._separation('shared_boundary', uniform_span_prior=False)
+        oxcal = self._oxcals('shared_boundary')
+        assert abs(with_it - oxcal) < abs(without - oxcal) / 2.0, (
+            with_it, without, oxcal)
+
+
 class TestLimiters:
     def test_tpq_truncates_the_posterior(self):
         """A TPQ on the phase must be respected as a hard bound."""
