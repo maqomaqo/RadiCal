@@ -109,7 +109,16 @@ Three further measurements rule it out directly:
     relative to OxCal's than their own phase-mates' under the general model
     (WK50098 14.6 -> 20.1 against WK50099 14.2 -> 18.6).
 
-What the discrepancy actually IS, measured band by band. Every one of the eleven
+PART OF IT IS THE MISSING LIMITS FACTOR, measured directly: with OxCal's
+UniformSpanPrior off this model's span is 36.91 years rather than its default 29.24,
+against our 43.3 (sampler) and 51.4 (exact). So 7.7 of the 22 years by which the
+exact solver overshoots is that term, and the separation lines up too -- 15.58 with
+the term off against our 16.41. What remains after it is ~6 years on the sampler and
+a further ~8 on the exact solver, the latter being its per-date treatment of the
+outlier scale. The band-by-band young tail described next is that remainder, not the
+whole of it.
+
+What the rest of the discrepancy IS, measured band by band. Every one of the eleven
 marginals is about a third too wide (1.34x OxCal's sd, on a common window), and
 the excess is a specific YOUNG TAIL that OxCal does not have, with a matching
 deficit in the oldest lobe. Averaged over the seven Rockshelter dates:
@@ -141,11 +150,25 @@ UniformSpanPrior correction was fixed --
 Unordered is exact. Part of the rest was a first-order discretisation error in the
 correction -- it divided by a continuum power where the discrete model needs a
 binomial count, see exact_chain._span_prior_correction -- worth about 1.1 years
-here and pinned now by TestTheCorrectionIsExact against a closed form. What
-survives is ~1.5 years on the exact solver and ~3 on the sampler, and it survives
-refining the grid fourfold, so it is the prior's FORM or OxCal's own answer rather
-than either one's arithmetic. Five designed OxCal runs on deliberately unimodal
-dates are the next step.
+here and pinned now by TestTheCorrectionIsExact against a closed form.
+
+MOST OF WHAT SURVIVED THAT IS NOW EXPLAINED, and it is not about ordering at all:
+it is the UniformSpanPrior limits factor we do not implement (Bronk Ramsey 2008
+A.31, 2009a eq 29). Asking OxCal to run these same models with the option OFF
+brings the two into line --
+
+    fixture           OxCal option OFF   ours (no such term)
+    ordered                     13.47    14.18 (sampler)
+    shared_boundary             26.30    26.7  (both refinements off)
+
+-- against OxCal's defaults of 11.66 and 13.19. So the app is reproducing OxCal
+with one of OxCal's refinements switched off, on every model where the phase prior
+does real work. See exact_chain._span_prior_correction for the term, for why the
+sign of it is subtle, and for why it is still not implemented.
+
+OxCal is not the one that is wrong, which was worth checking and is now checked:
+raising its kIterations from the default 30 to 60 moves its answer 0.23 years while
+its reported convergence rises 95.7 -> 97.1.
 
 Two things measured along the way that any further work here should start from:
 

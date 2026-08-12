@@ -721,20 +721,44 @@ def _span_prior_correction(grid: np.ndarray, num_boundaries: int,
           OxCal, UniformSpanPrior OFF    span 31.83   dates spread 4.92
           this solver                    span 32.53   dates spread 5.18
 
-      So we reproduce OxCal with the refinement switched off, and the term is
-      worth 5.6 years of span -- 18% -- on that model. It is not implemented here
-      because the sign of eq 29 as read off the paper predicts the OPPOSITE
-      effect (1/g flattens a span prior that otherwise falls off as
-      (window - span), which should widen the span), so implementing it from that
-      reading would be guessing. Being wrong in a way that happens to fit one
-      fixture is what the reverted minimum-span floor did.
+      So we reproduce OxCal with the refinement switched OFF, and the term is
+      worth 5.6 years of span -- 18% -- on that model. OxCal's ON/OFF ratio is
+      about the same on every model tried: 0.825 here, 0.847 on the `ordered`
+      fixture, 0.792 on the charcoal one.
 
-      Consequences to expect meanwhile: a phase's span from this app is wider
-      than OxCal's default answer, by more the more the prior does the work --
-      about 18% on eight tightly clustered dates, 62% on four, 7% on Shag River's
-      sixteen. It is also the leading suspect for the charcoal fixture's span
-      overshoot and for the ordering over-separation in
-      TestOrderingOverSeparates, both of which have been chased elsewhere.
+      What the term is. Bronk Ramsey 2008 appendix A.31 gives it in full (2009a
+      eq 29 is the same expression):
+
+          g = min( (ulim_m - llim_a) - (t_m - t_a),
+                   (t_m - t_a) - (llim_m - ulim_a),
+                   ulim_a - llim_a,
+                   ulim_m - llim_m )
+
+      with 1/g added to the prior. Which of the four terms is the smallest decides
+      which WAY it biases the span, and that is the whole subtlety. Take llim/ulim
+      to be the wide computational window and the first term wins, g = window -
+      span, and 1/g flattens a span prior that would otherwise fall off as
+      (window - span) -- worth about 3% here, and in the direction of a WIDER span.
+      That reading cannot be what OxCal does: its effect is 18% and it narrows.
+      With per-boundary limits tight enough for the SECOND term to win instead,
+      1/g goes as 1/(span + c), which penalises long spans and is the right sign
+      and roughly the right size.
+
+      Why it is still not implemented. A.31 needs the four limits OxCal assigns to
+      each boundary, and none of the three papers says what they are; picking a c
+      that reproduces one fixture is exactly what the reverted minimum-span floor
+      did. Two OxCal runs bracketing the model at AD 500-750 and AD 200-1100 --
+      a 3.6x change of window -- moved its answer by 0.57 years, so the limits it
+      uses are internal to it rather than the user's constraints.
+
+      Consequences to expect meanwhile: a phase's span from this app is wider than
+      OxCal's default answer, by more the more the prior does the work -- about 18%
+      on eight tightly clustered dates, 62% on four, 7% on Shag River's sixteen.
+      Both open items chased elsewhere are partly this: it accounts for 7.7 of the
+      22 years by which the charcoal fixture's span overshoots, and for most of the
+      ordering over-separation in TestOrderingOverSeparates (with the term off on
+      both sides, OxCal's `ordered` separation is 13.47 against our 14.18, and its
+      shared_boundary is 26.30 against our 26.7).
     * At n = 2 the exponent is zero, so a single Phase between two
       Boundaries -- the app's default shape -- is untouched. Nothing to
       apply, and the O(M^2) chain is kept.
