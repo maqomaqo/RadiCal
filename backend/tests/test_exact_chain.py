@@ -479,16 +479,18 @@ class TestOrderingOverSeparates:
 
         run               OxCal   exact   gibbs
         unordered          -0.1     0.0    -0.1
-        ordered            11.7    15.8    14.4
-        shared_boundary    13.2    15.8    15.9
+        ordered            11.7    14.7    14.2
+        shared_boundary    13.2    14.7    16.3
 
     Worth its own class because of what the three rows exclude. It is not the
     outlier model (no fixture here has one). It is not the interval quadrature
     (that is what took the unordered row to 0.1). It is not the implicit-boundary
-    rewrite, since it is the same size when the middle Boundary is written out. And
-    it is not the UniformSpanPrior correction, without which shared_boundary
-    separates by 26.7 rather than 15.8 -- the correction removes most of the error
-    and leaves this.
+    rewrite, since it is the same size when the middle Boundary is written out. It
+    is not the UniformSpanPrior correction, without which shared_boundary separates
+    by 26.7 -- and it is not that correction's discretisation either, which was a
+    genuine first-order bug worth about 1.1 years of the exact solver's row and is
+    now fixed and pinned in TestTheCorrectionIsExact. Nor is it grid resolution:
+    what is left survives halving the step twice.
 
     It is also the floor under the charcoal fixture's larger overshoot, which is
     why it is pinned separately from it -- see tests/nenthorn_charcoal_fixture.
@@ -534,8 +536,11 @@ class TestOrderingOverSeparates:
     def test_the_span_prior_correction_is_not_what_causes_it(self):
         """
         Switching the correction off makes the separation much WORSE (26.7 against
-        15.8), so the residual is not an artefact of applying it. Recorded because
-        the correction is the obvious suspect and this rules it out.
+        14.7), so the residual is not an artefact of applying it. Recorded because
+        the correction is the obvious suspect -- and it was half right to be: its
+        DISCRETISATION was wrong and worth about 1.1 years here. What this rules out
+        is the correction's presence, not its arithmetic; TestTheCorrectionIsExact
+        covers the arithmetic.
         """
         with_it = self._separation('shared_boundary', uniform_span_prior=True)
         without = self._separation('shared_boundary', uniform_span_prior=False)
@@ -572,12 +577,15 @@ class TestUniformSpanPrior:
     """
     OxCal's UniformSpanPrior, on by default here as there.
 
-    It divides the prior by (b_first - b_last)^(n-2), which stops a
-    sequence's span prior depending on how many sub-groups it is cut into.
-    That couples the two ends of the chain, so it needs a different and more
-    expensive computation than the plain forward/backward pass -- these check
-    that the expensive one computes the same thing a brute-force sum does,
-    and that the cheap one is still used when the correction cannot matter.
+    It divides out the freedom the n-2 interior boundaries have inside the span,
+    which stops a sequence's span prior depending on how many sub-groups it is cut
+    into. That couples the two ends of the chain, so it needs a different and more
+    expensive computation than the plain forward/backward pass -- these check that
+    the expensive one computes the same thing a brute-force sum does, and that the
+    cheap one is still used when the correction cannot matter.
+
+    TestTheCorrectionIsExact below checks the factor itself against a closed form,
+    which is the part that does not depend on any fixture.
     """
 
     def _two_group_model(self):
@@ -664,9 +672,16 @@ class TestUniformSpanPrior:
         logT = [log_transfer(g) for g in chain.groups]
         T = [np.where(np.isfinite(np.exp(ec._rescaled(t))), np.exp(ec._rescaled(t)), 0.0)
              for t in logT]
-        outer = grid[None, :] - grid[:, None]                  # [b2, b0]
+        # The correction the solver applies, written out independently: one over
+        # the COUNT of places the single interior boundary can sit strictly
+        # inside the outer pair, which for k = 1 is (span in cells) - 1. Not
+        # 1/(span in years) -- see exact_chain._span_prior_correction for why the
+        # continuum power is wrong on a grid, and note that a brute force
+        # carrying the same mistake as the solver is exactly how the earlier
+        # interval-quadrature bug survived this suite.
+        cells = np.arange(M)[None, :] - np.arange(M)[:, None]   # [b2, b0]
         with np.errstate(divide='ignore', invalid='ignore'):
-            corr = np.where(outer > 0, 1.0 / np.where(outer > 0, outer, 1.0), 0.0)
+            corr = np.where(cells > 1, 1.0 / np.where(cells > 1, cells - 1, 1.0), 0.0)
 
         # Explicit cube, axes (b2, b1, b0).
         for gi, ids in enumerate(chain.groups):
@@ -691,6 +706,115 @@ class TestUniformSpanPrior:
                 mine = expected[where] / expected[where].sum()
                 overlap = float(np.minimum(got, mine).sum())
                 assert overlap > 0.999, f'{d} overlap {overlap}'
+
+
+class TestTheCorrectionIsExact:
+    """
+    The UniformSpanPrior factor against a closed form, with no fixture and no
+    OxCal involved.
+
+    Switch the likelihoods off and the reported posterior IS the prior, which is
+    known exactly. Each group's dates then have volume exactly span^K -- the
+    trapezoid rule integrates a constant exactly -- so every span factor cancels
+    and what is left is the correction against the interior boundaries' freedom.
+    With the correction right those cancel too, leaving the ordered pair
+    (b_first, b_last) UNIFORM, so the oldest boundary's marginal simply counts its
+    admissible partners:
+
+        p(i) proportional to (i - k),   k = n - 2
+
+    -- i - k and not i, because the younger boundary has to leave room for the k
+    interior ones. That distinction is the whole point: a continuum reference
+    would predict p(i) ∝ i and be wrong by a mean of k*step/3, which is what the
+    old (b_first - b_last)^-(n-2) form was quietly delivering.
+
+    This is the test that would have caught that form immediately, and it is
+    cheap, so it is here rather than in a scratch script.
+    """
+
+    LO, HI = 2800.0, 3600.0
+
+    def _flat(self, M):
+        """Patch the likelihood and the grid, and undo it afterwards."""
+        grid = np.linspace(self.LO, self.HI, M)
+        flat = np.ones(M)
+        saved = (ec._date_likelihood, ec._build_grid)
+        ec._date_likelihood = lambda g, m, b: flat.copy()
+        ec._build_grid = lambda ms, eb, ng=1: grid.copy()
+        return grid, saved
+
+    def _restore(self, saved):
+        ec._date_likelihood, ec._build_grid = saved
+
+    def _model(self, n, dates_per_group):
+        children, dates = [], []
+        for i in range(n - 1):
+            children.append(_boundary(f'b{i}'))
+            children.append(_phase(f'p{i}'))
+            for j in range(dates_per_group[i]):
+                dates.append(_dates((f'd{i}_{j}', 3000, 25, f'p{i}'))[0])
+        children.append(_boundary(f'b{n - 1}'))
+        return _sequence('s', children), dates
+
+    def _oldest_marginal(self, n, dates_per_group, M=301):
+        grid, saved = self._flat(M)
+        try:
+            tree, dates = self._model(n, dates_per_group)
+            chain = ec.layout(tree, dates)
+            assert chain is not None
+            solved = ec.solve(dates, tree, chain, num_samples=50,
+                              uniform_span_prior=True)
+            pairs = np.asarray(solved['boundaries'][chain.boundary_ids[0]][
+                'posterior']['probability_distribution'], float)
+            order = np.argsort(pairs[:, 0])
+            density = np.interp(grid, pairs[order, 0], pairs[order, 1],
+                                left=0.0, right=0.0)
+            return grid, density / density.sum()
+        finally:
+            self._restore(saved)
+
+    @pytest.mark.parametrize('n,dates_per_group', [
+        (3, [2, 2]), (3, [1, 3]), (4, [2, 1, 1]), (5, [1, 1, 1, 1]),
+    ])
+    def test_the_induced_prior_is_the_closed_form(self, n, dates_per_group):
+        grid, got = self._oldest_marginal(n, dates_per_group)
+        k = n - 2
+        want = np.clip(np.arange(len(grid)) - k, 0.0, None)
+        want = want / want.sum()
+        # Total variation, and the mean in years -- the second because a fraction
+        # of a percent of the first says nothing about whether it can move an
+        # answer, and it turned out it could: the old form was worth +2.04 years
+        # at n = 3 and +7.99 at n = 5.
+        assert 0.5 * np.abs(got - want).sum() < 1e-6
+        shift = float((grid * got).sum() - (grid * want).sum())
+        assert abs(shift) < 1e-6, shift
+
+    def test_it_does_not_depend_on_how_the_dates_are_split(self):
+        """Every K_i cancels against its own group's span factor, so the prior
+        cannot see the split. Asserted separately because it holds exactly, and
+        an implementation that fitted the exponent to a fixture would break it."""
+        _g1, a = self._oldest_marginal(3, [2, 2])
+        _g2, b = self._oldest_marginal(3, [1, 3])
+        assert 0.5 * np.abs(a - b).sum() < 1e-9
+
+    def test_a_continuum_reference_would_have_missed_it(self):
+        """
+        Guard on the test above. The closed form differs from its continuum limit
+        by a mean of k*step/3, so if someone 'simplifies' the reference to p ∝ i
+        the check silently weakens to a tolerance of a couple of years.
+        """
+        M = 301
+        grid, saved = self._flat(M)
+        self._restore(saved)
+        step = grid[1] - grid[0]
+        for n in (3, 4, 5):
+            k = n - 2
+            discrete = np.clip(np.arange(M) - k, 0.0, None)
+            discrete /= discrete.sum()
+            continuum = np.arange(M, dtype=float)
+            continuum /= continuum.sum()
+            gap = float((grid * discrete).sum() - (grid * continuum).sum())
+            assert gap == pytest.approx(k * step / 3.0, rel=0.05), (n, gap)
 
 
 class TestReportingIsIndependentOfTheInternalGrid:

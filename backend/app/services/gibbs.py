@@ -146,6 +146,7 @@ from app.services.exact_chain import (
     _summarize,
     convolve_on_grid,
     date_tables,
+    log_interior_placements,
     scale_nodes,
 )
 from app.services.model_tree import inherited_bounds, plan_model
@@ -668,17 +669,24 @@ class Model:
                     on_candidate[index - lo] += 1.0
             log_dens -= np.log(2.0) * on_candidate
 
+        candidate_indices = np.arange(lo, hi + 1)
         for oldest_id, youngest_id, exponent in self.span_priors:
             if boundary_id == oldest_id:
-                outer = candidates - self.grid[state.index[youngest_id]]
+                cells = candidate_indices - state.index[youngest_id]
             elif boundary_id == youngest_id:
-                outer = self.grid[state.index[oldest_id]] - candidates
+                cells = state.index[oldest_id] - candidate_indices
             else:
                 continue
-            with np.errstate(divide='ignore', invalid='ignore'):
-                log_dens += np.where(
-                    outer > 0, -exponent * np.log(np.where(outer > 0, outer, 1.0)),
-                    -np.inf)
+            # Counted in CELLS, not years, and as a binomial rather than a power
+            # -- see exact_chain._span_prior_correction for why the power is wrong
+            # on a grid and what it was costing.
+            log_count = log_interior_placements(cells, exponent)
+            room = np.isfinite(log_count)
+            # Masked before subtracting: a candidate that is already impossible
+            # carries -inf, and -inf minus -inf is a nan rather than the -inf the
+            # where() would then have to discard.
+            log_dens = np.where(room, log_dens - np.where(room, log_count, 0.0),
+                                -np.inf)
 
         finite = np.isfinite(log_dens)
         if not np.any(finite):
@@ -722,11 +730,12 @@ class Model:
             total -= K * float(np.log(span))
 
         for oldest_id, youngest_id, exponent in self.span_priors:
-            outer = (self.grid[state.index[oldest_id]]
-                     - self.grid[state.index[youngest_id]])
-            if outer <= 0:
+            cells = state.index[oldest_id] - state.index[youngest_id]
+            log_count = float(log_interior_placements(
+                np.array([cells], dtype=float), exponent)[0])
+            if not np.isfinite(log_count):
                 return -np.inf
-            total -= exponent * float(np.log(outer))
+            total -= log_count
 
         return total
 

@@ -102,6 +102,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 from scipy.signal import fftconvolve
+from scipy.special import gammaln
 
 from app.services.calibration import get_curve, hpd_ranges_from_distribution
 from app.services.model_tree import inherited_bounds, plan_model
@@ -638,6 +639,29 @@ def _log_interval_integral(cumulative: np.ndarray, density: np.ndarray,
         return np.where(F > 0, np.log(np.where(F > 0, F, 1.0)), -np.inf)
 
 
+def log_interior_placements(span_cells: np.ndarray, num_interior: int) -> np.ndarray:
+    """
+    log of the number of ways `num_interior` ordered boundaries fit strictly
+    inside a span of `span_cells` grid cells, i.e. log C(span_cells - 1,
+    num_interior). -inf where the span is too narrow to hold them at all.
+
+    This is the exact discrete version of the volume the UniformSpanPrior
+    correction has to divide out, and it is deliberately a COUNT rather than a
+    power -- see _span_prior_correction for why the power is wrong on a grid.
+
+    Shared with services/gibbs.py so the two solvers cannot drift apart on it.
+    Only defined up to a constant factor, like the correction itself: the
+    1/num_interior! in the continuum expression is absorbed into the posterior's
+    normalisation either way.
+    """
+    j = np.asarray(span_cells, dtype=float)
+    k = float(num_interior)
+    out = np.full(np.shape(j), -np.inf)
+    room = j >= k + 1.0
+    out[room] = gammaln(j[room]) - gammaln(k + 1.0) - gammaln(j[room] - k)
+    return out
+
+
 def _span_prior_correction(grid: np.ndarray, num_boundaries: int,
                            enabled: bool) -> Optional[np.ndarray]:
     """
@@ -645,15 +669,38 @@ def _span_prior_correction(grid: np.ndarray, num_boundaries: int,
     indexed [youngest boundary, oldest boundary], or None when it would do
     nothing and the cheap chain can be used.
 
-        1 / (b_first - b_last)^(n - 2)
+        1 / C(span in cells - 1, n - 2)
 
     Placing n boundaries in order across a span leaves the n-2 interior ones
     uniform within it, so the induced prior on the overall span carries a
-    factor span^(n-2) -- it favours long sequences purely because a longer
-    one has more room to arrange its interior boundaries in. Dividing that
-    out makes the span prior independent of how finely the sequence is
+    factor for that freedom -- it favours long sequences purely because a
+    longer one has more room to arrange its interior boundaries in. Dividing
+    that out makes the span prior independent of how finely the sequence is
     subdivided, which is Nicholls and Jones (2001)'s recommendation and
     OxCal's default.
+
+    WHY A BINOMIAL AND NOT (b_first - b_last)^-(n-2), which is what this
+    computed until it was measured. The continuum factor is span^(n-2), but the
+    model this solver actually integrates is discrete, and on a grid the number
+    of ways to place k ordered interior boundaries strictly inside a span of j
+    cells is C(j-1, k), not (j*step)^k. The two agree only as j grows: at k = 1
+    they are 1/(j-1) against 1/j, a first-order error, and the span prior
+    concentrates mass at SMALL j where it is largest. Same family as the
+    interval-quadrature bug in _interval_integral, and found the same way.
+
+    Measured with the likelihoods switched off, so the reported posterior IS the
+    prior and the answer is known in closed form (uniform over the ordered pair,
+    hence a linear marginal for each outermost boundary). Total-variation
+    distance of the oldest boundary's marginal from that, at a step of 1.33
+    years, before -> after:
+
+        n = 3   0.39% ->  0.00%      mean shift +2.04y -> +0.00y
+        n = 4   0.93% ->  0.00%                 +4.80y -> +0.00y
+        n = 5   1.56% ->  0.00%                 +7.99y -> +0.00y
+
+    The old error was first-order in the step and so shrank under refinement,
+    which is why it survived every fixture comparison: it looked like a modelling
+    difference against OxCal rather than a bug.
 
     Two things this deliberately does NOT do, both measured on the OxCal
     fixture rather than assumed:
@@ -667,26 +714,32 @@ def _span_prior_correction(grid: np.ndarray, num_boundaries: int,
       Boundaries -- the app's default shape -- is untouched. Nothing to
       apply, and the O(M^2) chain is kept.
 
-    What it is worth, on the fixture's two-group model and re-measured after the
-    interval-quadrature fix (the numbers here previously predated it): it is not
-    optional. With it the group separation is 15.8 years against OxCal's 13.2 and
-    the dates 1.26 years rms; without it, 26.7 and 6.67. It also couples the two
-    ends of the chain, so the solve stops factorising and goes from O(M^2) to
-    O(M^3) per group -- worth paying.
+    What it is worth, on the fixture's two-group model: it is not optional. With it
+    the group separation is 14.7 years against OxCal's 13.2 and the dates 0.76
+    years rms; without it, 26.7 and 6.67. It also couples the two ends of the
+    chain, so the solve stops factorising and goes from O(M^2) to O(M^3) per group
+    -- worth paying.
 
-    The residual 2.6 years of extra separation is not this factor's doing. It
-    appears whenever two groups are ORDERED, at much the same size with an
-    explicit middle Boundary (15.8 against 13.2) as with an implied one, and it is
-    absent when nothing orders them (the unordered run agrees to 0.1 years). See
-    tests/nenthorn_charcoal_fixture's WHAT IS LEFT note.
+    About 1.5 years of extra separation remains, and it is not this factor's
+    doing: it survives refining the grid fourfold (2.01 -> 1.50 -> 1.44 as the step
+    halves twice), appears whenever two groups are ORDERED whether the middle
+    Boundary is written or implied, and is absent when nothing orders them (the
+    unordered run agrees to 0.06 years). See tests/nenthorn_charcoal_fixture's
+    WHAT IS LEFT note.
     """
     exponent = num_boundaries - 2
     if not enabled or exponent <= 0:
         return None
-    outer = grid[None, :] - grid[:, None]          # [youngest, oldest]
-    with np.errstate(divide='ignore', invalid='ignore'):
-        corr = np.where(outer > 0, np.where(outer > 0, outer, 1.0) ** -exponent, 0.0)
-    return np.where(np.isfinite(corr), corr, 0.0)
+    index = np.arange(len(grid))
+    cells = index[None, :] - index[:, None]        # [youngest, oldest]
+    log_count = log_interior_placements(cells, exponent)
+    # exp(-log_count), and zero where the span cannot hold the interior
+    # boundaries at all -- those states have no admissible configuration, so the
+    # value there is irrelevant and zero is the one that cannot leak mass.
+    corr = np.zeros_like(log_count)
+    room = np.isfinite(log_count)
+    corr[room] = np.exp(-log_count[room])
+    return corr
 
 
 def _messages(chain: Chain, allowed: Dict, transfer):

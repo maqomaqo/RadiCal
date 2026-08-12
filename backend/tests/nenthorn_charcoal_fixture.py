@@ -128,19 +128,38 @@ and seven, and K is the exponent doing the resisting. Same cause, smaller, on
 tests/fixtures/oxcal's `ordered` run: 2.51 years rms patched against the sampler's
 1.49 on the model as authored.
 
-A SECOND, independent gap of about 2.6 years sits underneath, and it has nothing
-to do with outliers: any two ORDERED groups come out further apart than OxCal puts
-them. Separation of Quarry from Rockshelter, no outlier model anywhere --
+A SECOND, independent gap sits underneath, and it has nothing to do with outliers:
+any two ORDERED groups come out further apart than OxCal puts them. Separation of
+Quarry from Rockshelter, no outlier model anywhere, before and after the
+UniformSpanPrior correction was fixed --
 
-    run               OxCal   exact   gibbs
-    unordered          -0.1     0.0    -0.1
-    ordered            11.7    15.8    14.4
-    shared_boundary    13.2    15.8    15.9
+    run               OxCal   exact         gibbs
+    unordered          -0.1     0.0          -0.1
+    ordered            11.7    15.8 -> 14.7  14.0 -> 14.2
+    shared_boundary    13.2    15.8 -> 14.7  16.5 -> 16.3
 
-Unordered is exact; ordering costs ~2.6 years whether the middle Boundary is
-written or implied. So it is not the implicit-boundary rewrite and not the
-UniformSpanPrior correction (without which shared_boundary separates by 26.7).
-Undiagnosed.
+Unordered is exact. Part of the rest was a first-order discretisation error in the
+correction -- it divided by a continuum power where the discrete model needs a
+binomial count, see exact_chain._span_prior_correction -- worth about 1.1 years
+here and pinned now by TestTheCorrectionIsExact against a closed form. What
+survives is ~1.5 years on the exact solver and ~3 on the sampler, and it survives
+refining the grid fourfold, so it is the prior's FORM or OxCal's own answer rather
+than either one's arithmetic. Five designed OxCal runs on deliberately unimodal
+dates are the next step.
+
+Two things measured along the way that any further work here should start from:
+
+  * the sampler is faithful to the target it states. On the `ordered` shape, which
+    exact_chain declines and which therefore had no oracle at all, the entire
+    discrete posterior was enumerated directly -- every (b_older, b_younger, t_A,
+    t_B) state -- and gibbs matches it to 0.25 years, converging under refinement.
+  * the two solvers nevertheless disagree by an amount that GROWS with the number
+    of boundaries, and it is not sampling noise: on four ordered phases the gap
+    against exact_chain widens from +1.87 to +2.57 years as the sampler goes from
+    30k to 400k sweeps, i.e. it converges to a different answer. Present before the
+    correction was fixed and unchanged by it. Undiagnosed, and the reason the
+    sampler is the worse of the two on shared_boundary while being much the better
+    on this fixture.
 
 Ruled out as causes, each by measurement: the uniform-scatter exponent
 (multiplicatively and additively -- the response is a cliff, and K-1 and K-2 are
