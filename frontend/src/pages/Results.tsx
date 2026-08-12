@@ -1207,32 +1207,37 @@ export default function Results() {
           you have already decided to look at closely. */}
       {plotOrder.length > 0 && (
         <Paper sx={{ p: 3, mb: 3 }}>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 2 }}>
-            <Box>
-              <Typography variant="h6" gutterBottom>
-                Posterior Distributions
-              </Typography>
-              <Typography variant="body2" color="textSecondary">
-                {plotView === 'stacked'
-                  ? `One row per ${
-                      isBayesian ? 'date and modelled transition' : 'date'
-                    }, oldest first, on a shared calendar axis — the same order as the table above. Each row is scaled to its own peak, so heights compare precision, not probability.`
-                  : `One plot per ${
-                      isBayesian ? 'date and modelled transition' : 'date'
-                    }, oldest first — the same order as the table above.`}
-              </Typography>
-            </Box>
+          {/* The toggle sits beside the heading, and the caption goes on its
+              own line beneath both. The two views need captions of different
+              lengths, and while the caption shared a line with the toggle
+              that difference moved the control when it was pressed -- to a
+              line of its own on a wide screen, and 40px down the page on a
+              narrow one, both times away from the pointer that had just
+              clicked it. Beside a heading of fixed text it cannot move except
+              by the page being resized. */}
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 2 }}>
+            <Typography variant="h6">Posterior Distributions</Typography>
             <ToggleButtonGroup
               size="small"
               exclusive
               value={plotView}
               onChange={(_, value) => value && setPlotView(value)}
               aria-label="Plot layout"
+              sx={{ flexShrink: 0 }}
             >
               <ToggleButton value="stacked">Stacked</ToggleButton>
               <ToggleButton value="individual">Individual</ToggleButton>
             </ToggleButtonGroup>
           </Box>
+          <Typography variant="body2" color="textSecondary" sx={{ mt: 1 }}>
+            {plotView === 'stacked'
+              ? `One row per ${
+                  isBayesian ? 'date and modelled transition' : 'date'
+                }, oldest first, on a shared calendar axis — the same order as the table above. Each row is scaled to its own peak, so heights compare precision, not probability.`
+              : `One plot per ${
+                  isBayesian ? 'date and modelled transition' : 'date'
+                }, oldest first — the same order as the table above.`}
+          </Typography>
 
           {/* Above the plots rather than beside the table's controls, so the
               switch that hides them isn't below everything it hides. Only shown
