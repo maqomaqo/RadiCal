@@ -5,6 +5,7 @@ import FolderIcon from '@mui/icons-material/Folder'
 import DeleteIcon from '@mui/icons-material/Delete'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import { formatApiError } from '@/utils/apiError'
+import { useNotify } from '@/contexts/NotificationContext'
 
 interface AnalysisSummary {
   id: string
@@ -23,6 +24,7 @@ interface AnalysisSummary {
 const RECENT_LIMIT = 5
 
 export default function Dashboard() {
+  const notify = useNotify()
   const [analyses, setAnalyses] = useState<AnalysisSummary[]>([])
   const [loading, setLoading] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<AnalysisSummary | null>(null)
@@ -57,10 +59,10 @@ export default function Dashboard() {
         setDeleteTarget(null)
         fetchAnalyses()
       } else {
-        alert('Failed to delete analysis: ' + formatApiError(data))
+        notify('Failed to delete analysis: ' + formatApiError(data))
       }
     } catch (error) {
-      alert('Error deleting analysis: ' + (error as Error).message)
+      notify('Error deleting analysis: ' + (error as Error).message)
     } finally {
       setDeleting(false)
     }

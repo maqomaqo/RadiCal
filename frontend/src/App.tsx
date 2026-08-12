@@ -1,5 +1,6 @@
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom'
 import { CssBaseline, ThemeProvider, createTheme } from '@mui/material'
+import { NotificationProvider } from '@/contexts/NotificationContext'
 import Navigation from '@/components/Navigation'
 import Dashboard from '@/pages/Dashboard'
 import NewAnalysis from '@/pages/NewAnalysis'
@@ -28,23 +29,25 @@ function App() {
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
-      <Router>
-        <Navigation />
-        <Routes>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/new-analysis" element={<NewAnalysis />} />
-          <Route path="/new-analysis/model-structure" element={<Stratigraphy />} />
-          {/* Editing a saved analysis reuses the same two pages as creating
-              one -- NewAnalysis loads the saved inputs into the shared draft
-              store, and Stratigraphy edits them exactly as for a new
-              analysis. See NewAnalysis's edit-mode effect. */}
-          <Route path="/analysis/:analysisId/edit" element={<NewAnalysis />} />
-          <Route path="/analysis/:analysisId/edit/model-structure" element={<Stratigraphy />} />
-          <Route path="/results/:analysisId" element={<Results />} />
-          <Route path="/projects" element={<Projects />} />
-          <Route path="/projects/:projectId" element={<ProjectDetail />} />
-        </Routes>
-      </Router>
+      <NotificationProvider>
+        <Router>
+          <Navigation />
+          <Routes>
+            <Route path="/" element={<Dashboard />} />
+            <Route path="/new-analysis" element={<NewAnalysis />} />
+            <Route path="/new-analysis/model-structure" element={<Stratigraphy />} />
+            {/* Editing a saved analysis reuses the same two pages as creating
+                one -- NewAnalysis loads the saved inputs into the shared draft
+                store, and Stratigraphy edits them exactly as for a new
+                analysis. See NewAnalysis's edit-mode effect. */}
+            <Route path="/analysis/:analysisId/edit" element={<NewAnalysis />} />
+            <Route path="/analysis/:analysisId/edit/model-structure" element={<Stratigraphy />} />
+            <Route path="/results/:analysisId" element={<Results />} />
+            <Route path="/projects" element={<Projects />} />
+            <Route path="/projects/:projectId" element={<ProjectDetail />} />
+          </Routes>
+        </Router>
+      </NotificationProvider>
     </ThemeProvider>
   )
 }

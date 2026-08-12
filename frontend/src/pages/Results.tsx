@@ -43,6 +43,7 @@ import HarrisMatrixDiagram from '@/components/HarrisMatrixDiagram'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import AssignProjectDialog from '@/components/AssignProjectDialog'
 import { formatApiError } from '@/utils/apiError'
+import { useNotify } from '@/contexts/NotificationContext'
 import { treeToMatrix, flattenStructure } from '@/utils/stratigraphy'
 import type { StructureRow } from '@/utils/stratigraphy'
 import {
@@ -369,6 +370,7 @@ function StructureTableRow({
 export default function Results() {
   const { analysisId } = useParams<{ analysisId: string }>()
   const navigate = useNavigate()
+  const notify = useNotify()
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -457,7 +459,7 @@ export default function Results() {
       window.URL.revokeObjectURL(url)
       document.body.removeChild(a)
     } catch (err) {
-      alert('Failed to export CSV: ' + (err as Error).message)
+      notify('Failed to export CSV: ' + (err as Error).message)
     }
   }
 
@@ -470,10 +472,10 @@ export default function Results() {
       if (data.success) {
         navigate(analysis?.project_id ? `/projects/${analysis.project_id}` : '/projects')
       } else {
-        alert('Failed to delete analysis: ' + formatApiError(data))
+        notify('Failed to delete analysis: ' + formatApiError(data))
       }
     } catch (err) {
-      alert('Error deleting analysis: ' + (err as Error).message)
+      notify('Error deleting analysis: ' + (err as Error).message)
     } finally {
       setDeleting(false)
     }
@@ -491,10 +493,10 @@ export default function Results() {
       if (data.success) {
         navigate(`/analysis/${data.data.id}/edit`)
       } else {
-        alert('Failed to duplicate analysis: ' + formatApiError(data))
+        notify('Failed to duplicate analysis: ' + formatApiError(data))
       }
     } catch (err) {
-      alert('Error duplicating analysis: ' + (err as Error).message)
+      notify('Error duplicating analysis: ' + (err as Error).message)
     } finally {
       setDuplicating(false)
     }
@@ -510,10 +512,10 @@ export default function Results() {
         setRerunOpen(false)
         fetchAnalysis(analysisId)
       } else {
-        alert('Failed to rerun analysis: ' + formatApiError(data))
+        notify('Failed to rerun analysis: ' + formatApiError(data))
       }
     } catch (err) {
-      alert('Error rerunning analysis: ' + (err as Error).message)
+      notify('Error rerunning analysis: ' + (err as Error).message)
     } finally {
       setRerunning(false)
     }

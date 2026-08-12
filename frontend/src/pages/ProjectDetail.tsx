@@ -30,6 +30,7 @@ import DriveFileMoveIcon from '@mui/icons-material/DriveFileMove'
 import ReplayIcon from '@mui/icons-material/Replay'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import { formatApiError } from '@/utils/apiError'
+import { useNotify } from '@/contexts/NotificationContext'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import AssignProjectDialog from '@/components/AssignProjectDialog'
 import ProjectSampleTable from '@/components/ProjectSampleTable'
@@ -52,9 +53,23 @@ interface ProjectDetailData {
   analyses: AnalysisSummary[]
 }
 
+// The result of a "re-run all" pass, once one has run -- a per-analysis
+// batch, so unlike a single failed request this can carry several distinct
+// error messages at once. Shown as a dismissible in-page Alert rather than
+// through the toast queue: a toast is sized and timed for one line, and
+// forcing "Wk-50104: sampler did not converge, Wk-50099: ..." through that
+// would either truncate the list or block behind it whatever else the
+// queue was already holding.
+interface RerunSummary {
+  severity: 'success' | 'warning' | 'error'
+  headline: string
+  details?: string[]
+}
+
 export default function ProjectDetail() {
   const { projectId } = useParams<{ projectId: string }>()
   const navigate = useNavigate()
+  const notify = useNotify()
   const isUnassigned = projectId === 'unassigned'
 
   const [project, setProject] = useState<ProjectDetailData | null>(null)
@@ -82,6 +97,7 @@ export default function ProjectDetail() {
   const [rerunningOne, setRerunningOne] = useState(false)
   const [rerunAllOpen, setRerunAllOpen] = useState(false)
   const [rerunningAll, setRerunningAll] = useState(false)
+  const [rerunSummary, setRerunSummary] = useState<RerunSummary | null>(null)
 
   useEffect(() => {
     if (projectId) fetchProject(projectId)
@@ -147,10 +163,10 @@ export default function ProjectDetail() {
         setEditOpen(false)
         fetchProject(project.id)
       } else {
-        alert('Failed to update project: ' + formatApiError(data))
+        notify('Failed to update project: ' + formatApiError(data))
       }
     } catch (err) {
-      alert('Error updating project: ' + (err as Error).message)
+      notify('Error updating project: ' + (err as Error).message)
     } finally {
       setSaving(false)
     }
@@ -165,10 +181,10 @@ export default function ProjectDetail() {
       if (data.success) {
         navigate('/projects')
       } else {
-        alert('Failed to delete project: ' + formatApiError(data))
+        notify('Failed to delete project: ' + formatApiError(data))
       }
     } catch (err) {
-      alert('Error deleting project: ' + (err as Error).message)
+      notify('Error deleting project: ' + (err as Error).message)
     } finally {
       setDeletingProject(false)
     }
@@ -184,10 +200,10 @@ export default function ProjectDetail() {
         setDeleteAnalysisTarget(null)
         fetchProject(project.id)
       } else {
-        alert('Failed to delete analysis: ' + formatApiError(data))
+        notify('Failed to delete analysis: ' + formatApiError(data))
       }
     } catch (err) {
-      alert('Error deleting analysis: ' + (err as Error).message)
+      notify('Error deleting analysis: ' + (err as Error).message)
     } finally {
       setDeletingAnalysis(false)
     }
@@ -203,10 +219,10 @@ export default function ProjectDetail() {
       if (data.success) {
         navigate(`/analysis/${data.data.id}/edit`)
       } else {
-        alert('Failed to duplicate analysis: ' + formatApiError(data))
+        notify('Failed to duplicate analysis: ' + formatApiError(data))
       }
     } catch (err) {
-      alert('Error duplicating analysis: ' + (err as Error).message)
+      notify('Error duplicating analysis: ' + (err as Error).message)
     } finally {
       setDuplicating(false)
     }
@@ -222,10 +238,10 @@ export default function ProjectDetail() {
         setRerunTarget(null)
         fetchProject(project.id)
       } else {
-        alert('Failed to rerun analysis: ' + formatApiError(data))
+        notify('Failed to rerun analysis: ' + formatApiError(data))
       }
     } catch (err) {
-      alert('Error rerunning analysis: ' + (err as Error).message)
+      notify('Error rerunning analysis: ' + (err as Error).message)
     } finally {
       setRerunningOne(false)
     }
@@ -238,6 +254,7 @@ export default function ProjectDetail() {
   const handleRerunAll = async () => {
     if (!project) return
     setRerunningAll(true)
+    setRerunSummary(null)
     try {
       if (isUnassigned) {
         const outcomes = await Promise.allSettled(
@@ -245,22 +262,28 @@ export default function ProjectDetail() {
         )
         const failed = outcomes.filter((o) => o.status === 'rejected' || !o.value?.success)
         if (failed.length > 0) {
-          alert(`Rerun finished with ${failed.length} of ${outcomes.length} analyses failing. Check them individually for details.`)
+          setRerunSummary({
+            severity: 'warning',
+            headline: `Rerun finished with ${failed.length} of ${outcomes.length} analyses failing. Check them individually for details.`,
+          })
         }
       } else {
         const response = await fetch(`/api/projects/${project.id}/rerun`, { method: 'POST' })
         const data = await response.json()
         if (data.success && data.data.failed.length > 0) {
-          const names = data.data.failed.map((f: { name: string; error: string }) => `${f.name}: ${f.error}`).join('\n')
-          alert(`${data.data.rerun_count} rerun successfully. ${data.data.failed.length} failed:\n${names}`)
+          setRerunSummary({
+            severity: 'warning',
+            headline: `${data.data.rerun_count} rerun successfully. ${data.data.failed.length} failed:`,
+            details: data.data.failed.map((f: { name: string; error: string }) => `${f.name}: ${f.error}`),
+          })
         } else if (!data.success) {
-          alert('Failed to rerun project: ' + formatApiError(data))
+          notify('Failed to rerun project: ' + formatApiError(data))
         }
       }
       setRerunAllOpen(false)
       fetchProject(project.id)
     } catch (err) {
-      alert('Error rerunning project: ' + (err as Error).message)
+      notify('Error rerunning project: ' + (err as Error).message)
     } finally {
       setRerunningAll(false)
     }
@@ -330,6 +353,23 @@ export default function ProjectDetail() {
           )}
         </Box>
       </Box>
+
+      {rerunSummary && (
+        <Alert severity={rerunSummary.severity} onClose={() => setRerunSummary(null)} sx={{ mb: 3 }}>
+          <Typography variant="body2" sx={{ fontWeight: 600 }}>
+            {rerunSummary.headline}
+          </Typography>
+          {rerunSummary.details && (
+            <Box component="ul" sx={{ m: 0, mt: 0.5, pl: 2.5 }}>
+              {rerunSummary.details.map((line, i) => (
+                <li key={i}>
+                  <Typography variant="body2">{line}</Typography>
+                </li>
+              ))}
+            </Box>
+          )}
+        </Alert>
+      )}
 
       {!isUnassigned && (
         <Tabs value={tab} onChange={(_e, v) => setTab(v)} sx={{ mb: 2 }}>

@@ -11,6 +11,7 @@ import {
   MenuItem,
 } from '@mui/material'
 import { formatApiError } from '@/utils/apiError'
+import { useNotify } from '@/contexts/NotificationContext'
 
 interface ProjectOption {
   id: string
@@ -37,6 +38,7 @@ export default function AssignProjectDialog({
   onClose,
   onAssigned,
 }: AssignProjectDialogProps) {
+  const notify = useNotify()
   const [projects, setProjects] = useState<ProjectOption[]>([])
   const [projectId, setProjectId] = useState<string>(currentProjectId || '')
   const [saving, setSaving] = useState(false)
@@ -65,10 +67,10 @@ export default function AssignProjectDialog({
         onAssigned(data.data.project_id, data.data.project_name)
         onClose()
       } else {
-        alert('Failed to assign project: ' + formatApiError(data))
+        notify('Failed to assign project: ' + formatApiError(data))
       }
     } catch (err) {
-      alert('Error assigning project: ' + (err as Error).message)
+      notify('Error assigning project: ' + (err as Error).message)
     } finally {
       setSaving(false)
     }

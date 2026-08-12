@@ -44,6 +44,7 @@ import {
   saveDateFormatPreference,
 } from '@/utils/dateFormat'
 import { formatApiError } from '@/utils/apiError'
+import { useNotify } from '@/contexts/NotificationContext'
 import { useAnalysisDraftStore } from '@/stores/analysisStore'
 import type { SolverChoice } from '@/stores/analysisStore'
 import type { DraftMeasurement, ModelElement } from '@/types'
@@ -92,6 +93,7 @@ interface PreviewResult {
 
 export default function NewAnalysis() {
   const navigate = useNavigate()
+  const notify = useNotify()
   const [searchParams] = useSearchParams()
   // Name, type, project, date format, measurements, and (for Bayesian
   // analyses) groups/relationships/TPQ-TAQ defined on the Model Structure
@@ -135,6 +137,12 @@ export default function NewAnalysis() {
     curve_id: 'intcal20',
   })
   const [loading, setLoading] = useState(false)
+  // Validation for the Add Measurement card specifically -- shown right
+  // there rather than through the toast queue, since it's telling the user
+  // which fields on THIS card need attention before the click does anything.
+  const [addMeasurementError, setAddMeasurementError] = useState<string | null>(null)
+  // Same reasoning, for whatever kept Run Analysis from doing anything.
+  const [runError, setRunError] = useState<string | null>(null)
   // The date currently open in the edit dialog, held as a working copy so
   // Cancel really discards. Committed to the store only on Save.
   const [editing, setEditing] = useState<
@@ -220,7 +228,7 @@ export default function NewAnalysis() {
         const data = await response.json()
         if (cancelled) return
         if (!data.success) {
-          alert('Failed to load analysis: ' + formatApiError(data))
+          notify('Failed to load analysis: ' + formatApiError(data))
           navigate('/projects')
           return
         }
@@ -288,7 +296,7 @@ export default function NewAnalysis() {
           ),
         })
       } catch (err) {
-        if (!cancelled) alert('Error loading analysis: ' + (err as Error).message)
+        if (!cancelled) notify('Error loading analysis: ' + (err as Error).message)
       } finally {
         if (!cancelled) setLoadingExisting(false)
       }
@@ -315,10 +323,10 @@ export default function NewAnalysis() {
         setNewProjectDialogOpen(false)
         fetchProjects()
       } else {
-        alert('Failed to create project: ' + formatApiError(data))
+        notify('Failed to create project: ' + formatApiError(data))
       }
     } catch (error) {
-      alert('Error creating project: ' + (error as Error).message)
+      notify('Error creating project: ' + (error as Error).message)
     } finally {
       setCreatingProject(false)
     }
@@ -364,13 +372,16 @@ export default function NewAnalysis() {
       currentMeasurement.age_bp === undefined ||
       currentMeasurement.error_1sigma === undefined
     ) {
-      alert('Please fill in all required fields')
+      setAddMeasurementError('Please fill in all required fields.')
       return
     }
     if (missingDeltaRError) {
-      alert('A ΔR reservoir offset needs its 1σ error -- the two are combined, so an offset on its own would understate the uncertainty of the date.')
+      setAddMeasurementError(
+        'A ΔR reservoir offset needs its 1σ error -- the two are combined, so an offset on its own would understate the uncertainty of the date.'
+      )
       return
     }
+    setAddMeasurementError(null)
 
     const measurement: Measurement = {
       id: Math.random().toString(36).substr(2, 9),
@@ -397,10 +408,11 @@ export default function NewAnalysis() {
 
   const handleRunAnalysis = async () => {
     if (!analysisName || measurements.length === 0) {
-      alert('Please provide analysis name and at least one measurement')
+      setRunError('Please provide analysis name and at least one measurement.')
       return
     }
 
+    setRunError(null)
     setLoading(true)
     setPreviewResult(null)
     try {
@@ -440,7 +452,7 @@ export default function NewAnalysis() {
             setPreviewResult(data.data)
           }
         } else {
-          alert('Analysis failed: ' + formatApiError(data))
+          setRunError('Analysis failed: ' + formatApiError(data))
         }
       } else {
         // For Bayesian, send the full stratigraphy defined on the
@@ -456,21 +468,17 @@ export default function NewAnalysis() {
         // cycle, which is one of the things authoring one directly buys.
         // An invalid model structure would only be rejected with a 422 after
         // submitting, so stop here and point back at the editor instead.
+        // The detail lives in the persistent "Model structure problems: ..."
+        // banner further down the page (see structureInvalid below) --
+        // this toast is only the acknowledgment that clicking Run didn't
+        // do anything, and why to look down there.
         if (modelTree && treeProblems.length > 0) {
-          alert(
-            'Cannot run: the model structure has problems that must be fixed on the ' +
-              'Model Structure page first:\n\n' +
-              treeProblems.join('\n')
-          )
+          notify('Cannot run: the model structure has problems shown below. Fix them on the Model Structure page first.')
           setLoading(false)
           return
         }
         if (!modelTree && cycle) {
-          alert(
-            'Cannot run: the stratigraphic relationships are circular (' +
-              cycleLabels.join(', ') +
-              '). Fix this on the Model Structure page first.'
-          )
+          notify('Cannot run: the stratigraphic relationships are circular. Fix this on the Model Structure page first.')
           setLoading(false)
           return
         }
@@ -512,7 +520,7 @@ export default function NewAnalysis() {
             const runResponse = await fetch(`/api/analysis/${resultId}/rerun`, { method: 'POST' })
             const runData = await runResponse.json()
             if (!runData.success) {
-              alert('Inputs saved, but the run failed: ' + formatApiError(runData))
+              setRunError('Inputs saved, but the run failed: ' + formatApiError(runData))
               setLoading(false)
               return
             }
@@ -521,11 +529,11 @@ export default function NewAnalysis() {
           resetDraft()
           navigate(`/results/${resultId}`)
         } else {
-          alert('Analysis failed: ' + formatApiError(data))
+          setRunError('Analysis failed: ' + formatApiError(data))
         }
       }
     } catch (error) {
-      alert('Error running analysis: ' + (error as Error).message)
+      setRunError('Error running analysis: ' + (error as Error).message)
     } finally {
       setLoading(false)
     }
@@ -716,6 +724,12 @@ export default function NewAnalysis() {
             <Typography variant="h6" gutterBottom>
               Add Measurement
             </Typography>
+
+            {addMeasurementError && (
+              <Alert severity="error" sx={{ mb: 2 }} onClose={() => setAddMeasurementError(null)}>
+                {addMeasurementError}
+              </Alert>
+            )}
 
             <MeasurementFields
               value={currentMeasurement}
@@ -931,6 +945,12 @@ export default function NewAnalysis() {
             )}
           </Paper>
         </Box>
+      )}
+
+      {runError && (
+        <Alert severity="error" sx={{ mt: 3 }} onClose={() => setRunError(null)}>
+          {runError}
+        </Alert>
       )}
 
       <Box sx={{ mt: 4, display: 'flex', gap: 2 }}>

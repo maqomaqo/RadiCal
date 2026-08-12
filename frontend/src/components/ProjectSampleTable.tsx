@@ -29,6 +29,7 @@ import PlaylistAddIcon from '@mui/icons-material/PlaylistAdd'
 import RocketLaunchIcon from '@mui/icons-material/RocketLaunch'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import { formatApiError } from '@/utils/apiError'
+import { useNotify } from '@/contexts/NotificationContext'
 
 // A date held in the PROJECT's collection (backend models.ProjectSample) --
 // entered once here, then deployed into as many analyses as needed. Note
@@ -158,6 +159,7 @@ interface Props {
 
 export default function ProjectSampleTable({ projectId }: Props) {
   const navigate = useNavigate()
+  const notify = useNotify()
   const [samples, setSamples] = useState<ProjectSample[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -167,9 +169,18 @@ export default function ProjectSampleTable({ projectId }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [form, setForm] = useState<DraftForm>(EMPTY_FORM)
   const [saving, setSaving] = useState(false)
+  // Validation only -- request failures go through the toast queue instead,
+  // same as everywhere else. This one stays inline because it names which
+  // fields are missing right above the fields themselves, which a toast
+  // fired from the corner of the screen can't do as directly.
+  const [formError, setFormError] = useState<string | null>(null)
 
   const [pasteOpen, setPasteOpen] = useState(false)
   const [pasteText, setPasteText] = useState('')
+  // Same reasoning as formError, but the content here can run to several
+  // lines (one per unparsed row), which a single-line toast would truncate
+  // or cut off entirely.
+  const [pasteError, setPasteError] = useState<{ headline: string; details?: string[] } | null>(null)
 
   const [deleteTarget, setDeleteTarget] = useState<ProjectSample | null>(null)
   const [deleting, setDeleting] = useState(false)
@@ -206,21 +217,24 @@ export default function ProjectSampleTable({ projectId }: Props) {
   const openAdd = () => {
     setEditingId(null)
     setForm(EMPTY_FORM)
+    setFormError(null)
     setFormOpen(true)
   }
 
   const openEdit = (sample: ProjectSample) => {
     setEditingId(sample.id)
     setForm(toForm(sample))
+    setFormError(null)
     setFormOpen(true)
   }
 
   const handleSave = async () => {
     const payload = formToPayload(form)
     if (!payload.sample_name || !Number.isFinite(payload.age_bp) || !Number.isFinite(payload.error_1sigma)) {
-      alert('Name, age BP and 1σ error are required.')
+      setFormError('Name, age BP and 1σ error are required.')
       return
     }
+    setFormError(null)
     setSaving(true)
     try {
       const response = editingId
@@ -239,10 +253,10 @@ export default function ProjectSampleTable({ projectId }: Props) {
         setFormOpen(false)
         fetchSamples()
       } else {
-        alert('Failed to save date: ' + formatApiError(data))
+        notify('Failed to save date: ' + formatApiError(data))
       }
     } catch (err) {
-      alert('Error saving date: ' + (err as Error).message)
+      notify('Error saving date: ' + (err as Error).message)
     } finally {
       setSaving(false)
     }
@@ -251,13 +265,14 @@ export default function ProjectSampleTable({ projectId }: Props) {
   const handlePaste = async () => {
     const { rows, errors } = parsePastedDates(pasteText)
     if (errors.length > 0) {
-      alert('Could not read some lines:\n' + errors.join('\n'))
+      setPasteError({ headline: 'Could not read some lines:', details: errors })
       return
     }
     if (rows.length === 0) {
-      alert('No dates found. Use one per line: name, age, error')
+      setPasteError({ headline: 'No dates found. Use one per line: name, age, error' })
       return
     }
+    setPasteError(null)
     setSaving(true)
     try {
       const response = await fetch(`/api/projects/${projectId}/samples`, {
@@ -271,10 +286,10 @@ export default function ProjectSampleTable({ projectId }: Props) {
         setPasteText('')
         fetchSamples()
       } else {
-        alert('Failed to add dates: ' + formatApiError(data))
+        notify('Failed to add dates: ' + formatApiError(data))
       }
     } catch (err) {
-      alert('Error adding dates: ' + (err as Error).message)
+      notify('Error adding dates: ' + (err as Error).message)
     } finally {
       setSaving(false)
     }
@@ -290,10 +305,10 @@ export default function ProjectSampleTable({ projectId }: Props) {
         setDeleteTarget(null)
         fetchSamples()
       } else {
-        alert('Failed to delete date: ' + formatApiError(data))
+        notify('Failed to delete date: ' + formatApiError(data))
       }
     } catch (err) {
-      alert('Error deleting date: ' + (err as Error).message)
+      notify('Error deleting date: ' + (err as Error).message)
     } finally {
       setDeleting(false)
     }
@@ -320,10 +335,10 @@ export default function ProjectSampleTable({ projectId }: Props) {
         // more than once is modelling them differently each time.
         navigate(`/analysis/${data.data.id}/edit`)
       } else {
-        alert('Failed to deploy dates: ' + formatApiError(data))
+        notify('Failed to deploy dates: ' + formatApiError(data))
       }
     } catch (err) {
-      alert('Error deploying dates: ' + (err as Error).message)
+      notify('Error deploying dates: ' + (err as Error).message)
     } finally {
       setDeploying(false)
     }
@@ -353,7 +368,14 @@ export default function ProjectSampleTable({ projectId }: Props) {
         <Button variant="contained" startIcon={<AddIcon />} onClick={openAdd}>
           Add Date
         </Button>
-        <Button variant="outlined" startIcon={<PlaylistAddIcon />} onClick={() => setPasteOpen(true)}>
+        <Button
+          variant="outlined"
+          startIcon={<PlaylistAddIcon />}
+          onClick={() => {
+            setPasteError(null)
+            setPasteOpen(true)
+          }}
+        >
           Paste Dates
         </Button>
         <Box sx={{ flexGrow: 1 }} />
@@ -448,6 +470,11 @@ export default function ProjectSampleTable({ projectId }: Props) {
       <Dialog open={formOpen} onClose={() => setFormOpen(false)} fullWidth maxWidth="sm">
         <DialogTitle>{editingId ? 'Edit Date' : 'Add Date'}</DialogTitle>
         <DialogContent>
+          {formError && (
+            <Alert severity="error" sx={{ mt: 1 }}>
+              {formError}
+            </Alert>
+          )}
           <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2, mt: 1 }}>
             <TextField
               label="Sample Name / Lab Code"
@@ -531,6 +558,22 @@ export default function ProjectSampleTable({ projectId }: Props) {
             value={pasteText}
             onChange={(e) => setPasteText(e.target.value)}
           />
+          {pasteError && (
+            <Alert severity="error" sx={{ mt: 2 }}>
+              <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                {pasteError.headline}
+              </Typography>
+              {pasteError.details && (
+                <Box component="ul" sx={{ m: 0, mt: 0.5, pl: 2.5 }}>
+                  {pasteError.details.map((line, i) => (
+                    <li key={i}>
+                      <Typography variant="body2">{line}</Typography>
+                    </li>
+                  ))}
+                </Box>
+              )}
+            </Alert>
+          )}
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setPasteOpen(false)}>Cancel</Button>

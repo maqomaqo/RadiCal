@@ -21,6 +21,7 @@ import FolderIcon from '@mui/icons-material/Folder'
 import InboxIcon from '@mui/icons-material/Inbox'
 import DeleteIcon from '@mui/icons-material/Delete'
 import { formatApiError } from '@/utils/apiError'
+import { useNotify } from '@/contexts/NotificationContext'
 import ConfirmDialog from '@/components/ConfirmDialog'
 
 interface ProjectSummary {
@@ -33,6 +34,7 @@ interface ProjectSummary {
 }
 
 export default function Projects() {
+  const notify = useNotify()
   const [projects, setProjects] = useState<ProjectSummary[]>([])
   const [unassignedCount, setUnassignedCount] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -79,10 +81,10 @@ export default function Projects() {
         setNewDescription('')
         fetchProjects()
       } else {
-        alert('Failed to create project: ' + formatApiError(data))
+        notify('Failed to create project: ' + formatApiError(data))
       }
     } catch (error) {
-      alert('Error creating project: ' + (error as Error).message)
+      notify('Error creating project: ' + (error as Error).message)
     } finally {
       setCreating(false)
     }
@@ -98,10 +100,10 @@ export default function Projects() {
         setDeleteTarget(null)
         fetchProjects()
       } else {
-        alert('Failed to delete project: ' + formatApiError(data))
+        notify('Failed to delete project: ' + formatApiError(data))
       }
     } catch (error) {
-      alert('Error deleting project: ' + (error as Error).message)
+      notify('Error deleting project: ' + (error as Error).message)
     } finally {
       setDeleting(false)
     }
