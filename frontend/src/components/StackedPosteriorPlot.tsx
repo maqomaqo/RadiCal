@@ -1,0 +1,411 @@
+import { useMemo } from 'react'
+import { Paper, Typography, useMediaQuery, useTheme } from '@mui/material'
+import Plotly from 'plotly.js-dist-min'
+import createPlotlyComponent from 'react-plotly.js/factory'
+import {
+  DateFormat,
+  DEFAULT_DATE_FORMAT,
+  calendarAxisTicks,
+  calendarAxisTitle,
+  formatCalendarAge,
+} from '@/utils/dateFormat'
+import type { HPDRange } from '@/utils/dateFormat'
+
+// Same binding as PosteriorPlot -- see the note there for why the factory is
+// bound to the packaged plotly.js rather than a CDN global.
+const Plot = createPlotlyComponent(Plotly)
+
+/**
+ * One row of the stacked plot: a modelled posterior with its HPD region,
+ * carrying enough structure context to label and group it.
+ */
+export interface StackedSeries {
+  key: string
+  kind: 'date' | 'boundary'
+  title: string
+  /** Where it sits in the structure ("Site > Phase J"); null if unplaced. */
+  path: string | null
+  distribution?: Array<[number, number]>
+  hpd68?: [number, number]
+  hpd95?: [number, number]
+  hpd68Ranges?: HPDRange[]
+  hpd95Ranges?: HPDRange[]
+  pointEstimates: { mean?: number; median?: number; std?: number }
+}
+
+interface StackedPosteriorPlotProps {
+  /** Oldest first -- drawn top to bottom in that order, as OxCal lists a model. */
+  series: StackedSeries[]
+  showMean?: boolean
+  showMedian?: boolean
+  dateFormat?: DateFormat
+}
+
+// Row geometry, in y-axis data units where one row is exactly 1.0 tall.
+// The curve occupies the upper part of its row and the two HPD bars sit in
+// the gap beneath it, so no row can ever paint into its neighbour.
+const CURVE_HEIGHT = 0.78
+const HPD95_BAR: [number, number] = [-0.09, -0.03]
+const HPD68_BAR: [number, number] = [-0.19, -0.13]
+// Pixels per row. Enough for a name and a readable curve; 15 dates then come
+// to roughly one screen instead of the seven-screen scroll one plot per date
+// produced.
+const ROW_PIXELS = 46
+const CHROME_PIXELS = 130
+// Room for the row names, and the offset the phase labels are placed at
+// within it. On a phone the wide version took half the available width and
+// left the curves squeezed into the rest, so it shrinks with the viewport --
+// sample codes are short, and a truncated name still identifies its row
+// against the table above.
+const MARGIN_LEFT = 150
+const MARGIN_LEFT_NARROW = 84
+
+const POSTERIOR_LINE = 'rgb(99, 110, 250)'
+const POSTERIOR_FILL = 'rgba(99, 110, 250, 0.25)'
+// Boundaries are the same kind of object -- a modelled parameter with a
+// posterior -- but they are a transition rather than a dated thing, so they
+// read as an outline against the solid dates either side of them.
+const BOUNDARY_LINE = 'rgb(120, 120, 130)'
+const BOUNDARY_FILL = 'rgba(120, 120, 130, 0.16)'
+const HPD95_COLOR = 'rgba(255, 127, 14, 0.55)'
+const HPD68_COLOR = 'rgba(44, 160, 44, 0.65)'
+const MEAN_COLOR = 'rgb(214, 39, 40)'
+const MEDIAN_COLOR = 'rgb(148, 103, 189)'
+
+const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
+
+/** The row's own baseline. Row 0 (the oldest) sits at the top. */
+const baselineFor = (index: number) => -index
+
+/** A filled rectangle in data coordinates, as a closed polygon trace. */
+function bar(
+  x0: number,
+  x1: number,
+  yBase: number,
+  span: [number, number],
+  color: string,
+  name: string,
+  showlegend: boolean,
+  legendgroup: string
+) {
+  return {
+    x: [x0, x0, x1, x1],
+    y: [yBase + span[0], yBase + span[1], yBase + span[1], yBase + span[0]],
+    fill: 'toself',
+    fillcolor: color,
+    line: { width: 0, color: 'rgba(0,0,0,0)' },
+    mode: 'lines',
+    name,
+    legendgroup,
+    showlegend,
+    hoverinfo: 'skip',
+  }
+}
+
+/**
+ * Every posterior in one figure, one row each, sharing a single calendar
+ * axis -- the OxCal multiplot idiom.
+ *
+ * The point of the shared axis is comparison: whether two dates overlap, and
+ * by how much, is the question a sequence is built to answer, and it cannot
+ * be read off a stack of separate charts each auto-ranged to its own data.
+ *
+ * Each row is scaled to its OWN peak, so heights are not comparable between
+ * rows -- a tall narrow curve is a precise date, not a more probable one.
+ * That is what OxCal does too, and the alternative (a shared density scale)
+ * would flatten every precise date into an unreadable spike.
+ */
+export default function StackedPosteriorPlot({
+  series,
+  showMean = false,
+  showMedian = false,
+  dateFormat = DEFAULT_DATE_FORMAT,
+}: StackedPosteriorPlotProps) {
+  const theme = useTheme()
+  const narrow = useMediaQuery(theme.breakpoints.down('sm'))
+  const marginLeft = narrow ? MARGIN_LEFT_NARROW : MARGIN_LEFT
+
+  const drawable = useMemo(
+    () => series.filter((s) => s.distribution && s.distribution.length > 0),
+    [series]
+  )
+
+  const plotData = useMemo(() => {
+    const data: any[] = []
+    // One legend entry per kind of mark, taken from whichever row happens to
+    // carry it first -- otherwise a 15-date model prints 15 identical
+    // "95% HPD" rows down the side of the figure.
+    const legendUsed = new Set<string>()
+    const claimLegend = (key: string) => {
+      if (legendUsed.has(key)) return false
+      legendUsed.add(key)
+      return true
+    }
+
+    drawable.forEach((s, index) => {
+      const yBase = baselineFor(index)
+      const full = s.distribution!
+      const peakOfFull = Math.max(...full.map(([, prob]) => prob))
+      // Trim the outer tails, where the density is indistinguishable from
+      // zero at this row height. Left in, they draw as a flat rule running
+      // the whole width of every row, which reads as a range bar rather than
+      // as a curve. Only the OUTER tails go: the slice stays contiguous, so
+      // the flat gap between the peaks of a multimodal posterior -- which is
+      // a real feature of the calibration, not padding -- is still drawn.
+      const significant = full
+        .map(([, prob], i) => (prob >= peakOfFull * 0.002 ? i : -1))
+        .filter((i) => i >= 0)
+      const from = significant.length > 0 ? Math.max(0, significant[0] - 1) : 0
+      const to =
+        significant.length > 0
+          ? Math.min(full.length - 1, significant[significant.length - 1] + 1)
+          : full.length - 1
+      const visible = full.slice(from, to + 1)
+      const ages = visible.map(([age]) => age)
+      const probs = visible.map(([, prob]) => prob)
+      const peak = Math.max(...probs)
+      const scale = peak > 0 ? CURVE_HEIGHT / peak : 0
+      const isBoundary = s.kind === 'boundary'
+
+      // HPD bars first, so the curve draws over them rather than under.
+      // Each disjoint range gets its own bar: a multimodal posterior's HPD
+      // is not the span between its outermost peaks, and drawing it as one
+      // bar would claim the gap between them.
+      const ranges95: Array<[number, number]> =
+        s.hpd95Ranges && s.hpd95Ranges.length > 0
+          ? s.hpd95Ranges.map((r) => [r.min, r.max])
+          : s.hpd95
+          ? [s.hpd95]
+          : []
+      const ranges68: Array<[number, number]> =
+        s.hpd68Ranges && s.hpd68Ranges.length > 0
+          ? s.hpd68Ranges.map((r) => [r.min, r.max])
+          : s.hpd68
+          ? [s.hpd68]
+          : []
+
+      ranges95.forEach(([min, max]) =>
+        data.push(
+          bar(min, max, yBase, HPD95_BAR, HPD95_COLOR, '95% HPD', claimLegend('hpd95'), 'hpd95')
+        )
+      )
+      ranges68.forEach(([min, max]) =>
+        data.push(
+          bar(min, max, yBase, HPD68_BAR, HPD68_COLOR, '68% HPD', claimLegend('hpd68'), 'hpd68')
+        )
+      )
+
+      // The density, as two traces: a closed polygon carrying the fill with
+      // no stroke, and the curve itself on top. `tozeroy` can't be used here
+      // -- the axis zero is a whole page away for the lower rows -- and
+      // stroking the closed polygon instead would draw its baseline as a
+      // hard rule running the full width of the date's tails, which reads
+      // as a range bar rather than as the bottom of a curve.
+      const curveY = probs.map((p) => yBase + p * scale)
+      data.push({
+        x: [ages[0], ...ages, ages[ages.length - 1]],
+        y: [yBase, ...curveY, yBase],
+        fill: 'toself',
+        fillcolor: isBoundary ? BOUNDARY_FILL : POSTERIOR_FILL,
+        line: { width: 0, color: 'rgba(0,0,0,0)' },
+        mode: 'lines',
+        showlegend: false,
+        hoverinfo: 'skip',
+      })
+      data.push({
+        x: ages,
+        y: curveY,
+        customdata: ages.map(
+          (age, i) => `${formatCalendarAge(age, dateFormat)}<br>Probability: ${probs[i].toFixed(4)}`
+        ),
+        line: {
+          color: isBoundary ? BOUNDARY_LINE : POSTERIOR_LINE,
+          width: 1.5,
+          dash: isBoundary ? 'dot' : 'solid',
+        },
+        mode: 'lines',
+        name: isBoundary ? 'Boundary — modelled transition' : 'Modelled posterior',
+        legendgroup: isBoundary ? 'boundary' : 'posterior',
+        showlegend: claimLegend(isBoundary ? 'boundary' : 'posterior'),
+        hovertemplate: `<b>${s.title}</b><br>%{customdata}<extra></extra>`,
+      })
+
+      // Point estimates as a tick within the row, not a line across the
+      // figure: at this density a full-height rule per date would be the
+      // only thing anyone could see.
+      const marker = (value: number, color: string, dash: string, name: string, key: string) =>
+        data.push({
+          x: [value, value],
+          y: [yBase, yBase + CURVE_HEIGHT],
+          mode: 'lines',
+          line: { color, width: 1.5, dash },
+          name,
+          legendgroup: key,
+          showlegend: claimLegend(key),
+          hoverinfo: 'skip',
+        })
+      if (showMean && isNum(s.pointEstimates.mean)) {
+        marker(s.pointEstimates.mean, MEAN_COLOR, 'dash', 'Mean', 'mean')
+      }
+      if (showMedian && isNum(s.pointEstimates.median)) {
+        marker(s.pointEstimates.median, MEDIAN_COLOR, 'dot', 'Median', 'median')
+      }
+    })
+
+    return data
+  }, [drawable, showMean, showMedian, dateFormat])
+
+  // Phase groupings: a light rule where the dates change phase, with the
+  // phase named once beside its first date. The table above says the same
+  // thing in words; the point here is that a reader scanning the figure can
+  // see where one phase ends without counting rows against it.
+  //
+  // Driven by the DATE rows only. Every boundary has a path of its own (it
+  // is the transition between two phases, not a member of either), so
+  // grouping on all rows alike would break the run at every boundary and
+  // print a label against nearly every row -- the noise it exists to remove.
+  const { shapes, annotations } = useMemo(() => {
+    const shapes: any[] = []
+    const annotations: any[] = []
+    // Last segment only: the full path repeats the site name on every row.
+    const phaseOf = (s: StackedSeries) =>
+      s.kind === 'date' && s.path ? s.path.split('>').pop()!.trim() : null
+
+    let currentPhase: string | null = null
+    drawable.forEach((s, index) => {
+      const phase = phaseOf(s)
+      if (!phase || phase === currentPhase) return
+      currentPhase = phase
+      if (index > 0) {
+        shapes.push({
+          type: 'line',
+          xref: 'paper',
+          x0: 0,
+          x1: 1,
+          yref: 'y',
+          y0: baselineFor(index) + 0.5,
+          y1: baselineFor(index) + 0.5,
+          line: { color: 'rgba(0,0,0,0.12)', width: 1 },
+        })
+      }
+      // In the left margin with the row names, not inside the plot: at the
+      // left edge of the axis it landed on whatever curve happened to reach
+      // that far and read as a stray character.
+      annotations.push({
+        xref: 'paper',
+        x: 0,
+        xanchor: 'left',
+        xshift: -marginLeft + 4,
+        yref: 'y',
+        y: baselineFor(index) + 0.5,
+        yanchor: 'middle',
+        text: phase,
+        showarrow: false,
+        font: { size: 11, color: 'rgba(0,0,0,0.75)' },
+      })
+    })
+    return { shapes, annotations }
+  }, [drawable, marginLeft])
+
+  // The axis is set from the HPD regions, not from the full extent of every
+  // curve. A posterior's tails run far wider than anything it says: on a real
+  // sequence they stretched the shared axis to three times the span the dates
+  // actually occupy, squeezing every curve into the middle third. Padding
+  // keeps the tails visible where they matter, and Autoscale on the modebar
+  // still restores the full extent.
+  const xRange = useMemo(() => {
+    const bounds: number[] = []
+    drawable.forEach((s) => {
+      if (s.hpd95Ranges && s.hpd95Ranges.length > 0) {
+        s.hpd95Ranges.forEach((r) => bounds.push(r.min, r.max))
+      } else if (s.hpd95) {
+        bounds.push(s.hpd95[0], s.hpd95[1])
+      }
+    })
+    if (bounds.length === 0) return null
+    const min = Math.min(...bounds)
+    const max = Math.max(...bounds)
+    const pad = Math.max((max - min) * 0.35, 25)
+    // Reversed axis: Plotly takes the range in axis order, so the older
+    // (larger cal BP) end comes first.
+    return [max + pad, min - pad]
+  }, [drawable])
+
+  // Ticks span whatever the axis actually shows, so a clipped view doesn't
+  // label years that were left off it.
+  const ticks = useMemo(() => {
+    if (xRange) return calendarAxisTicks(xRange[1], xRange[0], dateFormat)
+    const all = drawable.flatMap((s) => s.distribution!.map(([age]) => age))
+    if (all.length === 0) return null
+    return calendarAxisTicks(Math.min(...all), Math.max(...all), dateFormat)
+  }, [drawable, dateFormat, xRange])
+
+  const layout = useMemo(
+    () => ({
+      xaxis: {
+        title: calendarAxisTitle(dateFormat),
+        zeroline: false,
+        // Oldest on the left, as a chronology is read -- see PosteriorPlot
+        // for why plotting cal BP needs the axis reversed to get that. An
+        // explicit range is already given in that (descending) order.
+        ...(xRange ? { range: xRange, autorange: false } : { autorange: 'reversed' }),
+        ...(ticks ? { tickmode: 'array', tickvals: ticks.tickvals, ticktext: ticks.ticktext } : {}),
+      },
+      yaxis: {
+        // Rows are positions, not quantities: label each one with its date
+        // and fix the range, so adding a date never rescales the figure.
+        tickmode: 'array',
+        tickvals: drawable.map((_, index) => baselineFor(index)),
+        ticktext: drawable.map((s) => s.title),
+        tickfont: { size: narrow ? 9 : 11 },
+        range: [baselineFor(drawable.length - 1) - 0.35, CURVE_HEIGHT + 0.35],
+        zeroline: false,
+        showgrid: false,
+        fixedrange: true,
+      },
+      shapes,
+      annotations,
+      // Per-row, because two rows at the same calendar age are two different
+      // dates -- a unified readout would merge them into one tooltip.
+      hovermode: 'closest',
+      plot_bgcolor: 'rgba(240, 240, 240, 0.5)',
+      paper_bgcolor: 'white',
+      margin: { l: marginLeft, r: 20, t: 10, b: 60 },
+      legend: { orientation: 'h', y: -0.08, yanchor: 'top' },
+      autosize: true,
+    }),
+    [dateFormat, ticks, drawable, shapes, annotations, xRange, marginLeft, narrow]
+  )
+
+  const config = useMemo(
+    () => ({
+      responsive: true,
+      displayModeBar: true,
+      displaylogo: false,
+      modeBarButtonsToRemove: ['lasso2d', 'select2d'],
+    }),
+    []
+  )
+
+  if (drawable.length === 0) {
+    return (
+      <Paper variant="outlined" sx={{ p: 2 }}>
+        <Typography color="textSecondary">No posterior distributions to plot.</Typography>
+      </Paper>
+    )
+  }
+
+  return (
+    <Plot
+      data={plotData}
+      layout={layout}
+      config={config}
+      useResizeHandler
+      style={{
+        width: '100%',
+        height: `${drawable.length * ROW_PIXELS + CHROME_PIXELS}px`,
+        minHeight: '260px',
+      }}
+    />
+  )
+}

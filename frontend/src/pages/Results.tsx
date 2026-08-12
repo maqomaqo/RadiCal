@@ -28,6 +28,8 @@ import {
   Chip,
   Stack,
   Tooltip,
+  ToggleButton,
+  ToggleButtonGroup,
 } from '@mui/material'
 import DownloadIcon from '@mui/icons-material/Download'
 import AccountTreeIcon from '@mui/icons-material/AccountTree'
@@ -36,6 +38,7 @@ import ReplayIcon from '@mui/icons-material/Replay'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import EditIcon from '@mui/icons-material/Edit'
 import PosteriorPlot from '@/components/PosteriorPlot'
+import StackedPosteriorPlot from '@/components/StackedPosteriorPlot'
 import HarrisMatrixDiagram from '@/components/HarrisMatrixDiagram'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import AssignProjectDialog from '@/components/AssignProjectDialog'
@@ -390,6 +393,13 @@ export default function Results() {
   // pair of phases, so on a large one they can outnumber the dates and make
   // the page long to scroll; this hides them without hiding the dates.
   const [showBoundaryPlots, setShowBoundaryPlots] = useState(true)
+  // How the posteriors are drawn. Stacked is the default: one figure, one row
+  // per date, all on a single calendar axis, which is the only way to see
+  // whether two dates overlap -- the question a sequence is built to answer.
+  // The per-date charts remain available because the stacked view trades
+  // detail for comparison: they carry the full-height curve, the point
+  // estimates panel and their own zoom.
+  const [plotView, setPlotView] = useState<'stacked' | 'individual'>('stacked')
   // Confidence level for the HPD columns below -- default 95.4% (2-sigma),
   // the most commonly cited "95% confidence" convention in archaeological
   // reporting; switchable to 68.2% or 99.7% without a network round trip
@@ -1197,13 +1207,32 @@ export default function Results() {
           you have already decided to look at closely. */}
       {plotOrder.length > 0 && (
         <Paper sx={{ p: 3, mb: 3 }}>
-          <Typography variant="h6" gutterBottom>
-            Posterior Distributions
-          </Typography>
-          <Typography variant="body2" color="textSecondary">
-            One plot per {isBayesian ? 'date and modelled transition' : 'date'}, oldest first
-            — the same order as the table above.
-          </Typography>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 2 }}>
+            <Box>
+              <Typography variant="h6" gutterBottom>
+                Posterior Distributions
+              </Typography>
+              <Typography variant="body2" color="textSecondary">
+                {plotView === 'stacked'
+                  ? `One row per ${
+                      isBayesian ? 'date and modelled transition' : 'date'
+                    }, oldest first, on a shared calendar axis — the same order as the table above. Each row is scaled to its own peak, so heights compare precision, not probability.`
+                  : `One plot per ${
+                      isBayesian ? 'date and modelled transition' : 'date'
+                    }, oldest first — the same order as the table above.`}
+              </Typography>
+            </Box>
+            <ToggleButtonGroup
+              size="small"
+              exclusive
+              value={plotView}
+              onChange={(_, value) => value && setPlotView(value)}
+              aria-label="Plot layout"
+            >
+              <ToggleButton value="stacked">Stacked</ToggleButton>
+              <ToggleButton value="individual">Individual</ToggleButton>
+            </ToggleButtonGroup>
+          </Box>
 
           {/* Above the plots rather than beside the table's controls, so the
               switch that hides them isn't below everything it hides. Only shown
@@ -1222,6 +1251,16 @@ export default function Results() {
             />
           )}
 
+          {plotView === 'stacked' ? (
+            <Box sx={{ mt: 2 }}>
+              <StackedPosteriorPlot
+                series={visiblePlots}
+                showMean={showMean}
+                showMedian={showMedian}
+                dateFormat={dateFormat}
+              />
+            </Box>
+          ) : (
           <Box sx={{ mt: 2 }}>
             {visiblePlots.map((series) => (
               <Box key={series.key} sx={{ mb: 4 }}>
@@ -1262,6 +1301,7 @@ export default function Results() {
               </Box>
             ))}
           </Box>
+          )}
         </Paper>
       )}
 
