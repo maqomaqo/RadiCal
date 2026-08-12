@@ -702,14 +702,39 @@ def _span_prior_correction(grid: np.ndarray, num_boundaries: int,
     which is why it survived every fixture comparison: it looked like a modelling
     difference against OxCal rather than a bug.
 
-    Two things this deliberately does NOT do, both measured on the OxCal
-    fixture rather than assumed:
+    Two things this deliberately does NOT do:
 
-    * There is no separate limit correction. OxCal also divides by
-      ((ulim - llim) - span) to keep the span prior flat inside its finite
-      computational window, but a real span (tens of years) is negligible
-      against any sane window, so that factor is a constant: identical
-      results at windows of 2,031 / 3,000 / 10,000 / 55,000 years.
+    * THE LIMITS FACTOR IS MISSING, AND THAT IS A REAL DEFECT -- this comment
+      used to claim it was negligible, and it is not. OxCal's UniformSpanPrior
+      also carries the factor of Bronk Ramsey 2009a eq 29-30, 1/g(t_a, t_m,
+      llim_a, llim_m, ulim_a, ulim_m). The old argument for dropping it was that
+      a real span of tens of years is nothing against the computational window,
+      supported by identical results at windows of 2,031 / 3,000 / 10,000 /
+      55,000 years -- which tested OUR window sensitivity and not what OxCal
+      does with the term.
+
+      Measured by running OxCal with the option off, on eight overlapping dates
+      in one phase (no ordering, no outliers, likelihoods agreeing with ours to
+      0.1% in width):
+
+          OxCal, UniformSpanPrior ON     span 26.26   dates spread 3.62
+          OxCal, UniformSpanPrior OFF    span 31.83   dates spread 4.92
+          this solver                    span 32.53   dates spread 5.18
+
+      So we reproduce OxCal with the refinement switched off, and the term is
+      worth 5.6 years of span -- 18% -- on that model. It is not implemented here
+      because the sign of eq 29 as read off the paper predicts the OPPOSITE
+      effect (1/g flattens a span prior that otherwise falls off as
+      (window - span), which should widen the span), so implementing it from that
+      reading would be guessing. Being wrong in a way that happens to fit one
+      fixture is what the reverted minimum-span floor did.
+
+      Consequences to expect meanwhile: a phase's span from this app is wider
+      than OxCal's default answer, by more the more the prior does the work --
+      about 18% on eight tightly clustered dates, 62% on four, 7% on Shag River's
+      sixteen. It is also the leading suspect for the charcoal fixture's span
+      overshoot and for the ordering over-separation in
+      TestOrderingOverSeparates, both of which have been chased elsewhere.
     * At n = 2 the exponent is zero, so a single Phase between two
       Boundaries -- the app's default shape -- is untouched. Nothing to
       apply, and the O(M^2) chain is kept.
