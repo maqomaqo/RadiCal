@@ -145,8 +145,10 @@ from app.services.exact_chain import (
     _outlier_kernel_at_scale,
     _summarize,
     convolve_on_grid,
+    boundary_limits,
     date_tables,
     log_interior_placements,
+    log_limits_factor_of_span,
     scale_nodes,
 )
 from app.services.model_tree import inherited_bounds, plan_model
@@ -436,6 +438,7 @@ class Model:
         self.window = {p: self._own_window(p, p in self.likelihood) for p in self.params}
 
         self.span_priors = self._span_priors() if self.uniform_span_prior else []
+        self.limits_tables = self._limits_factor_tables()
 
     def _younger_reachable(self) -> Dict[str, set]:
         """
@@ -493,7 +496,9 @@ class Model:
         single span for the correction to be about, and inventing one would
         change the model rather than de-bias it.
         """
-        if len(self.boundary_ids) < 3:
+        # Two is enough: the interior-boundary factor needs three, but the limits
+        # factor applies to any pair with a span between them.
+        if len(self.boundary_ids) < 2:
             return []
 
         reachable = self._younger_reachable()
@@ -521,7 +526,10 @@ class Model:
         priors: List[Tuple[str, str, int]] = []
         for members in components.values():
             exponent = len(members) - 2
-            if exponent <= 0:
+            # exponent 0 is NOT skipped any more: a component of two boundaries
+            # still carries the limits factor, which does not depend on how many
+            # interior boundaries there are. Fewer than two has no span at all.
+            if exponent < 0:
                 continue
             rest = set(members)
             oldest = [b for b in members if rest - {b} <= younger_boundaries[b]]
@@ -530,6 +538,34 @@ class Model:
             if len(oldest) == 1 and len(youngest) == 1 and oldest[0] != youngest[0]:
                 priors.append((oldest[0], youngest[0], exponent))
         return priors
+
+    def _limits_factor_tables(self):
+        """
+        -log g of Bronk Ramsey 2008 A.31 per span prior, as a lookup over the
+        span in CELLS -- one row per (oldest, youngest) pair in self.span_priors.
+
+        Precomputed rather than evaluated per draw because g depends only on the
+        span and on each boundary's own limits, both fixed for the run. Only REAL
+        constraints count as limits -- a TPQ or TAQ on the Boundary or on something
+        enclosing it -- so a pair with nothing constraining it gets no entry here at
+        all. See exact_chain.boundary_limits for why the grid's own edges must not
+        stand in for them.
+
+        The terms and their sign come from exact_chain rather than being written out
+        again: which of them is smallest decides which way the factor pushes the
+        span, and that is exactly the sort of thing that drifts between two
+        implementations of the same prior.
+        """
+        tables = {}
+        spans = np.arange(self.M, dtype=float) * self.dt
+        for oldest_id, youngest_id, _exponent in self.span_priors:
+            factor = log_limits_factor_of_span(
+                spans,
+                boundary_limits(self.element_bounds, oldest_id),
+                boundary_limits(self.element_bounds, youngest_id))
+            if factor is not None:
+                tables[(oldest_id, youngest_id)] = factor
+        return tables
 
     def _build_blocks(self):
         """
@@ -680,13 +716,17 @@ class Model:
             # Counted in CELLS, not years, and as a binomial rather than a power
             # -- see exact_chain._span_prior_correction for why the power is wrong
             # on a grid and what it was costing.
+            # log of the factor itself, so both parts enter with one sign:
+            # 1/(ways the interior boundaries fit) times 1/g, the second applying
+            # at any number of boundaries. Both depend only on the span in cells.
             log_count = log_interior_placements(cells, exponent)
-            room = np.isfinite(log_count)
-            # Masked before subtracting: a candidate that is already impossible
-            # carries -inf, and -inf minus -inf is a nan rather than the -inf the
-            # where() would then have to discard.
-            log_dens = np.where(room, log_dens - np.where(room, log_count, 0.0),
-                                -np.inf)
+            factor = np.where(np.isfinite(log_count), -log_count, -np.inf)
+            limits = self.limits_tables.get((oldest_id, youngest_id))
+            if limits is not None:
+                safe = np.clip(cells, 0, self.M - 1)
+                factor = factor + np.where((cells >= 0) & (cells < self.M),
+                                           limits[safe], -np.inf)
+            log_dens = log_dens + factor
 
         finite = np.isfinite(log_dens)
         if not np.any(finite):
@@ -731,11 +771,18 @@ class Model:
 
         for oldest_id, youngest_id, exponent in self.span_priors:
             cells = state.index[oldest_id] - state.index[youngest_id]
+            if not 0 <= cells < self.M:
+                return -np.inf
             log_count = float(log_interior_placements(
                 np.array([cells], dtype=float), exponent)[0])
             if not np.isfinite(log_count):
                 return -np.inf
             total -= log_count
+            row = self.limits_tables.get((oldest_id, youngest_id))
+            if row is not None:
+                if not np.isfinite(row[cells]):
+                    return -np.inf
+                total += float(row[cells])
 
         return total
 

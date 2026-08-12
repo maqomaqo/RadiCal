@@ -405,11 +405,15 @@ class TestUniformSpanPriorGrouping:
     @pytest.mark.parametrize('run', ['shared_boundary', 'ordered', 'unordered'])
     def test_it_reduces_to_the_exact_solver_on_a_chain(self, run):
         """
-        The load-bearing check. exact_chain applies 1/(first - last)^(n-2) over
-        the chain's own ends, so on any chain this must produce exactly that:
-        one correction, the chain's ends, that exponent. `unordered` has only
-        two boundaries, where the exponent is zero and there is nothing to
-        apply -- exact_chain skips it there too.
+        The load-bearing check. exact_chain divides out the interior boundaries'
+        freedom over the chain's own ends, so on any chain this must produce exactly
+        that: one correction, the chain's ends, that exponent.
+
+        `unordered` has only two boundaries, so the exponent is zero and there is no
+        interior freedom to divide out. The PAIR is still listed, because the limits
+        factor applies to any pair with a span between them -- but these fixtures
+        constrain no boundary, so nothing is applied, and limits_tables is the thing
+        to assert on rather than the list.
         """
         measurements = ox.measurements()
         tree = ox.model_tree(run)
@@ -420,11 +424,12 @@ class TestUniformSpanPriorGrouping:
 
         model = gibbs.Model(measurements, tree)
         exponent = len(chain.boundary_ids) - 2
+        assert model.span_priors == [
+            (chain.boundary_ids[0], chain.boundary_ids[-1], max(exponent, 0))]
         if exponent <= 0:
-            assert model.span_priors == []
-        else:
-            assert model.span_priors == [
-                (chain.boundary_ids[0], chain.boundary_ids[-1], exponent)]
+            assert model.limits_tables == {}, (
+                'nothing constrains these boundaries, so there is no limits '
+                'factor either -- the pair is listed and contributes nothing')
 
     def test_switching_it_off_removes_every_correction(self):
         measurements = ox.measurements()
@@ -461,9 +466,15 @@ class TestUniformSpanPriorGrouping:
     def test_a_component_with_no_unique_outermost_pair_is_skipped(self):
         """
         Nothing to be about: with no single span, applying a correction would
-        change the model rather than de-bias it. Two branches inside an
-        unordered Phase, with no outer boundaries, is that case at the top
-        level -- each branch still gets its own.
+        change the model rather than de-bias it. Two branches inside an unordered
+        Phase, with no outer boundaries, is that case at the top level -- the
+        branch that DOES have a pair still gets its own entry.
+
+        That entry carries exponent 0 (two boundaries, no interior freedom) and,
+        because nothing constrains those boundaries, no limits factor either. So
+        the model is corrected nowhere, which is the point -- asserted on what is
+        applied rather than on the list, since the list now names every pair with
+        a span whether or not anything acts on it.
         """
         a = _element('phase', 'A')
         branch = _element('sequence', 'A seq', [
@@ -473,8 +484,8 @@ class TestUniformSpanPriorGrouping:
         measurements = [_date(a['id'], 3000), _date(loose['id'], 3100)]
 
         model = gibbs.Model(measurements, tree)
-        # aStart/aEnd are only two boundaries, so exponent 0 -- nothing at all.
-        assert model.span_priors == []
+        assert [exponent for _o, _y, exponent in model.span_priors] == [0]
+        assert model.limits_tables == {}
 
 
 class TestTheChainCanActuallyMove:

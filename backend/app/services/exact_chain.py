@@ -662,8 +662,100 @@ def log_interior_placements(span_cells: np.ndarray, num_interior: int) -> np.nda
     return out
 
 
-def _span_prior_correction(grid: np.ndarray, num_boundaries: int,
-                           enabled: bool) -> Optional[np.ndarray]:
+def boundary_limits(element_bounds: Dict, boundary_id: str) -> Tuple[float, float]:
+    """
+    (oldest, youngest) calendar age a boundary may take, in cal BP, as infinities
+    where nothing constrains it.
+
+    These are the llim/ulim of Bronk Ramsey 2008 A.30-A.31. Only REAL constraints
+    count -- a TPQ or TAQ on the Boundary or on an element enclosing it. The
+    solver's grid is deliberately not used, even though it does bound the answer
+    numerically: the grid is padded by six times the dates' own width for the
+    boundaries' benefit (see _build_grid), so treating its edges as model
+    statements would make the limits factor an artefact of that padding. Measured,
+    it does exactly that -- the factor's effect on a single unconstrained phase
+    came out as +1.20 years at a 600-year window, +0.56 at 1,200, +0.27 at 2,400
+    and +0.13 at 4,800, halving with each doubling and heading for nothing.
+
+    An unconstrained boundary is unbounded, and in that limit g is infinite, so
+    1/g is constant in the span and drops out of the posterior. That is why an
+    unconstrained model gets no limits factor at all rather than a small arbitrary
+    one.
+    """
+    taq, tpq = element_bounds.get(boundary_id, (None, None))
+    oldest = float(tpq) if tpq is not None else np.inf
+    youngest = float(taq) if taq is not None else -np.inf
+    return oldest, youngest
+
+
+def log_limits_factor_of_span(spans: np.ndarray,
+                              oldest_limits: Tuple[float, float],
+                              youngest_limits: Tuple[float, float],
+                              ) -> Optional[np.ndarray]:
+    """
+    The limits factor as a function of the span alone, for `spans` of any shape --
+    see _log_limits_factor for the derivation and for what the four terms mean.
+
+    Split out from it so services/gibbs.py can ask for a 1-D row indexed by span
+    without allocating the M x M matrix the exact solver needs (32 MB at M = 2000),
+    while both still share one definition of the terms and of their sign.
+    """
+    hi_old, lo_old = oldest_limits
+    hi_yng, lo_yng = youngest_limits
+    spans = np.asarray(spans, dtype=float)
+
+    terms = []
+    if np.isfinite(hi_old) and np.isfinite(lo_yng):
+        terms.append((hi_old - lo_yng) - spans)
+    if np.isfinite(lo_old) and np.isfinite(hi_yng):
+        terms.append(spans - (lo_old - hi_yng))
+    if not terms:
+        return None                                   # nothing depends on the span
+    for constant in (hi_old - lo_old, hi_yng - lo_yng):
+        if np.isfinite(constant):
+            terms.append(np.full_like(spans, constant))
+
+    g = np.stack(terms).min(axis=0)
+    out = np.full(g.shape, -np.inf)
+    positive = g > 0
+    out[positive] = -np.log(g[positive])
+    return out
+
+
+def _log_limits_factor(grid: np.ndarray, oldest_limits: Tuple[float, float],
+                       youngest_limits: Tuple[float, float]) -> Optional[np.ndarray]:
+    """
+    log of the factor 1/g from Bronk Ramsey 2008 A.31 (= 2009a eq 29), as a matrix
+    indexed [youngest boundary, oldest boundary]. None when g does not depend on
+    the span, in which case the factor is a constant and contributes nothing.
+
+    The paper is written in AD, where the phase runs from t_a up to t_m with
+    llim_a <= t_a <= ulim_a and llim_m <= t_m <= ulim_m. In cal BP everything
+    reverses, so writing (hi, lo) for the oldest and youngest age each boundary may
+    take, A.31 becomes
+
+        g = min( (hi_old - lo_yng) - span,        <- needs a TPQ on the oldest
+                 span - (lo_old - hi_yng),        <-   and a TAQ on the youngest
+                 hi_old - lo_old,                 <- the oldest's own range
+                 hi_yng - lo_yng )                <- the youngest's own range
+
+    WHICH TERM IS SMALLEST is the whole character of this factor, and it is why
+    the sign of it is easy to get backwards. The first term falls with the span, so
+    1/g rises and favours a LONGER span; the second rises with the span, so 1/g
+    favours a SHORTER one. The last two are constants that merely cap it.
+
+    Only the first two depend on the span, and each needs both of its limits to be
+    real; with either infinite that term cannot be the minimum. If neither
+    survives, the factor is constant and None is returned.
+    """
+    span = grid[None, :] - grid[:, None]              # [youngest, oldest]
+    return log_limits_factor_of_span(span, oldest_limits, youngest_limits)
+
+
+def _span_prior_correction(grid: np.ndarray, num_boundaries: int, enabled: bool,
+                           oldest_limits: Optional[Tuple[float, float]] = None,
+                           youngest_limits: Optional[Tuple[float, float]] = None,
+                           ) -> Optional[np.ndarray]:
     """
     OxCal's UniformSpanPrior factor over the outermost pair, as a matrix
     indexed [youngest boundary, oldest boundary], or None when it would do
@@ -744,12 +836,24 @@ def _span_prior_correction(grid: np.ndarray, num_boundaries: int,
       1/g goes as 1/(span + c), which penalises long spans and is the right sign
       and roughly the right size.
 
-      Why it is still not implemented. A.31 needs the four limits OxCal assigns to
-      each boundary, and none of the three papers says what they are; picking a c
-      that reproduces one fixture is exactly what the reverted minimum-span floor
-      did. Two OxCal runs bracketing the model at AD 500-750 and AD 200-1100 --
-      a 3.6x change of window -- moved its answer by 0.57 years, so the limits it
-      uses are internal to it rather than the user's constraints.
+      IT IS NOW IMPLEMENTED, but only from limits that are real -- see
+      _log_limits_factor and boundary_limits. A Boundary carrying a TPQ or TAQ, or
+      enclosed by an element that does, has genuine llim/ulim and gets the factor;
+      an unconstrained one is UNBOUNDED, g is then infinite, 1/g is constant in the
+      span, and the factor correctly drops out.
+
+      That leaves OxCal's default answer unmatched, and deliberately so. OxCal
+      evidently supplies limits of its own for unconstrained boundaries -- the
+      second term of the min wins there, worth 18% -- and none of 2001, 2009a or
+      2008 says what they are. Bracketing the model at AD 500-750 and at AD
+      200-1100, a 3.6x change of window, moved OxCal by 0.57 years, so those limits
+      are internal to it rather than the user's constraints. Standing in the grid's
+      own edges was tried and rejected: it made the factor an artefact of
+      _build_grid's padding, contributing +1.20 years at a 600-year window and
+      +0.13 at 4,800 -- halving with each doubling, heading for nothing, and in the
+      WRONG DIRECTION besides, widening the span where OxCal's narrows it. Fitting
+      a constant to close the remaining gap is what the reverted minimum-span floor
+      did.
 
       Consequences to expect meanwhile: a phase's span from this app is wider than
       OxCal's default answer, by more the more the prior does the work -- about 18%
@@ -776,19 +880,36 @@ def _span_prior_correction(grid: np.ndarray, num_boundaries: int,
     unordered run agrees to 0.06 years). See tests/nenthorn_charcoal_fixture's
     WHAT IS LEFT note.
     """
-    exponent = num_boundaries - 2
-    if not enabled or exponent <= 0:
+    if not enabled:
         return None
-    index = np.arange(len(grid))
-    cells = index[None, :] - index[:, None]        # [youngest, oldest]
-    log_count = log_interior_placements(cells, exponent)
-    # exp(-log_count), and zero where the span cannot hold the interior
-    # boundaries at all -- those states have no admissible configuration, so the
-    # value there is irrelevant and zero is the one that cannot leak mass.
-    corr = np.zeros_like(log_count)
-    room = np.isfinite(log_count)
-    corr[room] = np.exp(-log_count[room])
-    return corr
+    exponent = num_boundaries - 2
+    # The LOG OF THE FACTOR, so both parts enter with the same sign and -inf
+    # means "this pair of boundaries is impossible".
+    total = np.zeros((len(grid), len(grid)))       # [youngest, oldest]
+    has_limits = False
+
+    if exponent > 0:
+        index = np.arange(len(grid))
+        cells = index[None, :] - index[:, None]
+        # 1 / (ways the interior boundaries fit) -- A.29, 2001 eq 6.
+        log_count = log_interior_placements(cells, exponent)
+        total = np.where(np.isfinite(log_count), total - log_count, -np.inf)
+
+    if oldest_limits is not None and youngest_limits is not None:
+        # 1 / g -- A.31, 2001 eq 7. Applies at ANY number of boundaries, which is
+        # why this function can return something at two of them; it is None when
+        # nothing constrains the boundaries, which is the usual case.
+        limits = _log_limits_factor(grid, oldest_limits, youngest_limits)
+        if limits is not None:
+            total = np.where(np.isfinite(limits) & np.isfinite(total),
+                             total + limits, -np.inf)
+            has_limits = True
+
+    if exponent <= 0 and not has_limits:
+        return None                                # nothing to apply
+    if not np.any(np.isfinite(total)):
+        return None
+    return total
 
 
 def _messages(chain: Chain, allowed: Dict, transfer):
@@ -927,13 +1048,30 @@ def solve(measurements: List[Dict], root: Dict, chain: Chain,
         out = np.exp(_rescaled(log_T[i]))
         return np.where(np.isfinite(out), out, 0.0)
 
-    correction = _span_prior_correction(grid, len(chain.boundary_ids),
-                                        uniform_span_prior)
-    if correction is None:
-        pair_weight, boundary_density = _messages(chain, allowed, transfer)
+    log_correction = _span_prior_correction(
+        grid, len(chain.boundary_ids), uniform_span_prior,
+        boundary_limits(element_bounds, chain.boundary_ids[0]),
+        boundary_limits(element_bounds, chain.boundary_ids[-1]))
+    correction = None
+    if log_correction is not None:
+        if len(chain.groups) == 1:
+            # One group means the correction's two boundaries ARE this group's
+            # two boundaries, so it folds straight into the transfer matrix and
+            # costs nothing. Worth the special case: it is the app's default
+            # shape, and the limits factor now applies to it where the older
+            # (n-2) factor did not, so without this every single-phase model
+            # would move to the O(M^3) path for a couple of percent.
+            log_T[0] = log_T[0] + np.where(np.isfinite(log_correction),
+                                           log_correction, -np.inf)
+            pair_weight, boundary_density = _messages(chain, allowed, transfer)
+        else:
+            correction = np.where(np.isfinite(log_correction),
+                                  np.exp(_rescaled(log_correction)), 0.0)
+            correction = np.where(np.isfinite(correction), correction, 0.0)
+            pair_weight, boundary_density = _messages_with_span_prior(
+                chain, allowed, transfer, correction)
     else:
-        pair_weight, boundary_density = _messages_with_span_prior(
-            chain, allowed, transfer, correction)
+        pair_weight, boundary_density = _messages(chain, allowed, transfer)
 
     rng = np.random.default_rng(seed)
     results = {'measurements': {}, 'boundaries': {}}
@@ -973,7 +1111,7 @@ def solve(measurements: List[Dict], root: Dict, chain: Chain,
         }
 
     results['method'] = 'exact'
-    results['uniform_span_prior'] = correction is not None
+    results['uniform_span_prior'] = log_correction is not None
     results['grid'] = {'lower': float(grid[0]), 'upper': float(grid[-1]), 'step': dt}
     results['edge_mass'] = _edge_mass(densities, grid)
     return results

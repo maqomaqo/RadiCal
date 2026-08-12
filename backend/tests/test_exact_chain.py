@@ -20,6 +20,7 @@ import pytest
 
 from app.services import exact_chain as ec
 from app.services.calibration import get_curve
+from app.services.model_tree import inherited_bounds
 
 import oxcal_fixture as ox
 
@@ -815,6 +816,141 @@ class TestTheCorrectionIsExact:
             continuum /= continuum.sum()
             gap = float((grid * discrete).sum() - (grid * continuum).sum())
             assert gap == pytest.approx(k * step / 3.0, rel=0.05), (n, gap)
+
+
+class TestTheLimitsFactor:
+    """
+    The other half of OxCal's UniformSpanPrior: the limits factor of Bronk Ramsey
+    2008 A.31, equivalently 2009a eq 29 and 2001 eq 7.
+
+    It exists because constraining where a phase's boundaries may sit biases the
+    prior on its span, and it divides that bias out. The subtlety, and the reason
+    the sign of it is easy to get backwards, is that A.31 is a MIN of four terms:
+    two of them depend on the span in opposite directions, and which one is
+    smallest decides which way the factor pushes.
+
+    What it is NOT allowed to depend on is the solver's grid. The grid is padded by
+    six times the dates' own width so the boundaries have room, so taking its edges
+    for llim/ulim would make this factor an artefact of that padding -- measured, it
+    behaved exactly so, contributing +1.20 years at a 600-year window and +0.13 at
+    4,800, halving with each doubling. An unconstrained boundary is unbounded, g is
+    then infinite, and 1/g is constant in the span and drops out. Hence the first
+    test below.
+    """
+
+    LO, HI, M = 2800.0, 3600.0, 401
+
+    def _flat(self):
+        grid = np.linspace(self.LO, self.HI, self.M)
+        flat = np.ones(self.M)
+        saved = (ec._date_likelihood, ec._build_grid)
+        ec._date_likelihood = lambda g, m, b: flat.copy()
+        ec._build_grid = lambda ms, eb, ng=1: grid.copy()
+        return grid, saved
+
+    def _model(self, tpq=None, taq=None):
+        dates = _dates(*[(f'lf{i}', 3000, 25, 'p0') for i in range(4)])
+        tree = _sequence('s', [_boundary('b0'), _phase('p0'), _boundary('b1')])
+        tree['tpq_age_bp'], tree['taq_age_bp'] = tpq, taq
+        return tree, dates
+
+    def test_an_unconstrained_model_gets_no_factor_at_all(self):
+        """
+        So the answer stays independent of the window, which this solver has always
+        been and must remain: reporting must not depend on how much padding the grid
+        carries for the boundaries' benefit.
+
+        Asserted as ON against OFF at each window rather than across windows -- the
+        span itself moves with the window for a legitimate reason (with the prior
+        doing the work, E[span] is a third of it), and what must not move is the
+        factor's contribution.
+        """
+        tree, dates = self._model()
+        bounds = inherited_bounds(tree)
+        assert ec.boundary_limits(bounds, 'b0') == (np.inf, -np.inf)
+        grid = np.linspace(self.LO, self.HI, self.M)
+        assert ec._log_limits_factor(grid, (np.inf, -np.inf), (np.inf, -np.inf)) is None
+
+        chain = ec.layout(tree, dates)
+        for width in (600.0, 2400.0):
+            saved = ec._build_grid
+            axis = np.arange(3200.0 - width / 2, 3200.0 + width / 2, 1.0)
+            ec._build_grid = lambda ms, eb, ng=1, _a=axis: _a.copy()
+            try:
+                spans = []
+                for flag in (True, False):
+                    solved = ec.solve(dates, tree, chain, num_samples=50,
+                                      uniform_span_prior=flag)
+                    b = solved['boundaries']
+                    spans.append(b['b0']['posterior']['posterior_mean']
+                                 - b['b1']['posterior']['posterior_mean'])
+                    assert solved['uniform_span_prior'] is False, (
+                        'two boundaries and no constraints leaves nothing to apply')
+                assert spans[0] == pytest.approx(spans[1], abs=1e-9), (width, spans)
+            finally:
+                ec._build_grid = saved
+
+    def test_with_real_constraints_it_matches_the_closed_form(self):
+        """
+        Where the factor does apply, against a reference built from the model
+        statement rather than from this solver: flat likelihoods make each group's
+        date volume exactly span^K, cancelling its span factor, so the prior over
+        the boundary pair is 1/g and nothing else.
+        """
+        tpq, taq = 3400.0, 3000.0
+        tree, dates = self._model(tpq=tpq, taq=taq)
+        grid, saved = self._flat()
+        try:
+            bounds = inherited_bounds(tree)
+            assert ec.boundary_limits(bounds, 'b0') == (tpq, taq)
+            solved = ec.solve(dates, tree, ec.layout(tree, dates), num_samples=50,
+                              uniform_span_prior=True)
+            pairs = np.asarray(
+                solved['boundaries']['b0']['posterior']['probability_distribution'],
+                float)
+            order = np.argsort(pairs[:, 0])
+            got = np.interp(grid, pairs[order, 0], pairs[order, 1], left=0.0, right=0.0)
+            got = got / got.sum()
+
+            factor = ec._log_limits_factor(grid, (tpq, taq), (tpq, taq))
+            assert factor is not None
+            weight = np.where(np.isfinite(factor), np.exp(factor), 0.0)
+            span = grid[None, :] - grid[:, None]
+            inside = (grid >= taq) & (grid <= tpq)
+            weight = np.where((span > 0) & inside[None, :] & inside[:, None],
+                              weight, 0.0)
+            want = weight.sum(axis=0)
+            want = want / want.sum()
+            assert 0.5 * np.abs(got - want).sum() < 1e-6
+        finally:
+            ec._date_likelihood, ec._build_grid = saved
+
+    def test_which_term_of_the_min_wins_sets_the_direction(self):
+        """
+        The property that makes this factor confusing, pinned so the sign cannot be
+        silently flipped. Shared limits leave the first term smallest, so 1/g grows
+        with the span and favours a longer one; limits tight and disjoint leave the
+        second smallest, and it favours a shorter one.
+        """
+        grid = np.linspace(0.0, 100.0, 11)
+        shared = ec._log_limits_factor(grid, (100.0, 0.0), (100.0, 0.0))
+        # g = window - span, so -log g RISES with the span
+        assert shared[0, 9] > shared[0, 1]
+
+        disjoint = ec._log_limits_factor(grid, (100.0, 60.0), (40.0, 0.0))
+        # g = span - 20 over the low spans, so -log g FALLS with the span
+        assert disjoint[0, 3] > disjoint[0, 5]
+
+    def test_a_one_sided_constraint_contributes_nothing(self):
+        """
+        Each span-dependent term of A.31 needs BOTH of its limits to be real. A TPQ
+        with no TAQ leaves neither term finite, so the factor is still constant --
+        which is worth pinning, because using the grid for the missing half is
+        precisely the mistake this class exists to prevent.
+        """
+        grid = np.linspace(self.LO, self.HI, self.M)
+        assert ec._log_limits_factor(grid, (3400.0, -np.inf),
+                                     (3400.0, -np.inf)) is None
 
 
 class TestReportingIsIndependentOfTheInternalGrid:
