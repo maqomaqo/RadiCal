@@ -713,7 +713,13 @@ export default function Results() {
               </Button>
             </Typography>
           </Box>
-          <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+          {/* flexWrap here, not just on the row above: that outer wrap only
+              moves this whole group onto its own line once the title
+              doesn't fit beside it. Without it too, this group -- a
+              220px-minimum select plus four buttons -- stayed a single
+              unbreakable 700px-plus row and forced the page to scroll
+              sideways on anything narrower than that, title wrapped or not. */}
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, alignItems: 'center' }}>
             <FormControl size="small" sx={{ minWidth: 220 }}>
               <InputLabel>Date Format</InputLabel>
               <Select value={dateFormat} label="Date Format" onChange={handleDateFormatChange}>

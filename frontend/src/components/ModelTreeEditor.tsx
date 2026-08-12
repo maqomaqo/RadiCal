@@ -399,7 +399,12 @@ export default function ModelTreeEditor({ tree, measurements, assignments, onCha
           </Typography>
         ) : (
           measurements.map((m) => (
-            <Box key={m.id} sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 1 }}>
+            // wrap: the label and the select each have their own 220px
+            // minimum, and on their own line that's fine -- but held to one
+            // unbroken row the pair needs ~490px, wider than a phone's
+            // viewport, and forced the page to scroll sideways to reach the
+            // select on the right.
+            <Box key={m.id} sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 2, mb: 1 }}>
               <Typography variant="body2" sx={{ minWidth: 220, fontFamily: 'monospace' }}>
                 {m.sample_name} — {m.age_bp} ± {m.error_1sigma ?? '?'} BP
               </Typography>
