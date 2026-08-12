@@ -274,11 +274,17 @@ class TestTheEndpointWeighting:
             state.index[date_id] = peak
             assert model.endpoint_weight(date_id, state) == 0.5
 
-        # What log_posterior would report with no weighting: the raw likelihoods
-        # and the span factor, nothing else.
+        # What log_posterior would report with no endpoint weighting: the raw
+        # likelihoods, the span factor, and the limits factor -- that last one
+        # because the dates bound the boundaries they sit between, so it applies
+        # even here with nothing else constraining them (see
+        # exact_chain.pair_limits).
         span = model.grid[peak + 1] - model.grid[peak]
         unweighted = sum(float(model.log_likelihood[d][peak]) for d in group)
         unweighted -= len(group) * float(np.log(span))
+        for (oldest_id, youngest_id), row in model.limits_tables.items():
+            if (oldest_id, youngest_id) == (older, younger):
+                unweighted += float(row[1])          # a span of one cell
         assert model.log_posterior(state) == pytest.approx(
             unweighted - len(group) * np.log(2.0))
 
@@ -426,10 +432,11 @@ class TestUniformSpanPriorGrouping:
         exponent = len(chain.boundary_ids) - 2
         assert model.span_priors == [
             (chain.boundary_ids[0], chain.boundary_ids[-1], max(exponent, 0))]
-        if exponent <= 0:
-            assert model.limits_tables == {}, (
-                'nothing constrains these boundaries, so there is no limits '
-                'factor either -- the pair is listed and contributes nothing')
+        # One limits factor, over the same pair. It applies at any number of
+        # boundaries -- the dates bound the ones enclosing them -- so `unordered`,
+        # with an exponent of zero, is still corrected.
+        assert list(model.limits_tables) == [
+            (chain.boundary_ids[0], chain.boundary_ids[-1])]
 
     def test_switching_it_off_removes_every_correction(self):
         measurements = ox.measurements()
@@ -484,8 +491,15 @@ class TestUniformSpanPriorGrouping:
         measurements = [_date(a['id'], 3000), _date(loose['id'], 3100)]
 
         model = gibbs.Model(measurements, tree)
+        # The branch's own pair, with no interior boundaries to divide out. It does
+        # get a limits factor, from the dates inside it -- and only from those: the
+        # loose phase outside the branch must not contribute, which is what the
+        # enclosure test in _limits_factor_tables is for.
         assert [exponent for _o, _y, exponent in model.span_priors] == [0]
-        assert model.limits_tables == {}
+        assert len(model.limits_tables) == 1
+        pair = next(iter(model.limits_tables))
+        assert set(pair) == {b['id'] for b in tree['children'][0]['children']
+                             if b['element_type'] == 'boundary'}
 
 
 class TestTheChainCanActuallyMove:
@@ -684,14 +698,14 @@ class TestOutlierModel:
             assert wide['measurements'][m['id']]['outlier_probability'] == \
                 pytest.approx(narrow_p, abs=0.05), m['id']
 
-    def _residual_case(self, model, sweeps=20000):
-        """Four contemporary dates plus one 400 radiocarbon years too old."""
+    def _residual_case(self, model, sweeps=20000, offset=400):
+        """Four contemporary dates plus one `offset` radiocarbon years too old."""
         phase = _element('phase', 'p')
         tree = _element('sequence', 's', [
             _element('boundary', 'b0'), phase, _element('boundary', 'b1')])
         dates = [dict(_date(phase['id'], age), outlier_prior=0.05,
                       outlier_model=model, curve_id='intcal20')
-                 for age in (3000, 3020, 3040, 3060, 3460)]
+                 for age in (3000, 3020, 3040, 3060, 3060 + offset)]
         residual = dates[-1]['id']
         exact = ec.solve(dates, tree, ec.layout(tree, dates), num_samples=200)
         sampled = _fixed(dates, tree, sweeps=sweeps, num_samples=200,
@@ -703,9 +717,16 @@ class TestOutlierModel:
         Same direction as the exact solver: a model that knows the material can
         only be too OLD does not have to spend prior mass on the direction it
         cannot be wrong in, so it flags a residual date harder.
+
+        At a 250-year offset rather than this class's usual 400, because at 400 both
+        models are past 0.99 and the question stops being answerable -- measured
+        0.9876 against 0.9931 for the exact solver and 0.9973 against 0.9923 for the
+        sampler, i.e. the sampler's own noise is larger than what is being compared.
+        At 250 the effect is a factor of about 1.5 and both solvers show it plainly.
         """
-        _d, residual, general_exact, general = self._residual_case('general')
-        _d2, residual2, charcoal_exact, charcoal = self._residual_case('charcoal')
+        _d, residual, general_exact, general = self._residual_case('general', offset=250)
+        _d2, residual2, charcoal_exact, charcoal = self._residual_case('charcoal',
+                                                                      offset=250)
         assert (charcoal['measurements'][residual2]['outlier_probability']
                 > general['measurements'][residual]['outlier_probability'])
         # ...and the exact solver says so too, so this is not a sampler artefact.

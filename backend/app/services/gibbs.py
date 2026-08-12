@@ -145,10 +145,10 @@ from app.services.exact_chain import (
     _outlier_kernel_at_scale,
     _summarize,
     convolve_on_grid,
-    boundary_limits,
     date_tables,
     log_interior_placements,
     log_limits_factor_of_span,
+    pair_limits,
     scale_nodes,
 )
 from app.services.model_tree import inherited_bounds, plan_model
@@ -545,11 +545,11 @@ class Model:
         span in CELLS -- one row per (oldest, youngest) pair in self.span_priors.
 
         Precomputed rather than evaluated per draw because g depends only on the
-        span and on each boundary's own limits, both fixed for the run. Only REAL
-        constraints count as limits -- a TPQ or TAQ on the Boundary or on something
-        enclosing it -- so a pair with nothing constraining it gets no entry here at
-        all. See exact_chain.boundary_limits for why the grid's own edges must not
-        stand in for them.
+        span and on each boundary's limits, both fixed for the run. The limits are
+        each boundary's own TPQ/TAQ where it has one, tightened by the extent of the
+        dates it encloses -- see exact_chain.pair_limits, which is where the evidence
+        for that rule is, and boundary_limits for why the solver's grid must not
+        stand in for a constraint that is simply absent.
 
         The terms and their sign come from exact_chain rather than being written out
         again: which of them is smallest decides which way the factor pushes the
@@ -558,11 +558,19 @@ class Model:
         """
         tables = {}
         spans = np.arange(self.M, dtype=float) * self.dt
+        reachable = self._younger_reachable()
+        inliers = {d: (self.outlier_parts[d][0] if d in self.outlier_parts
+                       else self.likelihood[d]) for d in self.date_ids}
         for oldest_id, youngest_id, _exponent in self.span_priors:
-            factor = log_limits_factor_of_span(
-                spans,
-                boundary_limits(self.element_bounds, oldest_id),
-                boundary_limits(self.element_bounds, youngest_id))
+            # The dates this pair actually encloses, which for a model of two
+            # independent branches is not all of them: a date is enclosed when the
+            # older boundary is above it in the ordering and the younger below.
+            enclosed = [d for d in self.date_ids
+                        if d in reachable[oldest_id] and youngest_id in reachable[d]]
+            oldest_limits, youngest_limits = pair_limits(
+                self.element_bounds, oldest_id, youngest_id,
+                self.grid, inliers, enclosed)
+            factor = log_limits_factor_of_span(spans, oldest_limits, youngest_limits)
             if factor is not None:
                 tables[(oldest_id, youngest_id)] = factor
         return tables

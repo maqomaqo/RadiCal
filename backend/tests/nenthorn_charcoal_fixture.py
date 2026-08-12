@@ -109,14 +109,12 @@ Three further measurements rule it out directly:
     relative to OxCal's than their own phase-mates' under the general model
     (WK50098 14.6 -> 20.1 against WK50099 14.2 -> 18.6).
 
-PART OF IT IS THE MISSING LIMITS FACTOR, measured directly: with OxCal's
-UniformSpanPrior off this model's span is 36.91 years rather than its default 29.24,
-against our 43.3 (sampler) and 51.4 (exact). So 7.7 of the 22 years by which the
-exact solver overshoots is that term, and the separation lines up too -- 15.58 with
-the term off against our 16.41. What remains after it is ~6 years on the sampler and
-a further ~8 on the exact solver, the latter being its per-date treatment of the
-outlier scale. The band-by-band young tail described next is that remainder, not the
-whole of it.
+PART OF IT WAS THE LIMITS FACTOR, measured directly: with OxCal's UniformSpanPrior
+off this model's span is 36.91 years rather than its default 29.24, against the 43.3
+(sampler) and 51.4 (exact) we gave before implementing the factor. Now 40.3 exact,
+and the separation excess falls from +3.85 to +1.31 on the sampler. What remains is
+the exact solver's per-date treatment of the outlier scale, and the band-by-band
+young tail described next -- that being the remainder, not the whole of it.
 
 What the rest of the discrepancy IS, measured band by band. Every one of the eleven
 marginals is about a third too wide (1.34x OxCal's sd, on a common window), and
@@ -152,19 +150,21 @@ correction -- it divided by a continuum power where the discrete model needs a
 binomial count, see exact_chain._span_prior_correction -- worth about 1.1 years
 here and pinned now by TestTheCorrectionIsExact against a closed form.
 
-MOST OF WHAT SURVIVED THAT IS NOW EXPLAINED, and it is not about ordering at all:
-it is the UniformSpanPrior limits factor we do not implement (Bronk Ramsey 2008
-A.31, 2009a eq 29). Asking OxCal to run these same models with the option OFF
-brings the two into line --
+MOST OF WHAT SURVIVED THAT IS NOW FIXED, and it was not about ordering at all: it
+was the UniformSpanPrior limits factor, which we did not implement (Bronk Ramsey
+2008 A.31, 2009a eq 29) and now do. Asking OxCal to run these same models with the
+option OFF is what identified it, by bringing the two into line --
 
     fixture           OxCal option OFF   ours (no such term)
     ordered                     13.47    14.18 (sampler)
     shared_boundary             26.30    26.7  (both refinements off)
 
--- against OxCal's defaults of 11.66 and 13.19. So the app is reproducing OxCal
-with one of OxCal's refinements switched off, on every model where the phase prior
-does real work. See exact_chain._span_prior_correction for the term, for why the
-sign of it is subtle, and for why it is still not implemented.
+-- against OxCal's defaults of 11.66 and 13.19: the app was reproducing OxCal with
+one of OxCal's own refinements switched off, on every model where the phase prior
+does real work. With the factor in, the separations are 12.4 and 14.0 against those
+defaults, and this fixture's own gap falls from +3.85 to +1.31. See
+exact_chain._span_prior_correction for the term and for why the sign of it is
+subtle, and pair_limits for where the limits come from.
 
 OxCal is not the one that is wrong, which was worth checking and is now checked:
 raising its kIterations from the default 30 to 60 moves its answer 0.23 years while

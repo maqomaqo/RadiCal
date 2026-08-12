@@ -716,10 +716,78 @@ def log_limits_factor_of_span(spans: np.ndarray,
             terms.append(np.full_like(spans, constant))
 
     g = np.stack(terms).min(axis=0)
-    out = np.full(g.shape, -np.inf)
+    # g <= 0 means the derived limits contradict each other at this span -- which
+    # happens when the dates' own supports do not overlap, so containment already
+    # forbids a span that short. The factor counts configurations to normalise a
+    # prior; a non-positive count is a statement about the LIMITS, not about the
+    # model, so it must not veto the state. Weight 1 there, not zero.
+    #
+    # Learned the hard way: returning -inf let this bookkeeping quantity make the
+    # sampler's starting state infeasible on a model with a stratigraphic inversion,
+    # which is a perfectly ordinary thing for an archaeologist to write down.
+    out = np.zeros(g.shape)
     positive = g > 0
     out[positive] = -np.log(g[positive])
     return out
+
+
+def containment_limits(grid: np.ndarray, inliers: Dict[str, np.ndarray],
+                       date_ids: Sequence[str]) -> Tuple[float, float]:
+    """
+    How far the enclosing pair of boundaries is pinned by the dates between them:
+    (youngest the OLDER boundary may be, oldest the YOUNGER boundary may be), cal BP.
+
+    These are the llim/ulim that Bronk Ramsey 2008 A.31 wants, and OxCal derives
+    them exactly this way. Its Model Specification report for a single phase of
+    eight dates lists, in AD:
+
+        U1 ulim 669.5   U2 671.5   U3 675.5   U4-U6 (clipped)
+        U7 llim 537.5   U8 540.5
+        Start: ulim 669.5 = min over the dates' ulim
+        End:   llim 540.5 = max over the dates' llim
+
+    -- each date bounded by its own likelihood's extent, and each boundary then
+    bounded by the constraints t_start < t_i < t_end. Which is to say the older
+    boundary cannot be younger than the youngest end of the OLDEST date's support,
+    because it has to be older than that date; and symmetrically for the younger.
+
+    Reproducing OxCal's numbers needs a threshold, and SUPPORT_THRESHOLD gets the
+    DIFFERENCES between dates exactly right with a fixed offset per side (-3.5 years
+    on the young end, +2.5 on the old end, on all five values OxCal reports
+    unclipped). The answer barely depends on it: the quantity that reaches the
+    posterior is the gap between the two bounds, 123 years against OxCal's 129, and
+    feeding OxCal's own value in instead moves the modelled span by 0.11 years.
+
+    The INLIER likelihood, not the outlier mixture: a flagged date's broad component
+    runs for thousands of years, and that is a statement about where its event might
+    be if the sample is residual, not about the range the parameter is confined to.
+    """
+    youngest_of_oldest, oldest_of_youngest = -np.inf, np.inf
+    for date_id in date_ids:
+        density = inliers.get(date_id)
+        if density is None:
+            continue
+        support = np.where(density >= density.max() * SUPPORT_THRESHOLD)[0]
+        if not len(support):
+            continue
+        youngest_of_oldest = max(youngest_of_oldest, float(grid[support[0]]))
+        oldest_of_youngest = min(oldest_of_youngest, float(grid[support[-1]]))
+    return youngest_of_oldest, oldest_of_youngest
+
+
+def pair_limits(element_bounds: Dict, oldest_id: str, youngest_id: str,
+                grid: np.ndarray, inliers: Dict[str, np.ndarray],
+                date_ids: Sequence[str],
+                ) -> Tuple[Tuple[float, float], Tuple[float, float]]:
+    """
+    The four limits A.31 needs for one pair of boundaries: each one's own explicit
+    TPQ/TAQ where it has them, tightened by what the dates between them imply.
+    """
+    young_bound, old_bound = containment_limits(grid, inliers, date_ids)
+    oldest = boundary_limits(element_bounds, oldest_id)
+    youngest = boundary_limits(element_bounds, youngest_id)
+    return ((oldest[0], max(oldest[1], young_bound)),
+            (min(youngest[0], old_bound), youngest[1]))
 
 
 def _log_limits_factor(grid: np.ndarray, oldest_limits: Tuple[float, float],
@@ -836,33 +904,39 @@ def _span_prior_correction(grid: np.ndarray, num_boundaries: int, enabled: bool,
       1/g goes as 1/(span + c), which penalises long spans and is the right sign
       and roughly the right size.
 
-      IT IS NOW IMPLEMENTED, but only from limits that are real -- see
-      _log_limits_factor and boundary_limits. A Boundary carrying a TPQ or TAQ, or
-      enclosed by an element that does, has genuine llim/ulim and gets the factor;
-      an unconstrained one is UNBOUNDED, g is then infinite, 1/g is constant in the
-      span, and the factor correctly drops out.
+      IT IS NOW IMPLEMENTED -- see _log_limits_factor for the expression and
+      pair_limits for where the limits come from. Two dead ends on the way, both
+      worth not repeating:
 
-      That leaves OxCal's default answer unmatched, and deliberately so. OxCal
-      evidently supplies limits of its own for unconstrained boundaries -- the
-      second term of the min wins there, worth 18% -- and none of 2001, 2009a or
-      2008 says what they are. Bracketing the model at AD 500-750 and at AD
-      200-1100, a 3.6x change of window, moved OxCal by 0.57 years, so those limits
-      are internal to it rather than the user's constraints. Standing in the grid's
-      own edges was tried and rejected: it made the factor an artefact of
-      _build_grid's padding, contributing +1.20 years at a 600-year window and
-      +0.13 at 4,800 -- halving with each doubling, heading for nothing, and in the
-      WRONG DIRECTION besides, widening the span where OxCal's narrows it. Fitting
-      a constant to close the remaining gap is what the reverted minimum-span floor
-      did.
+        * the solver's GRID edges do not stand in for a missing constraint. That
+          made the factor an artefact of _build_grid's padding, contributing +1.20
+          years at a 600-year window and +0.13 at 4,800, halving with each
+          doubling and heading for nothing -- and widening the span where OxCal's
+          narrows it.
+        * an unconstrained boundary is not therefore unbounded either. The DATES
+          bound the boundaries enclosing them, which is how OxCal derives these,
+          and it prints them: its Model Specification report gives llim/ulim per
+          parameter, and for one phase of eight dates the older boundary's ulim is
+          exactly the smallest of the dates' ulim.
 
-      Consequences to expect meanwhile: a phase's span from this app is wider than
-      OxCal's default answer, by more the more the prior does the work -- about 18%
-      on eight tightly clustered dates, 62% on four, 7% on Shag River's sixteen.
-      Both open items chased elsewhere are partly this: it accounts for 7.7 of the
-      22 years by which the charcoal fixture's span overshoots, and for most of the
-      ordering over-separation in TestOrderingOverSeparates (with the term off on
-      both sides, OxCal's `ordered` separation is 13.47 against our 14.18, and its
-      shared_boundary is 26.30 against our 26.7).
+      What it bought, against OxCal, rms of the modelled dates and then the span:
+
+          oxcal/unordered         0.20 -> 0.13     34.9 -> 30.4
+          oxcal/ordered           2.42 -> 2.05     36.7 -> 31.5
+          oxcal/shared_boundary   0.76 -> 0.30     36.7 -> 31.5
+          outlier/Shag            0.18 -> 0.16     20.7 -> 18.5
+          charcoal/Nenthorn      10.12 -> 8.37     51.4 -> 40.3
+
+      and the ordered-group separation that this suite chased for a long stretch
+      went from +3.03 and +1.50 years to +1.19 and -0.34.
+
+      What is left. Feeding OxCal's OWN reported limits in rather than ours moves
+      the answer 0.11 years, so the residual is not in the limits: on a single
+      phase of eight overlapping dates we get 29.2 against OxCal's 26.3, about
+      three years, cause unknown. SUPPORT_THRESHOLD reproduces the differences
+      between OxCal's reported limits exactly, with a fixed offset per side (-3.5
+      years young, +2.5 old), and the gap that reaches the posterior is 123 years
+      against its 129.
     * At n = 2 the exponent is zero, so a single Phase between two
       Boundaries -- the app's default shape -- is untouched. Nothing to
       apply, and the O(M^2) chain is kept.
@@ -1048,10 +1122,15 @@ def solve(measurements: List[Dict], root: Dict, chain: Chain,
         out = np.exp(_rescaled(log_T[i]))
         return np.where(np.isfinite(out), out, 0.0)
 
+    all_dates = [d for group in chain.groups for d in group]
+    inliers = {d: (outlier_parts[d][0] if d in outlier_parts else likelihood[d])
+               for d in all_dates}
+    oldest_limits, youngest_limits = pair_limits(
+        element_bounds, chain.boundary_ids[0], chain.boundary_ids[-1],
+        grid, inliers, all_dates)
     log_correction = _span_prior_correction(
         grid, len(chain.boundary_ids), uniform_span_prior,
-        boundary_limits(element_bounds, chain.boundary_ids[0]),
-        boundary_limits(element_bounds, chain.boundary_ids[-1]))
+        oldest_limits, youngest_limits)
     correction = None
     if log_correction is not None:
         if len(chain.groups) == 1:

@@ -178,6 +178,12 @@ def _brute_force(curve, grid, dates):
     quadrature here would make the two disagree for a reason that has nothing to
     do with the algorithm being compared. The quadrature has its own test against
     a continuum reference -- see TestIntervalQuadrature.
+
+    The limits factor is included for the same reason, written out from A.31 rather
+    than imported: at one group there is no interior-boundary factor, so it used to
+    be true that a single group carried no span correction at all, and it is not any
+    more -- the dates bound the boundaries between them, which is a real part of the
+    prior worth 5.8% of the overlap here.
     """
     dt = grid[1] - grid[0]
     K = len(dates)
@@ -195,10 +201,22 @@ def _brute_force(curve, grid, dates):
         return max(whole - 0.5 * dt * (L[j, a] + L[j, b]), 0.0)
 
     M = len(grid)
+    # A.31's limits, from the dates' own extents: the older boundary can be no
+    # younger than the youngest end of the OLDEST date's support, and the younger no
+    # older than the oldest end of the YOUNGEST date's.
+    support = [np.where(l >= l.max() * ec.SUPPORT_THRESHOLD)[0] for l in L]
+    young_bound = max(grid[sup[0]] for sup in support)
+    old_bound = min(grid[sup[-1]] for sup in support)
+
+    def limits(b, a):
+        # only A.31's second term is finite with the outer sides unconstrained
+        g = (grid[a] - grid[b]) - (young_bound - old_bound)
+        return 1.0 / g if g > 0 else 1.0
+
     out = np.zeros((K, M))
     for b in range(M):
         for a in range(b + 1, M):
-            base = (grid[a] - grid[b]) ** (-K)
+            base = (grid[a] - grid[b]) ** (-K) * limits(b, a)
             fs = [F(j, b, a) for j in range(K)]
             for j in range(K):
                 weight = base
@@ -472,29 +490,36 @@ class TestAgainstOxCalModelled:
             assert draws.std() == pytest.approx(entry['posterior_std'], rel=0.15)
 
 
-class TestOrderingOverSeparates:
+class TestOrderedGroupsAgreeWithOxCal:
     """
-    A small, open, well-localised disagreement with OxCal: two ORDERED groups come
-    out about 2.6 years further apart than OxCal puts them, and the effect appears
-    only when something orders them.
+    Two ordered groups against OxCal, which was the largest open disagreement in
+    this suite for a long stretch and is now closed to about a year.
 
-        run               OxCal   exact   gibbs
+        run               OxCal   exact   gibbs        was (exact/gibbs)
         unordered          -0.1     0.0    -0.1
-        ordered            11.7    14.7    14.2
-        shared_boundary    13.2    14.7    16.3
+        ordered            11.7    12.9    12.4        15.8 / 14.4
+        shared_boundary    13.2    12.9    14.0        15.8 / 15.9
 
-    Worth its own class because of what the three rows exclude. It is not the
-    outlier model (no fixture here has one). It is not the interval quadrature
-    (that is what took the unordered row to 0.1). It is not the implicit-boundary
-    rewrite, since it is the same size when the middle Boundary is written out. It
-    is not the UniformSpanPrior correction, without which shared_boundary separates
-    by 26.7 -- and it is not that correction's discretisation either, which was a
-    genuine first-order bug worth about 1.1 years of the exact solver's row and is
-    now fixed and pinned in TestTheCorrectionIsExact. Nor is it grid resolution:
-    what is left survives halving the step twice.
+    The history is worth keeping, because the residual was blamed on several things
+    it was not. Four separate causes, each found by measurement:
 
-    It is also the floor under the charcoal fixture's larger overshoot, which is
-    why it is pinned separately from it -- see tests/nenthorn_charcoal_fixture.
+      * the interval quadrature, which gave an interval of span k*step one cell too
+        much likelihood -- see _interval_integral. Worth most of it, and it was
+        making every modelled phase several times too narrow.
+      * the same in the sampler, which had to be corrected separately.
+      * the interior-boundary factor, which divided by a continuum power where the
+        discrete model needs a binomial count -- see _span_prior_correction. ~1.1
+        years.
+      * the LIMITS factor, absent entirely, which this suite asserted was negligible
+        on the strength of a measurement that did not test it. Worth 1.5-2 years
+        here and 18% of the span on a prior-dominated model. Identified by asking
+        OxCal to run the same models with UniformSpanPrior off, at which point it
+        agreed with us; see pair_limits.
+
+    What is NOT the cause, also by measurement: the implicit-boundary rewrite (the
+    gap was the same size with the middle Boundary written out), OxCal's own
+    convergence (kIterations 30 -> 60 moves it 0.23 years), and the grid (what is
+    left survives halving the step twice).
     """
 
     def _separation(self, run, **kwargs):
@@ -519,35 +544,36 @@ class TestOrderingOverSeparates:
         return mean(ox.QUARRY) - mean(ox.ROCKSHELTER)
 
     def test_with_nothing_ordering_them_we_agree_exactly(self):
-        """The control. Same dates, same curve, same span prior -- only the
-        ordering removed -- and the separation matches to a tenth of a year."""
+        """The control. Same dates, same curve, same priors, only the ordering
+        removed, and the separation matches to a tenth of a year."""
         assert self._separation('unordered') == pytest.approx(
             self._oxcals('unordered'), abs=0.5)
 
     @pytest.mark.parametrize('run', ['ordered', 'shared_boundary'])
-    def test_ordering_costs_about_two_and_a_half_years(self, run):
+    def test_ordered_groups_agree_to_about_a_year(self, run):
         """
-        Pinned as a band on the EXCESS, so it fails both if the gap widens and if
-        someone closes it -- the latter being the more interesting failure and the
-        signal to rewrite this docstring.
+        Measured at +1.19 on `ordered` and -0.34 on `shared_boundary`, from +4.10 and
+        +2.57 before the limits factor and +5.03/+3.50 before the binomial count.
+        Two years is the bound because the two runs now straddle OxCal rather than
+        both sitting above it.
         """
         excess = self._separation(run) - self._oxcals(run)
-        assert 1.0 < excess < 5.0, (run, excess)
+        assert abs(excess) < 2.0, (run, excess)
 
-    def test_the_span_prior_correction_is_not_what_causes_it(self):
+    def test_both_refinements_earn_their_place(self):
         """
-        Switching the correction off makes the separation much WORSE (26.7 against
-        14.7), so the residual is not an artefact of applying it. Recorded because
-        the correction is the obvious suspect -- and it was half right to be: its
-        DISCRETISATION was wrong and worth about 1.1 years here. What this rules out
-        is the correction's presence, not its arithmetic; TestTheCorrectionIsExact
-        covers the arithmetic.
+        Switching the whole UniformSpanPrior off is much worse (26.7 years of
+        separation against OxCal's 13.2), and OxCal agrees with US when ITS option is
+        off -- 26.30 against our 26.7 -- which is what identified the missing factor
+        in the first place. So this is not an artefact of applying the correction.
         """
         with_it = self._separation('shared_boundary', uniform_span_prior=True)
         without = self._separation('shared_boundary', uniform_span_prior=False)
         oxcal = self._oxcals('shared_boundary')
-        assert abs(with_it - oxcal) < abs(without - oxcal) / 2.0, (
+        assert abs(with_it - oxcal) < abs(without - oxcal) / 4.0, (
             with_it, without, oxcal)
+        assert without == pytest.approx(26.5, abs=1.5), (
+            "OxCal with its own option off reports 26.30 here", without)
 
 
 class TestLimiters:
@@ -596,10 +622,17 @@ class TestUniformSpanPrior:
                                _phase('p1'), _boundary('b2')])
         return dates, tree
 
-    def test_no_effect_with_two_boundaries(self):
+    def test_no_interior_factor_with_two_boundaries_but_the_limits_still_apply(self):
         """
-        The exponent is n - 2, so a single Phase between two Boundaries --
-        the app's default shape -- is untouched, and the cheap chain is kept.
+        The interior-boundary exponent is n - 2, so a single Phase between two
+        Boundaries has no interior freedom to divide out. It is NOT untouched
+        though: the limits factor applies to any pair with a span, and the dates
+        between them supply the limits (see exact_chain.pair_limits). This used to
+        assert that the whole correction was skipped here, which was wrong.
+
+        Both still run on the cheap O(M^2) chain -- with one group the correction is
+        a function of that group's own two boundaries, so it folds into the transfer
+        matrix.
         """
         dates = _dates(('sp1_a', 3000, 30, 'p'), ('sp1_b', 3040, 30, 'p'))
         tree = _sequence('s', [_boundary('b0'), _phase('p'), _boundary('b1')])
@@ -608,11 +641,12 @@ class TestUniformSpanPrior:
         on = ec.solve(dates, tree, chain, num_samples=100, uniform_span_prior=True)
         off = ec.solve(dates, tree, chain, num_samples=100, uniform_span_prior=False)
 
-        assert on['uniform_span_prior'] is False, 'nothing to apply at n = 2'
-        for d in dates:
-            a = np.array(on['measurements'][d['id']]['probability_distribution'])
-            b = np.array(off['measurements'][d['id']]['probability_distribution'])
-            assert np.allclose(a, b)
+        assert on['uniform_span_prior'] is True
+        assert off['uniform_span_prior'] is False
+        # It pulls the boundaries in, as it does with three of them.
+        span = lambda r: (r['boundaries']['b0']['posterior']['posterior_mean']
+                          - r['boundaries']['b1']['posterior']['posterior_mean'])
+        assert span(on) < span(off), (span(on), span(off))
 
     def test_applies_with_three_boundaries_and_can_be_switched_off(self):
         dates, tree = self._two_group_model()
@@ -684,6 +718,17 @@ class TestUniformSpanPrior:
         with np.errstate(divide='ignore', invalid='ignore'):
             corr = np.where(cells > 1, 1.0 / np.where(cells > 1, cells - 1, 1.0), 0.0)
 
+        # ...times the limits factor, A.31's second term, which is the only finite
+        # one when nothing constrains the outer sides. Written out here rather than
+        # imported for the same reason as the count above it.
+        support = [np.where(lik[d] >= lik[d].max() * ec.SUPPORT_THRESHOLD)[0]
+                   for d in lik]
+        young_bound = max(grid[sup[0]] for sup in support)
+        old_bound = min(grid[sup[-1]] for sup in support)
+        outer_span = grid[None, :] - grid[:, None]               # [b2, b0]
+        g = outer_span - (young_bound - old_bound)
+        corr = corr * np.where(g > 0, 1.0 / np.where(g > 0, g, 1.0), 1.0)
+
         # Explicit cube, axes (b2, b1, b0).
         for gi, ids in enumerate(chain.groups):
             for d in ids:
@@ -736,16 +781,25 @@ class TestTheCorrectionIsExact:
     LO, HI = 2800.0, 3600.0
 
     def _flat(self, M):
-        """Patch the likelihood and the grid, and undo it afterwards."""
+        """
+        Patch the likelihood, the grid, and the containment limits; undo afterwards.
+
+        The limits go too because this class is about the INTERIOR-BOUNDARY factor
+        alone, and a flat likelihood has no meaningful extent -- the support it
+        implies is just the grid, which is precisely what exact_chain.pair_limits
+        refuses to treat as a constraint. Left in, it would apply a second factor of
+        1/(span + window) and the closed form below would stop being the closed form.
+        """
         grid = np.linspace(self.LO, self.HI, M)
         flat = np.ones(M)
-        saved = (ec._date_likelihood, ec._build_grid)
+        saved = (ec._date_likelihood, ec._build_grid, ec.containment_limits)
         ec._date_likelihood = lambda g, m, b: flat.copy()
         ec._build_grid = lambda ms, eb, ng=1: grid.copy()
+        ec.containment_limits = lambda g, inl, ids: (-np.inf, np.inf)
         return grid, saved
 
     def _restore(self, saved):
-        ec._date_likelihood, ec._build_grid = saved
+        ec._date_likelihood, ec._build_grid, ec.containment_limits = saved
 
     def _model(self, n, dates_per_group):
         children, dates = [], []
@@ -854,16 +908,18 @@ class TestTheLimitsFactor:
         tree['tpq_age_bp'], tree['taq_age_bp'] = tpq, taq
         return tree, dates
 
-    def test_an_unconstrained_model_gets_no_factor_at_all(self):
+    def test_the_grid_never_supplies_a_limit(self):
         """
-        So the answer stays independent of the window, which this solver has always
-        been and must remain: reporting must not depend on how much padding the grid
-        carries for the boundaries' benefit.
+        An absent TPQ/TAQ is an absent constraint, so boundary_limits reports
+        infinities and the solver's own grid edges are never stood in for them.
 
-        Asserted as ON against OFF at each window rather than across windows -- the
-        span itself moves with the window for a legitimate reason (with the prior
-        doing the work, E[span] is a third of it), and what must not move is the
-        factor's contribution.
+        The factor is not inert on an unconstrained model, though: the DATES bound
+        the boundaries they sit between, which is how OxCal derives these as well
+        (see pair_limits). This test asserted the opposite for one commit, reasoning
+        that no constraint meant no limits -- the dates are the constraint. What
+        survives is the property that actually matters: the answer must not depend on
+        how much padding the grid carries, that being a numerical choice rather than
+        a statement about the model.
         """
         tree, dates = self._model()
         bounds = inherited_bounds(tree)
@@ -871,24 +927,21 @@ class TestTheLimitsFactor:
         grid = np.linspace(self.LO, self.HI, self.M)
         assert ec._log_limits_factor(grid, (np.inf, -np.inf), (np.inf, -np.inf)) is None
 
-        chain = ec.layout(tree, dates)
-        for width in (600.0, 2400.0):
-            saved = ec._build_grid
+        # The limits themselves, at two window widths: these are what the grid could
+        # leak into, and they are the right thing to pin. The factor's effect on the
+        # span cannot be asserted window-independently -- a boundary enclosing four
+        # identical dates has a heavy tail, so the span moves with the window on its
+        # own account and the factor moves proportionally with it.
+        derived = []
+        for width in (700.0, 2800.0):
             axis = np.arange(3200.0 - width / 2, 3200.0 + width / 2, 1.0)
-            ec._build_grid = lambda ms, eb, ng=1, _a=axis: _a.copy()
-            try:
-                spans = []
-                for flag in (True, False):
-                    solved = ec.solve(dates, tree, chain, num_samples=50,
-                                      uniform_span_prior=flag)
-                    b = solved['boundaries']
-                    spans.append(b['b0']['posterior']['posterior_mean']
-                                 - b['b1']['posterior']['posterior_mean'])
-                    assert solved['uniform_span_prior'] is False, (
-                        'two boundaries and no constraints leaves nothing to apply')
-                assert spans[0] == pytest.approx(spans[1], abs=1e-9), (width, spans)
-            finally:
-                ec._build_grid = saved
+            inliers = {}
+            for d in dates:
+                inliers[d['id']] = ec._date_likelihood(
+                    axis, d, ec._effective_date_bounds(d, bounds))
+            derived.append(ec.containment_limits(axis, inliers,
+                                                 [d['id'] for d in dates]))
+        assert derived[0] == pytest.approx(derived[1], abs=1.5), derived
 
     def test_with_real_constraints_it_matches_the_closed_form(self):
         """
