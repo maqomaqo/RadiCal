@@ -85,7 +85,13 @@ interface AnalysisResult {
     // labelled as one.
     requested?: 'auto' | 'exact' | 'gibbs'
     reason?: string | null
+    // How many implied transitions were supplied to the solver that ran. Always
+    // 0 on the sampled path.
     implicit_boundaries?: number
+    // How many WOULD be needed for the exact solver to apply. Set only when that
+    // is why this was sampled -- a different statement from `reason`, which says
+    // the model cannot be integrated exactly at all.
+    exact_needs_boundaries?: number
     // Sampled path only. `converged` is against OxCal's own 0.95 target for the
     // overlap-integral convergence measure.
     sweeps?: number
@@ -845,7 +851,16 @@ export default function Results() {
               <Typography variant="subtitle2" gutterBottom>
                 Sampled, but not fully converged
               </Typography>
-              {analysis.solver.reason ? (
+              {analysis.solver.exact_needs_boundaries ? (
+                <Typography variant="body2" sx={{ mb: 1 }}>
+                  Integrating this model exactly would mean supplying{' '}
+                  {analysis.solver.exact_needs_boundaries === 1
+                    ? 'a transition'
+                    : `${analysis.solver.exact_needs_boundaries} transitions`}{' '}
+                  that its ordering only implies, which changes the model rather than
+                  restating it, so it was sampled as written instead.
+                </Typography>
+              ) : analysis.solver.reason ? (
                 <Typography variant="body2" sx={{ mb: 1 }}>
                   This model cannot be solved exactly because {analysis.solver.reason}.
                 </Typography>
@@ -869,14 +884,20 @@ export default function Results() {
                 short of the 95% usually wanted. The ranges below are probably a few
                 years out rather than wrong
                 {analysis.solver.reason
-                  ? ', but adding a Boundary where the model needs one would let it be solved exactly instead.'
+                  ? ', but writing in the Boundary the model implies would let it be solved exactly without changing anything.'
                   : '.'}
               </Typography>
             </Alert>
           ) : (
             <Tooltip
               title={
-                (analysis.solver.reason
+                (analysis.solver.exact_needs_boundaries
+                  ? `Integrating this model exactly would mean supplying ${
+                      analysis.solver.exact_needs_boundaries === 1
+                        ? 'a transition'
+                        : analysis.solver.exact_needs_boundaries + ' transitions'
+                    } that its ordering only implies. That is a change to the model, not a restatement of it — it splits one phase-span term in two and measurably moves the answer away from OxCal’s — so it was sampled as written with OxCal’s own Metropolis-Hastings/Gibbs scheme. Choose the exact solver if you want the transitions supplied anyway; note that it will then be answering a slightly different model. `
+                  : analysis.solver.reason
                   ? `This model cannot be integrated exactly — ${analysis.solver.reason} — so it was sampled with OxCal’s Metropolis-Hastings/Gibbs scheme. `
                   : 'OxCal’s Metropolis-Hastings/Gibbs sampler was chosen for this analysis. This model could also have been integrated exactly; the two agree to well under a year on the models where both can be run. ') +
                 `It converged to ${

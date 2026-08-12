@@ -282,6 +282,21 @@ def _run_bayesian(
     sampler targets the true posterior from the first sweep and reproduces the
     exact solver to under a year wherever the exact solver can be asked.
 
+    A model that is not a chain AS AUTHORED goes to the sampler, even when
+    supplying the transitions its ordering implies would make it exactly solvable.
+    Both remain available -- `exact` supplies them and runs -- but that insertion
+    is a real change to the model rather than a reformulation, and it is the wrong
+    default: it splits one span term over K dates into two over K1 + K2, and K is
+    the exponent in (span)^(-K) that resists a date wandering away from its group.
+    Measured against OxCal, rms of the modelled dates: on tests/fixtures/oxcal's
+    `ordered` run 1.49 sampled on the model as written against 2.51 exact on the
+    patched one, and on the charcoal fixture, where a declared residual date needs
+    that resistance most, 4.53 against 10.63.
+
+    The cost, which the results page states rather than hides: the two solvers are
+    then no longer given the same tree, so choosing `exact` on such a model
+    cross-checks a different model as well as a different method.
+
     Either choice can be overridden per analysis via bayesian_config.solver --
     see BayesianConfigInput.solver for what each value means and why the
     override exists. `exact` on a model that cannot be integrated raises rather
@@ -295,42 +310,46 @@ def _run_bayesian(
 
         {'method': 'exact' | 'gibbs',
          'requested': what the config asked for ('auto' unless overridden),
-         'reason': why the model is not exactly solvable (None when it is,
-                   whichever solver actually ran),
-         'implicit_boundaries': how many transitions were supplied,
+         'reason': why the model is not exactly solvable AS AUTHORED (None when
+                   it is, whichever solver actually ran),
+         'implicit_boundaries': how many transitions were supplied to the solver
+                   that ran -- always 0 on the sampled path, which never needs
+                   them,
+         'exact_needs_boundaries': how many WOULD have to be supplied for the
+                   exact solver to apply, set only when that is why the sampler
+                   ran,
          and for the sampled path: 'sweeps', 'convergence', 'converged', and
          'outlier_scale' -- the shared offset scale each outlier model's dates
          inferred, which only the sampler estimates (see services/gibbs.py)}
     """
     requested = bayesian_config.get('solver') or 'auto'
 
-    # Which tree to solve is decided ONCE, before the solver is chosen, and both
-    # solvers then get the same one. That matters specifically for the override:
-    # cross-checking the exact solver against the sampler is only meaningful if
-    # the two are given the same model, and the earlier version handed the
-    # sampler the tree as authored while the exact solver got the patched
-    # candidate -- so on a model needing implicit transitions the two would have
-    # disagreed for a modelling reason and looked like a solver discrepancy.
+    # Each solver gets the tree it can actually take: the sampler the model as
+    # AUTHORED, the exact solver a copy with the transitions the ordering implies
+    # supplied, because it cannot integrate anything else.
     #
-    # It is also the better answer for reproducing OxCal, which is the other
-    # reason the override exists: OxCal orders sibling groups whether or not a
-    # Boundary is written between them (its `ordered` and `shared_boundary` runs
-    # of the Nenthorn fixture agree to 0.948 posterior overlap), so supplying the
-    # transition is closer to what OxCal did than leaving it out.
+    # The two are therefore not always the same tree, which is deliberate and is a
+    # reversal -- they used to share the patched one so that the override was a
+    # pure method-vs-method cross-check. That property is worth less than the
+    # accuracy it cost. Supplying a transition is not a reformulation: it splits
+    # one span term over K dates into two over K1 + K2, weakening the exponent that
+    # holds a group together, and it is measurably the worse answer (see this
+    # function's docstring for the numbers). The results page says when the two
+    # solvers would be comparing different models.
     chain, reason = exact_chain.layout_with_reason(model_tree, measurements)
-    solve_tree = model_tree
-    implicit_boundaries = 0
+    authored_is_chain = chain is not None
+    exact_tree = model_tree
+    exact_needs_boundaries = 0
     if chain is None:
         # A Sequence that orders two groups with no Boundary between them is
-        # not a chain. Supplying the transition it implies makes it exact and
-        # lands 6.4 years rms from OxCal's own answer, against 12.6 for the
-        # sampler this replaced. See model_tree.with_implicit_boundaries.
+        # not a chain. Supplying the transition it implies makes it solvable
+        # here -- at a price. See model_tree.with_implicit_boundaries.
         candidate, inserted = with_implicit_boundaries(model_tree)
         if inserted:
             patched, patched_reason = exact_chain.layout_with_reason(candidate, measurements)
             if patched is not None:
-                chain, reason, solve_tree = patched, None, candidate
-                implicit_boundaries = len(inserted)
+                chain, exact_tree = patched, candidate
+                exact_needs_boundaries = len(inserted)
             else:
                 # Report why the model is still not a chain AFTER the
                 # transitions were supplied -- the original reason was
@@ -346,9 +365,13 @@ def _run_bayesian(
             'sampler, which has no such restriction.'
         )
 
-    if chain is not None and requested != 'gibbs':
+    # `auto` takes the exact answer only where it needs no help. Asking for it
+    # explicitly still gets it, transitions and all -- that is what the override
+    # is for.
+    if chain is not None and (requested == 'exact'
+                              or (requested != 'gibbs' and authored_is_chain)):
         solved = exact_chain.solve(
-            measurements, solve_tree, chain,
+            measurements, exact_tree, chain,
             num_samples=bayesian_config.get('mcmc_samples', 2000),
             uniform_span_prior=bayesian_config.get('uniform_span_prior', True),
         )
@@ -357,11 +380,11 @@ def _run_bayesian(
             'method': 'exact',
             'requested': requested,
             'reason': None,
-            'implicit_boundaries': implicit_boundaries,
+            'implicit_boundaries': exact_needs_boundaries,
         }
 
     sampled = gibbs.solve(
-        measurements, solve_tree,
+        measurements, model_tree,
         num_samples=bayesian_config.get('mcmc_samples', 2000),
         uniform_span_prior=bayesian_config.get('uniform_span_prior', True),
     )
@@ -369,12 +392,18 @@ def _run_bayesian(
     return sampled['measurements'], sampled['boundaries'], {
         'method': 'gibbs',
         'requested': requested,
-        # None when the model WAS exactly solvable and the sampler ran by
-        # choice. Reporting a "why it could not be solved exactly" against a
-        # model that could would be simply false, and would make the results
-        # page warn about a deliberate, valid decision.
+        # Why the model is not a chain AS AUTHORED. None when it is one and the
+        # sampler ran by choice: reporting a "why it could not be solved exactly"
+        # against a model that could would be simply false, and would make the
+        # results page warn about a deliberate, valid decision.
         'reason': reason,
-        'implicit_boundaries': implicit_boundaries,
+        # Nothing was supplied -- the sampler took the model as written.
+        'implicit_boundaries': 0,
+        # ...but this is how many the exact solver would have needed, which is a
+        # different statement from `reason` and has to stay distinguishable from
+        # it: here the model COULD have been integrated exactly, and was not,
+        # because doing so would have changed it.
+        'exact_needs_boundaries': exact_needs_boundaries,
         'sweeps': sampled['sweeps'],
         'convergence': sampled['convergence'],
         'converged': sampled['converged'],

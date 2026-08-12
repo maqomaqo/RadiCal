@@ -80,21 +80,52 @@ class TestExactPath:
         fetched = client.get(f'/api/analysis/{analysis_id}').json()['data']
         assert fetched['solver']['method'] == 'exact'
 
-    def test_implicit_transitions_are_counted_not_hidden(self, client):
-        """
-        Two phases ordered with no Boundary between them are solved exactly by
-        supplying the transition they imply -- a change to the model, so the
-        record says how many were added rather than presenting the result as
-        though the user's model were solvable as written.
-        """
-        tag = f'sr{next(_IDS)}'
+    def _ordered_without_a_boundary(self, tag):
+        """Two phases ordered with no Boundary between them: solvable exactly only
+        by supplying the transition they imply."""
         tree = _chain_tree(tag)
         tree['children'].insert(2, {'id': f'{tag}p2', 'element_type': 'phase',
                                    'name': 'Later', 'children': []})
-        created = _run(client, tag, tree, [
+        return tree, [
             _measurement(f'{tag}s1', f'{tag}p1', age_bp=3200),
             _measurement(f'{tag}s2', f'{tag}p2', age_bp=3000),
-        ])
+        ]
+
+    def test_a_model_needing_a_transition_is_sampled_not_quietly_patched(self, client):
+        """
+        `auto` does not supply the transition. Doing so makes the model exactly
+        solvable, but it splits one span term over K dates into two over K1 + K2 and
+        is measurably the worse answer -- 2.51 years rms from OxCal against the
+        sampler's 1.49 on the plain fixture, 10.63 against 4.53 on the charcoal one.
+        So the user's model is taken as written and sampled.
+        """
+        tag = f'sr{next(_IDS)}'
+        tree, measurements = self._ordered_without_a_boundary(tag)
+        created = _run(client, tag, tree, measurements)
+        assert created.status_code == 200, created.text
+        solver = created.json()['data']['solver']
+        assert solver['method'] == 'gibbs'
+        # Nothing was supplied to the solver that ran...
+        assert solver['implicit_boundaries'] == 0
+        # ...but the record still says what an exact solve would have cost, which
+        # is a different statement from "this cannot be solved exactly".
+        assert solver['exact_needs_boundaries'] == 1
+
+    def test_asking_for_exact_still_supplies_them_and_counts_them(self, client):
+        """
+        The override exists so an analyst can have the exact answer anyway. It
+        gets it, transitions and all, and the record says how many -- rather than
+        presenting the result as though their model were solvable as written.
+        """
+        tag = f'sr{next(_IDS)}'
+        tree, measurements = self._ordered_without_a_boundary(tag)
+        created = client.post('/api/analysis/bayesian', json={
+            'name': f'Solver {tag}',
+            'measurements': measurements,
+            'model_tree': tree,
+            'bayesian_config': {'mcmc_samples': 200, 'solver': 'exact'},
+            'save': True,
+        })
         assert created.status_code == 200, created.text
         solver = created.json()['data']['solver']
         assert solver['method'] == 'exact'
@@ -245,16 +276,17 @@ class TestSolverOverride:
             got = sampled_results[sample_id]['posterior_mean']
             assert got == pytest.approx(exact['posterior_mean'], abs=2.0), sample_id
 
-    def test_both_solvers_are_given_the_same_model(self):
+    def test_each_solver_is_given_the_tree_it_can_take(self):
         """
-        A cross-check is only meaningful if the two solvers see the same thing.
+        On a model that is not a chain as authored the two solvers see DIFFERENT
+        trees -- the sampler the model as written, the exact solver a copy with the
+        implied transition supplied, because it cannot integrate anything else.
 
-        Implicit transitions are supplied to make an ordered-without-boundaries
-        model exactly solvable, and an earlier version handed the SAMPLER the
-        tree as authored while the exact solver got the patched one -- so on such
-        a model the two would have disagreed for a modelling reason and it would
-        have looked like a solver discrepancy. Both must now report the same
-        patch count.
+        This reverses an earlier decision to hand both the patched tree so that the
+        override was a pure method-vs-method cross-check. That property is real but
+        costs accuracy on every such model, since the insertion weakens the (span)^
+        (-K) exponent, and the record keeps the difference visible instead: the
+        patch count is 1 for the exact solve and 0 for the sampled one.
         """
         tag = f'so{next(_IDS)}'
         tree = _chain_tree(tag)
@@ -271,7 +303,8 @@ class TestSolverOverride:
             _r, _b, records[choice] = analysis_api._run_bayesian(
                 measurements, tree, {'mcmc_samples': 200, 'solver': choice})
         assert records['exact']['implicit_boundaries'] == 1
-        assert records['gibbs']['implicit_boundaries'] == 1
+        assert records['gibbs']['implicit_boundaries'] == 0
+        assert records['gibbs']['exact_needs_boundaries'] == 1
 
     def test_it_round_trips_through_a_saved_analysis(self, client):
         """The override has to survive being saved, or a rerun would silently

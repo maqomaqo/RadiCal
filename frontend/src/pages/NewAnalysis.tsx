@@ -676,9 +676,9 @@ export default function NewAnalysis() {
                   </Select>
                   <FormHelperText>
                     {mcmc.solver === 'auto' &&
-                      'Integrates the posterior exactly where the model allows it, and samples otherwise.'}
+                      'Integrates the posterior exactly where the model as written allows it, and samples otherwise.'}
                     {mcmc.solver === 'exact' &&
-                      'Fails rather than sampling if this model cannot be integrated exactly.'}
+                      'Fails rather than sampling if this model cannot be integrated exactly. Where a model needs a Boundary its ordering only implies, this supplies it — which changes the model slightly.'}
                     {mcmc.solver === 'gibbs' &&
                       'Uses OxCal’s own method throughout — for reproducing a published analysis, or cross-checking the exact solver.'}
                   </FormHelperText>
