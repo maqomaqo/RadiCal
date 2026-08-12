@@ -794,7 +794,7 @@ export default function Results() {
       </Grid>
 
       {/* Which solver produced every number below it. Placed here, above the
-          plots, because it qualifies all of them rather than any one.
+          results table, because it qualifies all of them rather than any one.
 
           Both good outcomes are quiet chips -- they are the normal cases, and a
           permanent banner announcing one would be noise. What earns a warning is
@@ -925,92 +925,6 @@ export default function Results() {
           )}
         </Box>
       )}
-
-      {/* Posterior distribution plots, in the model's own reading order --
-          the same order as the results table and both exports, so scrolling
-          the plots walks the sequence from oldest to youngest instead of
-          whatever order the results happened to come back in.
-          Boundaries are drawn in their place between the phases they
-          separate, since a transition is usually what the model was built to
-          estimate and reads best against the dates either side. Falls back
-          to the results order for an analysis with no stored structure. */}
-      {/* Placed above the plots rather than with the table's controls, so the
-          switch that hides them isn't below everything it hides. Only shown
-          when there are boundary plots to hide. */}
-      {boundaryPlotCount > 0 && (
-        <FormControlLabel
-          sx={{ mb: 1 }}
-          control={
-            <Checkbox
-              size="small"
-              checked={showBoundaryPlots}
-              onChange={(e) => setShowBoundaryPlots(e.target.checked)}
-            />
-          }
-          label={`Show boundary plots (${boundaryPlotCount})`}
-        />
-      )}
-
-      {visiblePlots.map((series) => (
-        <Box key={series.key} sx={{ mb: 4 }}>
-          {(series.path || series.kind === 'boundary') && (
-            <Stack direction="row" spacing={1} sx={{ mb: 1 }} flexWrap="wrap" useFlexGap>
-              {series.path && (
-                <Chip size="small" icon={<AccountTreeIcon />} label={series.path} />
-              )}
-              {series.kind === 'boundary' && (
-                <Chip
-                  size="small"
-                  color="primary"
-                  variant="outlined"
-                  label="Boundary — modelled transition"
-                />
-              )}
-            </Stack>
-          )}
-          {series.distribution && series.distribution.length > 0 ? (
-            <PosteriorPlot
-              calAges={series.distribution.map(([age]) => age)}
-              probabilities={series.distribution.map(([, prob]) => prob)}
-              hpd68={series.hpd68}
-              hpd95={series.hpd95}
-              hpd68Ranges={series.hpd68Ranges}
-              hpd95Ranges={series.hpd95Ranges}
-              sampleName={series.title}
-              pointEstimates={series.pointEstimates}
-              showMean={showMean}
-              showMedian={showMedian}
-              dateFormat={dateFormat}
-            />
-          ) : (
-            <Alert severity="info">
-              No posterior distribution data available for {series.title}
-            </Alert>
-          )}
-        </Box>
-      ))}
-
-      {/* Model Structure -- read-only view of the groups/relationships/TPQ-TAQ
-          this bayesian analysis actually used, if any. Doubles as the
-          "run the Harris matrix as a check" step after the fact: even
-          though the constraints already fed into the MCMC run above, this
-          confirms visually that they were specified as intended. */}
-      {analysis.analysis_type === 'bayesian' &&
-        analysis.measurements &&
-        (structureView.groups.length > 0 || structureView.relationships.length > 0) && (
-          <Paper sx={{ p: 3, mb: 3 }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
-              <AccountTreeIcon color="action" />
-              <Typography variant="h6">Model Structure used</Typography>
-            </Box>
-            <HarrisMatrixDiagram
-              measurements={structureView.measurements}
-              groups={structureView.groups}
-              relationships={structureView.relationships}
-              editable={false}
-            />
-          </Paper>
-        )}
 
       {/* Boundaries used to be listed in a table of their own here. They now
           sit in the results table in their place in the structure, between
@@ -1239,6 +1153,117 @@ export default function Results() {
           </Table>
         </TableContainer>
       </Paper>
+
+      {/* Model Structure -- read-only view of the groups/relationships/TPQ-TAQ
+          this bayesian analysis actually used, if any. Doubles as the
+          "run the Harris matrix as a check" step after the fact: even
+          though the constraints already fed into the MCMC run, this
+          confirms visually that they were specified as intended.
+
+          It reads after the results table because it answers the question the
+          table raises -- "what ordering produced these ranges?" -- rather than
+          one asked before the ranges have been seen. */}
+      {analysis.analysis_type === 'bayesian' &&
+        analysis.measurements &&
+        (structureView.groups.length > 0 || structureView.relationships.length > 0) && (
+          <Paper sx={{ p: 3, mb: 3 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+              <AccountTreeIcon color="action" />
+              <Typography variant="h6">Model Structure used</Typography>
+            </Box>
+            <HarrisMatrixDiagram
+              measurements={structureView.measurements}
+              groups={structureView.groups}
+              relationships={structureView.relationships}
+              editable={false}
+            />
+          </Paper>
+        )}
+
+      {/* Posterior distribution plots, in the model's own reading order --
+          the same order as the results table and both exports, so scrolling
+          the plots walks the sequence from oldest to youngest instead of
+          whatever order the results happened to come back in.
+          Boundaries are drawn in their place between the phases they
+          separate, since a transition is usually what the model was built to
+          estimate and reads best against the dates either side. Falls back
+          to the results order for an analysis with no stored structure.
+
+          Last on the page, not first. Each plot is roughly half a screen, so
+          a modest analysis put a full-page-height stack of them between the
+          reader and the summary table -- the one thing every visit is for.
+          The ranges, the flagged dates and the structure are all readable
+          without scrolling past a single plot now; the plots are for the date
+          you have already decided to look at closely. */}
+      {plotOrder.length > 0 && (
+        <Paper sx={{ p: 3, mb: 3 }}>
+          <Typography variant="h6" gutterBottom>
+            Posterior Distributions
+          </Typography>
+          <Typography variant="body2" color="textSecondary">
+            One plot per {isBayesian ? 'date and modelled transition' : 'date'}, oldest first
+            — the same order as the table above.
+          </Typography>
+
+          {/* Above the plots rather than beside the table's controls, so the
+              switch that hides them isn't below everything it hides. Only shown
+              when there are boundary plots to hide. */}
+          {boundaryPlotCount > 0 && (
+            <FormControlLabel
+              sx={{ mt: 1 }}
+              control={
+                <Checkbox
+                  size="small"
+                  checked={showBoundaryPlots}
+                  onChange={(e) => setShowBoundaryPlots(e.target.checked)}
+                />
+              }
+              label={`Show boundary plots (${boundaryPlotCount})`}
+            />
+          )}
+
+          <Box sx={{ mt: 2 }}>
+            {visiblePlots.map((series) => (
+              <Box key={series.key} sx={{ mb: 4 }}>
+                {(series.path || series.kind === 'boundary') && (
+                  <Stack direction="row" spacing={1} sx={{ mb: 1 }} flexWrap="wrap" useFlexGap>
+                    {series.path && (
+                      <Chip size="small" icon={<AccountTreeIcon />} label={series.path} />
+                    )}
+                    {series.kind === 'boundary' && (
+                      <Chip
+                        size="small"
+                        color="primary"
+                        variant="outlined"
+                        label="Boundary — modelled transition"
+                      />
+                    )}
+                  </Stack>
+                )}
+                {series.distribution && series.distribution.length > 0 ? (
+                  <PosteriorPlot
+                    calAges={series.distribution.map(([age]) => age)}
+                    probabilities={series.distribution.map(([, prob]) => prob)}
+                    hpd68={series.hpd68}
+                    hpd95={series.hpd95}
+                    hpd68Ranges={series.hpd68Ranges}
+                    hpd95Ranges={series.hpd95Ranges}
+                    sampleName={series.title}
+                    pointEstimates={series.pointEstimates}
+                    showMean={showMean}
+                    showMedian={showMedian}
+                    dateFormat={dateFormat}
+                  />
+                ) : (
+                  <Alert severity="info">
+                    No posterior distribution data available for {series.title}
+                  </Alert>
+                )}
+              </Box>
+            ))}
+          </Box>
+        </Paper>
+      )}
 
       <Box sx={{ mt: 4 }}>
         <Button onClick={() => navigate('/')} variant="outlined">
