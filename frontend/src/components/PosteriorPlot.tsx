@@ -106,6 +106,14 @@ interface PosteriorPlotProps {
    */
   hpd68Ranges?: HPDRange[]
   hpd95Ranges?: HPDRange[]
+  /**
+   * The same date's plain calibration with no stratigraphic constraints --
+   * "what it would say alone" -- drawn as a light grey shadow behind the
+   * posterior when showPrior is on. Off by default: it's a comparison aid,
+   * not something every reading of the plot needs.
+   */
+  priorDistribution?: Array<[number, number]>
+  showPrior?: boolean
   sampleName?: string
   pointEstimates?: {
     mean?: number
@@ -138,6 +146,8 @@ export default function PosteriorPlot({
   hpd95,
   hpd68Ranges,
   hpd95Ranges,
+  priorDistribution,
+  showPrior = false,
   sampleName,
   pointEstimates,
   showMean = true,
@@ -165,6 +175,24 @@ export default function PosteriorPlot({
     }
 
     const data: any[] = []
+
+    // Prior (unmodelled) distribution, pushed first so the posterior draws
+    // over it -- what's left showing through is exactly where the model
+    // moved the date away from its own plain calibration.
+    if (showPrior && priorDistribution && priorDistribution.length > 0) {
+      const priorAges = priorDistribution.map(([age]) => age)
+      const priorProbs = priorDistribution.map(([, prob]) => prob)
+      data.push({
+        x: priorAges,
+        y: priorProbs,
+        customdata: priorAges.map((age) => formatCalendarAge(age, dateFormat)),
+        fill: 'tozeroy',
+        fillcolor: 'rgba(120, 120, 120, 0.18)',
+        line: { color: 'rgba(120, 120, 120, 0.5)', width: 1 },
+        name: 'Prior (unmodelled)',
+        hovertemplate: '<b>%{customdata}</b><br>Prior probability: %{y:.4f}<extra></extra>',
+      })
+    }
 
     // Main posterior distribution (filled area)
     data.push({
@@ -276,14 +304,32 @@ export default function PosteriorPlot({
     }
 
     return data
-  }, [calAges, probabilities, hpd68, hpd95, hpd68Ranges, hpd95Ranges, pointEstimates, showMean, showMedian, dateFormat])
+  }, [
+    calAges,
+    probabilities,
+    hpd68,
+    hpd95,
+    hpd68Ranges,
+    hpd95Ranges,
+    priorDistribution,
+    showPrior,
+    pointEstimates,
+    showMean,
+    showMedian,
+    dateFormat,
+  ])
 
   // Tick positions stay in cal BP (where the data is); only the labels are
   // in the chosen convention. Null for cal BP, leaving Plotly to auto-tick.
+  // Includes the prior's own ages when it's shown, since the axis
+  // auto-ranges to whatever's plotted and a wider prior otherwise leaves
+  // its edges unlabelled.
   const ticks = useMemo(() => {
     if (!calAges || calAges.length === 0) return null
-    return calendarAxisTicks(Math.min(...calAges), Math.max(...calAges), dateFormat)
-  }, [calAges, dateFormat])
+    const priorAges = showPrior && priorDistribution ? priorDistribution.map(([age]) => age) : []
+    const allAges = priorAges.length > 0 ? [...calAges, ...priorAges] : calAges
+    return calendarAxisTicks(Math.min(...allAges), Math.max(...allAges), dateFormat)
+  }, [calAges, dateFormat, priorDistribution, showPrior])
 
   const layout = useMemo(
     () => ({

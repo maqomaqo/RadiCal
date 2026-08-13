@@ -982,14 +982,12 @@ async def get_analysis(analysis_id: str, db: Session = Depends(get_db)):
     # meaningful for a calibration-only analysis, where the single stored
     # `probability_distribution` already *is* the unmodelled result.
     #
-    # The HPD ranges themselves are returned, not the plottable series they
-    # used to be derived from. The page only ever used that series to
-    # recompute these ranges, and doing so client-side worked from a
-    # distribution downsampled to at most 200 points -- so the figure on
-    # screen disagreed in its last digits with the CSV, which computes the
-    # same thing over the curve's full grid. Same calibration, two
-    # resolutions. Now there is one.
-    unmodelled_by_sample_id: Dict[str, list] = {}
+    # The HPD ranges themselves are returned, computed over the curve's full
+    # grid (see the resolution note below). A plottable series is ALSO kept
+    # here -- capped the same way `probability_distribution` already is --
+    # for the "prior" shadow the Results page can optionally overlay behind
+    # the modelled posterior; the HPD ranges alone can't draw that.
+    unmodelled_by_sample_id: Dict[str, dict] = {}
     if analysis.analysis_type == 'bayesian':
         for r in results:
             sample = samples_by_id.get(r.sample_id)
@@ -1001,10 +999,13 @@ async def get_analysis(analysis_id: str, db: Session = Depends(get_db)):
                     sample.age_bp, sample.error_1sigma,
                     sample.delta_r, sample.delta_r_error,
                 )
-                unmodelled_by_sample_id[r.sample_id] = [
-                    {'confidence': level, 'ranges': curve.get_hpd_ranges(cal_ages, probs, level)}
-                    for level in REPORTING_CONFIDENCE_LEVELS
-                ]
+                unmodelled_by_sample_id[r.sample_id] = {
+                    'hpd_ranges': [
+                        {'confidence': level, 'ranges': curve.get_hpd_ranges(cal_ages, probs, level)}
+                        for level in REPORTING_CONFIDENCE_LEVELS
+                    ],
+                    'distribution': curve.get_display_distribution(cal_ages, probs),
+                }
             except Exception:
                 # A sample whose curve_id can't be resolved (e.g. an old
                 # analysis predating a curve rename) shouldn't break the
@@ -1119,7 +1120,11 @@ async def get_analysis(analysis_id: str, db: Session = Depends(get_db)):
                     "probability_distribution": r.probability_distribution,
                     # [{confidence, ranges}] at each level the page offers,
                     # computed over the curve's full grid -- see above.
-                    "unmodelled_hpd_ranges": unmodelled_by_sample_id.get(r.sample_id),
+                    "unmodelled_hpd_ranges": unmodelled_by_sample_id.get(r.sample_id, {}).get('hpd_ranges'),
+                    # The same unmodelled calibration as a plottable series,
+                    # for the optional "prior" shadow behind the modelled
+                    # posterior on the Results page's plots.
+                    "unmodelled_distribution": unmodelled_by_sample_id.get(r.sample_id, {}).get('distribution'),
                     # Diagnostics, so the results page can flag a suspect
                     # date in place rather than making someone download the
                     # CSV to find out. Null means not computed -- for

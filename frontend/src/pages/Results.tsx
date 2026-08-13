@@ -144,6 +144,9 @@ interface SampleResult {
   // That difference showed up as the screen and the CSV disagreeing in
   // their last digits about the same calibration.
   unmodelled_hpd_ranges?: Array<{ confidence: number; ranges: HPDRange[] }> | null
+  // The same unmodelled calibration as a plottable series, for the optional
+  // "prior" shadow behind the modelled posterior -- see showPrior below.
+  unmodelled_distribution?: Array<[number, number]> | null
 }
 
 /**
@@ -164,6 +167,8 @@ interface PlottableSeries {
   hpd95?: [number, number]
   hpd68Ranges?: HPDRange[]
   hpd95Ranges?: HPDRange[]
+  /** A date's plain calibration with no stratigraphic constraints applied; absent for a boundary, which has no such counterpart. */
+  priorDistribution?: Array<[number, number]>
   pointEstimates: { mean?: number; median?: number; std?: number }
 }
 
@@ -398,6 +403,10 @@ export default function Results() {
   // pair of phases, so on a large one they can outnumber the dates and make
   // the page long to scroll; this hides them without hiding the dates.
   const [showBoundaryPlots, setShowBoundaryPlots] = useState(true)
+  // Off by default -- the modelled posterior is the primary reading of the
+  // plot, and overlaying the unconstrained calibration behind every date at
+  // once is a comparison a reader opts into, not something to show unasked.
+  const [showPrior, setShowPrior] = useState(false)
   // How the posteriors are drawn. Stacked is the default: one figure, one row
   // per date, all on a single calendar axis, which is the only way to see
   // whether two dates overlap -- the question a sequence is built to answer.
@@ -655,6 +664,7 @@ export default function Results() {
         hpd95: result.hpd_95,
         hpd68Ranges: result.hpd_68_ranges,
         hpd95Ranges: result.hpd_95_ranges,
+        priorDistribution: result.unmodelled_distribution ?? undefined,
         pointEstimates: {
           mean: result.posterior_mean,
           median: result.posterior_median,
@@ -694,6 +704,7 @@ export default function Results() {
       hpd95: result.hpd_95,
       hpd68Ranges: result.hpd_68_ranges,
       hpd95Ranges: result.hpd_95_ranges,
+      priorDistribution: result.unmodelled_distribution ?? undefined,
       pointEstimates: {
         mean: result.posterior_mean,
         median: result.posterior_median,
@@ -1284,12 +1295,30 @@ export default function Results() {
             />
           )}
 
+          {/* Only meaningful for a Bayesian analysis -- a plain calibration's
+              posterior IS the unconstrained calibration, so there is nothing
+              to shadow it against. */}
+          {isBayesian && plotOrder.some((s) => s.priorDistribution) && (
+            <FormControlLabel
+              sx={{ mt: 1, ml: 2 }}
+              control={
+                <Checkbox
+                  size="small"
+                  checked={showPrior}
+                  onChange={(e) => setShowPrior(e.target.checked)}
+                />
+              }
+              label="Show prior (unmodelled) distribution"
+            />
+          )}
+
           {plotView === 'stacked' ? (
             <Box sx={{ mt: 2 }}>
               <StackedPosteriorPlot
                 series={visiblePlots}
                 showMean={showMean}
                 showMedian={showMedian}
+                showPrior={showPrior}
                 dateFormat={dateFormat}
               />
             </Box>
@@ -1320,6 +1349,8 @@ export default function Results() {
                     hpd95={series.hpd95}
                     hpd68Ranges={series.hpd68Ranges}
                     hpd95Ranges={series.hpd95Ranges}
+                    priorDistribution={series.priorDistribution}
+                    showPrior={showPrior}
                     sampleName={series.title}
                     pointEstimates={series.pointEstimates}
                     showMean={showMean}

@@ -30,6 +30,8 @@ export interface StackedSeries {
   hpd95?: [number, number]
   hpd68Ranges?: HPDRange[]
   hpd95Ranges?: HPDRange[]
+  /** Same date's plain calibration with no stratigraphic constraints -- see showPrior below. */
+  priorDistribution?: Array<[number, number]>
   pointEstimates: { mean?: number; median?: number; std?: number }
 }
 
@@ -38,6 +40,13 @@ interface StackedPosteriorPlotProps {
   series: StackedSeries[]
   showMean?: boolean
   showMedian?: boolean
+  /**
+   * Overlay each date's unconstrained calibration as a light grey shadow
+   * behind its modelled posterior, scaled into the same row so the two are
+   * directly comparable. Off by default -- a comparison aid, not something
+   * every reading of the stack needs.
+   */
+  showPrior?: boolean
   dateFormat?: DateFormat
 }
 
@@ -67,12 +76,37 @@ const POSTERIOR_FILL = 'rgba(99, 110, 250, 0.25)'
 // read as an outline against the solid dates either side of them.
 const BOUNDARY_LINE = 'rgb(120, 120, 130)'
 const BOUNDARY_FILL = 'rgba(120, 120, 130, 0.16)'
+// A date's unconstrained calibration, shown behind its posterior -- neutral
+// grey rather than boundary's blue-grey so the two read as different things.
+const PRIOR_LINE = 'rgba(100, 100, 100, 0.5)'
+const PRIOR_FILL = 'rgba(100, 100, 100, 0.15)'
 const HPD95_COLOR = 'rgba(255, 127, 14, 0.55)'
 const HPD68_COLOR = 'rgba(44, 160, 44, 0.65)'
 const MEAN_COLOR = 'rgb(214, 39, 40)'
 const MEDIAN_COLOR = 'rgb(148, 103, 189)'
 
 const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
+
+/**
+ * Trims a distribution's outer tails, where the density is indistinguishable
+ * from zero at row scale -- left in, they draw as a flat rule running the
+ * whole width of the row rather than as a curve. Only the OUTER tails go: a
+ * multimodal posterior's flat gap between peaks is a real feature of the
+ * calibration, not padding, so the slice stays contiguous.
+ */
+function trimTails(distribution: Array<[number, number]>) {
+  const peak = Math.max(...distribution.map(([, p]) => p))
+  const significant = distribution
+    .map(([, p], i) => (p >= peak * 0.002 ? i : -1))
+    .filter((i) => i >= 0)
+  const from = significant.length > 0 ? Math.max(0, significant[0] - 1) : 0
+  const to =
+    significant.length > 0
+      ? Math.min(distribution.length - 1, significant[significant.length - 1] + 1)
+      : distribution.length - 1
+  const visible = distribution.slice(from, to + 1)
+  return { ages: visible.map(([age]) => age), probs: visible.map(([, p]) => p), peak }
+}
 
 /** The row's own baseline. Row 0 (the oldest) sits at the top. */
 const baselineFor = (index: number) => -index
@@ -119,6 +153,7 @@ export default function StackedPosteriorPlot({
   series,
   showMean = false,
   showMedian = false,
+  showPrior = false,
   dateFormat = DEFAULT_DATE_FORMAT,
 }: StackedPosteriorPlotProps) {
   const theme = useTheme()
@@ -144,26 +179,7 @@ export default function StackedPosteriorPlot({
 
     drawable.forEach((s, index) => {
       const yBase = baselineFor(index)
-      const full = s.distribution!
-      const peakOfFull = Math.max(...full.map(([, prob]) => prob))
-      // Trim the outer tails, where the density is indistinguishable from
-      // zero at this row height. Left in, they draw as a flat rule running
-      // the whole width of every row, which reads as a range bar rather than
-      // as a curve. Only the OUTER tails go: the slice stays contiguous, so
-      // the flat gap between the peaks of a multimodal posterior -- which is
-      // a real feature of the calibration, not padding -- is still drawn.
-      const significant = full
-        .map(([, prob], i) => (prob >= peakOfFull * 0.002 ? i : -1))
-        .filter((i) => i >= 0)
-      const from = significant.length > 0 ? Math.max(0, significant[0] - 1) : 0
-      const to =
-        significant.length > 0
-          ? Math.min(full.length - 1, significant[significant.length - 1] + 1)
-          : full.length - 1
-      const visible = full.slice(from, to + 1)
-      const ages = visible.map(([age]) => age)
-      const probs = visible.map(([, prob]) => prob)
-      const peak = Math.max(...probs)
+      const { ages, probs, peak } = trimTails(s.distribution!)
       const scale = peak > 0 ? CURVE_HEIGHT / peak : 0
       const isBoundary = s.kind === 'boundary'
 
@@ -194,6 +210,28 @@ export default function StackedPosteriorPlot({
           bar(min, max, yBase, HPD68_BAR, HPD68_COLOR, '68% HPD', claimLegend('hpd68'), 'hpd68')
         )
       )
+
+      // The prior (unmodelled) shadow, scaled by this row's OWN scale factor
+      // rather than its own peak -- so it reads directly against the
+      // posterior above it: shorter and wider means the model narrowed this
+      // date, not that the prior is somehow smaller. Drawn before the
+      // posterior so the posterior's fill sits on top of it.
+      if (showPrior && s.priorDistribution && s.priorDistribution.length > 0) {
+        const priorTrimmed = trimTails(s.priorDistribution)
+        const priorY = priorTrimmed.probs.map((p) => yBase + p * scale)
+        data.push({
+          x: [priorTrimmed.ages[0], ...priorTrimmed.ages, priorTrimmed.ages[priorTrimmed.ages.length - 1]],
+          y: [yBase, ...priorY, yBase],
+          fill: 'toself',
+          fillcolor: PRIOR_FILL,
+          line: { width: 1, color: PRIOR_LINE },
+          mode: 'lines',
+          name: 'Prior (unmodelled)',
+          legendgroup: 'prior',
+          showlegend: claimLegend('prior'),
+          hoverinfo: 'skip',
+        })
+      }
 
       // The density, as two traces: a closed polygon carrying the fill with
       // no stroke, and the curve itself on top. `tozeroy` can't be used here
@@ -253,7 +291,7 @@ export default function StackedPosteriorPlot({
     })
 
     return data
-  }, [drawable, showMean, showMedian, dateFormat])
+  }, [drawable, showMean, showMedian, showPrior, dateFormat])
 
   // Phase groupings: a light rule where the dates change phase, with the
   // phase named once beside its first date. The table above says the same
