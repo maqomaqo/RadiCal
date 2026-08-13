@@ -11,6 +11,67 @@ import {
 } from '@/utils/dateFormat'
 import type { HPDRange } from '@/utils/dateFormat'
 
+// Linear-interpolated probability at an arbitrary calBP position, from the
+// plotted (calAges, probabilities) grid. HPD boundaries are computed by the
+// backend against its own finer grid and rarely land exactly on one of the
+// ~200 points this component plots, so shading a band right up to its true
+// edge needs a value AT that edge, not just at the nearest plotted point.
+function densityAt(calAges: number[], probabilities: number[], target: number): number {
+  const n = calAges.length
+  if (n === 0) return 0
+  for (let i = 0; i < n - 1; i++) {
+    const a = calAges[i]
+    const b = calAges[i + 1]
+    if ((target - a) * (target - b) <= 0) {
+      if (a === b) return probabilities[i]
+      const t = (target - a) / (b - a)
+      return probabilities[i] + t * (probabilities[i + 1] - probabilities[i])
+    }
+  }
+  // Outside the plotted range entirely -- clamp to whichever end is closer.
+  return Math.abs(target - calAges[0]) <= Math.abs(target - calAges[n - 1])
+    ? probabilities[0]
+    : probabilities[n - 1]
+}
+
+/**
+ * The polygon for shading an HPD band as the area under the curve itself
+ * (clipped to [lo, hi]) rather than a box of some arbitrary fixed height.
+ * A box has to pick one height for the whole interval, which is wrong
+ * everywhere the curve isn't flat -- either short of the peak at the mode,
+ * or floating above the curve out in the interval's own tails. Following
+ * the curve is right at every x by construction, and it's what OxCal and
+ * CALIB draw HPD shading as.
+ *
+ * calAges isn't assumed to be sorted in either direction (the interpolation
+ * above only needs consecutive pairs to bracket the target); this collects
+ * the interior points and re-sorts by x so the returned polygon is a clean
+ * x-ascending sweep regardless of the source order.
+ */
+function curveFillPolygon(
+  calAges: number[],
+  probabilities: number[],
+  lo: number,
+  hi: number
+): { x: number[]; y: number[] } {
+  const xMin = Math.min(lo, hi)
+  const xMax = Math.max(lo, hi)
+  const points: Array<[number, number]> = [[xMin, densityAt(calAges, probabilities, xMin)]]
+  for (let i = 0; i < calAges.length; i++) {
+    const x = calAges[i]
+    if (x > xMin && x < xMax) points.push([x, probabilities[i]])
+  }
+  points.push([xMax, densityAt(calAges, probabilities, xMax)])
+  points.sort((a, b) => a[0] - b[0])
+  // Closed down to baseline at both ends -- 'toself' fill draws the
+  // straight line from the last point back to the first, so this only
+  // needs the top edge; the two baseline corners close the shape.
+  return {
+    x: [xMin, ...points.map((p) => p[0]), xMax],
+    y: [0, ...points.map((p) => p[1]), 0],
+  }
+}
+
 // react-plotly.js's <Plot> wraps the imperative Plotly.js API so this
 // component doesn't have to: it calls Plotly.newPlot on mount,
 // Plotly.react (a diffed, in-place update -- not a full teardown/rebuild)
@@ -119,24 +180,24 @@ export default function PosteriorPlot({
       hovertemplate: '<b>%{customdata}</b><br>Probability: %{y:.4f}<extra></extra>',
     })
 
-    const bandHeight = probabilities.length > 0 ? Math.max(...probabilities) * 0.95 : 0
-
-    // HPD 95% band(s) (light shading). Calibration curves are
-    // non-monotonic, so the HPD region is often two or more disjoint
-    // ranges rather than one span -- when hpd95Ranges is available, draw
-    // each range as its own band instead of one band across the full
-    // min/max envelope, which would visually claim the gap between peaks
-    // as part of the HPD region. Only the first band gets showlegend:
-    // true, so a fragmented posterior still shows one "95% HPD" legend
-    // row rather than one per segment; every band still renders on the
-    // chart either way.
+    // HPD 95% band(s) (light shading), each following the curve itself
+    // (see curveFillPolygon) rather than a fixed-height box. Calibration
+    // curves are non-monotonic, so the HPD region is often two or more
+    // disjoint ranges rather than one span -- when hpd95Ranges is
+    // available, draw each range as its own band instead of one band
+    // across the full min/max envelope, which would visually claim the
+    // gap between peaks as part of the HPD region. Only the first band
+    // gets showlegend: true, so a fragmented posterior still shows one
+    // "95% HPD" legend row rather than one per segment; every band still
+    // renders on the chart either way.
     if (hpd95Ranges && hpd95Ranges.length > 0) {
       hpd95Ranges.forEach((range, idx) => {
+        const { x, y } = curveFillPolygon(calAges, probabilities, range.min, range.max)
         data.push({
-          x: [range.min, range.min, range.max, range.max],
-          y: [0, bandHeight, bandHeight, 0],
+          x,
+          y,
           fill: 'toself',
-          fillcolor: 'rgba(255, 127, 14, 0.1)',
+          fillcolor: 'rgba(255, 127, 14, 0.25)',
           line: { color: 'rgba(255, 127, 14, 0)' },
           name: '95% HPD',
           hovertemplate: '',
@@ -145,11 +206,12 @@ export default function PosteriorPlot({
         })
       })
     } else if (hpd95) {
+      const { x, y } = curveFillPolygon(calAges, probabilities, hpd95[0], hpd95[1])
       data.push({
-        x: [hpd95[0], hpd95[0], hpd95[1], hpd95[1]],
-        y: [0, bandHeight, bandHeight, 0],
+        x,
+        y,
         fill: 'toself',
-        fillcolor: 'rgba(255, 127, 14, 0.1)',
+        fillcolor: 'rgba(255, 127, 14, 0.25)',
         line: { color: 'rgba(255, 127, 14, 0)' },
         name: '95% HPD',
         hovertemplate: '',
@@ -157,14 +219,15 @@ export default function PosteriorPlot({
       })
     }
 
-    // HPD 68% band(s) (darker shading), same multi-range treatment.
+    // HPD 68% band(s) (darker shading), same curve-following treatment.
     if (hpd68Ranges && hpd68Ranges.length > 0) {
       hpd68Ranges.forEach((range, idx) => {
+        const { x, y } = curveFillPolygon(calAges, probabilities, range.min, range.max)
         data.push({
-          x: [range.min, range.min, range.max, range.max],
-          y: [0, bandHeight, bandHeight, 0],
+          x,
+          y,
           fill: 'toself',
-          fillcolor: 'rgba(44, 160, 44, 0.2)',
+          fillcolor: 'rgba(44, 160, 44, 0.35)',
           line: { color: 'rgba(44, 160, 44, 0)' },
           name: '68% HPD',
           hovertemplate: '',
@@ -173,11 +236,12 @@ export default function PosteriorPlot({
         })
       })
     } else if (hpd68) {
+      const { x, y } = curveFillPolygon(calAges, probabilities, hpd68[0], hpd68[1])
       data.push({
-        x: [hpd68[0], hpd68[0], hpd68[1], hpd68[1]],
-        y: [0, bandHeight, bandHeight, 0],
+        x,
+        y,
         fill: 'toself',
-        fillcolor: 'rgba(44, 160, 44, 0.2)',
+        fillcolor: 'rgba(44, 160, 44, 0.35)',
         line: { color: 'rgba(44, 160, 44, 0)' },
         name: '68% HPD',
         hovertemplate: '',
