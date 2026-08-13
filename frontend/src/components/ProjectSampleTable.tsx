@@ -412,7 +412,7 @@ export default function ProjectSampleTable({ projectId }: Props) {
         <TableContainer>
           <Table size="small">
             <TableHead>
-              <TableRow sx={{ backgroundColor: '#f5f5f5' }}>
+              <TableRow sx={{ backgroundColor: 'grey.100' }}>
                 <TableCell padding="checkbox">
                   <Checkbox
                     checked={allSelected}

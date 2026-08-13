@@ -344,7 +344,7 @@ export default function PosteriorPlot({
         style={{ width: '100%', height: `${height}px`, minHeight: '300px' }}
       />
       {pointEstimates && (showMean || showMedian) && (
-        <Box sx={{ mt: 2, p: 1, backgroundColor: '#f5f5f5', borderRadius: 1 }}>
+        <Box sx={{ mt: 2, p: 1, backgroundColor: 'grey.100', borderRadius: 1 }}>
           <Typography variant="body2" color="textSecondary" gutterBottom>
             <strong>Point Estimates:</strong>
           </Typography>

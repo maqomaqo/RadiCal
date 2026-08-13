@@ -18,6 +18,7 @@ import DeleteIcon from '@mui/icons-material/Delete'
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward'
 import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward'
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh'
+import { useElementTypeColors } from '@/theme/diagramColors'
 import type { ModelElement, ElementType, MatrixMeasurement } from '@/types'
 
 // Editor for the explicit OxCal-style model structure: a nested, ordered
@@ -36,13 +37,6 @@ const TYPE_LABEL: Record<ElementType, string> = {
   phase: 'Phase',
   boundary: 'Boundary',
   hiatus: 'Hiatus',
-}
-
-const TYPE_COLOR: Record<ElementType, string> = {
-  sequence: '#1976d2',
-  phase: '#2e7d32',
-  boundary: '#ed6c02',
-  hiatus: '#9c27b0',
 }
 
 const TYPE_HINT: Record<ElementType, string> = {
@@ -159,6 +153,7 @@ interface Props {
 
 export default function ModelTreeEditor({ tree, measurements, assignments, onChange }: Props) {
   const [addMenu, setAddMenu] = useState<{ anchor: HTMLElement; targetId: string } | null>(null)
+  const typeColor = useElementTypeColors()
 
   const datesIn = (elementId: string) =>
     measurements.filter((m) => assignments[m.id] === elementId)
@@ -274,14 +269,14 @@ export default function ModelTreeEditor({ tree, measurements, assignments, onCha
       <Box key={element.id} sx={{ ml: depth === 0 ? 0 : 3, mt: 1 }}>
         <Paper
           variant="outlined"
-          sx={{ p: 1.5, borderLeft: `4px solid ${TYPE_COLOR[element.element_type]}` }}
+          sx={{ p: 1.5, borderLeft: `4px solid ${typeColor[element.element_type]}` }}
         >
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
             <Tooltip title={TYPE_HINT[element.element_type]}>
               <Chip
                 size="small"
                 label={TYPE_LABEL[element.element_type]}
-                sx={{ backgroundColor: TYPE_COLOR[element.element_type], color: 'white' }}
+                sx={{ backgroundColor: typeColor[element.element_type], color: 'white' }}
               />
             </Tooltip>
             <TextField

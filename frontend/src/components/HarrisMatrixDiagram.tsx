@@ -33,15 +33,18 @@ import ReactFlow, {
 } from 'reactflow'
 import 'reactflow/dist/style.css'
 import { Box, Paper, Typography, FormControl, Select, MenuItem, Button, Alert, Stack } from '@mui/material'
+import { useTheme } from '@mui/material/styles'
+import { grey, purple } from '@mui/material/colors'
 import DeleteIcon from '@mui/icons-material/Delete'
 import type { DraftGroup, MatrixMeasurement, DraftRelationship, RelationshipType } from '@/types'
 import { expandRelationships, findCycle } from '@/utils/stratigraphy'
-
-const CONTEXT_COLORS = ['#1976d2', '#9c27b0', '#2e7d32', '#ed6c02', '#0288d1', '#c2185b', '#5d4037', '#455a64']
+import { CONTEXT_PALETTE } from '@/theme/diagramColors'
 
 function colorForContext(contextId: string, contexts: DraftGroup[]): string {
   const idx = contexts.findIndex((c) => c.id === contextId)
-  return CONTEXT_COLORS[idx % CONTEXT_COLORS.length] || '#666'
+  // The modulo means this can't actually miss, but TS can't see that a
+  // fixed-length array indexed by n % length is always in range.
+  return CONTEXT_PALETTE[idx % CONTEXT_PALETTE.length] || grey[600]
 }
 
 function nodeLabel(name: string, sub?: string, badges?: string[]) {
@@ -120,6 +123,7 @@ export default function HarrisMatrixDiagram({
   onUpdateRelationshipType,
   onDeleteRelationship,
 }: HarrisMatrixDiagramProps) {
+  const theme = useTheme()
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null)
 
   const unassignedCount = useMemo(
@@ -196,14 +200,14 @@ export default function HarrisMatrixDiagram({
             label: r.relationship,
             animated: false,
             style: {
-              stroke: isEqual ? '#9c27b0' : '#1976d2',
+              stroke: isEqual ? purple[500] : theme.palette.primary.main,
               strokeDasharray: isEqual ? '6 4' : undefined,
               strokeWidth: r.id === selectedEdgeId ? 3 : 1.5,
             },
-            markerEnd: isEqual ? undefined : { type: MarkerType.ArrowClosed, color: '#1976d2' },
+            markerEnd: isEqual ? undefined : { type: MarkerType.ArrowClosed, color: theme.palette.primary.main },
           }
         }),
-    [relationships, selectedEdgeId]
+    [relationships, selectedEdgeId, theme]
   )
 
   const [nodes, setNodes, onNodesChange] = useNodesState(flowNodes)

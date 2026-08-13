@@ -31,6 +31,7 @@ import {
   ToggleButton,
   ToggleButtonGroup,
 } from '@mui/material'
+import { alpha, useTheme } from '@mui/material/styles'
 import DownloadIcon from '@mui/icons-material/Download'
 import AccountTreeIcon from '@mui/icons-material/AccountTree'
 import DeleteIcon from '@mui/icons-material/Delete'
@@ -254,6 +255,7 @@ function StructureTableRow({
   confidence: number
   dateFormat: DateFormat
 }) {
+  const theme = useTheme()
   const isDate = row.kind === 'date'
   const posterior = row.posterior
   // A heading (sequence/phase/hiatus) has no posterior of its own -- its
@@ -280,15 +282,16 @@ function StructureTableRow({
   // scanning a long table; the chip in the diagnostics column says what it
   // actually is, since colour on its own is not a message.
   const tint = concern
-    ? concern.level === 'suspect'
-      ? 'rgba(211, 47, 47, 0.08)'
-      : 'rgba(237, 108, 2, 0.08)'
+    ? alpha(
+        concern.level === 'suspect' ? theme.palette.error.main : theme.palette.warning.main,
+        0.08
+      )
     : undefined
 
   return (
     <TableRow
       sx={{
-        backgroundColor: tint ?? (isHeading ? '#fafafa' : undefined),
+        backgroundColor: tint ?? (isHeading ? 'grey.50' : undefined),
         ...(concern
           ? { borderLeft: 3, borderColor: concern.level === 'suspect' ? 'error.main' : 'warning.main' }
           : {}),
@@ -795,7 +798,7 @@ export default function Results() {
               <Typography color="textSecondary" gutterBottom>
                 Status
               </Typography>
-              <Typography variant="h6" sx={{ color: analysis.status === 'completed' ? 'green' : 'orange' }}>
+              <Typography variant="h6" sx={{ color: analysis.status === 'completed' ? 'success.main' : 'warning.main' }}>
                 {analysis.status}
               </Typography>
             </CardContent>
@@ -975,7 +978,7 @@ export default function Results() {
           <TableContainer>
             <Table size="small">
               <TableHead>
-                <TableRow sx={{ backgroundColor: '#f5f5f5' }}>
+                <TableRow sx={{ backgroundColor: 'grey.100' }}>
                   <TableCell>Context</TableCell>
                   {showMean && <TableCell align="right">Start Mean</TableCell>}
                   {showMedian && <TableCell align="right">Start Median</TableCell>}
@@ -1101,7 +1104,7 @@ export default function Results() {
         <TableContainer>
           <Table>
             <TableHead>
-              <TableRow sx={{ backgroundColor: '#f5f5f5' }}>
+              <TableRow sx={{ backgroundColor: 'grey.100' }}>
                 <TableCell>{structureRows.length > 0 ? 'Structure / Sample' : 'Sample'}</TableCell>
                 {showMean && <TableCell align="right">Posterior Mean</TableCell>}
                 {showMean && <TableCell align="right">Posterior Std (yr)</TableCell>}

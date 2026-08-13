@@ -405,7 +405,7 @@ export default function ProjectDetail() {
           <TableContainer>
             <Table>
               <TableHead>
-                <TableRow sx={{ backgroundColor: '#f5f5f5' }}>
+                <TableRow sx={{ backgroundColor: 'grey.100' }}>
                   <TableCell>Name</TableCell>
                   <TableCell>Type</TableCell>
                   <TableCell>Status</TableCell>
