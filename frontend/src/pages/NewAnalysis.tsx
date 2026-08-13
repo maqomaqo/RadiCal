@@ -591,7 +591,7 @@ export default function NewAnalysis() {
       <Grid container spacing={3}>
         <Grid item xs={12} md={6}>
           <Paper sx={{ p: 3 }}>
-            <Typography variant="h6" gutterBottom>
+            <Typography variant="h5" gutterBottom>
               Analysis Settings
             </Typography>
 
@@ -751,7 +751,7 @@ export default function NewAnalysis() {
 
         <Grid item xs={12} md={6}>
           <Paper sx={{ p: 3 }}>
-            <Typography variant="h6" gutterBottom>
+            <Typography variant="h5" gutterBottom>
               Add Measurement
             </Typography>
 
@@ -863,7 +863,7 @@ export default function NewAnalysis() {
       </Dialog>
 
       <Box sx={{ mt: 3 }}>
-        <Typography variant="h6" gutterBottom>
+        <Typography variant="h5" gutterBottom>
           Measurements ({measurements.length})
         </Typography>
         {measurements.length === 0 ? (
@@ -940,7 +940,7 @@ export default function NewAnalysis() {
           <Paper sx={{ p: 3 }}>
             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ sm: 'center' }} justifyContent="space-between">
               <Box>
-                <Typography variant="h6" gutterBottom>
+                <Typography variant="h5" gutterBottom>
                   Model Structure
                 </Typography>
                 <Stack direction="row" spacing={1} sx={{ mb: 1 }}>

@@ -385,7 +385,7 @@ export default function ProjectDetail() {
 
       {tab === 'dates' && !isUnassigned ? (
         <Paper sx={{ p: 3 }}>
-          <Typography variant="h6" gutterBottom>
+          <Typography variant="h5" gutterBottom>
             Date Collection
           </Typography>
           <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
@@ -398,7 +398,7 @@ export default function ProjectDetail() {
         </Paper>
       ) : (
       <Paper sx={{ p: 3 }}>
-        <Typography variant="h6" gutterBottom>
+        <Typography variant="h5" gutterBottom>
           Analyses ({project.analyses.length})
         </Typography>
 

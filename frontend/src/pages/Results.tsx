@@ -788,7 +788,7 @@ export default function Results() {
               <Typography color="textSecondary" gutterBottom>
                 Analysis Type
               </Typography>
-              <Typography variant="h6">{analysis.analysis_type}</Typography>
+              <Typography variant="h4">{analysis.analysis_type}</Typography>
             </CardContent>
           </Card>
         </Grid>
@@ -798,7 +798,10 @@ export default function Results() {
               <Typography color="textSecondary" gutterBottom>
                 Status
               </Typography>
-              <Typography variant="h6" sx={{ color: analysis.status === 'completed' ? 'success.main' : 'warning.main' }}>
+              <Typography
+                variant="h4"
+                sx={{ color: analysis.status === 'completed' ? 'success.main' : 'warning.main' }}
+              >
                 {analysis.status}
               </Typography>
             </CardContent>
@@ -810,7 +813,7 @@ export default function Results() {
               <Typography color="textSecondary" gutterBottom>
                 Samples
               </Typography>
-              <Typography variant="h6">{analysis.measurements_count}</Typography>
+              <Typography variant="h4">{analysis.measurements_count}</Typography>
             </CardContent>
           </Card>
         </Grid>
@@ -820,7 +823,7 @@ export default function Results() {
               <Typography color="textSecondary" gutterBottom>
                 Results
               </Typography>
-              <Typography variant="h6">{analysis.results.length}</Typography>
+              <Typography variant="h4">{analysis.results.length}</Typography>
             </CardContent>
           </Card>
         </Grid>
@@ -967,7 +970,7 @@ export default function Results() {
 
       {boundaryRows.length === 0 && contextsWithModeledSpan.length > 0 && (
         <Paper sx={{ p: 3, mb: 3 }}>
-          <Typography variant="h6" gutterBottom>
+          <Typography variant="h5" gutterBottom>
             Context Spans
           </Typography>
           <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
@@ -1034,7 +1037,7 @@ export default function Results() {
       <Paper sx={{ p: 3, mb: 3 }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 2, mb: 2 }}>
           <Box>
-            <Typography variant="h6" gutterBottom>
+            <Typography variant="h5" gutterBottom>
               Results Summary
             </Typography>
             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ sm: 'center' }}>
@@ -1202,7 +1205,7 @@ export default function Results() {
           <Paper sx={{ p: 3, mb: 3 }}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
               <AccountTreeIcon color="action" />
-              <Typography variant="h6">Model Structure used</Typography>
+              <Typography variant="h5">Model Structure used</Typography>
             </Box>
             <HarrisMatrixDiagram
               measurements={structureView.measurements}
@@ -1239,7 +1242,7 @@ export default function Results() {
               clicked it. Beside a heading of fixed text it cannot move except
               by the page being resized. */}
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 2 }}>
-            <Typography variant="h6">Posterior Distributions</Typography>
+            <Typography variant="h5">Posterior Distributions</Typography>
             <ToggleButtonGroup
               size="small"
               exclusive
