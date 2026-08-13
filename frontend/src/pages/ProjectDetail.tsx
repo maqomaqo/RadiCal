@@ -22,6 +22,7 @@ import {
   Alert,
   Tabs,
   Tab,
+  Tooltip,
 } from '@mui/material'
 import EditIcon from '@mui/icons-material/Edit'
 import DeleteIcon from '@mui/icons-material/Delete'
@@ -343,12 +344,16 @@ export default function ProjectDetail() {
           )}
           {!isUnassigned && (
             <>
-              <IconButton onClick={openEdit} aria-label="Edit project">
-                <EditIcon />
-              </IconButton>
-              <IconButton onClick={() => setDeleteProjectOpen(true)} color="error" aria-label="Delete project">
-                <DeleteIcon />
-              </IconButton>
+              <Tooltip title="Edit project">
+                <IconButton onClick={openEdit} aria-label="Edit project">
+                  <EditIcon />
+                </IconButton>
+              </Tooltip>
+              <Tooltip title="Delete project">
+                <IconButton onClick={() => setDeleteProjectOpen(true)} color="error" aria-label="Delete project">
+                  <DeleteIcon />
+                </IconButton>
+              </Tooltip>
             </>
           )}
         </Box>
@@ -477,7 +482,9 @@ export default function ProjectDetail() {
                       </IconButton>
                       <IconButton
                         size="small"
+                        color="error"
                         aria-label={`Delete ${a.name}`}
+                        title="Delete"
                         onClick={(e) => {
                           e.stopPropagation()
                           setDeleteAnalysisTarget(a)

@@ -14,6 +14,7 @@ import {
   CircularProgress,
   Chip,
   IconButton,
+  Tooltip,
 } from '@mui/material'
 import { Link as RouterLink } from 'react-router-dom'
 import AddIcon from '@mui/icons-material/Add'
@@ -163,7 +164,6 @@ export default function Projects() {
                   gap: 1.5,
                   alignItems: 'flex-start',
                   '&:hover': { boxShadow: 3 },
-                  '&:hover .project-delete-btn': { opacity: 1 },
                 }}
               >
                 {/* Stretched link: covers the whole card for navigation,
@@ -193,15 +193,25 @@ export default function Projects() {
                     Created {new Date(project.created_at).toLocaleDateString()}
                   </Typography>
                 </Box>
-                <IconButton
-                  className="project-delete-btn"
-                  size="small"
-                  aria-label={`Delete ${project.name}`}
-                  sx={{ position: 'absolute', top: 8, right: 8, opacity: 0, transition: 'opacity 0.15s', zIndex: 1 }}
-                  onClick={() => setDeleteTarget(project)}
-                >
-                  <DeleteIcon fontSize="small" />
-                </IconButton>
+                {/* Always visible, not hover-revealed: this used to fade
+                    in only on :hover, which a keyboard user tabbing to it
+                    and a touch user (no hover state to reveal it at all)
+                    could never trigger -- delete was reachable by mouse
+                    only. Every other destructive icon button in the app
+                    follows the same rule: always visible, small, error
+                    colour, labelled with a Tooltip in addition to the
+                    aria-label a screen reader already gets from it. */}
+                <Tooltip title={`Delete ${project.name}`}>
+                  <IconButton
+                    size="small"
+                    color="error"
+                    aria-label={`Delete ${project.name}`}
+                    sx={{ position: 'absolute', top: 8, right: 8, zIndex: 1 }}
+                    onClick={() => setDeleteTarget(project)}
+                  >
+                    <DeleteIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
               </Paper>
             </Grid>
           ))}

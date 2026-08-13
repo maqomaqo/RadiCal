@@ -915,13 +915,16 @@ export default function NewAnalysis() {
                             <EditIcon fontSize="small" />
                           </IconButton>
                         </Tooltip>
-                        <IconButton
-                          size="small"
-                          onClick={() => removeMeasurement(m.id)}
-                          color="error"
-                        >
-                          <DeleteIcon />
-                        </IconButton>
+                        <Tooltip title={`Delete ${m.sample_name}`}>
+                          <IconButton
+                            size="small"
+                            aria-label={`Delete ${m.sample_name}`}
+                            onClick={() => removeMeasurement(m.id)}
+                            color="error"
+                          >
+                            <DeleteIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
                       </Box>
                     </Box>
                   </CardContent>

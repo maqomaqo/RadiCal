@@ -452,13 +452,16 @@ export default function ProjectSampleTable({ projectId }: Props) {
                     <IconButton size="small" aria-label={`Edit ${s.sample_name}`} onClick={() => openEdit(s)}>
                       <EditIcon fontSize="small" />
                     </IconButton>
-                    <IconButton
-                      size="small"
-                      aria-label={`Delete ${s.sample_name}`}
-                      onClick={() => setDeleteTarget(s)}
-                    >
-                      <DeleteIcon fontSize="small" />
-                    </IconButton>
+                    <Tooltip title={`Delete ${s.sample_name}`}>
+                      <IconButton
+                        size="small"
+                        color="error"
+                        aria-label={`Delete ${s.sample_name}`}
+                        onClick={() => setDeleteTarget(s)}
+                      >
+                        <DeleteIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
                   </TableCell>
                 </TableRow>
               ))}

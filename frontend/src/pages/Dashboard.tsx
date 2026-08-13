@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { Container, Box, Paper, Typography, Button, Grid, IconButton } from '@mui/material'
+import { Container, Box, Paper, Typography, Button, Grid, IconButton, Tooltip } from '@mui/material'
 import { Link as RouterLink } from 'react-router-dom'
 import FolderIcon from '@mui/icons-material/Folder'
 import DeleteIcon from '@mui/icons-material/Delete'
@@ -126,7 +126,6 @@ export default function Dashboard() {
                     position: 'relative',
                     p: 2,
                     '&:hover': { boxShadow: 3 },
-                    '&:hover .analysis-delete-btn': { opacity: 1 },
                   }}
                 >
                   {/* Stretched link: see the matching comment in
@@ -159,15 +158,20 @@ export default function Dashboard() {
                       {new Date(analysis.created_at).toLocaleDateString()}
                     </Typography>
                   </Box>
-                  <IconButton
-                    className="analysis-delete-btn"
-                    size="small"
-                    aria-label={`Delete ${analysis.name}`}
-                    sx={{ position: 'absolute', top: 8, right: 8, opacity: 0, transition: 'opacity 0.15s', zIndex: 1 }}
-                    onClick={() => setDeleteTarget(analysis)}
-                  >
-                    <DeleteIcon fontSize="small" />
-                  </IconButton>
+                  {/* Always visible, not hover-revealed -- see the matching
+                      comment in Projects.tsx for why, and for the rule this
+                      follows across every destructive icon button. */}
+                  <Tooltip title={`Delete ${analysis.name}`}>
+                    <IconButton
+                      size="small"
+                      color="error"
+                      aria-label={`Delete ${analysis.name}`}
+                      sx={{ position: 'absolute', top: 8, right: 8, zIndex: 1 }}
+                      onClick={() => setDeleteTarget(analysis)}
+                    >
+                      <DeleteIcon fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
                 </Paper>
               </Grid>
             ))}

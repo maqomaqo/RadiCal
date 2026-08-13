@@ -331,10 +331,16 @@ export default function ModelTreeEditor({ tree, measurements, assignments, onCha
               </IconButton>
             )}
             {!isRoot && (
-              <IconButton size="small" aria-label={`Delete ${element.name}`}
-                onClick={() => remove(element.id)}>
-                <DeleteIcon fontSize="small" />
-              </IconButton>
+              <Tooltip title={`Delete ${element.name}`}>
+                <IconButton
+                  size="small"
+                  color="error"
+                  aria-label={`Delete ${element.name}`}
+                  onClick={() => remove(element.id)}
+                >
+                  <DeleteIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
             )}
           </Box>
 
