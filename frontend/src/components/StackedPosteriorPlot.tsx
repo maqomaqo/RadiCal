@@ -233,36 +233,29 @@ export default function StackedPosteriorPlot({
         })
       }
 
-      // The density, as two traces: a closed polygon carrying the fill with
-      // no stroke, and the curve itself on top. `tozeroy` can't be used here
-      // -- the axis zero is a whole page away for the lower rows -- and
-      // stroking the closed polygon instead would draw its baseline as a
-      // hard rule running the full width of the date's tails, which reads
-      // as a range bar rather than as the bottom of a curve.
+      // The density as one closed-polygon trace, fill and stroke together --
+      // same treatment as the prior shadow above, so its legend entry shows
+      // the same fill+line swatch instead of a bare line. The stroke does
+      // trace the flat closing edge at the row's baseline along with the
+      // curve itself, but at this width and alongside the HPD bars already
+      // sitting there it doesn't read as a range bar in practice.
       const curveY = probs.map((p) => yBase + p * scale)
+      const hoverText = ages.map(
+        (age, i) => `${formatCalendarAge(age, dateFormat)}<br>Probability: ${probs[i].toFixed(4)}`
+      )
       data.push({
         x: [ages[0], ...ages, ages[ages.length - 1]],
         y: [yBase, ...curveY, yBase],
+        customdata: [hoverText[0], ...hoverText, hoverText[hoverText.length - 1]],
         fill: 'toself',
         fillcolor: isBoundary ? BOUNDARY_FILL : POSTERIOR_FILL,
-        line: { width: 0, color: 'rgba(0,0,0,0)' },
-        mode: 'lines',
-        showlegend: false,
-        hoverinfo: 'skip',
-      })
-      data.push({
-        x: ages,
-        y: curveY,
-        customdata: ages.map(
-          (age, i) => `${formatCalendarAge(age, dateFormat)}<br>Probability: ${probs[i].toFixed(4)}`
-        ),
         line: {
           color: isBoundary ? BOUNDARY_LINE : POSTERIOR_LINE,
           width: 1.5,
           dash: isBoundary ? 'dot' : 'solid',
         },
         mode: 'lines',
-        name: isBoundary ? 'Boundary — modelled transition' : 'Modelled posterior',
+        name: isBoundary ? 'Boundary (modelled transition)' : 'Modelled posterior',
         legendgroup: isBoundary ? 'boundary' : 'posterior',
         showlegend: claimLegend(isBoundary ? 'boundary' : 'posterior'),
         hovertemplate: `<b>${s.title}</b><br>%{customdata}<extra></extra>`,

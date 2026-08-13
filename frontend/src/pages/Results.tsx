@@ -1336,7 +1336,7 @@ export default function Results() {
                         size="small"
                         color="primary"
                         variant="outlined"
-                        label="Boundary — modelled transition"
+                        label="Boundary (modelled transition)"
                       />
                     )}
                   </Stack>
