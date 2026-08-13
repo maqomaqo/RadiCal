@@ -11,66 +11,43 @@ import {
 } from '@/utils/dateFormat'
 import type { HPDRange } from '@/utils/dateFormat'
 
-// Linear-interpolated probability at an arbitrary calBP position, from the
-// plotted (calAges, probabilities) grid. HPD boundaries are computed by the
-// backend against its own finer grid and rarely land exactly on one of the
-// ~200 points this component plots, so shading a band right up to its true
-// edge needs a value AT that edge, not just at the nearest plotted point.
-function densityAt(calAges: number[], probabilities: number[], target: number): number {
-  const n = calAges.length
-  if (n === 0) return 0
-  for (let i = 0; i < n - 1; i++) {
-    const a = calAges[i]
-    const b = calAges[i + 1]
-    if ((target - a) * (target - b) <= 0) {
-      if (a === b) return probabilities[i]
-      const t = (target - a) / (b - a)
-      return probabilities[i] + t * (probabilities[i + 1] - probabilities[i])
-    }
+/**
+ * A filled rectangle on the hidden yaxis2 strip below the curve (see the
+ * layout's yaxis2 below), as a closed polygon trace -- same technique
+ * StackedPosteriorPlot uses for its own HPD bars.
+ */
+function bar(
+  x0: number,
+  x1: number,
+  y0: number,
+  y1: number,
+  color: string,
+  name: string,
+  showlegend: boolean,
+  legendgroup: string
+) {
+  return {
+    x: [x0, x0, x1, x1],
+    y: [y0, y1, y1, y0],
+    yaxis: 'y2',
+    fill: 'toself',
+    fillcolor: color,
+    line: { width: 0, color: 'rgba(0,0,0,0)' },
+    mode: 'lines',
+    name,
+    legendgroup,
+    showlegend,
+    hoverinfo: 'skip',
   }
-  // Outside the plotted range entirely -- clamp to whichever end is closer.
-  return Math.abs(target - calAges[0]) <= Math.abs(target - calAges[n - 1])
-    ? probabilities[0]
-    : probabilities[n - 1]
 }
 
-/**
- * The polygon for shading an HPD band as the area under the curve itself
- * (clipped to [lo, hi]) rather than a box of some arbitrary fixed height.
- * A box has to pick one height for the whole interval, which is wrong
- * everywhere the curve isn't flat -- either short of the peak at the mode,
- * or floating above the curve out in the interval's own tails. Following
- * the curve is right at every x by construction, and it's what OxCal and
- * CALIB draw HPD shading as.
- *
- * calAges isn't assumed to be sorted in either direction (the interpolation
- * above only needs consecutive pairs to bracket the target); this collects
- * the interior points and re-sorts by x so the returned polygon is a clean
- * x-ascending sweep regardless of the source order.
- */
-function curveFillPolygon(
-  calAges: number[],
-  probabilities: number[],
-  lo: number,
-  hi: number
-): { x: number[]; y: number[] } {
-  const xMin = Math.min(lo, hi)
-  const xMax = Math.max(lo, hi)
-  const points: Array<[number, number]> = [[xMin, densityAt(calAges, probabilities, xMin)]]
-  for (let i = 0; i < calAges.length; i++) {
-    const x = calAges[i]
-    if (x > xMin && x < xMax) points.push([x, probabilities[i]])
-  }
-  points.push([xMax, densityAt(calAges, probabilities, xMax)])
-  points.sort((a, b) => a[0] - b[0])
-  // Closed down to baseline at both ends -- 'toself' fill draws the
-  // straight line from the last point back to the first, so this only
-  // needs the top edge; the two baseline corners close the shape.
-  return {
-    x: [xMin, ...points.map((p) => p[0]), xMax],
-    y: [0, ...points.map((p) => p[1]), 0],
-  }
-}
+// Where the two bars sit within the yaxis2 strip (range [0, 1], 1 = nearest
+// the curve). 95% nearer the curve, 68% further down -- same ordering
+// StackedPosteriorPlot uses.
+const HPD95_BAR: [number, number] = [0.55, 0.85]
+const HPD68_BAR: [number, number] = [0.05, 0.35]
+const HPD95_COLOR = 'rgba(255, 127, 14, 0.55)'
+const HPD68_COLOR = 'rgba(44, 160, 44, 0.65)'
 
 // react-plotly.js's <Plot> wraps the imperative Plotly.js API so this
 // component doesn't have to: it calls Plotly.newPlot on mount,
@@ -208,73 +185,37 @@ export default function PosteriorPlot({
       hovertemplate: '<b>%{customdata}</b><br>Probability: %{y:.4f}<extra></extra>',
     })
 
-    // HPD 95% band(s) (light shading), each following the curve itself
-    // (see curveFillPolygon) rather than a fixed-height box. Calibration
-    // curves are non-monotonic, so the HPD region is often two or more
-    // disjoint ranges rather than one span -- when hpd95Ranges is
-    // available, draw each range as its own band instead of one band
-    // across the full min/max envelope, which would visually claim the
-    // gap between peaks as part of the HPD region. Only the first band
-    // gets showlegend: true, so a fragmented posterior still shows one
-    // "95% HPD" legend row rather than one per segment; every band still
-    // renders on the chart either way.
+    // HPD region(s), as solid range bars in their own strip below the curve
+    // (yaxis2) rather than shaded fills under the curve itself. A fill
+    // there has to sit on top of the posterior's own fill -- and, with the
+    // prior shadow on, the prior's grey fill too -- and translucent orange
+    // and green over blue (and grey) stacks into muddy, hard-to-read
+    // colours. A bar in its own space stays one flat colour regardless of
+    // what else is showing. Calibration curves are non-monotonic, so the
+    // HPD region is often two or more disjoint ranges rather than one span
+    // -- when *Ranges is available, each range gets its own bar instead of
+    // one spanning the full min/max envelope, which would visually claim
+    // the gap between peaks as part of the HPD region. Only the first bar
+    // at each level gets showlegend: true, so a fragmented posterior still
+    // shows one legend row rather than one per segment.
     if (hpd95Ranges && hpd95Ranges.length > 0) {
-      hpd95Ranges.forEach((range, idx) => {
-        const { x, y } = curveFillPolygon(calAges, probabilities, range.min, range.max)
-        data.push({
-          x,
-          y,
-          fill: 'toself',
-          fillcolor: 'rgba(255, 127, 14, 0.25)',
-          line: { color: 'rgba(255, 127, 14, 0)' },
-          name: '95% HPD',
-          hovertemplate: '',
-          showlegend: idx === 0,
-          legendgroup: 'hpd95',
-        })
-      })
+      hpd95Ranges.forEach((range, idx) =>
+        data.push(
+          bar(range.min, range.max, HPD95_BAR[0], HPD95_BAR[1], HPD95_COLOR, '95% HPD', idx === 0, 'hpd95')
+        )
+      )
     } else if (hpd95) {
-      const { x, y } = curveFillPolygon(calAges, probabilities, hpd95[0], hpd95[1])
-      data.push({
-        x,
-        y,
-        fill: 'toself',
-        fillcolor: 'rgba(255, 127, 14, 0.25)',
-        line: { color: 'rgba(255, 127, 14, 0)' },
-        name: '95% HPD',
-        hovertemplate: '',
-        showlegend: true,
-      })
+      data.push(bar(hpd95[0], hpd95[1], HPD95_BAR[0], HPD95_BAR[1], HPD95_COLOR, '95% HPD', true, 'hpd95'))
     }
 
-    // HPD 68% band(s) (darker shading), same curve-following treatment.
     if (hpd68Ranges && hpd68Ranges.length > 0) {
-      hpd68Ranges.forEach((range, idx) => {
-        const { x, y } = curveFillPolygon(calAges, probabilities, range.min, range.max)
-        data.push({
-          x,
-          y,
-          fill: 'toself',
-          fillcolor: 'rgba(44, 160, 44, 0.35)',
-          line: { color: 'rgba(44, 160, 44, 0)' },
-          name: '68% HPD',
-          hovertemplate: '',
-          showlegend: idx === 0,
-          legendgroup: 'hpd68',
-        })
-      })
+      hpd68Ranges.forEach((range, idx) =>
+        data.push(
+          bar(range.min, range.max, HPD68_BAR[0], HPD68_BAR[1], HPD68_COLOR, '68% HPD', idx === 0, 'hpd68')
+        )
+      )
     } else if (hpd68) {
-      const { x, y } = curveFillPolygon(calAges, probabilities, hpd68[0], hpd68[1])
-      data.push({
-        x,
-        y,
-        fill: 'toself',
-        fillcolor: 'rgba(44, 160, 44, 0.35)',
-        line: { color: 'rgba(44, 160, 44, 0)' },
-        name: '68% HPD',
-        hovertemplate: '',
-        showlegend: true,
-      })
+      data.push(bar(hpd68[0], hpd68[1], HPD68_BAR[0], HPD68_BAR[1], HPD68_COLOR, '68% HPD', true, 'hpd68'))
     }
 
     // Vertical line at mean
@@ -352,6 +293,19 @@ export default function PosteriorPlot({
       yaxis: {
         title: 'Probability Density',
         zeroline: false,
+        // Top portion of the figure -- the bottom is reserved for the HPD
+        // bars on yaxis2, below.
+        domain: [0.22, 1],
+      },
+      // A hidden secondary axis sharing the same x, giving the HPD bars a
+      // strip of their own with a plain [0, 1] scale instead of the
+      // curve's density scale -- see the bar() helper above. Fixed and
+      // invisible: this axis exists only to place the bars, not to be read.
+      yaxis2: {
+        domain: [0, 0.18],
+        range: [0, 1],
+        visible: false,
+        fixedrange: true,
       },
       hovermode: 'x unified',
       plot_bgcolor: 'rgba(240, 240, 240, 0.5)',
