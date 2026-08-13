@@ -1,11 +1,10 @@
 # Remaining Work: RadiCal
 
-*Rewritten 2026-08-05 after re-auditing against the actual code. Every claim
-below was checked by reading the referenced file or exercising the running
-app — the previous version had drifted (it still described the filesystem as
-unable to delete files, and listed as open several things that had since
-landed). If you're reading this after more work has happened, treat it the
-same way: verify before trusting.*
+*Rewritten 2026-08-05, re-audited 2026-08-13 (file/documentation cleanup pass
+-- see the Environment Notes and Priority #2 below for what changed). Every
+claim below was checked by reading the referenced file or exercising the
+running app. If you're reading this after more work has happened, treat it
+the same way: verify before trusting.*
 
 ---
 
@@ -69,15 +68,20 @@ previous revisions of this file understated parts of it.
 - **Effort:** 2–3 hours.
 
 ### 2. Documentation is materially wrong
-- `docs/USER_MANUAL.md` still describes a "4-step workflow" that doesn't
-  exist, and documents PDF export as a working feature.
-- `README.md` advertises "PDF export capabilities" and export of tables and
-  graphs as "CSV, PDF, and image files".
-- Neither mentions project date collections, deploy, duplicate/edit, re-run,
-  or context Boundaries — i.e. most of what the app now does.
-- **Impact:** High, and cheap to fix. Wrong docs are worse than none: they
-  send a user looking for a PDF button that returns a 501.
-- **Effort:** 1–2 hours.
+**Resolved 2026-08-13.** `README.md`, `docs/USER_MANUAL.md` and
+`docs/INSTALLATION.md` were rewritten against the actual running app: no more
+PyMC/D3.js/react-table in the tech stack (none are dependencies or imports
+any more), no fictional "4-step workflow", no PDF-export-as-working-feature,
+correct frontend port (5173, not 3000 — `docs/INSTALLATION.md` had
+previously sent two different ports for the same thing in adjacent
+sections), a real API endpoint list instead of invented ones
+(`POST /api/analysis/multi` never existed; `/api/harris-matrix/*` and
+`/api/results/{id}/graphs` do exist but aren't mentioned since nothing in
+the frontend calls them — see #6 below), and coverage of what the app
+actually does now: three analysis types, project date collections and
+deploy, duplicate/edit/re-run, the model-tree Harris matrix, the agreement
+index, and the prior/posterior plot overlay. `README.md`'s license section
+also claimed MIT; the repo's `LICENSE` file is CC0.
 
 ---
 
@@ -104,17 +108,31 @@ previous revisions of this file understated parts of it.
   renames, type changes and backfills aren't covered at all.
 - **Effort:** 2–3 hours including migrating the stopgap away.
 
-### 6. Wire the curves API into the frontend
+### 6. Wire the curves API into the frontend (and decide about harris_matrix.py)
 - **Current:** `GET /api/curves` exists but nothing calls it —
   `NewAnalysis.tsx` hardcodes its own `<MenuItem value="intcal20">` list, and
   `ProjectSampleTable.tsx` now hardcodes a *second* copy. The endpoint's
   metadata is also wrong: it claims IntCal20 has 5,141 points; the loaded
-  curve has 9,501.
-- **Needed:** fetch options from `/api/curves` (single source of truth) or
-  delete the endpoint. Either way fix the point counts.
-- **Impact:** Medium — harmless today, but there are now two hardcoded lists
-  to forget when a curve is added.
-- **Effort:** ~1 hour.
+  curve has 9,501. Neither `curves.py` nor `harris_matrix.py` has any test
+  coverage (confirmed again 2026-08-13).
+- `harris_matrix.py`'s two endpoints (`/api/harris-matrix/validate`,
+  `/api/harris-matrix/relationships`) are in the same position: live routes,
+  operating on a plain nodes/edges shape that predates the model tree
+  (`services/model_tree.py`) the real Harris matrix editor
+  (`HarrisMatrixDiagram.tsx`) actually talks to via the analysis endpoints
+  directly. Nothing in the frontend calls them either.
+- **Needed:** for curves, fetch options from `/api/curves` (single source of
+  truth) or delete the endpoint — either way fix the point counts. For
+  harris_matrix.py, a call: keep it as a documented-but-unused piece of API
+  surface for external consumers, or delete it. Left as-is rather than
+  deleted outright during the 2026-08-13 cleanup pass, since removing live
+  (if unused) API endpoints is a bigger call than deleting dead frontend
+  code — worth a deliberate decision, not a drive-by deletion.
+- **Impact:** Medium — harmless today, but there are now two hardcoded curve
+  lists to forget when a curve is added, and two API modules that look live
+  but aren't connected to anything.
+- **Effort:** ~1 hour for curves; harris_matrix.py is a delete-or-keep
+  decision more than effort.
 
 ### 7. Database connection pooling
 - **Current:** `create_engine(DATABASE_URL, echo=False)` with no
@@ -184,21 +202,28 @@ each is a real edge.
 
 ## Testing & QA
 
-- **Backend: 80 tests**, all passing, in `backend/tests/`:
-  - `test_calibration.py` (10) — calibration and HPD logic.
-  - `test_validation.py` (15) — request validation.
-  - `test_stratigraphy.py` (16) — cycle detection, group expansion, TPQ/TAQ.
+- **Backend: 399 tests** (`pytest --collect-only`, 2026-08-13) in
+  `backend/tests/`, including several files added since the 80-test count
+  above was first recorded: `test_agreement.py` (the agreement index),
+  `test_charcoal_outlier.py`, `test_solver_reporting.py`, and
+  `test_exports.py` (47 tests covering `results.py`'s export/table/graphs/pdf
+  routes — see below). Still present from before:
+  - `test_calibration.py` — calibration and HPD logic.
+  - `test_validation.py` — request validation.
+  - `test_stratigraphy.py` — cycle detection, group expansion, TPQ/TAQ.
   - `test_exact_chain.py`, `test_gibbs.py` — the two solvers, against a
     brute-force integration, against each other, and against real OxCal 4.4
-    runs. (`test_bayesian.py` covered the deleted PyMC model.)
-  - `test_rerun.py` (8) — project assignment, rerun, project batch rerun.
-  - `test_project_samples.py` (21) — date collection CRUD, deploy, snapshot
+    runs.
+  - `test_rerun.py` — project assignment, rerun, project batch rerun.
+  - `test_project_samples.py` — date collection CRUD, deploy, snapshot
     semantics, duplicate, edit-inputs.
-  - `conftest.py` provides a throwaway SQLite DB. There is no longer a
+  - `conftest.py` provides a throwaway SQLite DB. There is no
     `requires_pymc` skip marker: both solvers are pure numpy, so every test
     runs everywhere and a Bayesian analysis in the suite is a real one.
-- **Not covered:** `results.py`, `curves.py`, `harris_matrix.py` have no
-  tests at all (14 endpoints between them).
+- **Not covered:** `curves.py` and `harris_matrix.py` still have no tests at
+  all (re-confirmed 2026-08-13) — consistent with both being unused by the
+  frontend; see #6 above. `results.py` is no longer in this list — it's
+  covered by `test_exports.py` now.
 - **Frontend tests: none.** No Vitest/Jest/Testing Library in `package.json`.
   `utils/hpd.ts`, `utils/stratigraphy.ts` (cycle detection) and
   `ProjectSampleTable`'s `parsePastedDates` are pure functions and would be
@@ -216,16 +241,46 @@ each is a real edge.
    npm's resolver with `Invalid Version`. Regenerating the lockfile fixed it,
    and also cleared what looked like unrelated baseline `tsc` errors
    (`reactflow` "no exported member", MUI `Grid`/`Stack` overload
-   mismatches). `tsc --noEmit` is now down to 6 trivial pre-existing warnings
-   (unused `React` imports, one `ImportMeta.env`), and `npm run build`
-   succeeds.
+   mismatches). `tsc --noEmit` is now **clean** (0 errors, 2026-08-13) — the
+   remaining unused-`React`-import warnings and the `ImportMeta.env` error
+   were fixed as part of the file cleanup below, not just filtered out.
+   `npm run build` succeeds.
 2. **Files can be deleted.** The old note that `rm` returns "Operation not
-   permitted" no longer applies — verified directly. This means the four
-   superseded stubs (`BayesianConfig.tsx`, `HarrisMatrixEditor.tsx`,
-   `MeasurementForm.tsx`, `StratigraPhyForm.tsx`, all now just a comment and
-   `export {}`) can and should actually be deleted rather than left as
-   tombstones.
-3. **Docker builds occasionally fail with `DeadlineExceeded`** fetching base
+   permitted" no longer applies — verified directly, and again on
+   2026-08-13. The four superseded frontend stubs (`BayesianConfig.tsx`,
+   `HarrisMatrixEditor.tsx`, `StratigraPhyForm.tsx`, and `MeasurementForm.tsx`
+   which had already been removed by the time of this note) are gone. So is
+   `backend/app/models/sample.py` — a second, incompatible `RadiocarbonSample`
+   mapped to the same table as the real one in `app/models.py`, self-labelled
+   `# DEAD CODE -- do not import from here` with the same "can't delete"
+   note; that note was also stale.
+3. **`frontend/src/services/api.ts` was entirely orphaned** — an axios-based
+   API client with its own typed interfaces, imported by nothing (every page
+   now calls `fetch()` directly; the real types live in `types/index.ts` and
+   inline per component). Deleted along with it: `axios`, plus four more
+   dependencies with zero imports anywhere in `src/` — `d3` (and
+   `@types/d3`), `date-fns`, `html2canvas`, `jspdf`, `papaparse`,
+   `@tanstack/react-table` (all charting/export work goes through Plotly and
+   hand-rolled CSV parsing instead). `npm install` after removing them from
+   `package.json` dropped 69 packages from `node_modules`. This is also what
+   fixed the `ImportMeta.env` error noted above — it lived in the dead
+   `api.ts` file, not in anything actually loaded by the app, which is why
+   `tsc` had been reporting it as a "trivial pre-existing" error for as long
+   as anyone had been filtering it out instead of tracing it.
+4. **Config had drifted the same way.** `.env.example` and
+   `docker-compose.yml` still declared `MCMC_SAMPLES`/`MCMC_TUNE`/
+   `MCMC_CHAINS`/`MCMC_CORES` (from the removed PyMC sampler; per-analysis
+   settings now live in `bayesian_config`, not the environment),
+   `BACKEND_PORT`, `DEBUG`, `UPLOAD_DIR`/`MAX_FILE_SIZE` (no upload feature
+   exists), `API_SECRET_KEY` (no auth exists yet — see Priority #4 above) and
+   `VITE_APP_NAME` (not read anywhere in `frontend/src`) — none read by any
+   code in `backend/app/` or `frontend/src/`, confirmed by grep before
+   removal. `docker-compose.yml`'s `CORS_ORIGINS` default and the same
+   fallback hardcoded in `main.py` both still said `localhost:3000`, a port
+   nothing in this app has used since the frontend moved to Vite on 5173;
+   fixed both. Also dropped the `version: '3.8'` key Compose has been
+   warning is obsolete on every single `docker compose` invocation.
+5. **Docker builds occasionally fail with `DeadlineExceeded`** fetching base
    image metadata — transient registry flakiness, not a config problem.
    Retrying after a minute works. Both services bind-mount their source and
    hot-reload, so the running app can be ahead of the built images.
@@ -234,15 +289,20 @@ each is a real edge.
 
 ## Suggested Order
 
-1. **Rewrite `README.md` and `docs/USER_MANUAL.md`** to match reality — the
-   cheapest fix with the highest chance of misleading someone if skipped.
+1. ~~Rewrite `README.md` and `docs/USER_MANUAL.md` to match reality~~ —
+   **done 2026-08-13**, along with `docs/INSTALLATION.md`.
 2. **PDF export** — the last big advertised-but-missing feature; fold in the
    context Boundaries that CSV export also misses (gap #2).
-3. **Delete the four superseded component stubs** now that deletion works.
+3. ~~Delete the four superseded component stubs~~ — **done 2026-08-13**,
+   along with the dead `app/models/sample.py`, the orphaned
+   `frontend/src/services/api.ts`, six unused npm dependencies, and the
+   config drift both had left behind (see Environment Notes).
 4. **Async MCMC** — the synchronous "Re-run All" is the most likely thing to
    feel broken as projects grow.
-5. **Wire up the curves API** before a fourth hardcoded curve list appears.
-6. **Frontend tests** for the pure utils, then the untested backend routers.
+5. **Wire up the curves API**, and decide whether `harris_matrix.py` stays,
+   before a fourth hardcoded curve list appears.
+6. **Frontend tests** for the pure utils, then the untested backend routers
+   (`curves.py`, `harris_matrix.py` — `results.py` is now covered).
 7. Everything else — auth, Alembic, pooling, comparison UI, curve
    management — as concrete need arises.
 
@@ -250,5 +310,6 @@ each is a real edge.
 
 *Status: calibration and Bayesian math correct and tested (including
 OxCal-style Boundaries); project management, date collections, deploy,
-duplicate/edit and re-run all working end to end. PDF export and accurate
-documentation are the two remaining high-priority gaps.*
+duplicate/edit and re-run all working end to end. Documentation now matches
+the app (2026-08-13) and the codebase's accumulated dead files/config have
+been cleared out. PDF export is the one remaining high-priority gap.*

@@ -21,7 +21,7 @@ cp .env.example .env
 docker-compose up -d
 
 # Wait for services to be ready (about 30-60 seconds)
-# Access the webapp at http://localhost:3000
+# Access the webapp at http://localhost:5173
 # API documentation at http://localhost:8000/docs
 ```
 
@@ -83,11 +83,11 @@ docker-compose down -v
 ## Troubleshooting
 
 ### Port Already in Use
-- Frontend: 3000, 5173
-- Backend: 8000  
-- Database: 5432
+- Frontend: 5173
+- Backend: 8000
+- Database: 5433 on the host (mapped to Postgres's own 5432 inside the container)
 
-Change ports in `docker-compose.yml` or `.env` if conflicts occur.
+Change ports in `docker-compose.yml` if conflicts occur.
 
 ### Database Connection Issues
 Verify PostgreSQL is running and credentials in `.env` match.
@@ -97,9 +97,15 @@ Update `CORS_ORIGINS` in `.env` to include your frontend URL.
 
 ## Environment Variables
 
-Key variables in `.env`:
-- `VITE_API_URL` - Backend API URL for frontend
+Key variables in `.env` (see `.env.example` for the full, current list):
+- `VITE_API_URL` - Backend API URL the frontend calls
 - `DATABASE_URL` - PostgreSQL connection string
-- `MCMC_SAMPLES` - Number of MCMC samples for Bayesian analysis
-- `MCMC_TUNE` - Burn-in iterations
-- `MCMC_CHAINS` - Number of parallel chains
+- `CORS_ORIGINS` - Origins the backend accepts requests from
+- `INTCAL_CURVE_PATH` / `MARINE_CURVE_PATH` / `SHCAL_CURVE_PATH` - Calibration curve file locations;
+  only needed if running the backend outside Docker with the data somewhere other than
+  `calibration_data/`
+
+MCMC/Bayesian settings (posterior draws, solver choice, the uniform span prior) are configured
+per-analysis in the New Analysis form, not via environment variables — the app used to read
+`MCMC_SAMPLES`/`MCMC_TUNE`/`MCMC_CHAINS` from the environment, but that was tied to a PyMC-based
+sampler that has since been replaced (see `REMAINING_WORK.md`).

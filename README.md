@@ -1,98 +1,99 @@
 # RadiCal
 
-A comprehensive web-based tool for radiocarbon dating analysis with Bayesian statistical modeling, stratigraphic relationship handling, and interactive visualization.
+A web-based tool for radiocarbon dating analysis: calibration against IntCal20/Marine20/SHCal20,
+Bayesian chronological modelling with stratigraphic constraints (OxCal-style Sequences, Phases and
+Boundaries), and interactive posterior visualization.
 
 ## Features
 
-- **Calibration Curve Selection**: Choose from all published curves (IntCal20, Marine20, SHCal20, and more)
-- **Sample Type Support**: Terrestrial and marine samples with appropriate curve corrections
-- **Bayesian Analysis**: Statistical modeling incorporating stratigraphic relationships
-- **Harris Matrix Support**: Visual input of stratigraphic relationships via interactive diagram
-- **Data Input GUI**: User-friendly interface for entering radiocarbon measurements
-- **Results Visualization**: 
-  - Posterior probability distributions
-  - Calibrated age tables
-  - Interactive graphs
-  - PDF export capabilities
-- **Download Functionality**: Export all tables and graphs as CSV, PDF, and image files
+- **Three analysis types**: single calibration, independent calibration of several samples at once
+  ("group calibration"), and full Bayesian modelling with stratigraphic constraints.
+- **Calibration curves**: IntCal20, Marine20, SHCal20, with marine reservoir (ΔR) correction.
+- **Bayesian chronological modelling**: an explicit model tree of nested Sequences, Phases,
+  Boundaries and Hiatuses (the OxCal idiom), each date assigned to a Phase; TPQ/TAQ age limiters;
+  an optional outlier model per date. Solved exactly where the model permits it, and by OxCal's own
+  MH/Gibbs scheme otherwise — see [`REMAINING_WORK.md`](REMAINING_WORK.md) for how the solvers were
+  validated against real OxCal 4.4 runs.
+- **Harris matrix diagram**: a drag-and-drop `reactflow` editor for the model tree, and a read-only
+  rendering of it on a completed analysis's results.
+- **Diagnostics**: an OxCal-style agreement index per date (how much the model had to move it away
+  from its own unconstrained calibration) and an outlier posterior probability where an outlier model
+  is applied.
+- **Posterior visualization**: Plotly charts, individually or all stacked on one shared calendar
+  axis, with HPD range bars at 68%/95%/99.7% confidence, optional mean/median markers, and an
+  optional overlay of each date's unconstrained ("prior") calibration behind its modelled posterior.
+- **Projects and date collections**: group analyses under a project; keep a project's own collection
+  of dates (entered individually or by bulk paste) and deploy any selection of them into a new
+  analysis, independently of how many other analyses have already used them; re-run one analysis or
+  every analysis in a project; duplicate or edit an existing analysis's inputs.
+- **Export**: CSV and JSON. (PDF export is not implemented — see below.)
 
 ## Tech Stack
 
 ### Frontend
-- **React 18** with TypeScript
-- **Vite** for fast development and building
-- **D3.js** for data visualization
-- **React Flow** for Harris matrix diagram editor
-- **Material-UI** for UI components
-- **Plotly.js** for interactive graphs
+- **React 18** with TypeScript, built with **Vite**
+- **Material-UI** for components
+- **Plotly.js** for posterior distribution charts
+- **React Flow** for the Harris matrix / model tree diagram
+- **Zustand** for the shared New Analysis / Model Structure draft state
 
 ### Backend
-- **Python 3.11** with FastAPI
-- **PyMC** for Bayesian statistical modeling
-- **NumPy/SciPy** for numerical computations
-- **Pandas** for data handling
-- **ReportLab** for PDF generation
-
-### Database
-- **PostgreSQL** for data persistence
-- **SQLAlchemy** ORM
+- **Python 3.11** with **FastAPI**
+- **NumPy/SciPy** for the calibration math and both Bayesian solvers (exact integration for
+  chain-shaped models, OxCal's own MH/Gibbs scheme otherwise — no PyMC, no MCMC sampler dependency)
+- **SQLAlchemy** ORM over **PostgreSQL**
 
 ## Project Structure
 
 ```
 RadiCal/
 ├── frontend/                 # React TypeScript application
-│   ├── src/
-│   │   ├── components/      # React components
-│   │   ├── pages/           # Page components
-│   │   ├── services/        # API services
-│   │   ├── types/           # TypeScript types
-│   │   ├── stores/          # State management
-│   │   ├── utils/           # Utility functions
-│   │   └── App.tsx
-│   ├── public/
-│   ├── vite.config.ts
-│   └── package.json
+│   └── src/
+│       ├── components/       # Reusable UI (plots, Harris matrix, dialogs, forms)
+│       ├── pages/            # Route-level pages (Dashboard, NewAnalysis, Results, ...)
+│       ├── stores/           # Shared draft state (Zustand)
+│       ├── theme/            # MUI theme customization
+│       ├── types/            # Shared TypeScript types
+│       └── utils/            # Date formatting, HPD/stratigraphy helpers
 ├── backend/                  # FastAPI application
-│   ├── app/
-│   │   ├── api/             # API routes
-│   │   ├── models/          # Data models
-│   │   ├── services/        # Business logic
-│   │   ├── schemas/         # Pydantic schemas
-│   │   └── main.py
-│   ├── calibration_data/    # Calibration curves
-│   ├── requirements.txt
-│   └── Dockerfile
+│   └── app/
+│       ├── api/               # Route handlers
+│       ├── services/          # Calibration math, both Bayesian solvers, model tree, agreement
+│       ├── schemas/            # Pydantic request/response schemas
+│       ├── models.py           # SQLAlchemy ORM models
+│       └── main.py
+├── backend/tests/            # pytest suite, plus fixtures from real OxCal 4.4 runs
+├── calibration_data/         # Full IntCal20/Marine20/SHCal20 curve files
+├── docs/                     # Installation guide and user manual
 ├── docker-compose.yml
-├── .env.example
-└── README.md
+└── .env.example
 ```
 
 ## Quick Start
 
 ### Prerequisites
-- Docker and Docker Compose (recommended)
-- Node.js 18+
-- Python 3.11+
-- PostgreSQL 14+
+- Docker and Docker Compose (recommended), **or** Node.js 18+, Python 3.11+ and PostgreSQL 14+ for
+  running the two services directly.
 
 ### Installation
 
 ```bash
-# Clone the repository
 git clone https://github.com/maqomaqo/RadiCal.git
 cd RadiCal
-
-# Copy environment variables
 cp .env.example .env
-
-# Start with Docker Compose
 docker-compose up -d
 
-# Access the webapp at http://localhost:3000
+# Frontend: http://localhost:5173
+# Backend API + interactive docs: http://localhost:8000/docs
 ```
 
+See [`docs/INSTALLATION.md`](docs/INSTALLATION.md) for running the frontend and backend outside
+Docker, and for troubleshooting.
+
 ### Development
+
+Both containers bind-mount their source and hot-reload, so `docker-compose up -d` is normally enough
+during development too. To run a service directly on the host instead:
 
 #### Frontend
 ```bash
@@ -111,107 +112,46 @@ uvicorn app.main:app --reload
 ```
 
 #### Backend tests
-The runtime image installs `requirements.txt` only, so the test
-dependencies live in a separate file:
+The runtime image installs `requirements.txt` only, so the test dependencies live in a separate
+file:
 ```bash
 cd backend
 pip install -r requirements-dev.txt
 pytest
 ```
-Tests needing PyMC are marked `requires_pymc` and skip automatically when
-it isn't installed.
 
-## API Endpoints
+## API Overview
 
-### Calibration Curves
-- `GET /api/curves` - List all available calibration curves
-- `GET /api/curves/{curve_id}` - Get curve data
-- `GET /api/curves/type/{type}` - Get curves by type
+Full interactive documentation (generated from the actual FastAPI routes) is at
+`http://localhost:8000/docs` once the backend is running. The main groups:
 
-### Radiocarbon Analysis
-- `POST /api/analysis/calibrate` - Perform single sample calibration
-- `POST /api/analysis/bayesian` - Perform Bayesian multi-sample analysis
-- `POST /api/analysis/multi` - Multi-sample analysis
-- `GET /api/analysis/{analysis_id}` - Retrieve analysis results
-- `GET /api/analysis` - List all analyses
+- **Analysis** (`/api/analysis`, `/api/analysis/{id}`, `/api/analysis/calibrate`,
+  `/api/analysis/calibrate-group`, `/api/analysis/bayesian`, plus rerun/duplicate/edit-inputs and
+  model-tree endpoints) — create, run, retrieve, and manage analyses of all three types.
+- **Projects** (`/api/projects`, `/api/projects/{id}`, `/api/projects/{id}/rerun`) — group analyses
+  and re-run them in bulk.
+- **Project date collections** (`/api/projects/{id}/samples`, `/api/projects/{id}/deploy`) — a
+  project's own reusable set of dates.
+- **Results** (`/api/results/{id}/export/csv`, `/api/results/{id}/export/json`,
+  `/api/results/{id}/table`) — export a completed analysis. `/api/results/{id}/pdf` exists but
+  returns `501 Not Implemented` — see [`REMAINING_WORK.md`](REMAINING_WORK.md).
 
-### Harris Matrix
-- `POST /api/harris-matrix/validate` - Validate matrix relationships
-- `POST /api/harris-matrix/relationships` - Generate relationships from diagram
+## Documentation
 
-### Results
-- `GET /api/results/{analysis_id}/table` - Export results as table
-- `GET /api/results/{analysis_id}/pdf` - Generate PDF report
-- `GET /api/results/{analysis_id}/graphs` - Retrieve visualization data
-- `GET /api/results/{analysis_id}/export/csv` - Export as CSV
-- `GET /api/results/{analysis_id}/export/json` - Export as JSON
-
-## Usage Guide
-
-### Basic Workflow
-
-1. **Create New Analysis**
-   - Navigate to "New Analysis"
-   - Enter sample information (name, type, radiocarbon age ± 1σ)
-
-2. **Select Calibration Curve**
-   - Choose between marine/terrestrial samples
-   - Select appropriate calibration curve (default: IntCal20)
-   - Apply reservoir age correction if marine
-
-3. **Define Stratigraphic Relationships**
-   - Use Harris Matrix diagram to visualize layer relationships
-   - Specify boundaries and phases
-   - Set any temporal constraints
-
-4. **Run Analysis**
-   - Select Bayesian or frequentist calibration
-   - Configure MCMC parameters if Bayesian
-   - Run analysis
-
-5. **View & Export Results**
-   - Review posterior probability distributions
-   - Examine calibrated age ranges
-   - Download tables and graphs
-
-## Advanced Features
-
-### Bayesian Modeling
-The webapp uses PyMC for Bayesian inference:
-- Specify prior distributions
-- Define likelihood models
-- Run MCMC sampling with diagnostics
-- Calculate highest posterior density (HPD) intervals
-
-### Harris Matrix Support
-- Drag-and-drop interface for creating stratigraphic matrices
-- Automatic validation of relationships
-- Integration with Bayesian model constraints
-
-### Multi-Sample Analysis
-- Simultaneously analyze multiple samples
-- Incorporate sequence constraints
-- Generate pooled posterior distributions
+- [`docs/INSTALLATION.md`](docs/INSTALLATION.md) — setup and troubleshooting.
+- [`docs/USER_MANUAL.md`](docs/USER_MANUAL.md) — using the app.
+- [`REMAINING_WORK.md`](REMAINING_WORK.md) — what's built, what isn't, and why, kept current against
+  the actual code rather than written once and left to drift.
 
 ## References
 
 - Reimer, P. J., et al. (2020). IntCal20 Northern Hemisphere radiocarbon age calibration curve. Radiocarbon, 62(4).
 - Bronk Ramsey, C. (2009). Bayesian analysis of radiocarbon dates. Radiocarbon, 51(1).
+- Bronk Ramsey, C. (1995). Radiocarbon calibration and analysis of stratigraphy: the OxCal program. Radiocarbon, 37(2).
 - Buck, C. E., et al. (1996). Bayesian Approach to Interpreting Archaeological Data.
 - Heaton, T. J., et al. (2020). Marine20—the marine radiocarbon age calibration curve. Radiocarbon, 62(4).
+- Nicholls, G., and Jones, M. (2001). Radiocarbon dating with temporal order constraints. Applied Statistics, 50(4).
 
 ## License
 
-MIT License - see LICENSE file for details
-
-## Contributing
-
-Contributions are welcome! Please see CONTRIBUTING.md for guidelines.
-
-## Support
-
-For issues and questions, please open an issue on GitHub.
-
-## Authors
-
-- Initial development: maqomaqo
+[CC0 1.0 Universal](LICENSE) — public domain dedication.
