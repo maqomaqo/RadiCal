@@ -236,7 +236,9 @@ export default function NewAnalysis() {
         loadFromAnalysis({
           analysisId: editRouteId,
           name: a.name,
-          analysisType: a.analysis_type === 'bayesian' ? 'bayesian' : 'calibration',
+          analysisType: a.analysis_type === 'bayesian' || a.analysis_type === 'group_calibration'
+            ? a.analysis_type
+            : 'calibration',
           measurements: (a.measurements || []).map((m: any) => ({
             id: m.id,
             sample_name: m.sample_name,
@@ -454,6 +456,33 @@ export default function NewAnalysis() {
         } else {
           setRunError('Analysis failed: ' + formatApiError(data))
         }
+      } else if (analysisType === 'group_calibration') {
+        // Standard direct calibration of every measurement, independently --
+        // no stratigraphy, no model. Sent as the same measurement objects
+        // the Bayesian draft builds (see GroupCalibrationRequest's
+        // docstring), so group_id/outlier fields ride along unused.
+        //
+        // Like Bayesian, always saved -- and like 'calibration' above,
+        // editing does not replace this analysis's inputs in place; it
+        // always creates a new one. Fixing that is a pre-existing gap in
+        // 'calibration' too, not something introduced here.
+        const response = await fetch('/api/analysis/calibrate-group', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: analysisName,
+            measurements,
+            project_id: projectId || null,
+          }),
+        })
+        const data = await response.json()
+        if (data.success) {
+          saveDateFormatPreference(data.data.id, dateFormat)
+          resetDraft()
+          navigate(`/results/${data.data.id}`)
+        } else {
+          setRunError('Analysis failed: ' + formatApiError(data))
+        }
       } else {
         // For Bayesian, send the full stratigraphy defined on the
         // Model Structure page too (groups, relationships, and any TPQ/TAQ
@@ -582,9 +611,10 @@ export default function NewAnalysis() {
                 <Select
                   value={analysisType}
                   label="Analysis Type"
-                  onChange={(e) => setAnalysisType(e.target.value as 'calibration' | 'bayesian')}
+                  onChange={(e) => setAnalysisType(e.target.value as 'calibration' | 'group_calibration' | 'bayesian')}
                 >
                   <MenuItem value="calibration">Single Calibration</MenuItem>
+                  <MenuItem value="group_calibration">Group Calibration</MenuItem>
                   <MenuItem value="bayesian">Bayesian (with stratigraphic constraints)</MenuItem>
                 </Select>
               </FormControl>

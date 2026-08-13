@@ -38,7 +38,7 @@ export const DEFAULT_MCMC: McmcConfig = {
 
 interface AnalysisDraftState {
   name: string
-  analysisType: 'calibration' | 'bayesian'
+  analysisType: 'calibration' | 'group_calibration' | 'bayesian'
   // Project and Result Date Format live here rather than as local useState
   // on NewAnalysis.tsx for the same reason as everything else in this
   // store: navigating to /new-analysis/model-structure and back remounts
@@ -64,14 +64,14 @@ interface AnalysisDraftState {
   setModelTree: (tree: ModelElement | null, assignments?: Record<string, string>) => void
 
   setName: (name: string) => void
-  setAnalysisType: (analysisType: 'calibration' | 'bayesian') => void
+  setAnalysisType: (analysisType: 'calibration' | 'group_calibration' | 'bayesian') => void
   setProjectId: (projectId: string) => void
   setDateFormat: (dateFormat: DateFormat) => void
   setMcmc: (mcmc: Partial<McmcConfig>) => void
   loadFromAnalysis: (payload: {
     analysisId: string
     name: string
-    analysisType: 'calibration' | 'bayesian'
+    analysisType: 'calibration' | 'group_calibration' | 'bayesian'
     measurements: DraftMeasurement[]
     groups: DraftGroup[]
     relationships: DraftRelationship[]

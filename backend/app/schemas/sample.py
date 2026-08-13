@@ -337,6 +337,42 @@ class BayesianConfigInput(BaseModel):
     uniform_span_prior: bool = True
 
 
+class GroupCalibrationRequest(BaseModel):
+    """
+    Request body for POST /analysis/calibrate-group: plain (unmodelled)
+    calibration of several independent measurements at once, saved as one
+    analysis so they land on the Results page's shared-axis plot and
+    results table together, in chronological order -- for laying several
+    dates out on one timeline without asserting any stratigraphic
+    relationship between them. See BayesianRequest for that.
+
+    Reuses BayesianMeasurementInput for its per-measurement fields rather
+    than defining a narrower one: group_id/element_id/outlier_prior/
+    outlier_model are accepted (so the same measurement objects the UI
+    already builds for a Bayesian draft can be sent here unchanged) but
+    not applied to anything -- a group calibration has no phases, no
+    model tree, and no outlier model to be an outlier from.
+    """
+    name: str = Field(default="Group Calibration", max_length=200)
+    measurements: List[BayesianMeasurementInput] = Field(..., min_length=1)
+    project_id: Optional[str] = None
+    save: bool = True
+
+    @field_validator("name")
+    @classmethod
+    def _name_not_blank(cls, v: str) -> str:
+        v = v.strip()
+        return v or "Group Calibration"
+
+    @field_validator("measurements")
+    @classmethod
+    def _no_duplicate_ids(cls, v: List["BayesianMeasurementInput"]) -> List["BayesianMeasurementInput"]:
+        ids = [m.id for m in v]
+        if len(set(ids)) != len(ids):
+            raise ValueError("measurements contain a duplicate id")
+        return v
+
+
 class BayesianRequest(BaseModel):
     """Request body for POST /analysis/bayesian."""
     name: str = Field(default="Untitled", max_length=200)

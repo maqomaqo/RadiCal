@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.orm import Session
 from app.database import get_db
-from app.schemas.sample import CalibrateRequest, BayesianRequest
+from app.schemas.sample import CalibrateRequest, BayesianRequest, GroupCalibrationRequest
 from app.services.calibration import get_curve, CalibrationCurve
 from app.services import exact_chain
 from app.services import gibbs
@@ -94,6 +94,37 @@ def _compute_calibration_stats(
         'hpd_95_ranges': hpd_95_ranges,
         'probability_distribution': display_distribution,
     }
+
+
+def _calibration_result_row(
+    analysis_id: str,
+    sample_id: str,
+    stats: Dict,
+    existing: Optional[AnalysisResult] = None,
+) -> AnalysisResult:
+    """
+    One plain-calibration result (calibrated_age_bp/posterior stats/HPD/
+    distribution -- no MCMC-only fields like agreement_index or
+    posterior_samples) as a database row, from an already-computed stats
+    dict (see _compute_calibration_stats). Updates `existing` in place if
+    given, otherwise returns a new, not-yet-added row.
+
+    Shared by the group-calibration endpoint below and both the
+    'calibration' and 'group_calibration' branches of _rerun_analysis, so
+    a field added to one can't silently go missing from another the way
+    _sample_row's docstring says has already happened here before.
+    """
+    result = existing or AnalysisResult(analysis_id=analysis_id, sample_id=sample_id)
+    result.calibrated_age_bp = stats['calibrated_age_bp']
+    result.posterior_mean = stats['posterior_mean']
+    result.posterior_median = stats['posterior_median']
+    result.posterior_std = stats['posterior_std']
+    result.hpd_68_min, result.hpd_68_max = stats['hpd_68']
+    result.hpd_95_min, result.hpd_95_max = stats['hpd_95']
+    result.hpd_68_ranges = stats['hpd_68_ranges']
+    result.hpd_95_ranges = stats['hpd_95_ranges']
+    result.probability_distribution = stats['probability_distribution']
+    return result
 
 
 def _iter_tree(element: Dict):
@@ -606,6 +637,71 @@ async def calibrate_single(measurement: CalibrateRequest, db: Session = Depends(
         raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/analysis/calibrate-group")
+async def calibrate_group(request: GroupCalibrationRequest, db: Session = Depends(get_db)):
+    """
+    Calibrate several radiocarbon measurements independently -- each
+    exactly as /analysis/calibrate would calibrate it alone -- and save
+    them as one analysis, so they land on the Results page's shared-axis
+    plot and results table together, in chronological order.
+
+    Where a Bayesian analysis asks "what do these dates imply together,
+    given how they relate stratigraphically", this is the plainer
+    question: lay several independent dates out on one timeline, with no
+    relationship asserted between them. Always saved -- unlike single
+    calibration there is no quick-preview mode here, on the same
+    reasoning the Bayesian endpoint doesn't have one either: a set of
+    dates worth calibrating together is normally worth keeping.
+    """
+    try:
+        project_id = _validate_project_id(request.project_id, db)
+
+        analysis = Analysis(
+            name=request.name,
+            analysis_type='group_calibration',
+            status='completed',
+            bayesian_config={},
+            project_id=project_id,
+        )
+        db.add(analysis)
+        db.flush()
+
+        # No group_id/element_id passed through -- a group calibration has
+        # no phases or model tree for a measurement to belong to.
+        for measurement in request.measurements:
+            sample = _sample_row(analysis.id, measurement)
+            db.add(sample)
+            db.flush()
+
+            curve = get_curve(sample.curve_id)
+            stats = _compute_calibration_stats(
+                curve, sample.age_bp, sample.error_1sigma,
+                sample.delta_r, sample.delta_r_error,
+            )
+            db.add(_calibration_result_row(analysis.id, sample.id, stats))
+
+        db.commit()
+        db.refresh(analysis)
+
+        return {
+            "success": True,
+            "data": {
+                "id": analysis.id,
+                "name": analysis.name,
+                "analysis_type": "group_calibration",
+                "status": "completed",
+                "project_id": analysis.project_id,
+                "measurements_count": len(request.measurements),
+            },
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+
 
 @router.post("/analysis/bayesian")
 async def bayesian_analysis(request: BayesianRequest, db: Session = Depends(get_db)):
@@ -1172,20 +1268,31 @@ def _rerun_analysis(analysis: Analysis, db: Session) -> None:
             curve, sample.age_bp, sample.error_1sigma,
             sample.delta_r, sample.delta_r_error,
         )
-
-        result = db.query(AnalysisResult).filter(AnalysisResult.analysis_id == analysis.id).first()
-        if not result:
-            result = AnalysisResult(analysis_id=analysis.id, sample_id=sample.id)
+        existing = db.query(AnalysisResult).filter(AnalysisResult.analysis_id == analysis.id).first()
+        result = _calibration_result_row(analysis.id, sample.id, stats, existing)
+        if not existing:
             db.add(result)
-        result.calibrated_age_bp = stats['calibrated_age_bp']
-        result.posterior_mean = stats['posterior_mean']
-        result.posterior_median = stats['posterior_median']
-        result.posterior_std = stats['posterior_std']
-        result.hpd_68_min, result.hpd_68_max = stats['hpd_68']
-        result.hpd_95_min, result.hpd_95_max = stats['hpd_95']
-        result.hpd_68_ranges = stats['hpd_68_ranges']
-        result.hpd_95_ranges = stats['hpd_95_ranges']
-        result.probability_distribution = stats['probability_distribution']
+
+    elif analysis.analysis_type == 'group_calibration':
+        # Unlike 'calibration', every sample is recalibrated -- a group
+        # calibration has no single "the" sample, and its member set never
+        # changes between a save and a rerun (that goes through duplicate
+        # or a fresh calibrate-group instead), so this is always exactly
+        # one result per existing sample, matched by id.
+        existing_by_sample = {
+            r.sample_id: r
+            for r in db.query(AnalysisResult).filter(AnalysisResult.analysis_id == analysis.id).all()
+        }
+        for sample in samples:
+            curve = get_curve(sample.curve_id)
+            stats = _compute_calibration_stats(
+                curve, sample.age_bp, sample.error_1sigma,
+                sample.delta_r, sample.delta_r_error,
+            )
+            existing = existing_by_sample.get(sample.id)
+            result = _calibration_result_row(analysis.id, sample.id, stats, existing)
+            if not existing:
+                db.add(result)
 
     elif analysis.analysis_type == 'bayesian':
         groups = db.query(SampleGroup).filter(SampleGroup.analysis_id == analysis.id).all()

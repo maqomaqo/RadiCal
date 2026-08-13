@@ -604,6 +604,18 @@ export default function Results() {
   const structureRows = flattenStructure(analysis.model_tree, analysis.measurements || [])
   const resultBySampleId = new Map((analysis.results || []).map((r) => [r.sample_id, r]))
 
+  // analysis.results as returned isn't in any particular order -- it's DB
+  // insertion order. When there's no model structure to walk instead (a
+  // calibration or group calibration), sort oldest first by posterior mean
+  // (larger cal BP = older), matching the "oldest first" convention
+  // structureRows already gives the structured case. Ties/missing means
+  // (shouldn't happen, but not worth crashing over) fall back to the
+  // original order.
+  const chronologicalResults = [...(analysis.results || [])].sort((a, b) => {
+    if (a.posterior_mean == null || b.posterior_mean == null) return 0
+    return b.posterior_mean - a.posterior_mean
+  })
+
   // Dates whose own diagnostics object to them, worst first so the banner
   // leads with the one most worth looking at.
   const flaggedDates = (analysis.results || [])
@@ -667,7 +679,7 @@ export default function Results() {
       })
     }
   }
-  for (const result of analysis.results || []) {
+  for (const result of chronologicalResults) {
     if (plotted.has(result.sample_id)) continue
     plotOrder.push({
       key: `date-${result.sample_id}`,
@@ -1129,7 +1141,7 @@ export default function Results() {
                       dateFormat={dateFormat}
                     />
                   ))
-                : analysis.results.map((result, idx) => {
+                : chronologicalResults.map((result, idx) => {
                     const unmodelledRanges = isBayesian
                       ? unmodelledRangesFor(result, confidence)
                       : []

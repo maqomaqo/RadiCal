@@ -82,7 +82,7 @@ class Analysis(Base):
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     name = Column(String, nullable=False)
-    analysis_type = Column(String, nullable=False)  # 'calibration' or 'bayesian'
+    analysis_type = Column(String, nullable=False)  # 'calibration', 'group_calibration', or 'bayesian'
     status = Column(String, default='pending')  # 'pending', 'running', 'completed', 'failed'
     error_message = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
