@@ -5,12 +5,13 @@
 1. [Getting Started](#getting-started)
 2. [Creating an Analysis](#creating-an-analysis)
 3. [Adding Measurements](#adding-measurements)
-4. [Model Structure (Bayesian only)](#model-structure-bayesian-only)
-5. [Running an Analysis](#running-an-analysis)
-6. [Viewing Results](#viewing-results)
-7. [Exporting Data](#exporting-data)
-8. [Projects and Date Collections](#projects-and-date-collections)
-9. [Best Practices](#best-practices)
+4. [Importing Dates from a File](#importing-dates-from-a-file)
+5. [Model Structure (Bayesian only)](#model-structure-bayesian-only)
+6. [Running an Analysis](#running-an-analysis)
+7. [Viewing Results](#viewing-results)
+8. [Exporting Data](#exporting-data)
+9. [Projects and Date Collections](#projects-and-date-collections)
+10. [Best Practices](#best-practices)
 
 ## Getting Started
 
@@ -55,6 +56,58 @@ Each date needs, at minimum, a **Sample Name**, **Age (BP)** and **1σ Error**. 
 If a project is assigned and its date collection already has dates in it, an **Add from Project's
 Date Collection** button appears above the measurement form — pick any subset to copy into this
 analysis instead of retyping them.
+
+## Importing Dates from a File
+
+**Import from a File** (on New Analysis, and **Import File** on a project's Dates tab) reads a
+spreadsheet of dates or an OxCal model. Nothing is saved until you have seen what was read: the
+file is parsed, the dates and any model structure are shown for review, and only then does
+confirming put them where hand-typed dates go.
+
+An import is **all or nothing**. One unreadable row fails the whole file and lists every problem
+found, rather than importing what it could and leaving you to work out which dates are missing.
+
+### CSV
+
+One date per row with a header row naming the columns. Only `sample_name`, `age_bp` and
+`error_1sigma` are required; everything else takes the same default a typed-in date would.
+Column **order does not matter** and common spellings are understood — `Lab Code`, `Age BP`,
+`± 1σ`, `sd`, `Material`, `Curve`, `Context` all resolve to the right field. Comma, tab and
+semicolon separators are all read.
+
+Use **Download template** in the dialog for a file with the full column list and three worked
+example rows. The optional columns are `material_type`, `curve_id`, `sample_type`, `delta_r`,
+`delta_r_error`, `phase`, `tpq_age_bp`, `taq_age_bp`, `outlier_model`, `outlier_prior`, `depth_cm`,
+`location` and `notes`.
+
+A `phase` column is what turns a list of dates into a model: dates sharing a phase name are
+grouped, and a starting structure is built around them — one Start/End pair with the phases
+**unordered** inside it, since a CSV says which dates go together but nothing about which group
+came first. Ordering them is then a decision you make in the Model Structure editor.
+
+The app's own results export is readable back in, so exporting a table, correcting it in a
+spreadsheet and re-importing works. Its structural rows and its posterior columns are recognised
+and skipped rather than read back as input.
+
+### OxCal (.oxcal)
+
+An OxCal model file is read directly — its `Sequence`, `Phase`, `Boundary` and `Hiatus` structure,
+per-scope `Curve` and `Delta_R`, and per-date `Outlier` settings all come across, keeping the names
+OxCal gave them. Importing one from New Analysis brings the model structure with it.
+
+OxCal's language is larger than what this app models. Anything that would change the posterior and
+cannot be honoured — `Tau_Boundary`, `Sigma_Boundary` and `Zero_Boundary` (non-uniform
+transitions), `C_Date`, `R_Combine`, the deposition-model sequences (`P_Sequence`, `D_Sequence`,
+`V_Sequence`), a curve the app does not have, or a custom `Outlier_Model` — **fails the import**
+with a message naming it, rather than being read as the nearest thing that is implemented. An
+unrecognised command fails it too. Commands that only affect what OxCal plots (`Sum`, `KDE_Plot`,
+`Span`, `Difference`, `Order`…) are skipped with a note, since they query a posterior rather than
+shape one.
+
+Two differences in how the file is read are reported rather than left implicit: a date sitting
+directly inside a `Sequence` is put in a Phase of its own (this app attaches dates to Phases; its
+position, and so the ordering, is unchanged), and several independent top-level items are wrapped
+in one Phase, which asserts no ordering between them.
 
 ## Model Structure (Bayesian only)
 
@@ -116,8 +169,11 @@ Calibration with "Save this analysis" on) navigates straight to its Results page
 ## Projects and Date Collections
 
 A **Project** groups analyses, and can also hold its own collection of dates — entered one at a
-time or pasted in bulk (`name, age, error[, material[, context[, curve]]]` per line) — independent
-of any particular analysis. Deploying a selection of them copies the values into a new analysis, so
+time, pasted in bulk (`name, age, error[, material[, context[, curve]]]` per line), or imported
+from a file (see [Importing Dates from a File](#importing-dates-from-a-file)) — independent
+of any particular analysis. A collection holds dates rather than models, so importing an OxCal file
+here keeps each date's phase as its default context but not the structure; import it from a new
+analysis to keep that. Deploying a selection of them copies the values into a new analysis, so
 editing the collection afterwards never changes an analysis already created from it, and the same
 dates can be deployed more than once to model them differently each time.
 

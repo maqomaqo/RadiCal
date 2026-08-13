@@ -23,9 +23,16 @@ Boundaries), and interactive posterior visualization.
   axis, with HPD range bars at 68%/95%/99.7% confidence, optional mean/median markers, and an
   optional overlay of each date's unconstrained ("prior") calibration behind its modelled posterior.
 - **Projects and date collections**: group analyses under a project; keep a project's own collection
-  of dates (entered individually or by bulk paste) and deploy any selection of them into a new
-  analysis, independently of how many other analyses have already used them; re-run one analysis or
-  every analysis in a project; duplicate or edit an existing analysis's inputs.
+  of dates (entered individually, by bulk paste, or by file import) and deploy any selection of them
+  into a new analysis, independently of how many other analyses have already used them; re-run one
+  analysis or every analysis in a project; duplicate or edit an existing analysis's inputs.
+- **File import**: read dates from a CSV (header-driven, column order irrelevant, common lab-report
+  spellings understood) or straight from an OxCal `.oxcal` model file, whose Sequences, Phases,
+  Boundaries, per-scope curves and per-date outlier settings all come across. Every import is
+  previewed before anything is stored, and is all-or-nothing. An OxCal construct this app does not
+  model — a non-uniform Boundary, `C_Date`, `R_Combine`, a deposition-model sequence, an unknown
+  curve — fails the import naming itself rather than being read as the nearest thing that is
+  implemented.
 - **Export**: CSV and JSON. (PDF export is not implemented — see below.)
 
 ## Tech Stack
@@ -132,6 +139,10 @@ Full interactive documentation (generated from the actual FastAPI routes) is at
   and re-run them in bulk.
 - **Project date collections** (`/api/projects/{id}/samples`, `/api/projects/{id}/deploy`) — a
   project's own reusable set of dates.
+- **Import** (`/api/import/dates`, `/api/import/csv-template`, `/api/import/csv-columns`) — parse an
+  uploaded `.csv` or `.oxcal` and return what it held. These only read: the parsed dates are stored
+  through the endpoints above, so an upload is not a second route into the database with its own
+  validation to drift out of step.
 - **Results** (`/api/results/{id}/export/csv`, `/api/results/{id}/export/json`,
   `/api/results/{id}/table`) — export a completed analysis. `/api/results/{id}/pdf` exists but
   returns `501 Not Implemented` — see [`REMAINING_WORK.md`](REMAINING_WORK.md).

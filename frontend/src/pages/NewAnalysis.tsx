@@ -33,7 +33,9 @@ import DeleteIcon from '@mui/icons-material/Delete'
 import EditIcon from '@mui/icons-material/Edit'
 import AddIcon from '@mui/icons-material/Add'
 import AccountTreeIcon from '@mui/icons-material/AccountTree'
+import UploadFileIcon from '@mui/icons-material/UploadFile'
 import PosteriorPlot from '@/components/PosteriorPlot'
+import ImportDatesDialog, { type ImportPreview } from '@/components/ImportDatesDialog'
 import MeasurementFields, {
   deltaRErrorMissing,
   isMarineMeasurement,
@@ -114,9 +116,11 @@ export default function NewAnalysis() {
     dateFormat,
     setDateFormat,
     measurements,
+    setMeasurements,
     addMeasurement,
     removeMeasurement,
     updateMeasurement,
+    setModelTree,
     groups,
     relationships,
     mcmc,
@@ -171,6 +175,8 @@ export default function NewAnalysis() {
       !Number.isFinite(editing.draft.age_bp) ||
       !Number.isFinite(editing.draft.error_1sigma) ||
       deltaRErrorMissing(editing.draft))
+
+  const [importOpen, setImportOpen] = useState(false)
 
   const [projects, setProjects] = useState<ProjectOption[]>([])
   // Only offered for single calibration -- a quick way to try a
@@ -424,6 +430,51 @@ export default function NewAnalysis() {
       tpq_age_bp: s.tpq_age_bp ?? null,
       taq_age_bp: s.taq_age_bp ?? null,
     }
+  }
+
+  /**
+   * Load an uploaded file's dates -- and, when it carried one, its model
+   * structure -- into this draft.
+   *
+   * REPLACES the draft's measurements rather than appending to them. An
+   * .oxcal file's structure refers to its own dates by id, so merging it with
+   * dates already on the form would leave those dates in no phase and the
+   * model refusing to run. Replacing is also what the confirm button says it
+   * does, and the dialog shows the full list first.
+   */
+  const handleImport = (preview: ImportPreview) => {
+    setMeasurements(
+      preview.dates.map((d) => ({
+        id: d.id,
+        sample_name: d.sample_name,
+        age_bp: d.age_bp,
+        error_1sigma: d.error_1sigma,
+        material_type: d.material_type || 'unknown',
+        // A CSV may leave this to the curve, the same way the backend does
+        // when a hand-entered date omits it.
+        sample_type: d.sample_type || (d.curve_id === 'marine20' ? 'marine' : 'terrestrial'),
+        curve_id: d.curve_id,
+        delta_r: d.delta_r,
+        delta_r_error: d.delta_r_error,
+        outlier_prior: d.outlier_prior,
+        outlier_model: d.outlier_model,
+        depth_cm: d.depth_cm,
+        location: d.location,
+        notes: d.notes,
+        tpq_age_bp: d.tpq_age_bp,
+        taq_age_bp: d.taq_age_bp,
+        element_id: d.element_id ?? null,
+      }))
+    )
+    setModelTree(preview.model_tree, preview.element_assignments)
+    setAnalysisType(preview.suggested_analysis_type)
+    if (!analysisName && preview.analysis_name) setAnalysisName(preview.analysis_name)
+    setImportOpen(false)
+
+    const structure = preview.model_tree
+      ? ' Its model structure came with it — check it under Model Structure before running.'
+      : ' The file carried no model structure, so these will be calibrated independently.'
+    notify(`Loaded ${preview.dates.length} date${preview.dates.length === 1 ? '' : 's'}.${structure}`)
   }
 
   const handleAddMeasurement = () => {
@@ -819,11 +870,12 @@ export default function NewAnalysis() {
               </Alert>
             )}
 
-            {projectId && projectSamples.length > 0 && (
-              <Box sx={{ mb: 3 }}>
+            <Box sx={{ mb: 3 }}>
+              {projectId && projectSamples.length > 0 && (
                 <Button
                   variant="outlined"
                   fullWidth
+                  sx={{ mb: 1 }}
                   onClick={() => {
                     setPickerSelected(new Set())
                     setPickerOpen(true)
@@ -831,11 +883,20 @@ export default function NewAnalysis() {
                 >
                   Add from Project's Date Collection ({projectSamples.length})
                 </Button>
-                <Typography variant="caption" color="textSecondary" sx={{ display: 'block', mt: 0.5 }}>
-                  Or fill in the fields below to add a new date.
-                </Typography>
-              </Box>
-            )}
+              )}
+              <Button
+                variant="outlined"
+                fullWidth
+                startIcon={<UploadFileIcon />}
+                onClick={() => setImportOpen(true)}
+              >
+                Import from a File
+              </Button>
+              <Typography variant="caption" color="textSecondary" sx={{ display: 'block', mt: 0.5 }}>
+                A spreadsheet of dates (.csv), or an OxCal model (.oxcal) with its structure. Or
+                fill in the fields below to add a single date.
+              </Typography>
+            </Box>
 
             <MeasurementFields
               value={currentMeasurement}
@@ -937,6 +998,13 @@ export default function NewAnalysis() {
           </Button>
         </DialogActions>
       </Dialog>
+
+      <ImportDatesDialog
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        target="analysis"
+        onConfirm={handleImport}
+      />
 
       <Dialog open={pickerOpen} onClose={() => setPickerOpen(false)} fullWidth maxWidth="sm">
         <DialogTitle>

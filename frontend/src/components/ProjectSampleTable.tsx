@@ -27,7 +27,9 @@ import DeleteIcon from '@mui/icons-material/Delete'
 import EditIcon from '@mui/icons-material/Edit'
 import PlaylistAddIcon from '@mui/icons-material/PlaylistAdd'
 import RocketLaunchIcon from '@mui/icons-material/RocketLaunch'
+import UploadFileIcon from '@mui/icons-material/UploadFile'
 import ConfirmDialog from '@/components/ConfirmDialog'
+import ImportDatesDialog, { type ImportPreview } from '@/components/ImportDatesDialog'
 import { formatApiError } from '@/utils/apiError'
 import { useNotify } from '@/contexts/NotificationContext'
 
@@ -182,6 +184,9 @@ export default function ProjectSampleTable({ projectId }: Props) {
   // or cut off entirely.
   const [pasteError, setPasteError] = useState<{ headline: string; details?: string[] } | null>(null)
 
+  const [importOpen, setImportOpen] = useState(false)
+  const [importing, setImporting] = useState(false)
+
   const [deleteTarget, setDeleteTarget] = useState<ProjectSample | null>(null)
   const [deleting, setDeleting] = useState(false)
 
@@ -295,6 +300,52 @@ export default function ProjectSampleTable({ projectId }: Props) {
     }
   }
 
+  /**
+   * Add an uploaded file's dates to the collection.
+   *
+   * Goes through POST /projects/:id/samples -- the same endpoint the Add and
+   * Paste paths use -- so an imported date is stored by exactly the code a
+   * typed one is. The phase each date was filed under becomes its default
+   * context, which is what deploying then groups by.
+   */
+  const handleImport = async (preview: ImportPreview) => {
+    setImporting(true)
+    try {
+      const response = await fetch(`/api/projects/${projectId}/samples`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          samples: preview.dates.map((d) => ({
+            sample_name: d.sample_name,
+            age_bp: d.age_bp,
+            error_1sigma: d.error_1sigma,
+            material_type: d.material_type || 'unknown',
+            curve_id: d.curve_id,
+            sample_type: d.sample_type,
+            default_context_name: d.phase_name,
+            tpq_age_bp: d.tpq_age_bp,
+            taq_age_bp: d.taq_age_bp,
+            depth_cm: d.depth_cm,
+            location: d.location,
+            notes: d.notes,
+          })),
+        }),
+      })
+      const data = await response.json()
+      if (data.success) {
+        setImportOpen(false)
+        notify(`Added ${data.data.items.length} date${data.data.items.length === 1 ? '' : 's'} to the collection.`)
+        fetchSamples()
+      } else {
+        notify('Failed to import dates: ' + formatApiError(data))
+      }
+    } catch (err) {
+      notify('Error importing dates: ' + (err as Error).message)
+    } finally {
+      setImporting(false)
+    }
+  }
+
   const handleDelete = async () => {
     if (!deleteTarget) return
     setDeleting(true)
@@ -377,6 +428,13 @@ export default function ProjectSampleTable({ projectId }: Props) {
           }}
         >
           Paste Dates
+        </Button>
+        <Button
+          variant="outlined"
+          startIcon={<UploadFileIcon />}
+          onClick={() => setImportOpen(true)}
+        >
+          Import File
         </Button>
         <Box sx={{ flexGrow: 1 }} />
         <Tooltip title={selected.size === 0 ? 'Select dates to deploy' : ''}>
@@ -610,6 +668,14 @@ export default function ProjectSampleTable({ projectId }: Props) {
           </Button>
         </DialogActions>
       </Dialog>
+
+      <ImportDatesDialog
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        target="collection"
+        confirming={importing}
+        onConfirm={handleImport}
+      />
 
       <ConfirmDialog
         open={!!deleteTarget}

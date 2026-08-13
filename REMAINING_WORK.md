@@ -202,12 +202,13 @@ each is a real edge.
 
 ## Testing & QA
 
-- **Backend: 399 tests** (`pytest --collect-only`, 2026-08-13) in
+- **Backend: 491 tests** (`pytest --collect-only`, 2026-08-14) in
   `backend/tests/`, including several files added since the 80-test count
   above was first recorded: `test_agreement.py` (the agreement index),
-  `test_charcoal_outlier.py`, `test_solver_reporting.py`, and
+  `test_charcoal_outlier.py`, `test_solver_reporting.py`,
   `test_exports.py` (47 tests covering `results.py`'s export/table/graphs/pdf
-  routes — see below). Still present from before:
+  routes — see below), and `test_imports.py` (92 tests covering CSV and
+  `.oxcal` file import). Still present from before:
   - `test_calibration.py` — calibration and HPD logic.
   - `test_validation.py` — request validation.
   - `test_stratigraphy.py` — cycle detection, group expansion, TPQ/TAQ.
@@ -217,6 +218,14 @@ each is a real edge.
   - `test_rerun.py` — project assignment, rerun, project batch rerun.
   - `test_project_samples.py` — date collection CRUD, deploy, snapshot
     semantics, duplicate, edit-inputs.
+  - `test_imports.py` — file import. Its load-bearing tests parse the three
+    `tests/fixtures/oxcal/*.oxcal` files and assert the result equals the
+    hand-built trees in `oxcal_fixture.model_tree()`, which are themselves
+    held against OxCal's own published output by `test_oxcal_agreement.py` —
+    so the importer is chained onto an oracle reaching out to OxCal. The
+    other half tests refusals: an OxCal construct the app does not model must
+    fail the import rather than be read as the nearest thing that is
+    implemented.
   - `conftest.py` provides a throwaway SQLite DB. There is no
     `requires_pymc` skip marker: both solvers are pure numpy, so every test
     runs everywhere and a Bayesian analysis in the suite is a real one.
@@ -227,7 +236,9 @@ each is a real edge.
 - **Frontend tests: none.** No Vitest/Jest/Testing Library in `package.json`.
   `utils/hpd.ts`, `utils/stratigraphy.ts` (cycle detection) and
   `ProjectSampleTable`'s `parsePastedDates` are pure functions and would be
-  the cheapest, highest-value place to start.
+  the cheapest, highest-value place to start. `ImportDatesDialog` holds no
+  parsing logic of its own — the file goes to the backend and the parsed
+  result comes back — so it needs a component test rather than a unit one.
 - **Integration/E2E: none automated.** The flows in this session were
   verified by hand against the running stack.
 
