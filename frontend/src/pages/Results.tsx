@@ -788,7 +788,9 @@ export default function Results() {
               <Typography color="textSecondary" gutterBottom>
                 Analysis Type
               </Typography>
-              <Typography variant="h4">{analysis.analysis_type}</Typography>
+              <Typography variant="h4">
+                {analysis.analysis_type === 'group_calibration' ? 'calibration' : analysis.analysis_type}
+              </Typography>
             </CardContent>
           </Card>
         </Grid>
