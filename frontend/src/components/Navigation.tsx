@@ -27,12 +27,19 @@ export default function Navigation() {
             to="/"
             sx={{
               flexGrow: 1,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 1,
               textDecoration: 'none',
               color: 'inherit',
               fontWeight: 600,
             }}
           >
-            ☢️ RadiCal
+            {/* Decorative -- "RadiCal" right after it already names the
+                link, so an alt here would just repeat it for a screen
+                reader. */}
+            <Box component="img" src="/logo-cluster.svg" alt="" sx={{ width: 28, height: 28 }} />
+            RadiCal
           </Typography>
 
           <Box sx={{ display: { xs: 'none', sm: 'flex' }, gap: 2, alignItems: 'center' }}>
