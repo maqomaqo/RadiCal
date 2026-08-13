@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   postgres:
     image: postgres:15-alpine
@@ -27,12 +25,7 @@ services:
       - "8000:8000"
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-radiocarbon}:${POSTGRES_PASSWORD:-password}@postgres:5432/${POSTGRES_DB:-radiocarbon_db}
-      BACKEND_PORT: 8000
-      DEBUG: ${DEBUG:-False}
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://localhost:5173}
-      MCMC_SAMPLES: ${MCMC_SAMPLES:-2000}
-      MCMC_TUNE: ${MCMC_TUNE:-1000}
-      MCMC_CHAINS: ${MCMC_CHAINS:-4}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
       INTCAL_CURVE_PATH: ${INTCAL_CURVE_PATH:-/app/data/intcal20.14c}
       MARINE_CURVE_PATH: ${MARINE_CURVE_PATH:-/app/data/marine20.14c}
       SHCAL_CURVE_PATH: ${SHCAL_CURVE_PATH:-/app/data/shcal20.14c}
@@ -51,7 +44,6 @@ services:
       dockerfile: Dockerfile
       args:
         VITE_API_URL: ${VITE_API_URL:-http://localhost:8000}
-        VITE_APP_NAME: ${VITE_APP_NAME:-RadiCal}
     container_name: radiocarbon_frontend
     ports:
       - "5173:5173"
