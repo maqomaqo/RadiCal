@@ -930,13 +930,43 @@ def _span_prior_correction(grid: np.ndarray, num_boundaries: int, enabled: bool,
       and the ordered-group separation that this suite chased for a long stretch
       went from +3.03 and +1.50 years to +1.19 and -0.34.
 
-      What is left. Feeding OxCal's OWN reported limits in rather than ours moves
-      the answer 0.11 years, so the residual is not in the limits: on a single
-      phase of eight overlapping dates we get 29.2 against OxCal's 26.3, about
-      three years, cause unknown. SUPPORT_THRESHOLD reproduces the differences
-      between OxCal's reported limits exactly, with a fixed offset per side (-3.5
-      years young, +2.5 old), and the gap that reaches the posterior is 123 years
-      against its 129.
+      What is left, and where it lives. On a single phase of eight overlapping dates
+      we give a span of 29.2 against OxCal's 26.3, and 54.8 against 48.9 on four of
+      them -- +11% and +12%, a constant PROPORTION rather than a constant offset.
+      It is localised to the two BOUNDARIES: their marginals carry about 45% more
+      mass far from the dates than OxCal's, while the dates themselves agree to
+      0.1-0.2 years in sd, and the date most affected is the one adjacent to a
+      boundary.
+
+      Ruled out by measurement, each separately:
+
+        * the limits. Feeding OxCal's own reported llim/ulim in instead of ours
+          moves the answer 0.11 years. SUPPORT_THRESHOLD reproduces the differences
+          between its values exactly, with a fixed offset per side (-3.5 years
+          young, +2.5 old), and the gap that reaches the posterior is 123 years
+          against its 129.
+        * our grid. Refining the step sixfold on a window holding just this model
+          moves the span 0.38 years, from 30.81 to 30.43.
+        * the interior-boundary factor, which is exact against a closed form.
+        * the likelihoods, within 0.5% in width of OxCal's own.
+        * an extra exponent. One value fits both cases (0.15 at eight dates, 0.13 at
+          four), but a fractional power is a symptom rather than a term, and the
+          tail shape below rules the family out anyway.
+
+      What the tail SHAPE says. Normalised at the mode, the ratio of our density to
+      OxCal's down the old tail of the start boundary runs 1.04, 1.03, 1.07, 1.15,
+      1.18, 1.47, 1.63, 2.18 at 5, 10, 15, 20, 30, 40, 50 and 60 years below it:
+      agreement to a few percent within about one sd, then progressive depletion of
+      OxCal's. A prior with a different exponent would give a clean power law in
+      that distance, and this is not one. The likeliest remaining explanation is
+      therefore that OxCal's sampler does not reach the far tail of a heavy-tailed
+      boundary -- consistent with the dates (light-tailed) agreeing while the
+      boundaries do not, and with Shag River's sixteen dates, where the boundaries
+      are tight and our span comes out 4% NARROW rather than 11% wide.
+
+      Treat that last paragraph as the current hypothesis and not a finding. A
+      sixteen-date run is out with OxCal to falsify it: we predict a span of 22.39
+      there, and 11% below that would mean the cause is in the prior after all.
     * At n = 2 the exponent is zero, so a single Phase between two
       Boundaries -- the app's default shape -- is untouched. Nothing to
       apply, and the O(M^2) chain is kept.
