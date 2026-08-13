@@ -953,20 +953,37 @@ def _span_prior_correction(grid: np.ndarray, num_boundaries: int, enabled: bool,
           four), but a fractional power is a symptom rather than a term, and the
           tail shape below rules the family out anyway.
 
-      What the tail SHAPE says. Normalised at the mode, the ratio of our density to
-      OxCal's down the old tail of the start boundary runs 1.04, 1.03, 1.07, 1.15,
-      1.18, 1.47, 1.63, 2.18 at 5, 10, 15, 20, 30, 40, 50 and 60 years below it:
-      agreement to a few percent within about one sd, then progressive depletion of
-      OxCal's. A prior with a different exponent would give a clean power law in
-      that distance, and this is not one. The likeliest remaining explanation is
-      therefore that OxCal's sampler does not reach the far tail of a heavy-tailed
-      boundary -- consistent with the dates (light-tailed) agreeing while the
-      boundaries do not, and with Shag River's sixteen dates, where the boundaries
-      are tight and our span comes out 4% NARROW rather than 11% wide.
+      It also CHANGES SIGN with the number of dates, which is what rules out the
+      explanations that otherwise fit. One phase, unbracketed, same eight ages
+      throughout (sixteen being each age twice):
 
-      Treat that last paragraph as the current hypothesis and not a finding. A
-      sixteen-date run is out with OxCal to falsify it: we predict a span of 22.39
-      there, and 11% below that would mean the cause is in the prior after all.
+          dates    ours    OxCal
+            4     54.76    48.90    +12%
+            8     29.12    26.26    +11%
+           16     22.39    23.86     -6%
+
+      So it is not a constant prior difference and not an exponent -- the exponent
+      that would reproduce OxCal is +0.13, +0.15, -0.13 across those three. It is
+      not a one-directional sampler artefact either. A depleted far tail was the
+      hypothesis this fixture set was built to test, on the evidence that the ratio
+      of our density to OxCal's down the start boundary's old tail runs 1.04, 1.03,
+      1.07, 1.15, 1.18, 1.47, 1.63, 2.18 at 5 to 60 years below the mode -- and the
+      sixteen-date run falsified it, ours coming out NARROWER where a depleted tail
+      predicts wider still.
+
+      The dates move with the boundaries, so it is not specific to boundaries: our
+      date spread is 4.29 against OxCal's 3.62 at eight dates and 1.90 against 2.15
+      at sixteen. And OxCal is not under-converged, reporting C of 97.6-99.8 on both
+      runs. Measured against the dates' own precision the difference is the same
+      story rather than a new one -- span over mean date sd is 1.41/1.27, 2.24/2.04,
+      1.90/2.01 for ours/OxCal at four, eight and sixteen dates -- because the two
+      agree on the date sds to a fraction of a year throughout.
+
+      Left open deliberately. Every remaining lead is a guess about OxCal's
+      internals, and the one change made here on a story rather than a mechanism --
+      the minimum-span floor -- had to be reverted. The practical size of it: dates
+      agree with OxCal to a year or two on every fixture, and a phase's span differs
+      by up to about a tenth.
     * At n = 2 the exponent is zero, so a single Phase between two
       Boundaries -- the app's default shape -- is untouched. Nothing to
       apply, and the O(M^2) chain is kept.
