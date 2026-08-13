@@ -255,7 +255,7 @@ export default function StackedPosteriorPlot({
           dash: isBoundary ? 'dot' : 'solid',
         },
         mode: 'lines',
-        name: isBoundary ? 'Boundary (modelled transition)' : 'Modelled posterior',
+        name: isBoundary ? 'Boundary (modelled transition)' : 'Posterior (modelled)',
         legendgroup: isBoundary ? 'boundary' : 'posterior',
         showlegend: claimLegend(isBoundary ? 'boundary' : 'posterior'),
         hovertemplate: `<b>${s.title}</b><br>%{customdata}<extra></extra>`,
