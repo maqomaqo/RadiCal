@@ -279,9 +279,13 @@ export default function ModelTreeEditor({ tree, measurements, assignments, onCha
                 sx={{ backgroundColor: typeColor[element.element_type], color: 'white' }}
               />
             </Tooltip>
+            {/* No variant prop -- every other field in the app is the
+                outlined TextField/Select default; this one used to be the
+                lone exception with a bare underline instead of a bordered
+                box, easy to miss as an editable field next to the boxed
+                ones surrounding it. */}
             <TextField
               size="small"
-              variant="standard"
               value={element.name || ''}
               onChange={(e) => rename(element.id, e.target.value)}
               sx={{ minWidth: 180 }}
@@ -290,7 +294,6 @@ export default function ModelTreeEditor({ tree, measurements, assignments, onCha
               <>
                 <TextField
                   size="small"
-                  variant="standard"
                   type="number"
                   label="TPQ"
                   value={element.tpq_age_bp ?? ''}
@@ -299,7 +302,6 @@ export default function ModelTreeEditor({ tree, measurements, assignments, onCha
                 />
                 <TextField
                   size="small"
-                  variant="standard"
                   type="number"
                   label="TAQ"
                   value={element.taq_age_bp ?? ''}
