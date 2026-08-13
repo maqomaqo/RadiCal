@@ -38,6 +38,7 @@ import MeasurementFields, {
   deltaRErrorMissing,
   isMarineMeasurement,
 } from '@/components/MeasurementFields'
+import type { ProjectSample } from '@/components/ProjectSampleTable'
 import {
   DateFormat,
   DATE_FORMAT_OPTIONS,
@@ -177,6 +178,14 @@ export default function NewAnalysis() {
   const [saveResult, setSaveResult] = useState(true)
   const [previewResult, setPreviewResult] = useState<PreviewResult | null>(null)
 
+  // The selected project's own date collection (see ProjectSampleTable),
+  // offered here as an alternative to retyping dates that are already on
+  // file -- picking one copies it into this draft's measurements, same as
+  // the "Deploy" action on the project page itself.
+  const [projectSamples, setProjectSamples] = useState<ProjectSample[]>([])
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const [pickerSelected, setPickerSelected] = useState<Set<string>>(new Set())
+
   // The Project field below is a fixed dropdown of *existing* projects --
   // there's nowhere in it to type a new name. This small dialog is the
   // "type a name to create one" path, reachable via the + button next to
@@ -197,6 +206,26 @@ export default function NewAnalysis() {
   useEffect(() => {
     fetchProjects()
   }, [])
+
+  // Whichever project is currently assigned -- picked from the dropdown or
+  // preselected via ?project=<id> -- its date collection becomes available
+  // to add from below. Cleared when unassigned rather than left stale.
+  useEffect(() => {
+    if (!projectId) {
+      setProjectSamples([])
+      return
+    }
+    let cancelled = false
+    fetch(`/api/projects/${projectId}/samples`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (!cancelled && data.success) setProjectSamples(data.data.items)
+      })
+      .catch((err) => console.error('Failed to load project dates:', err))
+    return () => {
+      cancelled = true
+    }
+  }, [projectId])
 
   // Arriving via a project's own "New Analysis" link (?project=<id>)
   // preselects that project. Only applies when the draft doesn't already
@@ -367,6 +396,35 @@ export default function NewAnalysis() {
   // catch it here rather than on submit.
   const isMarine = isMarineMeasurement(currentMeasurement)
   const missingDeltaRError = deltaRErrorMissing(currentMeasurement)
+
+  // Matches a draft measurement to a project-collection date by value --
+  // there's no id linking them, since a deployed/added date is deliberately
+  // an independent copy (see ProjectSample's docstring). Good enough to
+  // grey out dates already pulled in without needing to track provenance.
+  const measurementKey = (m: { sample_name: string; age_bp: number; error_1sigma: number }) =>
+    `${m.sample_name}|${m.age_bp}|${m.error_1sigma}`
+  const addedProjectSampleKeys = new Set(measurements.map(measurementKey))
+
+  function projectSampleToMeasurement(s: ProjectSample): Measurement {
+    return {
+      id: Math.random().toString(36).substr(2, 9),
+      sample_name: s.sample_name,
+      age_bp: s.age_bp,
+      error_1sigma: s.error_1sigma,
+      material_type: s.material_type || 'unknown',
+      sample_type: s.sample_type,
+      curve_id: s.curve_id || 'intcal20',
+      // The collection has no ΔR fields of its own (see ProjectSampleTable),
+      // so a marine date arrives without one and can be given one here.
+      delta_r: null,
+      delta_r_error: null,
+      outlier_prior: 0,
+      outlier_model: 'general',
+      notes: s.notes ?? null,
+      tpq_age_bp: s.tpq_age_bp ?? null,
+      taq_age_bp: s.taq_age_bp ?? null,
+    }
+  }
 
   const handleAddMeasurement = () => {
     if (
@@ -761,6 +819,24 @@ export default function NewAnalysis() {
               </Alert>
             )}
 
+            {projectId && projectSamples.length > 0 && (
+              <Box sx={{ mb: 3 }}>
+                <Button
+                  variant="outlined"
+                  fullWidth
+                  onClick={() => {
+                    setPickerSelected(new Set())
+                    setPickerOpen(true)
+                  }}
+                >
+                  Add from Project's Date Collection ({projectSamples.length})
+                </Button>
+                <Typography variant="caption" color="textSecondary" sx={{ display: 'block', mt: 0.5 }}>
+                  Or fill in the fields below to add a new date.
+                </Typography>
+              </Box>
+            )}
+
             <MeasurementFields
               value={currentMeasurement}
               onChange={setCurrentMeasurement}
@@ -858,6 +934,65 @@ export default function NewAnalysis() {
             }}
           >
             Save
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={pickerOpen} onClose={() => setPickerOpen(false)} fullWidth maxWidth="sm">
+        <DialogTitle>
+          Add dates from {projects.find((p) => p.id === projectId)?.name ?? 'this project'}'s collection
+        </DialogTitle>
+        <DialogContent dividers sx={{ maxHeight: 420, p: 0 }}>
+          {projectSamples.map((s) => {
+            const alreadyAdded = addedProjectSampleKeys.has(measurementKey(s))
+            return (
+              <FormControlLabel
+                key={s.id}
+                sx={{ display: 'flex', width: '100%', mx: 0, px: 2, py: 0.5 }}
+                control={
+                  <Checkbox
+                    checked={pickerSelected.has(s.id) || alreadyAdded}
+                    disabled={alreadyAdded}
+                    onChange={() =>
+                      setPickerSelected((prev) => {
+                        const next = new Set(prev)
+                        if (next.has(s.id)) next.delete(s.id)
+                        else next.add(s.id)
+                        return next
+                      })
+                    }
+                  />
+                }
+                label={
+                  <Box>
+                    <Typography variant="body2">
+                      {s.sample_name} — {s.age_bp} ± {s.error_1sigma} BP ({s.sample_type}, {s.curve_id})
+                    </Typography>
+                    {alreadyAdded && (
+                      <Typography variant="caption" color="textSecondary">
+                        Already in this analysis
+                      </Typography>
+                    )}
+                  </Box>
+                }
+              />
+            )
+          })}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setPickerOpen(false)}>Cancel</Button>
+          <Button
+            variant="contained"
+            disabled={pickerSelected.size === 0}
+            onClick={() => {
+              for (const s of projectSamples) {
+                if (pickerSelected.has(s.id)) addMeasurement(projectSampleToMeasurement(s))
+              }
+              setPickerSelected(new Set())
+              setPickerOpen(false)
+            }}
+          >
+            Add {pickerSelected.size} Date{pickerSelected.size === 1 ? '' : 's'}
           </Button>
         </DialogActions>
       </Dialog>
