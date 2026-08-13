@@ -12,9 +12,8 @@ import {
 import type { HPDRange } from '@/utils/dateFormat'
 
 /**
- * A filled rectangle on the hidden yaxis2 strip below the curve (see the
- * layout's yaxis2 below), as a closed polygon trace -- same technique
- * StackedPosteriorPlot uses for its own HPD bars.
+ * A filled rectangle in data coordinates, as a closed polygon trace -- same
+ * technique StackedPosteriorPlot uses for its own HPD bars.
  */
 function bar(
   x0: number,
@@ -29,7 +28,6 @@ function bar(
   return {
     x: [x0, x0, x1, x1],
     y: [y0, y1, y1, y0],
-    yaxis: 'y2',
     fill: 'toself',
     fillcolor: color,
     line: { width: 0, color: 'rgba(0,0,0,0)' },
@@ -41,11 +39,16 @@ function bar(
   }
 }
 
-// Where the two bars sit within the yaxis2 strip (range [0, 1], 1 = nearest
-// the curve). 95% nearer the curve, 68% further down -- same ordering
-// StackedPosteriorPlot uses.
-const HPD95_BAR: [number, number] = [0.55, 0.85]
-const HPD68_BAR: [number, number] = [0.05, 0.35]
+// Bar geometry, as fractions of the posterior's own peak density -- negative
+// values sit below the curve's zero baseline. Ordered top to bottom: curve,
+// a gap, the 95% bar, a gap, the 68% bar, then AXIS_BOTTOM_MARGIN of clear
+// space before the x-axis itself. That last margin is what keeps the axis
+// line/ticks/title from landing on top of the 68% bar -- an explicit
+// yaxis.range (below) is what makes this margin real rather than something
+// Plotly's autorange could shrink away.
+const HPD95_BAR: [number, number] = [-0.11, -0.04]
+const HPD68_BAR: [number, number] = [-0.22, -0.15]
+const AXIS_BOTTOM_MARGIN = 0.07
 const HPD95_COLOR = 'rgba(255, 127, 14, 0.55)'
 const HPD68_COLOR = 'rgba(44, 160, 44, 0.65)'
 
@@ -145,6 +148,14 @@ export default function PosteriorPlot({
   // real finite-number check everywhere instead.
   const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
 
+  // The posterior's own peak -- what the HPD bars (and the yaxis range
+  // below) are scaled against, regardless of whether the prior shadow is
+  // taller or shorter.
+  const peak = useMemo(
+    () => (probabilities && probabilities.length > 0 ? Math.max(...probabilities) : 0),
+    [probabilities]
+  )
+
   // Prepare data for Plotly
   const plotData = useMemo(() => {
     if (!calAges || !probabilities || calAges.length === 0) {
@@ -198,24 +209,23 @@ export default function PosteriorPlot({
     // the gap between peaks as part of the HPD region. Only the first bar
     // at each level gets showlegend: true, so a fragmented posterior still
     // shows one legend row rather than one per segment.
+    const hpd95Y: [number, number] = [HPD95_BAR[0] * peak, HPD95_BAR[1] * peak]
+    const hpd68Y: [number, number] = [HPD68_BAR[0] * peak, HPD68_BAR[1] * peak]
+
     if (hpd95Ranges && hpd95Ranges.length > 0) {
       hpd95Ranges.forEach((range, idx) =>
-        data.push(
-          bar(range.min, range.max, HPD95_BAR[0], HPD95_BAR[1], HPD95_COLOR, '95% HPD', idx === 0, 'hpd95')
-        )
+        data.push(bar(range.min, range.max, hpd95Y[0], hpd95Y[1], HPD95_COLOR, '95% HPD', idx === 0, 'hpd95'))
       )
     } else if (hpd95) {
-      data.push(bar(hpd95[0], hpd95[1], HPD95_BAR[0], HPD95_BAR[1], HPD95_COLOR, '95% HPD', true, 'hpd95'))
+      data.push(bar(hpd95[0], hpd95[1], hpd95Y[0], hpd95Y[1], HPD95_COLOR, '95% HPD', true, 'hpd95'))
     }
 
     if (hpd68Ranges && hpd68Ranges.length > 0) {
       hpd68Ranges.forEach((range, idx) =>
-        data.push(
-          bar(range.min, range.max, HPD68_BAR[0], HPD68_BAR[1], HPD68_COLOR, '68% HPD', idx === 0, 'hpd68')
-        )
+        data.push(bar(range.min, range.max, hpd68Y[0], hpd68Y[1], HPD68_COLOR, '68% HPD', idx === 0, 'hpd68'))
       )
     } else if (hpd68) {
-      data.push(bar(hpd68[0], hpd68[1], HPD68_BAR[0], HPD68_BAR[1], HPD68_COLOR, '68% HPD', true, 'hpd68'))
+      data.push(bar(hpd68[0], hpd68[1], hpd68Y[0], hpd68Y[1], HPD68_COLOR, '68% HPD', true, 'hpd68'))
     }
 
     // Vertical line at mean
@@ -248,6 +258,7 @@ export default function PosteriorPlot({
   }, [
     calAges,
     probabilities,
+    peak,
     hpd68,
     hpd95,
     hpd68Ranges,
@@ -272,6 +283,22 @@ export default function PosteriorPlot({
     return calendarAxisTicks(Math.min(...allAges), Math.max(...allAges), dateFormat)
   }, [calAges, dateFormat, priorDistribution, showPrior])
 
+  // Explicit range rather than Plotly's autorange: the bars and their
+  // bottom margin need real, guaranteed room below zero, which autorange
+  // (fit tightly to the tallest/widest trace) would otherwise shrink back
+  // down to nothing whenever a plot happened to have no bars taller than
+  // the curve itself. Floats the curve up and pulls the x-axis down with
+  // it -- see HPD95_BAR/HPD68_BAR/AXIS_BOTTOM_MARGIN above for the geometry.
+  const yRange = useMemo(() => {
+    if (!(peak > 0)) return null
+    let top = peak
+    if (showPrior && priorDistribution && priorDistribution.length > 0) {
+      const priorPeak = Math.max(...priorDistribution.map(([, prob]) => prob))
+      if (priorPeak > top) top = priorPeak
+    }
+    return [(HPD68_BAR[0] - AXIS_BOTTOM_MARGIN) * peak, top * 1.08]
+  }, [peak, showPrior, priorDistribution])
+
   const layout = useMemo(
     () => ({
       title: sampleName ? `Posterior Distribution: ${sampleName}` : 'Posterior Distribution',
@@ -293,19 +320,7 @@ export default function PosteriorPlot({
       yaxis: {
         title: 'Probability Density',
         zeroline: false,
-        // Top portion of the figure -- the bottom is reserved for the HPD
-        // bars on yaxis2, below.
-        domain: [0.22, 1],
-      },
-      // A hidden secondary axis sharing the same x, giving the HPD bars a
-      // strip of their own with a plain [0, 1] scale instead of the
-      // curve's density scale -- see the bar() helper above. Fixed and
-      // invisible: this axis exists only to place the bars, not to be read.
-      yaxis2: {
-        domain: [0, 0.18],
-        range: [0, 1],
-        visible: false,
-        fixedrange: true,
+        ...(yRange ? { range: yRange, autorange: false } : {}),
       },
       hovermode: 'x unified',
       plot_bgcolor: 'rgba(240, 240, 240, 0.5)',
@@ -313,7 +328,7 @@ export default function PosteriorPlot({
       margin: { l: 60, r: 20, t: 50, b: 60 },
       autosize: true,
     }),
-    [sampleName, dateFormat, ticks]
+    [sampleName, dateFormat, ticks, yRange]
   )
 
   const config = useMemo(
