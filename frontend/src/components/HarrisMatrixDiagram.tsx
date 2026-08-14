@@ -1,334 +1,290 @@
-// Drag-and-drop Harris matrix diagram: each node is a stratigraphic
-// Context (a named phase/layer that one or more dated samples belong to),
-// with above/below/equal relationships as edges between contexts. Nodes
-// auto-layout into layers on first render (oldest at the bottom, youngest
-// at the top, matching the conventional Harris matrix reading direction)
-// but can be freely dragged afterward -- reactflow persists whatever
-// position the user leaves a node at for the rest of the session.
+// The Harris matrix: a read-only rendering of the model tree, oldest at the
+// bottom.
 //
-// Individual dated samples are deliberately NOT drawn as their own boxes
-// here -- the workflow is "assign each sample to a Context, then relate
-// Contexts to each other," so a context node just shows how many dates it
-// contains (see the "N dates" sub-label). A sample not yet assigned to any
-// context has nowhere to attach in this diagram; see unassignedCount below.
+// This component is deliberately thin. Everything about WHERE things go lives
+// in utils/harrisLayout.ts as pure geometry, because reactflow draws into a
+// measured viewport and there is no DOM assertion that says "the boxes line
+// up" -- the nodes are present at whatever coordinates they were given,
+// sensible or not. Keeping the layout separate is what lets
+// utils/harrisLayout.test.ts hold it to the properties that matter.
 //
-// In editable mode, dragging a connection from one context to another
-// creates a new "above" relationship (source = younger, target = older --
-// law of superposition: what's above is younger); click an edge to change
-// its type or delete it via the panel below the canvas. In read-only mode
-// (used on the Results page to show what stratigraphy a saved analysis
-// actually used), dragging is limited to repositioning -- no edges can be
-// added, changed, or removed.
-import React, { useMemo, useState, useEffect } from 'react'
+// What the drawing means:
+//
+//   context   a Phase that dates are attached to -- the thing a Harris matrix
+//             is actually made of. Shows its date count and any TPQ/TAQ.
+//   group     a Sequence, or a Phase that contains other Phases. Drawn as a
+//             box AROUND its children rather than a node beside them, because
+//             "Fires" contains the fire features; it is not one of them.
+//   boundary  a modelled transition, drawn as a labelled rule spanning the
+//             group it divides, with its posterior range once the analysis has
+//             run.
+//   arrow     an ordering between two adjacent blocks. Only drawn where no
+//             Boundary rule already separates them, and never expanded to the
+//             phases nested inside -- the containing box carries that.
+//
+// Nodes are not draggable. The layout now means something (a child sits
+// centred beneath its parent, siblings share a row because the model says
+// they are unordered), and dragging would let that be pulled apart while
+// still looking authoritative. Pan, zoom and fit remain.
+import { useMemo } from 'react'
 import ReactFlow, {
-  Node,
-  Edge,
-  Connection,
-  MarkerType,
-  useNodesState,
-  useEdgesState,
-  Controls,
   Background,
+  Controls,
+  Handle,
+  MarkerType,
   MiniMap,
+  Position,
+  type Edge,
+  type Node,
+  type NodeProps,
 } from 'reactflow'
 import 'reactflow/dist/style.css'
-import { Box, Paper, Typography, FormControl, Select, MenuItem, Button, Alert, Stack } from '@mui/material'
+import { Alert, Box, Typography } from '@mui/material'
 import { useTheme } from '@mui/material/styles'
-import { grey, purple } from '@mui/material/colors'
-import DeleteIcon from '@mui/icons-material/Delete'
-import type { DraftGroup, MatrixMeasurement, DraftRelationship, RelationshipType } from '@/types'
-import { expandRelationships, findCycle } from '@/utils/stratigraphy'
+import { alpha } from '@mui/material/styles'
+import type { MatrixMeasurement, ModelElement } from '@/types'
 import { CONTEXT_PALETTE } from '@/theme/diagramColors'
+import {
+  layoutHarrisMatrix,
+  type LaidOutNode,
+} from '@/utils/harrisLayout'
+import { DEFAULT_DATE_FORMAT, formatCalendarRange, type DateFormat } from '@/utils/dateFormat'
 
-function colorForContext(contextId: string, contexts: DraftGroup[]): string {
-  const idx = contexts.findIndex((c) => c.id === contextId)
-  // The modulo means this can't actually miss, but TS can't see that a
-  // fixed-length array indexed by n % length is always in range.
-  return CONTEXT_PALETTE[idx % CONTEXT_PALETTE.length] || grey[600]
+interface NodeData {
+  node: LaidOutNode
+  color: string
+  dateFormat: DateFormat
 }
 
-function nodeLabel(name: string, sub?: string, badges?: string[]) {
+// Handles are hidden but must exist: reactflow anchors every edge to one, and
+// an edge whose handle is missing silently does not render.
+const HIDDEN_HANDLE = { opacity: 0, width: 1, height: 1, border: 'none', background: 'transparent' }
+
+function ContextNode({ data }: NodeProps<NodeData>) {
+  const { node, color } = data
+  const badges: string[] = []
+  if (node.tpqAgeBp != null) badges.push(`TPQ ≤${node.tpqAgeBp}`)
+  if (node.taqAgeBp != null) badges.push(`TAQ ≥${node.taqAgeBp}`)
+
   return (
-    <Box sx={{ textAlign: 'center', lineHeight: 1.3 }}>
-      <Typography sx={{ fontSize: 12, fontWeight: 700 }}>{name}</Typography>
-      {sub && (
-        <Typography sx={{ fontSize: 10, opacity: 0.75 }}>{sub}</Typography>
+    <Box
+      sx={{
+        width: '100%',
+        height: '100%',
+        display: 'flex',
+        flexDirection: 'column',
+        justifyContent: 'center',
+        alignItems: 'center',
+        border: `2px solid ${color}`,
+        borderRadius: 1.5,
+        backgroundColor: alpha(color, 0.1),
+        px: 1,
+        boxSizing: 'border-box',
+      }}
+    >
+      <Handle type="target" position={Position.Top} style={HIDDEN_HANDLE} />
+      <Typography sx={{ fontSize: 12, fontWeight: 700, lineHeight: 1.2, textAlign: 'center' }}>
+        {node.name}
+      </Typography>
+      <Typography sx={{ fontSize: 10, opacity: 0.75 }}>
+        {node.dateCount} date{node.dateCount === 1 ? '' : 's'}
+      </Typography>
+      {badges.length > 0 && (
+        <Typography sx={{ fontSize: 9, opacity: 0.8 }}>{badges.join(' · ')}</Typography>
       )}
-      {badges && badges.length > 0 && (
-        <Typography sx={{ fontSize: 9, opacity: 0.8, mt: 0.25 }}>{badges.join(' · ')}</Typography>
-      )}
+      <Handle type="source" position={Position.Bottom} style={HIDDEN_HANDLE} />
     </Box>
   )
 }
 
-function tpqTaqBadges(tpq?: number | null, taq?: number | null): string[] {
-  const badges: string[] = []
-  if (tpq != null) badges.push(`TPQ ≤${tpq}`)
-  if (taq != null) badges.push(`TAQ ≥${taq}`)
-  return badges
+function GroupNode({ data }: NodeProps<NodeData>) {
+  const { node, color } = data
+  return (
+    <Box
+      sx={{
+        width: '100%',
+        height: '100%',
+        border: `1px dashed ${alpha(color, 0.6)}`,
+        borderRadius: 2,
+        // Each level of nesting is a touch darker, so depth reads at a glance
+        // without needing to trace the borders.
+        backgroundColor: alpha(color, 0.04 + Math.min(node.depth, 4) * 0.02),
+        boxSizing: 'border-box',
+      }}
+    >
+      <Handle type="target" position={Position.Top} style={HIDDEN_HANDLE} />
+      <Typography
+        sx={{
+          fontSize: 10,
+          fontWeight: 700,
+          textTransform: 'uppercase',
+          letterSpacing: 0.5,
+          opacity: 0.7,
+          px: 1,
+          pt: 0.5,
+        }}
+      >
+        {node.name}
+      </Typography>
+      <Handle type="source" position={Position.Bottom} style={HIDDEN_HANDLE} />
+    </Box>
+  )
 }
 
-// Layer = length of the longest "older than" chain leading to this context;
-// a context with no known relationship defaults to layer 0. Only
-// context-to-context relationships participate here -- see the module
-// comment above for why individual samples don't get their own nodes.
-function layoutNodes(contexts: DraftGroup[], relationships: DraftRelationship[]): { nodeId: string; layer: number }[] {
-  // Edges here are always (older, younger), matching utils/stratigraphy.ts
-  // -- law of superposition: "above" means younger (so the older node is
-  // the *target*), "below" means older (so the older node is the *source*).
-  const edges: { from: string; to: string }[] = []
-  for (const r of relationships) {
-    if (r.from_type !== 'group' || r.to_type !== 'group') continue
-    if (r.relationship === 'above') edges.push({ from: r.to_sample_id, to: r.from_sample_id })
-    else if (r.relationship === 'below') edges.push({ from: r.from_sample_id, to: r.to_sample_id })
-  }
+function BoundaryNode({ data }: NodeProps<NodeData>) {
+  const { node, color, dateFormat } = data
+  // The 95% modelled range for this transition, once the analysis has run.
+  // Shown on the rule itself so the diagram says WHEN a transition happened,
+  // not merely that there is one -- the same figure the results table reports.
+  const range = node.posterior
+    ? formatCalendarRange(node.posterior.hpd_95[0], node.posterior.hpd_95[1], dateFormat)
+    : null
 
-  const layer = new Map<string, number>()
-  for (const c of contexts) layer.set(c.id, 0)
-
-  // Iteratively relax layers along edges until stable (equivalent to
-  // longest-path in a DAG; if there's a cycle this just stops after a
-  // bounded number of passes rather than looping forever).
-  for (let pass = 0; pass < contexts.length + 1; pass++) {
-    let changed = false
-    for (const { from, to } of edges) {
-      const candidate = (layer.get(from) || 0) + 1
-      if (candidate > (layer.get(to) || 0)) {
-        layer.set(to, candidate)
-        changed = true
-      }
-    }
-    if (!changed) break
-  }
-
-  return contexts.map((c) => ({ nodeId: c.id, layer: layer.get(c.id) || 0 }))
+  return (
+    <Box
+      sx={{
+        width: '100%',
+        height: '100%',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 1,
+        boxSizing: 'border-box',
+      }}
+    >
+      <Handle type="target" position={Position.Top} style={HIDDEN_HANDLE} />
+      <Box sx={{ flex: 1, borderTop: `2px solid ${color}` }} />
+      <Typography sx={{ fontSize: 10, fontWeight: 700, color, whiteSpace: 'nowrap' }}>
+        {node.name}
+        {range && (
+          <Typography component="span" sx={{ fontSize: 10, fontWeight: 400, opacity: 0.8, ml: 0.75 }}>
+            {range}
+          </Typography>
+        )}
+      </Typography>
+      <Box sx={{ flex: 1, borderTop: `2px solid ${color}` }} />
+      <Handle type="source" position={Position.Bottom} style={HIDDEN_HANDLE} />
+    </Box>
+  )
 }
 
-interface HarrisMatrixDiagramProps {
+const NODE_TYPES = { context: ContextNode, group: GroupNode, boundary: BoundaryNode }
+
+// Module-level so the default prop is referentially stable. A fresh `{}` per
+// render would change the layout memo's dependency every time and rebuild the
+// whole geometry on each paint.
+const NO_ASSIGNMENTS: Record<string, string> = {}
+
+interface Props {
+  tree: ModelElement | null | undefined
   measurements: MatrixMeasurement[]
-  groups: DraftGroup[]
-  relationships: DraftRelationship[]
-  editable: boolean
-  onAddRelationship?: (rel: Omit<DraftRelationship, 'id'>) => void
-  onUpdateRelationshipType?: (id: string, relationship: RelationshipType) => void
-  onDeleteRelationship?: (id: string) => void
+  /** Date id -> element id, for a model still being drafted. Falls back to
+   *  each date's own element_id/group_id when absent. */
+  assignments?: Record<string, string>
+  dateFormat?: DateFormat
+  height?: number
 }
 
 export default function HarrisMatrixDiagram({
+  tree,
   measurements,
-  groups: contexts,
-  relationships,
-  editable,
-  onAddRelationship,
-  onUpdateRelationshipType,
-  onDeleteRelationship,
-}: HarrisMatrixDiagramProps) {
+  assignments = NO_ASSIGNMENTS,
+  dateFormat = DEFAULT_DATE_FORMAT,
+  height = 520,
+}: Props) {
   const theme = useTheme()
-  const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null)
 
-  const unassignedCount = useMemo(
-    () => measurements.filter((m) => !m.group_id).length,
-    [measurements]
+  const layout = useMemo(
+    () => layoutHarrisMatrix(tree, measurements, assignments),
+    [tree, measurements, assignments]
   )
 
-  const initialLayout = useMemo(() => layoutNodes(contexts, relationships), [contexts.length, relationships])
+  const nodes = useMemo<Node<NodeData>[]>(() => {
+    // Contexts are coloured categorically so two of them are told apart at a
+    // glance; containers and rules take a structural colour instead, since
+    // what matters about them is what they ARE, not which one they are.
+    let contextIndex = 0
+    return layout.nodes.map((node) => {
+      let color: string
+      if (node.kind === 'context') {
+        color = CONTEXT_PALETTE[contextIndex++ % CONTEXT_PALETTE.length]
+      } else if (node.kind === 'boundary') {
+        color = theme.palette.warning.dark
+      } else {
+        color = theme.palette.primary.main
+      }
 
-  const flowNodes = useMemo<Node[]>(() => {
-    const maxLayer = Math.max(0, ...initialLayout.map((n) => n.layer))
-    const byLayer = new Map<number, string[]>()
-    for (const { nodeId, layer } of initialLayout) {
-      if (!byLayer.has(layer)) byLayer.set(layer, [])
-      byLayer.get(layer)!.push(nodeId)
-    }
-
-    return contexts.map((c) => {
-      const layerEntry = initialLayout.find((n) => n.nodeId === c.id)
-      const layer = layerEntry?.layer ?? 0
-      const siblings = byLayer.get(layer) || [c.id]
-      const idx = siblings.indexOf(c.id)
-      const color = colorForContext(c.id, contexts)
-      const dateCount = measurements.filter((m) => m.group_id === c.id).length
       return {
-        id: c.id,
-        position: { x: idx * 220, y: (maxLayer - layer) * 140 },
-        data: {
-          label: nodeLabel(c.name, `${dateCount} date${dateCount === 1 ? '' : 's'}`, tpqTaqBadges(c.tpq_age_bp, c.taq_age_bp)),
-        },
-        style: {
-          background: `${color}22`,
-          border: `2px solid ${color}`,
-          borderRadius: 10,
-          padding: 8,
-          minWidth: 150,
-        },
+        id: node.id,
+        type: node.kind,
+        // Relative to parentNode when there is one -- which is what
+        // harrisLayout already produces.
+        position: { x: node.x, y: node.y },
+        style: { width: node.width, height: node.height },
+        data: { node, color, dateFormat },
+        draggable: false,
+        selectable: false,
+        connectable: false,
+        ...(node.parentId ? { parentNode: node.parentId, extent: 'parent' as const } : {}),
       }
     })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [contexts, measurements, initialLayout])
+    // layout.nodes is already parent-before-child (the layout emits each
+    // container before descending into it), which reactflow requires.
+  }, [layout, theme, dateFormat])
 
-  const flowEdges = useMemo<Edge[]>(
+  const edges = useMemo<Edge[]>(
     () =>
-      relationships
-        .filter((r) => r.from_type === 'group' && r.to_type === 'group')
-        .map((r) => {
-          const isEqual = r.relationship === 'equal'
-          // Canonical (younger, older) direction, matching layoutNodes above
-          // -- 'above' means from_sample_id is younger; 'below' means it's
-          // older. Drawing every edge from younger to older, regardless of
-          // which relationship type produced it, matters because reactflow's
-          // default node always puts its SOURCE handle at the bottom and its
-          // TARGET handle at the top, no matter which role that node plays.
-          // layoutNodes positions the younger context higher on screen (see
-          // its own "oldest at the bottom, youngest at the top" comment), so
-          // source=younger/target=older makes the connector exit the bottom
-          // of the higher box and enter the top of the lower one -- a
-          // straight vertical line. Using from/to directly instead (as
-          // before) draws a 'below' edge -- from=older, to=younger --
-          // backwards: source=older (already at the bottom) exits its own
-          // bottom, target=younger (already at the top) is entered from its
-          // top, so the line has to loop the wrong way around both boxes
-          // rather than run straight between them.
-          const [sourceId, targetId] = isEqual
-            ? [r.from_sample_id, r.to_sample_id]
-            : r.relationship === 'below'
-              ? [r.to_sample_id, r.from_sample_id]
-              : [r.from_sample_id, r.to_sample_id]
-          return {
-            id: r.id,
-            source: sourceId,
-            target: targetId,
-            label: r.relationship,
-            animated: false,
-            style: {
-              stroke: isEqual ? purple[500] : theme.palette.primary.main,
-              strokeDasharray: isEqual ? '6 4' : undefined,
-              strokeWidth: r.id === selectedEdgeId ? 3 : 1.5,
-            },
-            markerEnd: isEqual ? undefined : { type: MarkerType.ArrowClosed, color: theme.palette.primary.main },
-          }
-        }),
-    [relationships, selectedEdgeId, theme]
+      layout.edges.map((edge) => ({
+        id: edge.id,
+        source: edge.source,
+        target: edge.target,
+        type: 'smoothstep',
+        style: { stroke: theme.palette.text.secondary, strokeWidth: 1.5 },
+        markerEnd: { type: MarkerType.ArrowClosed, color: theme.palette.text.secondary },
+      })),
+    [layout, theme]
   )
 
-  const [nodes, setNodes, onNodesChange] = useNodesState(flowNodes)
-  const [edges, setEdges, onEdgesChange] = useEdgesState(flowEdges)
-
-  // Keep the flow's internal state in sync whenever the underlying draft
-  // data changes (e.g. a relationship added from the List Editor tab)
-  // without clobbering positions the user has already dragged.
-  useEffect(() => {
-    setNodes((current: Node[]) => {
-      const byId = new Map(current.map((n: Node) => [n.id, n]))
-      return flowNodes.map((n) => (byId.has(n.id) ? { ...n, data: n.data, style: n.style } : n))
-    })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [flowNodes])
-
-  useEffect(() => {
-    setEdges(flowEdges)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [flowEdges])
-
-  const onConnect = (connection: Connection) => {
-    if (!editable || !onAddRelationship || !connection.source || !connection.target) return
-    if (connection.source === connection.target) return
-    onAddRelationship({
-      from_sample_id: connection.source,
-      to_sample_id: connection.target,
-      from_type: 'group',
-      to_type: 'group',
-      relationship: 'above',
-    })
+  if (!tree || layout.nodes.length === 0) {
+    return (
+      <Alert severity="info">
+        No model structure to draw yet — add Phases and Boundaries in the Model Structure editor.
+      </Alert>
+    )
   }
-
-  const cycle = useMemo(() => {
-    const { olderYounger } = expandRelationships(measurements, contexts, relationships)
-    return findCycle(olderYounger.map((e) => ({ from: e.from, to: e.to })))
-  }, [measurements, contexts, relationships])
-
-  const cycleLabels = useMemo(() => {
-    if (!cycle) return []
-    const names = new Map<string, string>()
-    for (const m of measurements) names.set(m.id, m.sample_name)
-    for (const c of contexts) names.set(c.id, c.name)
-    return cycle.map((id) => names.get(id) || id)
-  }, [cycle, measurements, contexts])
-
-  const selectedRelationship = relationships.find((r) => r.id === selectedEdgeId) || null
 
   return (
     <Box>
-      {cycle && (
-        <Alert severity="error" sx={{ mb: 2 }}>
-          Circular relationship detected involving: {cycleLabels.join(', ')}. No set of calendar ages
-          can satisfy every constraint at once -- fix or remove one of these relationships before
-          running the analysis.
-        </Alert>
-      )}
-      {unassignedCount > 0 && (
+      {layout.unassignedCount > 0 && (
         <Alert severity="warning" sx={{ mb: 2 }}>
-          {unassignedCount} sample{unassignedCount === 1 ? '' : 's'} not yet assigned to a context --
-          not shown here, and unconstrained by any relationship. Assign {unassignedCount === 1 ? 'it' : 'them'} to a
-          context in the Samples table to include {unassignedCount === 1 ? 'it' : 'them'} in this diagram.
-        </Alert>
-      )}
-      {editable && (
-        <Alert severity="info" sx={{ mb: 2 }}>
-          Drag from one context's edge to another to add an "above" relationship (younger → older).
-          Click an edge below to change its type or delete it. Drag contexts to rearrange the layout.
+          {layout.unassignedCount} date{layout.unassignedCount === 1 ? '' : 's'} not assigned to any
+          phase — not shown here, and unconstrained by the model. Assign{' '}
+          {layout.unassignedCount === 1 ? 'it' : 'them'} to a Phase to include{' '}
+          {layout.unassignedCount === 1 ? 'it' : 'them'}.
         </Alert>
       )}
 
-      <Box sx={{ width: '100%', height: 480, border: '1px solid #ddd', borderRadius: 1 }}>
+      <Box sx={{ width: '100%', height, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
         <ReactFlow
           nodes={nodes}
           edges={edges}
-          onNodesChange={onNodesChange}
-          onEdgesChange={editable ? onEdgesChange : undefined}
-          nodesDraggable
-          nodesConnectable={editable}
-          elementsSelectable={editable}
-          onConnect={editable ? onConnect : undefined}
-          onEdgeClick={(_: React.MouseEvent, edge: Edge) => setSelectedEdgeId(edge.id)}
-          onPaneClick={() => setSelectedEdgeId(null)}
+          nodeTypes={NODE_TYPES}
+          nodesDraggable={false}
+          nodesConnectable={false}
+          elementsSelectable={false}
+          proOptions={{ hideAttribution: false }}
+          minZoom={0.1}
           fitView
         >
           <Background />
           <Controls showInteractive={false} />
-          {contexts.length > 8 && <MiniMap />}
+          {layout.nodes.length > 12 && <MiniMap pannable zoomable />}
         </ReactFlow>
       </Box>
 
-      {editable && selectedRelationship && (
-        <Paper sx={{ mt: 2, p: 2 }}>
-          <Stack direction="row" spacing={2} alignItems="center">
-            <Typography variant="body2" sx={{ flex: 1 }}>
-              Selected relationship
-            </Typography>
-            <FormControl size="small" sx={{ minWidth: 140 }}>
-              <Select
-                value={selectedRelationship.relationship}
-                onChange={(e) => onUpdateRelationshipType?.(selectedRelationship.id, e.target.value as RelationshipType)}
-              >
-                <MenuItem value="above">Above (younger)</MenuItem>
-                <MenuItem value="below">Below (older)</MenuItem>
-                <MenuItem value="equal">Equal (same phase)</MenuItem>
-              </Select>
-            </FormControl>
-            <Button
-              size="small"
-              color="error"
-              startIcon={<DeleteIcon />}
-              onClick={() => {
-                onDeleteRelationship?.(selectedRelationship.id)
-                setSelectedEdgeId(null)
-              }}
-            >
-              Delete
-            </Button>
-          </Stack>
-        </Paper>
-      )}
+      <Typography variant="caption" color="textSecondary" sx={{ display: 'block', mt: 1 }}>
+        Oldest at the bottom. A box drawn around others groups them without ordering them; an arrow
+        or a labelled rule between two blocks means the lower one is older.
+      </Typography>
     </Box>
   )
 }

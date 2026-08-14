@@ -45,7 +45,7 @@ import ConfirmDialog from '@/components/ConfirmDialog'
 import AssignProjectDialog from '@/components/AssignProjectDialog'
 import { formatApiError } from '@/utils/apiError'
 import { useNotify } from '@/contexts/NotificationContext'
-import { treeToMatrix, flattenStructure } from '@/utils/stratigraphy'
+import { flattenStructure } from '@/utils/stratigraphy'
 import type { StructureRow } from '@/utils/stratigraphy'
 import {
   DateFormat,
@@ -533,32 +533,26 @@ export default function Results() {
     }
   }
 
-  // What the Harris matrix further down draws. Derived from the model tree
-  // the same way the editor derives it, because the ordering lives in the
-  // tree: a tree-authored analysis has no SampleGroup or relationship rows
-  // at all, so reading those directly drew unordered phases containing no
-  // dates. Falls back to the stored contexts for analyses predating trees.
+  // Which phase each date sits in, for the Harris matrix further down.
   //
-  // Memoised because HarrisMatrixDiagram memoises its flow nodes/edges on
-  // the identity of these arrays and syncs them into reactflow state via an
-  // effect -- rebuilding them each render would loop that effect forever,
-  // leaving every node stuck unmeasured (invisible) and no edges drawn.
-  const structureView = useMemo(() => {
-    const measurements = analysis?.measurements || []
-    if (analysis?.model_tree) {
-      const assignments = Object.fromEntries(
-        measurements
+  // There is no fallback to the stored contexts here any more: GET
+  // /analysis/:id runs _get_or_migrate_tree for every Bayesian analysis, so
+  // one predating model trees is migrated on read and comes back WITH a tree.
+  // model_tree is null only for a plain or group calibration, which has no
+  // stratigraphy to draw.
+  //
+  // Memoised on `analysis` so the object identity handed to the diagram is
+  // stable across renders; the layout is recomputed only when the analysis
+  // itself changes.
+  const structureAssignments = useMemo(
+    () =>
+      Object.fromEntries(
+        (analysis?.measurements || [])
           .map((m) => [m.id, m.element_id || m.group_id])
           .filter(([, elementId]) => !!elementId) as [string, string][]
-      )
-      return treeToMatrix(analysis.model_tree, measurements, assignments)
-    }
-    return {
-      measurements,
-      groups: analysis?.groups || [],
-      relationships: analysis?.relationships || [],
-    }
-  }, [analysis])
+      ),
+    [analysis]
+  )
 
   if (loading) {
     return (
@@ -1212,22 +1206,20 @@ export default function Results() {
           It reads after the results table because it answers the question the
           table raises -- "what ordering produced these ranges?" -- rather than
           one asked before the ranges have been seen. */}
-      {analysis.analysis_type === 'bayesian' &&
-        analysis.measurements &&
-        (structureView.groups.length > 0 || structureView.relationships.length > 0) && (
-          <Paper sx={{ p: 3, mb: 3 }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
-              <AccountTreeIcon color="action" />
-              <Typography variant="h5">Model Structure used</Typography>
-            </Box>
-            <HarrisMatrixDiagram
-              measurements={structureView.measurements}
-              groups={structureView.groups}
-              relationships={structureView.relationships}
-              editable={false}
-            />
-          </Paper>
-        )}
+      {analysis.analysis_type === 'bayesian' && analysis.model_tree && (
+        <Paper sx={{ p: 3, mb: 3 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+            <AccountTreeIcon color="action" />
+            <Typography variant="h5">Model Structure used</Typography>
+          </Box>
+          <HarrisMatrixDiagram
+            tree={analysis.model_tree}
+            measurements={analysis.measurements || []}
+            assignments={structureAssignments}
+            dateFormat={dateFormat}
+          />
+        </Paper>
+      )}
 
       {/* Posterior distribution plots, in the model's own reading order --
           the same order as the results table and both exports, so scrolling

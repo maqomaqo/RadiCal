@@ -51,7 +51,8 @@ import { useNotify } from '@/contexts/NotificationContext'
 import { useAnalysisDraftStore } from '@/stores/analysisStore'
 import type { SolverChoice } from '@/stores/analysisStore'
 import type { DraftMeasurement, ModelElement } from '@/types'
-import { expandRelationships, findCycle, treeToMatrix } from '@/utils/stratigraphy'
+import { expandRelationships, findCycle } from '@/utils/stratigraphy'
+import { summariseTree } from '@/utils/harrisLayout'
 import { validateTree } from '@/components/ModelTreeEditor'
 
 type Measurement = DraftMeasurement
@@ -389,9 +390,17 @@ export default function NewAnalysis() {
   // groups/relationships arrays, which stay empty for a tree-authored
   // draft and only get backfilled with a phase list (never relationships)
   // once an existing analysis is loaded for editing.
-  const structureView = modelTree ? treeToMatrix(modelTree, measurements, elementAssignments) : null
-  const structurePhaseCount = structureView ? structureView.groups.length : groups.length
-  const structureRelationshipCount = structureView ? structureView.relationships.length : relationships.length
+  //
+  // The ordering count comes from summariseTree, which counts what the MODEL
+  // asserts -- one per adjacent pair of children in each Sequence. The old
+  // treeToMatrix counted the cross-product edges the diagram used to draw, so
+  // a model asserting 39 orderings displayed 175: the chip was quoting a
+  // drawing bug back at the user.
+  const structureSummary = modelTree ? summariseTree(modelTree) : null
+  const structurePhaseCount = structureSummary ? structureSummary.phaseCount : groups.length
+  const structureRelationshipCount = structureSummary
+    ? structureSummary.orderingCount
+    : relationships.length
   const structureDefined = modelTree ? true : groups.length > 0 || relationships.length > 0
   const structureInvalid = modelTree ? treeProblems.length > 0 : !!cycle
 

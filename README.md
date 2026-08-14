@@ -14,8 +14,10 @@ Boundaries), and interactive posterior visualization.
   an optional outlier model per date. Solved exactly where the model permits it, and by OxCal's own
   MH/Gibbs scheme otherwise — see [`REMAINING_WORK.md`](REMAINING_WORK.md) for how the solvers were
   validated against real OxCal 4.4 runs.
-- **Harris matrix diagram**: a drag-and-drop `reactflow` editor for the model tree, and a read-only
-  rendering of it on a completed analysis's results.
+- **Harris matrix diagram**: the model tree drawn to the conventional reading, oldest at the bottom
+  — nesting shown as boxes within boxes, Boundaries as labelled rules carrying their modelled
+  range, and an arrow only between adjacent blocks that nothing else already separates. Laid out
+  from the tree by `utils/harrisLayout.ts`, whose geometry is unit-tested rather than eyeballed.
 - **Diagnostics**: an OxCal-style agreement index per date (how much the model had to move it away
   from its own unconstrained calibration) and an outlier posterior probability where an outlier model
   is applied.
@@ -126,6 +128,15 @@ cd backend
 pip install -r requirements-dev.txt
 pytest
 ```
+
+#### Frontend tests
+```bash
+cd frontend
+npm test
+```
+Vitest, running in plain node. It covers the pure helpers — most importantly
+`utils/harrisLayout.ts`, whose geometry cannot be checked any other way: React Flow draws into a
+measured viewport, so nothing in the DOM tells you whether the boxes actually line up.
 
 ## API Overview
 

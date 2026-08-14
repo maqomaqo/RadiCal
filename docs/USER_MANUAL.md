@@ -116,10 +116,28 @@ model as nested Sequences and Phases with Boundaries placed where you want them 
 then assign each date to a Phase. TPQ (terminus post quem — a maximum age) and TAQ (terminus ante
 quem — a minimum age) limiters can be set on a date or on a whole Phase.
 
-Reached via **Specify Model Structure** / **Edit Model Structure**, which has two ways to build the
-same tree: a drag-and-drop Harris matrix diagram, and a List Editor for the same structure as plain
-controls. The Results page later renders this same tree read-only as a diagram, and the Posterior
-Distributions plots follow its order.
+Reached via **Specify Model Structure** / **Edit Model Structure**, which has an **Editor** tab for
+building the tree and a **Harris Matrix Diagram** tab showing it drawn. The Results page renders
+the same diagram for a completed analysis, and the Posterior Distributions plots follow its order.
+
+### Reading the Harris matrix
+
+The diagram is a picture of the model tree, not a second place to edit it — build the structure on
+the Editor tab and the diagram follows. **Oldest is at the bottom**, as the convention has it.
+
+- A **context** (solid box) is a Phase that dates are attached to, showing how many it holds and
+  any TPQ/TAQ limiter.
+- A **box drawn around other boxes** is a Sequence or a grouping Phase. It groups without ordering:
+  a Phase containing two Phases says they belong together and says nothing about which came first,
+  so they sit side by side inside it.
+- A **labelled rule** across a group is a Boundary — a modelled transition — with its 95% range
+  once the analysis has run.
+- An **arrow** means the lower block is older. Arrows are drawn only between adjacent blocks, and
+  only where no Boundary rule already separates them: a relationship implied by another one is left
+  out, which is what keeps a nested model readable.
+
+Nothing in the diagram is draggable. Position carries meaning here — a context sits centred beneath
+the group that contains it — so it is laid out rather than arranged by hand.
 
 **Model Settings**, on the New Analysis form itself:
 - **Solver** — Automatic (recommended: exact integration where the model allows it, sampling

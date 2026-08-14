@@ -11,7 +11,7 @@
 // same thing with no way to reconcile them.
 //
 // The Harris matrix (components/HarrisMatrixDiagram.tsx) is now a READ-ONLY
-// view derived from that tree via utils/stratigraphy.treeToMatrix, rather
+// view derived from that tree via utils/harrisLayout.layoutHarrisMatrix, rather
 // than an editable second representation.
 //
 // Two flows share this page: a saved analysis edits its stored tree through
@@ -37,7 +37,7 @@ import type { ModelElement, MatrixMeasurement } from '@/types'
 import HarrisMatrixDiagram from '@/components/HarrisMatrixDiagram'
 import ModelTreeEditor, { newElementId, validateTree } from '@/components/ModelTreeEditor'
 import { formatApiError } from '@/utils/apiError'
-import { treeToMatrix } from '@/utils/stratigraphy'
+import { summariseTree } from '@/utils/harrisLayout'
 
 const STRUCTURE_BLURB =
   'The explicit OxCal-style model: nested Sequences and Phases with Boundaries placed where you ' +
@@ -143,7 +143,7 @@ export default function Stratigraphy() {
   // The Harris matrix is a derived VIEW of the model tree rather than an
   // editable source of its own -- whichever tree is in play (the saved
   // analysis's, or the in-progress draft) is what it draws.
-  const matrixView = treeToMatrix(activeTree, activeMeasurements, activeAssignments)
+  const summary = summariseTree(activeTree)
 
   // Same rules the backend enforces (services/model_tree.validate_tree), run
   // here so an invalid structure can't be submitted at all. The editor shows
@@ -206,7 +206,7 @@ export default function Stratigraphy() {
           </Typography>
         </Box>
         <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-          <Chip label={`${matrixView.groups.length} phase${matrixView.groups.length === 1 ? '' : 's'}`} />
+          <Chip label={`${summary.phaseCount} phase${summary.phaseCount === 1 ? '' : 's'}`} />
           {unassignedCount > 0 && (
             <Chip label={`${unassignedCount} unassigned date${unassignedCount === 1 ? '' : 's'}`} color="warning" />
           )}
@@ -299,22 +299,16 @@ export default function Stratigraphy() {
       ) : (
         <Paper sx={{ p: 3 }}>
           <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
-            A read-only view of the model structure as a Harris matrix: each Phase is a context,
-            and an arrow means the lower context is older. Boundaries and hiatuses are structural
-            and aren't drawn — the chain runs through them. Edit the structure on the Editor tab.
+            A read-only view of the model structure as a Harris matrix, oldest at the bottom. A
+            Phase holding dates is a context; a Phase or Sequence holding others is drawn as a box
+            around them, which groups without ordering. A Boundary is a labelled rule across the
+            groups it divides. Edit the structure on the Editor tab.
           </Typography>
-          {matrixView.groups.length === 0 ? (
-            <Alert severity="info">
-              No contexts to draw yet — add Phases on the Editor tab.
-            </Alert>
-          ) : (
-            <HarrisMatrixDiagram
-              measurements={matrixView.measurements}
-              groups={matrixView.groups}
-              relationships={matrixView.relationships}
-              editable={false}
-            />
-          )}
+          <HarrisMatrixDiagram
+            tree={activeTree}
+            measurements={activeMeasurements}
+            assignments={activeAssignments}
+          />
         </Paper>
       )}
 

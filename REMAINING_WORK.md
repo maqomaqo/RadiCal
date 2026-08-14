@@ -31,9 +31,12 @@ previous revisions of this file understated parts of it.
   exact conditional afterwards, so "Modelled Start/End" genuinely extend
   beyond the oldest/youngest dated sample. Verified against the closed form
   `E[a+b] = 2w/(K-3)`.
-- **Stratigraphy / Harris Matrix UI** — contexts, above/below/equal
-  relationships, TPQ/TAQ, a drag-and-drop Harris matrix, and live cycle
-  detection that blocks a contradictory run.
+- **Stratigraphy / Harris Matrix UI** — the model tree editor, TPQ/TAQ, and a
+  laid-out Harris matrix derived from the tree (`utils/harrisLayout.ts`):
+  nesting as boxes within boxes, Boundaries as labelled rules, and ordering
+  arrows only between adjacent blocks nothing else already separates. The
+  matrix is a read-only view; a tree cannot contain a cycle, so the cycle
+  check that guarded the old pairwise-relationship editor is gone with it.
 - **Project management** — projects, assigning existing analyses to a project
   after the fact, re-running a single analysis or every analysis in a
   project, and deleting either.
@@ -233,12 +236,24 @@ each is a real edge.
   all (re-confirmed 2026-08-13) — consistent with both being unused by the
   frontend; see #6 above. `results.py` is no longer in this list — it's
   covered by `test_exports.py` now.
-- **Frontend tests: none.** No Vitest/Jest/Testing Library in `package.json`.
-  `utils/hpd.ts`, `utils/stratigraphy.ts` (cycle detection) and
-  `ProjectSampleTable`'s `parsePastedDates` are pure functions and would be
-  the cheapest, highest-value place to start. `ImportDatesDialog` holds no
+- **Frontend: 24 tests** (Vitest, `npm test` in `frontend/`), all in
+  `utils/harrisLayout.test.ts`. They exist because the Harris matrix cannot be
+  verified any other way: React Flow draws into a measured viewport, so the
+  DOM reports nodes at whatever coordinates they were given and never says
+  whether those coordinates line up. The layout was therefore written as pure
+  geometry and the three defects it replaced are each pinned as a property —
+  no implied edges, containment as nesting rather than an edge, children
+  centred on their parent — plus reading direction, non-overlap and rule
+  spans.
+- **Still untested on the frontend:** `utils/hpd.ts`, `utils/stratigraphy.ts`
+  and `ProjectSampleTable`'s `parsePastedDates` are pure functions and are now
+  cheap to cover, the harness being in place. `ImportDatesDialog` holds no
   parsing logic of its own — the file goes to the backend and the parsed
-  result comes back — so it needs a component test rather than a unit one.
+  result comes back — so it needs a component test (and hence jsdom) rather
+  than a unit one.
+- **`npm run lint` does not work** and did not before this: there is no
+  ESLint config anywhere in the repo, so the script exits "couldn't find a
+  configuration file". Either add one or drop the script.
 - **Integration/E2E: none automated.** The flows in this session were
   verified by hand against the running stack.
 
