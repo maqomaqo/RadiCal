@@ -61,6 +61,13 @@ export default function Stratigraphy() {
   // editing UI is identical, only where "Back" returns to differs.
   const { analysisId: editRouteId } = useParams<{ analysisId: string }>()
   const backPath = editRouteId ? `/analysis/${editRouteId}/edit` : '/new-analysis'
+  // /new-analysis is also where the nav bar's own "New Analysis" link lands,
+  // on a bare URL indistinguishable from this one -- so NewAnalysis.tsx resets
+  // its draft on mount unless it sees this marker, which is how a *genuine*
+  // stale draft (abandoned mid-edit, never run) doesn't leak into the next
+  // "New Analysis" click. Going back to a mid-edit analysis doesn't need the
+  // marker: that page reloads by editRouteId regardless of draft state.
+  const backState = editRouteId ? undefined : { fromModelStructure: true }
 
   // The model structure is the authoring surface for stratigraphy in both
   // flows, so it is the default tab. For a saved analysis it is loaded from
@@ -186,7 +193,7 @@ export default function Stratigraphy() {
         <Alert severity="warning" sx={{ mb: 2 }}>
           No measurements yet -- add measurements on the New Analysis page first.
         </Alert>
-        <Button startIcon={<ArrowBackIcon />} variant="outlined" onClick={() => navigate(backPath)}>
+        <Button startIcon={<ArrowBackIcon />} variant="outlined" onClick={() => navigate(backPath, { state: backState })}>
           Back to New Analysis
         </Button>
       </Container>
@@ -313,7 +320,7 @@ export default function Stratigraphy() {
       )}
 
       <Box sx={{ mt: 4 }}>
-        <Button startIcon={<ArrowBackIcon />} variant="contained" onClick={() => navigate(backPath)}>
+        <Button startIcon={<ArrowBackIcon />} variant="contained" onClick={() => navigate(backPath, { state: backState })}>
           Back to New Analysis
         </Button>
       </Box>

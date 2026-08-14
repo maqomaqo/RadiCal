@@ -28,7 +28,7 @@ import {
   Stack,
   Tooltip,
 } from '@mui/material'
-import { useNavigate, useSearchParams, useParams } from 'react-router-dom'
+import { useNavigate, useSearchParams, useParams, useLocation } from 'react-router-dom'
 import DeleteIcon from '@mui/icons-material/Delete'
 import EditIcon from '@mui/icons-material/Edit'
 import AddIcon from '@mui/icons-material/Add'
@@ -97,6 +97,7 @@ interface PreviewResult {
 
 export default function NewAnalysis() {
   const navigate = useNavigate()
+  const location = useLocation()
   const notify = useNotify()
   const [searchParams] = useSearchParams()
   // Name, type, project, date format, measurements, and (for Bayesian
@@ -234,14 +235,23 @@ export default function NewAnalysis() {
     }
   }, [projectId])
 
-  // Arriving via a project's own "New Analysis" link (?project=<id>)
-  // preselects that project. Only applies when the draft doesn't already
-  // have one -- returning here from /new-analysis/model-structure re-mounts
-  // this component but carries no query param, so this must not clobber
-  // the project already sitting in the shared draft store.
+  // /new-analysis is reached two ways that land on the exact same bare URL:
+  // a genuine fresh start (nav bar, Dashboard, a project's own "New
+  // Analysis" link) and Stratigraphy's "Back to New Analysis", which remounts
+  // this component too since they're separate top-level routes. Only the
+  // latter should keep whatever is already in the shared draft store --
+  // Stratigraphy marks that case via location.state (see backState there),
+  // so anything else wipes a stale draft rather than silently carrying an
+  // earlier, unrelated analysis's measurements and project into this one.
+  // Editing an existing analysis is unaffected: it has its own load effect
+  // below, keyed on editRouteId rather than this.
   useEffect(() => {
+    if (editRouteId) return
+    const fromModelStructure = (location.state as { fromModelStructure?: boolean } | null)
+      ?.fromModelStructure
+    if (!fromModelStructure) resetDraft()
     const fromQuery = searchParams.get('project')
-    if (fromQuery && !projectId) setProjectId(fromQuery)
+    if (fromQuery) setProjectId(fromQuery)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
