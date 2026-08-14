@@ -90,6 +90,27 @@ also claimed MIT; the repo's `LICENSE` file is CC0.
 
 ## Priority: MEDIUM
 
+### 3a. Legacy calibration distributions are stored in the old units
+- **Current:** `CalibrationCurve.get_display_distribution` now returns a
+  probability DENSITY (integrating to 1 over calendar years) rather than the
+  per-point masses it used to, so the series can be plotted against a
+  calendar axis and compared with a modelled posterior. Rows written before
+  that change still hold masses in `RadiocarbonResult.probability_distribution`
+  — only for plain and group calibrations; a Bayesian analysis's distribution
+  comes from `exact_chain._plottable` and was always a density.
+- **Impact:** Low, and bounded. The plot's y-axis auto-scales, so the shape is
+  identical and only the axis numbers differ. The reported HPD ranges are
+  computed on the full curve grid from the masses and never touched this
+  series. The one real effect is the client-side confidence re-selection in
+  `utils/hpd.ts`, which now weights each point by the calendar width it
+  stands for: correct for a density, slightly off for a legacy mass array,
+  and only where the window spans one of the curve's resolution changes
+  (IntCal20/SHCal20 step 1, 5, 10, 20 years in different ranges).
+- **Needed:** either a one-off backfill, or nothing — re-running an analysis
+  regenerates it. Deliberately not done as part of the fix: rewriting stored
+  results is a bigger call than correcting what gets written next.
+
+
 ### 3. Async MCMC processing
 - **Current:** still fully synchronous in the request handler. This got more
   pressing, not less: "Re-run All" on a project now runs *every* analysis in
@@ -236,9 +257,9 @@ each is a real edge.
   all (re-confirmed 2026-08-13) — consistent with both being unused by the
   frontend; see #6 above. `results.py` is no longer in this list — it's
   covered by `test_exports.py` now.
-- **Frontend: 52 tests** (Vitest, `npm test` in `frontend/`), in
+- **Frontend: 62 tests** (Vitest, `npm test` in `frontend/`), in
   `utils/harrisLayout.test.ts` (24), `utils/distribution.test.ts` (12),
-  `components/ModelTreeEditor.test.ts` (9) and
+  `utils/hpd.test.ts` (10), `components/ModelTreeEditor.test.ts` (9) and
   `utils/stackedPlotGeometry.test.ts` (7). Most of these cover geometry that
   cannot be verified any other way: React Flow and Plotly draw into measured
   viewports, so the DOM reports elements at whatever coordinates they were
@@ -248,8 +269,8 @@ each is a real edge.
   edges, containment as nesting, children centred on their parent; for the
   stacked plot, a constant pixel gap below the axis at every row count, and
   a prior overlay that cannot paint outside its own row.
-- **Still untested on the frontend:** `utils/hpd.ts`, `utils/stratigraphy.ts`
-  and `ProjectSampleTable`'s `parsePastedDates` are pure functions and are now
+- **Still untested on the frontend:** `utils/stratigraphy.ts` and
+  `ProjectSampleTable`'s `parsePastedDates` are pure functions and are now
   cheap to cover, the harness being in place. `ImportDatesDialog` holds no
   parsing logic of its own — the file goes to the backend and the parsed
   result comes back — so it needs a component test (and hence jsdom) rather

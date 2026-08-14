@@ -231,3 +231,103 @@ class TestReservoirCorrection:
         assert self._peak(curve, 2500, 50, 190, 0) == pytest.approx(
             self._peak(curve, 2500, 50, 190, 100), abs=40
         )
+
+
+class TestDisplayDistributionIsADensity:
+    """
+    get_display_distribution returns a series to be plotted against a
+    calendar axis, so it has to be a probability DENSITY -- integrating to 1
+    over calendar years, regardless of how finely the curve happens to be
+    sampled where the date falls.
+
+    It used to return the raw masses `calibrate` produces, which are weighted
+    by grid spacing and therefore carry different units in different parts of
+    the curve. That surfaced as a real defect: the stacked plot draws this
+    series behind a modelled posterior, which IS a density, and integrating
+    each over its own grid on one real analysis gave 1.000 for every
+    posterior but 10.000 for the marine rows -- so the prior was drawn an
+    order of magnitude too tall and overflowed into the row above on 16 of
+    22 rows.
+
+    Marine20 is the case that exposed it: uniformly 10-year spaced, where
+    IntCal20 and SHCal20 are 1-year in the recent range.
+    """
+
+    @staticmethod
+    def _integral(series):
+        """Trapezium rule over the returned window."""
+        total = 0.0
+        for (x0, y0), (x1, y1) in zip(series, series[1:]):
+            total += (y0 + y1) / 2.0 * abs(x1 - x0)
+        return total
+
+    @pytest.mark.parametrize('curve_id', ['intcal20', 'shcal20', 'marine20'])
+    def test_it_integrates_to_one_on_every_curve(self, curve_id):
+        from app.services.calibration import get_curve
+
+        curve = get_curve(curve_id)
+        cal_ages, probs = curve.calibrate(1000, 40)
+        series = curve.get_display_distribution(cal_ages, probs)
+
+        # Slightly under 1: the window trims tails below 1e-4 of the peak.
+        assert self._integral(series) == pytest.approx(1.0, abs=0.01)
+
+    def test_a_ten_year_grid_no_longer_reads_ten_times_too_tall(self):
+        """
+        The specific failure. Marine20's 10-year spacing made its masses ten
+        times a per-year density, so a marine date's curve towered over a
+        terrestrial one drawn on the same scale.
+        """
+        from app.services.calibration import get_curve
+
+        marine = get_curve('marine20')
+        intcal = get_curve('intcal20')
+
+        marine_series = marine.get_display_distribution(*marine.calibrate(1000, 40))
+        intcal_series = intcal.get_display_distribution(*intcal.calibrate(1000, 40))
+
+        marine_peak = max(p for _, p in marine_series)
+        intcal_peak = max(p for _, p in intcal_series)
+
+        # Two dates of similar precision now have peaks of the same order,
+        # rather than differing by the curves' grid spacing.
+        assert 0.3 < marine_peak / intcal_peak < 3.0, (marine_peak, intcal_peak)
+
+    def test_it_still_windows_to_where_the_mass_is(self):
+        """The behaviour this function existed for in the first place."""
+        from app.services.calibration import get_curve
+
+        curve = get_curve('intcal20')
+        cal_ages, probs = curve.calibrate(3000, 30)
+        series = curve.get_display_distribution(cal_ages, probs)
+
+        ages = [a for a, _ in series]
+        peak_age = float(cal_ages[np.argmax(probs)])
+        assert min(ages) < peak_age < max(ages)
+        # A narrow window, not the curve's whole 0-55,000 range.
+        assert max(ages) - min(ages) < 1000
+        assert len(series) <= 200
+
+    def test_downsampling_does_not_change_the_integral(self):
+        """
+        Downsampling keeps every k-th point, which changes the spacing. On a
+        density that is harmless -- the values still mean the same thing --
+        which is exactly what was not true of the masses.
+        """
+        from app.services.calibration import get_curve
+
+        curve = get_curve('intcal20')
+        cal_ages, probs = curve.calibrate(3000, 200)   # wide, forces downsampling
+
+        dense = curve.get_display_distribution(cal_ages, probs, max_points=10_000)
+        sparse = curve.get_display_distribution(cal_ages, probs, max_points=50)
+
+        assert len(sparse) <= 50
+        assert len(dense) > len(sparse)
+        assert self._integral(sparse) == pytest.approx(self._integral(dense), rel=0.02)
+
+    def test_an_empty_input_is_still_empty(self):
+        from app.services.calibration import get_curve
+
+        curve = get_curve('intcal20')
+        assert curve.get_display_distribution(np.array([]), np.array([])) == []

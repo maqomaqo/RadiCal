@@ -323,8 +323,8 @@ class CalibrationCurve:
     def get_display_distribution(self, cal_ages: np.ndarray, probs: np.ndarray,
                                   max_points: int = 200, mass_threshold: float = 1e-4):
         """
-        Return a compact (cal_age, probability) series suitable for sending
-        to the frontend for plotting.
+        Return a compact (cal_age, probability DENSITY) series suitable for
+        sending to the frontend for plotting.
 
         The full curve has thousands of grid points (e.g. ~9,500 for
         IntCal20) spanning 0-55,000 cal BP, but any single sample's posterior
@@ -336,23 +336,62 @@ class CalibrationCurve:
         line instead of the sample's actual distribution.
 
         This instead:
-        1. Finds the contiguous window where probability exceeds
+        1. Converts the posterior MASSES that `calibrate` returns into a
+           density, by dividing out the calendar-year width each grid point
+           stands for (see _grid_weights).
+        2. Finds the contiguous window where the density exceeds
            `mass_threshold` of the peak (padded by a few points either side).
-        2. Downsamples that window (not the whole curve) to at most
+        3. Downsamples that window (not the whole curve) to at most
            `max_points` points, if needed, for a reasonably sized payload.
+
+        Why step 1 exists. `calibrate` returns per-point masses summing to 1,
+        weighted by grid spacing -- correct for a mass, but the curves are not
+        uniformly spaced (IntCal20 and SHCal20 step 1, 5, 10 and 20 years in
+        different ranges; Marine20 is 10 throughout). A mass array therefore
+        has different units in different parts of the curve, and the series
+        this returns is plotted against a calendar axis where only a density
+        means anything.
+
+        It showed up as a real defect. The stacked plot draws this series as
+        the unmodelled "prior" behind a modelled posterior, which comes from
+        exact_chain._plottable and IS a density. Integrating each over its own
+        grid on one real analysis gave 1.000 for every posterior but 10.000
+        for the marine rows, so the prior was drawn an order of magnitude too
+        tall -- 16 of 22 rows overflowed into the row above. Downsampling made
+        it worse by changing the spacing again without touching the values.
+
+        A density is also what the plot's y-axis has always been labelled
+        ("Probability Density" in PosteriorPlot), so this makes an existing
+        claim true rather than making a new one.
+
+        Note the returned window integrates to slightly less than 1, by
+        whatever the trimmed tails held -- it is a view of a density, not a
+        renormalised distribution in its own right.
 
         Args:
             cal_ages: full curve calendar ages for this posterior
-            probs: full curve posterior probabilities (same length)
-            max_points: cap on how many (age, prob) pairs to return
-            mass_threshold: fraction of the peak probability below which
-                points are considered negligible and excluded
+            probs: full curve posterior probability MASSES (as returned by
+                calibrate, summing to 1)
+            max_points: cap on how many (age, density) pairs to return
+            mass_threshold: fraction of the peak below which points are
+                considered negligible and excluded
 
         Returns:
-            List of [cal_age, probability] pairs, ordered by calendar age.
+            List of [cal_age, probability density] pairs, ordered by calendar
+            age. Integrating with the trapezium rule gives ~1.
         """
         if len(cal_ages) == 0 or len(probs) == 0:
             return []
+
+        # Masses -> density. Guarded against a zero-width cell so a
+        # degenerate curve cannot produce an infinity here.
+        weights = self._grid_weights()
+        if len(weights) == len(probs):
+            probs = np.divide(
+                probs, weights,
+                out=np.zeros_like(probs, dtype=float),
+                where=weights > 0,
+            )
 
         peak = np.max(probs)
         if peak <= 0:
