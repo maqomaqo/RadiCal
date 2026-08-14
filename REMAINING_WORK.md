@@ -251,9 +251,15 @@ each is a real edge.
   parsing logic of its own — the file goes to the backend and the parsed
   result comes back — so it needs a component test (and hence jsdom) rather
   than a unit one.
-- **`npm run lint` does not work** and did not before this: there is no
-  ESLint config anywhere in the repo, so the script exits "couldn't find a
-  configuration file". Either add one or drop the script.
+- **No linting.** The `lint` script was dropped: there has never been an
+  ESLint config anywhere in the repo, so it only ever exited "couldn't find a
+  configuration file" — a script that cannot run is worse than no script,
+  since it reads as coverage that exists. `npm run type-check` (`tsc
+  --noEmit`) is the static check that does work. Adding ESLint back is a real
+  option, but it means choosing a ruleset and fixing whatever it finds, not
+  restoring a line to `package.json`. The `eslint`, `@typescript-eslint/*`
+  and `eslint-plugin-*` devDependencies are still installed and now have
+  nothing to run them.
 - **Integration/E2E: none automated.** The flows in this session were
   verified by hand against the running stack.
 
