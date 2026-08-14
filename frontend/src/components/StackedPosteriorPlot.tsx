@@ -11,6 +11,7 @@ import {
 } from '@/utils/dateFormat'
 import type { HPDRange } from '@/utils/dateFormat'
 import { stackedPlotGeometry } from '@/utils/stackedPlotGeometry'
+import { toUnitArea } from '@/utils/distribution'
 
 // Same binding as PosteriorPlot -- see the note there for why the factory is
 // bound to the packaged plotly.js rather than a CDN global.
@@ -175,8 +176,28 @@ export default function StackedPosteriorPlot({
 
     drawable.forEach((s, index) => {
       const yBase = baselineFor(index)
-      const { ages, probs, peak } = trimTails(s.distribution!)
-      const scale = peak > 0 ? CURVE_HEIGHT / peak : 0
+      // Both series are put on unit area before anything is measured off
+      // them. They arrive in different units -- the posterior is the solver's
+      // density, the prior is the curve's probabilities downsampled by index
+      // without rescaling -- so comparing their raw peaks was comparing two
+      // different quantities. See utils/distribution.ts.
+      const { ages, probs, peak } = trimTails(toUnitArea(s.distribution!))
+      const priorPoints =
+        showPrior && s.priorDistribution && s.priorDistribution.length > 0
+          ? trimTails(toUnitArea(s.priorDistribution))
+          : null
+
+      // One scale for the row, taken from whichever of the two is taller, so
+      // neither can paint outside its own band. Scaling by the posterior
+      // alone let a prior that is sharper than its posterior -- an outlier
+      // the model has spread out, or a date on a steep part of the curve --
+      // overflow into the row above.
+      //
+      // Equal area plus a shared scale is what makes the overlay readable:
+      // shorter and wider genuinely means the model narrowed this date,
+      // rather than meaning the two were normalised differently.
+      const rowPeak = Math.max(peak, priorPoints ? priorPoints.peak : 0)
+      const scale = rowPeak > 0 ? CURVE_HEIGHT / rowPeak : 0
       const isBoundary = s.kind === 'boundary'
 
       // HPD bars first, so the curve draws over them rather than under.
@@ -212,8 +233,8 @@ export default function StackedPosteriorPlot({
       // posterior above it: shorter and wider means the model narrowed this
       // date, not that the prior is somehow smaller. Drawn before the
       // posterior so the posterior's fill sits on top of it.
-      if (showPrior && s.priorDistribution && s.priorDistribution.length > 0) {
-        const priorTrimmed = trimTails(s.priorDistribution)
+      if (priorPoints) {
+        const priorTrimmed = priorPoints
         const priorY = priorTrimmed.probs.map((p) => yBase + p * scale)
         data.push({
           x: [priorTrimmed.ages[0], ...priorTrimmed.ages, priorTrimmed.ages[priorTrimmed.ages.length - 1]],
