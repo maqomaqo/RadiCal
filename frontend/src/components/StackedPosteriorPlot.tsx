@@ -10,6 +10,7 @@ import {
   formatCalendarAge,
 } from '@/utils/dateFormat'
 import type { HPDRange } from '@/utils/dateFormat'
+import { stackedPlotGeometry } from '@/utils/stackedPlotGeometry'
 
 // Same binding as PosteriorPlot -- see the note there for why the factory is
 // bound to the packaged plotly.js rather than a CDN global.
@@ -56,11 +57,6 @@ interface StackedPosteriorPlotProps {
 const CURVE_HEIGHT = 0.78
 const HPD95_BAR: [number, number] = [-0.09, -0.03]
 const HPD68_BAR: [number, number] = [-0.19, -0.13]
-// Pixels per row. Enough for a name and a readable curve; 15 dates then come
-// to roughly one screen instead of the seven-screen scroll one plot per date
-// produced.
-const ROW_PIXELS = 46
-const CHROME_PIXELS = 130
 // Room for the row names, and the offset the phase labels are placed at
 // within it. On a phone the wide version took half the available width and
 // left the curves squeezed into the rest, so it shrinks with the viewport --
@@ -371,10 +367,16 @@ export default function StackedPosteriorPlot({
     return calendarAxisTicks(Math.min(...all), Math.max(...all), dateFormat)
   }, [drawable, dateFormat, xRange])
 
+  // Pixel budget for everything below the axis -- see stackedPlotGeometry.
+  const geometry = useMemo(() => stackedPlotGeometry(drawable.length), [drawable.length])
+
   const layout = useMemo(
     () => ({
       xaxis: {
-        title: calendarAxisTitle(dateFormat),
+        // An explicit standoff pins the title just under the tick labels.
+        // Left to itself Plotly places it against the bottom of whatever
+        // margin it is given, so a taller figure left it stranded low.
+        title: { text: calendarAxisTitle(dateFormat), standoff: geometry.titleStandoff },
         zeroline: false,
         // Oldest on the left, as a chronology is read -- see PosteriorPlot
         // for why plotting cal BP needs the axis reversed to get that. An
@@ -401,11 +403,11 @@ export default function StackedPosteriorPlot({
       hovermode: 'closest',
       plot_bgcolor: 'rgba(240, 240, 240, 0.5)',
       paper_bgcolor: 'white',
-      margin: { l: marginLeft, r: 20, t: 10, b: 60 },
-      legend: { orientation: 'h', y: -0.08, yanchor: 'top' },
+      margin: { l: marginLeft, r: 20, t: geometry.marginTop, b: geometry.marginBottom },
+      legend: { orientation: 'h', y: geometry.legendY, yanchor: 'top' },
       autosize: true,
     }),
-    [dateFormat, ticks, drawable, shapes, annotations, xRange, marginLeft, narrow]
+    [dateFormat, ticks, drawable, shapes, annotations, xRange, marginLeft, narrow, geometry]
   )
 
   const config = useMemo(
@@ -434,8 +436,7 @@ export default function StackedPosteriorPlot({
       useResizeHandler
       style={{
         width: '100%',
-        height: `${drawable.length * ROW_PIXELS + CHROME_PIXELS}px`,
-        minHeight: '260px',
+        height: `${geometry.height}px`,
       }}
     />
   )

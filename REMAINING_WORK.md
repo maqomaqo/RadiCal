@@ -236,15 +236,16 @@ each is a real edge.
   all (re-confirmed 2026-08-13) — consistent with both being unused by the
   frontend; see #6 above. `results.py` is no longer in this list — it's
   covered by `test_exports.py` now.
-- **Frontend: 24 tests** (Vitest, `npm test` in `frontend/`), all in
-  `utils/harrisLayout.test.ts`. They exist because the Harris matrix cannot be
-  verified any other way: React Flow draws into a measured viewport, so the
-  DOM reports nodes at whatever coordinates they were given and never says
-  whether those coordinates line up. The layout was therefore written as pure
-  geometry and the three defects it replaced are each pinned as a property —
-  no implied edges, containment as nesting rather than an edge, children
-  centred on their parent — plus reading direction, non-overlap and rule
-  spans.
+- **Frontend: 31 tests** (Vitest, `npm test` in `frontend/`), in
+  `utils/harrisLayout.test.ts` (24) and `utils/stackedPlotGeometry.test.ts`
+  (7). Both cover geometry that cannot be verified any other way: React Flow
+  and Plotly draw into measured viewports, so the DOM reports elements at
+  whatever coordinates they were handed and never says whether those
+  coordinates collide. Both modules are therefore pure arithmetic, kept out of
+  their components, with the defect each replaced pinned as a property — for
+  the matrix, no implied edges, containment as nesting, children centred on
+  their parent; for the stacked plot, a constant pixel gap below the axis at
+  every row count.
 - **Still untested on the frontend:** `utils/hpd.ts`, `utils/stratigraphy.ts`
   and `ProjectSampleTable`'s `parsePastedDates` are pure functions and are now
   cheap to cover, the harness being in place. `ImportDatesDialog` holds no
