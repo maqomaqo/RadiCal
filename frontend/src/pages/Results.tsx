@@ -216,7 +216,8 @@ const OUTLIER_LIFT_CHECK = 0.2
 // saying even when the posterior didn't move past it (see "Assigned" below)
 // -- rather than OxCal's routine 5% default, which an analyst commonly
 // turns on for every date in a phase and which would otherwise put a chip
-// on every clean row.
+// on every clean row. Also the line below which agreement_index is still
+// treated as independent evidence -- see concernFor.
 const NOTABLE_OUTLIER_PRIOR = 0.2
 
 type Concern = { level: 'suspect' | 'check'; reasons: string[] }
@@ -235,16 +236,24 @@ type Concern = { level: 'suspect' | 'check'; reasons: string[] }
  * a red row tells a reader something is wrong without telling them what, and
  * the two diagnostics mean genuinely different things. Agreement says the
  * model had to move the date; the outlier probability says the model thinks
- * it does not belong. A date can trip either without the other.
+ * it does not belong. A date can trip either without the other -- except
+ * that for a date given a notable outlier prior, "the model had to move
+ * it" is no longer independent information: agreement.py compares the
+ * posterior to the date's plain, un-modelled calibration, and a date
+ * pulled toward its broad/outlier kernel is expected to drift from that on
+ * its own (agreement.py's own docstring: this "detects a date the model
+ * had to move, which is not the same as a date that does not belong").
+ * Below NOTABLE_OUTLIER_PRIOR, where no such treatment is doing that
+ * pulling, poor agreement is still real, independent evidence.
  */
 function concernFor(result?: SampleResult, outlierPrior?: number | null): Concern | null {
   if (!result) return null
   const reasons: string[] = []
   let level: 'suspect' | 'check' | null = null
+  const prior = outlierPrior ?? 0
 
   const outlier = result.outlier_probability
   if (outlier != null) {
-    const prior = outlierPrior ?? 0
     const lift = outlier - prior
     const withPrior = (message: string) =>
       prior > 0 ? `${message} -- up from the ${Math.round(prior * 100)}% prior it was given` : message
@@ -258,7 +267,7 @@ function concernFor(result?: SampleResult, outlierPrior?: number | null): Concer
   }
 
   const agreement = result.agreement_index
-  if (agreement != null && agreement < POOR_AGREEMENT) {
+  if (agreement != null && agreement < POOR_AGREEMENT && prior < NOTABLE_OUTLIER_PRIOR) {
     level = 'suspect'
     reasons.push(`agreement ${agreement.toFixed(0)}, below ${POOR_AGREEMENT}`)
   }
