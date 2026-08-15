@@ -709,6 +709,134 @@ export default function Results() {
     : plotOrder.filter((s) => s.kind !== 'boundary')
   const CONFIDENCE_LABEL = CONFIDENCE_OPTIONS.find((o) => o.value === confidence)?.label ?? ''
 
+  // Which solver produced every number on the page -- qualifies all of them
+  // rather than any one, so it sits with the other summary chips rather than
+  // buried near the table. Split into a chip (the two good outcomes: quiet,
+  // since they're the normal cases) and an alert (a warning worth its own
+  // paragraph -- sampled-and-not-converged, or the retired SMC path with its
+  // known failure on wiggly curves; see services/gibbs.py's module
+  // docstring). Only one of the two is ever set.
+  let solverChip: JSX.Element | null = null
+  let solverAlert: JSX.Element | null = null
+  if (isBayesian && analysis.status !== 'failed') {
+    if (!analysis.solver) {
+      solverChip = (
+        <Tooltip title="This analysis was run before the solver was recorded. Re-run it to find out which method its model uses.">
+          <Chip size="small" variant="outlined" label="Solver not recorded" />
+        </Tooltip>
+      )
+    } else if (analysis.solver.method === 'exact') {
+      solverChip = (
+        <Tooltip
+          title={
+            'The posterior was integrated exactly on a calendar grid -- no sampler, ' +
+            'so nothing to converge and no calibration lobe to miss.' +
+            (analysis.solver.implicit_boundaries
+              ? ` ${analysis.solver.implicit_boundaries} implied transition(s) were supplied to make the model solvable this way.`
+              : '')
+          }
+        >
+          <Chip size="small" variant="outlined" color="success" label="Exact solver" />
+        </Tooltip>
+      )
+    } else if (analysis.solver.method === 'smc') {
+      solverAlert = (
+        <Alert severity="warning">
+          <Typography variant="subtitle2" gutterBottom>
+            Computed by the old SMC sampler
+          </Typography>
+          <Typography variant="body2">
+            That sampler mis-weighted the separate calendar ranges a wiggly
+            calibration curve produces once stratigraphic ordering was involved,
+            and has since been replaced. Re-run this analysis to recompute it.
+          </Typography>
+        </Alert>
+      )
+    } else if (analysis.solver.converged === false) {
+      solverAlert = (
+        <Alert severity="warning">
+          <Typography variant="subtitle2" gutterBottom>
+            Sampled, but not fully converged
+          </Typography>
+          {analysis.solver.exact_needs_boundaries ? (
+            <Typography variant="body2" sx={{ mb: 1 }}>
+              Integrating this model exactly would mean supplying{' '}
+              {analysis.solver.exact_needs_boundaries === 1
+                ? 'a transition'
+                : `${analysis.solver.exact_needs_boundaries} transitions`}{' '}
+              that its ordering only implies, which changes the model rather than
+              restating it, so it was sampled as written instead.
+            </Typography>
+          ) : analysis.solver.reason ? (
+            <Typography variant="body2" sx={{ mb: 1 }}>
+              This model cannot be solved exactly because {analysis.solver.reason}.
+            </Typography>
+          ) : (
+            <Typography variant="body2" sx={{ mb: 1 }}>
+              The MH/Gibbs sampler was chosen for this analysis. This model can
+              also be integrated exactly, which needs no sampling at all — switch
+              the solver to Automatic if you don’t need OxCal’s method
+              specifically.
+            </Typography>
+          )}
+          <Typography variant="body2">
+            The sampler reached{' '}
+            {/* One decimal place, not none: a run stopping at 0.945 rounds
+                to "95%", which reads as a contradiction against the 95%
+                target it just missed. */}
+            {analysis.solver.convergence !== undefined
+              ? `${(analysis.solver.convergence * 100).toFixed(1)}%`
+              : 'less than 95%'}{' '}
+            convergence after {analysis.solver.sweeps?.toLocaleString()} passes,
+            short of the 95% usually wanted. The ranges below are probably a few
+            years out rather than wrong
+            {analysis.solver.reason
+              ? ', but writing in the Boundary the model implies would let it be solved exactly without changing anything.'
+              : '.'}
+          </Typography>
+        </Alert>
+      )
+    } else {
+      // A run the analyst asked for is labelled as their choice, not as a
+      // fallback -- they may have picked OxCal's method to reproduce a
+      // published analysis or to cross-check the exact solver, and calling
+      // that "sampled because we had to" would be false.
+      solverChip = (
+        <Tooltip
+          title={
+            (analysis.solver.exact_needs_boundaries
+              ? `Integrating this model exactly would mean supplying ${
+                  analysis.solver.exact_needs_boundaries === 1
+                    ? 'a transition'
+                    : analysis.solver.exact_needs_boundaries + ' transitions'
+                } that its ordering only implies. That is a change to the model, not a restatement of it — it splits one phase-span term in two and measurably moves the answer away from OxCal’s — so it was sampled as written with OxCal’s own Metropolis-Hastings/Gibbs scheme. Choose the exact solver if you want the transitions supplied anyway; note that it will then be answering a slightly different model. `
+              : analysis.solver.reason
+              ? `This model cannot be integrated exactly — ${analysis.solver.reason} — so it was sampled with OxCal’s Metropolis-Hastings/Gibbs scheme. `
+              : 'OxCal’s Metropolis-Hastings/Gibbs sampler was chosen for this analysis. This model could also have been integrated exactly; the two agree to well under a year on the models where both can be run. ') +
+            `It converged to ${
+              analysis.solver.convergence !== undefined
+                ? (analysis.solver.convergence * 100).toFixed(1) + '%'
+                : 'the 95% target'
+            } over ${analysis.solver.sweeps?.toLocaleString()} passes.`
+          }
+        >
+          <Chip
+            size="small"
+            variant="outlined"
+            color="success"
+            label={`${
+              analysis.solver.requested === 'gibbs' ? 'MH/Gibbs (chosen)' : 'Sampled (MH/Gibbs)'
+            } — ${
+              analysis.solver.convergence !== undefined
+                ? (analysis.solver.convergence * 100).toFixed(0) + '% converged'
+                : 'converged'
+            }`}
+          />
+        </Tooltip>
+      )
+    }
+  }
+
   return (
     <Container maxWidth="lg" sx={{ py: 4 }}>
       <Box sx={{ mb: 4 }}>
@@ -791,6 +919,7 @@ export default function Results() {
           when the counts actually diverge -- a pending/failed/partial run --
           which is exactly when that divergence is worth a reader's attention. */}
       <Stack direction="row" spacing={1} sx={{ mb: 3 }} flexWrap="wrap" useFlexGap alignItems="center">
+        {solverChip}
         <Chip
           label={analysis.analysis_type === 'group_calibration' ? 'calibration' : analysis.analysis_type}
         />
@@ -811,15 +940,6 @@ export default function Results() {
         )}
       </Stack>
 
-      {/* Which solver produced every number below it. Placed here, above the
-          results table, because it qualifies all of them rather than any one.
-
-          Both good outcomes are quiet chips -- they are the normal cases, and a
-          permanent banner announcing one would be noise. What earns a warning is
-          not "this was sampled" but "this was sampled and did not converge",
-          plus the legacy SMC path, which had a known and measured failure on
-          wiggly curves (see services/gibbs.py's module docstring for what
-          replaced it and why). */}
       {/* A failed run, with the reason. Before this the page showed only the word
           "failed" in the status card, leaving the user to guess -- and one way to
           fail is now a deliberate choice (requiring the exact solver on a model
@@ -835,114 +955,10 @@ export default function Results() {
         </Alert>
       )}
 
-      {isBayesian && analysis.status !== 'failed' && (
-        <Box sx={{ mb: 3 }}>
-          {!analysis.solver ? (
-            <Tooltip title="This analysis was run before the solver was recorded. Re-run it to find out which method its model uses.">
-              <Chip size="small" variant="outlined" label="Solver not recorded" />
-            </Tooltip>
-          ) : analysis.solver.method === 'exact' ? (
-            <Tooltip
-              title={
-                'The posterior was integrated exactly on a calendar grid -- no sampler, ' +
-                'so nothing to converge and no calibration lobe to miss.' +
-                (analysis.solver.implicit_boundaries
-                  ? ` ${analysis.solver.implicit_boundaries} implied transition(s) were supplied to make the model solvable this way.`
-                  : '')
-              }
-            >
-              <Chip size="small" variant="outlined" color="success" label="Exact solver" />
-            </Tooltip>
-          ) : analysis.solver.method === 'smc' ? (
-            <Alert severity="warning">
-              <Typography variant="subtitle2" gutterBottom>
-                Computed by the old SMC sampler
-              </Typography>
-              <Typography variant="body2">
-                That sampler mis-weighted the separate calendar ranges a wiggly
-                calibration curve produces once stratigraphic ordering was involved,
-                and has since been replaced. Re-run this analysis to recompute it.
-              </Typography>
-            </Alert>
-          ) : analysis.solver.converged === false ? (
-            <Alert severity="warning">
-              <Typography variant="subtitle2" gutterBottom>
-                Sampled, but not fully converged
-              </Typography>
-              {analysis.solver.exact_needs_boundaries ? (
-                <Typography variant="body2" sx={{ mb: 1 }}>
-                  Integrating this model exactly would mean supplying{' '}
-                  {analysis.solver.exact_needs_boundaries === 1
-                    ? 'a transition'
-                    : `${analysis.solver.exact_needs_boundaries} transitions`}{' '}
-                  that its ordering only implies, which changes the model rather than
-                  restating it, so it was sampled as written instead.
-                </Typography>
-              ) : analysis.solver.reason ? (
-                <Typography variant="body2" sx={{ mb: 1 }}>
-                  This model cannot be solved exactly because {analysis.solver.reason}.
-                </Typography>
-              ) : (
-                <Typography variant="body2" sx={{ mb: 1 }}>
-                  The MH/Gibbs sampler was chosen for this analysis. This model can
-                  also be integrated exactly, which needs no sampling at all — switch
-                  the solver to Automatic if you don’t need OxCal’s method
-                  specifically.
-                </Typography>
-              )}
-              <Typography variant="body2">
-                The sampler reached{' '}
-                {/* One decimal place, not none: a run stopping at 0.945 rounds
-                    to "95%", which reads as a contradiction against the 95%
-                    target it just missed. */}
-                {analysis.solver.convergence !== undefined
-                  ? `${(analysis.solver.convergence * 100).toFixed(1)}%`
-                  : 'less than 95%'}{' '}
-                convergence after {analysis.solver.sweeps?.toLocaleString()} passes,
-                short of the 95% usually wanted. The ranges below are probably a few
-                years out rather than wrong
-                {analysis.solver.reason
-                  ? ', but writing in the Boundary the model implies would let it be solved exactly without changing anything.'
-                  : '.'}
-              </Typography>
-            </Alert>
-          ) : (
-            <Tooltip
-              title={
-                (analysis.solver.exact_needs_boundaries
-                  ? `Integrating this model exactly would mean supplying ${
-                      analysis.solver.exact_needs_boundaries === 1
-                        ? 'a transition'
-                        : analysis.solver.exact_needs_boundaries + ' transitions'
-                    } that its ordering only implies. That is a change to the model, not a restatement of it — it splits one phase-span term in two and measurably moves the answer away from OxCal’s — so it was sampled as written with OxCal’s own Metropolis-Hastings/Gibbs scheme. Choose the exact solver if you want the transitions supplied anyway; note that it will then be answering a slightly different model. `
-                  : analysis.solver.reason
-                  ? `This model cannot be integrated exactly — ${analysis.solver.reason} — so it was sampled with OxCal’s Metropolis-Hastings/Gibbs scheme. `
-                  : 'OxCal’s Metropolis-Hastings/Gibbs sampler was chosen for this analysis. This model could also have been integrated exactly; the two agree to well under a year on the models where both can be run. ') +
-                `It converged to ${
-                  analysis.solver.convergence !== undefined
-                    ? (analysis.solver.convergence * 100).toFixed(1) + '%'
-                    : 'the 95% target'
-                } over ${analysis.solver.sweeps?.toLocaleString()} passes.`
-              }
-            >
-              {/* A run the analyst asked for is labelled as their choice, not as
-                  a fallback -- they may have picked OxCal's method to reproduce a
-                  published analysis or to cross-check the exact solver, and
-                  calling that "sampled because we had to" would be false. */}
-              <Chip size="small" variant="outlined" color="success"
-                label={`${
-                  analysis.solver.requested === 'gibbs'
-                    ? 'MH/Gibbs (chosen)'
-                    : 'Sampled (MH/Gibbs)'
-                } — ${
-                  analysis.solver.convergence !== undefined
-                    ? (analysis.solver.convergence * 100).toFixed(0) + '% converged'
-                    : 'converged'
-                }`} />
-            </Tooltip>
-          )}
-        </Box>
-      )}
+      {/* The quiet-chip outcomes (solverChip) already rendered first in the
+          summary chip row above -- only a warning worth its own paragraph
+          lands here. */}
+      {solverAlert && <Box sx={{ mb: 3 }}>{solverAlert}</Box>}
 
       {/* Boundaries used to be listed in a table of their own here. They now
           sit in the results table in their place in the structure, between
