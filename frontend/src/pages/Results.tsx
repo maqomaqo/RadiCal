@@ -6,9 +6,6 @@ import {
   Paper,
   Typography,
   Button,
-  Grid,
-  Card,
-  CardContent,
   CircularProgress,
   Table,
   TableBody,
@@ -786,55 +783,33 @@ export default function Results() {
         </Box>
       </Box>
 
-      <Grid container spacing={3} sx={{ mb: 3 }}>
-        <Grid item xs={12} sm={6} md={3}>
-          <Card>
-            <CardContent>
-              <Typography color="textSecondary" gutterBottom>
-                Analysis Type
-              </Typography>
-              <Typography variant="h4">
-                {analysis.analysis_type === 'group_calibration' ? 'calibration' : analysis.analysis_type}
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid item xs={12} sm={6} md={3}>
-          <Card>
-            <CardContent>
-              <Typography color="textSecondary" gutterBottom>
-                Status
-              </Typography>
-              <Typography
-                variant="h4"
-                sx={{ color: analysis.status === 'completed' ? 'success.main' : 'warning.main' }}
-              >
-                {analysis.status}
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid item xs={12} sm={6} md={3}>
-          <Card>
-            <CardContent>
-              <Typography color="textSecondary" gutterBottom>
-                Samples
-              </Typography>
-              <Typography variant="h4">{analysis.measurements_count}</Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid item xs={12} sm={6} md={3}>
-          <Card>
-            <CardContent>
-              <Typography color="textSecondary" gutterBottom>
-                Results
-              </Typography>
-              <Typography variant="h4">{analysis.results.length}</Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-      </Grid>
+      {/* A compact line, not four hero stat cards -- this is a single record's
+          detail view, not a dashboard, and two of the four numbers those
+          cards showed (Samples, Results) are the same number in every normal
+          case: one result per measurement. Identical hero numbers read as a
+          bug even when they aren't. The "results" chip only appears at all
+          when the counts actually diverge -- a pending/failed/partial run --
+          which is exactly when that divergence is worth a reader's attention. */}
+      <Stack direction="row" spacing={1} sx={{ mb: 3 }} flexWrap="wrap" useFlexGap alignItems="center">
+        <Chip
+          label={analysis.analysis_type === 'group_calibration' ? 'calibration' : analysis.analysis_type}
+        />
+        <Chip
+          label={analysis.status}
+          color={
+            analysis.status === 'completed' ? 'success' : analysis.status === 'failed' ? 'error' : 'warning'
+          }
+        />
+        <Chip
+          label={`${analysis.measurements_count} sample${analysis.measurements_count === 1 ? '' : 's'}`}
+        />
+        {analysis.results.length !== analysis.measurements_count && (
+          <Chip
+            color="warning"
+            label={`${analysis.results.length} of ${analysis.measurements_count} have results`}
+          />
+        )}
+      </Stack>
 
       {/* Which solver produced every number below it. Placed here, above the
           results table, because it qualifies all of them rather than any one.
