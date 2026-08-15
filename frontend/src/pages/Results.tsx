@@ -199,17 +199,37 @@ const STRUCTURE_MARKER: Record<string, string> = {
 // Below this, OxCal's convention is that a date is worth re-examining
 // (Bronk Ramsey 1995).
 const POOR_AGREEMENT = 60
-// A date the outlier model thinks is more likely than not an outlier.
-const OUTLIER_LIKELY = 0.5
-// ...and one it is unsure about. Reported separately rather than folded in,
-// because "probably wrong" and "worth a look" are different messages and a
-// single threshold would have to pick one.
-const OUTLIER_ELEVATED = 0.2
+// How far above the PRIOR the posterior outlier probability has to rise to
+// count as the model having found something. Not an absolute posterior
+// threshold: a date given prior 1 (forced to be treated as an outlier)
+// always comes back with posterior 1 by construction, so judging the
+// posterior on its own would flag every forced-outlier date as "suspect"
+// for the setting the analyst gave it, not for anything the data said. At
+// prior 0 (the common case) this is equivalent to the old absolute
+// threshold, since lift and posterior are the same number.
+const OUTLIER_LIFT_SUSPECT = 0.5
+// ...and a rise it is unsure about. Reported separately rather than folded
+// in, because "probably wrong" and "worth a look" are different messages
+// and a single threshold would have to pick one.
+const OUTLIER_LIFT_CHECK = 0.2
+// A prior at or above this is a deliberate, elevated suspicion -- worth
+// saying even when the posterior didn't move past it (see "Assigned" below)
+// -- rather than OxCal's routine 5% default, which an analyst commonly
+// turns on for every date in a phase and which would otherwise put a chip
+// on every clean row.
+const NOTABLE_OUTLIER_PRIOR = 0.2
 
 type Concern = { level: 'suspect' | 'check'; reasons: string[] }
 
 /**
  * Whether a date's own diagnostics say something is wrong with it, and what.
+ *
+ * The outlier check compares the posterior probability to the PRIOR the
+ * analyst assigned this date, not the raw posterior on its own -- see
+ * OUTLIER_LIFT_SUSPECT above for why. A date whose posterior sits close to
+ * its own prior isn't flagged here at all; StructureTableRow shows that as
+ * a separate, non-alarming "Assigned" chip instead, since it is a fact
+ * about how the date was configured, not a diagnostic finding.
  *
  * Colour alone would not do: the reasons are shown as text beside it, since
  * a red row tells a reader something is wrong without telling them what, and
@@ -217,18 +237,24 @@ type Concern = { level: 'suspect' | 'check'; reasons: string[] }
  * model had to move the date; the outlier probability says the model thinks
  * it does not belong. A date can trip either without the other.
  */
-function concernFor(result?: SampleResult): Concern | null {
+function concernFor(result?: SampleResult, outlierPrior?: number | null): Concern | null {
   if (!result) return null
   const reasons: string[] = []
   let level: 'suspect' | 'check' | null = null
 
   const outlier = result.outlier_probability
-  if (outlier != null && outlier >= OUTLIER_LIKELY) {
-    level = 'suspect'
-    reasons.push(`${Math.round(outlier * 100)}% likely an outlier`)
-  } else if (outlier != null && outlier >= OUTLIER_ELEVATED) {
-    level = 'check'
-    reasons.push(`${Math.round(outlier * 100)}% chance of being an outlier`)
+  if (outlier != null) {
+    const prior = outlierPrior ?? 0
+    const lift = outlier - prior
+    const withPrior = (message: string) =>
+      prior > 0 ? `${message} -- up from the ${Math.round(prior * 100)}% prior it was given` : message
+    if (lift >= OUTLIER_LIFT_SUSPECT) {
+      level = 'suspect'
+      reasons.push(withPrior(`${Math.round(outlier * 100)}% likely an outlier`))
+    } else if (lift >= OUTLIER_LIFT_CHECK) {
+      level = 'check'
+      reasons.push(withPrior(`${Math.round(outlier * 100)}% chance of being an outlier`))
+    }
   }
 
   const agreement = result.agreement_index
@@ -279,7 +305,19 @@ function StructureTableRow({
   ].filter(Boolean).join(' · ')
 
   const cell = (value: string) => (isHeading ? '' : value)
-  const concern = isDate ? concernFor(result) : null
+  const concern = isDate ? concernFor(result, row.outlierPrior) : null
+  // A date given a NOTABLE outlier prior whose posterior didn't rise
+  // meaningfully above it (see concernFor) still had special treatment --
+  // worth saying, just not as a warning. Shown as a plain chip rather than
+  // folded into the reasons text above, so it never inherits the red/amber
+  // styling a real concern gets. Below NOTABLE_OUTLIER_PRIOR this stays
+  // quiet: OxCal's routine 5% default, turned on across a whole phase, is
+  // not itself worth a chip on every clean row -- the "O 4%" text already
+  // says it was checked.
+  const assignedOutlier =
+    isDate && !concern && (row.outlierPrior ?? 0) >= NOTABLE_OUTLIER_PRIOR
+      ? { prior: row.outlierPrior ?? 0, model: row.outlierModel }
+      : null
   // A tint carries the flag across the whole row so it is findable when
   // scanning a long table; the chip in the diagnostics column says what it
   // actually is, since colour on its own is not a message.
@@ -352,6 +390,17 @@ function StructureTableRow({
                   variant={concern.level === 'suspect' ? 'filled' : 'outlined'}
                   label={concern.level === 'suspect' ? 'Suspect' : 'Check'}
                 />
+              )}
+              {assignedOutlier && (
+                <Tooltip
+                  title={
+                    `Given a ${Math.round(assignedOutlier.prior * 100)}% ` +
+                    `${assignedOutlier.model === 'charcoal' ? 'charcoal' : 'general'} outlier prior. ` +
+                    'The posterior is close to that, so the data did not add anything beyond what was already assumed.'
+                  }
+                >
+                  <Chip size="small" variant="outlined" label="Assigned" />
+                </Tooltip>
               )}
               <Box component="span" sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>
                 {/* Both numbers, always, so a reader can see a date is fine
@@ -606,6 +655,10 @@ export default function Results() {
   // to the flat date list below.
   const structureRows = flattenStructure(analysis.model_tree, analysis.measurements || [])
   const resultBySampleId = new Map((analysis.results || []).map((r) => [r.sample_id, r]))
+  // Same reason concernFor needs it in StructureTableRow: a posterior close
+  // to the prior it was given isn't a finding, so the banner below has to
+  // know each result's prior too, not just its posterior.
+  const measurementBySampleId = new Map((analysis.measurements || []).map((m) => [m.id, m]))
 
   // analysis.results as returned isn't in any particular order -- it's DB
   // insertion order. When there's no model structure to walk instead (a
@@ -624,7 +677,7 @@ export default function Results() {
   const flaggedDates = (analysis.results || [])
     .map((r, idx) => ({
       name: r.sample_name || `Sample ${idx + 1}`,
-      concern: concernFor(r),
+      concern: concernFor(r, measurementBySampleId.get(r.sample_id)?.outlier_prior),
     }))
     .filter((f): f is { name: string; concern: Concern } => f.concern !== null)
     .sort((a, b) => (a.concern.level === b.concern.level ? 0 : a.concern.level === 'suspect' ? -1 : 1))
@@ -1115,7 +1168,7 @@ export default function Results() {
                 </TableCell>
                 {isBayesian && (
                   <Tooltip
-                    title="A = agreement index: how well the modelled date still fits its own measurement (below 60 is worth re-examining). O = posterior probability the date is an outlier, when an outlier model was applied to it."
+                    title='A = agreement index: how well the modelled date still fits its own measurement (below 60 is worth re-examining). O = posterior probability the date is an outlier, when an outlier model was applied to it. "Suspect"/"Check" mean the data pushed O meaningfully above the prior it was given; "Assigned" means a prior was set but O stayed close to it, which is not itself a finding.'
                   >
                     <TableCell align="right">Diagnostics</TableCell>
                   </Tooltip>

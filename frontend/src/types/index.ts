@@ -61,6 +61,16 @@ export interface MatrixMeasurement {
   element_id?: string | null
   tpq_age_bp?: number | null
   taq_age_bp?: number | null
+  // Prior probability that this date does not belong to the population
+  // being modelled -- residual charcoal, intrusive material, lab error.
+  // Zero or absent means no outlier model is applied to it. `outlier_model`
+  // picks which one: "general" is symmetric, "charcoal" is one-sided
+  // (the material predates its context). Declared here rather than only on
+  // DraftMeasurement below because a saved analysis's results also need it,
+  // to tell a posterior outlier probability the data actually found from
+  // one that just reports back a prior the analyst already set.
+  outlier_prior?: number | null
+  outlier_model?: 'general' | 'charcoal' | null
 }
 
 export interface DraftMeasurement extends MatrixMeasurement {
@@ -74,13 +84,6 @@ export interface DraftMeasurement extends MatrixMeasurement {
   // from it. The error is required whenever the offset is set.
   delta_r?: number | null
   delta_r_error?: number | null
-  // Prior probability that this date does not belong to the population
-  // being modelled -- residual charcoal, intrusive material, lab error.
-  // Zero or absent means no outlier model is applied to it. `outlier_model`
-  // picks which one: "general" is symmetric, "charcoal" is one-sided
-  // (the material predates its context).
-  outlier_prior?: number | null
-  outlier_model?: 'general' | 'charcoal' | null
   // Recorded against the date but not used in the calculation. Carried
   // through the draft so editing a saved analysis resubmits them instead
   // of blanking them -- dates deployed from a project collection arrive

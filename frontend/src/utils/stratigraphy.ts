@@ -121,6 +121,12 @@ export interface StructureRow {
   tpqAgeBp?: number | null
   taqAgeBp?: number | null
   sampleId?: string | null
+  // A date row's own outlier configuration, carried through so a results
+  // table can tell a posterior outlier probability the data actually found
+  // apart from one that just reports back a prior the analyst assigned it.
+  // Always null for an element row.
+  outlierPrior?: number | null
+  outlierModel?: 'general' | 'charcoal' | null
 }
 
 /**
@@ -172,6 +178,8 @@ export function flattenStructure(
       tpqAgeBp: m.tpq_age_bp ?? null,
       taqAgeBp: m.taq_age_bp ?? null,
       sampleId: m.id,
+      outlierPrior: m.outlier_prior ?? null,
+      outlierModel: m.outlier_model ?? null,
     }
   }
 
