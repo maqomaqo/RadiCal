@@ -722,7 +722,7 @@ export default function Results() {
     if (!analysis.solver) {
       solverChip = (
         <Tooltip title="This analysis was run before the solver was recorded. Re-run it to find out which method its model uses.">
-          <Chip size="small" variant="outlined" label="Solver not recorded" />
+          <Chip variant="outlined" label="Solver not recorded" />
         </Tooltip>
       )
     } else if (analysis.solver.method === 'exact') {
@@ -736,7 +736,7 @@ export default function Results() {
               : '')
           }
         >
-          <Chip size="small" variant="outlined" color="success" label="Exact solver" />
+          <Chip variant="outlined" color="success" label="Exact solver" />
         </Tooltip>
       )
     } else if (analysis.solver.method === 'smc') {
@@ -821,7 +821,6 @@ export default function Results() {
           }
         >
           <Chip
-            size="small"
             variant="outlined"
             color="success"
             label={`${
