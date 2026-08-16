@@ -899,7 +899,7 @@ export default function Results() {
 
   return (
     <Container maxWidth="lg" sx={{ py: 4 }}>
-      <Box sx={{ mb: 4 }}>
+      <Paper sx={{ p: 3, mb: 3 }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 2 }}>
           <Box>
             <Typography variant="h3" component="h1" gutterBottom>
@@ -973,36 +973,36 @@ export default function Results() {
             </Button>
           </Box>
         </Box>
-      </Box>
 
-      {/* A compact line, not four hero stat cards -- this is a single record's
-          detail view, not a dashboard, and two of the four numbers those
-          cards showed (Samples, Results) are the same number in every normal
-          case: one result per measurement. Identical hero numbers read as a
-          bug even when they aren't. The "results" chip only appears at all
-          when the counts actually diverge -- a pending/failed/partial run --
-          which is exactly when that divergence is worth a reader's attention. */}
-      <Stack direction="row" spacing={1} sx={{ mb: 3 }} flexWrap="wrap" useFlexGap alignItems="center">
-        {solverChip}
-        <Chip
-          label={analysis.analysis_type === 'group_calibration' ? 'calibration' : analysis.analysis_type}
-        />
-        <Chip
-          label={analysis.status}
-          color={
-            analysis.status === 'completed' ? 'success' : analysis.status === 'failed' ? 'error' : 'warning'
-          }
-        />
-        <Chip
-          label={`${analysis.measurements_count} sample${analysis.measurements_count === 1 ? '' : 's'}`}
-        />
-        {analysis.results.length !== analysis.measurements_count && (
+        {/* A compact line, not four hero stat cards -- this is a single record's
+            detail view, not a dashboard, and two of the four numbers those
+            cards showed (Samples, Results) are the same number in every normal
+            case: one result per measurement. Identical hero numbers read as a
+            bug even when they aren't. The "results" chip only appears at all
+            when the counts actually diverge -- a pending/failed/partial run --
+            which is exactly when that divergence is worth a reader's attention. */}
+        <Stack direction="row" spacing={1} sx={{ mt: 3 }} flexWrap="wrap" useFlexGap alignItems="center">
+          {solverChip}
           <Chip
-            color="warning"
-            label={`${analysis.results.length} of ${analysis.measurements_count} have results`}
+            label={analysis.analysis_type === 'group_calibration' ? 'calibration' : analysis.analysis_type}
           />
-        )}
-      </Stack>
+          <Chip
+            label={analysis.status}
+            color={
+              analysis.status === 'completed' ? 'success' : analysis.status === 'failed' ? 'error' : 'warning'
+            }
+          />
+          <Chip
+            label={`${analysis.measurements_count} sample${analysis.measurements_count === 1 ? '' : 's'}`}
+          />
+          {analysis.results.length !== analysis.measurements_count && (
+            <Chip
+              color="warning"
+              label={`${analysis.results.length} of ${analysis.measurements_count} have results`}
+            />
+          )}
+        </Stack>
+      </Paper>
 
       {/* A failed run, with the reason. Before this the page showed only the word
           "failed" in the status card, leaving the user to guess -- and one way to
