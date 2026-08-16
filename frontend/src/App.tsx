@@ -9,15 +9,43 @@ import Results from '@/pages/Results'
 import Projects from '@/pages/Projects'
 import ProjectDetail from '@/pages/ProjectDetail'
 
+// MUI's default shadows are tuned (offset/blur/spread) per elevation level,
+// but colored pure black -- recoloring them to the theme's own ink rather
+// than replacing the 25-entry scale by hand keeps that tuning intact while
+// making every elevated surface (Card, Menu, Dialog, Snackbar...) pick up
+// the same warm cast as everything else, not just the components this file
+// styles directly.
+const warmShadows = createTheme().shadows.map((shadow) =>
+  shadow.replace(/rgba\(0,\s*0,\s*0,/g, 'rgba(43, 35, 32,')
+) as ReturnType<typeof createTheme>['shadows']
+
+// Palette pulled from the app's own logo (frontend/public/RadiCal.png) --
+// see the palette mockup this replaced -- rather than MUI's stock blue and
+// pink, which the previous values (#1976d2 / #dc004e) were verbatim restating.
 const theme = createTheme({
   palette: {
     primary: {
-      main: '#1976d2',
+      // Darkened from the logo's own #f05460 for AA contrast as white-on-
+      // primary text (buttons, filled chips); the logo's exact coral is
+      // reserved for illustration use, not interactive surfaces.
+      main: '#e14a56',
     },
     secondary: {
-      main: '#dc004e',
+      // The logo's pale blue (#f0f0fc) is a tint, not a usable interactive
+      // color -- this is that same hue saturated up enough for links/focus.
+      main: '#4a7dc4',
+    },
+    background: {
+      // A warm-tinted canvas instead of MUI's white default, so elevated
+      // white Cards/Paper actually read as lifted off the page rather than
+      // blending into it.
+      default: '#faf6f3',
     },
   },
+  shape: {
+    borderRadius: 8,
+  },
+  shadows: warmShadows,
   typography: {
     fontFamily: 'Roboto, sans-serif',
     h1: { fontSize: '2.5rem', fontWeight: 600 },
