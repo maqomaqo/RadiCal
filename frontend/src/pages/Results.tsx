@@ -6,6 +6,7 @@ import {
   Paper,
   Typography,
   Button,
+  Link,
   CircularProgress,
   Table,
   TableBody,
@@ -39,7 +40,6 @@ import PosteriorPlot from '@/components/PosteriorPlot'
 import StackedPosteriorPlot from '@/components/StackedPosteriorPlot'
 import HarrisMatrixDiagram from '@/components/HarrisMatrixDiagram'
 import ConfirmDialog from '@/components/ConfirmDialog'
-import AssignProjectDialog from '@/components/AssignProjectDialog'
 import { formatApiError } from '@/utils/apiError'
 import { useNotify } from '@/contexts/NotificationContext'
 import { flattenStructure } from '@/utils/stratigraphy'
@@ -442,7 +442,6 @@ export default function Results() {
   )
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
-  const [assignOpen, setAssignOpen] = useState(false)
   const [rerunOpen, setRerunOpen] = useState(false)
   const [rerunning, setRerunning] = useState(false)
   const [duplicating, setDuplicating] = useState(false)
@@ -912,13 +911,17 @@ export default function Results() {
             <Typography variant="body2" color="textSecondary">
               Project:{' '}
               {analysis.project_id ? (
-                <RouterLink to={`/projects/${analysis.project_id}`}>{analysis.project_name}</RouterLink>
+                <Link
+                  component={RouterLink}
+                  to={`/projects/${analysis.project_id}`}
+                  underline="hover"
+                  sx={{ fontWeight: 600 }}
+                >
+                  {analysis.project_name}
+                </Link>
               ) : (
                 'Unassigned'
-              )}{' '}
-              <Button size="small" onClick={() => setAssignOpen(true)} sx={{ minWidth: 0, py: 0 }}>
-                Change
-              </Button>
+              )}
             </Typography>
           </Box>
           {/* flexWrap here, not just on the row above: that outer wrap only
@@ -1438,14 +1441,6 @@ export default function Results() {
         loading={rerunning}
         onConfirm={handleRerun}
         onCancel={() => setRerunOpen(false)}
-      />
-
-      <AssignProjectDialog
-        open={assignOpen}
-        analysisId={analysis.id}
-        currentProjectId={analysis.project_id ?? null}
-        onClose={() => setAssignOpen(false)}
-        onAssigned={() => analysisId && fetchAnalysis(analysisId)}
       />
     </Container>
   )
