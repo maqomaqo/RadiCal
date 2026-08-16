@@ -900,78 +900,28 @@ export default function Results() {
   return (
     <Container maxWidth="lg" sx={{ py: 4 }}>
       <Paper sx={{ p: 3, mb: 3 }}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 2 }}>
-          <Box>
-            <Typography variant="h3" component="h1" gutterBottom>
-              {analysis.name}
-            </Typography>
-            <Typography variant="body1" color="textSecondary" gutterBottom>
-              Created: {new Date(analysis.created_at).toLocaleString()}
-            </Typography>
-            <Typography variant="body2" color="textSecondary">
-              Project:{' '}
-              {analysis.project_id ? (
-                <Link
-                  component={RouterLink}
-                  to={`/projects/${analysis.project_id}`}
-                  underline="hover"
-                  sx={{ fontWeight: 600 }}
-                >
-                  {analysis.project_name}
-                </Link>
-              ) : (
-                'Unassigned'
-              )}
-            </Typography>
-          </Box>
-          {/* flexWrap here, not just on the row above: that outer wrap only
-              moves this whole group onto its own line once the title
-              doesn't fit beside it. Without it too, this group -- a
-              220px-minimum select plus four buttons -- stayed a single
-              unbreakable 700px-plus row and forced the page to scroll
-              sideways on anything narrower than that, title wrapped or not. */}
-          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, alignItems: 'center' }}>
-            <FormControl size="small" sx={{ minWidth: 220 }}>
-              <InputLabel>Date Format</InputLabel>
-              <Select value={dateFormat} label="Date Format" onChange={handleDateFormatChange}>
-                {DATE_FORMAT_OPTIONS.map((option) => (
-                  <MenuItem key={option.value} value={option.value}>
-                    {option.label}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-            <Button
-              startIcon={<EditIcon />}
-              variant="outlined"
-              onClick={() => navigate(`/analysis/${analysis.id}/edit`)}
-            >
-              Edit
-            </Button>
-            <Button
-              startIcon={<ContentCopyIcon />}
-              variant="outlined"
-              disabled={duplicating}
-              onClick={handleDuplicate}
-            >
-              {duplicating ? 'Copying...' : 'Duplicate'}
-            </Button>
-            <Button
-              startIcon={<ReplayIcon />}
-              variant="outlined"
-              onClick={() => setRerunOpen(true)}
-            >
-              Re-run
-            </Button>
-            <Button
-              startIcon={<DeleteIcon />}
-              color="error"
-              variant="outlined"
-              onClick={() => setDeleteOpen(true)}
-            >
-              Delete
-            </Button>
-          </Box>
+        <Box>
+          <Typography variant="h3" component="h1" gutterBottom>
+            {analysis.name}
+          </Typography>
+          <Typography variant="body1" color="textSecondary" gutterBottom>
+            Created: {new Date(analysis.created_at).toLocaleString()}
+          </Typography>
+          <Typography variant="body2" color="textSecondary">
+            Project:{' '}
+            {analysis.project_id ? (
+              <Link
+                component={RouterLink}
+                to={`/projects/${analysis.project_id}`}
+                underline="hover"
+                sx={{ fontWeight: 600 }}
+              >
+                {analysis.project_name}
+              </Link>
+            ) : (
+              'Unassigned'
+            )}
+          </Typography>
         </Box>
 
         {/* A compact line, not four hero stat cards -- this is a single record's
@@ -981,7 +931,7 @@ export default function Results() {
             bug even when they aren't. The "results" chip only appears at all
             when the counts actually diverge -- a pending/failed/partial run --
             which is exactly when that divergence is worth a reader's attention. */}
-        <Stack direction="row" spacing={1} sx={{ mt: 3 }} flexWrap="wrap" useFlexGap alignItems="center">
+        <Stack direction="row" spacing={1} sx={{ mt: 2 }} flexWrap="wrap" useFlexGap alignItems="center">
           {solverChip}
           <Chip
             label={analysis.analysis_type === 'group_calibration' ? 'calibration' : analysis.analysis_type}
@@ -1002,6 +952,55 @@ export default function Results() {
             />
           )}
         </Stack>
+
+        {/* Its own row below the title/chips rather than beside the title,
+            so a 220px-minimum select plus four buttons has the full card
+            width to reflow into rather than competing with the title block
+            for horizontal space. flexWrap still earns its place here: on a
+            narrow screen this is five separate controls, and without it
+            they'd force the page to scroll sideways instead of wrapping. */}
+        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, alignItems: 'center', mt: 3 }}>
+          <FormControl size="small" sx={{ minWidth: 220 }}>
+            <InputLabel>Date Format</InputLabel>
+            <Select value={dateFormat} label="Date Format" onChange={handleDateFormatChange}>
+              {DATE_FORMAT_OPTIONS.map((option) => (
+                <MenuItem key={option.value} value={option.value}>
+                  {option.label}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+          <Button
+            startIcon={<EditIcon />}
+            variant="outlined"
+            onClick={() => navigate(`/analysis/${analysis.id}/edit`)}
+          >
+            Edit
+          </Button>
+          <Button
+            startIcon={<ContentCopyIcon />}
+            variant="outlined"
+            disabled={duplicating}
+            onClick={handleDuplicate}
+          >
+            {duplicating ? 'Copying...' : 'Duplicate'}
+          </Button>
+          <Button
+            startIcon={<ReplayIcon />}
+            variant="outlined"
+            onClick={() => setRerunOpen(true)}
+          >
+            Re-run
+          </Button>
+          <Button
+            startIcon={<DeleteIcon />}
+            color="error"
+            variant="outlined"
+            onClick={() => setDeleteOpen(true)}
+          >
+            Delete
+          </Button>
+        </Box>
       </Paper>
 
       {/* A failed run, with the reason. Before this the page showed only the word
