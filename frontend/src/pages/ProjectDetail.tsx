@@ -350,7 +350,11 @@ export default function ProjectDetail() {
                 </IconButton>
               </Tooltip>
               <Tooltip title="Delete project">
-                <IconButton onClick={() => setDeleteProjectOpen(true)} color="error" aria-label="Delete project">
+                <IconButton
+                  onClick={() => setDeleteProjectOpen(true)}
+                  aria-label="Delete project"
+                  sx={{ '&:hover, &:focus-visible': { color: 'error.main' } }}
+                >
                   <DeleteIcon />
                 </IconButton>
               </Tooltip>
@@ -482,13 +486,13 @@ export default function ProjectDetail() {
                       </IconButton>
                       <IconButton
                         size="small"
-                        color="error"
                         aria-label={`Delete ${a.name}`}
                         title="Delete"
                         onClick={(e) => {
                           e.stopPropagation()
                           setDeleteAnalysisTarget(a)
                         }}
+                        sx={{ '&:hover, &:focus-visible': { color: 'error.main' } }}
                       >
                         <DeleteIcon fontSize="small" />
                       </IconButton>

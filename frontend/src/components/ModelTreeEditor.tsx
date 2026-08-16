@@ -425,7 +425,12 @@ function RowActions({ element, canMoveUp, canMoveDown, onMoveUp, onMoveDown, onA
         </IconButton>
       )}
       <Tooltip title={`Delete ${element.name}`}>
-        <IconButton size="small" color="error" aria-label={`Delete ${element.name}`} onClick={onDelete}>
+        <IconButton
+          size="small"
+          aria-label={`Delete ${element.name}`}
+          onClick={onDelete}
+          sx={{ '&:hover, &:focus-visible': { color: 'error.main' } }}
+        >
           <DeleteIcon fontSize="small" />
         </IconButton>
       </Tooltip>

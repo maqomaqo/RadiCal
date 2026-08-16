@@ -164,9 +164,14 @@ export default function Dashboard() {
                   <Tooltip title={`Delete ${analysis.name}`}>
                     <IconButton
                       size="small"
-                      color="error"
                       aria-label={`Delete ${analysis.name}`}
-                      sx={{ position: 'absolute', top: 8, right: 8, zIndex: 1 }}
+                      sx={{
+                        position: 'absolute',
+                        top: 8,
+                        right: 8,
+                        zIndex: 1,
+                        '&:hover, &:focus-visible': { color: 'error.main' },
+                      }}
                       onClick={() => setDeleteTarget(analysis)}
                     >
                       <DeleteIcon fontSize="small" />

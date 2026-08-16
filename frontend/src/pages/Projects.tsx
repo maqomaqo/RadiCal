@@ -197,16 +197,25 @@ export default function Projects() {
                     in only on :hover, which a keyboard user tabbing to it
                     and a touch user (no hover state to reveal it at all)
                     could never trigger -- delete was reachable by mouse
-                    only. Every other destructive icon button in the app
-                    follows the same rule: always visible, small, error
-                    colour, labelled with a Tooltip in addition to the
-                    aria-label a screen reader already gets from it. */}
+                    only. Grey by default and red only on :hover/:focus,
+                    though -- a whole grid of always-red icons competed with
+                    the content for attention regardless of intent to use
+                    them. Every other destructive icon button in the app
+                    follows the same rule: always visible, small, default
+                    colour that turns error on hover, labelled with a
+                    Tooltip in addition to the aria-label a screen reader
+                    already gets from it. */}
                 <Tooltip title={`Delete ${project.name}`}>
                   <IconButton
                     size="small"
-                    color="error"
                     aria-label={`Delete ${project.name}`}
-                    sx={{ position: 'absolute', top: 8, right: 8, zIndex: 1 }}
+                    sx={{
+                      position: 'absolute',
+                      top: 8,
+                      right: 8,
+                      zIndex: 1,
+                      '&:hover, &:focus-visible': { color: 'error.main' },
+                    }}
                     onClick={() => setDeleteTarget(project)}
                   >
                     <DeleteIcon fontSize="small" />

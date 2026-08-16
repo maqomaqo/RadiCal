@@ -1142,7 +1142,7 @@ export default function NewAnalysis() {
                             size="small"
                             aria-label={`Delete ${m.sample_name}`}
                             onClick={() => removeMeasurement(m.id)}
-                            color="error"
+                            sx={{ '&:hover, &:focus-visible': { color: 'error.main' } }}
                           >
                             <DeleteIcon fontSize="small" />
                           </IconButton>

@@ -513,9 +513,9 @@ export default function ProjectSampleTable({ projectId }: Props) {
                     <Tooltip title={`Delete ${s.sample_name}`}>
                       <IconButton
                         size="small"
-                        color="error"
                         aria-label={`Delete ${s.sample_name}`}
                         onClick={() => setDeleteTarget(s)}
+                        sx={{ '&:hover, &:focus-visible': { color: 'error.main' } }}
                       >
                         <DeleteIcon fontSize="small" />
                       </IconButton>
