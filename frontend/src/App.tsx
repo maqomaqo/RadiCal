@@ -25,15 +25,16 @@ const warmShadows = createTheme().shadows.map((shadow) =>
 const theme = createTheme({
   palette: {
     primary: {
-      // Darkened from the logo's own #f05460 for AA contrast as white-on-
-      // primary text (buttons, filled chips); the logo's exact coral is
-      // reserved for illustration use, not interactive surfaces.
-      main: '#e14a56',
+      // The logo's pale blue (#f0f0fc) is a tint, not a usable interactive
+      // color -- this is that same hue saturated up enough for buttons,
+      // filled chips, and focus states.
+      main: '#4a7dc4',
     },
     secondary: {
-      // The logo's pale blue (#f0f0fc) is a tint, not a usable interactive
-      // color -- this is that same hue saturated up enough for links/focus.
-      main: '#4a7dc4',
+      // Darkened from the logo's own #f05460 for AA contrast as white-on-
+      // secondary text; the logo's exact coral is reserved for
+      // illustration use, not interactive surfaces.
+      main: '#e14a56',
     },
     background: {
       // A warm-tinted canvas instead of MUI's white default, so elevated
