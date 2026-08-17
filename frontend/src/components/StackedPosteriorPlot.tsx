@@ -12,6 +12,7 @@ import {
 import type { HPDRange } from '@/utils/dateFormat'
 import { stackedPlotGeometry } from '@/utils/stackedPlotGeometry'
 import { toUnitArea } from '@/utils/distribution'
+import { usePlotColors } from '@/theme/plotColors'
 
 // Same binding as PosteriorPlot -- see the note there for why the factory is
 // bound to the packaged plotly.js rather than a CDN global.
@@ -65,22 +66,6 @@ const HPD68_BAR: [number, number] = [-0.19, -0.13]
 // against the table above.
 const MARGIN_LEFT = 150
 const MARGIN_LEFT_NARROW = 84
-
-const POSTERIOR_LINE = 'rgb(99, 110, 250)'
-const POSTERIOR_FILL = 'rgba(99, 110, 250, 0.25)'
-// Boundaries are the same kind of object -- a modelled parameter with a
-// posterior -- but they are a transition rather than a dated thing, so they
-// read as an outline against the solid dates either side of them.
-const BOUNDARY_LINE = 'rgb(120, 120, 130)'
-const BOUNDARY_FILL = 'rgba(120, 120, 130, 0.16)'
-// A date's unconstrained calibration, shown behind its posterior -- neutral
-// grey rather than boundary's blue-grey so the two read as different things.
-const PRIOR_LINE = 'rgba(100, 100, 100, 0.5)'
-const PRIOR_FILL = 'rgba(100, 100, 100, 0.15)'
-const HPD95_COLOR = 'rgba(255, 127, 14, 0.55)'
-const HPD68_COLOR = 'rgba(44, 160, 44, 0.65)'
-const MEAN_COLOR = 'rgb(214, 39, 40)'
-const MEDIAN_COLOR = 'rgb(148, 103, 189)'
 
 const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
 
@@ -154,6 +139,7 @@ export default function StackedPosteriorPlot({
   dateFormat = DEFAULT_DATE_FORMAT,
 }: StackedPosteriorPlotProps) {
   const theme = useTheme()
+  const plot = usePlotColors()
   const narrow = useMediaQuery(theme.breakpoints.down('sm'))
   const marginLeft = narrow ? MARGIN_LEFT_NARROW : MARGIN_LEFT
 
@@ -219,12 +205,12 @@ export default function StackedPosteriorPlot({
 
       ranges95.forEach(([min, max]) =>
         data.push(
-          bar(min, max, yBase, HPD95_BAR, HPD95_COLOR, '95% HPD', claimLegend('hpd95'), 'hpd95')
+          bar(min, max, yBase, HPD95_BAR, plot.hpd95, '95% HPD', claimLegend('hpd95'), 'hpd95')
         )
       )
       ranges68.forEach(([min, max]) =>
         data.push(
-          bar(min, max, yBase, HPD68_BAR, HPD68_COLOR, '68% HPD', claimLegend('hpd68'), 'hpd68')
+          bar(min, max, yBase, HPD68_BAR, plot.hpd68, '68% HPD', claimLegend('hpd68'), 'hpd68')
         )
       )
 
@@ -240,8 +226,8 @@ export default function StackedPosteriorPlot({
           x: [priorTrimmed.ages[0], ...priorTrimmed.ages, priorTrimmed.ages[priorTrimmed.ages.length - 1]],
           y: [yBase, ...priorY, yBase],
           fill: 'toself',
-          fillcolor: PRIOR_FILL,
-          line: { width: 1, color: PRIOR_LINE },
+          fillcolor: plot.priorFill,
+          line: { width: 1, color: plot.priorLine },
           mode: 'lines',
           name: 'Prior (unmodelled)',
           legendgroup: 'prior',
@@ -265,9 +251,9 @@ export default function StackedPosteriorPlot({
         y: [yBase, ...curveY, yBase],
         customdata: [hoverText[0], ...hoverText, hoverText[hoverText.length - 1]],
         fill: 'toself',
-        fillcolor: isBoundary ? BOUNDARY_FILL : POSTERIOR_FILL,
+        fillcolor: isBoundary ? plot.boundaryFill : plot.posteriorFill,
         line: {
-          color: isBoundary ? BOUNDARY_LINE : POSTERIOR_LINE,
+          color: isBoundary ? plot.boundaryLine : plot.posteriorLine,
           width: 1.5,
           dash: isBoundary ? 'dot' : 'solid',
         },
@@ -293,15 +279,15 @@ export default function StackedPosteriorPlot({
           hoverinfo: 'skip',
         })
       if (showMean && isNum(s.pointEstimates.mean)) {
-        marker(s.pointEstimates.mean, MEAN_COLOR, 'dash', 'Mean', 'mean')
+        marker(s.pointEstimates.mean, plot.mean, 'dash', 'Mean', 'mean')
       }
       if (showMedian && isNum(s.pointEstimates.median)) {
-        marker(s.pointEstimates.median, MEDIAN_COLOR, 'dot', 'Median', 'median')
+        marker(s.pointEstimates.median, plot.median, 'dot', 'Median', 'median')
       }
     })
 
     return data
-  }, [drawable, showMean, showMedian, showPrior, dateFormat])
+  }, [drawable, plot, showMean, showMedian, showPrior, dateFormat])
 
   // Phase groupings: a light rule where the dates change phase, with the
   // phase named once beside its first date. The table above says the same

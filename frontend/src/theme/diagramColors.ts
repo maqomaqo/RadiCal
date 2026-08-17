@@ -18,10 +18,13 @@ import type { ElementType } from '@/types'
  * violet is desaturated to match -- Material's stock purple[500] was the
  * loudest thing on screen next to these.
  */
-const BOUNDARY_CORAL = '#f15d5f'
-const BOUNDARY_CORAL_INK = '#d23f4a'
-const PHASE_GREEN = '#1f7a62'
-const HIATUS_VIOLET = '#7a5c99'
+// Exported because the plots colour the same objects the diagrams do -- a
+// Boundary is a Boundary whether it is a rule in the matrix or a curve in
+// the stacked plot. See theme/plotColors.ts.
+export const BOUNDARY_CORAL = '#f15d5f'
+export const BOUNDARY_CORAL_INK = '#d23f4a'
+export const PHASE_GREEN = '#1f7a62'
+export const HIATUS_VIOLET = '#7a5c99'
 
 export interface ElementTypeColor {
   /** Borders, rules and tints. Graphic use, which only needs 3:1. */

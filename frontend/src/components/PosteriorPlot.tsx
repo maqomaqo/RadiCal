@@ -10,6 +10,7 @@ import {
   formatCalendarAge,
 } from '@/utils/dateFormat'
 import type { HPDRange } from '@/utils/dateFormat'
+import { usePlotColors } from '@/theme/plotColors'
 
 /**
  * A filled rectangle in data coordinates, as a closed polygon trace -- same
@@ -49,8 +50,6 @@ function bar(
 const HPD95_BAR: [number, number] = [-0.11, -0.04]
 const HPD68_BAR: [number, number] = [-0.22, -0.15]
 const AXIS_BOTTOM_MARGIN = 0.07
-const HPD95_COLOR = 'rgba(255, 127, 14, 0.55)'
-const HPD68_COLOR = 'rgba(44, 160, 44, 0.65)'
 
 // react-plotly.js's <Plot> wraps the imperative Plotly.js API so this
 // component doesn't have to: it calls Plotly.newPlot on mount,
@@ -94,6 +93,12 @@ interface PosteriorPlotProps {
    */
   priorDistribution?: Array<[number, number]>
   showPrior?: boolean
+  /**
+   * A modelled transition rather than a dated thing. Drawn in the boundary
+   * coral, as it is in the stacked plot and in the diagrams -- the same
+   * object should not change colour depending on which view you opened.
+   */
+  isBoundary?: boolean
   sampleName?: string
   pointEstimates?: {
     mean?: number
@@ -128,6 +133,7 @@ export default function PosteriorPlot({
   hpd95Ranges,
   priorDistribution,
   showPrior = false,
+  isBoundary = false,
   sampleName,
   pointEstimates,
   showMean = true,
@@ -135,6 +141,7 @@ export default function PosteriorPlot({
   height = 400,
   dateFormat = DEFAULT_DATE_FORMAT,
 }: PosteriorPlotProps) {
+  const plot = usePlotColors()
   const formatAge = (age: number) =>
     Number.isFinite(age) ? formatCalendarAge(age, dateFormat) : 'N/A'
   // The backend legitimately sends `null` (not `undefined`) for point
@@ -175,8 +182,8 @@ export default function PosteriorPlot({
         y: priorProbs,
         customdata: priorAges.map((age) => formatCalendarAge(age, dateFormat)),
         fill: 'tozeroy',
-        fillcolor: 'rgba(120, 120, 120, 0.18)',
-        line: { color: 'rgba(120, 120, 120, 0.5)', width: 1 },
+        fillcolor: plot.priorFill,
+        line: { color: plot.priorLine, width: 1 },
         name: 'Prior (unmodelled)',
         hovertemplate: '<b>%{customdata}</b><br>Prior probability: %{y:.4f}<extra></extra>',
       })
@@ -190,19 +197,25 @@ export default function PosteriorPlot({
       // plotted at -- the hover should read in the chosen convention.
       customdata: calAges.map((age) => formatCalendarAge(age, dateFormat)),
       fill: 'tozeroy',
-      fillcolor: 'rgba(99, 110, 250, 0.2)',
-      line: { color: 'rgb(99, 110, 250)', width: 2 },
-      name: 'Posterior Distribution',
+      fillcolor: isBoundary ? plot.boundaryFill : plot.posteriorFill,
+      line: {
+        color: isBoundary ? plot.boundaryLine : plot.posteriorLine,
+        width: 2,
+        dash: isBoundary ? 'dot' : 'solid',
+      },
+      name: isBoundary ? 'Boundary (modelled transition)' : 'Posterior (modelled)',
       hovertemplate: '<b>%{customdata}</b><br>Probability: %{y:.4f}<extra></extra>',
     })
 
     // HPD region(s), as solid range bars in their own strip below the curve
-    // (yaxis2) rather than shaded fills under the curve itself. A fill
-    // there has to sit on top of the posterior's own fill -- and, with the
-    // prior shadow on, the prior's grey fill too -- and translucent orange
-    // and green over blue (and grey) stacks into muddy, hard-to-read
-    // colours. A bar in its own space stays one flat colour regardless of
-    // what else is showing. Calibration curves are non-monotonic, so the
+    // rather than shaded fills under the curve itself. A fill there has to
+    // sit on top of the posterior's own fill -- and, with the prior shadow
+    // on, the prior's grey fill too -- and translucent colours stacked
+    // three deep go muddy and hard to read. A bar in its own space stays
+    // one flat colour regardless of what else is showing. The two levels
+    // are one hue at two strengths: they are nested intervals of the same
+    // quantity, so the stronger is the tighter interval rather than the
+    // two being different things. Calibration curves are non-monotonic, so the
     // HPD region is often two or more disjoint ranges rather than one span
     // -- when *Ranges is available, each range gets its own bar instead of
     // one spanning the full min/max envelope, which would visually claim
@@ -214,18 +227,18 @@ export default function PosteriorPlot({
 
     if (hpd95Ranges && hpd95Ranges.length > 0) {
       hpd95Ranges.forEach((range, idx) =>
-        data.push(bar(range.min, range.max, hpd95Y[0], hpd95Y[1], HPD95_COLOR, '95% HPD', idx === 0, 'hpd95'))
+        data.push(bar(range.min, range.max, hpd95Y[0], hpd95Y[1], plot.hpd95, '95% HPD', idx === 0, 'hpd95'))
       )
     } else if (hpd95) {
-      data.push(bar(hpd95[0], hpd95[1], hpd95Y[0], hpd95Y[1], HPD95_COLOR, '95% HPD', true, 'hpd95'))
+      data.push(bar(hpd95[0], hpd95[1], hpd95Y[0], hpd95Y[1], plot.hpd95, '95% HPD', true, 'hpd95'))
     }
 
     if (hpd68Ranges && hpd68Ranges.length > 0) {
       hpd68Ranges.forEach((range, idx) =>
-        data.push(bar(range.min, range.max, hpd68Y[0], hpd68Y[1], HPD68_COLOR, '68% HPD', idx === 0, 'hpd68'))
+        data.push(bar(range.min, range.max, hpd68Y[0], hpd68Y[1], plot.hpd68, '68% HPD', idx === 0, 'hpd68'))
       )
     } else if (hpd68) {
-      data.push(bar(hpd68[0], hpd68[1], hpd68Y[0], hpd68Y[1], HPD68_COLOR, '68% HPD', true, 'hpd68'))
+      data.push(bar(hpd68[0], hpd68[1], hpd68Y[0], hpd68Y[1], plot.hpd68, '68% HPD', true, 'hpd68'))
     }
 
     // Vertical line at mean
@@ -234,7 +247,7 @@ export default function PosteriorPlot({
         x: [pointEstimates.mean, pointEstimates.mean],
         y: [0, Math.max(...probabilities)],
         mode: 'lines',
-        line: { color: 'rgb(214, 39, 40)', width: 2, dash: 'dash' },
+        line: { color: plot.mean, width: 2, dash: 'dash' },
         name: `Mean: ${pointEstimates.mean.toFixed(0)} cal BP`,
         hovertemplate: '',
         showlegend: true,
@@ -247,7 +260,7 @@ export default function PosteriorPlot({
         x: [pointEstimates.median, pointEstimates.median],
         y: [0, Math.max(...probabilities)],
         mode: 'lines',
-        line: { color: 'rgb(148, 103, 189)', width: 2, dash: 'dot' },
+        line: { color: plot.median, width: 2, dash: 'dot' },
         name: `Median: ${pointEstimates.median.toFixed(0)} cal BP`,
         hovertemplate: '',
         showlegend: true,
@@ -259,12 +272,14 @@ export default function PosteriorPlot({
     calAges,
     probabilities,
     peak,
+    plot,
     hpd68,
     hpd95,
     hpd68Ranges,
     hpd95Ranges,
     priorDistribution,
     showPrior,
+    isBoundary,
     pointEstimates,
     showMean,
     showMedian,

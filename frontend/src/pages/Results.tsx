@@ -1525,6 +1525,7 @@ export default function Results() {
                     hpd95Ranges={series.hpd95Ranges}
                     priorDistribution={series.priorDistribution}
                     showPrior={showPrior}
+                    isBoundary={series.kind === 'boundary'}
                     sampleName={series.title}
                     pointEstimates={series.pointEstimates}
                     showMean={showMean}
