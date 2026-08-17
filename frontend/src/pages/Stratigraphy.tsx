@@ -40,12 +40,11 @@ import { formatApiError } from '@/utils/apiError'
 import { summariseTree } from '@/utils/harrisLayout'
 
 const STRUCTURE_BLURB =
-  'The explicit OxCal-style model: nested Sequences and Phases with Boundaries placed where you ' +
-  'want them. Use a Sequence to put groups in order, a Phase for dates with no order between ' +
+  'Define constraints for events here. Use a Sequence to put groups in order, a Phase for dates with no order between ' +
   'them, and a Boundary to mark a transition — a Boundary between two Phases is a single shared ' +
-  'parameter, giving one transition date rather than two independent ones. Nest a Sequence ' +
+  'parameter, giving one transition date rather than two independent ones. Nest Sequences ' +
   'inside a Phase for parallel branches, and put a Hiatus between two Boundaries for a ' +
-  'deliberate gap.'
+  'deliberate gap. ' + 'TPQ (terminus post quem) is the earliest date an event could have occurred, and TAQ (terminus ante quem) is the latest. Only use these if you know this information. Must be entered in years BP.'
 
 export default function Stratigraphy() {
   const navigate = useNavigate()
@@ -306,9 +305,9 @@ export default function Stratigraphy() {
       ) : (
         <Paper sx={{ p: 3 }}>
           <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
-            A read-only view of the model structure as a Harris matrix, oldest at the bottom. A
+            A read-only view of the model structure, following similar principles to a Harris matrix. Oldest at the bottom. A
             Phase holding dates is a context; a Phase or Sequence holding others is drawn as a box
-            around them, which groups without ordering. A Boundary is a labelled rule across the
+            around them. A Boundary is a labelled rule across the
             groups it divides. Edit the structure on the Editor tab.
           </Typography>
           <HarrisMatrixDiagram

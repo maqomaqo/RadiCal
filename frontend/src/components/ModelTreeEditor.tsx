@@ -878,8 +878,7 @@ export default function ModelTreeEditor({ tree, measurements, assignments, onCha
     <Box>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2, flexWrap: 'wrap' }}>
         <Typography variant="body2" color="textSecondary" sx={{ flexGrow: 1 }}>
-          Oldest first — the top of this list is the bottom of the stratigraphy. A Boundary between
-          two Phases is a single shared transition: the end of one and the start of the next. Drag
+          Oldest first — the top of this list is the bottom of the stratigraphy. Drag
           the handle on the left to reorder or renest an element — drag sideways to change how
           deeply it's nested. The blue line shows where it will land, and which container it will
           land in.
