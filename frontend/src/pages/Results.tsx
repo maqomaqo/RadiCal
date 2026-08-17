@@ -866,14 +866,14 @@ export default function Results() {
         <Tooltip
           title={
             (analysis.solver.exact_needs_boundaries
-              ? `Integrating this model exactly would mean supplying ${
+              ? `This model was sampled with the Metropolis-Hastings/Gibbs scheme. Integrating this model exactly would mean supplying ${
                   analysis.solver.exact_needs_boundaries === 1
-                    ? 'a transition'
-                    : analysis.solver.exact_needs_boundaries + ' transitions'
-                } that its ordering only implies. That is a change to the model, not a restatement of it — it splits one phase-span term in two and measurably moves the answer away from OxCal’s — so it was sampled as written with OxCal’s own Metropolis-Hastings/Gibbs scheme. Choose the exact solver if you want the transitions supplied anyway; note that it will then be answering a slightly different model. `
+                    ? 'a boundary'
+                    : analysis.solver.exact_needs_boundaries + ' boundaries'
+                } that its ordering only implies. That would be a change to the model, splitting one phase-span in two and measurably moving the answer. Choose the exact solver if you want the missing boundaries supplied anyway; note that it will then be answering a slightly different model. `
               : analysis.solver.reason
-              ? `This model cannot be integrated exactly — ${analysis.solver.reason} — so it was sampled with OxCal’s Metropolis-Hastings/Gibbs scheme. `
-              : 'OxCal’s Metropolis-Hastings/Gibbs sampler was chosen for this analysis. This model could also have been integrated exactly; the two agree to well under a year on the models where both can be run. ') +
+              ? `This model was sampled with the Metropolis-Hastings/Gibbs scheme. It cannot be integrated exactly — ${analysis.solver.reason}. `
+              : 'The Metropolis-Hastings/Gibbs sampler was chosen for this analysis. This model could also have been integrated exactly; the two agree to well under a year on the models where both can be run. ') +
             `It converged to ${
               analysis.solver.convergence !== undefined
                 ? (analysis.solver.convergence * 100).toFixed(1) + '%'
@@ -885,7 +885,7 @@ export default function Results() {
             variant="outlined"
             color="success"
             label={`${
-              analysis.solver.requested === 'gibbs' ? 'MH/Gibbs (chosen)' : 'Sampled (MH/Gibbs)'
+              analysis.solver.requested === 'gibbs' ? 'MH/Gibbs (chosen)' : 'MH/Gibbs (auto)'
             } — ${
               analysis.solver.convergence !== undefined
                 ? (analysis.solver.convergence * 100).toFixed(0) + '% converged'
