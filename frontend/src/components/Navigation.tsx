@@ -38,7 +38,7 @@ export default function Navigation() {
             {/* Decorative -- "RadiCal" right after it already names the
                 link, so an alt here would just repeat it for a screen
                 reader. */}
-            <Box component="img" src="/RadiCal.png" alt="" sx={{ width: 28, height: 28 }} />
+            <Box component="img" src="/RadiCal.png" alt="" sx={{ width: 36, height: 36 }} />
             RadiCal
           </Typography>
 
