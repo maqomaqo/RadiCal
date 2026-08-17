@@ -400,12 +400,12 @@ function StructureTableRow({
             "Phase 1" already says what it is, but a boundary named "Start"
             does not. */}
         {!isDate && !row.name.toLowerCase().includes(String(row.kind)) && (
-          <Box component="span" sx={{ ml: 1, color: 'text.secondary', fontSize: '0.8em' }}>
+          <Box component="span" sx={{ ml: 1, color: 'text.secondary', fontSize: '0.75rem' }}>
             {row.kind}
           </Box>
         )}
         {limiters && (
-          <Box component="span" sx={{ ml: 1, color: 'text.secondary', fontSize: '0.8em' }}>
+          <Box component="span" sx={{ ml: 1, color: 'text.secondary', fontSize: '0.75rem' }}>
             ({limiters})
           </Box>
         )}
