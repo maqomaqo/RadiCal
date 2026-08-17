@@ -1287,7 +1287,7 @@ export default function Results() {
                 </TableCell>
                 {isBayesian && (
                   <Tooltip
-                    title='A = agreement index: how well the modelled date still fits its own measurement (below 60 is worth re-examining). O = posterior probability the date is an outlier, when an outlier model was applied to it. "Suspect"/"Check" mean the data pushed O meaningfully above the prior it was given; "Assigned" means a prior was set but O stayed close to it, which is not itself a finding.'
+                    title='A = agreement index: how well the modelled date still fits the prior distribution (below 60 is worth re-examining). O = posterior probability the date is an outlier, when an outlier model was applied to it. "Suspect"/"Check" identifies an outlier probability greater than the prior it was given; "Assigned" means the data stayed close to the assigned prior.'
                   >
                     <TableCell align="right">Diagnostics</TableCell>
                   </Tooltip>
