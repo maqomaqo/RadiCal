@@ -213,7 +213,11 @@ export default function HarrisMatrixDiagram({
         // its own label, so this colour has to carry 10px text as well.
         color = elementTypeColors.boundary.ink
       } else {
-        color = theme.palette.primary.main
+        // Keyed off elementType rather than kind, so a Phase drawn as a box
+        // around other elements is the same green as that Phase in the tree
+        // editor. Every container used to be the Sequence blue, which made
+        // the two views disagree about what colour a Phase is.
+        color = elementTypeColors[node.elementType].main
       }
 
       return {

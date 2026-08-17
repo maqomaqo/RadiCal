@@ -297,6 +297,33 @@ describe('dates and what is missing', () => {
   })
 })
 
+describe('what a node is, as distinct from how it is drawn', () => {
+  // `kind` answers "what shape", and deliberately merges things: a Sequence
+  // and a Phase holding other elements are both boxes. The diagram colours
+  // a Phase differently from a Sequence, so it needs the distinction back.
+  it('keeps the element type a grouping Phase shares with a Sequence', () => {
+    const nodes = byId(layoutHarrisMatrix(nenthorn(), []))
+
+    expect(nodes.get('fires')!.kind).toBe('group')
+    expect(nodes.get('rock')!.kind).toBe('group')
+    expect(nodes.get('fires')!.elementType).toBe('phase')
+    expect(nodes.get('rock')!.elementType).toBe('sequence')
+  })
+
+  it('reports a context as the Phase it is', () => {
+    const nodes = byId(layoutHarrisMatrix(nenthorn(), [date('d1', 'ff_k')]))
+
+    expect(nodes.get('ff_k')!.kind).toBe('context')
+    expect(nodes.get('ff_k')!.elementType).toBe('phase')
+  })
+
+  it('reports a boundary as itself', () => {
+    const nodes = byId(layoutHarrisMatrix(nenthorn(), []))
+
+    expect(nodes.get('b_start')!.elementType).toBe('boundary')
+  })
+})
+
 describe('degenerate structures', () => {
   it('returns nothing for an absent tree, but still counts the dates', () => {
     const layout = layoutHarrisMatrix(null, [date('d1', 'x')])

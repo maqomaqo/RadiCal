@@ -29,7 +29,7 @@
 // types. That is deliberate. reactflow draws into a measured viewport, so
 // "the boxes line up" cannot be checked by looking at the DOM -- it has to be
 // asserted on the numbers, which is what utils/harrisLayout.test.ts does.
-import type { MatrixMeasurement, ModelElement, PosteriorSummary } from '@/types'
+import type { ElementType, MatrixMeasurement, ModelElement, PosteriorSummary } from '@/types'
 
 // Box metrics. Chosen so a context node fits a lab code, a date count and a
 // TPQ/TAQ badge line without wrapping at the diagram's default zoom.
@@ -52,6 +52,14 @@ export type LaidOutKind = 'context' | 'group' | 'boundary'
 export interface LaidOutNode {
   id: string
   kind: LaidOutKind
+  /**
+   * The element type this was laid out from, which `kind` deliberately
+   * loses: a Phase becomes a 'context' when it holds dates and a 'group'
+   * when it holds other elements, and a Sequence is always a 'group'. Kind
+   * is what to DRAW; this is what the thing IS, which is what the element
+   * type colours key off.
+   */
+  elementType: ElementType
   name: string
   /** Containing element, or null at the root. Children are positioned
    *  RELATIVE to this, which is what reactflow's sub-flow nodes expect. */
@@ -204,6 +212,7 @@ function place(
   nodes.push({
     id: element.id,
     kind: measured.kind === 'skip' ? 'group' : measured.kind,
+    elementType: element.element_type,
     name: element.name || element.element_type,
     parentId,
     x,
