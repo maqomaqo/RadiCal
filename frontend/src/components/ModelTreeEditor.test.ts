@@ -12,7 +12,13 @@
 // can be asserted directly.
 import { describe, expect, it } from 'vitest'
 
-import { INDENT_PX, commitDrop, flattenTree, type FlatNode } from './ModelTreeEditor'
+import {
+  INDENT_PX,
+  commitDrop,
+  flattenTree,
+  getProjection,
+  type FlatNode,
+} from './ModelTreeEditor'
 import type { ModelElement } from '@/types'
 
 function el(
@@ -146,6 +152,87 @@ describe('commitDrop', () => {
     // recognise that as a no-op rather than a wasted state update.
     const next = commit('phase1', 'phase1', 0)
     expect(next).toBeNull()
+  })
+})
+
+describe('sticky depth (drag hysteresis)', () => {
+  // The indicator must not flicker between two nesting levels while the
+  // pointer sits on the boundary between them, so the step a drag is
+  // already on survives a small wobble past the halfway mark.
+  it('keeps the step it is already on for a wobble just past halfway', () => {
+    const tree = sampleTree()
+    const flat = flattenTree(tree)
+    // 0.55 of an indent past centre would round up to a full step on its own...
+    expect(getProjection(flat, 'end', 'end', 0.55 * INDENT_PX, 'root')!.depthDelta).toBe(1)
+    // ...but not while the drag is already settled on step 0.
+    expect(getProjection(flat, 'end', 'end', 0.55 * INDENT_PX, 'root', 0)!.depthDelta).toBe(0)
+  })
+
+  it('still changes step once the pointer moves decisively', () => {
+    const tree = sampleTree()
+    const flat = flattenTree(tree)
+    expect(getProjection(flat, 'end', 'end', 0.7 * INDENT_PX, 'root', 0)!.depthDelta).toBe(1)
+  })
+
+  it('carries the sticky step through to the committed tree', () => {
+    const tree = sampleTree()
+    const flat = flattenTree(tree)
+    // Same gesture, different drag history: settled on step 0, the wobble
+    // must not silently renest "end" inside Phase 1.
+    expect(commitDrop(tree, flat, 'end', 'end', 0.55 * INDENT_PX, 0)).toBeNull()
+    expect(commitDrop(tree, flat, 'end', 'end', 0.55 * INDENT_PX)).not.toBeNull()
+  })
+})
+
+describe('drop indicator', () => {
+  // What the indicator promises and what the drop does are both derived
+  // from the same projection -- these assert they cannot disagree.
+  it('reports the row the block lands above, and null at the end of the outline', () => {
+    const tree = sampleTree()
+    const flat = flattenTree(tree)
+    expect(getProjection(flat, 'end', 'start', 0, 'root')!.insertBeforeId).toBe('start')
+    expect(getProjection(flat, 'start', 'start', 0, 'root')!.insertBeforeId).toBe('phase1')
+    // Dragging the last row onto itself has nothing following it.
+    expect(getProjection(flat, 'end', 'end', 0, 'root')!.insertBeforeId).toBeNull()
+  })
+
+  it('promises the depth the block actually ends up at', () => {
+    const tree = sampleTree()
+    const flat = flattenTree(tree)
+    const ids = flat.map((n) => n.id)
+    for (const activeId of ids) {
+      for (const overId of ids) {
+        for (const offset of [-2, -1, 0, 1, 2].map((n) => n * INDENT_PX)) {
+          const projection = getProjection(flat, activeId, overId, offset, 'root')!
+          const next = commitDrop(tree, flat, activeId, overId, offset)
+          if (!next) continue
+          const landed = flattenTree(next).find((n) => n.id === activeId)!
+          expect(landed.depth).toBe(projection.depth)
+        }
+      }
+    }
+  })
+
+  it('names a container that really is the block’s new parent', () => {
+    const tree = sampleTree()
+    const flat = flattenTree(tree)
+    const ids = flat.map((n) => n.id)
+    for (const activeId of ids) {
+      for (const overId of ids) {
+        for (const offset of [-2, -1, 0, 1, 2].map((n) => n * INDENT_PX)) {
+          const projection = getProjection(flat, activeId, overId, offset, 'root')!
+          const next = commitDrop(tree, flat, activeId, overId, offset)
+          if (!next) continue
+          // Whatever the indicator labelled itself with must be the element
+          // that actually ends up holding the dragged block.
+          const parent = flattenTree(next).find((n) =>
+            (n.element.children || []).some((c) => c.id === activeId)
+          )
+          const actualParentId = parent ? parent.id : next.id
+          expect(actualParentId).toBe(projection.parentId)
+        }
+      }
+    }
   })
 })
 

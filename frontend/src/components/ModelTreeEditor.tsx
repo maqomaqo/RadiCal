@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import {
   Box,
   Paper,
@@ -29,16 +29,13 @@ import {
   useSensors,
   type DragEndEvent,
   type DragMoveEvent,
-  type DragOverEvent,
   type DragStartEvent,
 } from '@dnd-kit/core'
 import {
   SortableContext,
   sortableKeyboardCoordinates,
   useSortable,
-  verticalListSortingStrategy,
 } from '@dnd-kit/sortable'
-import { CSS } from '@dnd-kit/utilities'
 import { useElementTypeColors } from '@/theme/diagramColors'
 import type { ModelElement, ElementType, MatrixMeasurement } from '@/types'
 
@@ -59,6 +56,19 @@ import type { ModelElement, ElementType, MatrixMeasurement } from '@/types'
 // element to a different nesting level" into an index+depth projection on a
 // flat array -- the same technique dnd-kit's own sortable-tree example uses
 // -- instead of juggling parent pointers by hand.
+//
+// The rows themselves DO NOT move while a drag is in progress: the sortable
+// strategy is a no-op and no transform is applied, so the outline stays
+// exactly where it was and a DropIndicator line shows where the block will
+// land instead. An earlier version re-flattened and re-ordered the whole
+// list on every pointer move to preview the drop in place, which fought
+// dnd-kit's own shifting animation for control of the same rows -- the
+// visible result was jitter, and rows changing height/order mid-drag
+// invalidated the rects dnd-kit had measured for collision, so a drop could
+// land on a stale target or refuse to register at all. A static list also
+// suits a TREE better than a list: a gap opening between two rows cannot
+// express which of the surrounding levels the block would land at, whereas
+// an indented line can.
 
 const TYPE_LABEL: Record<ElementType, string> = {
   sequence: 'Sequence',
@@ -221,12 +231,26 @@ function rebuildFromFlat(root: ModelElement, flat: FlatNode[]): ModelElement {
   return newRoot
 }
 
-interface Projection {
+export interface Projection {
   depth: number
   insertIndexInRest: number
   parentId: string
   rest: FlatNode[]
+  /** The row the block would land immediately above, or null for the very
+   * end of the outline. This is what the indicator line is drawn against. */
+  insertBeforeId: string | null
+  /** The depth STEP that produced this (projected minus original depth),
+   * fed back into the next call so the chosen step is sticky -- see
+   * DEPTH_HYSTERESIS. */
+  depthDelta: number
 }
+
+// How far past the halfway point between two indent steps the pointer has
+// to travel before the projected depth changes. Plain rounding flips at
+// exactly .5, so a hand holding still on that boundary would flicker the
+// indicator between two levels; this makes the step the pointer is already
+// on that much stickier.
+const DEPTH_HYSTERESIS = 0.6
 
 /**
  * Given the flat outline, the item being dragged, what it's currently
@@ -236,13 +260,18 @@ interface Projection {
  * hiatus) and never skip past what the surrounding items structurally
  * allow -- so every candidate drop position is a legal tree, and nothing
  * needs to be rejected at drop time.
+ *
+ * `previousDepthDelta` is the step this same drag last settled on, if any.
+ * Passing it keeps the indicator from flickering between two levels while
+ * the pointer sits on the boundary between them.
  */
-function getProjection(
+export function getProjection(
   flat: FlatNode[],
   activeId: string,
   overId: string,
   dragOffsetX: number,
-  rootId: string
+  rootId: string,
+  previousDepthDelta?: number | null
 ): Projection | null {
   const activeIndex = flat.findIndex((n) => n.id === activeId)
   if (activeIndex === -1) return null
@@ -264,7 +293,11 @@ function getProjection(
   const previousItem = rest[insertIndexInRest - 1]
   const nextItem = rest[insertIndexInRest]
 
-  const dragDepthDelta = Math.round(dragOffsetX / INDENT_PX)
+  const rawDelta = dragOffsetX / INDENT_PX
+  const dragDepthDelta =
+    previousDepthDelta != null && Math.abs(rawDelta - previousDepthDelta) < DEPTH_HYSTERESIS
+      ? previousDepthDelta
+      : Math.round(rawDelta)
   const projectedDepth = activeNode.depth + dragDepthDelta
 
   const maxDepth = previousItem
@@ -283,41 +316,33 @@ function getProjection(
     if (rest[i].depth < depth - 1) break
   }
 
-  return { depth, insertIndexInRest, parentId, rest }
+  return {
+    depth,
+    insertIndexInRest,
+    parentId,
+    rest,
+    insertBeforeId: nextItem ? nextItem.id : null,
+    depthDelta: dragDepthDelta,
+  }
 }
 
-/** Live preview order while dragging: the dragged item collapses to a
- * single row (its descendants ride along invisibly) at its projected slot,
- * so the rest of the list can animate out of the way. */
-function buildPreviewFlat(
-  flat: FlatNode[],
-  activeId: string,
-  overId: string,
-  dragOffsetX: number,
-  rootId: string
-): FlatNode[] {
-  const projection = getProjection(flat, activeId, overId, dragOffsetX, rootId)
-  if (!projection) return flat
-  const activeNode = flat.find((n) => n.id === activeId)
-  if (!activeNode) return flat
-  const previewActiveNode: FlatNode = { ...activeNode, depth: projection.depth }
-  const { rest, insertIndexInRest } = projection
-  return [...rest.slice(0, insertIndexInRest), previewActiveNode, ...rest.slice(insertIndexInRest)]
-}
-
-/** Commits a drag: reinserts the full dragged subtree (descendants
- * included, shifted by the same depth change) at its projected position.
- * Returns null if the drop didn't actually move anything. */
-export function commitDrop(
+/**
+ * Reinserts the full dragged subtree (descendants included, shifted by the
+ * same depth change) at an already-computed projected position. Returns
+ * null if the drop didn't actually move anything.
+ *
+ * Split out from getProjection so the indicator the user is looking at and
+ * the tree the drop produces are built from the SAME projection object,
+ * rather than each deriving one and hoping they agree.
+ */
+function applyProjection(
   tree: ModelElement,
   flat: FlatNode[],
   activeId: string,
-  overId: string,
-  dragOffsetX: number
+  projection: Projection
 ): ModelElement | null {
-  const projection = getProjection(flat, activeId, overId, dragOffsetX, tree.id)
-  if (!projection) return null
   const activeIndex = flat.findIndex((n) => n.id === activeId)
+  if (activeIndex === -1) return null
   const activeNode = flat[activeIndex]
 
   const depthDelta = projection.depth - activeNode.depth
@@ -332,6 +357,92 @@ export function commitDrop(
   const { rest, insertIndexInRest } = projection
   const newFlat = [...rest.slice(0, insertIndexInRest), ...subtree, ...rest.slice(insertIndexInRest)]
   return rebuildFromFlat(tree, newFlat)
+}
+
+/** Projects a drag and applies it in one step. Returns null if the drop
+ * didn't actually move anything. */
+export function commitDrop(
+  tree: ModelElement,
+  flat: FlatNode[],
+  activeId: string,
+  overId: string,
+  dragOffsetX: number,
+  previousDepthDelta?: number | null
+): ModelElement | null {
+  const projection = getProjection(flat, activeId, overId, dragOffsetX, tree.id, previousDepthDelta)
+  if (!projection) return null
+  return applyProjection(tree, flat, activeId, projection)
+}
+
+/** The dragged row plus every descendant riding along with it -- dimmed
+ * together during a drag, since they all move as one block. */
+function subtreeIds(flat: FlatNode[], activeId: string): Set<string> {
+  const ids = new Set<string>()
+  const index = flat.findIndex((n) => n.id === activeId)
+  if (index === -1) return ids
+  ids.add(activeId)
+  for (let i = index + 1; i < flat.length && flat[i].depth > flat[index].depth; i++) {
+    ids.add(flat[i].id)
+  }
+  return ids
+}
+
+/** Do two projections describe the same landing place? Used to keep a
+ * pointer move that changes nothing from re-rendering the outline. */
+function samePlacement(a: Projection | null, b: Projection | null): boolean {
+  if (a === b) return true
+  if (!a || !b) return false
+  return a.depth === b.depth && a.insertBeforeId === b.insertBeforeId && a.parentId === b.parentId
+}
+
+/**
+ * The line showing where the dragged block will land: indented to the depth
+ * it would sit at, tagged with the container it would go into. Absolutely
+ * positioned in the gap above a row so that showing it costs no layout --
+ * the outline must not move while a drag is in progress.
+ */
+function DropIndicator({ depth, label }: { depth: number; label: string }) {
+  return (
+    <Box
+      aria-hidden
+      sx={{
+        position: 'absolute',
+        top: -5,
+        left: depth * INDENT_PX,
+        right: 0,
+        height: 0,
+        zIndex: 3,
+        pointerEvents: 'none',
+      }}
+    >
+      <Box sx={{ position: 'absolute', left: 0, right: 0, height: '2px', bgcolor: 'primary.main', borderRadius: 1 }} />
+      <Box
+        sx={{
+          position: 'absolute',
+          left: -3,
+          top: -3,
+          width: 8,
+          height: 8,
+          borderRadius: '50%',
+          bgcolor: 'primary.main',
+        }}
+      />
+      <Chip
+        size="small"
+        label={label}
+        sx={{
+          position: 'absolute',
+          right: 0,
+          top: -10,
+          height: 20,
+          fontSize: '0.7rem',
+          bgcolor: 'primary.main',
+          color: 'primary.contrastText',
+          '& .MuiChip-label': { px: 1 },
+        }}
+      />
+    </Box>
+  )
 }
 
 interface Props {
@@ -444,6 +555,12 @@ interface TreeRowProps {
   dates: MatrixMeasurement[]
   canMoveUp: boolean
   canMoveDown: boolean
+  /** Drawn in the gap above this row when the block would land here. */
+  indicator: { depth: number; label: string } | null
+  /** This row is the container the block would land inside. */
+  isDropTarget: boolean
+  /** This row is part of the block being dragged. */
+  isDragged: boolean
   onRename: (id: string, name: string) => void
   onSetLimit: (id: string, field: 'tpq_age_bp' | 'taq_age_bp', value: string) => void
   onMoveUp: (id: string) => void
@@ -458,6 +575,9 @@ function TreeRow({
   dates,
   canMoveUp,
   canMoveDown,
+  indicator,
+  isDropTarget,
+  isDragged,
   onRename,
   onSetLimit,
   onMoveUp,
@@ -465,23 +585,27 @@ function TreeRow({
   onAdd,
   onDelete,
 }: TreeRowProps) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
-    id: node.id,
-  })
+  // No transform and no transition: the outline holds still for the whole
+  // drag (see the note at the top of this file) and the indicator does the
+  // talking. useSortable is still what registers this row as a drop target
+  // and gives the drag handle its keyboard support.
+  const { attributes, listeners, setNodeRef } = useSortable({ id: node.id })
   const { element, depth } = node
 
   return (
-    <Box
-      ref={setNodeRef}
-      sx={{
-        ml: depth * INDENT_UNITS,
-        mt: 1,
-        transform: CSS.Transform.toString(transform),
-        transition: transition ?? undefined,
-        opacity: isDragging ? 0.4 : 1,
-      }}
-    >
-      <Paper variant="outlined" sx={{ p: 1.5, borderLeft: `4px solid ${typeColor[element.element_type]}` }}>
+    <Box ref={setNodeRef} sx={{ position: 'relative', mt: 1 }}>
+      {indicator && <DropIndicator depth={indicator.depth} label={indicator.label} />}
+      <Box sx={{ ml: depth * INDENT_UNITS, opacity: isDragged ? 0.4 : 1 }}>
+      <Paper
+        variant="outlined"
+        sx={{
+          p: 1.5,
+          borderLeft: `4px solid ${typeColor[element.element_type]}`,
+          ...(isDropTarget
+            ? { borderColor: 'primary.main', boxShadow: (theme) => `0 0 0 1px ${theme.palette.primary.main}` }
+            : {}),
+        }}
+      >
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
           <Box
             {...attributes}
@@ -532,6 +656,7 @@ function TreeRow({
           </Box>
         )}
       </Paper>
+      </Box>
     </Box>
   )
 }
@@ -539,8 +664,24 @@ function TreeRow({
 export default function ModelTreeEditor({ tree, measurements, assignments, onChange }: Props) {
   const [addMenu, setAddMenu] = useState<{ anchor: HTMLElement; targetId: string } | null>(null)
   const [activeId, setActiveId] = useState<string | null>(null)
-  const [overId, setOverId] = useState<string | null>(null)
-  const [dragOffsetX, setDragOffsetX] = useState(0)
+  // Where the block would land right now, for the indicator. Only replaced
+  // when the LANDING PLACE changes, not on every pointer move -- a drag
+  // across one row is hundreds of move events but only a handful of
+  // distinct placements, and re-rendering the outline for the rest of them
+  // is what a static list is trying to avoid.
+  const [projection, setProjection] = useState<Projection | null>(null)
+  // The same projection, kept where the drop handler can read it without
+  // going through React state. onDragEnd used to read the placement out of
+  // state, which meant a drop landing in the same tick as the last move --
+  // exactly what a quick flick does -- committed the placement from one
+  // event ago, or none at all if the drag had only just started.
+  const projectionRef = useRef<Projection | null>(null)
+  // The last row the pointer was actually over. dnd-kit reports no target
+  // for the odd frame -- while it re-measures, or crossing the gap between
+  // two rows -- and treating that as "back where it started" made the line
+  // jump home and back for one frame. Holding the last real answer instead
+  // keeps it still.
+  const lastOverIdRef = useRef<string | null>(null)
   const typeColor = useElementTypeColors()
 
   const sensors = useSensors(
@@ -659,44 +800,76 @@ export default function ModelTreeEditor({ tree, measurements, assignments, onCha
     return map
   }, [tree])
 
-  const displayFlat = useMemo(() => {
-    if (!activeId) return flat
-    return buildPreviewFlat(flat, activeId, overId ?? activeId, dragOffsetX, tree.id)
-  }, [flat, activeId, overId, dragOffsetX, tree.id])
-
   const activeElement = activeId ? flat.find((n) => n.id === activeId)?.element ?? null : null
+  const draggedIds = useMemo(
+    () => (activeId ? subtreeIds(flat, activeId) : new Set<string>()),
+    [flat, activeId]
+  )
+
+  /** Name of whatever container the block would land in, for the indicator's
+   * tag. The root is not in `flat` -- it is rendered above the list. */
+  const containerName = (id: string): string => {
+    if (id === tree.id) return tree.name || TYPE_LABEL[tree.element_type]
+    const found = flat.find((n) => n.id === id)
+    return found ? found.element.name || TYPE_LABEL[found.element.element_type] : 'here'
+  }
+
+  const project = (dragged: string, over: string | null, offsetX: number) => {
+    if (over) lastOverIdRef.current = over
+    const next = getProjection(
+      flat,
+      dragged,
+      over ?? lastOverIdRef.current ?? dragged,
+      offsetX,
+      tree.id,
+      projectionRef.current?.depthDelta
+    )
+    projectionRef.current = next
+    // Returning the previous object when the placement is unchanged lets
+    // React bail out of the re-render entirely.
+    setProjection((prev) => (samePlacement(prev, next) ? prev : next))
+  }
+
+  const endDrag = () => {
+    setActiveId(null)
+    setProjection(null)
+    projectionRef.current = null
+    lastOverIdRef.current = null
+  }
 
   const handleDragStart = (event: DragStartEvent) => {
     const id = String(event.active.id)
     setActiveId(id)
-    setOverId(id)
-    setDragOffsetX(0)
+    projectionRef.current = null
+    lastOverIdRef.current = null
+    project(id, id, 0)
   }
 
   const handleDragMove = (event: DragMoveEvent) => {
-    setDragOffsetX(event.delta.x)
-  }
-
-  const handleDragOver = (event: DragOverEvent) => {
-    setOverId(event.over ? String(event.over.id) : null)
+    project(String(event.active.id), event.over ? String(event.over.id) : null, event.delta.x)
   }
 
   const handleDragEnd = (event: DragEndEvent) => {
-    const currentActiveId = activeId
-    const currentOverId = event.over ? String(event.over.id) : overId
-    const finalOffsetX = event.delta.x
-    setActiveId(null)
-    setOverId(null)
-    setDragOffsetX(0)
-    if (!currentActiveId || !currentOverId) return
-    const nextTree = commitDrop(tree, flat, currentActiveId, currentOverId, finalOffsetX)
+    const dragged = String(event.active.id)
+    // Deliberately the projection the indicator was LAST SHOWING, not one
+    // recomputed from the drop event. The pointer cannot move between the
+    // final move event and the release, so there is nothing fresher to
+    // learn from recomputing -- but the two can disagree when dnd-kit
+    // resolves a different `over` at release than it reported during the
+    // drag (it measures droppable rects off the main thread, so a release
+    // arriving before that settles resolves against newer rects). Whenever
+    // they disagreed the block landed somewhere other than the line the
+    // user was looking at, which is the whole thing the indicator exists to
+    // promise. Committing what was displayed makes that promise structural.
+    const landing = projectionRef.current
+    endDrag()
+    if (!landing) return
+    const nextTree = applyProjection(tree, flat, dragged, landing)
     if (nextTree) onChange(nextTree, assignments)
   }
 
   const handleDragCancel = () => {
-    setActiveId(null)
-    setOverId(null)
-    setDragOffsetX(0)
+    endDrag()
   }
 
   const problems = validateTree(tree, assignments, measurements)
@@ -708,7 +881,8 @@ export default function ModelTreeEditor({ tree, measurements, assignments, onCha
           Oldest first — the top of this list is the bottom of the stratigraphy. A Boundary between
           two Phases is a single shared transition: the end of one and the start of the next. Drag
           the handle on the left to reorder or renest an element — drag sideways to change how
-          deeply it's nested.
+          deeply it's nested. The blue line shows where it will land, and which container it will
+          land in.
         </Typography>
         <Button size="small" startIcon={<AutoFixHighIcon />} onClick={bracketPhases}>
           Bracket phases with boundaries
@@ -724,7 +898,16 @@ export default function ModelTreeEditor({ tree, measurements, assignments, onCha
       )}
 
       <Box sx={{ mt: 1 }}>
-        <Paper variant="outlined" sx={{ p: 1.5, borderLeft: `4px solid ${typeColor[tree.element_type]}` }}>
+        <Paper
+          variant="outlined"
+          sx={{
+            p: 1.5,
+            borderLeft: `4px solid ${typeColor[tree.element_type]}`,
+            ...(projection?.parentId === tree.id
+              ? { borderColor: 'primary.main', boxShadow: (theme) => `0 0 0 1px ${theme.palette.primary.main}` }
+              : {}),
+          }}
+        >
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
             <ElementFields
               element={tree}
@@ -749,12 +932,14 @@ export default function ModelTreeEditor({ tree, measurements, assignments, onCha
         collisionDetection={closestCenter}
         onDragStart={handleDragStart}
         onDragMove={handleDragMove}
-        onDragOver={handleDragOver}
         onDragEnd={handleDragEnd}
         onDragCancel={handleDragCancel}
       >
-        <SortableContext items={displayFlat.map((n) => n.id)} strategy={verticalListSortingStrategy}>
-          {displayFlat.map((node) => {
+        {/* A no-op strategy: dnd-kit still tracks which row the pointer is
+            over, but applies no transform, so nothing shifts under the
+            cursor mid-drag. */}
+        <SortableContext items={flat.map((n) => n.id)} strategy={() => null}>
+          {flat.map((node) => {
             const parent = parentMap.get(node.id)
             const siblings = parent?.children || []
             const index = siblings.findIndex((s) => s.id === node.id)
@@ -766,6 +951,13 @@ export default function ModelTreeEditor({ tree, measurements, assignments, onCha
                 dates={datesIn(node.id)}
                 canMoveUp={index > 0}
                 canMoveDown={index >= 0 && index < siblings.length - 1}
+                indicator={
+                  projection && projection.insertBeforeId === node.id
+                    ? { depth: projection.depth, label: `into ${containerName(projection.parentId)}` }
+                    : null
+                }
+                isDropTarget={!!projection && projection.parentId === node.id}
+                isDragged={draggedIds.has(node.id)}
                 onRename={rename}
                 onSetLimit={setLimit}
                 onMoveUp={(id) => move(id, -1)}
@@ -775,6 +967,16 @@ export default function ModelTreeEditor({ tree, measurements, assignments, onCha
               />
             )
           })}
+          {/* Landing at the very end has no following row to hang the line
+              above, so it gets a zero-height slot of its own. */}
+          {projection && projection.insertBeforeId === null && (
+            <Box sx={{ position: 'relative', mt: 1, height: 0 }}>
+              <DropIndicator
+                depth={projection.depth}
+                label={`into ${containerName(projection.parentId)}`}
+              />
+            </Box>
+          )}
         </SortableContext>
         <DragOverlay>
           {activeElement && (
