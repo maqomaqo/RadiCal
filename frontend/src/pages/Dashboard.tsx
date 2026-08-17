@@ -70,6 +70,7 @@ export default function Dashboard() {
 
   return (
     <Container maxWidth="lg" sx={{ py: 4 }}>
+    <Paper sx={{ p: 3, mb: 3 }}>
       <Box sx={{ mb: 4 }}>
         <Typography variant="h3" component="h1" gutterBottom>
           RadiCal Dashboard
@@ -77,6 +78,7 @@ export default function Dashboard() {
         <Typography variant="body1" color="textSecondary" paragraph>
           Welcome to RadiCal. Create a new analysis or browse your projects.
         </Typography>
+       
       </Box>
 
       <Box sx={{ mb: 4, display: 'flex', gap: 2 }}>
@@ -99,7 +101,7 @@ export default function Dashboard() {
           Manage Projects
         </Button>
       </Box>
-
+ </Paper>
       <Box>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
           <Typography variant="h5" component="h2">

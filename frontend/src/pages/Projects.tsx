@@ -112,6 +112,7 @@ export default function Projects() {
 
   return (
     <Container maxWidth="lg" sx={{ py: 4 }}>
+     <Paper sx={{ p: 3, mb: 3 }}>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 4, flexWrap: 'wrap', gap: 2 }}>
         <Box>
           <Typography variant="h3" component="h1" gutterBottom>
@@ -125,6 +126,7 @@ export default function Projects() {
           New Project
         </Button>
       </Box>
+      </Paper>
 
       {loading ? (
         <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
