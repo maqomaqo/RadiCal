@@ -36,7 +36,7 @@ import {
   sortableKeyboardCoordinates,
   useSortable,
 } from '@dnd-kit/sortable'
-import { useElementTypeColors } from '@/theme/diagramColors'
+import { useElementTypeColors, type ElementTypeColor } from '@/theme/diagramColors'
 import type { ModelElement, ElementType, MatrixMeasurement } from '@/types'
 
 // Editor for the explicit OxCal-style model structure: a nested, ordered
@@ -454,7 +454,7 @@ interface Props {
 
 interface ElementFieldsProps {
   element: ModelElement
-  typeColor: Record<ElementType, string>
+  typeColor: Record<ElementType, ElementTypeColor>
   onRename: (name: string) => void
   onSetLimit: (field: 'tpq_age_bp' | 'taq_age_bp', value: string) => void
   dates: MatrixMeasurement[]
@@ -467,7 +467,7 @@ function ElementFields({ element, typeColor, onRename, onSetLimit, dates }: Elem
         <Chip
           size="small"
           label={TYPE_LABEL[element.element_type]}
-          sx={{ backgroundColor: typeColor[element.element_type], color: 'white' }}
+          sx={{ backgroundColor: typeColor[element.element_type].ink, color: 'white' }}
         />
       </Tooltip>
       {/* No variant prop -- every other field in the app is the outlined
@@ -551,7 +551,7 @@ function RowActions({ element, canMoveUp, canMoveDown, onMoveUp, onMoveDown, onA
 
 interface TreeRowProps {
   node: FlatNode
-  typeColor: Record<ElementType, string>
+  typeColor: Record<ElementType, ElementTypeColor>
   dates: MatrixMeasurement[]
   canMoveUp: boolean
   canMoveDown: boolean
@@ -600,7 +600,7 @@ function TreeRow({
         variant="outlined"
         sx={{
           p: 1.5,
-          borderLeft: `4px solid ${typeColor[element.element_type]}`,
+          borderLeft: `4px solid ${typeColor[element.element_type].main}`,
           ...(isDropTarget
             ? { borderColor: 'primary.main', boxShadow: (theme) => `0 0 0 1px ${theme.palette.primary.main}` }
             : {}),
@@ -902,7 +902,7 @@ export default function ModelTreeEditor({ tree, measurements, assignments, onCha
           variant="outlined"
           sx={{
             p: 1.5,
-            borderLeft: `4px solid ${typeColor[tree.element_type]}`,
+            borderLeft: `4px solid ${typeColor[tree.element_type].main}`,
             ...(projection?.parentId === tree.id
               ? { borderColor: 'primary.main', boxShadow: (theme) => `0 0 0 1px ${theme.palette.primary.main}` }
               : {}),
@@ -983,7 +983,7 @@ export default function ModelTreeEditor({ tree, measurements, assignments, onCha
             <Paper
               sx={{
                 p: 1.5,
-                borderLeft: `4px solid ${typeColor[activeElement.element_type]}`,
+                borderLeft: `4px solid ${typeColor[activeElement.element_type].main}`,
                 display: 'flex',
                 alignItems: 'center',
                 gap: 1,
@@ -995,7 +995,7 @@ export default function ModelTreeEditor({ tree, measurements, assignments, onCha
               <Chip
                 size="small"
                 label={TYPE_LABEL[activeElement.element_type]}
-                sx={{ backgroundColor: typeColor[activeElement.element_type], color: 'white' }}
+                sx={{ backgroundColor: typeColor[activeElement.element_type].ink, color: 'white' }}
               />
               <Typography variant="body2">{activeElement.name}</Typography>
             </Paper>

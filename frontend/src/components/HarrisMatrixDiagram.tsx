@@ -43,7 +43,7 @@ import { Alert, Box, Typography } from '@mui/material'
 import { useTheme } from '@mui/material/styles'
 import { alpha } from '@mui/material/styles'
 import type { MatrixMeasurement, ModelElement } from '@/types'
-import { CONTEXT_PALETTE } from '@/theme/diagramColors'
+import { CONTEXT_PALETTE, useElementTypeColors } from '@/theme/diagramColors'
 import {
   layoutHarrisMatrix,
   type LaidOutNode,
@@ -192,6 +192,7 @@ export default function HarrisMatrixDiagram({
   height = 520,
 }: Props) {
   const theme = useTheme()
+  const elementTypeColors = useElementTypeColors()
 
   const layout = useMemo(
     () => layoutHarrisMatrix(tree, measurements, assignments),
@@ -208,7 +209,9 @@ export default function HarrisMatrixDiagram({
       if (node.kind === 'context') {
         color = CONTEXT_PALETTE[contextIndex++ % CONTEXT_PALETTE.length]
       } else if (node.kind === 'boundary') {
-        color = theme.palette.warning.dark
+        // The deeper coral, not the flat one: a boundary here is a rule AND
+        // its own label, so this colour has to carry 10px text as well.
+        color = elementTypeColors.boundary.ink
       } else {
         color = theme.palette.primary.main
       }
@@ -229,7 +232,7 @@ export default function HarrisMatrixDiagram({
     })
     // layout.nodes is already parent-before-child (the layout emits each
     // container before descending into it), which reactflow requires.
-  }, [layout, theme, dateFormat])
+  }, [layout, theme, elementTypeColors, dateFormat])
 
   const edges = useMemo<Edge[]>(
     () =>
