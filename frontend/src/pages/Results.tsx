@@ -7,6 +7,7 @@ import {
   Typography,
   Button,
   Link,
+  IconButton,
   CircularProgress,
   Table,
   TableBody,
@@ -36,6 +37,8 @@ import DeleteIcon from '@mui/icons-material/Delete'
 import ReplayIcon from '@mui/icons-material/Replay'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import EditIcon from '@mui/icons-material/Edit'
+import KeyboardArrowRightIcon from '@mui/icons-material/KeyboardArrowRight'
+import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown'
 import PosteriorPlot from '@/components/PosteriorPlot'
 import StackedPosteriorPlot from '@/components/StackedPosteriorPlot'
 import HarrisMatrixDiagram from '@/components/HarrisMatrixDiagram'
@@ -292,6 +295,7 @@ function concernFor(result?: SampleResult, outlierPrior?: number | null): Concer
  */
 function StructureTableRow({
   row, result, isBayesian, showMean, showMedian, confidence, dateFormat,
+  isCollapsible, isCollapsed, onToggleCollapse,
 }: {
   row: StructureRow
   result?: SampleResult
@@ -300,6 +304,10 @@ function StructureTableRow({
   showMedian: boolean
   confidence: number
   dateFormat: DateFormat
+  /** Whether this row is a Sequence/Phase with something nested under it -- only those get a disclosure control. */
+  isCollapsible: boolean
+  isCollapsed: boolean
+  onToggleCollapse?: () => void
 }) {
   const theme = useTheme()
   const isDate = row.kind === 'date'
@@ -356,6 +364,26 @@ function StructureTableRow({
       }}
     >
       <TableCell sx={{ pl: 2 + row.depth * 2.5 }}>
+        {/* The disclosure control is the ONLY thing that toggles -- the
+            STRUCTURE_MARKER glyph right after it keeps meaning "what kind of
+            row is this" exactly as before, so this doesn't overload one
+            symbol with two different jobs. Non-collapsible rows (dates,
+            Boundaries, empty headings) get no button at all rather than a
+            disabled one, since there is nothing here for them to do. */}
+        {isCollapsible && (
+          <IconButton
+            size="small"
+            onClick={onToggleCollapse}
+            aria-label={`${isCollapsed ? 'Expand' : 'Collapse'} ${row.name}`}
+            sx={{ p: 0.25, mr: 0.25, verticalAlign: 'middle' }}
+          >
+            {isCollapsed ? (
+              <KeyboardArrowRightIcon fontSize="small" />
+            ) : (
+              <KeyboardArrowDownIcon fontSize="small" />
+            )}
+          </IconButton>
+        )}
         <Box component="span" sx={{ color: 'text.secondary', mr: 1 }}>
           {STRUCTURE_MARKER[row.kind] ?? '·'}
         </Box>
@@ -486,6 +514,18 @@ export default function Results() {
   // reporting; switchable to 68.2% or 99.7% without a network round trip
   // (see utils/hpd.ts).
   const [confidence, setConfidence] = useState<number>(0.954)
+  // Which Sequence/Phase headings in the results table are collapsed, keyed
+  // by element id. Nothing collapsed by default -- matches the table's
+  // previous always-expanded behaviour, so this is additive rather than a
+  // new default state to learn.
+  const [collapsedElements, setCollapsedElements] = useState<Set<string>>(new Set())
+  const toggleCollapsed = (elementId: string) =>
+    setCollapsedElements((prev) => {
+      const next = new Set(prev)
+      if (next.has(elementId)) next.delete(elementId)
+      else next.add(elementId)
+      return next
+    })
 
   const handleDateFormatChange = (e: SelectChangeEvent) => {
     const next = e.target.value as DateFormat
@@ -675,6 +715,49 @@ export default function Results() {
   // calibration or an analysis with no stored structure, which falls back
   // to the flat date list below.
   const structureRows = flattenStructure(analysis.model_tree, analysis.measurements || [])
+
+  // Sequence/Phase headings that actually have something nested under them
+  // -- an empty one (no dates, no children) gets no collapse control, since
+  // there is nothing for it to hide.
+  const collapsibleElementIds = new Set(
+    structureRows
+      .filter((row, idx) => {
+        if (row.kind !== 'sequence' && row.kind !== 'phase') return false
+        const next = structureRows[idx + 1]
+        return !!next && next.depth > row.depth
+      })
+      .map((row) => row.elementId!)
+  )
+
+  // What the table actually renders: structureRows with any collapsed
+  // Sequence/Phase's subtree hidden. Boundaries stay visible even inside a
+  // collapsed subtree -- a Boundary is a modelled transition's own result,
+  // not detail to fold away, and collapsing a large structure down to just
+  // its Boundaries is often exactly the point (the dates were the noise;
+  // the transitions were the answer). Single pass: at most one collapsed
+  // ancestor is ever relevant at a time, since a collapse nested inside an
+  // already-hidden subtree changes nothing about what's hidden.
+  const visibleStructureRows: StructureRow[] = []
+  let hiddenBelowDepth: number | null = null
+  for (const row of structureRows) {
+    if (hiddenBelowDepth !== null) {
+      if (row.depth <= hiddenBelowDepth) {
+        hiddenBelowDepth = null
+      } else {
+        if (row.kind === 'boundary') visibleStructureRows.push(row)
+        continue
+      }
+    }
+    visibleStructureRows.push(row)
+    if (
+      (row.kind === 'sequence' || row.kind === 'phase') &&
+      row.elementId &&
+      collapsedElements.has(row.elementId)
+    ) {
+      hiddenBelowDepth = row.depth
+    }
+  }
+
   const resultBySampleId = new Map((analysis.results || []).map((r) => [r.sample_id, r]))
   // Same reason concernFor needs it in StructureTableRow: a posterior close
   // to the prior it was given isn't a finding, so the banner below has to
@@ -1207,7 +1290,7 @@ export default function Results() {
             </TableHead>
             <TableBody>
               {structureRows.length > 0
-                ? structureRows.map((row, idx) => (
+                ? visibleStructureRows.map((row, idx) => (
                     <StructureTableRow
                       // sampleId first, elementId only as the fallback. A
                       // date row's elementId is the PHASE it sits in, which
@@ -1225,6 +1308,26 @@ export default function Results() {
                       showMedian={showMedian}
                       confidence={confidence}
                       dateFormat={dateFormat}
+                      // A date row's elementId is its PARENT phase's id (see
+                      // the comment on the key above), so these must also
+                      // check row.kind -- otherwise every date would inherit
+                      // its own phase's collapsibility and grow a disclosure
+                      // control that actually toggles its parent.
+                      isCollapsible={
+                        (row.kind === 'sequence' || row.kind === 'phase') &&
+                        !!row.elementId &&
+                        collapsibleElementIds.has(row.elementId)
+                      }
+                      isCollapsed={
+                        (row.kind === 'sequence' || row.kind === 'phase') &&
+                        !!row.elementId &&
+                        collapsedElements.has(row.elementId)
+                      }
+                      onToggleCollapse={
+                        (row.kind === 'sequence' || row.kind === 'phase') && row.elementId
+                          ? () => toggleCollapsed(row.elementId!)
+                          : undefined
+                      }
                     />
                   ))
                 : chronologicalResults.map((result, idx) => {
