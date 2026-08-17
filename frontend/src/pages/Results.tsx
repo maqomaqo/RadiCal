@@ -1166,7 +1166,13 @@ export default function Results() {
         )}
 
         <TableContainer>
-          <Table>
+          {/* tabular-nums so every numeric column -- ages, percentages,
+              agreement/outlier diagnostics -- lines up digit-for-digit down
+              the column instead of drifting with each digit's own width.
+              Inherited onto every cell including the header labels and the
+              Suspect/Check/Assigned chips, which is harmless: none of that
+              text has digits whose alignment matters. */}
+          <Table sx={{ fontVariantNumeric: 'tabular-nums' }}>
             <TableHead>
               <TableRow sx={{ backgroundColor: 'grey.100' }}>
                 <TableCell>{structureRows.length > 0 ? 'Structure / Sample' : 'Sample'}</TableCell>
