@@ -195,8 +195,11 @@ const CONFIDENCE_OPTIONS = [
 
 // Indentation and marker for one row of the model structure. Sequences and
 // phases are headings; boundaries and dates are the rows carrying numbers.
+// No entries for 'sequence'/'phase' -- those now have a real disclosure
+// chevron doing that job (see StructureTableRow), so a second, static
+// glyph next to it would just be redundant.
 const STRUCTURE_MARKER: Record<string, string> = {
-  sequence: '▸', phase: '▪', boundary: '◆', hiatus: '⋯', unassigned: '⚠', date: '·',
+  boundary: '◆', hiatus: '⋯', unassigned: '⚠', date: '·',
 }
 
 // Every numeric column in the results table (ages, HPD ranges, percentages,
@@ -364,12 +367,13 @@ function StructureTableRow({
       }}
     >
       <TableCell sx={{ pl: 2 + row.depth * 2.5 }}>
-        {/* The disclosure control is the ONLY thing that toggles -- the
-            STRUCTURE_MARKER glyph right after it keeps meaning "what kind of
-            row is this" exactly as before, so this doesn't overload one
-            symbol with two different jobs. Non-collapsible rows (dates,
-            Boundaries, empty headings) get no button at all rather than a
-            disabled one, since there is nothing here for them to do. */}
+        {/* The disclosure control replaces the old static ▸/▪ glyph for
+            Sequence/Phase rows entirely, rather than sitting beside it --
+            two symbols both saying "this is a heading" would be redundant
+            now that one of them is real. Non-collapsible headings (empty
+            Sequences/Phases with nothing nested under them) get neither: no
+            button, since there's nothing to toggle, and no glyph, since
+            STRUCTURE_MARKER no longer has an entry for those kinds. */}
         {isCollapsible && (
           <IconButton
             size="small"
@@ -384,9 +388,11 @@ function StructureTableRow({
             )}
           </IconButton>
         )}
-        <Box component="span" sx={{ color: 'text.secondary', mr: 1 }}>
-          {STRUCTURE_MARKER[row.kind] ?? '·'}
-        </Box>
+        {STRUCTURE_MARKER[row.kind] && (
+          <Box component="span" sx={{ color: 'text.secondary', mr: 1 }}>
+            {STRUCTURE_MARKER[row.kind]}
+          </Box>
+        )}
         <Box component="span" sx={{ fontWeight: isHeading ? 600 : 400 }}>
           {row.name}
         </Box>
