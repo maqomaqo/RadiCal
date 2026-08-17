@@ -385,6 +385,7 @@ export default function StackedPosteriorPlot({
         // margin it is given, so a taller figure left it stranded low.
         title: { text: calendarAxisTitle(dateFormat), standoff: geometry.titleStandoff },
         zeroline: false,
+        gridcolor: plot.grid,
         // Oldest on the left, as a chronology is read -- see PosteriorPlot
         // for why plotting cal BP needs the axis reversed to get that. An
         // explicit range is already given in that (descending) order.
@@ -408,13 +409,13 @@ export default function StackedPosteriorPlot({
       // Per-row, because two rows at the same calendar age are two different
       // dates -- a unified readout would merge them into one tooltip.
       hovermode: 'closest',
-      plot_bgcolor: 'rgba(240, 240, 240, 0.5)',
-      paper_bgcolor: 'white',
+      plot_bgcolor: plot.surface,
+      paper_bgcolor: plot.surface,
       margin: { l: marginLeft, r: 20, t: geometry.marginTop, b: geometry.marginBottom },
       legend: { orientation: 'h', y: geometry.legendY, yanchor: 'top' },
       autosize: true,
     }),
-    [dateFormat, ticks, drawable, shapes, annotations, xRange, marginLeft, narrow, geometry]
+    [plot, dateFormat, ticks, drawable, shapes, annotations, xRange, marginLeft, narrow, geometry]
   )
 
   const config = useMemo(

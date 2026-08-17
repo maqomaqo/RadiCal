@@ -320,6 +320,7 @@ export default function PosteriorPlot({
       xaxis: {
         title: calendarAxisTitle(dateFormat),
         zeroline: false,
+        gridcolor: plot.grid,
         // Time runs left to right, oldest to youngest, as a chronology is
         // conventionally read. The data is plotted in cal BP, which counts
         // BACKWARDS from the present, so plotting it on an ascending axis
@@ -335,15 +336,16 @@ export default function PosteriorPlot({
       yaxis: {
         title: 'Probability Density',
         zeroline: false,
+        gridcolor: plot.grid,
         ...(yRange ? { range: yRange, autorange: false } : {}),
       },
       hovermode: 'x unified',
-      plot_bgcolor: 'rgba(240, 240, 240, 0.5)',
-      paper_bgcolor: 'white',
+      plot_bgcolor: plot.surface,
+      paper_bgcolor: plot.surface,
       margin: { l: 60, r: 20, t: 50, b: 60 },
       autosize: true,
     }),
-    [sampleName, dateFormat, ticks, yRange]
+    [plot, sampleName, dateFormat, ticks, yRange]
   )
 
   const config = useMemo(

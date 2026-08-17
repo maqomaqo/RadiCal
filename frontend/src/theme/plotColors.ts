@@ -36,6 +36,9 @@ export interface PlotColors {
   hpd68: string
   mean: string
   median: string
+  /** The plot area itself. */
+  surface: string
+  grid: string
 }
 
 // The app's warm ink, as used by the theme's shadows. Point estimates are
@@ -67,7 +70,19 @@ export function usePlotColors(): PlotColors {
       hpd68: alpha(PHASE_GREEN, 0.72),
       mean: alpha(INK, 0.85),
       median: alpha(INK, 0.45),
+      // White, not the grey this used to be. Every fill on these plots is
+      // translucent -- and has to be, since the prior reads by showing
+      // through the posterior drawn over it, and in the stacked view the
+      // curves draw over their own HPD bars. Tinting the surface those
+      // fills composite against therefore desaturates all of them at once,
+      // which is what made the colours look muddy. White is what they were
+      // picked against, and it matches the card the plot sits on.
+      surface: theme.palette.background.paper,
+      // With the surface no longer marking out the plot area, the grid is
+      // what does. Warm, to sit with the rest of the app rather than
+      // reintroducing a cool grey by the back door.
+      grid: alpha(INK, 0.09),
     }),
-    [primary]
+    [primary, theme.palette.background.paper]
   )
 }
