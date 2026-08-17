@@ -41,9 +41,8 @@ import ReactFlow, {
 import 'reactflow/dist/style.css'
 import { Alert, Box, Typography } from '@mui/material'
 import { useTheme } from '@mui/material/styles'
-import { alpha } from '@mui/material/styles'
 import type { MatrixMeasurement, ModelElement } from '@/types'
-import { CONTEXT_PALETTE, useElementTypeColors } from '@/theme/diagramColors'
+import { CONTEXT_PALETTE, tint, useElementTypeColors } from '@/theme/diagramColors'
 import {
   layoutHarrisMatrix,
   type LaidOutNode,
@@ -53,6 +52,9 @@ import { DEFAULT_DATE_FORMAT, formatCalendarRange, type DateFormat } from '@/uti
 interface NodeData {
   node: LaidOutNode
   color: string
+  /** What a box is painted over. Fills are composited against this rather
+   *  than left translucent -- see `tint`. */
+  surface: string
   dateFormat: DateFormat
 }
 
@@ -61,7 +63,7 @@ interface NodeData {
 const HIDDEN_HANDLE = { opacity: 0, width: 1, height: 1, border: 'none', background: 'transparent' }
 
 function ContextNode({ data }: NodeProps<NodeData>) {
-  const { node, color } = data
+  const { node, color, surface } = data
   const badges: string[] = []
   if (node.tpqAgeBp != null) badges.push(`TPQ ≤${node.tpqAgeBp}`)
   if (node.taqAgeBp != null) badges.push(`TAQ ≥${node.taqAgeBp}`)
@@ -77,7 +79,7 @@ function ContextNode({ data }: NodeProps<NodeData>) {
         alignItems: 'center',
         border: `2px solid ${color}`,
         borderRadius: 1.5,
-        backgroundColor: alpha(color, 0.1),
+        backgroundColor: tint(color, 0.1, surface),
         px: 1,
         boxSizing: 'border-box',
       }}
@@ -98,17 +100,19 @@ function ContextNode({ data }: NodeProps<NodeData>) {
 }
 
 function GroupNode({ data }: NodeProps<NodeData>) {
-  const { node, color } = data
+  const { node, color, surface } = data
   return (
     <Box
       sx={{
         width: '100%',
         height: '100%',
-        border: `1px dashed ${alpha(color, 0.6)}`,
+        border: `1px dashed ${tint(color, 0.6, surface)}`,
         borderRadius: 2,
         // Each level of nesting is a touch darker, so depth reads at a glance
-        // without needing to trace the borders.
-        backgroundColor: alpha(color, 0.04 + Math.min(node.depth, 4) * 0.02),
+        // without needing to trace the borders. Composited rather than
+        // translucent so this is the ONLY thing setting the shade -- stacked
+        // tints used to add a container's ancestors to its own on top.
+        backgroundColor: tint(color, 0.04 + Math.min(node.depth, 4) * 0.02, surface),
         boxSizing: 'border-box',
       }}
     >
@@ -227,7 +231,7 @@ export default function HarrisMatrixDiagram({
         // harrisLayout already produces.
         position: { x: node.x, y: node.y },
         style: { width: node.width, height: node.height },
-        data: { node, color, dateFormat },
+        data: { node, color, surface: theme.palette.background.paper, dateFormat },
         draggable: false,
         selectable: false,
         connectable: false,

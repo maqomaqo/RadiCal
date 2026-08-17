@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { useTheme } from '@mui/material/styles'
+import { decomposeColor, recomposeColor, useTheme } from '@mui/material/styles'
 import { blue, lightBlue, pink, brown, blueGrey } from '@mui/material/colors'
 import type { ElementType } from '@/types'
 
@@ -59,6 +59,30 @@ export function useElementTypeColors(): Record<ElementType, ElementTypeColor> {
     }),
     [primary]
   )
+}
+
+/**
+ * `color` at `weight` strength over `base`, returned fully opaque.
+ *
+ * The Harris matrix nests boxes several levels deep, and filling each one
+ * with a translucent tint meant a context four levels in was seen through
+ * four washes of three different hues -- so the fill formula said one
+ * thing and the screen showed another, muddier one, and the same box read
+ * differently depending on where it sat. Compositing up front instead
+ * means every box paints exactly the shade it asks for, whatever is
+ * behind it.
+ */
+export function tint(color: string, weight: number, base: string): string {
+  const fg = decomposeColor(color).values
+  const bg = decomposeColor(base).values
+  return recomposeColor({
+    type: 'rgb',
+    values: [0, 1, 2].map((i) => Math.round(fg[i] * weight + bg[i] * (1 - weight))) as [
+      number,
+      number,
+      number,
+    ],
+  })
 }
 
 /**
