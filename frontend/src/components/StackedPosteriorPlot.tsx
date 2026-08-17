@@ -261,6 +261,12 @@ export default function StackedPosteriorPlot({
         name: isBoundary ? 'Boundary (modelled transition)' : 'Posterior (modelled)',
         legendgroup: isBoundary ? 'boundary' : 'posterior',
         showlegend: claimLegend(isBoundary ? 'boundary' : 'posterior'),
+        // Hover on the curve's own points, not on the area it encloses. A
+        // filled trace defaults to 'points+fills', and the fill hover is a
+        // separate mechanism that ignores hovertemplate: it prints the
+        // trace name, in the fill colour, alongside the real label -- which
+        // read as the row's name escaping the tooltip box.
+        hoveron: 'points',
         hovertemplate: `<b>${s.title}</b><br>%{customdata}<extra></extra>`,
       })
 
