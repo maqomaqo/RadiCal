@@ -196,6 +196,15 @@ const STRUCTURE_MARKER: Record<string, string> = {
   sequence: '▸', phase: '▪', boundary: '◆', hiatus: '⋯', unassigned: '⚠', date: '·',
 }
 
+// Every numeric column in the results table (ages, HPD ranges, percentages,
+// agreement/outlier diagnostics) gets this -- a multi-range HPD string is
+// long enough to wrap on an ordinary tablet width, and wrapping mid-value
+// splits a single dash-joined calendar range across two lines, which reads
+// as two numbers rather than one range. Forcing it onto one line instead
+// lets the table grow wider than its container, which TableContainer
+// already scrolls horizontally for -- nothing here ever silently clips.
+const NUMERIC_CELL_SX = { whiteSpace: 'nowrap' } as const
+
 // Below this, OxCal's convention is that a date is worth re-examining
 // (Bronk Ramsey 1995).
 const POOR_AGREEMENT = 60
@@ -368,28 +377,32 @@ function StructureTableRow({
         )}
       </TableCell>
       {showMean && (
-        <TableCell align="right">
+        <TableCell align="right" sx={NUMERIC_CELL_SX}>
           {cell(mean != null ? formatCalendarAge(mean, dateFormat) : 'N/A')}
         </TableCell>
       )}
-      {showMean && <TableCell align="right">{cell(std?.toFixed(0) ?? 'N/A')}</TableCell>}
+      {showMean && (
+        <TableCell align="right" sx={NUMERIC_CELL_SX}>
+          {cell(std?.toFixed(0) ?? 'N/A')}
+        </TableCell>
+      )}
       {showMedian && (
-        <TableCell align="right">
+        <TableCell align="right" sx={NUMERIC_CELL_SX}>
           {cell(median != null ? formatCalendarAge(median, dateFormat) : 'N/A')}
         </TableCell>
       )}
       {isBayesian && (
-        <TableCell align="right">
+        <TableCell align="right" sx={NUMERIC_CELL_SX}>
           {/* Only a date has an unmodelled counterpart -- a boundary exists
               solely as a modelled parameter. */}
           {isDate ? (unmodelledRanges.length > 0 ? formatHPDRanges(unmodelledRanges, dateFormat) : 'N/A') : ''}
         </TableCell>
       )}
-      <TableCell align="right">
+      <TableCell align="right" sx={NUMERIC_CELL_SX}>
         {cell(envelope ? formatCalendarRange(envelope[0], envelope[1], dateFormat) : 'N/A')}
       </TableCell>
       {isBayesian && (
-        <TableCell align="right">
+        <TableCell align="right" sx={NUMERIC_CELL_SX}>
           {isDate && (
             <Stack direction="column" spacing={0.5} alignItems="flex-end">
               {concern && (
@@ -1223,30 +1236,30 @@ export default function Results() {
                       <TableRow key={result.sample_id}>
                         <TableCell>{result.sample_name || `Sample ${idx + 1}`}</TableCell>
                         {showMean && (
-                          <TableCell align="right">
+                          <TableCell align="right" sx={NUMERIC_CELL_SX}>
                             {result.posterior_mean != null
                               ? formatCalendarAge(result.posterior_mean, dateFormat)
                               : 'N/A'}
                           </TableCell>
                         )}
                         {showMean && (
-                          <TableCell align="right">
+                          <TableCell align="right" sx={NUMERIC_CELL_SX}>
                             {result.posterior_std?.toFixed(0) ?? 'N/A'}
                           </TableCell>
                         )}
                         {showMedian && (
-                          <TableCell align="right">
+                          <TableCell align="right" sx={NUMERIC_CELL_SX}>
                             {result.posterior_median != null
                               ? formatCalendarAge(result.posterior_median, dateFormat)
                               : 'N/A'}
                           </TableCell>
                         )}
                         {isBayesian && (
-                          <TableCell align="right">
+                          <TableCell align="right" sx={NUMERIC_CELL_SX}>
                             {unmodelledRanges.length > 0 ? formatHPDRanges(unmodelledRanges, dateFormat) : 'N/A'}
                           </TableCell>
                         )}
-                        <TableCell align="right">
+                        <TableCell align="right" sx={NUMERIC_CELL_SX}>
                           {modelledEnvelope ? formatCalendarRange(modelledEnvelope[0], modelledEnvelope[1], dateFormat) : 'N/A'}
                         </TableCell>
                       </TableRow>
