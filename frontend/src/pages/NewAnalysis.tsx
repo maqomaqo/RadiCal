@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import {
   Container,
   Box,
@@ -44,13 +44,14 @@ import type { ProjectSample } from '@/components/ProjectSampleTable'
 import {
   DateFormat,
   DATE_FORMAT_OPTIONS,
+  loadDateFormatPreference,
   saveDateFormatPreference,
 } from '@/utils/dateFormat'
 import { formatApiError } from '@/utils/apiError'
 import { useNotify } from '@/contexts/NotificationContext'
-import { useAnalysisDraftStore } from '@/stores/analysisStore'
-import type { SolverChoice } from '@/stores/analysisStore'
-import type { DraftMeasurement, ModelElement } from '@/types'
+import { useAnalysisDraftStore, DEFAULT_MCMC } from '@/stores/analysisStore'
+import type { McmcConfig, SolverChoice } from '@/stores/analysisStore'
+import type { DraftGroup, DraftMeasurement, DraftRelationship, ModelElement } from '@/types'
 import { expandRelationships, findCycle } from '@/utils/stratigraphy'
 import { summariseTree } from '@/utils/harrisLayout'
 import { validateTree } from '@/components/ModelTreeEditor'
@@ -93,6 +94,25 @@ interface PreviewResult {
   hpd_68_ranges?: Array<{ min: number; max: number; probability_percent: number }>
   hpd_95_ranges?: Array<{ min: number; max: number; probability_percent: number }>
   probability_distribution: Array<[number, number]>
+}
+
+/**
+ * A comparable fingerprint of everything a run actually consumes: the dates
+ * and the model, but not the label on them. Comparing the fingerprint taken
+ * when an analysis was loaded against the current draft is what tells a
+ * rename apart from an edit to the inputs -- the first can be saved on its
+ * own, the second only takes effect through a re-run.
+ */
+function inputsSignature(parts: {
+  analysisType: string
+  measurements: Measurement[]
+  groups: DraftGroup[]
+  relationships: DraftRelationship[]
+  modelTree: ModelElement | null
+  elementAssignments: Record<string, string>
+  mcmc: McmcConfig
+}): string {
+  return JSON.stringify(parts)
 }
 
 export default function NewAnalysis() {
@@ -139,6 +159,13 @@ export default function NewAnalysis() {
   const { analysisId: editRouteId } = useParams<{ analysisId: string }>()
   const isEditing = !!editRouteId
   const [loadingExisting, setLoadingExisting] = useState(isEditing)
+  const [savingDetails, setSavingDetails] = useState(false)
+  // The inputs as they arrived from the backend, for telling a rename-only
+  // edit apart from one that changed the dates or the model (see
+  // handleSaveDetails). Null whenever the draft was hydrated by something
+  // other than the load effect below -- coming back from the Model
+  // Structure page, say -- which counts as "may well have changed".
+  const loadedInputsRef = useRef<string | null>(null)
   const [currentMeasurement, setCurrentMeasurement] = useState<Partial<Measurement>>({
     sample_type: 'terrestrial',
     curve_id: 'intcal20',
@@ -279,70 +306,93 @@ export default function NewAnalysis() {
           return
         }
         const a = data.data
+        const loadedType: 'calibration' | 'group_calibration' | 'bayesian' =
+          a.analysis_type === 'bayesian' || a.analysis_type === 'group_calibration'
+            ? a.analysis_type
+            : 'calibration'
+        const loadedMeasurements: Measurement[] = (a.measurements || []).map((m: any) => ({
+          id: m.id,
+          sample_name: m.sample_name,
+          age_bp: m.age_bp,
+          error_1sigma: m.error_1sigma,
+          material_type: m.material_type || 'unknown',
+          sample_type: m.sample_type || 'terrestrial',
+          curve_id: m.curve_id || 'intcal20',
+          // Carried straight through: the form doesn't surface these, but
+          // a date deployed from a project collection arrives with them
+          // set, and running the edit resubmits whatever the draft holds.
+          delta_r: m.delta_r ?? null,
+          delta_r_error: m.delta_r_error ?? null,
+          // Loaded so editing an analysis does not silently switch the
+          // outlier model off -- the edit resubmits whatever the draft
+          // holds, so anything missing here is anything removed.
+          outlier_prior: m.outlier_prior ?? 0,
+          outlier_model: m.outlier_model ?? 'general',
+          reservoir_age: m.reservoir_age ?? null,
+          depth_cm: m.depth_cm ?? null,
+          location: m.location ?? null,
+          notes: m.notes ?? null,
+          group_id: m.group_id ?? null,
+          tpq_age_bp: m.tpq_age_bp ?? null,
+          taq_age_bp: m.taq_age_bp ?? null,
+        }))
+        const loadedGroups: DraftGroup[] = (a.groups || []).map((g: any) => ({
+          id: g.id,
+          name: g.name,
+          tpq_age_bp: g.tpq_age_bp ?? null,
+          taq_age_bp: g.taq_age_bp ?? null,
+        }))
+        const loadedRelationships: DraftRelationship[] = (a.relationships || []).map((r: any) => ({
+          id: r.id,
+          from_sample_id: r.from_sample_id,
+          to_sample_id: r.to_sample_id,
+          from_type: r.from_type,
+          to_type: r.to_type,
+          relationship: r.relationship,
+        }))
+        // Merged here rather than left to the store, so the fingerprint
+        // below is taken over the same object the store ends up holding.
+        const loadedMcmc: McmcConfig = { ...DEFAULT_MCMC, ...(a.bayesian_config || {}) }
+        // Carry the saved structure into the draft, so running the edit
+        // resubmits the tree it was saved with. Without it the draft has
+        // no tree, the submit falls back to groups/relationships, and the
+        // backend rebuilds a different structure from those.
+        //
+        // group_id is the fallback because a tree migrated from the old
+        // contexts reuses each context's id as its phase id, and those
+        // analyses have the id on group_id rather than element_id. Every
+        // date must resolve to a phase or the run is rejected outright.
+        const loadedTree: ModelElement | null = a.model_tree || null
+        const loadedAssignments: Record<string, string> = Object.fromEntries(
+          (a.measurements || [])
+            .map((m: any) => [m.id, m.element_id || m.group_id])
+            .filter(([, elementId]: [string, string | null]) => !!elementId)
+        )
         loadFromAnalysis({
           analysisId: editRouteId,
           name: a.name,
-          analysisType: a.analysis_type === 'bayesian' || a.analysis_type === 'group_calibration'
-            ? a.analysis_type
-            : 'calibration',
-          measurements: (a.measurements || []).map((m: any) => ({
-            id: m.id,
-            sample_name: m.sample_name,
-            age_bp: m.age_bp,
-            error_1sigma: m.error_1sigma,
-            material_type: m.material_type || 'unknown',
-            sample_type: m.sample_type || 'terrestrial',
-            curve_id: m.curve_id || 'intcal20',
-            // Carried straight through: the form doesn't surface these, but
-            // a date deployed from a project collection arrives with them
-            // set, and running the edit resubmits whatever the draft holds.
-            delta_r: m.delta_r ?? null,
-            delta_r_error: m.delta_r_error ?? null,
-            // Loaded so editing an analysis does not silently switch the
-            // outlier model off -- the edit resubmits whatever the draft
-            // holds, so anything missing here is anything removed.
-            outlier_prior: m.outlier_prior ?? 0,
-            outlier_model: m.outlier_model ?? 'general',
-            reservoir_age: m.reservoir_age ?? null,
-            depth_cm: m.depth_cm ?? null,
-            location: m.location ?? null,
-            notes: m.notes ?? null,
-            group_id: m.group_id ?? null,
-            tpq_age_bp: m.tpq_age_bp ?? null,
-            taq_age_bp: m.taq_age_bp ?? null,
-          })),
-          groups: (a.groups || []).map((g: any) => ({
-            id: g.id,
-            name: g.name,
-            tpq_age_bp: g.tpq_age_bp ?? null,
-            taq_age_bp: g.taq_age_bp ?? null,
-          })),
-          relationships: (a.relationships || []).map((r: any) => ({
-            id: r.id,
-            from_sample_id: r.from_sample_id,
-            to_sample_id: r.to_sample_id,
-            from_type: r.from_type,
-            to_type: r.to_type,
-            relationship: r.relationship,
-          })),
-          mcmc: a.bayesian_config || undefined,
+          analysisType: loadedType,
+          measurements: loadedMeasurements,
+          groups: loadedGroups,
+          relationships: loadedRelationships,
+          mcmc: loadedMcmc,
           projectId: a.project_id || '',
-          // Carry the saved structure into the draft, so running the edit
-          // resubmits the tree it was saved with. Without it the draft has
-          // no tree, the submit falls back to groups/relationships, and the
-          // backend rebuilds a different structure from those.
-          //
-          // group_id is the fallback because a tree migrated from the old
-          // contexts reuses each context's id as its phase id, and those
-          // analyses have the id on group_id rather than element_id. Every
-          // date must resolve to a phase or the run is rejected outright.
-          modelTree: a.model_tree || null,
-          elementAssignments: Object.fromEntries(
-            (a.measurements || [])
-              .map((m: any) => [m.id, m.element_id || m.group_id])
-              .filter(([, elementId]: [string, string | null]) => !!elementId)
-          ),
+          modelTree: loadedTree,
+          elementAssignments: loadedAssignments,
         })
+        loadedInputsRef.current = inputsSignature({
+          analysisType: loadedType,
+          measurements: loadedMeasurements,
+          groups: loadedGroups,
+          relationships: loadedRelationships,
+          modelTree: loadedTree,
+          elementAssignments: loadedAssignments,
+          mcmc: loadedMcmc,
+        })
+        // The reporting format is a client-side preference keyed by analysis
+        // id, so it has to be read back here: otherwise saving an edit would
+        // write the default over whatever format the analysis was set to.
+        setDateFormat(loadDateFormatPreference(editRouteId))
       } catch (err) {
         if (!cancelled) notify('Error loading analysis: ' + (err as Error).message)
       } finally {
@@ -536,6 +586,69 @@ export default function NewAnalysis() {
     setCurrentMeasurement({ sample_type: 'terrestrial', curve_id: 'intcal20' })
   }
 
+  /**
+   * Save the analysis's name and project without re-running it. Renaming
+   * used to mean going through Run Analysis, which recomputes the results
+   * and (for a calibration or group calibration) saves a second analysis
+   * rather than replacing the one being edited -- a heavy, lossy price for
+   * fixing a label. Nothing here touches the dates or the model, so the
+   * stored results stay exactly as valid as they were.
+   */
+  const handleSaveDetails = async () => {
+    if (!editRouteId) return
+    if (!analysisName.trim()) {
+      setRunError('Please provide an analysis name.')
+      return
+    }
+
+    setRunError(null)
+    setSavingDetails(true)
+    try {
+      const response = await fetch(`/api/analysis/${editRouteId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: analysisName.trim(), project_id: projectId || null }),
+      })
+      const data = await response.json()
+      if (!data.success) {
+        setRunError('Failed to save: ' + formatApiError(data))
+        return
+      }
+      saveDateFormatPreference(editRouteId, dateFormat)
+
+      // Anything else the form is holding is an input change, which only
+      // reaches the backend through Run Analysis -- so leaving the page now
+      // would quietly throw it away. Stay put and say why. When the inputs
+      // are untouched this really was just a rename, and there is nothing
+      // left on the page to lose.
+      const inputsChanged =
+        loadedInputsRef.current === null ||
+        loadedInputsRef.current !==
+          inputsSignature({
+            analysisType,
+            measurements,
+            groups,
+            relationships,
+            modelTree,
+            elementAssignments,
+            mcmc,
+          })
+      if (inputsChanged) {
+        notify(
+          'Name and project saved. Changes to the dates or model structure still need Run Analysis to take effect.'
+        )
+      } else {
+        notify('Analysis saved.')
+        resetDraft()
+        navigate(`/results/${editRouteId}`)
+      }
+    } catch (error) {
+      setRunError('Error saving analysis: ' + (error as Error).message)
+    } finally {
+      setSavingDetails(false)
+    }
+  }
+
   const handleRunAnalysis = async () => {
     if (!analysisName || measurements.length === 0) {
       setRunError('Please provide analysis name and at least one measurement.')
@@ -711,8 +824,9 @@ export default function NewAnalysis() {
       </Typography>
       {isEditing && (
         <Alert severity="info" sx={{ mb: 2 }}>
-          Editing a saved analysis. Saving replaces its inputs and re-runs it, replacing its current
-          results.
+          Editing a saved analysis. Run Analysis replaces its inputs and re-runs it, replacing its
+          current results. To change only the name or the project, use Save Details at the bottom of
+          the page -- it keeps the existing results.
         </Alert>
       )}
 
@@ -1208,17 +1322,39 @@ export default function NewAnalysis() {
         </Alert>
       )}
 
-      <Box sx={{ mt: 4, display: 'flex', gap: 2 }}>
+      <Box sx={{ mt: 4, display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap' }}>
         <Button
           variant="contained"
           color="primary"
           size="large"
           onClick={handleRunAnalysis}
-          disabled={loading || measurements.length === 0 || (analysisType === 'bayesian' && !!cycle)}
+          disabled={
+            loading ||
+            savingDetails ||
+            measurements.length === 0 ||
+            (analysisType === 'bayesian' && !!cycle)
+          }
         >
           {loading ? 'Running...' : 'Run Analysis'}
         </Button>
+        {/* Only when there is something to save onto: a new analysis has no
+            row to rename yet, so its name is settled by running it. */}
+        {isEditing && (
+          <Button
+            variant="outlined"
+            size="large"
+            onClick={handleSaveDetails}
+            disabled={loading || savingDetails || !analysisName.trim()}
+          >
+            {savingDetails ? 'Saving...' : 'Save Details'}
+          </Button>
+        )}
       </Box>
+      {isEditing && (
+        <Typography variant="body2" color="textSecondary" sx={{ mt: 1 }}>
+          Save Details stores the name and project only, leaving the current results in place.
+        </Typography>
+      )}
 
       {previewResult && (
         <Box sx={{ mt: 4 }}>
