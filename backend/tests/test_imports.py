@@ -190,6 +190,55 @@ class TestTheShagRiverModel:
         assert all(d['outlier_prior'] == 0.05 for d in result.dates)
 
 
+class TestTheCoastalMiddenModel:
+    """
+    tests/fixtures/oxcal_delta_r/Coastal_midden.oxcal -- the structure of a
+    real coastal model, with its lab codes and ages replaced. Its header
+    states the curves, the outlier models and the reservoir offset as named
+    definitions and then cites each by name where it applies, which is the
+    ordinary shape of a hand-written OxCal file; the citation form
+    `Delta_R("=LocalMarine", )` is what the importer used to reject outright
+    as a syntax error, taking the whole file with it.
+
+    Marine and terrestrial dates sit in the same phases here, which is what
+    makes the scoping of the offset matter: it belongs to Marine20, and the
+    SHCal20 dates beside it must not pick it up.
+    """
+
+    def setup_method(self):
+        self.result = parse_oxcal(
+            read_fixture('oxcal_delta_r', 'Coastal_midden.oxcal'),
+            'Coastal_midden.oxcal',
+        )
+
+    def test_the_whole_model_imports(self):
+        assert self.result.ok, self.result.errors
+        assert len(self.result.dates) == 22
+        assert [c['name'] for c in self.result.model_tree['children']] == [
+            'Start L4', 'L4', 'Transition L4/P3', 'P3', 'P3cap',
+            'Transition 2/3', 'L2', 'Transition L2/L2u', 'L2u',
+            'End Occupation',
+        ]
+
+    def test_the_offset_reaches_the_marine_dates_and_only_those(self):
+        by_curve = {'marine20': [], 'shcal20': []}
+        for date in self.result.dates:
+            by_curve[date['curve_id']].append(date)
+
+        assert len(by_curve['marine20']) == 13
+        assert len(by_curve['shcal20']) == 9
+        assert all(
+            (d['delta_r'], d['delta_r_error']) == (-162.0, 28.0)
+            for d in by_curve['marine20']
+        )
+        assert all(d['delta_r'] is None for d in by_curve['shcal20'])
+
+    def test_the_charcoal_outlier_model_survives_the_import(self):
+        charcoal = [d for d in self.result.dates if d['outlier_model'] == 'charcoal']
+        assert [d['sample_name'].strip() for d in charcoal] == ['LAB-1003']
+        assert charcoal[0]['outlier_prior'] == 1.0
+
+
 # --------------------------------------------------------------------------
 # Refusals -- the half that keeps a wrong model out
 # --------------------------------------------------------------------------
@@ -375,6 +424,107 @@ class TestTranslationChoices:
         assert date['curve_id'] == 'marine20'
         assert date['sample_type'] == 'marine'
         assert (date['delta_r'], date['delta_r_error']) == (-7.0, 45.0)
+
+    def test_a_named_delta_r_is_applied_where_it_is_cited(self):
+        """
+        OxCal states an offset once, with a name, and cites it by that name
+        wherever it applies: `Delta_R("=LocalMarine", )`. The citation
+        carries no numbers -- they are in the declaration -- so reading it as
+        an offset with no value refuses a file OxCal runs.
+        """
+        result = parse_oxcal(oxcal_model(
+            'Curve("SHCal20","SHCal20.14c"); Curve("Marine20","Marine20.14c"); '
+            'Delta_R("LocalMarine",-162,28); '
+            'Phase("Midden"){ Curve("=Marine20"); Delta_R("=LocalMarine", ); '
+            'R_Date("shell",900,20); };'
+        ), 't.oxcal')
+
+        assert result.ok, result.errors
+        date = result.dates[0]
+        assert date['curve_id'] == 'marine20'
+        assert (date['delta_r'], date['delta_r_error']) == (-162.0, 28.0)
+
+    def test_an_offset_stays_with_the_curve_it_was_stated_for(self):
+        """
+        OxCal defines Delta_R as applying to the current Curve, so switching
+        curve leaves it behind. This is the shape every coastal site has --
+        marine and terrestrial dates in one phase -- and carrying the offset
+        across would shift the terrestrial dates by the marine reservoir.
+        """
+        result = parse_oxcal(oxcal_model(
+            'Curve("SHCal20","SHCal20.14c"); Curve("Marine20","Marine20.14c"); '
+            'Delta_R("LocalMarine",-162,28); '
+            'Phase("L4"){ '
+            'Curve("=SHCal20"); R_Date("charcoal",473,19); '
+            'Curve("=Marine20"); Delta_R("=LocalMarine", ); R_Date("shell",886,22); };'
+        ), 't.oxcal')
+
+        assert result.ok, result.errors
+        charcoal, shell = result.dates
+        assert charcoal['curve_id'] == 'shcal20'
+        assert (charcoal['delta_r'], charcoal['delta_r_error']) == (None, None)
+        assert shell['curve_id'] == 'marine20'
+        assert (shell['delta_r'], shell['delta_r_error']) == (-162.0, 28.0)
+
+    def test_returning_to_a_curve_brings_its_offset_back(self):
+        """
+        The offset is a property of the curve, not of the point in the file
+        where it was written, so it does not have to be restated after every
+        excursion to another curve -- and dropping it there would understate
+        the uncertainty of the dates that follow.
+        """
+        result = parse_oxcal(oxcal_model(
+            'Curve("SHCal20","SHCal20.14c"); Curve("Marine20","Marine20.14c"); '
+            'Delta_R("LocalMarine",-162,28); '
+            'Phase("L4"){ R_Date("shell",886,22); '
+            'Curve("=SHCal20"); R_Date("charcoal",473,19); '
+            'Curve("=Marine20"); R_Date("shell2",900,20); };'
+        ), 't.oxcal')
+
+        assert result.ok, result.errors
+        shell, charcoal, shell2 = result.dates
+        assert (shell['delta_r'], shell['delta_r_error']) == (-162.0, 28.0)
+        assert charcoal['delta_r'] is None
+        assert (shell2['delta_r'], shell2['delta_r_error']) == (-162.0, 28.0)
+
+    def test_an_offset_stated_inside_a_phase_stays_there(self):
+        """
+        Curve and Delta_R are scoped to their block, so one phase's local
+        offset must not reach the next phase's dates on the same curve.
+        """
+        result = parse_oxcal(oxcal_model(
+            'Curve("Marine20","Marine20.14c"); '
+            'Phase("A"){ Delta_R("Bay",-162,28); R_Date("a",900,20); }; '
+            'Phase("B"){ R_Date("b",900,20); };'
+        ), 't.oxcal')
+
+        assert result.ok, result.errors
+        inside, outside = result.dates
+        assert (inside['delta_r'], inside['delta_r_error']) == (-162.0, 28.0)
+        assert outside['delta_r'] is None
+
+    def test_which_dates_a_named_offset_reached_is_reported(self):
+        result = parse_oxcal(oxcal_model(
+            'Curve("Marine20","Marine20.14c"); Delta_R("LocalMarine",-162,28); '
+            'Phase("M"){ R_Date("a",900,20); R_Date("b",910,20); };'
+        ), 't.oxcal')
+
+        assert result.ok, result.errors
+        assert any('LocalMarine' in n and '2 date(s)' in n for n in result.notes)
+
+    def test_citing_an_offset_the_file_never_states_is_refused(self):
+        """
+        The alternative is importing those dates with no offset at all, which
+        calibrates them against the global marine curve and looks like a
+        successful import.
+        """
+        result = parse_oxcal(oxcal_model(
+            'Curve("Marine20","Marine20.14c"); '
+            'Phase("M"){ Delta_R("=LocalMarine", ); R_Date("shell",900,20); };'
+        ), 't.oxcal')
+
+        assert not result.ok
+        assert any('LocalMarine' in e for e in result.errors)
 
     def test_delta_r_without_its_error_is_refused(self):
         """

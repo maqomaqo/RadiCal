@@ -2,10 +2,10 @@
 Reading OxCal's own model files (.oxcal, the CQL2 language) into the app's
 model tree.
 
-The five files in tests/fixtures are the specification this was written
-against -- real models exported by OxCal 4.4, covering nested Sequences and
-Phases, explicit and implied Boundaries, per-scope Curve selection, and both
-outlier models. tests/test_imports.py checks the parse of each against the
+The six files in tests/fixtures are the specification this was written
+against -- real models covering nested Sequences and Phases, explicit and
+implied Boundaries, per-scope Curve selection, reservoir offsets stated under
+a name and cited by it, and both outlier models. tests/test_imports.py checks the parse of each against the
 hand-built trees in tests/oxcal_fixture.py, which are themselves checked
 against OxCal's own published output for those runs. So an imported model is
 verified two steps out: it matches the tree we already know reproduces OxCal.
@@ -221,6 +221,14 @@ class _Parser:
                 raise OxcalSyntaxError('The file ends inside an argument list.')
             if token.value == ',':
                 self.next()
+                # An argument OxCal left out, written as a bare comma before
+                # the closing bracket: `Delta_R("=LocalMarine", )` names a
+                # definition and supplies no value of its own, because the
+                # value is in the definition. The empty slot says only that
+                # the argument is absent, so there is nothing to record.
+                if self.peek() is not None and self.peek().value == ')':
+                    self.next()
+                    return args
                 continue
             self.expect(')')
             return args
@@ -362,23 +370,46 @@ class _Scope:
     OxCal's Curve() and Delta_R() apply from where they appear to the end of
     their enclosing block, and are inherited by nested blocks -- so this is
     copied on the way into a block and mutated by statements within it.
+
+    A reservoir offset belongs to the CURVE it was stated against, not to the
+    block: OxCal defines Delta_R as "the shift that is to be applied to dates
+    before calibration; applies to the current Curve", and Curve("=Name")
+    selects a curve already defined. So the offset follows its curve --
+    switching to another one leaves it behind, and switching back brings it
+    with it. That is what lets a single phase calibrate marine dates against
+    Marine20 with a local Delta_R and terrestrial ones against SHCal20 with
+    none, which is the ordinary shape of a coastal model.
     """
 
     def __init__(self, curve_id: str = 'intcal20',
                  delta_r: Optional[float] = None,
-                 delta_r_error: Optional[float] = None):
+                 delta_r_error: Optional[float] = None,
+                 delta_r_name: Optional[str] = None,
+                 curve_offsets: Optional[Dict[str, Tuple]] = None):
         self.curve_id = curve_id
         self.delta_r = delta_r
         self.delta_r_error = delta_r_error
+        # The label the offset was given, carried only so the import can
+        # report which named offset reached which dates.
+        self.delta_r_name = delta_r_name
+        # curve id -> the offset in force for it, so that leaving a curve and
+        # coming back to it restores what was stated against it.
+        self.curve_offsets: Dict[str, Tuple] = dict(curve_offsets or {})
 
     def copy(self) -> '_Scope':
-        return _Scope(self.curve_id, self.delta_r, self.delta_r_error)
+        return _Scope(self.curve_id, self.delta_r, self.delta_r_error,
+                      self.delta_r_name, self.curve_offsets)
 
 
 class _Translator:
     def __init__(self, result: ImportResult):
         self.result = result
         self.declared_outlier_models: Dict[str, Call] = {}
+        # Reservoir offsets stated with a name, as (delta_r, delta_r_error),
+        # for the `Delta_R("=Name")` references that cite them.
+        self.declared_delta_r: Dict[str, Tuple[float, float]] = {}
+        # How many dates each named offset ended up on, for the note below.
+        self.delta_r_usage: Dict[str, int] = {}
         self.wrapped_sequence_dates = 0
         self.seen_ignorable: List[str] = []
 
@@ -408,6 +439,19 @@ class _Translator:
 
         self._assemble(self._translate_block(nodes, scope))
 
+        for label, count in sorted(self.delta_r_usage.items()):
+            offset, uncertainty = self.declared_delta_r.get(
+                label.lower(), (None, None)
+            )
+            if offset is None:
+                continue
+            self.result.notes.append(
+                f'Delta_R("{label}") = {offset:g} +/- {uncertainty:g} was '
+                f'applied to {count} date(s) -- every date calibrated against '
+                'the curve it was stated for. Dates on another curve carry no '
+                'offset; the table shows which.'
+            )
+
         if self.seen_ignorable:
             unique = sorted(set(self.seen_ignorable))
             self.result.notes.append(
@@ -425,10 +469,32 @@ class _Translator:
 
     def _collect_declarations(self, nodes: List[Node]) -> None:
         for node in nodes:
-            if node.command.lower() == 'outlier_model':
+            command = node.command.lower()
+            if command == 'outlier_model':
                 self._declare_outlier_model(node)
+            if command == 'delta_r':
+                self._declare_delta_r(node)
             if node.block:
                 self._collect_declarations(node.block)
+
+    def _declare_delta_r(self, node: Node) -> None:
+        """
+        Record a reservoir offset stated with a name, so that a later
+        `Delta_R("=Name")` can cite it.
+
+        Collected in the same first pass as the outlier models, and for the
+        same reason: a name is a name wherever it was written, and resolving
+        references against file order would refuse a model OxCal accepts. A
+        declaration that is short of its uncertainty is not recorded -- the
+        error for that belongs to the point of use, where the date it would
+        have applied to can be named.
+        """
+        name = (node.name or '').strip()
+        if not name or name.startswith('='):
+            return                            # a reference, not a declaration
+        numbers = node.numbers
+        if len(numbers) >= 2:
+            self.declared_delta_r[name.lower()] = (numbers[0], numbers[1])
 
     def _declare_outlier_model(self, node: Node) -> None:
         name = (node.name or '').strip()
@@ -490,9 +556,7 @@ class _Translator:
                 items.extend(self._translate_block(node.block or [], scope.copy()))
                 continue
             if command == 'curve':
-                resolved = self._resolve_curve(node)
-                if resolved:
-                    scope.curve_id = resolved
+                self._select_curve(node, scope)
                 continue
             if command == 'delta_r':
                 self._apply_delta_r(node, scope)
@@ -559,6 +623,29 @@ class _Translator:
 
     # -- individual commands ---------------------------------------------
 
+    def _select_curve(self, node: Node, scope: _Scope) -> Optional[str]:
+        """
+        Make a curve the one in force, bringing whatever reservoir offset
+        was stated against THAT curve with it.
+
+        OxCal applies Delta_R to the current curve, so switching from
+        Marine20 to SHCal20 does not carry the marine offset across -- a file
+        calibrating part of a phase against each, which is the usual shape
+        for a coastal site, depends on exactly that, and carrying it would
+        shift every terrestrial date by the marine reservoir. Switching back
+        restores it, because the offset is a property of the curve rather
+        than of the point in the file where it was written.
+        """
+        resolved = self._resolve_curve(node)
+        if resolved is None:
+            return None
+        if resolved != scope.curve_id:
+            scope.delta_r, scope.delta_r_error, scope.delta_r_name = (
+                scope.curve_offsets.get(resolved, (None, None, None))
+            )
+        scope.curve_id = resolved
+        return resolved
+
     def _resolve_curve(self, node: Node) -> Optional[str]:
         name = node.name
         if not name:
@@ -575,16 +662,53 @@ class _Translator:
         return resolved
 
     def _apply_delta_r(self, node: Node, scope: _Scope) -> None:
+        """
+        Put a reservoir offset in force for the curve currently selected.
+
+        Two forms, both OxCal's. The offset written out --
+        `Delta_R("LocalMarine", -162, 28)` -- states it and, if it carries a
+        name, makes that name citable. The reference --
+        `Delta_R("=LocalMarine", )` -- cites one already stated, which is how
+        a file gives an offset once in its header and applies it at each
+        marine group without repeating the numbers.
+        """
         numbers = node.numbers
-        if len(numbers) < 2:
-            self.error(
-                node,
-                'Delta_R needs a value and its uncertainty. An offset without '
-                'one would understate the uncertainty of every date using it.',
-            )
+        name = (node.name or '').strip()
+        if len(numbers) >= 2:
+            scope.delta_r = numbers[0]
+            scope.delta_r_error = numbers[1]
+            scope.delta_r_name = name.lstrip('=').strip() or None
+            self._bind_to_curve(scope)
             return
-        scope.delta_r = numbers[0]
-        scope.delta_r_error = numbers[1]
+
+        if name.startswith('='):
+            declared = self.declared_delta_r.get(name.lstrip('=').strip().lower())
+            if declared is None:
+                self.error(
+                    node,
+                    f'Delta_R("{name}") cites a reservoir offset that the file '
+                    'never states. Add the offset and its uncertainty where it '
+                    'is defined -- importing the dates without it would '
+                    'calibrate them against the global marine curve alone.',
+                )
+                return
+            scope.delta_r, scope.delta_r_error = declared
+            scope.delta_r_name = name.lstrip('=').strip()
+            self._bind_to_curve(scope)
+            return
+
+        self.error(
+            node,
+            'Delta_R needs a value and its uncertainty. An offset without '
+            'one would understate the uncertainty of every date using it.',
+        )
+
+    @staticmethod
+    def _bind_to_curve(scope: _Scope) -> None:
+        """Remember an offset against the curve it was stated for."""
+        scope.curve_offsets[scope.curve_id] = (
+            scope.delta_r, scope.delta_r_error, scope.delta_r_name
+        )
 
     def _note_options(self, node: Node) -> None:
         settings = [
@@ -636,12 +760,16 @@ class _Translator:
             if command == 'outlier':
                 self._apply_outlier(child, date)
             elif command == 'curve':
-                resolved = self._resolve_curve(child)
+                # Through the scope, so that a Curve inside the date drops an
+                # inherited offset the same way one in a block does.
+                resolved = self._select_curve(child, inner)
                 if resolved:
                     date['curve_id'] = resolved
                     date['sample_type'] = (
                         'marine' if resolved == 'marine20' else 'terrestrial'
                     )
+                    date['delta_r'] = inner.delta_r
+                    date['delta_r_error'] = inner.delta_r_error
             elif command == 'delta_r':
                 self._apply_delta_r(child, inner)
                 date['delta_r'] = inner.delta_r
@@ -654,6 +782,11 @@ class _Translator:
                     f'{child.command}() inside R_Date("{name}") is not '
                     'something this importer recognises.',
                 )
+
+        if date['delta_r'] is not None and inner.delta_r_name:
+            self.delta_r_usage[inner.delta_r_name] = (
+                self.delta_r_usage.get(inner.delta_r_name, 0) + 1
+            )
 
         return date
 

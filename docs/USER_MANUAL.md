@@ -95,6 +95,13 @@ An OxCal model file is read directly — its `Sequence`, `Phase`, `Boundary` and
 per-scope `Curve` and `Delta_R`, and per-date `Outlier` settings all come across, keeping the names
 OxCal gave them. Importing one from New Analysis brings the model structure with it.
 
+A reservoir offset can be written either way OxCal allows: in full, `Delta_R("LocalMarine",-162,28)`,
+or stated once under a name and cited wherever it applies, `Delta_R("=LocalMarine", )`. The offset
+belongs to the curve it was stated for — OxCal applies `Delta_R` to the current `Curve` — so a phase
+holding marine dates on Marine20 and terrestrial ones on SHCal20 gives the offset to the marine
+dates only. The preview shows the ΔR carried by each date, and a note says how many dates each named
+offset reached.
+
 OxCal's language is larger than what this app models. Anything that would change the posterior and
 cannot be honoured — `Tau_Boundary`, `Sigma_Boundary` and `Zero_Boundary` (non-uniform
 transitions), `C_Date`, `R_Combine`, the deposition-model sequences (`P_Sequence`, `D_Sequence`,

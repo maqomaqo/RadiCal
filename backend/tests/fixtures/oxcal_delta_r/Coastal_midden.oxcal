@@ -1,0 +1,132 @@
+ // A coastal midden model: marine and terrestrial dates in the same phases,
+ // with the reservoir offset stated once by name and cited where it applies.
+ // The structure is a real one; the lab codes and ages are not.
+Plot()
+ {
+  Curve("SHCal20","SHCal20.14c");
+  Curve("Marine20","Marine20.14c");
+  Delta_R("LocalMarine",-162,28);
+  Outlier_Model("General",T(5),U(0,4),"t");
+  Outlier_Model("Charcoal",Exp(1,-10,0),U(0,3),"t");
+  Sequence()
+  {
+   Boundary("Start L4");
+   Phase("L4")
+   {
+    Curve("=SHCal20");
+    R_Date("LAB-1001", 468, 19)
+    {
+     Outlier("General", 0.05);
+    };
+    R_Date("LAB-1002", 441, 18)
+    {
+     Outlier("General", 0.05);
+    };
+    R_Date("LAB-1003", 662, 20)
+    {
+     Outlier("Charcoal", 1.00);
+    };
+    R_Date("LAB-1004", 537, 21)
+    {
+     Outlier("General", 0.05);
+    };
+    R_Date("LAB-1005", 526, 20)
+    {
+     Outlier("General", 0.05);
+    };
+    Curve("=Marine20");
+    Delta_R("=LocalMarine", );
+    R_Date("LAB-2001", 881, 22)
+    {
+     Outlier("General", 0.05);
+    };
+    R_Date("LAB-2002", 936, 35)
+    {
+     Outlier("General", 0.05);
+    };
+   };
+   Boundary("Transition L4/P3");
+   Phase("P3")
+   {
+    Curve("=SHCal20");
+    R_Date("LAB-1006", 490, 20)
+    {
+     Outlier("General", 0.05);
+    };
+    Curve("=Marine20");
+    Delta_R("=LocalMarine", );
+    R_Date("LAB-2003", 921, 21)
+    {
+     Outlier("General", 0.05);
+    };
+    R_Date("LAB-2004", 912, 20)
+    {
+     Outlier("General", 0.05);
+    };
+    R_Date("LAB-2005", 884, 21)
+    {
+     Outlier("General", 0.05);
+    };
+    R_Date("LAB-2006", 951, 35)
+    {
+     Outlier("General", 0.05);
+    };
+    R_Date("LAB-2007", 903, 34)
+    {
+     Outlier("General", 0.05);
+    };
+   };
+   Phase("P3cap")
+   {
+    R_Date("LAB-2008", 894, 20)
+    {
+     Outlier("General", 0.05);
+    };
+   };
+   Boundary("Transition 2/3");
+   Phase("L2")
+   {
+    Curve("=SHCal20");
+    R_Date("LAB-1007", 430, 17)
+    {
+     Outlier("General", 0.05);
+    };
+    R_Date("LAB-1008", 497, 22)
+    {
+     Outlier("General", 0.05);
+    };
+    R_Date("LAB-1009", 483, 22)
+    {
+     Outlier("General", 0.05);
+    };
+    Curve("=Marine20");
+    Delta_R("=LocalMarine", );
+    R_Date("LAB-2009", 868, 20)
+    {
+     Outlier("General", 0.05);
+    };
+    R_Date("LAB-2010", 891, 20)
+    {
+     Outlier("General", 0.05);
+    };
+    R_Date("LAB-2011", 874, 35)
+    {
+     Outlier("General", 0.05);
+    };
+   };
+   Boundary("Transition L2/L2u");
+   Phase("L2u")
+   {
+    R_Date("LAB-2012", 905, 20)
+    {
+     Outlier("General", 0.05);
+    };
+    R_Date("LAB-2013", 879, 22)
+    {
+     Outlier("General", 0.05);
+    };
+   };
+   Boundary("End Occupation");
+  };
+  Difference("Diff start to end", "End Occupation", "Start L4");
+ };
