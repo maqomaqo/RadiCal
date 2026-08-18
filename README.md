@@ -28,7 +28,14 @@ Boundaries), and interactive posterior visualization.
   calendar age and how steeply it is running, which is what decides how tightly anything can be
   dated there: near 1 the curve tracks calendar time, near 0 it is a plateau and a measurement
   spreads over centuries, below 0 it reverses and one measurement splits into disjoint ranges.
-  Expected temporal resolution (after Svetlik et al. 2019) and mixed curves are planned in
+- **Expected temporal resolution**: under the curve, on the same calendar axis, how tightly a date
+  from each year could be known *before anyone measures anything* — the method of Svetlik et al.
+  (2019), as implemented in [res14c](https://github.com/demjanp/res14c_online). Mean plus a
+  5th–95th percentile band for how lucky one date can be, with the assumed laboratory error
+  selectable (±15 for the best AMS, through ±25–30 for a typical commercial date) and a CSV
+  export. On IntCal20 it puts the Hallstatt plateau at about 310 years and the steep drop at its
+  start at 33 — a ninefold difference across 150 years, which is the difference between a date
+  worth having and one that is not. Mixed curves are still planned in
   [`docs/CURVE_MANAGER_PLAN.md`](docs/CURVE_MANAGER_PLAN.md).
 - **Bayesian chronological modelling**: an explicit model tree of nested Sequences, Phases,
   Boundaries and Hiatuses (the OxCal idiom), each date assigned to a Phase; TPQ/TAQ age limiters;
@@ -172,7 +179,8 @@ Full interactive documentation (generated from the actual FastAPI routes) is at
   `?archive=true` instead), `/api/curves/{id}/restore`, `/api/curves/{id}/usage` and
   `/api/curves/{id}/export`. `/api/curves/{id}/points` serves a windowed, decimated slice for the
   browser — min/max per bucket rather than every Nth point, so a curve's wiggles survive being
-  drawn at any zoom.
+  drawn at any zoom. `/api/curves/{id}/resolution` (and `.csv`) serves the expected-resolution
+  profile.
 - **Analysis** (`/api/analysis`, `/api/analysis/{id}`, `/api/analysis/calibrate`,
   `/api/analysis/calibrate-group`, `/api/analysis/bayesian`, plus rerun/duplicate/edit-inputs and
   model-tree endpoints) — create, run, retrieve, and manage analyses of all three types.
@@ -197,6 +205,7 @@ Full interactive documentation (generated from the actual FastAPI routes) is at
 
 ## References
 
+- Svetlik, I., et al. (2019). The best possible time resolution: how precise could a radiocarbon dating method be? Radiocarbon, 61(6).
 - Reimer, P. J., et al. (2020). IntCal20 Northern Hemisphere radiocarbon age calibration curve. Radiocarbon, 62(4).
 - Bronk Ramsey, C. (2009). Bayesian analysis of radiocarbon dates. Radiocarbon, 51(1).
 - Bronk Ramsey, C. (1995). Radiocarbon calibration and analysis of stratigraphy: the OxCal program. Radiocarbon, 37(2).

@@ -428,12 +428,12 @@ Each phase leaves the app working and is independently useful.
 | 2 | ~~`calibration_curves` table, import preview/store, lifecycle rules, export~~ — **done 2026-08-18**, see §9.2 | 1 | 4–5 h |
 | 3 | ~~`/curves` manager page + import dialog~~ — **done 2026-08-18**, see §9.3 | 2 | 4–5 h |
 | 4 | ~~Curve browser: curve panel, error bands, time scrubber, readout~~ — **done 2026-08-18**, see §9.4 | 1 (3 for the entry point) | 6–8 h |
-| 5 | Resolution service, endpoints, cache; resolution panel + plateau shading | 4 | 4–5 h |
+| 5 | ~~Resolution service, endpoints, cache; resolution panel~~ — **done 2026-08-18**, see §9.5 | 4 | 4–5 h |
 | 6 | Mixed curves: math, endpoint, builder UI, `Mix_Curves` in the OxCal importer | 2, 4 | 3–4 h |
 | 7 | Compare mode, simulate-a-date, CSV exports | 4, 5 | 3–4 h |
 | 8 | Docs: README features + API overview, `USER_MANUAL.md` section, `REMAINING_WORK.md` items 6 and 11 | all | 2 h |
 
-**Total ≈ 30–37 h**, of which phases 1-4 are done — ≈13–18 h remaining.
+**Total ≈ 30–37 h**, of which phases 1-5 are done — ≈8–12 h remaining.
 
 ### 9.1 What phase 1 actually landed
 
@@ -557,6 +557,54 @@ Backend only; the `/curves` page is phase 3.
   not the pointer is on the curve (measured: **77 px in every state**), with the description
   closed up under the figures rather than a flex gap away, and the chart trimmed to 380 px so the
   whole panel ends at 709 px.
+
+### 9.5 What phase 5 actually landed
+
+- `services/resolution.py`, written from the paper and this app's own `hpd_ranges_from_distribution`
+  rather than translated from res14c (§6.4). **Validated against res14c's published output: 0.36%
+  mean absolute difference over 1,000–4,000 cal BP, 1.39% maximum**, including the 33-year trough
+  at 2,750 cal BP.
+- Two performance claims from §6.3 held up: a browser window computes in **0.05 s**, and the whole
+  curve in **12–19 s**, so only the whole-curve path is cached — keyed on the curve's *content
+  hash*, since the builtin curve files are all overridable by environment variable.
+- §6.2's padding is not merely adequate but **exact**: a windowed profile returns numbers
+  identical to the same span of a wider run (asserted at `rtol=1e-9`). Slicing the cached
+  whole-curve profile for a wide request is therefore not an approximation.
+- One improvement on the plan's sketch: percentiles are computed from the *exact* weighted
+  distribution of widths per calendar year, gathered sparsely, rather than from a histogram. A
+  histogram puts a floor on the precision of the very numbers being reported — the 5th percentile
+  at the 2,750 trough is 24 years, which a 50-year bin cannot express.
+- `GET /api/curves/{id}/resolution` and `/resolution.csv` (the CSV in res14c's own column order,
+  so the two can be compared directly). The panel sits under the curve on a locked shared x-axis,
+  with the laboratory error selectable — 15 stays the default for comparability with the
+  published figures, with the ±25–30 most commercial dates carry one click away.
+- `tests/test_resolution.py` (16 tests, 1 skipped) asserts the *shape*: the plateau worse than
+  both its neighbours, the trough at its start better by a factor of three, monotonicity in u0,
+  and the windowing identity. The res14c parity test skips unless the fixture is generated —
+  `tests/fixtures/res14c/README.md` documents how, and why it is not committed.
+- Two things found by using it. Reading the plot's width at fetch time can return a few dozen
+  pixels if the layout is momentarily collapsed, which silently turned a 450-year window into 33
+  points — a staircase across exactly the sharpest features, from a request that looked perfectly
+  successful; the width is now floored. And the panel would have pushed the readout back below the
+  fold, so the curve gives up exactly the height the panel takes: measured at 713 px with it on,
+  709 px with it off.
+- Verified in the running app: over the Hallstatt window the panel reports **312 years at 2,605
+  cal BP and 33 at 2,748** — a ninefold change across 150 years — and the readout reads "a ±15 yr
+  measurement of a sample from this year calibrates to about 312 years at 95.4%".
+- Turning the panel off is supposed to give its height back to the curve, and did not: setting
+  only the container's CSS height grew the box while Plotly went on drawing at its old computed
+  height, leaving a blank 110px strip where the curve should have expanded. `useResizeHandler`
+  does not catch this — it listens for WINDOW resizes, and nothing about the window changed. The
+  height is now part of the Plotly *layout*, so the chart is redrawn at it: container, layout and
+  rendered SVG all read 380 with the panel off and 270 with it on.
+
+**Known limitation, for phase 7's readout work.** The resolution shown when hovering is the
+nearest *computed* year, and the profile is sampled at about one point per pixel — so at a
+55,000-year zoom the nearest sample can be a few dozen years away, and in a region where
+resolution swings by 300 years across 150 (the Hallstatt plateau being exactly that), the figure
+quoted for the hovered year can be off by a fifth. It is right at any zoom where the feature is
+resolvable, which is where anyone would read it, but the readout states it more precisely than a
+coarse view supports.
 
 ## 10. Open decisions
 

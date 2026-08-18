@@ -41,7 +41,7 @@ from app.database import SessionLocal, get_db
 from app.models import StoredCalibrationCurve
 from app.services.calibration import CalibrationCurve
 from app.schemas.curve import CurveMetadata, CurveMetadataUpdate, SLUG_PATTERN, slugify
-from app.services import curve_import, curve_registry, curve_view
+from app.services import curve_import, curve_registry, curve_view, resolution
 
 router = APIRouter()
 
@@ -122,6 +122,82 @@ async def curve_points(
     data = curve_view.window(curve, cal_from, cal_to, max_points)
     data['curve_id'] = curve_id
     return {"success": True, "data": data}
+
+
+# Beyond this span, the calculation takes long enough (about twelve seconds
+# for the whole 55,000 years) that it is served from the cached whole-curve
+# profile instead. Slicing that is exact, not an approximation -- a windowed
+# calculation pads far enough to return identical numbers.
+WIDE_SPAN_YEARS = 20000
+
+
+@router.get("/curves/{curve_id}/resolution")
+async def curve_resolution(
+    curve_id: str,
+    cal_from: Optional[float] = Query(None, description="Window start, cal BP"),
+    cal_to: Optional[float] = Query(None, description="Window end, cal BP"),
+    u0: float = Query(resolution.DEFAULT_U0, gt=0, le=500,
+                      description="Laboratory 1-sigma at 0 BP, scaled with age from there"),
+    stride: int = Query(5, ge=1, le=200, description="Report every N calendar years"),
+):
+    """
+    How tightly a date from each calendar age could be known, before anyone
+    measures anything -- Svetlik et al. (2019); see services/resolution.py.
+
+    Each point is [cal BP, mean resolution, 5th percentile, 95th percentile,
+    laboratory sigma assumed], all in years. The percentiles are the spread
+    over what a single date might return: how lucky or unlucky one measurement
+    of a sample from that year can be.
+    """
+    try:
+        curve = curve_registry.resolve(curve_id)
+        spec = curve_registry.get_spec(curve_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+    lo = spec.cal_min if cal_from is None else max(cal_from, spec.cal_min)
+    hi = spec.cal_max if cal_to is None else min(cal_to, spec.cal_max)
+    if hi < lo:
+        lo, hi = hi, lo
+
+    if hi - lo > WIDE_SPAN_YEARS:
+        whole = resolution.full_profile(curve, spec.content_sha256, u0=u0, stride=stride)
+        computed = resolution.slice_profile(whole, lo, hi)
+    else:
+        computed = resolution.profile(curve, lo, hi, u0=u0, stride=stride)
+
+    data = computed.as_dict()
+    data['curve_id'] = curve_id
+    data['cal_from'] = lo
+    data['cal_to'] = hi
+    return {"success": True, "data": data}
+
+
+@router.get("/curves/{curve_id}/resolution.csv")
+async def curve_resolution_csv(
+    curve_id: str,
+    u0: float = Query(resolution.DEFAULT_U0, gt=0, le=500),
+    stride: int = Query(5, ge=1, le=200),
+):
+    """
+    The whole curve's resolution profile as a CSV, in the column order res14c
+    publishes so the two can be compared directly.
+    """
+    try:
+        curve = curve_registry.resolve(curve_id)
+        spec = curve_registry.get_spec(curve_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+    computed = resolution.full_profile(curve, spec.content_sha256, u0=u0, stride=stride)
+    return StreamingResponse(
+        iter([resolution.to_csv(computed)]),
+        media_type='text/csv',
+        headers={
+            'Content-Disposition':
+                f'attachment; filename="{curve_id}-resolution-u{u0:g}.csv"'
+        },
+    )
 
 
 # --------------------------------------------------------------------------

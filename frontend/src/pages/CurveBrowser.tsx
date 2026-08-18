@@ -8,17 +8,26 @@ import {
   Chip,
   CircularProgress,
   Container,
+  FormControlLabel,
   Link,
   MenuItem,
   Paper,
   Stack,
+  Switch,
   TextField,
   Typography,
 } from '@mui/material'
 import Plotly from 'plotly.js-dist-min'
 import createPlotlyComponent from 'react-plotly.js/factory'
 import CurveScrubber from '@/components/CurveScrubber'
-import { fetchCurvePoints, type CurvePoint, type CurveSpec } from '@/api/curves'
+import {
+  fetchCurvePoints,
+  fetchResolution,
+  resolutionCsvUrl,
+  type CurvePoint,
+  type CurveSpec,
+  type ResolutionPoint,
+} from '@/api/curves'
 import { useCurves } from '@/hooks/useCurves'
 import { usePlotColors } from '@/theme/plotColors'
 import {
@@ -38,8 +47,25 @@ import {
   type Window,
 } from '@/utils/curveScrubber'
 import { describeSlope } from '@/utils/curveShape'
+import { resolutionStride } from '@/utils/resolutionStride'
 
 const Plot = createPlotlyComponent(Plotly)
+
+/**
+ * Laboratory uncertainties to offer, as the 1σ on a modern sample -- the
+ * method scales it with age from there.
+ *
+ * 15 is what res14c uses and roughly the best a good AMS laboratory offers,
+ * which is what makes its answer the *best possible* resolution. It is kept
+ * as the default for comparability with the published figures, with the
+ * ±25–30 most commercial dates actually carry one click away.
+ */
+const LAB_UNCERTAINTIES = [
+  { value: 15, label: '±15 yr (best AMS)' },
+  { value: 25, label: '±25 yr (typical)' },
+  { value: 30, label: '±30 yr' },
+  { value: 50, label: '±50 yr' },
+]
 
 /**
  * Look at a calibration curve.
@@ -99,6 +125,24 @@ export default function CurveBrowser() {
   // loaded rather than blanking mid-drag, which means the plot and the
   // scrubber can disagree about where you are -- so it has to say so.
   const [stale, setStale] = useState(false)
+  // The resolution profile, on the same calendar axis as the curve above it.
+  // Optional because it is a second request per window, and because a curve
+  // is worth looking at without it.
+  const [showResolution, setShowResolution] = useState(true)
+  const [resolution, setResolution] = useState<ResolutionPoint[]>([])
+  const [u0, setU0] = useState(15)
+  const [resolutionLoading, setResolutionLoading] = useState(false)
+
+  /**
+   * How wide the plot is, for deciding how many points to ask for.
+   *
+   * Floored, because this is read at fetch time and a layout that is
+   * momentarily collapsed -- a hidden tab, a panel mid-resize -- reads back a
+   * few dozen pixels. That silently turns a 450-year window into 33 points: a
+   * staircase where the curve's sharpest features are, drawn from a request
+   * that looked perfectly successful.
+   */
+  const plotWidth = () => Math.max(plotBoxRef.current?.clientWidth ?? 900, 600)
 
   useEffect(() => {
     setSpec(curves.find((c) => c.id === curveId) ?? null)
@@ -139,7 +183,7 @@ export default function CurveBrowser() {
   useEffect(() => {
     if (!window) return
     let active = true
-    const width = plotBoxRef.current?.clientWidth ?? 900
+    const width = plotWidth()
     const timer = setTimeout(() => {
       fetchCurvePoints(curveId, {
         calFrom: window.from,
@@ -161,10 +205,59 @@ export default function CurveBrowser() {
     }
   }, [curveId, window])
 
+  // Fetched per window like the curve itself. The calculation is exact for a
+  // window rather than an approximation of the whole-curve answer -- it pads
+  // far enough that the two are identical -- so there is no reason to compute
+  // 55,000 years to draw 400 of them.
+  useEffect(() => {
+    if (!window || !showResolution) return
+    let active = true
+    setResolutionLoading(true)
+    const width = plotWidth()
+    const timer = setTimeout(() => {
+      fetchResolution(curveId, {
+        calFrom: window.from,
+        calTo: window.to,
+        u0,
+        stride: resolutionStride(window.to - window.from, width),
+      })
+        .then((data) => {
+          if (active) setResolution(data.points)
+        })
+        .catch(() => {
+          if (active) setResolution([])
+        })
+        .finally(() => {
+          if (active) setResolutionLoading(false)
+        })
+    }, 200)
+    return () => {
+      active = false
+      clearTimeout(timer)
+    }
+  }, [curveId, window, u0, showResolution])
+
   const hovered = useMemo(
     () => (hover === null ? null : sampleAt(points, hover)),
     [hover, points]
   )
+
+  const hoveredResolution = useMemo(() => {
+    // Gated on the panel being shown, not just on having numbers: the fetch
+    // is skipped while it is off, so whatever is still in `resolution` was
+    // computed for whichever window was on screen when it was last on.
+    if (!showResolution || hover === null || resolution.length === 0) return null
+    let nearest = resolution[0]
+    let best = Infinity
+    for (const point of resolution) {
+      const distance = Math.abs(point[0] - hover)
+      if (distance < best) {
+        best = distance
+        nearest = point
+      }
+    }
+    return nearest
+  }, [hover, resolution, showResolution])
 
   const plotData = useMemo(() => {
     if (points.length === 0) return []
@@ -206,9 +299,23 @@ export default function CurveBrowser() {
     ]
   }, [points, colors, dateFormat, spec, curveId])
 
+  /**
+   * How tall the curve chart is, giving up exactly what the resolution panel
+   * takes so the readout below never moves.
+   *
+   * Passed to Plotly's LAYOUT as well as the container's style. Setting only
+   * the style grows the box while Plotly keeps drawing at its old computed
+   * height -- the chart stays 270px inside a 380px container, and turning the
+   * resolution panel off leaves a blank 110px strip where the curve should
+   * have expanded. `useResizeHandler` does not catch it either: it listens
+   * for WINDOW resizes, and nothing about the window changed.
+   */
+  const chartHeight = showResolution ? 270 : 380
+
   const layout = useMemo(() => {
     const ticks = window ? calendarAxisTicks(window.from, window.to, dateFormat) : null
     return {
+      height: chartHeight,
       title: { text: spec ? `${spec.name}` : curveId, font: { size: 16 } },
       xaxis: {
         title: { text: calendarAxisTitle(dateFormat) },
@@ -230,7 +337,7 @@ export default function CurveBrowser() {
       margin: { l: 70, r: 20, t: 50, b: 60 },
       autosize: true,
     }
-  }, [spec, curveId, dateFormat, colors, window])
+  }, [spec, curveId, dateFormat, colors, window, chartHeight])
 
   const config = useMemo(
     () => ({
@@ -327,14 +434,75 @@ export default function CurveBrowser() {
           layout={layout as any}
           config={config}
           useResizeHandler
-          // 380 rather than a rounder 400: with the readout sitting under the
-          // chart, this is what keeps the whole panel -- chart, readout,
-          // scrubber -- inside a 720px viewport, so the line you hovered to
-          // read is not below the fold.
-          style={{ width: '100%', height: '380px' }}
+          style={{ width: '100%', height: `${chartHeight}px` }}
           onHover={(event: any) => setHover(event?.points?.[0]?.x ?? null)}
           onUnhover={() => setHover(null)}
         />
+
+        {showResolution && (
+          <Box sx={{ mt: 0.5 }}>
+            <Plot
+              data={
+                [
+                  {
+                    // The 5th-95th band: how lucky or unlucky one date can be.
+                    x: [...resolution.map((p) => p[0]), ...resolution.map((p) => p[0]).reverse()],
+                    y: [
+                      ...resolution.map((p) => p[3]),
+                      ...resolution.map((p) => p[2]).reverse(),
+                    ],
+                    fill: 'toself',
+                    fillcolor: colors.hpd95,
+                    line: { width: 0, color: 'rgba(0,0,0,0)' },
+                    mode: 'lines',
+                    name: '5th–95th percentile',
+                    hoverinfo: 'skip',
+                  },
+                  {
+                    x: resolution.map((p) => p[0]),
+                    y: resolution.map((p) => p[1]),
+                    customdata: resolution.map((p) => formatCalendarAge(p[0], dateFormat)),
+                    mode: 'lines',
+                    line: { color: colors.hpd68, width: 1.5 },
+                    name: 'Mean',
+                    hovertemplate:
+                      '<b>%{customdata}</b><br>about %{y:.0f} years (95.4%)<extra></extra>',
+                  },
+                ] as any
+              }
+              layout={
+                {
+                  xaxis: {
+                    // Locked to the curve above rather than autoranged: the
+                    // two are read together, and an axis that drifted by a few
+                    // years would line a plateau up against the wrong stretch
+                    // of curve.
+                    range: [window.to, window.from],
+                    matches: 'x',
+                    showticklabels: false,
+                    gridcolor: colors.grid,
+                  },
+                  yaxis: {
+                    title: { text: 'Resolution (yr)', font: { size: 11 } },
+                    gridcolor: colors.grid,
+                    rangemode: 'tozero' as const,
+                  },
+                  showlegend: false,
+                  hovermode: 'x unified' as const,
+                  plot_bgcolor: colors.surface,
+                  paper_bgcolor: colors.surface,
+                  margin: { l: 70, r: 20, t: 4, b: 4 },
+                  autosize: true,
+                } as any
+              }
+              config={{ responsive: true, displayModeBar: false }}
+              useResizeHandler
+              style={{ width: '100%', height: '110px' }}
+              onHover={(event: any) => setHover(event?.points?.[0]?.x ?? null)}
+              onUnhover={() => setHover(null)}
+            />
+          </Box>
+        )}
 
         {/* Directly under the chart, and laid out identically whether or not
             the pointer is on the curve. Both matter: hovering used to grow
@@ -363,6 +531,15 @@ export default function CurveBrowser() {
                   ? `${hovered[3].toFixed(2)} ¹⁴C yr / cal yr — ${slope.label}`
                   : '—',
               ],
+              ...(showResolution
+                ? [[
+                    'Expected resolution',
+                    hoveredResolution
+                      ? `${hoveredResolution[1].toFixed(0)} yr ` +
+                        `(${hoveredResolution[2].toFixed(0)}–${hoveredResolution[3].toFixed(0)})`
+                      : '—',
+                  ] as [string, string]]
+                : []),
             ].map(([label, value]) => (
               <Box key={label}>
                 <Typography variant="caption" color="textSecondary" display="block" lineHeight={1.4}>
@@ -376,8 +553,13 @@ export default function CurveBrowser() {
           </Box>
           <Typography variant="caption" color="textSecondary" display="block" sx={{ mt: 0.5 }}>
             {hovered && slope
-              ? `${slope.detail}.`
-              : 'Point at the curve to read what it says there, and how steeply it is running.'}
+              ? `${slope.detail}.` +
+                (hoveredResolution
+                  ? ` A ±${u0.toFixed(0)} yr measurement of a sample from this year` +
+                    ` calibrates to about ${hoveredResolution[1].toFixed(0)} years at 95.4%.`
+                  : '')
+              : 'Point at the curve to read what it says there, how steeply it is running,' +
+                ' and how tightly a date from that year could be known.'}
           </Typography>
         </Box>
 
@@ -407,6 +589,42 @@ export default function CurveBrowser() {
           <Button size="small" onClick={() => setPreset(2350, 2800)}>
             Hallstatt plateau
           </Button>
+          <Box sx={{ flexGrow: 1 }} />
+          <FormControlLabel
+            control={
+              <Switch
+                size="small"
+                checked={showResolution}
+                onChange={(e) => setShowResolution(e.target.checked)}
+              />
+            }
+            label={
+              <Typography variant="body2">
+                Expected resolution{resolutionLoading ? ' …' : ''}
+              </Typography>
+            }
+          />
+          {showResolution && (
+            <>
+              <TextField
+                select
+                size="small"
+                label="Lab ±1σ"
+                value={u0}
+                onChange={(e) => setU0(Number(e.target.value))}
+                sx={{ minWidth: 130 }}
+              >
+                {LAB_UNCERTAINTIES.map((option) => (
+                  <MenuItem key={option.value} value={option.value}>
+                    {option.label}
+                  </MenuItem>
+                ))}
+              </TextField>
+              <Button size="small" component="a" href={resolutionCsvUrl(curveId, u0)}>
+                Export CSV
+              </Button>
+            </>
+          )}
         </Stack>
       </Paper>
 

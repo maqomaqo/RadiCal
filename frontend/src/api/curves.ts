@@ -70,6 +70,21 @@ export interface CurveWindow {
   curve_cal_max: number
 }
 
+/**
+ * One point of a resolution profile: calendar age (cal BP), the mean 95.45%
+ * range width a date from that year would come out with, the 5th and 95th
+ * percentiles of that width, and the laboratory 1σ assumed at that age.
+ */
+export type ResolutionPoint = [number, number, number, number, number]
+
+export interface ResolutionProfile {
+  curve_id: string
+  cal_from: number
+  cal_to: number
+  u0: number
+  points: ResolutionPoint[]
+}
+
 /** What the import preview endpoint reports about an uploaded file. */
 export interface CurveImportPreview {
   ok: boolean
@@ -271,6 +286,33 @@ export async function fetchCurvePoints(
   const response = await fetch(`/api/curves/${curveId}/points?${params}`)
   const parsed = await readOrThrow(response)
   return parsed.data as CurveWindow
+}
+
+/**
+ * How tightly a date from each calendar age could be known, before anyone
+ * measures anything (Svetlik et al. 2019).
+ *
+ * `u0` is the laboratory 1σ at 0 BP, which the method scales with age. 15 is
+ * the reference implementation's default and about the best a good AMS lab
+ * offers; most commercial dates are ±25–30.
+ */
+export async function fetchResolution(
+  curveId: string,
+  options: { calFrom?: number; calTo?: number; u0?: number; stride?: number } = {}
+): Promise<ResolutionProfile> {
+  const params = new URLSearchParams()
+  if (options.calFrom !== undefined) params.set('cal_from', String(Math.round(options.calFrom)))
+  if (options.calTo !== undefined) params.set('cal_to', String(Math.round(options.calTo)))
+  if (options.u0 !== undefined) params.set('u0', String(options.u0))
+  if (options.stride !== undefined) params.set('stride', String(options.stride))
+  const response = await fetch(`/api/curves/${curveId}/resolution?${params}`)
+  const parsed = await readOrThrow(response)
+  return parsed.data as ResolutionProfile
+}
+
+/** Where the whole resolution profile can be downloaded as CSV. */
+export function resolutionCsvUrl(curveId: string, u0: number): string {
+  return `/api/curves/${curveId}/resolution.csv?u0=${u0}`
 }
 
 /** Where a curve can be downloaded from, as the file it was imported from. */
