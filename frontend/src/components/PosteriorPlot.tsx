@@ -11,6 +11,7 @@ import {
 } from '@/utils/dateFormat'
 import type { HPDRange } from '@/utils/dateFormat'
 import { usePlotColors } from '@/theme/plotColors'
+import { PNG_EXPORT_SCALE, exportFilename } from '@/utils/plotExport'
 
 /**
  * A filled rectangle in data coordinates, as a closed polygon trace -- same
@@ -354,8 +355,13 @@ export default function PosteriorPlot({
       displayModeBar: true,
       displaylogo: false,
       modeBarButtonsToRemove: ['lasso2d', 'select2d'],
+      toImageButtonOptions: {
+        format: 'png' as const,
+        scale: PNG_EXPORT_SCALE,
+        filename: exportFilename(sampleName ? `posterior-${sampleName}` : 'posterior'),
+      },
     }),
-    []
+    [sampleName]
   )
 
   if (plotData.length === 0) {

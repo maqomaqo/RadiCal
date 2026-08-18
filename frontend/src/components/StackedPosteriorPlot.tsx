@@ -13,6 +13,7 @@ import type { HPDRange } from '@/utils/dateFormat'
 import { stackedPlotGeometry } from '@/utils/stackedPlotGeometry'
 import { toUnitArea } from '@/utils/distribution'
 import { usePlotColors } from '@/theme/plotColors'
+import { PNG_EXPORT_SCALE } from '@/utils/plotExport'
 
 // Same binding as PosteriorPlot -- see the note there for why the factory is
 // bound to the packaged plotly.js rather than a CDN global.
@@ -430,6 +431,13 @@ export default function StackedPosteriorPlot({
       displayModeBar: true,
       displaylogo: false,
       modeBarButtonsToRemove: ['lasso2d', 'select2d'],
+      // This is the figure most likely to end up in a paper, so it is the
+      // one that most needs not to be a screenshot -- see PNG_EXPORT_SCALE.
+      toImageButtonOptions: {
+        format: 'png' as const,
+        scale: PNG_EXPORT_SCALE,
+        filename: 'posterior-stack',
+      },
     }),
     []
   )
