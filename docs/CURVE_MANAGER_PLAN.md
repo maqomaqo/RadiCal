@@ -714,10 +714,11 @@ Backend only; the `/curves` page is phase 3.
 
 1. **The `res14c` parity fixture** — regenerate-locally-and-skip (recommended, §6.4) versus a
    committed decimated slice with attribution.
-2. **`u₀` presets.** Default 15 yr at 0 BP follows the reference implementation, but most
-   commercial AMS dates are ±25–30. Offer a preset selector (15 / 25 / 30 / custom), and decide
-   whether the *displayed default* should be 25 — more representative of what users actually
-   send to a lab, at the cost of parity with the published figures.
+2. ~~**`u₀` presets.**~~ **Decided 2026-08-18: the default is ±25**, front and back, with 15 one
+   click away. It is what a commercial date carries, and the question anyone opens this panel
+   with is "can I date this period well enough", not "what would the best laboratory in the world
+   manage". Parity with the published figures is kept where it belongs — the res14c test now
+   asks for `u0=15` explicitly, rather than inheriting a default it silently depended on.
 3. **Where the browser is reachable from.** `/curves` is certain; whether the curve chip beside a
    date on the Results page should deep-link into the browser at that date's own calendar range
    is a nice touch with a small amount of plumbing behind it.

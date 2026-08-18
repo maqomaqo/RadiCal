@@ -221,13 +221,16 @@ a single date can be.
 The method is Svetlik et al. (2019): for every radiocarbon age a sample of that period could
 plausibly return, the laboratory error is scaled with age, the measurement calibrated, and the width
 of its calibrated range recorded; those widths are then averaged over the measurements that period
-could actually yield. **Lab ±1σ** sets the precision assumed — 15 years is about the best a good AMS
-laboratory offers, which is why the method describes the *best possible* resolution; most commercial
-dates are ±25 to ±30.
+could actually yield. **Lab ±1σ** sets the precision assumed. It starts at ±25, which is what a
+commercial date typically carries; ±15 is about the best a good AMS laboratory offers, and is the
+figure the method's published curves use — which is why it describes the *best possible*
+resolution.
 
-Read it as a planning tool. On IntCal20 the Hallstatt plateau sits at roughly 310 years while the
-drop at its start is 33 — a ninefold difference across 150 years, and the difference between a date
-worth commissioning and one that will not answer your question. **Export profile** saves the whole
+Read it as a planning tool. On IntCal20 at the default ±25, the Hallstatt plateau sits at about 330
+years while the drop at its start is 103 — and at the ±15 of the best AMS work, 312 against 33. The
+gap between those two places is far larger than the gap between a good laboratory and an ordinary
+one, which is the point: where you are on the curve matters more than what you pay for the
+measurement. **Export profile** saves the whole
 curve's profile as CSV; **Export this window** saves the visible stretch of the curve itself.
 
 ## Model Structure (Bayesian only)

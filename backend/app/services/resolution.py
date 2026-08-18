@@ -45,11 +45,17 @@ from app.services.calibration import CalibrationCurve, hpd_ranges_from_distribut
 # reported on.)
 MEAN_LIFE_DOUBLED = 2 * 8033.0
 
-# The reference implementation's default: a 15-year uncertainty on a modern
-# sample, which is about the best a good AMS laboratory offers. Most
-# commercial dates are +/-25 or +/-30, so this is the optimistic end -- what
-# the method calls the BEST POSSIBLE resolution.
-DEFAULT_U0 = 15.0
+# The laboratory uncertainty assumed when none is given: 25 years on a modern
+# sample, which is what a commercial date typically carries.
+#
+# The reference implementation defaults to 15, which is about the best a good
+# AMS laboratory offers and is why the method is titled "the best possible
+# time resolution". That is the right default for reproducing its published
+# figures and the wrong one for answering "can I date this period well
+# enough", which is what anyone here is actually asking: it would quote a
+# precision most samples will not get. 15 remains one click away, and the
+# parity test against res14c asks for it explicitly.
+DEFAULT_U0 = 25.0
 
 # 2 sigma, and the same 95.45% the rest of this app reports HPD ranges at.
 CONFIDENCE = 0.9545
@@ -103,6 +109,16 @@ def _padding(curve_sigma_max: float, u_max: float) -> float:
     every measurement that could contribute, converted to calendar years at
     the roughly one-to-one rate the curve runs at. The floor keeps a narrow
     window on a flat stretch honest, where the local rate is far below one.
+
+    That one-to-one conversion is the approximation. A curve running shallower
+    than one spreads a distribution further in calendar years than in
+    radiocarbon years, by roughly the inverse of its slope. On the three
+    bundled curves the floor absorbs this -- a windowed profile matches a
+    whole-curve one to about one part in a billion -- but a curve holding a
+    shallow constant slope for well over a thousand years reaches one part in
+    10^5 at a window's outermost point (measured in test_resolution.py, on a
+    synthetic curve built to provoke it). Worth knowing before trusting this
+    on a curve unlike the real ones.
     """
     return max(500.0, SIGMA_REACH * float(np.hypot(curve_sigma_max, u_max)))
 

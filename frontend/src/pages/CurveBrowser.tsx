@@ -62,10 +62,11 @@ const Plot = createPlotlyComponent(Plotly)
  * Laboratory uncertainties to offer, as the 1σ on a modern sample -- the
  * method scales it with age from there.
  *
- * 15 is what res14c uses and roughly the best a good AMS laboratory offers,
- * which is what makes its answer the *best possible* resolution. It is kept
- * as the default for comparability with the published figures, with the
- * ±25–30 most commercial dates actually carry one click away.
+ * 25 by default, which is what a commercial date typically carries. 15 is
+ * what res14c uses and roughly the best a good AMS laboratory offers -- the
+ * right figure for reproducing the published curves, and the wrong one for
+ * answering "can I date this period well enough", since it quotes a precision
+ * most samples will not get.
  */
 const LAB_UNCERTAINTIES = [
   { value: 15, label: '±15 yr (best AMS)' },
@@ -199,7 +200,7 @@ export default function CurveBrowser() {
   // first view costs one request rather than two.
   const [showResolution, setShowResolution] = useState(false)
   const [resolution, setResolution] = useState<ResolutionPoint[]>([])
-  const [u0, setU0] = useState(15)
+  const [u0, setU0] = useState(25)
   const [resolutionLoading, setResolutionLoading] = useState(false)
   // Comparison against a second curve, and the difference between them --
   // which is the part worth looking at, since two curves drawn over each

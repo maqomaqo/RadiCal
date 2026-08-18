@@ -39,10 +39,11 @@ Boundaries), and interactive posterior visualization.
   from each year could be known *before anyone measures anything* — the method of Svetlik et al.
   (2019), as implemented in [res14c](https://github.com/demjanp/res14c_online). Mean plus a
   5th–95th percentile band for how lucky one date can be, with the assumed laboratory error
-  selectable (±15 for the best AMS, through ±25–30 for a typical commercial date) and a CSV
-  export. On IntCal20 it puts the Hallstatt plateau at about 310 years and the steep drop at its
-  start at 33 — a ninefold difference across 150 years, which is the difference between a date
-  worth having and one that is not.
+  selectable — ±25 by default, what a commercial date typically carries, down to the ±15 of the
+  best AMS work — and a CSV export. On IntCal20 at ±25 it puts the Hallstatt plateau at about 330
+  years against 103 at the steep drop into it; at ±15 the same two points are 312 and 33. Either
+  way it is the difference between a date worth commissioning and one that will not answer the
+  question.
 - **Mixed curves**: OxCal's `Mix_Curves`, for a sample whose carbon came from more than one
   reservoir — a human or animal with a partly marine diet, whose bone is neither terrestrial nor
   marine carbon and is wrong by centuries against either curve alone. Built from two curves and a
