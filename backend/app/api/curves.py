@@ -41,7 +41,7 @@ from app.database import SessionLocal, get_db
 from app.models import StoredCalibrationCurve
 from app.services.calibration import CalibrationCurve
 from app.schemas.curve import CurveMetadata, CurveMetadataUpdate, SLUG_PATTERN, slugify
-from app.services import curve_import, curve_registry
+from app.services import curve_import, curve_registry, curve_view
 
 router = APIRouter()
 
@@ -96,6 +96,32 @@ async def get_curves_by_type(curve_type: str):
         if spec.type == curve_type
     ]
     return {"success": True, "data": curves}
+
+
+@router.get("/curves/{curve_id}/points")
+async def curve_points(
+    curve_id: str,
+    cal_from: Optional[float] = Query(None, description="Window start, cal BP"),
+    cal_to: Optional[float] = Query(None, description="Window end, cal BP"),
+    max_points: int = Query(curve_view.DEFAULT_MAX_POINTS, ge=2, le=curve_view.MAX_MAX_POINTS),
+):
+    """
+    A drawable slice of a curve: [cal BP, 14C age, 1-sigma, slope] rows.
+
+    Windowed and decimated server-side, because the browser asks for this again
+    on every zoom and a 9,501-point payload per zoom step would be wasteful --
+    and because the decimation has to be min/max per bucket (see
+    services/curve_view) rather than every Nth point, which is a decision that
+    belongs with the curve rather than with whichever client is drawing it.
+    """
+    try:
+        curve = curve_registry.resolve(curve_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+    data = curve_view.window(curve, cal_from, cal_to, max_points)
+    data['curve_id'] = curve_id
+    return {"success": True, "data": data}
 
 
 # --------------------------------------------------------------------------

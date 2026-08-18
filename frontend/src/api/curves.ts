@@ -49,6 +49,27 @@ export interface CurveSpec {
   source_filename: string | null
 }
 
+/**
+ * One point of a curve, as the browser draws it: calendar age (cal BP),
+ * radiocarbon age, the curve's own 1σ there, and the local gradient in
+ * radiocarbon years per calendar year.
+ */
+export type CurvePoint = [number, number, number, number]
+
+export interface CurveWindow {
+  curve_id: string
+  cal_from: number
+  cal_to: number
+  points: CurvePoint[]
+  point_count: number
+  /** How many points the window holds before decimation. */
+  points_in_window: number
+  decimated: boolean
+  /** The whole curve's extent, so a scrubber can be drawn without a second request. */
+  curve_cal_min: number
+  curve_cal_max: number
+}
+
 /** What the import preview endpoint reports about an uploaded file. */
 export interface CurveImportPreview {
   ok: boolean
@@ -229,6 +250,27 @@ export async function fetchUsage(curveId: string): Promise<CurveUsage> {
   const response = await fetch(`/api/curves/${curveId}/usage`)
   const parsed = await readOrThrow(response)
   return parsed.data as CurveUsage
+}
+
+/**
+ * A drawable window of a curve.
+ *
+ * Windowed and decimated by the backend rather than here: the decimation has
+ * to keep each bucket's extremes (a curve's wiggles are the whole point of
+ * looking at one) and that decision belongs with the curve, not with whichever
+ * client is drawing it.
+ */
+export async function fetchCurvePoints(
+  curveId: string,
+  options: { calFrom?: number; calTo?: number; maxPoints?: number } = {}
+): Promise<CurveWindow> {
+  const params = new URLSearchParams()
+  if (options.calFrom !== undefined) params.set('cal_from', String(Math.round(options.calFrom)))
+  if (options.calTo !== undefined) params.set('cal_to', String(Math.round(options.calTo)))
+  if (options.maxPoints !== undefined) params.set('max_points', String(options.maxPoints))
+  const response = await fetch(`/api/curves/${curveId}/points?${params}`)
+  const parsed = await readOrThrow(response)
+  return parsed.data as CurveWindow
 }
 
 /** Where a curve can be downloaded from, as the file it was imported from. */

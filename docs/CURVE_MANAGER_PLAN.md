@@ -427,13 +427,13 @@ Each phase leaves the app working and is independently useful.
 | 1 | ~~Registry + wire the frontend to it; retire the five hardcoded lists; fix the metadata (`REMAINING_WORK` item 6)~~ — **done 2026-08-18**, see §9.1 | — | 3–4 h |
 | 2 | ~~`calibration_curves` table, import preview/store, lifecycle rules, export~~ — **done 2026-08-18**, see §9.2 | 1 | 4–5 h |
 | 3 | ~~`/curves` manager page + import dialog~~ — **done 2026-08-18**, see §9.3 | 2 | 4–5 h |
-| 4 | Curve browser: curve panel, error bands, time scrubber, readout | 1 (3 for the entry point) | 6–8 h |
+| 4 | ~~Curve browser: curve panel, error bands, time scrubber, readout~~ — **done 2026-08-18**, see §9.4 | 1 (3 for the entry point) | 6–8 h |
 | 5 | Resolution service, endpoints, cache; resolution panel + plateau shading | 4 | 4–5 h |
 | 6 | Mixed curves: math, endpoint, builder UI, `Mix_Curves` in the OxCal importer | 2, 4 | 3–4 h |
 | 7 | Compare mode, simulate-a-date, CSV exports | 4, 5 | 3–4 h |
 | 8 | Docs: README features + API overview, `USER_MANUAL.md` section, `REMAINING_WORK.md` items 6 and 11 | all | 2 h |
 
-**Total ≈ 30–37 h**, of which phases 1-3 are done — ≈19–25 h remaining.
+**Total ≈ 30–37 h**, of which phases 1-4 are done — ≈13–18 h remaining.
 
 ### 9.1 What phase 1 actually landed
 
@@ -516,6 +516,47 @@ Backend only; the `/curves` page is phase 3.
   readable message, the imported curve then offered in the New Analysis picker, and deleted again
   through the confirmation dialog — which correctly reported that nothing was calibrated against
   it.
+
+### 9.4 What phase 4 actually landed
+
+- `GET /api/curves/{id}/points` + `services/curve_view.py`. Decimation is min/max per bucket, as
+  §5 required. Local gradient is computed alongside, and this is where the plan needed
+  correcting: a per-grid-step gradient is unusable, because IntCal20's 1-year stretch makes it
+  swing between +4 and −3 across ground that is flat at any scale a person cares about. Measured
+  over a fixed **50-year half-span** instead, chosen against three known stretches of IntCal20 —
+  the Hallstatt plateau reads 0.31, ordinary curve 0.91, the early Holocene 1.05 — with the
+  measurements written into the constant's comment.
+- `pages/CurveBrowser.tsx` at `/curves/:curveId/browse`, reachable from the curve name and a
+  chart icon in the library. Plotly curve with ±1σ/±2σ bands, `autorange: 'reversed'` to match
+  every other plot in the app, the calendar axis following the cal BP / BC-AD / BCE-CE
+  preference, and presets for the whole curve, the Holocene and the Hallstatt plateau.
+- `components/CurveScrubber.tsx` + `utils/curveScrubber.ts` — the full-range strip, as an SVG
+  rather than a second Plotly figure: it needs a drag that moves a window, not one that pans a
+  chart. The geometry is pure and tested (18 tests) because every way it can fail — drift on
+  repeated drags, sliding off the end of the curve, inverting when handles cross — renders
+  perfectly happily.
+- Three things worth recording, none of them anticipated:
+  - The scrubber was written **mirrored**. Both existing plots reverse the calendar axis, so
+    older is on the left; a scrubber running the other way moves the view backwards from the
+    drag. Caught by checking `PosteriorPlot`'s axis config rather than by luck, and now asserted.
+  - A window containing exactly *one* grid point draws nothing, just as an empty one does.
+    `curve_view` widens for **fewer than two**, not for zero — and a window landing exactly on a
+    grid point is the common way to get one.
+  - The windowed refetch swallowed its errors, which left the plot showing one window while the
+    scrubber showed another, silently. It now says so without blanking the chart.
+- Verified in the running app: the Hallstatt preset resolves the plateau's real structure, the
+  readout calls 2780 cal BP "ordinary" (1.47), 2600 and 2560 "reversal" (−0.50, −0.29 — the
+  genuine inversions that split dates there into disjoint ranges) and 2430 "plateau" (0.11);
+  BC/AD switching relabels the axis in round years (800 BC, 700 BC…) and the readout to 481 BC;
+  and dragging the scrubber 100 px moved the window by exactly the expected 4,911 years with its
+  width preserved.
+- The readout was reworked after use: it sat below the scrubber and the buttons, grew by 68 px on
+  hover (79 → 147), and its bottom landed at 853 px in a 720 px viewport — so hovering moved the
+  page under the pointer that had just triggered it, and the sentence you were hovering to read
+  was below the fold. It is now directly under the chart, laid out in the same shape whether or
+  not the pointer is on the curve (measured: **77 px in every state**), with the description
+  closed up under the figures rather than a flex gap away, and the chart trimmed to 380 px so the
+  whole panel ends at 709 px.
 
 ## 10. Open decisions
 

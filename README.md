@@ -20,8 +20,16 @@ Boundaries), and interactive posterior visualization.
   — a correction is a new curve, not an edit — and a curve something has been calibrated against
   cannot be deleted, only archived, so an analysis that used it still reruns. The **Curves** page
   is where they are imported, described, downloaded and archived, and it shows what was measured
-  from each curve — points, range, calendar grid — beside it. Mixed curves and the visual curve
-  browser are planned in [`docs/CURVE_MANAGER_PLAN.md`](docs/CURVE_MANAGER_PLAN.md).
+  from each curve — points, range, calendar grid — beside it.
+- **Curve browser**: look at any curve's shape with its own ±1σ/±2σ error bounds, scrolled and
+  zoomed along the calendar axis. A strip under the plot shows the whole 55,000 years with the
+  current view marked — drag it to move, drag an edge to zoom, click to jump — because panning
+  inside a chart never says *where* you are. Hovering reports what the curve says at that
+  calendar age and how steeply it is running, which is what decides how tightly anything can be
+  dated there: near 1 the curve tracks calendar time, near 0 it is a plateau and a measurement
+  spreads over centuries, below 0 it reverses and one measurement splits into disjoint ranges.
+  Expected temporal resolution (after Svetlik et al. 2019) and mixed curves are planned in
+  [`docs/CURVE_MANAGER_PLAN.md`](docs/CURVE_MANAGER_PLAN.md).
 - **Bayesian chronological modelling**: an explicit model tree of nested Sequences, Phases,
   Boundaries and Hiatuses (the OxCal idiom), each date assigned to a Phase; TPQ/TAQ age limiters;
   an optional outlier model per date. Solved exactly where the model permits it, and by OxCal's own
@@ -162,7 +170,9 @@ Full interactive documentation (generated from the actual FastAPI routes) is at
   `/api/curves/import/preview` (parse only, stores nothing), `POST /api/curves`,
   `PATCH /api/curves/{id}` (editorial fields only), `DELETE /api/curves/{id}` (409 while in use,
   `?archive=true` instead), `/api/curves/{id}/restore`, `/api/curves/{id}/usage` and
-  `/api/curves/{id}/export`.
+  `/api/curves/{id}/export`. `/api/curves/{id}/points` serves a windowed, decimated slice for the
+  browser — min/max per bucket rather than every Nth point, so a curve's wiggles survive being
+  drawn at any zoom.
 - **Analysis** (`/api/analysis`, `/api/analysis/{id}`, `/api/analysis/calibrate`,
   `/api/analysis/calibrate-group`, `/api/analysis/bayesian`, plus rerun/duplicate/edit-inputs and
   model-tree endpoints) — create, run, retrieve, and manage analyses of all three types.

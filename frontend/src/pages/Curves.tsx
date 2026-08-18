@@ -11,6 +11,7 @@ import {
   DialogContent,
   DialogTitle,
   IconButton,
+  Link,
   Paper,
   Stack,
   Table,
@@ -26,8 +27,10 @@ import {
 import AddIcon from '@mui/icons-material/Add'
 import DeleteIcon from '@mui/icons-material/Delete'
 import DownloadIcon from '@mui/icons-material/Download'
+import ShowChartIcon from '@mui/icons-material/ShowChart'
 import EditIcon from '@mui/icons-material/Edit'
 import UnarchiveIcon from '@mui/icons-material/Unarchive'
+import { Link as RouterLink } from 'react-router-dom'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import ImportCurveDialog from '@/components/ImportCurveDialog'
 import {
@@ -223,9 +226,15 @@ export default function Curves() {
                 <TableRow key={spec.id} sx={{ opacity: spec.archived ? 0.55 : 1 }}>
                   <TableCell>
                     <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
-                      <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                      <Link
+                        component={RouterLink}
+                        to={`/curves/${spec.id}/browse`}
+                        variant="body2"
+                        underline="hover"
+                        sx={{ fontWeight: 600 }}
+                      >
                         {spec.name}
-                      </Typography>
+                      </Link>
                       {spec.kind === 'builtin' ? (
                         <Chip size="small" label="bundled" variant="outlined" />
                       ) : (
@@ -254,6 +263,16 @@ export default function Curves() {
                   </TableCell>
                   <TableCell align="right">
                     <Stack direction="row" spacing={0} justifyContent="flex-end">
+                      <Tooltip title="Look at this curve's shape and error bounds">
+                        <IconButton
+                          size="small"
+                          component={RouterLink}
+                          to={`/curves/${spec.id}/browse`}
+                          aria-label={`Browse ${spec.name}`}
+                        >
+                          <ShowChartIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
                       <Tooltip title="Download this curve as a .14c file">
                         <IconButton
                           size="small"

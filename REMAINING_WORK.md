@@ -186,7 +186,7 @@ project*. Still missing: Excel-formatted output, and importing measurements
 directly into an analysis (as opposed to via a project collection). ~2 hours.
 
 ### 11. Calibration curve management UI
-Planned in full in `docs/CURVE_MANAGER_PLAN.md`. **Phases 1-3 are done**:
+Planned in full in `docs/CURVE_MANAGER_PLAN.md`. **Phases 1-4 are done**:
 the registry behind all of it (see #6), and the backend for user-imported
 curves — parse-then-store preview, `.14c`/CSV/BC-AD reading, immutable curve
 data guarded by a content hash checked on every load, archive-rather-than-
@@ -196,9 +196,13 @@ imports, and byte-for-byte export. Covered by `tests/test_curve_import.py`
 …and the `/curves` page over it: import dialog with a preview of the curve
 before anything is stored, editable description/citation/aliases, download,
 archive/restore, and a delete that asks what is using the curve first.
-**Remaining:** the visual curve browser (phase 4), res14c-style resolution
-profiles (5), mixed curves — the mixing math still isn't implemented (6),
-compare/simulate (7) and docs (8). ~19–25 hours.
+…and the curve browser at `/curves/{id}/browse`: curve shape with ±1σ/±2σ
+bands, a full-range time scrubber, a windowed `/points` endpoint whose
+decimation keeps each bucket's extremes, and a hover readout reporting the
+local gradient.
+**Remaining:** res14c-style resolution profiles (phase 5), mixed curves — the
+mixing math still isn't implemented (6), compare/simulate (7) and docs (8).
+~13–18 hours.
 
 ---
 
@@ -275,11 +279,12 @@ each is a real edge.
 - **Not covered:** `harris_matrix.py` still has no tests at all — consistent
   with it being unused by the frontend; see #6 above. `results.py` and
   `curves.py` are no longer in this list.
-- **Frontend: 103 tests** (Vitest, `npm test` in `frontend/`), in
+- **Frontend: 127 tests** (Vitest, `npm test` in `frontend/`), in
   `utils/harrisLayout.test.ts` (27), `components/ModelTreeEditor.test.ts` (15),
   `utils/distribution.test.ts` (12), `utils/hpd.test.ts` (10),
-  `api/curves.test.ts` (9), `components/ImportCurveDialog.test.ts` (8),
-  `utils/stackedPlotGeometry.test.ts` (7), `utils/plotExport.test.ts` (5),
+  `utils/curveScrubber.test.ts` (18), `api/curves.test.ts` (9),
+  `components/ImportCurveDialog.test.ts` (8), `utils/stackedPlotGeometry.test.ts` (7),
+  `utils/curveShape.test.ts` (6), `utils/plotExport.test.ts` (5),
   `theme/diagramColors.test.ts` (5) and
   `components/ProjectSampleTable.test.ts` (5). Most of these cover geometry that
   cannot be verified any other way: React Flow and Plotly draw into measured
