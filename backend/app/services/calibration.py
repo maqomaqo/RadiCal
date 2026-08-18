@@ -547,13 +547,6 @@ def load_shcal20() -> Optional[CalibrationCurve]:
     return CalibrationCurve([], [], [])
 
 
-_CURVE_LOADERS = {
-    'intcal20': load_intcal20,
-    'marine20': load_marine20,
-    'shcal20': load_shcal20,
-}
-
-
 def get_curve(curve_id: str) -> CalibrationCurve:
     """
     Shared curve lookup used by both the single-sample calibration endpoint
@@ -572,15 +565,15 @@ def get_curve(curve_id: str) -> CalibrationCurve:
     here, so this check is defense-in-depth for any other caller of
     get_curve() directly.
 
+    Which curves exist is services/curve_registry.py's question, not this
+    module's -- this is now a thin delegation to it, kept because fourteen
+    call sites (several inside solvers) import it by this name. The import is
+    function-level to break the cycle: the registry loads curves through the
+    loaders above, so it imports this module at module level and this module
+    cannot import it back the same way.
+
     Loaders are lru_cache'd, so the (fairly large) .14c files are parsed
     once per process rather than on every request.
     """
-    if curve_id not in _CURVE_LOADERS:
-        raise ValueError(
-            f"Unknown calibration curve '{curve_id}'. "
-            f"Supported curves: {', '.join(sorted(_CURVE_LOADERS))}"
-        )
-    curve = _CURVE_LOADERS[curve_id]()
-    if curve is None or len(curve.cal_ages) == 0:
-        raise ValueError(f"Calibration curve '{curve_id}' data is not available")
-    return curve
+    from app.services.curve_registry import resolve
+    return resolve(curve_id)

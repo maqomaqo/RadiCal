@@ -7,6 +7,7 @@ import NewAnalysis from '@/pages/NewAnalysis'
 import Stratigraphy from '@/pages/Stratigraphy'
 import Results from '@/pages/Results'
 import Projects from '@/pages/Projects'
+import Curves from '@/pages/Curves'
 import ProjectDetail from '@/pages/ProjectDetail'
 
 // MUI's default shadows are tuned (offset/blur/spread) per elevation level,
@@ -73,6 +74,7 @@ function App() {
             <Route path="/analysis/:analysisId/edit/model-structure" element={<Stratigraphy />} />
             <Route path="/results/:analysisId" element={<Results />} />
             <Route path="/projects" element={<Projects />} />
+            <Route path="/curves" element={<Curves />} />
             <Route path="/projects/:projectId" element={<ProjectDetail />} />
           </Routes>
         </Router>

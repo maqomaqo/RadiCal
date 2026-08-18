@@ -76,6 +76,80 @@ class ProjectSample(Base):
     project = relationship('Project', back_populates='samples')
 
 
+class StoredCalibrationCurve(Base):
+    """
+    A calibration curve the user added, as opposed to the three shipped with
+    the app (those stay files on disk -- see services/curve_registry.py, which
+    serves both kinds behind one interface).
+
+    Two rules shape this table, both about not invalidating results that have
+    already been published:
+
+    A stored curve's NUMBERS never change. `source_text` holds the uploaded
+    file verbatim -- for provenance, for re-download, and because its header
+    comments carry the citation -- and `parse_options` records how it was read
+    (which columns, which calendar convention), so re-parsing it is
+    deterministic. `content_sha256` is checked against the re-parsed rows on
+    every load, so a parser change years from now cannot silently move a
+    curve underneath an analysis that was run against it. Correcting a curve
+    means adding a new one, not editing this row; only the editorial fields
+    (name, description, reference, doi) are mutable, and those are read fresh
+    rather than cached.
+
+    A curve in use cannot be deleted. `archived` hides it from the pickers
+    while leaving it resolvable, which is what a rerun of an older analysis
+    needs -- see api/curves.py for where that is enforced. This is the same
+    trade ProjectSample's docstring describes for dates: a saved result must
+    keep matching the inputs displayed alongside it.
+    """
+    __tablename__ = "calibration_curves"
+
+    # The slug a date's curve_id points at, chosen at import time. A primary
+    # key rather than a surrogate id with a separate slug, because the slug is
+    # what every RadiocarbonSample row already stores and what an .oxcal file
+    # names.
+    id = Column(String, primary_key=True)
+
+    # 'imported' (a file) or 'mixed' (a recipe over two other curves). Builtin
+    # curves are not rows here at all.
+    kind = Column(String, nullable=False, default='imported')
+
+    # --- editorial: mutable, never cached ---
+    name = Column(String, nullable=False)
+    description = Column(String, nullable=True)
+    reference = Column(String, nullable=True)
+    doi = Column(String, nullable=True)
+    # Display grouping, and which sample type this curve suits -- same
+    # vocabulary the builtin curves use.
+    type = Column(String, nullable=False, default='terrestrial')
+    sample_type = Column(String, nullable=False, default='terrestrial')
+
+    # --- the curve itself: immutable ---
+    # The uploaded file, exactly as uploaded. Null for a mixed curve, which
+    # has no file behind it.
+    source_text = Column(String, nullable=True)
+    source_filename = Column(String, nullable=True)
+    # How source_text is to be read: column mapping and calendar convention.
+    # Stored so the parse is reproducible rather than dependent on whatever
+    # the importer would guess today.
+    parse_options = Column(JSON, nullable=True)
+    # For kind='mixed': {a, b, percent_a, percent_a_error}. The curve is
+    # stored as this recipe rather than as data, so it stays honest about its
+    # parents (and they count as in-use while it exists).
+    recipe = Column(JSON, nullable=True)
+    # sha256 over the normalised numeric rows; see the class docstring.
+    content_sha256 = Column(String, nullable=False)
+
+    # Other spellings this curve answers to when read out of a file -- so an
+    # .oxcal written against 'IntCal13' finds an IntCal13 imported here.
+    aliases = Column(JSON, nullable=True)
+
+    archived = Column(Boolean, default=False, nullable=False)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class Analysis(Base):
     """Represents a complete radiocarbon analysis"""
     __tablename__ = "analyses"

@@ -27,6 +27,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+from app.services import curve_registry
+
 # A file bigger than this is not a date list. The cap is on the DECODED text,
 # and exists so a mis-picked file fails immediately with a clear message
 # rather than being parsed line by line into an enormous error report.
@@ -310,22 +312,22 @@ def _curve(value: str, line: int, errors: List[str]) -> Optional[str]:
     unrecognised curve is the exact failure schemas/sample.py's
     VALID_CURVE_IDS exists to prevent -- a real result, computed against the
     wrong curve.
+
+    Spellings are matched by the registry, which holds each curve's aliases
+    alongside the curve itself, so a curve added there is understood here
+    without this function being touched.
     """
     text = _clean(value)
     if not text:
         return None
-    key = re.sub(r'[^a-z0-9]+', '', text.lower())
-    known = {
-        'intcal20': 'intcal20', 'intcal': 'intcal20',
-        'shcal20': 'shcal20', 'shcal': 'shcal20',
-        'marine20': 'marine20', 'marine': 'marine20',
-    }
-    if key in known:
-        return known[key]
+    resolved = curve_registry.resolve_alias(text)
+    if resolved is not None:
+        return resolved
+    available = ', '.join(spec.name for spec in curve_registry.list_specs())
     errors.append(
         f"Row {line}: unknown calibration curve '{text}'. This app calibrates "
-        "against IntCal20, SHCal20 or Marine20; a curve it does not have "
-        "cannot be substituted for one it does."
+        f"against {available}; a curve it does not have cannot be substituted "
+        "for one it does."
     )
     return None
 

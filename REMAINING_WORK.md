@@ -132,13 +132,19 @@ also claimed MIT; the repo's `LICENSE` file is CC0.
   renames, type changes and backfills aren't covered at all.
 - **Effort:** 2–3 hours including migrating the stopgap away.
 
-### 6. Wire the curves API into the frontend (and decide about harris_matrix.py)
-- **Current:** `GET /api/curves` exists but nothing calls it —
-  `NewAnalysis.tsx` hardcodes its own `<MenuItem value="intcal20">` list, and
-  `ProjectSampleTable.tsx` now hardcodes a *second* copy. The endpoint's
-  metadata is also wrong: it claims IntCal20 has 5,141 points; the loaded
-  curve has 9,501. Neither `curves.py` nor `harris_matrix.py` has any test
-  coverage (confirmed again 2026-08-13).
+### 6. ~~Wire the curves API into the frontend~~ (and decide about harris_matrix.py)
+- **Curves: done 2026-08-18.** `backend/app/services/curve_registry.py` is now
+  the single source of truth — it measures each curve's metadata from the
+  curve that actually loaded, and the five separate hardcoded lists (the
+  loaders in `calibration.py`, the `Literal` in `schemas/sample.py`, the table
+  in `api/curves.py`, the OxCal name map in `oxcal_script.py`, and the two
+  `<MenuItem>` lists in the frontend) all resolve through it. The wrong point
+  counts are gone with the table that held them: the API reported 5,141 /
+  1,341 / 5,141 where the loaded curves hold 9,501 / 5,501 / 9,501.
+  `frontend/src/api/curves.ts` + `hooks/useCurves.ts` are what the pickers
+  read, and `tests/test_curves.py` (29 tests) covers a module that had none.
+  See `docs/CURVE_MANAGER_PLAN.md` for what this was phase 1 of.
+- **Still open:** `harris_matrix.py`.
 - `harris_matrix.py`'s two endpoints (`/api/harris-matrix/validate`,
   `/api/harris-matrix/relationships`) are in the same position: live routes,
   operating on a plain nodes/edges shape that predates the model tree
@@ -152,11 +158,9 @@ also claimed MIT; the repo's `LICENSE` file is CC0.
   deleted outright during the 2026-08-13 cleanup pass, since removing live
   (if unused) API endpoints is a bigger call than deleting dead frontend
   code — worth a deliberate decision, not a drive-by deletion.
-- **Impact:** Medium — harmless today, but there are now two hardcoded curve
-  lists to forget when a curve is added, and two API modules that look live
-  but aren't connected to anything.
-- **Effort:** ~1 hour for curves; harris_matrix.py is a delete-or-keep
-  decision more than effort.
+- **Impact:** Low, now that the curves half has landed — one API module that
+  looks live but isn't connected to anything.
+- **Effort:** harris_matrix.py is a delete-or-keep decision more than effort.
 
 ### 7. Database connection pooling
 - **Current:** `create_engine(DATABASE_URL, echo=False)` with no
@@ -182,9 +186,19 @@ project*. Still missing: Excel-formatted output, and importing measurements
 directly into an analysis (as opposed to via a project collection). ~2 hours.
 
 ### 11. Calibration curve management UI
-Upload custom curves; mix marine/terrestrial curves (the mixing math isn't
-implemented at all). ~2–3 hours for upload; mixing is a separate piece of
-work.
+Planned in full in `docs/CURVE_MANAGER_PLAN.md`. **Phases 1-3 are done**:
+the registry behind all of it (see #6), and the backend for user-imported
+curves — parse-then-store preview, `.14c`/CSV/BC-AD reading, immutable curve
+data guarded by a content hash checked on every load, archive-rather-than-
+delete while in use, aliases so an OxCal file naming an imported curve
+imports, and byte-for-byte export. Covered by `tests/test_curve_import.py`
+(40 tests).
+…and the `/curves` page over it: import dialog with a preview of the curve
+before anything is stored, editable description/citation/aliases, download,
+archive/restore, and a delete that asks what is using the curve first.
+**Remaining:** the visual curve browser (phase 4), res14c-style resolution
+profiles (5), mixed curves — the mixing math still isn't implemented (6),
+compare/simulate (7) and docs (8). ~19–25 hours.
 
 ---
 
@@ -253,14 +267,21 @@ each is a real edge.
   - `conftest.py` provides a throwaway SQLite DB. There is no
     `requires_pymc` skip marker: both solvers are pure numpy, so every test
     runs everywhere and a Bayesian analysis in the suite is a real one.
-- **Not covered:** `curves.py` and `harris_matrix.py` still have no tests at
-  all (re-confirmed 2026-08-13) — consistent with both being unused by the
-  frontend; see #6 above. `results.py` is no longer in this list — it's
-  covered by `test_exports.py` now.
-- **Frontend: 62 tests** (Vitest, `npm test` in `frontend/`), in
-  `utils/harrisLayout.test.ts` (24), `utils/distribution.test.ts` (12),
-  `utils/hpd.test.ts` (10), `components/ModelTreeEditor.test.ts` (9) and
-  `utils/stackedPlotGeometry.test.ts` (7). Most of these cover geometry that
+  - `test_curves.py` — the curve registry and the endpoints over it (added
+    2026-08-18). Its load-bearing tests hold the served metadata against the
+    loaded curve rather than against a second constant: what makes the point
+    count right is that it is counted, which is exactly what the hand-written
+    table it replaced could not claim.
+- **Not covered:** `harris_matrix.py` still has no tests at all — consistent
+  with it being unused by the frontend; see #6 above. `results.py` and
+  `curves.py` are no longer in this list.
+- **Frontend: 103 tests** (Vitest, `npm test` in `frontend/`), in
+  `utils/harrisLayout.test.ts` (27), `components/ModelTreeEditor.test.ts` (15),
+  `utils/distribution.test.ts` (12), `utils/hpd.test.ts` (10),
+  `api/curves.test.ts` (9), `components/ImportCurveDialog.test.ts` (8),
+  `utils/stackedPlotGeometry.test.ts` (7), `utils/plotExport.test.ts` (5),
+  `theme/diagramColors.test.ts` (5) and
+  `components/ProjectSampleTable.test.ts` (5). Most of these cover geometry that
   cannot be verified any other way: React Flow and Plotly draw into measured
   viewports, so the DOM reports elements at whatever coordinates they were
   handed and never says whether those coordinates collide or overflow. Those
@@ -355,10 +376,10 @@ each is a real edge.
    config drift both had left behind (see Environment Notes).
 4. **Async MCMC** — the synchronous "Re-run All" is the most likely thing to
    feel broken as projects grow.
-5. **Wire up the curves API**, and decide whether `harris_matrix.py` stays,
-   before a fourth hardcoded curve list appears.
-6. **Frontend tests** for the pure utils, then the untested backend routers
-   (`curves.py`, `harris_matrix.py` — `results.py` is now covered).
+5. ~~**Wire up the curves API**~~ — **done 2026-08-18** (see #6); decide
+   whether `harris_matrix.py` stays.
+6. **Frontend tests** for the pure utils, then the untested backend router
+   (`harris_matrix.py` — `results.py` and `curves.py` are now covered).
 7. Everything else — auth, Alembic, pooling, comparison UI, curve
    management — as concrete need arises.
 

@@ -32,6 +32,8 @@ import ConfirmDialog from '@/components/ConfirmDialog'
 import ImportDatesDialog, { type ImportPreview } from '@/components/ImportDatesDialog'
 import { formatApiError } from '@/utils/apiError'
 import { useNotify } from '@/contexts/NotificationContext'
+import { curveLabel, curveOptions } from '@/api/curves'
+import { useCurves } from '@/hooks/useCurves'
 
 // A date held in the PROJECT's collection (backend models.ProjectSample) --
 // entered once here, then deployed into as many analyses as needed. Note
@@ -50,12 +52,6 @@ export interface ProjectSample {
   taq_age_bp: number | null
   notes: string | null
 }
-
-const CURVES = [
-  { value: 'intcal20', label: 'IntCal20 (Northern Hemisphere)' },
-  { value: 'shcal20', label: 'SHCal20 (Southern Hemisphere)' },
-  { value: 'marine20', label: 'Marine20' },
-]
 
 type DraftForm = {
   sample_name: string
@@ -107,8 +103,6 @@ function formToPayload(form: DraftForm) {
   }
 }
 
-const VALID_CURVE_IDS = new Set(CURVES.map((c) => c.value))
-
 /**
  * Parse the bulk-paste textarea: one date per line, comma or tab separated,
  * as `name, age, error[, material[, context[, curve]]]`. Deliberately
@@ -117,8 +111,18 @@ const VALID_CURVE_IDS = new Set(CURVES.map((c) => c.value))
  * number rather than silently dropped. Curve is optional and defaults to
  * IntCal20 -- most pasted batches are a single terrestrial curve, so it
  * would be noise to require it on every line.
+ *
+ * `validCurveIds` is passed in rather than held here so that this stays the
+ * pure, testable function it was while the curves themselves come from the
+ * backend registry. An empty set accepts any curve id and leaves the
+ * rejection to the backend, which is the right behaviour when the curve list
+ * could not be loaded: refusing every line on a list we never received would
+ * be blaming the paste for a failed request.
  */
-export function parsePastedDates(text: string): { rows: ReturnType<typeof formToPayload>[]; errors: string[] } {
+export function parsePastedDates(
+  text: string,
+  validCurveIds: Set<string>
+): { rows: ReturnType<typeof formToPayload>[]; errors: string[] } {
   const rows: ReturnType<typeof formToPayload>[] = []
   const errors: string[] = []
 
@@ -136,8 +140,11 @@ export function parsePastedDates(text: string): { rows: ReturnType<typeof formTo
       return
     }
     const curveId = curve ? curve.toLowerCase() : 'intcal20'
-    if (!VALID_CURVE_IDS.has(curveId)) {
-      errors.push(`Line ${index + 1}: unknown curve "${curve}" (expected intcal20, shcal20, or marine20)`)
+    if (validCurveIds.size > 0 && !validCurveIds.has(curveId)) {
+      errors.push(
+        `Line ${index + 1}: unknown curve "${curve}" (expected ` +
+          `${[...validCurveIds].join(', ')})`
+      )
       return
     }
     rows.push({
@@ -162,6 +169,7 @@ interface Props {
 export default function ProjectSampleTable({ projectId }: Props) {
   const navigate = useNavigate()
   const notify = useNotify()
+  const { curves, loading: curvesLoading, error: curvesError } = useCurves()
   const [samples, setSamples] = useState<ProjectSample[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -268,7 +276,10 @@ export default function ProjectSampleTable({ projectId }: Props) {
   }
 
   const handlePaste = async () => {
-    const { rows, errors } = parsePastedDates(pasteText)
+    const { rows, errors } = parsePastedDates(
+      pasteText,
+      new Set(curves.map((curve) => curve.id))
+    )
     if (errors.length > 0) {
       setPasteError({ headline: 'Could not read some lines:', details: errors })
       return
@@ -504,7 +515,7 @@ export default function ProjectSampleTable({ projectId }: Props) {
                   <TableCell align="right">{s.age_bp}</TableCell>
                   <TableCell align="right">{s.error_1sigma}</TableCell>
                   <TableCell>{s.material_type}</TableCell>
-                  <TableCell>{s.curve_id}</TableCell>
+                  <TableCell>{curveLabel(curves, s.curve_id)}</TableCell>
                   <TableCell>{s.default_context_name || '—'}</TableCell>
                   <TableCell align="right">
                     <IconButton size="small" aria-label={`Edit ${s.sample_name}`} onClick={() => openEdit(s)}>
@@ -564,11 +575,14 @@ export default function ProjectSampleTable({ projectId }: Props) {
               select
               label="Calibration Curve"
               value={form.curve_id}
+              disabled={curvesLoading}
+              error={!!curvesError}
+              helperText={curvesError ?? undefined}
               onChange={(e) => setForm({ ...form, curve_id: e.target.value })}
             >
-              {CURVES.map((c) => (
-                <MenuItem key={c.value} value={c.value}>
-                  {c.label}
+              {curveOptions(curves, form.curve_id).map((option) => (
+                <MenuItem key={option.id} value={option.id}>
+                  {option.label}
                 </MenuItem>
               ))}
             </TextField>
@@ -609,7 +623,8 @@ export default function ProjectSampleTable({ projectId }: Props) {
             <br />
             <code>name, age BP, 1σ error[, material[, context[, curve]]]</code>
             <br />
-            Curve defaults to IntCal20 if omitted (intcal20, shcal20, or marine20).
+            Curve defaults to IntCal20 if omitted
+            {curves.length > 0 && ` (${curves.map((curve) => curve.id).join(', ')})`}.
           </Typography>
           <TextField
             fullWidth

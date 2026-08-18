@@ -40,6 +40,7 @@ import MeasurementFields, {
   deltaRErrorMissing,
   isMarineMeasurement,
 } from '@/components/MeasurementFields'
+import { useCurves } from '@/hooks/useCurves'
 import type { ProjectSample } from '@/components/ProjectSampleTable'
 import {
   DateFormat,
@@ -153,6 +154,10 @@ export default function NewAnalysis() {
     loadFromAnalysis,
     reset: resetDraft,
   } = useAnalysisDraftStore()
+  // Which curve a date is on decides whether a reservoir offset applies to
+  // it (see isMarineMeasurement). The request is shared with the one
+  // MeasurementFields makes, so reading it here costs nothing extra.
+  const { curves } = useCurves()
   // Set when this page is reached via /analysis/:analysisId/edit -- the
   // same form, but saving replaces an existing analysis's inputs (PUT
   // .../inputs then rerun) instead of creating a new one.
@@ -469,7 +474,7 @@ export default function NewAnalysis() {
   // for. An offset is useless without its uncertainty, since the two are
   // combined in quadrature; the backend rejects one without the other, so
   // catch it here rather than on submit.
-  const isMarine = isMarineMeasurement(currentMeasurement)
+  const isMarine = isMarineMeasurement(currentMeasurement, curves)
   const missingDeltaRError = deltaRErrorMissing(currentMeasurement)
 
   // Matches a draft measurement to a project-collection date by value --
@@ -1113,8 +1118,10 @@ export default function NewAnalysis() {
                 // A reservoir offset means nothing off a marine curve, so
                 // switching a date back to terrestrial has to clear it
                 // rather than leave it applied invisibly.
-                delta_r: isMarineMeasurement(draft) ? draft.delta_r ?? null : null,
-                delta_r_error: isMarineMeasurement(draft) ? draft.delta_r_error ?? null : null,
+                delta_r: isMarineMeasurement(draft, curves) ? draft.delta_r ?? null : null,
+                delta_r_error: isMarineMeasurement(draft, curves)
+                  ? draft.delta_r_error ?? null
+                  : null,
               })
               if (editing.applyToPhase) {
                 for (const sibling of editSiblings) {

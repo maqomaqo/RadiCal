@@ -41,6 +41,20 @@ os.environ.setdefault("MARINE_CURVE_PATH", _curve_path("marine20.14c"))
 os.environ.setdefault("SHCAL_CURVE_PATH", _curve_path("shcal20.14c"))
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _schema():
+    """
+    Create the tables once for the whole run.
+
+    This used to happen only as a side effect of the first test that built the
+    `client` fixture, which imports app.main. A test module that exercises a
+    service directly -- test_curves.py does, since the curve registry is not
+    an endpoint -- would then run against a database with no tables in it.
+    """
+    from app.database import init_db
+    init_db()
+
+
 @pytest.fixture
 def client():
     """

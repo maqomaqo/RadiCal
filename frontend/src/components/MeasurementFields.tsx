@@ -3,6 +3,7 @@ import {
   Box,
   FormControl,
   FormControlLabel,
+  FormHelperText,
   InputLabel,
   MenuItem,
   Select,
@@ -11,6 +12,8 @@ import {
   Typography,
 } from '@mui/material'
 import type { DraftMeasurement } from '@/types'
+import { curveOptions, curvesForSampleType, type CurveSpec } from '@/api/curves'
+import { useCurves } from '@/hooks/useCurves'
 
 /**
  * The fields that describe one radiocarbon date.
@@ -32,15 +35,29 @@ export const COMMON_MATERIAL_TYPES = [
 ]
 
 /**
- * Which curves suit each sample type. The first is what selecting that
- * sample type switches to; the rest are other defensible choices a
- * deliberate selection should not be overridden by. Marine carbon has to
- * be calibrated against a marine curve -- IntCal20 would be wrong by
- * centuries -- while a terrestrial sample picks between hemispheres.
+ * Which curve to switch to when a sample type is selected, and whether the
+ * curve already chosen may stay.
+ *
+ * Marine carbon has to be calibrated against a marine curve -- IntCal20
+ * would be wrong by centuries -- while a terrestrial sample picks between
+ * hemispheres. Which curves are which used to be a hardcoded map here (and
+ * a second one in ProjectSampleTable); it now comes from the backend's curve
+ * registry, so a curve added there is offered here without a code change.
+ *
+ * A deliberate choice that already suits the sample type is left alone;
+ * anything else moves to the first curve the registry lists for it.
  */
-export const CURVE_FOR_SAMPLE_TYPE: Record<string, string[]> = {
-  terrestrial: ['intcal20', 'shcal20'],
-  marine: ['marine20'],
+export function curveForSampleType(
+  curves: CurveSpec[],
+  sampleType: string,
+  currentCurveId: string | undefined
+): string | undefined {
+  const suitable = curvesForSampleType(curves, sampleType)
+  if (suitable.length === 0) return currentCurveId
+  if (currentCurveId && suitable.some((curve) => curve.id === currentCurveId)) {
+    return currentCurveId
+  }
+  return suitable[0].id
 }
 
 export type MeasurementDraft = Partial<DraftMeasurement>
@@ -56,8 +73,22 @@ interface Props {
   showOutlier?: boolean
 }
 
-export function isMarineMeasurement(m: MeasurementDraft): boolean {
-  return (m.sample_type || 'terrestrial') === 'marine' || m.curve_id === 'marine20'
+/**
+ * Whether this date is marine carbon, and so whether a reservoir offset
+ * applies to it.
+ *
+ * The sample type answers it outright when set. Otherwise the curve does,
+ * looked up in the registry rather than compared against a literal, so an
+ * imported marine curve counts the same as the bundled Marine20. With no
+ * curve list to hand -- the request failed, or a caller has none -- it falls
+ * back to the one marine curve this app ships, which is the right answer
+ * whenever no others have been added.
+ */
+export function isMarineMeasurement(m: MeasurementDraft, curves: CurveSpec[] = []): boolean {
+  if ((m.sample_type || 'terrestrial') === 'marine') return true
+  const spec = curves.find((curve) => curve.id === m.curve_id)
+  if (spec) return spec.sample_type === 'marine'
+  return m.curve_id === 'marine20'
 }
 
 export function deltaRErrorMissing(m: MeasurementDraft): boolean {
@@ -65,8 +96,9 @@ export function deltaRErrorMissing(m: MeasurementDraft): boolean {
 }
 
 export default function MeasurementFields({ value, onChange, showOutlier = false }: Props) {
+  const { curves, loading: curvesLoading, error: curvesError } = useCurves()
   const set = (patch: MeasurementDraft) => onChange({ ...value, ...patch })
-  const marine = isMarineMeasurement(value)
+  const marine = isMarineMeasurement(value, curves)
   const missingError = deltaRErrorMissing(value)
   const outlierOn = (value.outlier_prior ?? 0) > 0
 
@@ -129,9 +161,7 @@ export default function MeasurementFields({ value, onChange, showOutlier = false
                 sample_type: sampleType,
                 // Follow the sample type with a curve that suits it, unless
                 // a deliberate choice has already been made that does.
-                curve_id: CURVE_FOR_SAMPLE_TYPE[sampleType].includes(value.curve_id || '')
-                  ? value.curve_id
-                  : CURVE_FOR_SAMPLE_TYPE[sampleType][0],
+                curve_id: curveForSampleType(curves, sampleType, value.curve_id),
               })
             }}
           >
@@ -139,17 +169,24 @@ export default function MeasurementFields({ value, onChange, showOutlier = false
             <MenuItem value="marine">Marine</MenuItem>
           </Select>
         </FormControl>
-        <FormControl size="small" sx={{ flex: 1 }}>
+        <FormControl size="small" sx={{ flex: 1 }} error={!!curvesError}>
           <InputLabel>Curve</InputLabel>
           <Select
             value={value.curve_id || 'intcal20'}
             label="Curve"
+            disabled={curvesLoading}
             onChange={(e) => set({ curve_id: e.target.value })}
           >
-            <MenuItem value="intcal20">IntCal20</MenuItem>
-            <MenuItem value="marine20">Marine20</MenuItem>
-            <MenuItem value="shcal20">SHCal20</MenuItem>
+            {/* Always includes whatever this date is already set to, so a
+                slow or failed curve list cannot blank a curve that was
+                chosen -- see api/curves.curveOptions. */}
+            {curveOptions(curves, value.curve_id || 'intcal20').map((option) => (
+              <MenuItem key={option.id} value={option.id}>
+                {option.label}
+              </MenuItem>
+            ))}
           </Select>
+          {curvesError && <FormHelperText>{curvesError}</FormHelperText>}
         </FormControl>
       </Box>
 

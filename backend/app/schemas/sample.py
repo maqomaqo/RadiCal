@@ -2,15 +2,41 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import Optional, List, Literal, Dict, Any
 from datetime import datetime
 
+from app.services import curve_registry
 from app.services.stratigraphy import expand_relationships, find_cycle
 
-# Kept in sync with app.services.calibration._CURVE_LOADERS -- these are
-# the only curve_ids the calibration engine actually knows how to load.
-# Previously an unrecognized curve_id wasn't rejected anywhere: it flowed
-# straight through to get_curve(), which silently fell back to IntCal20
-# rather than erroring, so a typo'd curve_id produced a real but wrong
-# result instead of a clear failure.
-VALID_CURVE_IDS = ("intcal20", "marine20", "shcal20")
+# The curves shipped with the app. Kept as a name because several tests and
+# error messages refer to it, but it is no longer the whole answer: a user can
+# import curves of their own, so what a request may name is "any curve the
+# registry can resolve", checked below rather than declared as a Literal here.
+VALID_CURVE_IDS = curve_registry.BUILTIN_CURVE_IDS
+
+
+def validate_curve_id(curve_id: Optional[str]) -> Optional[str]:
+    """
+    Reject a curve this app cannot load, at the edge.
+
+    Without this an unrecognized curve_id is not rejected anywhere: it flows
+    straight through to get_curve(), which before it started raising silently
+    fell back to IntCal20 -- so a typo'd curve_id produced a real but wrong
+    result instead of a clear failure. This used to be a Pydantic `Literal`
+    over a fixed tuple, which stopped working once the set of curves became
+    something a user can add to.
+
+    Builtin ids are answered without a database query (see
+    curve_registry.exists), so the common case -- forty dates all on IntCal20
+    -- costs nothing.
+    """
+    if curve_id is None:
+        return None
+    if not curve_registry.exists(curve_id):
+        available = ', '.join(curve_registry.known_ids())
+        raise ValueError(
+            f"Unknown calibration curve '{curve_id}'. This app can calibrate "
+            f"against: {available}. Import a curve to add to that list -- a "
+            "curve it does not have cannot be substituted for one it does."
+        )
+    return curve_id
 
 
 class MeasurementInput(BaseModel):
@@ -47,7 +73,12 @@ class MeasurementInput(BaseModel):
     # smart-default behavior of inferring "marine" from curve_id when the
     # caller doesn't specify a sample_type explicitly.
     sample_type: Optional[Literal["terrestrial", "marine"]] = None
-    curve_id: Literal[VALID_CURVE_IDS] = "intcal20"
+    curve_id: str = "intcal20"
+
+    @field_validator('curve_id')
+    @classmethod
+    def _known_curve(cls, value: str) -> str:
+        return validate_curve_id(value)
     # Local marine reservoir offset (Delta-R) and its 1-sigma uncertainty,
     # both in radiocarbon years.
     #
@@ -158,7 +189,12 @@ class ProjectSampleUpdate(BaseModel):
     error_1sigma: Optional[float] = Field(default=None, gt=0, le=10000)
     material_type: Optional[str] = Field(default=None, max_length=100)
     sample_type: Optional[Literal["terrestrial", "marine"]] = None
-    curve_id: Optional[Literal[VALID_CURVE_IDS]] = None
+    curve_id: Optional[str] = None
+
+    @field_validator('curve_id')
+    @classmethod
+    def _known_curve(cls, value: Optional[str]) -> Optional[str]:
+        return validate_curve_id(value)
     reservoir_age: Optional[float] = Field(default=None, ge=-500, le=2000)
     depth_cm: Optional[float] = Field(default=None, ge=0, le=10000)
     location: Optional[str] = Field(default=None, max_length=500)

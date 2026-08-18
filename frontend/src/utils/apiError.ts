@@ -18,6 +18,19 @@ export function formatApiError(data: unknown): string {
 
   if (typeof detail === 'string') return detail
 
+  // The curve endpoints raise a structured detail -- a message plus the
+  // parse errors or the list of analyses using a curve -- because a refusal
+  // that only says "409" leaves the user with nothing to act on. Read the
+  // message, and append the specifics when they are short enough to be a
+  // toast rather than a report.
+  if (detail && typeof detail === 'object' && !Array.isArray(detail) && 'message' in detail) {
+    const { message, errors } = detail as { message: unknown; errors?: unknown }
+    if (Array.isArray(errors) && errors.length > 0) {
+      return `${String(message)} ${errors.slice(0, 3).join(' ')}`
+    }
+    return String(message)
+  }
+
   if (Array.isArray(detail)) {
     const messages = detail.map((err) => {
       if (err && typeof err === 'object' && 'msg' in err) {

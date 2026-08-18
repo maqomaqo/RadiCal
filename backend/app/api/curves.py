@@ -1,65 +1,392 @@
-from fastapi import APIRouter, HTTPException
-from typing import List
+"""
+What calibration curves this app has, and what is true about each of them.
+
+Everything here is served from services/curve_registry.py, which measures a
+curve's countable properties from the curve that actually loaded. This module
+used to carry its own hand-written table instead, and every row of it had
+drifted: it reported 5,141 points for IntCal20 and SHCal20 and 1,341 for
+Marine20, where the loaded files hold 9,501, 9,501 and 5,501. Nothing called
+these endpoints, so nothing caught it -- the frontend had its own two
+hardcoded lists, which is what the registry and these endpoints now replace.
+
+Builtin curves are read-only and will stay so. Imported ones can be added,
+described, archived and removed here, under two rules that the endpoints
+enforce rather than merely document:
+
+  A stored curve's numbers never change. PATCH writes editorial fields only;
+  correcting a curve means importing a new one. An analysis run last month has
+  to keep meaning what it said.
+
+  A curve in use cannot be deleted. The refusal names what is using it, and
+  offers archiving -- which hides the curve from every picker while leaving it
+  resolvable, so rerunning an older analysis still works.
+
+Importing follows the same parse-then-store shape as api/imports.py: a preview
+endpoint that writes nothing and answers 200 even for an unreadable file, with
+`errors`/`warnings`/`notes` as three separate channels, and a store endpoint
+that takes the same file again. The file rather than the parsed rows, so
+there is exactly one parser and no second path by which curve data can reach
+the database.
+
+Mixed curves have a column and a lifecycle here but no endpoint yet -- see
+docs/CURVE_MANAGER_PLAN.md §4.3.
+"""
+from typing import List, Optional
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi.responses import StreamingResponse
+from sqlalchemy.orm import Session
+
+from app.database import SessionLocal, get_db
+from app.models import StoredCalibrationCurve
+from app.services.calibration import CalibrationCurve
+from app.schemas.curve import CurveMetadata, CurveMetadataUpdate, SLUG_PATTERN, slugify
+from app.services import curve_import, curve_registry
 
 router = APIRouter()
 
-AVAILABLE_CURVES = [
-    {
-        "id": "intcal20",
-        "name": "IntCal20",
-        "description": "Northern Hemisphere terrestrial radiocarbon age calibration",
-        "type": "terrestrial",
-        "reference": "Reimer et al. 2020",
-        "year": 2020,
-        "data_points": 5141
-    },
-    {
-        "id": "marine20",
-        "name": "Marine20",
-        "description": "Marine radiocarbon age calibration",
-        "type": "marine",
-        "reference": "Heaton et al. 2020",
-        "year": 2020,
-        "data_points": 1341
-    },
-    {
-        "id": "shcal20",
-        "name": "SHCal20",
-        "description": "Southern Hemisphere terrestrial radiocarbon age calibration",
-        "type": "southern_hemisphere",
-        "reference": "Hogg et al. 2020",
-        "year": 2020,
-        "data_points": 5141
-    }
-]
+# Only three curves exist today, but the response has always been paginated
+# and callers may rely on that shape. The default is well clear of the curve
+# count rather than the previous 10, so that adding curves cannot silently
+# truncate the list a picker is built from.
+DEFAULT_LIMIT = 100
+
 
 @router.get("/curves")
-async def list_curves(limit: int = 10):
-    """List available calibration curves"""
+async def list_curves(limit: int = DEFAULT_LIMIT, include_archived: bool = False):
+    """
+    Every curve available for calibration, in the order they should be
+    offered. This is the list the frontend's curve pickers are built from,
+    which is why archived curves are left out by default: they still resolve,
+    so old analyses rerun, but they are not offered for new work.
+    """
+    specs = curve_registry.list_specs(include_archived=include_archived)
+    items = [spec.as_dict() for spec in specs[:limit]]
     return {
         "success": True,
         "data": {
-            "items": AVAILABLE_CURVES[:limit],
-            "total": len(AVAILABLE_CURVES),
+            "items": items,
+            "total": len(specs),
             "page": 1,
             "per_page": limit,
-            "total_pages": 1
+            "total_pages": 1 if specs else 0,
         }
     }
 
+
 @router.get("/curves/{curve_id}")
 async def get_curve(curve_id: str):
-    """Get specific calibration curve"""
-    for curve in AVAILABLE_CURVES:
-        if curve["id"] == curve_id:
-            return {"success": True, "data": curve}
-    raise HTTPException(status_code=404, detail="Curve not found")
+    """One curve's full description, including its measured metadata."""
+    try:
+        spec = curve_registry.get_spec(curve_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    return {"success": True, "data": spec.as_dict()}
+
 
 @router.get("/curves/type/{curve_type}")
 async def get_curves_by_type(curve_type: str):
-    """Get curves by type"""
-    curves = [c for c in AVAILABLE_CURVES if c["type"] == curve_type]
+    """
+    Curves of one display type ('terrestrial', 'marine',
+    'southern_hemisphere'). An unknown type is an empty list, not a 404: it
+    is a filter that matched nothing, not a missing resource.
+    """
+    curves = [
+        spec.as_dict() for spec in curve_registry.list_specs()
+        if spec.type == curve_type
+    ]
+    return {"success": True, "data": curves}
+
+
+# --------------------------------------------------------------------------
+# Importing
+# --------------------------------------------------------------------------
+
+
+def _check_size(content: bytes) -> None:
+    if not content:
+        raise HTTPException(status_code=400, detail="The uploaded file is empty.")
+    if len(content) > curve_import.MAX_CONTENT_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                f"The file is {len(content) // 1024} KB; the limit is "
+                f"{curve_import.MAX_CONTENT_BYTES // 1024} KB."
+            ),
+        )
+
+
+@router.post("/curves/import/preview")
+async def preview_curve(
+    file: UploadFile = File(...),
+    calendar: str = Form('cal_bp'),
+):
+    """
+    Read an uploaded curve file and report what it holds, storing nothing.
+
+    An unreadable file still answers 200: the request succeeded, and its
+    answer is the list of what is wrong. `data.ok` carries the verdict, and
+    `data.preview` a downsampled series so the dialog can draw the curve
+    before it is accepted.
+    """
+    if calendar not in ('cal_bp', 'bc_ad'):
+        raise HTTPException(
+            status_code=422,
+            detail="calendar must be 'cal_bp' or 'bc_ad'.",
+        )
+    content = await file.read()
+    _check_size(content)
+
+    result = curve_import.parse_upload(file.filename or '', content, calendar=calendar)
+    payload = result.as_dict()
+    payload['filename'] = file.filename
+    payload['suggested_id'] = slugify(result.suggested_name or file.filename or 'curve')
+    return {"success": True, "data": payload}
+
+
+@router.post("/curves", status_code=201)
+async def create_curve(
+    file: UploadFile = File(...),
+    metadata: str = Form(..., description="CurveMetadata as JSON"),
+    calendar: str = Form('cal_bp'),
+    curve_id: Optional[str] = Form(None),
+    db: Session = Depends(get_db),
+):
+    """
+    Store a previewed curve.
+
+    Takes the file again rather than the rows the preview returned. Sending
+    the parsed numbers back would make the client a second, unvalidated route
+    by which curve data could reach the database -- the arrangement
+    api/imports.py's docstring argues against at length. Re-parsing costs
+    milliseconds and cannot disagree with the preview.
+    """
+    meta = CurveMetadata.model_validate_json(metadata)
+
+    content = await file.read()
+    _check_size(content)
+    text = curve_import.decode(content)
+    result = curve_import.parse_curve(text, calendar=calendar)
+    if not result.ok:
+        raise HTTPException(
+            status_code=422,
+            detail={"message": "The curve file could not be read.", "errors": result.errors},
+        )
+
+    slug = (curve_id or slugify(meta.name)).strip().lower()
+    if not SLUG_PATTERN.match(slug):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"'{slug}' is not a usable curve id. Use 2-64 characters: "
+                "lowercase letters, digits, hyphens or underscores."
+            ),
+        )
+    if curve_registry.resolve_alias(slug) is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"A calibration curve '{slug}' already exists. Curve data is "
+                "immutable, so a correction is imported as a new curve under "
+                "a new id rather than replacing this one."
+            ),
+        )
+    for alias in meta.aliases:
+        clash = curve_registry.resolve_alias(alias)
+        if clash is not None:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"The alias '{alias}' already refers to the curve "
+                    f"'{clash}'. An alias that names two curves would make an "
+                    "imported file's curve column ambiguous."
+                ),
+            )
+
+    curve = CalibrationCurve(
+        [p[0] for p in result.points],
+        [p[1] for p in result.points],
+        [p[2] for p in result.points],
+    )
+
+    row = StoredCalibrationCurve(
+        id=slug,
+        kind='imported',
+        name=meta.name,
+        description=meta.description,
+        reference=meta.reference,
+        doi=meta.doi,
+        type=meta.type,
+        sample_type=meta.sample_type,
+        source_text=text,
+        source_filename=file.filename,
+        parse_options=result.parse_options,
+        content_sha256=curve_registry.content_hash(curve),
+        aliases=meta.aliases,
+        archived=False,
+    )
+    db.add(row)
+    db.commit()
+    curve_registry.invalidate()
+
     return {
         "success": True,
-        "data": curves
+        "data": curve_registry.get_spec(slug).as_dict(),
+        "notes": result.notes,
+        "warnings": result.warnings,
     }
+
+
+# --------------------------------------------------------------------------
+# Lifecycle
+# --------------------------------------------------------------------------
+
+
+def _stored_or_404(curve_id: str, db: Session) -> StoredCalibrationCurve:
+    row = db.query(StoredCalibrationCurve).filter(
+        StoredCalibrationCurve.id == curve_id
+    ).one_or_none()
+    if row is None:
+        if curve_id in curve_registry.BUILTIN_CURVE_IDS:
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    f"'{curve_id}' is one of the curves shipped with this app "
+                    "and cannot be edited or removed."
+                ),
+            )
+        raise HTTPException(status_code=404, detail=f"Unknown calibration curve '{curve_id}'.")
+    return row
+
+
+@router.patch("/curves/{curve_id}")
+async def update_curve(
+    curve_id: str,
+    update: CurveMetadataUpdate,
+    db: Session = Depends(get_db),
+):
+    """
+    Correct a stored curve's description, citation or aliases.
+
+    Its numbers are not editable here and never will be: an analysis already
+    run against this curve has to keep meaning what it said. Importing a
+    corrected file creates a new curve.
+    """
+    row = _stored_or_404(curve_id, db)
+    fields = update.model_dump(exclude_unset=True)
+
+    for alias in fields.get('aliases') or []:
+        clash = curve_registry.resolve_alias(alias)
+        if clash is not None and clash != curve_id:
+            raise HTTPException(
+                status_code=409,
+                detail=f"The alias '{alias}' already refers to the curve '{clash}'.",
+            )
+
+    for key, value in fields.items():
+        setattr(row, key, value)
+    db.commit()
+    curve_registry.invalidate(curve_id)
+    return {"success": True, "data": curve_registry.get_spec(curve_id).as_dict()}
+
+
+@router.get("/curves/{curve_id}/usage")
+async def curve_usage(curve_id: str):
+    """What is already calibrated against this curve. Empty for a curve
+    nothing uses, which is the only kind that can be deleted outright."""
+    if not curve_registry.exists(curve_id):
+        raise HTTPException(status_code=404, detail=f"Unknown calibration curve '{curve_id}'.")
+    return {"success": True, "data": curve_registry.usage(curve_id)}
+
+
+@router.delete("/curves/{curve_id}")
+async def delete_curve(
+    curve_id: str,
+    archive: bool = Query(False, description="Archive instead of deleting"),
+    db: Session = Depends(get_db),
+):
+    """
+    Remove a stored curve, or archive it.
+
+    A curve something has been calibrated against is refused, and the refusal
+    names what is using it: deleting it would leave saved results that can be
+    displayed but never reproduced. Archiving is the way out -- the curve
+    leaves every picker but still resolves, so those analyses still rerun.
+    """
+    row = _stored_or_404(curve_id, db)
+
+    if archive:
+        row.archived = True
+        db.commit()
+        curve_registry.invalidate(curve_id)
+        return {"success": True, "data": {"id": curve_id, "archived": True}}
+
+    in_use = curve_registry.usage(curve_id)
+    if in_use['in_use']:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": (
+                    f"'{curve_id}' is in use and cannot be deleted. Archive it "
+                    "instead: it will disappear from the curve pickers, and "
+                    "the analyses below will still rerun."
+                ),
+                "usage": in_use,
+            },
+        )
+
+    db.delete(row)
+    db.commit()
+    curve_registry.invalidate(curve_id)
+    return {"success": True, "data": {"id": curve_id, "deleted": True}}
+
+
+@router.post("/curves/{curve_id}/restore")
+async def restore_curve(curve_id: str, db: Session = Depends(get_db)):
+    """Bring an archived curve back into the pickers."""
+    row = _stored_or_404(curve_id, db)
+    row.archived = False
+    db.commit()
+    curve_registry.invalidate(curve_id)
+    return {"success": True, "data": curve_registry.get_spec(curve_id).as_dict()}
+
+
+@router.get("/curves/{curve_id}/export")
+async def export_curve(curve_id: str):
+    """
+    The curve as a .14c file.
+
+    An imported curve comes back byte-for-byte as it was uploaded -- that is
+    what storing the source text rather than a parsed array buys, and it means
+    a curve can leave this app in exactly the state it arrived. Anything else
+    (a builtin, later a mixed curve) is rendered from its points into the same
+    format.
+    """
+    try:
+        spec = curve_registry.get_spec(curve_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+    row = None
+    if spec.kind != 'builtin':
+        with SessionLocal() as db:
+            row = db.query(StoredCalibrationCurve).filter(
+                StoredCalibrationCurve.id == curve_id
+            ).one_or_none()
+
+    if row is not None and row.source_text:
+        text = row.source_text
+        filename = row.source_filename or f'{curve_id}.14c'
+    else:
+        curve = curve_registry.resolve(curve_id)
+        text = curve_import.to_14c_text(
+            list(zip(curve.cal_ages.tolist(), curve.c14_ages.tolist(), curve.c14_errors.tolist())),
+            header=f'{spec.name}\n{spec.reference}',
+        )
+        filename = f'{curve_id}.14c'
+
+    return StreamingResponse(
+        iter([text]),
+        media_type='text/plain',
+        headers={'Content-Disposition': f'attachment; filename="{filename}"'},
+    )

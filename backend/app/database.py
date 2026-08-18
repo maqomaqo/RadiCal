@@ -123,7 +123,10 @@ def _ensure_schema_migrations():
 def init_db():
     """Initialize database tables"""
     # Import models to register them with Base
-    from app.models import Project, Analysis, RadiocarbonSample, AnalysisResult, StratigraphicRelationship, SampleGroup
+    from app.models import (
+        Project, Analysis, RadiocarbonSample, AnalysisResult,
+        StratigraphicRelationship, SampleGroup, StoredCalibrationCurve,
+    )
     Base.metadata.create_all(bind=engine)
     _ensure_schema_migrations()
 

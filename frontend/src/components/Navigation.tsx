@@ -6,6 +6,7 @@ import { Link as RouterLink } from 'react-router-dom'
 const NAV_LINKS = [
   { to: '/', label: 'Dashboard' },
   { to: '/projects', label: 'Projects' },
+  { to: '/curves', label: 'Curves' },
 ]
 
 export default function Navigation() {

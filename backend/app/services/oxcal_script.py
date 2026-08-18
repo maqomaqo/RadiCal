@@ -33,6 +33,7 @@ import re
 import uuid
 from typing import Any, Dict, List, Optional, Tuple
 
+from app.services import curve_registry
 from app.services.date_import import ImportResult, _name_from_filename
 
 
@@ -336,27 +337,19 @@ UNSUPPORTED = {
     'u_sequence': 'a uniform-deposition sequence, which this app does not model.',
 }
 
-CURVE_IDS = {
-    'intcal20': 'intcal20',
-    'intcal': 'intcal20',
-    'shcal20': 'shcal20',
-    'shcal': 'shcal20',
-    'marine20': 'marine20',
-    'marine': 'marine20',
-}
-
-
 def _curve_id(raw: str) -> Optional[str]:
     """
-    An OxCal curve name as one of the ids the calibration engine loads.
+    An OxCal curve name as one of the ids the calibration engine loads, or
+    None for a curve this app does not have -- which the caller reports as a
+    failed import naming the curve, never as a substitution.
 
-    Handles the '=Name' form, which is how OxCal refers back to a curve
-    already declared in an enclosing scope (`Curve("=SHCal20")`).
+    The name map lives in services/curve_registry.py alongside the curves
+    themselves, so a curve added there is recognised in an .oxcal file
+    without this module being touched. It handles the '=Name' form, which is
+    how OxCal refers back to a curve already declared in an enclosing scope
+    (`Curve("=SHCal20")`), and a name written as a filename.
     """
-    name = (raw or '').strip().lstrip('=')
-    name = name.rsplit('.', 1)[0]           # 'SHCal20.14c' -> 'SHCal20'
-    key = re.sub(r'[^a-z0-9]+', '', name.lower())
-    return CURVE_IDS.get(key)
+    return curve_registry.resolve_alias(raw)
 
 
 # --------------------------------------------------------------------------

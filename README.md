@@ -9,6 +9,19 @@ Boundaries), and interactive posterior visualization.
 - **Three analysis types**: single calibration, independent calibration of several samples at once
   ("group calibration"), and full Bayesian modelling with stratigraphic constraints.
 - **Calibration curves**: IntCal20, Marine20, SHCal20, with marine reservoir (ΔR) correction.
+  Which curves exist, and everything countable about each of them — point count, calendar and
+  radiocarbon range, the calendar grid's step structure, a content hash — comes from one registry
+  (`backend/app/services/curve_registry.py`) that measures them from the curves it actually loads,
+  and is what the curve pickers, the CSV importer and the OxCal importer all read.
+- **Your own curves**: import a curve from a `.14c` or a headed CSV (columns matched by name in any
+  order; a BC/AD calendar column converted on the way in), previewed before anything is stored.
+  An imported curve is then selectable on any date, understood by the CSV and OxCal importers under
+  whatever aliases it was given, and exportable byte-for-byte as uploaded. Its numbers are immutable
+  — a correction is a new curve, not an edit — and a curve something has been calibrated against
+  cannot be deleted, only archived, so an analysis that used it still reruns. The **Curves** page
+  is where they are imported, described, downloaded and archived, and it shows what was measured
+  from each curve — points, range, calendar grid — beside it. Mixed curves and the visual curve
+  browser are planned in [`docs/CURVE_MANAGER_PLAN.md`](docs/CURVE_MANAGER_PLAN.md).
 - **Bayesian chronological modelling**: an explicit model tree of nested Sequences, Phases,
   Boundaries and Hiatuses (the OxCal idiom), each date assigned to a Phase; TPQ/TAQ age limiters;
   an optional outlier model per date. Solved exactly where the model permits it, and by OxCal's own
@@ -143,6 +156,13 @@ measured viewport, so nothing in the DOM tells you whether the boxes actually li
 Full interactive documentation (generated from the actual FastAPI routes) is at
 `http://localhost:8000/docs` once the backend is running. The main groups:
 
+- **Calibration curves** (`/api/curves`, `/api/curves/{id}`, `/api/curves/type/{type}`) — what
+  curves are available and what is true about each. Served from the registry, so this list and the
+  list a request is validated against cannot drift apart. Imported curves add
+  `/api/curves/import/preview` (parse only, stores nothing), `POST /api/curves`,
+  `PATCH /api/curves/{id}` (editorial fields only), `DELETE /api/curves/{id}` (409 while in use,
+  `?archive=true` instead), `/api/curves/{id}/restore`, `/api/curves/{id}/usage` and
+  `/api/curves/{id}/export`.
 - **Analysis** (`/api/analysis`, `/api/analysis/{id}`, `/api/analysis/calibrate`,
   `/api/analysis/calibrate-group`, `/api/analysis/bayesian`, plus rerun/duplicate/edit-inputs and
   model-tree endpoints) — create, run, retrieve, and manage analyses of all three types.
