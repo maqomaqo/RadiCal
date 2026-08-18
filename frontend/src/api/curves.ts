@@ -310,6 +310,73 @@ export async function fetchResolution(
   return parsed.data as ResolutionProfile
 }
 
+/** [cal BP, A, σA, B, σB, A−B, σ of the difference] */
+export type ComparePoint = [number, number, number, number, number, number, number]
+
+export interface CurveComparison {
+  a: string
+  b: string
+  cal_from: number
+  cal_to: number
+  points: ComparePoint[]
+  overlap_cal_min: number
+  overlap_cal_max: number
+}
+
+/** A hypothetical date from one calendar year, calibrated back. */
+export interface SimulatedDate {
+  curve_id: string
+  cal_age: number
+  c14_age: number
+  curve_error: number
+  error: number
+  hpd_68_ranges: { min: number; max: number; probability_percent: number }[]
+  hpd_95_ranges: { min: number; max: number; probability_percent: number }[]
+  point_estimates: { mean: number; median: number; mode: number; std: number }
+  probability_distribution: [number, number][]
+}
+
+/**
+ * Two curves on one grid, with their difference.
+ *
+ * The difference is what this is for: drawn over each other two curves look
+ * alike at any zoom that fits a millennium on screen, and the hemispheric
+ * offset is a few decades against an axis spanning thousands of years.
+ */
+export async function compareCurves(
+  a: string,
+  b: string,
+  options: { calFrom?: number; calTo?: number; maxPoints?: number } = {}
+): Promise<CurveComparison> {
+  const params = new URLSearchParams({ a, b })
+  if (options.calFrom !== undefined) params.set('cal_from', String(Math.round(options.calFrom)))
+  if (options.calTo !== undefined) params.set('cal_to', String(Math.round(options.calTo)))
+  if (options.maxPoints !== undefined) params.set('max_points', String(options.maxPoints))
+  const response = await fetch(`/api/curves/compare?${params}`)
+  const parsed = await readOrThrow(response)
+  return parsed.data as CurveComparison
+}
+
+/** What a date from this calendar year would look like, measured this well. */
+export async function simulateDate(
+  curveId: string,
+  calAge: number,
+  error: number
+): Promise<SimulatedDate> {
+  const response = await fetch(`/api/curves/${curveId}/simulate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ cal_age: calAge, error }),
+  })
+  const parsed = await readOrThrow(response)
+  return parsed.data as SimulatedDate
+}
+
+/** Where the visible window can be downloaded as CSV. */
+export function curveWindowCsvUrl(curveId: string, calFrom: number, calTo: number): string {
+  return `/api/curves/${curveId}/points.csv?cal_from=${Math.round(calFrom)}&cal_to=${Math.round(calTo)}`
+}
+
 /** A curve defined as a proportional mixture of two others (OxCal's Mix_Curves). */
 export interface MixedCurveInput {
   curve_id?: string

@@ -186,7 +186,7 @@ project*. Still missing: Excel-formatted output, and importing measurements
 directly into an analysis (as opposed to via a project collection). ~2 hours.
 
 ### 11. Calibration curve management UI
-Planned in full in `docs/CURVE_MANAGER_PLAN.md`. **Phases 1-6 are done**:
+Planned in full in `docs/CURVE_MANAGER_PLAN.md`. **Phases 1-7 are done**:
 the registry behind all of it (see #6), and the backend for user-imported
 curves — parse-then-store preview, `.14c`/CSV/BC-AD reading, immutable curve
 data guarded by a content hash checked on every load, archive-rather-than-
@@ -207,8 +207,10 @@ mean difference over 1,000–4,000 cal BP.
 …and mixed curves: the mixing math (which had never been implemented at all),
 a builder on the Curves page, and `Mix_Curves` support in the OxCal importer,
 matched against a stored mixture rather than created by opening a file.
-**Remaining:** compare mode and simulate-a-date (phase 7), and the docs pass
-(8). ~5–8 hours.
+…and compare mode (a second curve overlaid, with their difference on its own
+panel), click-a-year to simulate a date, and CSV export of the visible window.
+**Remaining:** the documentation pass (phase 8) — `USER_MANUAL.md` has nothing
+about any of this yet. ~2 hours.
 
 ---
 
@@ -285,13 +287,13 @@ each is a real edge.
 - **Not covered:** `harris_matrix.py` still has no tests at all — consistent
   with it being unused by the frontend; see #6 above. `results.py` and
   `curves.py` are no longer in this list.
-- **Frontend: 131 tests** (Vitest, `npm test` in `frontend/`), in
+- **Frontend: 137 tests** (Vitest, `npm test` in `frontend/`), in
   `utils/harrisLayout.test.ts` (27), `components/ModelTreeEditor.test.ts` (15),
   `utils/distribution.test.ts` (12), `utils/hpd.test.ts` (10),
   `utils/curveScrubber.test.ts` (18), `api/curves.test.ts` (9),
   `components/ImportCurveDialog.test.ts` (8), `utils/stackedPlotGeometry.test.ts` (7),
   `utils/curveShape.test.ts` (6), `utils/plotExport.test.ts` (5),
-  `utils/resolutionStride.test.ts` (4),
+  `utils/resolutionStride.test.ts` (4), `utils/seriesLookup.test.ts` (6),
   `theme/diagramColors.test.ts` (5) and
   `components/ProjectSampleTable.test.ts` (5). Most of these cover geometry that
   cannot be verified any other way: React Flow and Plotly draw into measured

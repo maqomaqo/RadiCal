@@ -28,6 +28,13 @@ Boundaries), and interactive posterior visualization.
   calendar age and how steeply it is running, which is what decides how tightly anything can be
   dated there: near 1 the curve tracks calendar time, near 0 it is a plateau and a measurement
   spreads over centuries, below 0 it reverses and one measurement splits into disjoint ranges.
+- **Compare and simulate**: overlay a second curve and read their *difference* on its own panel —
+  two curves drawn over each other are indistinguishable at any zoom that fits a millennium on
+  screen, while IntCal20 − SHCal20 shows the hemispheric offset (about 40 ¹⁴C years) at a glance.
+  Clicking a calendar year shows what a date from it would actually look like: inside the Hallstatt
+  plateau, a ±25 yr measurement comes back as **four disjoint calendar ranges spread over 337
+  years**, which says what a plateau costs more plainly than any single number. The visible window
+  exports as CSV.
 - **Expected temporal resolution**: under the curve, on the same calendar axis, how tightly a date
   from each year could be known *before anyone measures anything* — the method of Svetlik et al.
   (2019), as implemented in [res14c](https://github.com/demjanp/res14c_online). Mean plus a
@@ -186,7 +193,9 @@ Full interactive documentation (generated from the actual FastAPI routes) is at
   `/api/curves/{id}/export`. `/api/curves/{id}/points` serves a windowed, decimated slice for the
   browser — min/max per bucket rather than every Nth point, so a curve's wiggles survive being
   drawn at any zoom. `/api/curves/{id}/resolution` (and `.csv`) serves the expected-resolution
-  profile, and `POST /api/curves/mixed` defines a mixture of two curves.
+  profile, `/api/curves/compare` two curves and their difference,
+  `POST /api/curves/{id}/simulate` a hypothetical date from one calendar year, and
+  `POST /api/curves/mixed` a mixture of two curves.
 - **Analysis** (`/api/analysis`, `/api/analysis/{id}`, `/api/analysis/calibrate`,
   `/api/analysis/calibrate-group`, `/api/analysis/bayesian`, plus rerun/duplicate/edit-inputs and
   model-tree endpoints) — create, run, retrieve, and manage analyses of all three types.

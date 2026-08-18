@@ -430,10 +430,11 @@ Each phase leaves the app working and is independently useful.
 | 4 | ~~Curve browser: curve panel, error bands, time scrubber, readout~~ — **done 2026-08-18**, see §9.4 | 1 (3 for the entry point) | 6–8 h |
 | 5 | ~~Resolution service, endpoints, cache; resolution panel~~ — **done 2026-08-18**, see §9.5 | 4 | 4–5 h |
 | 6 | ~~Mixed curves: math, endpoint, builder UI, `Mix_Curves` in the OxCal importer~~ — **done 2026-08-18**, see §9.6 | 2, 4 | 3–4 h |
-| 7 | Compare mode, simulate-a-date, CSV exports | 4, 5 | 3–4 h |
+| 7 | ~~Compare mode, simulate-a-date, CSV exports~~ — **done 2026-08-18**, see §9.7 | 4, 5 | 3–4 h |
 | 8 | Docs: README features + API overview, `USER_MANUAL.md` section, `REMAINING_WORK.md` items 6 and 11 | all | 2 h |
 
-**Total ≈ 30–37 h**, of which phases 1-6 are done — ≈5–8 h remaining.
+**Total ≈ 30–37 h**, of which phases 1-7 are done — only the documentation pass (phase 8)
+remains, ≈2 h.
 
 ### 9.1 What phase 1 actually landed
 
@@ -627,13 +628,69 @@ Backend only; the `/curves` page is phase 3.
   2440–2740 on Marine20, and 2653–2945 on a 30/70 mixture** — between the two, nearer the marine
   end, and wider for the diet uncertainty.
 
-**Known limitation, for phase 7's readout work.** The resolution shown when hovering is the
-nearest *computed* year, and the profile is sampled at about one point per pixel — so at a
-55,000-year zoom the nearest sample can be a few dozen years away, and in a region where
-resolution swings by 300 years across 150 (the Hallstatt plateau being exactly that), the figure
-quoted for the hovered year can be off by a fifth. It is right at any zoom where the feature is
-resolvable, which is where anyone would read it, but the readout states it more precisely than a
-coarse view supports.
+### 9.7 What phase 7 actually landed
+
+- **Compare**: `GET /api/curves/compare` puts two curves on the union grid with their difference
+  and its combined error, decimated on the *difference* since that is the series being examined.
+  The browser overlays the second curve and draws the difference on its own panel. This is what
+  the comparison is for: over each other, two curves are indistinguishable at any zoom fitting a
+  millennium on screen — IntCal20 − SHCal20 reads **−38 ¹⁴C years** immediately.
+- **Simulate**: `POST /api/curves/{id}/simulate` and a click on the curve. The curve's own
+  radiocarbon age at that year, calibrated back — OxCal's `C_Simulate` **without** its random
+  scatter, deliberately: a drawn measurement answers "what might one sample give", a different
+  answer every time it is asked, where this answers "how well does this year date". Inside the
+  plateau a ±25 yr measurement returns **four disjoint ranges over 337 years**, and the dialog
+  says so in those words.
+- **CSV**: `GET /api/curves/{id}/points.csv` for the visible window, with the local gradient
+  alongside.
+- **The limitation flagged above is fixed**, and the fix is a different one than expected. The
+  readout does not need to be more precise than the sampling — it needs to *agree with the line
+  the reader is looking at*. It now interpolates between the drawn samples rather than snapping
+  to the nearest, so hovering across a plateau at wide zoom reads 257 → 263 → 268 rather than
+  the same figure three times. `utils/seriesLookup.ts`, tested — and its first version read
+  descending series backwards, which a reversed calendar axis produces on every page here.
+- Three presentation bugs, all found by looking rather than by reading: `/curves/compare` was
+  a **404**, because `/curves/{curve_id}` is declared first and "compare" is a perfectly good
+  curve id as far as the path is concerned; a rotated y-axis title is limited by the panel's
+  *height*, so "IntCal20 − SHCal20" clipped to "ntCal20 − SHCal2" in a 95px panel; and the x-axis
+  title ended up stranded halfway down a stack of charts sharing one axis.
+- Panel heights: the curve gives up what the panels take, but not without limit — two panels at
+  110 left the curve 160px, too short to read the thing the page is about. Panels shrink to 95
+  when there are two, and the chart floors at 200.
+- The controls were regrouped after the page was used. Eleven of them sat in one wrapping row
+  under the scrubber, doing three unrelated jobs, with nothing saying what any applied to. They
+  now split by what they act on: **what is shown** (compare-with, the resolution toggle, date
+  format) went up to the header bar; **where you are looking** (zoom, presets, export this
+  window) stayed under the scrubber; and each panel became a **framed section with a title strip
+  that carries its own settings** — the laboratory error and the profile export now sit inside
+  the resolution panel, next to the thing they change.
+  - Moving controls into the header wrapped it to 120px, which was the same crowding one floor
+    up. The space was going to the calendar-grid chip (80 characters of it), now compacted to
+    "1–20 yr steps" with the full text in a tooltip: header back to 72px, one line.
+  - The frame costs height, so the chart's budget had to learn about it. The first estimate of
+    46px left the readout moving 45px when a panel opened — the exact thing the compensation
+    exists to prevent — so the constant is now the measured 91. One panel comes out at 380 total
+    and the readout does not move; two cannot, since two framed sections are 330px between them,
+    so the chart floors at 200 and the page grows instead.
+  - The panels' rotated y-axis titles are units only ("yr"). A rotated title is limited by the
+    panel's height, and the section header above it already names the quantity.
+- The hover tooltip was cut back to what indexes the pointer's position — the calendar age and
+  the radiocarbon age — after it was pointed out that it repeated the readout underneath. The
+  curve's error and its local gradient were in both places at once, and the floating box was
+  covering the curve to say what was already on screen. The curve is named in the tooltip only
+  when a comparison is overlaid, where two unlabelled numbers would otherwise be a guess.
+  - Removing the raw cal BP that Plotly prints alongside took three attempts, because the value
+    plotted **is** cal BP and no axis format turns 2502 into 553 BC. `x unified` prints it as a
+    header above the box; plain `x` moves the same number into a label on the axis; `closest`
+    removes it but, at the default distance cutoff, stopped firing the moment the pointer drifted
+    thirty pixels off the line — which blanked the readout, since that is driven by the same
+    hover. `closest` with `hoverdistance: -1` is the combination that works: no cutoff, so
+    pointing anywhere in the plot finds the nearest point on the curve. Explicit spike lines
+    restore the crosshair that unified had been drawing.
+- The resolution panel now starts **off**. Landing on three stacked charts is an answer to a
+  question nobody has asked yet; the page opens on the curve alone at full height, and the first
+  view costs one request rather than two. The readout's placeholder changes with it — with the
+  panel off it says where to turn it on rather than promising a figure that is not there.
 
 ## 10. Open decisions
 

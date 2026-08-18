@@ -94,3 +94,17 @@ class MixedCurveRequest(BaseModel):
     @classmethod
     def _clean_aliases(cls, value: List[str]) -> List[str]:
         return [a.strip() for a in value if a and a.strip()]
+
+
+class SimulateRequest(BaseModel):
+    """
+    A date asked for by calendar year rather than by measurement: what would a
+    sample from this year look like, measured this well?
+    """
+    cal_age: float = Field(..., ge=0, le=60000, description="Calendar age in cal BP")
+    error: float = Field(
+        default=25.0, gt=0, le=10000,
+        description="Laboratory 1-sigma on the hypothetical measurement",
+    )
+    delta_r: Optional[float] = Field(default=None, ge=-5000, le=5000)
+    delta_r_error: Optional[float] = Field(default=None, ge=0, le=5000)

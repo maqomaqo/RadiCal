@@ -170,3 +170,147 @@ class TestEndpoint:
     def test_max_points_is_bounded(self, client):
         assert client.get('/api/curves/intcal20/points?max_points=1').status_code == 422
         assert client.get('/api/curves/intcal20/points?max_points=99999').status_code == 422
+
+
+class TestComparingTwoCurves:
+    """
+    The difference is what a comparison is for. Two calibration curves drawn
+    over each other look alike at any zoom that fits a millennium on screen --
+    the hemispheric offset is a few decades against an axis spanning thousands
+    of years -- so the tests are about the difference series being right,
+    not about the two lines.
+    """
+
+    def test_the_southern_hemisphere_offset_comes_out(self):
+        """
+        SHCal20 samples measure older than IntCal20 ones of the same calendar
+        age, by a few decades. If the subtraction were the wrong way round, or
+        the two curves were not being read at the same calendar ages, this is
+        where it would show.
+        """
+        intcal = curve_registry.resolve('intcal20')
+        shcal = curve_registry.resolve('shcal20')
+        result = curve_view.compare(intcal, shcal, 2000, 3000, 500)
+        differences = [p[5] for p in result['points']]
+        mean = sum(differences) / len(differences)
+        assert -80 < mean < -20
+
+    def test_the_difference_carries_both_curve_errors(self):
+        intcal = curve_registry.resolve('intcal20')
+        shcal = curve_registry.resolve('shcal20')
+        for cal, a, a_sigma, b, b_sigma, difference, difference_sigma in \
+                curve_view.compare(intcal, shcal, 3000, 3100, 500)['points']:
+            assert difference == pytest.approx(a - b)
+            assert difference_sigma == pytest.approx(np.hypot(a_sigma, b_sigma))
+
+    def test_a_curve_compared_with_itself_is_flat_zero(self):
+        intcal = curve_registry.resolve('intcal20')
+        result = curve_view.compare(intcal, intcal, 1000, 2000, 200)
+        assert all(p[5] == pytest.approx(0.0) for p in result['points'])
+
+    def test_the_grid_is_the_union_so_neither_curve_is_resampled_down(self):
+        """Marine20 steps 10 years where IntCal20 steps 1; comparing them on
+        the coarser grid would hide the finer curve's structure."""
+        intcal = curve_registry.resolve('intcal20')
+        marine = curve_registry.resolve('marine20')
+        result = curve_view.compare(intcal, marine, 1000, 2000, 5000)
+        assert result['points_in_window'] > 900
+
+    def test_curves_that_do_not_overlap_are_refused(self):
+        from app.services.calibration import CalibrationCurve
+        old = CalibrationCurve(np.arange(30000, 40000, 20.0),
+                               np.arange(30000, 40000, 20.0), np.full(500, 50.0))
+        young = CalibrationCurve(np.arange(0, 1000, 10.0),
+                                 np.arange(0, 1000, 10.0), np.full(100, 20.0))
+        with pytest.raises(ValueError) as exc:
+            curve_view.compare(old, young)
+        assert 'do not overlap' in str(exc.value)
+
+
+class TestSimulatingADate:
+    """
+    What a date from a given calendar year would look like -- the single-date
+    counterpart of the resolution panel's aggregate.
+    """
+
+    def test_a_year_on_a_steep_stretch_gives_one_tight_range(self, client):
+        response = client.post('/api/curves/intcal20/simulate',
+                               json={'cal_age': 2750, 'error': 25})
+        assert response.status_code == 200
+        data = response.json()['data']
+        assert len(data['hpd_95_ranges']) == 1
+        span = data['hpd_95_ranges'][0]['max'] - data['hpd_95_ranges'][0]['min']
+        assert span < 60
+
+    def test_a_year_inside_the_plateau_splits_into_several(self, client):
+        """
+        The clearest statement of what a plateau costs: the same measurement
+        precision, 150 years earlier, buys one range of 37 years; here it buys
+        four ranges spread over three centuries.
+        """
+        data = client.post('/api/curves/intcal20/simulate',
+                           json={'cal_age': 2600, 'error': 25}).json()['data']
+        assert len(data['hpd_95_ranges']) >= 3
+        envelope = (max(r['max'] for r in data['hpd_95_ranges'])
+                    - min(r['min'] for r in data['hpd_95_ranges']))
+        assert envelope > 250
+
+    def test_the_simulated_measurement_is_the_curve_itself(self, client):
+        """No random scatter: this answers "how well does this year date",
+        which is a question with one answer, rather than "what might one
+        sample give", which has a different answer every time it is asked."""
+        curve = curve_registry.resolve('intcal20')
+        expected, _ = curve.interpolate(3000.0)
+        data = client.post('/api/curves/intcal20/simulate',
+                           json={'cal_age': 3000, 'error': 25}).json()['data']
+        assert data['c14_age'] == pytest.approx(float(expected))
+        again = client.post('/api/curves/intcal20/simulate',
+                            json={'cal_age': 3000, 'error': 25}).json()['data']
+        assert again['hpd_95_ranges'] == data['hpd_95_ranges']
+
+    def test_a_worse_measurement_gives_a_wider_answer(self, client):
+        spans = {}
+        for error in (15, 50):
+            data = client.post('/api/curves/intcal20/simulate',
+                               json={'cal_age': 3000, 'error': error}).json()['data']
+            spans[error] = (max(r['max'] for r in data['hpd_95_ranges'])
+                            - min(r['min'] for r in data['hpd_95_ranges']))
+        assert spans[50] > spans[15]
+
+    def test_a_year_outside_the_curve_is_refused(self, client):
+        response = client.post('/api/curves/intcal20/simulate',
+                               json={'cal_age': 58000, 'error': 25})
+        assert response.status_code == 422
+        assert '55000' in response.text.replace(',', '')
+
+    def test_unknown_curve_is_404(self, client):
+        assert client.post('/api/curves/intcal13/simulate',
+                           json={'cal_age': 3000}).status_code == 404
+
+
+class TestCompareAndCsvEndpoints:
+
+    def test_compare_endpoint(self, client):
+        response = client.get(
+            '/api/curves/compare?a=intcal20&b=shcal20&cal_from=2000&cal_to=2500'
+        )
+        assert response.status_code == 200
+        data = response.json()['data']
+        assert data['a'] == 'intcal20' and data['b'] == 'shcal20'
+        assert all(len(p) == 7 for p in data['points'])
+
+    def test_compare_reports_where_the_two_curves_both_exist(self, client):
+        data = client.get('/api/curves/compare?a=intcal20&b=marine20').json()['data']
+        assert data['overlap_cal_min'] == 0
+        assert data['overlap_cal_max'] == 55000
+
+    def test_compare_with_an_unknown_curve_is_404(self, client):
+        assert client.get('/api/curves/compare?a=intcal20&b=intcal13').status_code == 404
+
+    def test_window_csv(self, client):
+        response = client.get('/api/curves/intcal20/points.csv?cal_from=2700&cal_to=2800')
+        assert response.status_code == 200
+        lines = [l for l in response.text.splitlines() if not l.startswith('#')]
+        assert len(lines) == 101
+        assert len(lines[0].split(',')) == 4
+        assert 'attachment' in response.headers['content-disposition']

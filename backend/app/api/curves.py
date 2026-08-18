@@ -41,7 +41,8 @@ from app.database import SessionLocal, get_db
 from app.models import StoredCalibrationCurve
 from app.services.calibration import CalibrationCurve
 from app.schemas.curve import (
-    CurveMetadata, CurveMetadataUpdate, MixedCurveRequest, SLUG_PATTERN, slugify,
+    CurveMetadata, CurveMetadataUpdate, MixedCurveRequest, SimulateRequest,
+    SLUG_PATTERN, slugify,
 )
 from app.services import curve_import, curve_mix, curve_registry, curve_view, resolution
 
@@ -74,6 +75,43 @@ async def list_curves(limit: int = DEFAULT_LIMIT, include_archived: bool = False
             "total_pages": 1 if specs else 0,
         }
     }
+
+
+@router.get("/curves/compare")
+async def compare_curves(
+    a: str = Query(..., description="First curve id"),
+    b: str = Query(..., description="Second curve id"),
+    cal_from: Optional[float] = Query(None),
+    cal_to: Optional[float] = Query(None),
+    max_points: int = Query(curve_view.DEFAULT_MAX_POINTS, ge=2, le=curve_view.MAX_MAX_POINTS),
+):
+    """
+    Two curves on one grid, with their difference.
+
+    The difference is the point. Drawn over each other, two calibration curves
+    look alike at any zoom that fits a millennium on screen; the hemispheric
+    offset between IntCal20 and SHCal20 is a few decades against an axis
+    spanning thousands of years. As A - B it reads immediately.
+
+    Declared before /curves/{curve_id} on purpose: routes match in declaration
+    order, and "compare" is a perfectly good curve id as far as the path
+    pattern is concerned, so the other way round this endpoint is a 404 for a
+    curve that does not exist.
+    """
+    try:
+        curve_a = curve_registry.resolve(a)
+        curve_b = curve_registry.resolve(b)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+    try:
+        data = curve_view.compare(curve_a, curve_b, cal_from, cal_to, max_points)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+    data['a'] = a
+    data['b'] = b
+    return {"success": True, "data": data}
 
 
 @router.get("/curves/{curve_id}")
@@ -124,6 +162,78 @@ async def curve_points(
     data = curve_view.window(curve, cal_from, cal_to, max_points)
     data['curve_id'] = curve_id
     return {"success": True, "data": data}
+
+
+@router.post("/curves/{curve_id}/simulate")
+async def simulate_date(curve_id: str, request: SimulateRequest):
+    """
+    What a date from a given calendar year would look like.
+
+    The curve's own radiocarbon age at that year, calibrated back through the
+    curve with the stated laboratory error -- OxCal's C_Simulate, without its
+    random scatter. Deliberately without: a drawn measurement answers "what
+    might one particular sample give", which is a different question every
+    time it is asked, where this answers "how well does this year date", which
+    is the question a curve browser is for. It is also the single-date
+    counterpart of the aggregate the resolution panel reports.
+    """
+    try:
+        curve = curve_registry.resolve(curve_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+    if not (curve.cal_ages.min() <= request.cal_age <= curve.cal_ages.max()):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"{request.cal_age:g} cal BP is outside this curve, which "
+                f"covers {curve.cal_ages.min():g}-{curve.cal_ages.max():g} cal BP."
+            ),
+        )
+
+    c14_age, curve_sigma = curve.interpolate(float(request.cal_age))
+    cal_ages, probabilities = curve.calibrate(
+        float(c14_age), request.error, request.delta_r, request.delta_r_error
+    )
+
+    return {
+        "success": True,
+        "data": {
+            "curve_id": curve_id,
+            "cal_age": request.cal_age,
+            "c14_age": float(c14_age),
+            "curve_error": float(curve_sigma),
+            "error": request.error,
+            "hpd_68_ranges": curve.get_hpd_ranges(cal_ages, probabilities, 0.68),
+            "hpd_95_ranges": curve.get_hpd_ranges(cal_ages, probabilities, 0.95),
+            "point_estimates": curve.get_point_estimate(cal_ages, probabilities),
+            "probability_distribution": curve.get_display_distribution(cal_ages, probabilities),
+        },
+    }
+
+
+@router.get("/curves/{curve_id}/points.csv")
+async def curve_points_csv(
+    curve_id: str,
+    cal_from: Optional[float] = Query(None),
+    cal_to: Optional[float] = Query(None),
+    max_points: int = Query(curve_view.MAX_MAX_POINTS, ge=2, le=curve_view.MAX_MAX_POINTS),
+):
+    """The visible window as CSV, so a stretch of curve can leave this app as
+    data rather than only as a picture."""
+    try:
+        curve = curve_registry.resolve(curve_id)
+        spec = curve_registry.get_spec(curve_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+    window = curve_view.window(curve, cal_from, cal_to, max_points)
+    name = f"{curve_id}-{window['cal_from']:.0f}-{window['cal_to']:.0f}.csv"
+    return StreamingResponse(
+        iter([curve_view.to_csv(window, spec.name)]),
+        media_type='text/csv',
+        headers={'Content-Disposition': f'attachment; filename="{name}"'},
+    )
 
 
 # Beyond this span, the calculation takes long enough (about twelve seconds

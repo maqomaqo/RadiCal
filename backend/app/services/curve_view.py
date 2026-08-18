@@ -27,6 +27,11 @@ from app.services.calibration import CalibrationCurve
 
 # Enough to draw a curve on a wide screen without the payload getting silly.
 DEFAULT_MAX_POINTS = 800
+
+# A comparison window narrower than this is widened to it, so that two curves
+# whose grids happen to have no shared point in a very tight window still
+# produce a drawable line rather than nothing.
+GRID_MINIMUM_SPAN = 1.0
 MAX_MAX_POINTS = 5000
 
 
@@ -189,3 +194,82 @@ def window(
         'curve_cal_min': float(cal.min()),
         'curve_cal_max': float(cal.max()),
     }
+
+
+def compare(
+    curve_a: CalibrationCurve,
+    curve_b: CalibrationCurve,
+    cal_from: Optional[float] = None,
+    cal_to: Optional[float] = None,
+    max_points: int = DEFAULT_MAX_POINTS,
+) -> Dict[str, Any]:
+    """
+    Two curves on one grid, with their difference.
+
+    The difference is what the comparison is actually for. Two calibration
+    curves drawn over each other look much alike at any zoom that fits a
+    millennium on screen -- the hemispheric offset between IntCal20 and
+    SHCal20 is a few decades against a vertical axis spanning thousands of
+    years, and the eye cannot read it off two nearly-coincident lines. Plotted
+    as A - B it is legible immediately, which is the difference between "these
+    look similar" and "these differ by 40 +/- 12 years here".
+
+    Decimation keeps the extremes of the DIFFERENCE rather than of either
+    curve, since that is the series being examined; the two curves are
+    reported at whichever points survive.
+
+    Returns rows of [cal BP, A, sigma_A, B, sigma_B, A - B, sigma of the
+    difference], the last being the two curve errors in quadrature.
+    """
+    lo_curve = max(float(curve_a.cal_ages.min()), float(curve_b.cal_ages.min()))
+    hi_curve = min(float(curve_a.cal_ages.max()), float(curve_b.cal_ages.max()))
+    if hi_curve <= lo_curve:
+        raise ValueError(
+            "These two curves do not overlap in calendar time, so there is "
+            "nothing to compare."
+        )
+
+    lo = lo_curve if cal_from is None else max(float(cal_from), lo_curve)
+    hi = hi_curve if cal_to is None else min(float(cal_to), hi_curve)
+    if hi < lo:
+        lo, hi = hi, lo
+
+    grid = np.union1d(curve_a.cal_ages, curve_b.cal_ages)
+    grid = grid[(grid >= lo) & (grid <= hi)]
+    if len(grid) < 2:
+        grid = np.linspace(lo, max(hi, lo + GRID_MINIMUM_SPAN), 2)
+
+    a_c14, a_sigma = curve_a.interpolate(grid)
+    b_c14, b_sigma = curve_b.interpolate(grid)
+    difference = a_c14 - b_c14
+    difference_sigma = np.hypot(a_sigma, b_sigma)
+
+    kept = _decimate(np.arange(len(grid)), difference, int(np.clip(max_points, 2, MAX_MAX_POINTS)))
+
+    return {
+        'cal_from': float(grid[0]),
+        'cal_to': float(grid[-1]),
+        'points': [
+            [
+                float(grid[i]), float(a_c14[i]), float(a_sigma[i]),
+                float(b_c14[i]), float(b_sigma[i]),
+                float(difference[i]), float(difference_sigma[i]),
+            ]
+            for i in kept
+        ],
+        'point_count': int(len(kept)),
+        'points_in_window': int(len(grid)),
+        'decimated': bool(len(kept) < len(grid)),
+        'overlap_cal_min': lo_curve,
+        'overlap_cal_max': hi_curve,
+    }
+
+
+def to_csv(window: Dict[str, Any], curve_name: str) -> str:
+    """The visible window as CSV, in the .14c column order with the local
+    gradient alongside -- so a stretch of curve can leave this app as data,
+    not only as a picture."""
+    lines = [f'# {curve_name}', '# CAL BP,14C age,Sigma,Slope (14C yr / cal yr)']
+    for cal, c14, sigma, slope in window['points']:
+        lines.append(f'{cal:g},{c14:g},{sigma:g},{slope:.4f}')
+    return '\n'.join(lines) + '\n'

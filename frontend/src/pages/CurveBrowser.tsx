@@ -15,19 +15,24 @@ import {
   Stack,
   Switch,
   TextField,
+  Tooltip,
   Typography,
 } from '@mui/material'
 import Plotly from 'plotly.js-dist-min'
 import createPlotlyComponent from 'react-plotly.js/factory'
 import CurveScrubber from '@/components/CurveScrubber'
 import {
+  compareCurves,
+  curveWindowCsvUrl,
   fetchCurvePoints,
   fetchResolution,
   resolutionCsvUrl,
+  type ComparePoint,
   type CurvePoint,
   type CurveSpec,
   type ResolutionPoint,
 } from '@/api/curves'
+import SimulateDateDialog from '@/components/SimulateDateDialog'
 import { useCurves } from '@/hooks/useCurves'
 import { usePlotColors } from '@/theme/plotColors'
 import {
@@ -48,6 +53,8 @@ import {
 } from '@/utils/curveScrubber'
 import { describeSlope } from '@/utils/curveShape'
 import { resolutionStride } from '@/utils/resolutionStride'
+import { interpolateAt } from '@/utils/seriesLookup'
+import { compactGrid } from '@/utils/curveGrid'
 
 const Plot = createPlotlyComponent(Plotly)
 
@@ -106,6 +113,65 @@ function sampleAt(points: CurvePoint[], cal: number): CurvePoint | null {
   return nearest
 }
 
+/**
+ * A panel under the curve, framed and titled.
+ *
+ * The frame is doing real work rather than decoration: these panels share the
+ * curve's calendar axis and sit directly beneath it, so without one they read
+ * as more of the same chart. The strip along the top says which question this
+ * panel answers, and holds whatever settings belong to that question -- which
+ * is where the resolution panel's laboratory error and CSV export live, next
+ * to the thing they change, instead of in a row of eleven controls at the
+ * bottom of the page where nothing said what they applied to.
+ */
+function PanelSection({
+  title,
+  caption,
+  controls,
+  children,
+}: {
+  title: string
+  caption?: React.ReactNode
+  controls?: React.ReactNode
+  children: React.ReactNode
+}) {
+  return (
+    <Box
+      sx={{
+        mt: 1.5,
+        border: 1,
+        borderColor: 'divider',
+        borderRadius: 1,
+        overflow: 'hidden',
+      }}
+    >
+      <Box
+        sx={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 1.5,
+          flexWrap: 'wrap',
+          px: 1.5,
+          py: 0.5,
+          backgroundColor: 'action.hover',
+        }}
+      >
+        <Typography variant="caption" sx={{ fontWeight: 600 }}>
+          {title}
+        </Typography>
+        {caption && (
+          <Typography variant="caption" color="textSecondary">
+            {caption}
+          </Typography>
+        )}
+        <Box sx={{ flexGrow: 1 }} />
+        {controls}
+      </Box>
+      {children}
+    </Box>
+  )
+}
+
 export default function CurveBrowser() {
   const { curveId = '' } = useParams<{ curveId: string }>()
   const { curves } = useCurves()
@@ -126,12 +192,22 @@ export default function CurveBrowser() {
   // scrubber can disagree about where you are -- so it has to say so.
   const [stale, setStale] = useState(false)
   // The resolution profile, on the same calendar axis as the curve above it.
-  // Optional because it is a second request per window, and because a curve
-  // is worth looking at without it.
-  const [showResolution, setShowResolution] = useState(true)
+  //
+  // Off to begin with. The page opens on the curve alone -- one chart, full
+  // height, which is what someone arriving here came to see; the second panel
+  // is an answer to a question they have not asked yet. It also means the
+  // first view costs one request rather than two.
+  const [showResolution, setShowResolution] = useState(false)
   const [resolution, setResolution] = useState<ResolutionPoint[]>([])
   const [u0, setU0] = useState(15)
   const [resolutionLoading, setResolutionLoading] = useState(false)
+  // Comparison against a second curve, and the difference between them --
+  // which is the part worth looking at, since two curves drawn over each
+  // other are indistinguishable at any useful zoom.
+  const [compareWith, setCompareWith] = useState('')
+  const [comparison, setComparison] = useState<ComparePoint[]>([])
+  // A hypothetical date from one calendar year, opened by clicking the curve.
+  const [simulateAt, setSimulateAt] = useState<number | null>(null)
 
   /**
    * How wide the plot is, for deciding how many points to ask for.
@@ -237,27 +313,60 @@ export default function CurveBrowser() {
     }
   }, [curveId, window, u0, showResolution])
 
+  useEffect(() => {
+    if (!window || !compareWith) {
+      setComparison([])
+      return
+    }
+    let active = true
+    const width = plotWidth()
+    const timer = setTimeout(() => {
+      compareCurves(curveId, compareWith, {
+        calFrom: window.from,
+        calTo: window.to,
+        maxPoints: pointsForWidth(width),
+      })
+        .then((data) => {
+          if (active) setComparison(data.points)
+        })
+        .catch(() => {
+          if (active) setComparison([])
+        })
+    }, 150)
+    return () => {
+      active = false
+      clearTimeout(timer)
+    }
+  }, [curveId, compareWith, window])
+
   const hovered = useMemo(
     () => (hover === null ? null : sampleAt(points, hover)),
     [hover, points]
   )
 
+  /**
+   * The resolution figures at the hovered year, read off the drawn line.
+   *
+   * Interpolated rather than snapped to the nearest computed year, so the
+   * readout says what the panel above it shows. The profile is sampled at
+   * about one point per pixel; at a wide zoom the nearest sample can be
+   * decades away, and across a plateau — where resolution swings by 300 years
+   * in 150 — that made the figure differ from its own chart by a fifth.
+   *
+   * Gated on the panel being shown, not just on having numbers: the fetch is
+   * skipped while it is off, so whatever is still in `resolution` was computed
+   * for whichever window was on screen when it was last on.
+   */
   const hoveredResolution = useMemo(() => {
-    // Gated on the panel being shown, not just on having numbers: the fetch
-    // is skipped while it is off, so whatever is still in `resolution` was
-    // computed for whichever window was on screen when it was last on.
     if (!showResolution || hover === null || resolution.length === 0) return null
-    let nearest = resolution[0]
-    let best = Infinity
-    for (const point of resolution) {
-      const distance = Math.abs(point[0] - hover)
-      if (distance < best) {
-        best = distance
-        nearest = point
-      }
-    }
-    return nearest
+    const mean = interpolateAt(resolution, hover, 1)
+    const low = interpolateAt(resolution, hover, 2)
+    const high = interpolateAt(resolution, hover, 3)
+    if (mean === null || low === null || high === null) return null
+    return { mean, low, high }
   }, [hover, resolution, showResolution])
+
+  const comparedSpec = curves.find((curve) => curve.id === compareWith)
 
   const plotData = useMemo(() => {
     if (points.length === 0) return []
@@ -281,23 +390,45 @@ export default function CurveBrowser() {
       showlegend: true,
     })
 
-    return [
+    const traces: any[] = [
       band(2, colors.hpd95, '±2σ'),
       band(1, colors.hpd68, '±1σ'),
       {
         x: cal,
         y: c14,
-        customdata: points.map((p, i) => [labels[i], p[2], p[3]]),
+        // Just enough to say where the pointer is. The curve's error and its
+        // local gradient are both in the readout under the chart, and a
+        // floating box that repeats them covers the curve to tell you what is
+        // already on screen. Pre-formatted because %{x} is always the cal BP
+        // the point is plotted at, where the reader may be in BC/AD.
+        customdata: labels,
         mode: 'lines',
         line: { color: colors.posteriorLine, width: 1.5 },
         name: spec?.name ?? curveId,
-        hovertemplate:
-          '<b>%{customdata[0]}</b><br>' +
-          '¹⁴C age: %{y:.0f} ± %{customdata[1]:.0f} BP<br>' +
-          'slope: %{customdata[2]:.2f} ¹⁴C yr / cal yr<extra></extra>',
+        // Named only when there are two lines to tell apart. On its own the
+        // name is the chart's title repeated into a box that covers the
+        // curve; with a comparison overlaid, two unlabelled numbers are a
+        // guess.
+        hovertemplate: comparison.length > 0
+          ? `<b>%{customdata}</b><br>${spec?.name ?? curveId}: %{y:.0f} ¹⁴C BP<extra></extra>`
+          : '<b>%{customdata}</b><br>%{y:.0f} ¹⁴C BP<extra></extra>',
       },
     ]
-  }, [points, colors, dateFormat, spec, curveId])
+
+    if (comparison.length > 0) {
+      traces.push({
+        x: comparison.map((p) => p[0]),
+        y: comparison.map((p) => p[3]),
+        mode: 'lines',
+        line: { color: colors.priorLine, width: 1.5, dash: 'dot' },
+        name: comparedSpec?.name ?? compareWith,
+        hovertemplate:
+          `${comparedSpec?.name ?? compareWith}: %{y:.0f} ¹⁴C BP<extra></extra>`,
+      })
+    }
+
+    return traces
+  }, [points, colors, dateFormat, spec, curveId, comparison, compareWith, comparedSpec])
 
   /**
    * How tall the curve chart is, giving up exactly what the resolution panel
@@ -310,7 +441,32 @@ export default function CurveBrowser() {
    * have expanded. `useResizeHandler` does not catch it either: it listens
    * for WINDOW resizes, and nothing about the window changed.
    */
-  const chartHeight = showResolution ? 270 : 380
+  /**
+   * Heights for the stack of panels under the chart.
+   *
+   * The curve gives up what the panels take, so the readout below stays where
+   * it is and does not fall below the fold. But it cannot give up everything:
+   * at two panels a straight 110 each left the curve 160px tall, which is too
+   * short to read the thing the page is actually about. So the panels shrink
+   * a little when there are two of them, and the chart will not go below 200.
+   */
+  const panelCount = (showResolution ? 1 : 0) + (comparison.length > 0 ? 1 : 0)
+  const panelHeight = panelCount > 1 ? 75 : 85
+  /**
+   * What a framed section costs beyond its chart: the border, the title strip
+   * with its controls, and the margin above it. Measured, not guessed -- a
+   * first estimate of 46 left the readout moving 45px when a panel opened,
+   * which is the whole thing the compensation exists to prevent.
+   */
+  const SECTION_CHROME = 91
+  /**
+   * With one panel this comes out at 380 exactly, so the readout does not
+   * move. With two it cannot: two framed sections are 330px between them, and
+   * the only way to absorb that is a chart too short to read. The chart floors
+   * at 200 and the page grows instead -- which is a fair trade for having
+   * asked to see two extra charts at once.
+   */
+  const chartHeight = Math.max(380 - panelCount * (panelHeight + SECTION_CHROME), 200)
 
   const layout = useMemo(() => {
     const ticks = window ? calendarAxisTicks(window.from, window.to, dateFormat) : null
@@ -318,7 +474,17 @@ export default function CurveBrowser() {
       height: chartHeight,
       title: { text: spec ? `${spec.name}` : curveId, font: { size: 16 } },
       xaxis: {
-        title: { text: calendarAxisTitle(dateFormat) },
+        // Dropped when panels sit below, where it would be stranded halfway
+        // down a stack of charts sharing one axis; a caption under the last
+        // panel carries it instead.
+        ...(panelCount > 0 ? {} : { title: { text: calendarAxisTitle(dateFormat) } }),
+        // The crosshair that 'x unified' used to draw, kept without it. See
+        // hovermode below.
+        showspikes: true,
+        spikemode: 'across' as const,
+        spikethickness: 1,
+        spikedash: 'dot',
+        spikecolor: colors.grid,
         // Older to the left, as in every other plot in this app, so time
         // reads left to right.
         autorange: 'reversed' as const,
@@ -329,7 +495,31 @@ export default function CurveBrowser() {
         title: { text: 'Radiocarbon Age (BP)' },
         gridcolor: colors.grid,
       },
-      hovermode: 'x unified' as const,
+      /**
+       * 'closest', not 'x unified'.
+       *
+       * Unified draws a header line above the box holding the raw x value,
+       * and the x value here is always cal BP because that is what the curve
+       * is plotted in -- so in cal BP it printed the date twice, and in BC/AD
+       * it printed a number in a convention the reader had explicitly turned
+       * off. It cannot be reformatted: no axis format turns 2502 into 553 BC.
+       * So it goes, and the spike lines above keep the crosshair that made
+       * unified worth having.
+       */
+      hovermode: 'closest' as const,
+      /**
+       * No distance cutoff, so pointing anywhere in the plot finds the
+       * nearest point on the curve rather than requiring the pointer to track
+       * the line. That is what the readout underneath needs -- it is driven by
+       * this hover, and with the default cutoff it blanked whenever the
+       * pointer drifted thirty pixels off the curve.
+       *
+       * The alternatives both reintroduce the raw cal BP number this replaced:
+       * 'x unified' prints it as a header above the box, and 'x' prints it in
+       * a label on the axis. Neither can be reformatted, because the value
+       * plotted IS cal BP -- no axis format turns 2502 into 553 BC.
+       */
+      hoverdistance: -1,
       showlegend: true,
       legend: { orientation: 'h' as const, y: 1.02, yanchor: 'bottom' as const },
       plot_bgcolor: colors.surface,
@@ -337,7 +527,7 @@ export default function CurveBrowser() {
       margin: { l: 70, r: 20, t: 50, b: 60 },
       autosize: true,
     }
-  }, [spec, curveId, dateFormat, colors, window, chartHeight])
+  }, [spec, curveId, dateFormat, colors, window, chartHeight, panelCount])
 
   const config = useMemo(
     () => ({
@@ -400,18 +590,57 @@ export default function CurveBrowser() {
           {spec && (
             <>
               <Chip size="small" label={`${spec.data_points.toLocaleString()} points`} />
-              <Chip size="small" label={spec.resolution} variant="outlined" />
+              <Tooltip title={spec.resolution}>
+                <Chip size="small" label={compactGrid(spec.resolution)} variant="outlined" />
+              </Tooltip>
               {spec.reference && <Chip size="small" label={spec.reference} variant="outlined" />}
             </>
           )}
           <Box sx={{ flexGrow: 1 }} />
+          {/* What is on screen, kept together and kept away from the
+              navigation controls under the chart -- "which curves am I
+              looking at" and "where am I looking" are different questions,
+              and eleven controls in one row answered neither. */}
+          <FormControlLabel
+            control={
+              <Switch
+                size="small"
+                checked={showResolution}
+                onChange={(e) => setShowResolution(e.target.checked)}
+              />
+            }
+            label={
+              <Typography variant="body2">
+                Expected resolution{resolutionLoading ? ' …' : ''}
+              </Typography>
+            }
+          />
+          <TextField
+            select
+            size="small"
+            label="Compare with"
+            value={compareWith}
+            onChange={(e) => setCompareWith(e.target.value)}
+            sx={{ minWidth: 160 }}
+          >
+            <MenuItem value="">
+              <em>No comparison</em>
+            </MenuItem>
+            {curves
+              .filter((curve) => curve.id !== curveId)
+              .map((curve) => (
+                <MenuItem key={curve.id} value={curve.id}>
+                  {curve.name}
+                </MenuItem>
+              ))}
+          </TextField>
           <TextField
             select
             size="small"
             label="Dates as"
             value={dateFormat}
             onChange={(e) => setDateFormat(e.target.value as DateFormat)}
-            sx={{ minWidth: 200 }}
+            sx={{ minWidth: 170 }}
           >
             {DATE_FORMAT_OPTIONS.map((option) => (
               <MenuItem key={option.value} value={option.value}>
@@ -421,6 +650,15 @@ export default function CurveBrowser() {
           </TextField>
         </Stack>
       </Paper>
+
+      <SimulateDateDialog
+        open={simulateAt !== null}
+        onClose={() => setSimulateAt(null)}
+        curveId={curveId}
+        curveName={spec?.name ?? curveId}
+        calAge={simulateAt}
+        dateFormat={dateFormat}
+      />
 
       <Paper sx={{ p: 2, mb: 2 }} ref={plotBoxRef}>
         {stale && (
@@ -437,10 +675,121 @@ export default function CurveBrowser() {
           style={{ width: '100%', height: `${chartHeight}px` }}
           onHover={(event: any) => setHover(event?.points?.[0]?.x ?? null)}
           onUnhover={() => setHover(null)}
+          // Clicking a year asks what a date from it would actually look
+          // like. In a plateau the answer is three or four disjoint ranges,
+          // which says what a plateau costs far more plainly than any single
+          // number for it can.
+          onClick={(event: any) => {
+            const clicked = event?.points?.[0]?.x
+            if (typeof clicked === 'number') setSimulateAt(clicked)
+          }}
         />
 
+        {comparison.length > 0 && (
+          <PanelSection
+            title={`${spec?.name ?? curveId} − ${comparedSpec?.name ?? compareWith}`}
+            caption={`how far apart the two curves are, with both their errors — above zero, ${
+              spec?.name ?? curveId
+            } reads older`}
+          >
+            <Plot
+              data={
+                [
+                  {
+                    x: [
+                      ...comparison.map((p) => p[0]),
+                      ...comparison.map((p) => p[0]).reverse(),
+                    ],
+                    y: [
+                      ...comparison.map((p) => p[5] + p[6]),
+                      ...comparison.map((p) => p[5] - p[6]).reverse(),
+                    ],
+                    fill: 'toself',
+                    fillcolor: colors.hpd95,
+                    line: { width: 0, color: 'rgba(0,0,0,0)' },
+                    mode: 'lines',
+                    hoverinfo: 'skip',
+                  },
+                  {
+                    x: comparison.map((p) => p[0]),
+                    y: comparison.map((p) => p[5]),
+                    customdata: comparison.map((p) => formatCalendarAge(p[0], dateFormat)),
+                    mode: 'lines',
+                    line: { color: colors.posteriorLine, width: 1.5 },
+                    hovertemplate:
+                      '<b>%{customdata}</b><br>%{y:.0f} ¹⁴C yr apart<extra></extra>',
+                  },
+                ] as any
+              }
+              layout={
+                {
+                  height: panelHeight,
+                  xaxis: {
+                    range: [window.to, window.from],
+                    showticklabels: false,
+                    gridcolor: colors.grid,
+                    showspikes: true,
+                    spikemode: 'across' as const,
+                    spikethickness: 1,
+                    spikedash: 'dot',
+                    spikecolor: colors.grid,
+                  },
+                  yaxis: {
+                    // Units only. A rotated title is limited by the panel's
+                    // HEIGHT, and these panels are 75-85px -- but more to the
+                    // point, the section's own header already says what is
+                    // being plotted, so repeating it sideways in the space
+                    // where it does not fit says nothing twice.
+                    title: { text: 'yr', font: { size: 11 } },
+                    gridcolor: colors.grid,
+                    zeroline: true,
+                    zerolinecolor: colors.grid,
+                  },
+                  showlegend: false,
+                  hovermode: 'closest' as const,
+                  hoverdistance: -1,
+                  plot_bgcolor: colors.surface,
+                  paper_bgcolor: colors.surface,
+                  margin: { l: 52, r: 20, t: 4, b: 4 },
+                  autosize: true,
+                } as any
+              }
+              config={{ responsive: true, displayModeBar: false }}
+              useResizeHandler
+              style={{ width: '100%', height: `${panelHeight}px` }}
+              onHover={(event: any) => setHover(event?.points?.[0]?.x ?? null)}
+              onUnhover={() => setHover(null)}
+            />
+          </PanelSection>
+        )}
+
         {showResolution && (
-          <Box sx={{ mt: 0.5 }}>
+          <PanelSection
+            title="Expected resolution"
+            caption="how tightly a date from each year could be known, before measuring"
+            controls={
+              <>
+                <TextField
+                  select
+                  size="small"
+                  variant="standard"
+                  label="Lab ±1σ"
+                  value={u0}
+                  onChange={(e) => setU0(Number(e.target.value))}
+                  sx={{ minWidth: 120 }}
+                >
+                  {LAB_UNCERTAINTIES.map((option) => (
+                    <MenuItem key={option.value} value={option.value}>
+                      {option.label}
+                    </MenuItem>
+                  ))}
+                </TextField>
+                <Button size="small" component="a" href={resolutionCsvUrl(curveId, u0)}>
+                  Export profile
+                </Button>
+              </>
+            }
+          >
             <Plot
               data={
                 [
@@ -472,6 +821,7 @@ export default function CurveBrowser() {
               }
               layout={
                 {
+                  height: panelHeight,
                   xaxis: {
                     // Locked to the curve above rather than autoranged: the
                     // two are read together, and an axis that drifted by a few
@@ -481,27 +831,43 @@ export default function CurveBrowser() {
                     matches: 'x',
                     showticklabels: false,
                     gridcolor: colors.grid,
+                    showspikes: true,
+                    spikemode: 'across' as const,
+                    spikethickness: 1,
+                    spikedash: 'dot',
+                    spikecolor: colors.grid,
                   },
                   yaxis: {
-                    title: { text: 'Resolution (yr)', font: { size: 11 } },
+                    title: { text: 'yr', font: { size: 11 } },
                     gridcolor: colors.grid,
                     rangemode: 'tozero' as const,
                   },
                   showlegend: false,
-                  hovermode: 'x unified' as const,
+                  hovermode: 'closest' as const,
+                  hoverdistance: -1,
                   plot_bgcolor: colors.surface,
                   paper_bgcolor: colors.surface,
-                  margin: { l: 70, r: 20, t: 4, b: 4 },
+                  margin: { l: 52, r: 20, t: 4, b: 4 },
                   autosize: true,
                 } as any
               }
               config={{ responsive: true, displayModeBar: false }}
               useResizeHandler
-              style={{ width: '100%', height: '110px' }}
+              style={{ width: '100%', height: `${panelHeight}px` }}
               onHover={(event: any) => setHover(event?.points?.[0]?.x ?? null)}
               onUnhover={() => setHover(null)}
             />
-          </Box>
+          </PanelSection>
+        )}
+
+        {panelCount > 0 && (
+          <Typography
+            variant="caption"
+            color="textSecondary"
+            sx={{ display: 'block', textAlign: 'center', mt: 0.5 }}
+          >
+            {calendarAxisTitle(dateFormat)}
+          </Typography>
         )}
 
         {/* Directly under the chart, and laid out identically whether or not
@@ -535,8 +901,9 @@ export default function CurveBrowser() {
                 ? [[
                     'Expected resolution',
                     hoveredResolution
-                      ? `${hoveredResolution[1].toFixed(0)} yr ` +
-                        `(${hoveredResolution[2].toFixed(0)}–${hoveredResolution[3].toFixed(0)})`
+                      ? `${hoveredResolution.mean.toFixed(0)} yr ` +
+                        `(${hoveredResolution.low.toFixed(0)}–` +
+                        `${hoveredResolution.high.toFixed(0)})`
                       : '—',
                   ] as [string, string]]
                 : []),
@@ -556,10 +923,13 @@ export default function CurveBrowser() {
               ? `${slope.detail}.` +
                 (hoveredResolution
                   ? ` A ±${u0.toFixed(0)} yr measurement of a sample from this year` +
-                    ` calibrates to about ${hoveredResolution[1].toFixed(0)} years at 95.4%.`
+                    ` calibrates to about ${hoveredResolution.mean.toFixed(0)} years at 95.4%.`
                   : '')
-              : 'Point at the curve to read what it says there, how steeply it is running,' +
-                ' and how tightly a date from that year could be known.'}
+              : 'Point at the curve to read what it says there and how steeply it is' +
+                (showResolution
+                  ? ' running, and how tightly a date from that year could be known.'
+                  : ' running. Turn on Expected resolution below for how tightly a' +
+                    ' date from that year could be known.')}
           </Typography>
         </Box>
 
@@ -590,41 +960,13 @@ export default function CurveBrowser() {
             Hallstatt plateau
           </Button>
           <Box sx={{ flexGrow: 1 }} />
-          <FormControlLabel
-            control={
-              <Switch
-                size="small"
-                checked={showResolution}
-                onChange={(e) => setShowResolution(e.target.checked)}
-              />
-            }
-            label={
-              <Typography variant="body2">
-                Expected resolution{resolutionLoading ? ' …' : ''}
-              </Typography>
-            }
-          />
-          {showResolution && (
-            <>
-              <TextField
-                select
-                size="small"
-                label="Lab ±1σ"
-                value={u0}
-                onChange={(e) => setU0(Number(e.target.value))}
-                sx={{ minWidth: 130 }}
-              >
-                {LAB_UNCERTAINTIES.map((option) => (
-                  <MenuItem key={option.value} value={option.value}>
-                    {option.label}
-                  </MenuItem>
-                ))}
-              </TextField>
-              <Button size="small" component="a" href={resolutionCsvUrl(curveId, u0)}>
-                Export CSV
-              </Button>
-            </>
-          )}
+          <Button
+            size="small"
+            component="a"
+            href={curveWindowCsvUrl(curveId, window.from, window.to)}
+          >
+            Export this window
+          </Button>
         </Stack>
       </Paper>
 
