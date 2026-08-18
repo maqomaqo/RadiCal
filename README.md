@@ -35,8 +35,14 @@ Boundaries), and interactive posterior visualization.
   selectable (±15 for the best AMS, through ±25–30 for a typical commercial date) and a CSV
   export. On IntCal20 it puts the Hallstatt plateau at about 310 years and the steep drop at its
   start at 33 — a ninefold difference across 150 years, which is the difference between a date
-  worth having and one that is not. Mixed curves are still planned in
-  [`docs/CURVE_MANAGER_PLAN.md`](docs/CURVE_MANAGER_PLAN.md).
+  worth having and one that is not.
+- **Mixed curves**: OxCal's `Mix_Curves`, for a sample whose carbon came from more than one
+  reservoir — a human or animal with a partly marine diet, whose bone is neither terrestrial nor
+  marine carbon and is wrong by centuries against either curve alone. Built from two curves and a
+  proportion, with the uncertainty on that proportion widening the result most where the two
+  curves are furthest apart, which is where being wrong about the diet moves a date furthest. An
+  `.oxcal` file using `Mix_Curves` now imports, matched against a mixture this app already has —
+  and naming exactly what to create when it has none.
 - **Bayesian chronological modelling**: an explicit model tree of nested Sequences, Phases,
   Boundaries and Hiatuses (the OxCal idiom), each date assigned to a Phase; TPQ/TAQ age limiters;
   an optional outlier model per date. Solved exactly where the model permits it, and by OxCal's own
@@ -180,7 +186,7 @@ Full interactive documentation (generated from the actual FastAPI routes) is at
   `/api/curves/{id}/export`. `/api/curves/{id}/points` serves a windowed, decimated slice for the
   browser — min/max per bucket rather than every Nth point, so a curve's wiggles survive being
   drawn at any zoom. `/api/curves/{id}/resolution` (and `.csv`) serves the expected-resolution
-  profile.
+  profile, and `POST /api/curves/mixed` defines a mixture of two curves.
 - **Analysis** (`/api/analysis`, `/api/analysis/{id}`, `/api/analysis/calibrate`,
   `/api/analysis/calibrate-group`, `/api/analysis/bayesian`, plus rerun/duplicate/edit-inputs and
   model-tree endpoints) — create, run, retrieve, and manage analyses of all three types.

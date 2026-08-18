@@ -17,32 +17,8 @@ import pytest
 
 from app.services import curve_import, curve_registry
 
-@pytest.fixture(autouse=True)
-def _remove_stored_curves():
-    """
-    Delete any curve a test stored, once it has finished.
-
-    The suite shares one database (see conftest.py), and a stored curve is not
-    inert data: it changes what the whole application will accept. Leaving one
-    behind broke two tests in test_imports.py that use *IntCal13* as their
-    example of a curve this app does not have -- which it no longer was, once
-    a test here had imported one under that name. They were right to fail.
-    """
-    from app.database import SessionLocal
-    from app.models import StoredCalibrationCurve
-
-    with SessionLocal() as db:
-        before = {row[0] for row in db.query(StoredCalibrationCurve.id).all()}
-    yield
-    with SessionLocal() as db:
-        added = db.query(StoredCalibrationCurve).filter(
-            StoredCalibrationCurve.id.notin_(before) if before else True
-        ).all()
-        for row in added:
-            db.delete(row)
-        db.commit()
-    curve_registry.invalidate()
-
+# Every test here stores curves; each cleans up after itself. See conftest.
+pytestmark = pytest.mark.usefixtures('remove_stored_curves')
 
 def intcal_bytes():
     """The real IntCal20 file, wherever this run found it -- conftest.py

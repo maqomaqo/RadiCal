@@ -186,7 +186,7 @@ project*. Still missing: Excel-formatted output, and importing measurements
 directly into an analysis (as opposed to via a project collection). ~2 hours.
 
 ### 11. Calibration curve management UI
-Planned in full in `docs/CURVE_MANAGER_PLAN.md`. **Phases 1-5 are done**:
+Planned in full in `docs/CURVE_MANAGER_PLAN.md`. **Phases 1-6 are done**:
 the registry behind all of it (see #6), and the backend for user-imported
 curves — parse-then-store preview, `.14c`/CSV/BC-AD reading, immutable curve
 data guarded by a content hash checked on every load, archive-rather-than-
@@ -204,8 +204,11 @@ local gradient.
 on the same axis, with a selectable laboratory error and a CSV export.
 Validated against the reference implementation's published output at 0.36%
 mean difference over 1,000–4,000 cal BP.
-**Remaining:** mixed curves — the mixing math still isn't implemented (phase
-6), compare/simulate (7) and docs (8). ~8–12 hours.
+…and mixed curves: the mixing math (which had never been implemented at all),
+a builder on the Curves page, and `Mix_Curves` support in the OxCal importer,
+matched against a stored mixture rather than created by opening a file.
+**Remaining:** compare mode and simulate-a-date (phase 7), and the docs pass
+(8). ~5–8 hours.
 
 ---
 

@@ -40,8 +40,10 @@ from sqlalchemy.orm import Session
 from app.database import SessionLocal, get_db
 from app.models import StoredCalibrationCurve
 from app.services.calibration import CalibrationCurve
-from app.schemas.curve import CurveMetadata, CurveMetadataUpdate, SLUG_PATTERN, slugify
-from app.services import curve_import, curve_registry, curve_view, resolution
+from app.schemas.curve import (
+    CurveMetadata, CurveMetadataUpdate, MixedCurveRequest, SLUG_PATTERN, slugify,
+)
+from app.services import curve_import, curve_mix, curve_registry, curve_view, resolution
 
 router = APIRouter()
 
@@ -337,6 +339,104 @@ async def create_curve(
         "notes": result.notes,
         "warnings": result.warnings,
     }
+
+
+@router.post("/curves/mixed", status_code=201)
+async def create_mixed_curve(request: MixedCurveRequest, db: Session = Depends(get_db)):
+    """
+    Define a curve as a proportional mixture of two others, for samples whose
+    carbon came from more than one reservoir -- most often a human or animal
+    with a partly marine diet, whose bone is neither terrestrial nor marine
+    carbon and is wrong by centuries against either curve alone.
+
+    Stored as the recipe, not as the resulting numbers: it stays honest about
+    its parents, and they count as in use for as long as it exists.
+    """
+    for curve_id in (request.a, request.b):
+        if not curve_registry.exists(curve_id):
+            raise HTTPException(
+                status_code=422,
+                detail=f"There is no calibration curve '{curve_id}' to mix.",
+            )
+    if request.a == request.b:
+        raise HTTPException(
+            status_code=422,
+            detail="A curve mixed with itself is just that curve.",
+        )
+
+    spec_a = curve_registry.get_spec(request.a)
+    spec_b = curve_registry.get_spec(request.b)
+    name = request.name or f"{spec_a.name}/{spec_b.name} {request.percent_a:g}%"
+    slug = (request.curve_id or slugify(name)).strip().lower()
+
+    if not SLUG_PATTERN.match(slug):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"'{slug}' is not a usable curve id. Use 2-64 characters: "
+                "lowercase letters, digits, hyphens or underscores."
+            ),
+        )
+    if curve_registry.resolve_alias(slug) is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=f"A calibration curve '{slug}' already exists.",
+        )
+
+    existing = curve_registry.find_mixed(
+        request.a, request.b, request.percent_a, request.percent_a_error
+    )
+    if existing is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"'{existing}' is already this mixture. Two curves with the "
+                "same recipe would be the same numbers under two names, and "
+                "would make matching an .oxcal file's Mix_Curves to one of "
+                "them arbitrary."
+            ),
+        )
+
+    try:
+        mixed = curve_mix.mix(
+            curve_registry.resolve(request.a),
+            curve_registry.resolve(request.b),
+            request.percent_a,
+            request.percent_a_error,
+            name=name,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+    # A mixture containing any marine carbon is a marine sample's curve, and
+    # so should offer a reservoir offset -- which is what sample_type decides.
+    marine = 'marine' in (spec_a.sample_type, spec_b.sample_type)
+
+    row = StoredCalibrationCurve(
+        id=slug,
+        kind='mixed',
+        name=name,
+        description=request.description or curve_mix.describe(
+            spec_a.name, spec_b.name, request.percent_a, request.percent_a_error
+        ),
+        reference=request.reference,
+        type='mixed',
+        sample_type='marine' if marine else 'terrestrial',
+        recipe={
+            'a': request.a,
+            'b': request.b,
+            'percent_a': request.percent_a,
+            'percent_a_error': request.percent_a_error,
+        },
+        content_sha256=curve_registry.content_hash(mixed),
+        aliases=request.aliases,
+        archived=False,
+    )
+    db.add(row)
+    db.commit()
+    curve_registry.invalidate()
+
+    return {"success": True, "data": curve_registry.get_spec(slug).as_dict()}
 
 
 # --------------------------------------------------------------------------

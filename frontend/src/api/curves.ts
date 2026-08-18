@@ -310,6 +310,34 @@ export async function fetchResolution(
   return parsed.data as ResolutionProfile
 }
 
+/** A curve defined as a proportional mixture of two others (OxCal's Mix_Curves). */
+export interface MixedCurveInput {
+  curve_id?: string
+  name?: string
+  a: string
+  b: string
+  /** Percentage of the carbon from the FIRST curve, as OxCal states it. */
+  percent_a: number
+  percent_a_error: number
+  description?: string | null
+  aliases?: string[]
+}
+
+/**
+ * Define a mixed curve, for samples whose carbon came from more than one
+ * reservoir — a partly marine diet being the usual case.
+ */
+export async function createMixedCurve(input: MixedCurveInput): Promise<CurveSpec> {
+  const response = await fetch('/api/curves/mixed', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  })
+  const parsed = await readOrThrow(response)
+  resetCurveCache()
+  return parsed.data as CurveSpec
+}
+
 /** Where the whole resolution profile can be downloaded as CSV. */
 export function resolutionCsvUrl(curveId: string, u0: number): string {
   return `/api/curves/${curveId}/resolution.csv?u0=${u0}`

@@ -61,3 +61,36 @@ class CurveMetadataUpdate(BaseModel):
     type: Optional[Literal[CURVE_TYPES]] = None
     sample_type: Optional[Literal['terrestrial', 'marine']] = None
     aliases: Optional[List[str]] = Field(default=None, max_length=20)
+
+
+class MixedCurveRequest(BaseModel):
+    """
+    A curve defined as a proportional mixture of two others -- OxCal's
+    Mix_Curves.
+
+    The proportion is stated as a percentage of the FIRST curve, as OxCal
+    states it, so a recipe copied from an .oxcal file means the same thing
+    here. Its uncertainty is not optional in practice: a dietary fraction is
+    estimated, and an estimate offered without its error produces a mixed
+    curve that is more confident than the diet it came from.
+    """
+    curve_id: Optional[str] = None
+    name: Optional[str] = Field(default=None, max_length=120)
+    a: str = Field(..., description="The first curve's id")
+    b: str = Field(..., description="The second curve's id")
+    percent_a: float = Field(
+        ..., ge=0, le=100,
+        description="Percentage of the carbon from the first curve",
+    )
+    percent_a_error: float = Field(
+        default=0.0, ge=0, le=100,
+        description="1-sigma uncertainty on that percentage",
+    )
+    description: Optional[str] = Field(default=None, max_length=2000)
+    reference: Optional[str] = Field(default=None, max_length=500)
+    aliases: List[str] = Field(default_factory=list, max_length=20)
+
+    @field_validator('aliases')
+    @classmethod
+    def _clean_aliases(cls, value: List[str]) -> List[str]:
+        return [a.strip() for a in value if a and a.strip()]

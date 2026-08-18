@@ -337,6 +337,13 @@ UNSUPPORTED = {
     'u_sequence': 'a uniform-deposition sequence, which this app does not model.',
 }
 
+def _normalise_curve_name(raw: str) -> str:
+    """A curve name reduced to its comparable core, matching how the registry
+    compares names -- so `Curve("=Mixed Diet")` finds `Mix_Curves("mixed
+    diet", ...)`."""
+    return re.sub(r'[^a-z0-9]+', '', (raw or '').strip().lstrip('=').lower())
+
+
 def _curve_id(raw: str) -> Optional[str]:
     """
     An OxCal curve name as one of the ids the calibration engine loads, or
@@ -405,6 +412,9 @@ class _Translator:
         self.delta_r_usage: Dict[str, int] = {}
         self.wrapped_sequence_dates = 0
         self.seen_ignorable: List[str] = []
+        # Curve names this file defined with Mix_Curves, mapped to the stored
+        # curve each was matched to. Scoped to the file, as OxCal scopes them.
+        self.mixed_curves: Dict[str, str] = {}
 
     # -- helpers ---------------------------------------------------------
 
@@ -554,6 +564,9 @@ class _Translator:
             if command == 'delta_r':
                 self._apply_delta_r(node, scope)
                 continue
+            if command == 'mix_curves':
+                self._define_mixed_curve(node)
+                continue
             if command == 'outlier_model':
                 continue                      # already collected
             if command == 'options':
@@ -643,16 +656,80 @@ class _Translator:
         name = node.name
         if not name:
             return None
+        # A name this file defined with Mix_Curves wins over the global
+        # registry, exactly as it does in OxCal: the file is talking about its
+        # own mixture, not about a stored curve that happens to share a name.
+        local = self.mixed_curves.get(_normalise_curve_name(name))
+        if local is not None:
+            return local
         resolved = _curve_id(name)
         if resolved is None:
+            available = ', '.join(
+                spec.name for spec in curve_registry.list_specs(include_archived=True)
+            )
             self.error(
                 node,
                 f"Curve(\"{name}\") is not a curve this app has. It calibrates "
-                'against IntCal20, SHCal20 and Marine20; substituting one of '
-                'those would produce a real result against the wrong curve.',
+                f'against {available}; substituting one of those would produce '
+                'a real result against the wrong curve. Import the curve on '
+                'the Curves page and try again.',
             )
             return None
         return resolved
+
+    def _define_mixed_curve(self, node: Node) -> None:
+        """
+        Mix_Curves("name", A, B, percent, error) -- a curve made of two others,
+        for a sample whose carbon came from more than one reservoir.
+
+        Matched against the mixed curves already stored rather than created
+        here. Importing a file must not write curves: parsing and storing are
+        separate steps throughout this app (see api/imports.py), and a curve
+        quietly created by opening a file is a curve nobody chose to add. When
+        nothing matches, the error says exactly what to create, so one visit
+        to the Curves page makes the file importable.
+        """
+        args = [a for a in (node.args or []) if a is not None]
+        if len(args) < 4:
+            self.error(
+                node,
+                'Mix_Curves() needs a name, two curves and a percentage, '
+                'e.g. Mix_Curves("diet","IntCal20","Marine20",30,10).',
+            )
+            return
+
+        local_name = str(args[0]).strip().strip('"')
+        a_id = curve_registry.resolve_alias(str(args[1]))
+        b_id = curve_registry.resolve_alias(str(args[2]))
+        if a_id is None or b_id is None:
+            missing = str(args[1]) if a_id is None else str(args[2])
+            self.error(node, f"Mix_Curves() names a curve this app does not have: '{missing}'.")
+            return
+
+        try:
+            percent = float(args[3])
+            error = float(args[4]) if len(args) > 4 else 0.0
+        except (TypeError, ValueError):
+            self.error(node, 'Mix_Curves() needs its percentage as a number.')
+            return
+
+        match = curve_registry.find_mixed(a_id, b_id, percent, error)
+        if match is None:
+            self.error(
+                node,
+                f'Mix_Curves("{local_name}", {a_id}, {b_id}, {percent:g}, '
+                f'{error:g}) has no matching curve in this app. Create it on '
+                'the Curves page -- New mixed curve, '
+                f'{percent:g}% {a_id} with {b_id}, uncertainty {error:g}% -- '
+                'and import this file again.',
+            )
+            return
+
+        self.mixed_curves[_normalise_curve_name(local_name)] = match
+        self.result.notes.append(
+            f'Mix_Curves("{local_name}") was matched to the stored curve '
+            f"'{match}'."
+        )
 
     def _apply_delta_r(self, node: Node, scope: _Scope) -> None:
         """

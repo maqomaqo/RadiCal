@@ -25,6 +25,7 @@ import {
   Typography,
 } from '@mui/material'
 import AddIcon from '@mui/icons-material/Add'
+import CallMergeIcon from '@mui/icons-material/CallMerge'
 import DeleteIcon from '@mui/icons-material/Delete'
 import DownloadIcon from '@mui/icons-material/Download'
 import ShowChartIcon from '@mui/icons-material/ShowChart'
@@ -33,6 +34,7 @@ import UnarchiveIcon from '@mui/icons-material/Unarchive'
 import { Link as RouterLink } from 'react-router-dom'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import ImportCurveDialog from '@/components/ImportCurveDialog'
+import MixCurvesDialog from '@/components/MixCurvesDialog'
 import {
   curveExportUrl,
   deleteCurve,
@@ -56,6 +58,10 @@ import { useNotify } from '@/contexts/NotificationContext'
  * at a glance that an imported curve is the curve you meant to import.
  */
 
+// 'builtin' reads oddly in a row of curves; the others are already the word
+// a user would use.
+const KIND_LABELS: Record<string, string> = { builtin: 'bundled' }
+
 const TYPE_LABELS: Record<string, string> = {
   terrestrial: 'Terrestrial (NH)',
   southern_hemisphere: 'Terrestrial (SH)',
@@ -73,6 +79,7 @@ export default function Curves() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [importOpen, setImportOpen] = useState(false)
+  const [mixOpen, setMixOpen] = useState(false)
   const [editing, setEditing] = useState<CurveSpec | null>(null)
   const [editDraft, setEditDraft] = useState({ name: '', reference: '', doi: '', description: '', aliases: '' })
   const [saving, setSaving] = useState(false)
@@ -191,9 +198,14 @@ export default function Curves() {
               so it cannot drift from what a calibration actually uses.
             </Typography>
           </Box>
-          <Button variant="contained" startIcon={<AddIcon />} onClick={() => setImportOpen(true)}>
-            Import Curve
-          </Button>
+          <Stack direction="row" spacing={1}>
+            <Button variant="outlined" startIcon={<CallMergeIcon />} onClick={() => setMixOpen(true)}>
+              New Mixed Curve
+            </Button>
+            <Button variant="contained" startIcon={<AddIcon />} onClick={() => setImportOpen(true)}>
+              Import Curve
+            </Button>
+          </Stack>
         </Box>
       </Paper>
 
@@ -235,11 +247,16 @@ export default function Curves() {
                       >
                         {spec.name}
                       </Link>
-                      {spec.kind === 'builtin' ? (
-                        <Chip size="small" label="bundled" variant="outlined" />
-                      ) : (
-                        <Chip size="small" label="imported" color="primary" variant="outlined" />
-                      )}
+                      {/* Three kinds, not two: a mixed curve is neither
+                          bundled nor imported from a file, and calling it
+                          "imported" hides that it is a recipe over two other
+                          curves in this same list. */}
+                      <Chip
+                        size="small"
+                        label={KIND_LABELS[spec.kind] ?? spec.kind}
+                        variant="outlined"
+                        color={spec.kind === 'builtin' ? 'default' : 'primary'}
+                      />
                       {spec.archived && <Chip size="small" label="archived" />}
                     </Stack>
                     <Typography variant="caption" color="textSecondary">
@@ -331,6 +348,8 @@ export default function Curves() {
         onClose={() => setImportOpen(false)}
         onImported={load}
       />
+
+      <MixCurvesDialog open={mixOpen} onClose={() => setMixOpen(false)} onCreated={load} />
 
       <Dialog open={!!editing} onClose={() => setEditing(null)} fullWidth maxWidth="sm">
         <DialogTitle>Edit {editing?.name}</DialogTitle>

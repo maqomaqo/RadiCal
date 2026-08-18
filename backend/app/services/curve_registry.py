@@ -340,10 +340,7 @@ def _curve_from_row(row: StoredCalibrationCurve) -> CalibrationCurve:
     from app.services.curve_import import parse_curve  # local: parser imports numpy only
 
     if row.kind == 'mixed':
-        raise ValueError(
-            f"Calibration curve '{row.id}' is a mixed curve, which this "
-            "version cannot synthesise yet."
-        )
+        return _mixed_from_row(row)
     if not row.source_text:
         raise ValueError(f"Calibration curve '{row.id}' has no stored data.")
 
@@ -372,6 +369,58 @@ def _curve_from_row(row: StoredCalibrationCurve) -> CalibrationCurve:
             f"Calibration curve '{row.id}' does not match the data it was "
             "stored with -- it will not be used. Re-import the curve as a new "
             "one rather than trusting this copy."
+        )
+    return curve
+
+
+# A mix of a mix is allowed -- OxCal permits it -- but the depth is bounded so
+# that a hand-edited row pointing a curve at itself fails with something
+# readable instead of a recursion error.
+_MAX_MIX_DEPTH = 4
+
+
+def _mixed_from_row(row: StoredCalibrationCurve, depth: int = 0) -> CalibrationCurve:
+    """
+    Synthesise a mixed curve from its recipe.
+
+    Its parents are resolved through the ordinary path, so a mix of an
+    imported curve works, and an ingredient that has been archived still
+    resolves -- archiving hides a curve from the pickers, it does not withdraw
+    it, and a mix built on one has to keep working.
+    """
+    from app.services.curve_mix import mix
+
+    if depth > _MAX_MIX_DEPTH:
+        raise ValueError(
+            f"Calibration curve '{row.id}' mixes curves more than "
+            f"{_MAX_MIX_DEPTH} deep; it probably refers back to itself."
+        )
+
+    recipe = row.recipe or {}
+    a_id, b_id = recipe.get('a'), recipe.get('b')
+    if not a_id or not b_id:
+        raise ValueError(f"Calibration curve '{row.id}' has no usable recipe.")
+    if a_id == row.id or b_id == row.id:
+        raise ValueError(f"Calibration curve '{row.id}' refers to itself.")
+
+    try:
+        curve = mix(
+            resolve(a_id),
+            resolve(b_id),
+            float(recipe.get('percent_a', 50.0)),
+            float(recipe.get('percent_a_error', 0.0)),
+            name=row.name,
+        )
+    except ValueError as exc:
+        raise ValueError(f"Calibration curve '{row.id}' cannot be built: {exc}")
+
+    digest = content_hash(curve)
+    if row.content_sha256 and digest != row.content_sha256:
+        raise ValueError(
+            f"Calibration curve '{row.id}' no longer matches the data it was "
+            f"stored with -- one of the curves it mixes ({a_id}, {b_id}) has "
+            "changed underneath it. Build the mixture again as a new curve "
+            "rather than trusting this one."
         )
     return curve
 
@@ -585,6 +634,52 @@ def resolve_alias(name: str) -> Optional[str]:
     if builtin is not None:
         return builtin
     return _stored_index().get(key)
+
+
+# How close a stored mixture has to be to a requested one to be the same
+# mixture. Percentages in .oxcal files are written to whole numbers, so
+# anything within a tenth is the same recipe written differently -- and
+# anything further apart is a different mixture that would calibrate
+# differently.
+MIX_MATCH_TOLERANCE = 0.1
+
+
+def find_mixed(a_id: str, b_id: str, percent_a: float, percent_a_error: float) -> Optional[str]:
+    """
+    A stored mixed curve built from this recipe, or None.
+
+    Both orderings are checked, with the percentage flipped between them: 30%
+    IntCal20 with Marine20 IS 70% Marine20 with IntCal20, and refusing to
+    recognise one written the other way round would be pedantry.
+
+    Used twice, which is why it lives here rather than in either caller: the
+    OxCal importer matches a file's Mix_Curves against what this app already
+    has, and the create endpoint uses it to refuse a duplicate -- two curves
+    with the same recipe would be the same numbers under two names, and would
+    make that import matching arbitrary.
+    """
+    try:
+        with SessionLocal() as db:
+            rows = db.query(StoredCalibrationCurve).filter(
+                StoredCalibrationCurve.kind == 'mixed'
+            ).order_by(StoredCalibrationCurve.created_at).all()
+            recipes = [(row.id, dict(row.recipe or {})) for row in rows]
+    except SQLAlchemyError as exc:
+        _no_curve_table(exc)
+        return None
+
+    for curve_id, recipe in recipes:
+        stored_error = float(recipe.get('percent_a_error', 0.0) or 0.0)
+        if abs(stored_error - percent_a_error) > MIX_MATCH_TOLERANCE:
+            continue
+        stored_percent = float(recipe.get('percent_a', 0.0) or 0.0)
+        forward = (recipe.get('a') == a_id and recipe.get('b') == b_id
+                   and abs(stored_percent - percent_a) <= MIX_MATCH_TOLERANCE)
+        reversed_ = (recipe.get('a') == b_id and recipe.get('b') == a_id
+                     and abs(stored_percent - (100.0 - percent_a)) <= MIX_MATCH_TOLERANCE)
+        if forward or reversed_:
+            return curve_id
+    return None
 
 
 def usage(curve_id: str) -> Dict[str, Any]:

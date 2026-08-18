@@ -56,6 +56,37 @@ def _schema():
 
 
 @pytest.fixture
+def remove_stored_curves():
+    """
+    Delete any calibration curve a test stored, once it has finished.
+
+    Requested by the test modules that store curves, rather than autouse:
+    explicit, and it only costs the modules that need it.
+
+    A stored curve is not inert data -- it changes what the whole application
+    will accept. Leaving one behind broke two tests in test_imports.py that
+    use *IntCal13* as their example of a curve this app does not have, which
+    it no longer was once a test had imported one under that name. They were
+    right to fail. The suite shares one database (see above), so anything
+    persisted under a chosen id outlives the test that made it.
+    """
+    from app.database import SessionLocal
+    from app.models import StoredCalibrationCurve
+
+    with SessionLocal() as db:
+        before = {row[0] for row in db.query(StoredCalibrationCurve.id).all()}
+    yield
+    with SessionLocal() as db:
+        for row in db.query(StoredCalibrationCurve).all():
+            if row.id not in before:
+                db.delete(row)
+        db.commit()
+
+    from app.services import curve_registry
+    curve_registry.invalidate()
+
+
+@pytest.fixture
 def client():
     """
     FastAPI TestClient against a throwaway SQLite database.

@@ -429,11 +429,11 @@ Each phase leaves the app working and is independently useful.
 | 3 | ~~`/curves` manager page + import dialog~~ — **done 2026-08-18**, see §9.3 | 2 | 4–5 h |
 | 4 | ~~Curve browser: curve panel, error bands, time scrubber, readout~~ — **done 2026-08-18**, see §9.4 | 1 (3 for the entry point) | 6–8 h |
 | 5 | ~~Resolution service, endpoints, cache; resolution panel~~ — **done 2026-08-18**, see §9.5 | 4 | 4–5 h |
-| 6 | Mixed curves: math, endpoint, builder UI, `Mix_Curves` in the OxCal importer | 2, 4 | 3–4 h |
+| 6 | ~~Mixed curves: math, endpoint, builder UI, `Mix_Curves` in the OxCal importer~~ — **done 2026-08-18**, see §9.6 | 2, 4 | 3–4 h |
 | 7 | Compare mode, simulate-a-date, CSV exports | 4, 5 | 3–4 h |
 | 8 | Docs: README features + API overview, `USER_MANUAL.md` section, `REMAINING_WORK.md` items 6 and 11 | all | 2 h |
 
-**Total ≈ 30–37 h**, of which phases 1-5 are done — ≈8–12 h remaining.
+**Total ≈ 30–37 h**, of which phases 1-6 are done — ≈5–8 h remaining.
 
 ### 9.1 What phase 1 actually landed
 
@@ -597,6 +597,35 @@ Backend only; the `/curves` page is phase 3.
   does not catch this — it listens for WINDOW resizes, and nothing about the window changed. The
   height is now part of the Plotly *layout*, so the chart is redrawn at it: container, layout and
   rendered SVG all read 380 with the panel off and 270 with it on.
+
+### 9.6 What phase 6 actually landed
+
+- `services/curve_mix.py`, the §4.3 formulae, on the **union** of the two grids restricted to
+  their overlap — resampling onto the coarser of the two (Marine20's 10 years against IntCal20's
+  1) would throw away detail the mixture can carry perfectly well.
+- `POST /api/curves/mixed`, stored as a recipe rather than as data, so a mixture stays honest
+  about its parents and they count as in use while it exists (the 409 on deleting an ingredient
+  was already there from phase 2 and is now exercised).
+- `Mix_Curves` in the OxCal importer, which previously failed the whole import. It matches a
+  file's recipe against the mixtures this app already has rather than creating one: parsing must
+  not write curves — that contract is the whole of `api/imports.py`'s docstring — and a curve
+  quietly created by opening a file is a curve nobody chose to add. When nothing matches, the
+  error names exactly what to create, so one visit to the Curves page makes the file importable.
+  Both orderings match, with the percentage flipped: 30% IntCal20 IS 70% Marine20.
+- One design decision the plan did not foresee, and my own tests found it: **two stored mixtures
+  with the same recipe are refused**. They would be the same numbers under two names, and they
+  make matching an `.oxcal` file's `Mix_Curves` to one of them arbitrary — which is exactly how a
+  test of mine failed, matching a mixture created three tests earlier. The recipe matcher moved
+  into `curve_registry.find_mixed` so the importer and the create endpoint use one rule.
+- The suite-wide lesson from phase 2 was generalised: the "delete any curve a test stored"
+  fixture now lives in `conftest.py` and is requested by both curve test modules, because a
+  stored curve changes what the whole application will accept.
+- `tests/test_curve_mix.py` (21 tests). The load-bearing ones are about the uncertainty on the
+  proportion: that it widens the curve at all, and that it widens it *most where the two curves
+  are furthest apart*.
+- Verified in the running app: a 3000 ± 30 BP bone calibrates to **3294–3329 cal BP on IntCal20,
+  2440–2740 on Marine20, and 2653–2945 on a 30/70 mixture** — between the two, nearer the marine
+  end, and wider for the diet uncertainty.
 
 **Known limitation, for phase 7's readout work.** The resolution shown when hovering is the
 nearest *computed* year, and the profile is sampled at about one point per pixel — so at a
