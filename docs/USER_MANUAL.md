@@ -6,12 +6,13 @@
 2. [Creating an Analysis](#creating-an-analysis)
 3. [Adding Measurements](#adding-measurements)
 4. [Importing Dates from a File](#importing-dates-from-a-file)
-5. [Model Structure (Bayesian only)](#model-structure-bayesian-only)
-6. [Running an Analysis](#running-an-analysis)
-7. [Viewing Results](#viewing-results)
-8. [Exporting Data](#exporting-data)
-9. [Projects and Date Collections](#projects-and-date-collections)
-10. [Best Practices](#best-practices)
+5. [Calibration Curves](#calibration-curves)
+6. [Model Structure (Bayesian only)](#model-structure-bayesian-only)
+7. [Running an Analysis](#running-an-analysis)
+8. [Viewing Results](#viewing-results)
+9. [Exporting Data](#exporting-data)
+10. [Projects and Date Collections](#projects-and-date-collections)
+11. [Best Practices](#best-practices)
 
 ## Getting Started
 
@@ -48,7 +49,9 @@ Each date needs, at minimum, a **Sample Name**, **Age (BP)** and **1σ Error**. 
   offset) field with its own 1σ error — both are required together, since they're combined in
   quadrature with the measurement's own uncertainty.
 - **Calibration Curve** — IntCal20 (Northern Hemisphere terrestrial), SHCal20 (Southern Hemisphere
-  terrestrial), or Marine20.
+  terrestrial), Marine20, and any curve you have imported or mixed yourself. Selecting Marine
+  switches to a marine curve, since marine carbon calibrated against a terrestrial curve is wrong
+  by centuries. See [Calibration Curves](#calibration-curves).
 - **Outlier settings** (Bayesian analyses only) — an optional prior probability that this date does
   not belong to the modelled population, with a choice of outlier model (general vs. charcoal,
   i.e. one-sided for material likely to predate its context).
@@ -115,6 +118,117 @@ Two differences in how the file is read are reported rather than left implicit: 
 directly inside a `Sequence` is put in a Phase of its own (this app attaches dates to Phases; its
 position, and so the ordering, is unchanged), and several independent top-level items are wrapped
 in one Phase, which asserts no ordering between them.
+
+## Calibration Curves
+
+**Curves** in the top navigation lists every curve this app can calibrate against, and is where you
+add your own. Three are shipped with it — IntCal20, SHCal20 and Marine20 — and cannot be edited or
+removed.
+
+Everything measured in that table is read from the curve that actually loads: its point count,
+calendar range, and the structure of its calendar grid (IntCal20 steps 1 year up to 5,000 cal BP
+and 20 years beyond 25,000). Nothing is recorded separately from the file, so what you see is what
+a calibration will use.
+
+### Importing a curve
+
+**Import Curve** takes an IntCal-format `.14c` file, or a CSV with a calendar age, a radiocarbon age
+and a 1σ error column. Column names are matched however they are spelled and in whatever order they
+appear, and a calendar column in BC/AD (negative for BC) can be converted on the way in.
+
+Nothing is stored until you have seen the file read: the dialog reports the point count, the ranges,
+what it assumed, and draws the curve with its ±1σ band. That drawing is the check worth making — a
+calibration curve rises left to right with wiggles, and anything else means the columns were read
+the wrong way round. A date list is short enough to read after importing it; a curve is thousands of
+rows that nobody will check by eye, and a wrong one produces confident, plausible, wrong calendar
+ages for every sample calibrated against it.
+
+Files are refused rather than repaired, each refusal naming the row and the reason: a non-positive
+error, a duplicated calendar age, a radiocarbon column that looks like F¹⁴C rather than an age, a
+negative cal BP (post-bomb curves need a different likelihood, which this app does not have). Rows
+written oldest-first are simply sorted, as the IntCal files themselves are written that way.
+
+Give a curve **aliases** if files refer to it by other names — an alias of `IntCal13` is what lets an
+`.oxcal` model written against IntCal13 import once you have added that curve.
+
+**A stored curve's numbers never change.** You can correct its name, citation, DOI, notes and
+aliases at any time; correcting the *data* means importing the corrected file as a new curve. An
+analysis run last month has to keep meaning what it said. For the same reason a curve that something
+has been calibrated against cannot be deleted: the app offers to **archive** it instead, which
+removes it from the curve pickers while leaving it resolvable, so those analyses still re-run.
+
+### Mixed curves
+
+**New Mixed Curve** builds a curve from two others in a fixed proportion — OxCal's `Mix_Curves`.
+Its use is a sample whose carbon came from more than one reservoir, most often a human or animal
+with a partly marine diet: their bone is neither terrestrial nor marine carbon, and calibrating it
+against either curve alone is wrong by centuries in one direction or the other, with nothing in the
+result to say so.
+
+State the proportion as a percentage of the first curve, and **give its uncertainty**. A dietary
+fraction comes from stable isotopes and has real error, and that error widens the mixed curve most
+where the two curves are furthest apart — which is exactly where being wrong about the diet moves a
+date furthest. Left at zero, the curve claims the proportion is known exactly.
+
+An `.oxcal` file using `Mix_Curves` will import, matched against a mixture you already have. If you
+have none matching, the import fails naming exactly what to create — opening a file never creates
+curves behind your back.
+
+### Browsing a curve
+
+Clicking a curve's name opens the browser, which answers three questions.
+
+**What shape is the curve, and how well known is it?** The chart draws the curve with its own ±1σ
+and ±2σ bands, oldest on the left. Every calibrated date this app produces is this curve read
+backwards, so its wiggles are not detail: they are why a date splits into two ranges, or spreads
+over three centuries.
+
+**Where am I?** The strip under the chart is the whole 55,000 years with your current view marked.
+Drag it to move, drag an edge to zoom, click to jump; there are also zoom buttons and presets for
+the whole curve, the Holocene, and the Hallstatt plateau.
+
+**What is the curve doing here?** Pointing at it reports what the curve says at that calendar age
+and its **local gradient**, which is what governs how tightly anything can be dated there:
+
+| Gradient | Reads as | What it means for a date |
+|---|---|---|
+| below −0.05 | reversal | the curve doubles back, so one measurement matches several separate calendar ranges |
+| −0.05 to 0.35 | plateau | nearly flat: one measurement spreads over a wide calendar span |
+| 0.35 to 0.8 | shallow | flatter than calendar time, so dates here spread |
+| 0.8 to 1.6 | ordinary | the curve tracks calendar time; a date calibrates about as tightly as it was measured |
+| above 1.6 | steep | rising faster than calendar time, so dates here calibrate unusually tightly |
+
+Three more controls sit in the header bar. **Compare with** overlays a second curve and adds a panel
+showing their *difference* — worth doing, because two curves drawn over each other look alike at any
+zoom that fits a millennium on screen, while IntCal20 − SHCal20 shows the hemispheric offset (about
+40 ¹⁴C years) at a glance. **Dates as** switches the calendar convention. **Expected resolution** is
+described next.
+
+**Clicking a calendar year** shows what a date from it would actually look like: the curve's own
+radiocarbon age there, calibrated back at a laboratory precision you choose. Inside the Hallstatt
+plateau a ±25 year measurement comes back as four disjoint calendar ranges spread over 337 years;
+a century and a half earlier, on the steep drop into it, the same precision gives one range of 37
+years. That is the clearest statement of what a plateau costs, and no amount of laboratory precision
+removes it.
+
+### Expected resolution
+
+Switching **Expected resolution** on adds a panel, on the same calendar axis, showing how tightly a
+date from each year could be known *before anyone measures anything*. The line is the mean width of
+the 95.4% calibrated range; the band around it is the 5th–95th percentile, i.e. how lucky or unlucky
+a single date can be.
+
+The method is Svetlik et al. (2019): for every radiocarbon age a sample of that period could
+plausibly return, the laboratory error is scaled with age, the measurement calibrated, and the width
+of its calibrated range recorded; those widths are then averaged over the measurements that period
+could actually yield. **Lab ±1σ** sets the precision assumed — 15 years is about the best a good AMS
+laboratory offers, which is why the method describes the *best possible* resolution; most commercial
+dates are ±25 to ±30.
+
+Read it as a planning tool. On IntCal20 the Hallstatt plateau sits at roughly 310 years while the
+drop at its start is 33 — a ninefold difference across 150 years, and the difference between a date
+worth commissioning and one that will not answer your question. **Export profile** saves the whole
+curve's profile as CSV; **Export this window** saves the visible stretch of the curve itself.
 
 ## Model Structure (Bayesian only)
 
@@ -187,6 +301,10 @@ Calibration with "Save this analysis" on) navigates straight to its Results page
   comparison, in the currently-selected date format.
 - **JSON** — available via the API (`GET /api/results/{id}/export/json`) for anyone who wants the
   full result machine-readable; there's no button for it in the UI yet.
+- **Curve data** (on a curve's browser page) — **Export this window** saves the visible stretch of
+  the curve as CSV (calendar age, radiocarbon age, error, local gradient); **Export profile** saves
+  its whole expected-resolution profile. A curve itself can be downloaded from the Curves page, and
+  an imported one comes back byte-for-byte as it was uploaded.
 - **PDF** — not implemented. `GET /api/results/{id}/pdf` exists and returns a `501` rather than a
   fake success, so this is a deliberate gap, not a bug, and there's nothing to click for it in the
   UI.
@@ -212,6 +330,8 @@ the same result page).
    order before building a model structure around it.
 2. **Calibration curves** — IntCal20 for Northern Hemisphere terrestrial samples, SHCal20 for
    Southern Hemisphere terrestrial, Marine20 for marine samples. Use the most recent curve version.
+   For a sample whose carbon came from more than one reservoir, build a mixed curve rather than
+   choosing the nearer of the two — see [Calibration Curves](#calibration-curves).
 3. **Marine corrections** — consult the literature for an appropriate local ΔR; document its source
    in the sample's notes.
 4. **Reading diagnostics** — the agreement index compares a date's modelled posterior against its
@@ -219,6 +339,10 @@ the same result page).
    second look). It flags a date the model had to move, which is not automatically the same as a
    date that's simply wrong — see the discussion in `backend/app/services/agreement.py` if you're
    using it to hunt for outliers specifically.
-5. **Wide Boundaries on a short phase are expected** — a Phase's Start/End Boundaries genuinely need
+5. **Check the curve before commissioning the dates** — the browser's expected-resolution panel
+   says how tightly a date from your period can be known at best. If your question needs finer
+   resolution than the curve can give there, no laboratory precision will supply it, and it is
+   better to know that before the samples are sent than after.
+6. **Wide Boundaries on a short phase are expected** — a Phase's Start/End Boundaries genuinely need
    four or more dated members before their span is even mathematically well-constrained; two or
    three dates in a phase can produce a very wide 95% range and that's correct, not a bug.

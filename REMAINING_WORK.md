@@ -17,6 +17,15 @@ previous revisions of this file understated parts of it.
   IntCal20/Marine20/SHCal20 curves (9,501 points for IntCal20), correct
   quadrature error combination, and the curve-error normalization term
   matching current OxCal/CALIB practice.
+- **Calibration curve manager and browser** — one registry
+  (`services/curve_registry.py`) behind every curve the app knows, with the
+  metadata measured from the curve that loads rather than recorded beside it;
+  user-imported curves whose data is immutable and hash-checked on load;
+  mixed curves (OxCal's `Mix_Curves`, previously listed here as not
+  implemented at all); and a browser showing a curve's shape and error bounds,
+  its local gradient, its expected temporal resolution after Svetlik et al.
+  (2019), a comparison against a second curve, and what a date from any
+  chosen year would actually look like. See `docs/CURVE_MANAGER_PLAN.md`.
 - **Multi-range HPD reporting** — disjoint calendar-age ranges with per-range
   probabilities, on both the direct-calibration and MCMC paths.
 - **Bayesian chronological model** — calibration-curve-aware likelihood,
@@ -185,7 +194,7 @@ CSV/JSON export works and bulk paste now covers getting dates *into a
 project*. Still missing: Excel-formatted output, and importing measurements
 directly into an analysis (as opposed to via a project collection). ~2 hours.
 
-### 11. Calibration curve management UI
+### 11. ~~Calibration curve management UI~~ — **done 2026-08-18**
 Planned in full in `docs/CURVE_MANAGER_PLAN.md`. **Phases 1-7 are done**:
 the registry behind all of it (see #6), and the backend for user-imported
 curves — parse-then-store preview, `.14c`/CSV/BC-AD reading, immutable curve
@@ -207,10 +216,11 @@ mean difference over 1,000–4,000 cal BP.
 …and mixed curves: the mixing math (which had never been implemented at all),
 a builder on the Curves page, and `Mix_Curves` support in the OxCal importer,
 matched against a stored mixture rather than created by opening a file.
-…and compare mode (a second curve overlaid, with their difference on its own
-panel), click-a-year to simulate a date, and CSV export of the visible window.
-**Remaining:** the documentation pass (phase 8) — `USER_MANUAL.md` has nothing
-about any of this yet. ~2 hours.
+…compare mode (a second curve overlaid, with their difference on its own
+panel), click-a-year to simulate a date, CSV export of the visible window, and
+the documentation for all of it — `USER_MANUAL.md` has a Calibration Curves
+section, and every figure quoted in it was checked against the running app.
+**Nothing remaining**; the whole plan is delivered.
 
 ---
 

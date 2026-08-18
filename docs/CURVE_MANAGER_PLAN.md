@@ -431,10 +431,9 @@ Each phase leaves the app working and is independently useful.
 | 5 | ~~Resolution service, endpoints, cache; resolution panel~~ — **done 2026-08-18**, see §9.5 | 4 | 4–5 h |
 | 6 | ~~Mixed curves: math, endpoint, builder UI, `Mix_Curves` in the OxCal importer~~ — **done 2026-08-18**, see §9.6 | 2, 4 | 3–4 h |
 | 7 | ~~Compare mode, simulate-a-date, CSV exports~~ — **done 2026-08-18**, see §9.7 | 4, 5 | 3–4 h |
-| 8 | Docs: README features + API overview, `USER_MANUAL.md` section, `REMAINING_WORK.md` items 6 and 11 | all | 2 h |
+| 8 | ~~Docs: README features + API overview, `USER_MANUAL.md` section, `REMAINING_WORK.md` items 6 and 11~~ — **done 2026-08-18**, see §9.8 | all | 2 h |
 
-**Total ≈ 30–37 h**, of which phases 1-7 are done — only the documentation pass (phase 8)
-remains, ≈2 h.
+**Total ≈ 30–37 h. All eight phases are done.**
 
 ### 9.1 What phase 1 actually landed
 
@@ -691,6 +690,25 @@ Backend only; the `/curves` page is phase 3.
   question nobody has asked yet; the page opens on the curve alone at full height, and the first
   view costs one request rather than two. The readout's placeholder changes with it — with the
   panel off it says where to turn it on rather than promising a figure that is not there.
+
+### 9.8 What phase 8 actually landed
+
+- `docs/USER_MANUAL.md` gains a **Calibration Curves** section: the library, importing (with what
+  is refused and why), mixed curves, browsing, and the expected-resolution panel — written for
+  someone deciding whether a period can be dated finely enough to answer their question, which is
+  what the resolution panel is actually for.
+- **Every number in it was checked against the running app rather than recalled**: IntCal20's grid
+  structure, the −42 ¹⁴C year hemispheric offset, 312 years of resolution at 2,605 cal BP against
+  33 at 2,748, and the four-ranges-over-337-years simulation at 2,600. The gradient table's
+  thresholds were wrong on the first pass — written from memory of the wording rather than from
+  `curveShape.ts`, and missing the "shallow" band entirely — which is exactly the drift this
+  document's own preamble warns about.
+- Two existing entries were corrected rather than appended to: the measurement form's curve field
+  no longer claims three curves are all there is, and `REMAINING_WORK.md`'s "What's Actually
+  Working" now lists the manager and browser. Best Practices gains the point the whole resolution
+  feature exists to make — check what the curve can give you *before* commissioning the dates.
+
+---
 
 ## 10. Open decisions
 
