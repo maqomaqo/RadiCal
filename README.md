@@ -97,7 +97,7 @@ Boundaries), and interactive posterior visualization.
 - **Python 3.11** with **FastAPI**
 - **NumPy/SciPy** for the calibration math and both Bayesian solvers (exact integration for
   chain-shaped models, OxCal's own MH/Gibbs scheme otherwise — no PyMC, no MCMC sampler dependency)
-- **SQLAlchemy** ORM over **PostgreSQL**
+- **SQLAlchemy** ORM over **PostgreSQL**, with **Alembic** migrations applied on startup
 - **ReportLab** and **Matplotlib** for the PDF report — the figures are drawn through matplotlib's
   object API rather than pyplot, whose global figure registry is a leak waiting to happen in a
   long-lived server process

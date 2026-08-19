@@ -67,6 +67,46 @@ createuser -P radiocarbon  # password: password
 psql -c "ALTER ROLE radiocarbon WITH CREATEDB;"
 ```
 
+Create the tables by starting the backend — it brings the database up to the
+current schema on startup, whether that means creating it from nothing or
+applying migrations added since the last run. There is no separate setup step.
+
+### Schema changes
+
+The schema is versioned with Alembic (`backend/alembic/`). Day to day this
+needs no attention: the backend migrates on startup.
+
+Two cases where it does.
+
+**Upgrading an existing installation.** Pull, rebuild so the backend has the
+new dependencies, and start it — it migrates on the way up:
+
+```bash
+docker compose up -d --build backend
+```
+
+A database created before Alembic was adopted (any version before 2026-08-19)
+is recognised on that first start, brought up to date, and joined to the
+migration history automatically. Nothing to do by hand, and existing analyses
+are kept.
+
+**Changing a model.** Edit `backend/app/models.py`, then generate the
+migration and read what it produced before committing it:
+
+```bash
+docker compose exec backend alembic revision --autogenerate -m "what changed"
+```
+
+Autogenerate is a good first draft, not an authority — it does not see a
+rename (it proposes a drop and an add, which loses the data) and it cannot
+know a backfill is needed. `backend/tests/test_migrations.py` fails if the
+models and the migrations disagree, so a forgotten migration cannot reach
+anyone's database.
+
+To take migration out of startup — for a deployment that would rather run it
+deliberately — set `RADICAL_SKIP_MIGRATIONS=1` and run
+`alembic upgrade head` yourself.
+
 ## Stopping Services
 
 ```bash
@@ -104,6 +144,8 @@ Key variables in `.env` (see `.env.example` for the full, current list):
 - `INTCAL_CURVE_PATH` / `MARINE_CURVE_PATH` / `SHCAL_CURVE_PATH` - Calibration curve file locations;
   only needed if running the backend outside Docker with the data somewhere other than
   `calibration_data/`
+- `RADICAL_SKIP_MIGRATIONS` - set to `1` to stop the backend migrating the database on startup
+  (see Schema changes above). Unset by default, which is what a local install wants.
 
 MCMC/Bayesian settings (posterior draws, solver choice, the uniform span prior) are configured
 per-analysis in the New Analysis form, not via environment variables — the app used to read

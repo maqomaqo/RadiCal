@@ -61,9 +61,9 @@ previous revisions of this file understated parts of it.
   vs unmodelled comparison, selectable HPD confidence, and opt-in point
   estimates.
 - **Real CSV/JSON/PDF export**, **input validation** on all analysis endpoints,
-  and **self-healing schema drift** (`database.py`, for added columns; new
-  tables come from `create_all()`).
-- **Backend tests** — 80, in `backend/tests/`.
+  and **versioned schema migrations** (Alembic, `backend/alembic/`, applied on
+  startup — see #5).
+- **Backend tests** — 707, in `backend/tests/`.
 
 ---
 
@@ -185,12 +185,39 @@ this priority band:
 - Fine for single-user local use; required before any shared deployment.
 - **Effort:** 3–4 hours for basic JWT + user table.
 
-### 5. Real database migrations (Alembic)
-- **Current:** `_ensure_schema_migrations` in `database.py` is a
-  manually-maintained list that only handles "add column". New tables are
-  picked up by `create_all()` (that's how `project_samples` arrived), but
-  renames, type changes and backfills aren't covered at all.
-- **Effort:** 2–3 hours including migrating the stopgap away.
+### 5. ~~Real database migrations (Alembic)~~
+**Done 2026-08-19.** `backend/alembic/` holds the schema history, and
+`init_db()` brings the database up to it on startup instead of calling
+`create_all()` and then patching what it missed.
+
+- **The reason to bother was not tidiness.** It is
+  `tests/test_migrations.py::test_the_migrations_and_the_models_agree`, which
+  asserts there is nothing left for `--autogenerate` to produce. A column
+  added to a model without a migration is invisible to every other test —
+  the developer's own database already has it — and surfaces on a fresh
+  install as "column does not exist" on every request to that endpoint. That
+  test was checked by introducing the drift on purpose: it fails and names the
+  column.
+- **Old databases adopt themselves.** One with the tables but no
+  `alembic_version` is recognised at startup, topped up by the old column list
+  one last time, and *stamped* at the baseline rather than upgraded to it
+  (the baseline's `CREATE TABLE`s would fail against tables that exist).
+  Verified against a database missing two columns and holding a row: columns
+  added, row intact.
+- **The stopgap is closed, not deleted.** Those lists are the only record of
+  what an old database lacks, so deleting them would strand anyone upgrading
+  straight from a pre-Alembic version — silently, since their tables exist.
+  It is marked CLOSED, takes no new entries, and runs at most once in a
+  database's life.
+- **The baseline's `downgrade()` refuses.** Autogenerate wrote one that drops
+  every table, which here means deleting every analysis in the database. An
+  irreversible loss of someone's work should not be one mistyped command away.
+- **`RADICAL_SKIP_MIGRATIONS=1`** takes migration out of startup for a
+  deployment that would rather run `alembic upgrade head` deliberately.
+- Note that autogenerate does not see a **rename** — it proposes a drop and an
+  add, which loses the column's data — and cannot know a **backfill** is
+  needed. Both still need writing by hand; the difference from before is that
+  there is now somewhere to write them.
 
 ### 6. ~~Wire the curves API into the frontend, and decide about harris_matrix.py~~
 - **Curves: done 2026-08-18.** `backend/app/services/curve_registry.py` is now
@@ -471,7 +498,7 @@ each is a real edge.
    `harris_matrix.py` stays~~ — **deleted 2026-08-19** (see #6).
 6. ~~**Frontend tests** for the pure utils, then the untested backend
    router~~ — the utils are covered, and the untested router is gone.
-7. Everything else — auth, Alembic, comparison UI — as concrete need arises.
+7. Everything else — auth, comparison UI — as concrete need arises.
 
 ---
 
@@ -486,4 +513,4 @@ start feeling broken as projects grow; both halves of it were fixed on
 2026-08-19, scoped and recorded in `docs/ASYNC_JOBS_PLAN.md` — a solver run
 no longer holds the event loop against every other request, and no longer
 holds the caller's connection either. What is left in this file is
-authentication and Alembic.*
+authentication.*
