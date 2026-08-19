@@ -108,8 +108,8 @@ correct frontend port (5173, not 3000 — `docs/INSTALLATION.md` had
 previously sent two different ports for the same thing in adjacent
 sections), a real API endpoint list instead of invented ones
 (`POST /api/analysis/multi` never existed; `/api/harris-matrix/*` and
-`/api/results/{id}/graphs` do exist but aren't mentioned since nothing in
-the frontend calls them — see #6 below), and coverage of what the app
+`/api/results/{id}/graphs` did exist but weren't mentioned since nothing in
+the frontend called them — the former has since been deleted, see #6 below), and coverage of what the app
 actually does now: three analysis types, project date collections and
 deploy, duplicate/edit/re-run, the model-tree Harris matrix, the agreement
 index, and the prior/posterior plot overlay. `README.md`'s license section
@@ -192,7 +192,7 @@ this priority band:
   renames, type changes and backfills aren't covered at all.
 - **Effort:** 2–3 hours including migrating the stopgap away.
 
-### 6. ~~Wire the curves API into the frontend~~ (and decide about harris_matrix.py)
+### 6. ~~Wire the curves API into the frontend, and decide about harris_matrix.py~~
 - **Curves: done 2026-08-18.** `backend/app/services/curve_registry.py` is now
   the single source of truth — it measures each curve's metadata from the
   curve that actually loaded, and the five separate hardcoded lists (the
@@ -204,23 +204,23 @@ this priority band:
   `frontend/src/api/curves.ts` + `hooks/useCurves.ts` are what the pickers
   read, and `tests/test_curves.py` (29 tests) covers a module that had none.
   See `docs/CURVE_MANAGER_PLAN.md` for what this was phase 1 of.
-- **Still open:** `harris_matrix.py`.
-- `harris_matrix.py`'s two endpoints (`/api/harris-matrix/validate`,
-  `/api/harris-matrix/relationships`) are in the same position: live routes,
-  operating on a plain nodes/edges shape that predates the model tree
+- **harris_matrix.py: deleted 2026-08-19.** Its two endpoints
+  (`/api/harris-matrix/validate`, `/api/harris-matrix/relationships`) were
+  live routes on a plain nodes/edges shape that predates the model tree
   (`services/model_tree.py`) the real Harris matrix editor
-  (`HarrisMatrixDiagram.tsx`) actually talks to via the analysis endpoints
-  directly. Nothing in the frontend calls them either.
-- **Needed:** for curves, fetch options from `/api/curves` (single source of
-  truth) or delete the endpoint — either way fix the point counts. For
-  harris_matrix.py, a call: keep it as a documented-but-unused piece of API
-  surface for external consumers, or delete it. Left as-is rather than
-  deleted outright during the 2026-08-13 cleanup pass, since removing live
-  (if unused) API endpoints is a bigger call than deleting dead frontend
-  code — worth a deliberate decision, not a drive-by deletion.
-- **Impact:** Low, now that the curves half has landed — one API module that
-  looks live but isn't connected to anything.
-- **Effort:** harris_matrix.py is a delete-or-keep decision more than effort.
+  (`HarrisMatrixDiagram.tsx`) actually talks to, via the analysis endpoints
+  directly. Nothing called them, and they were not a smaller version of the
+  working path — they were a different, weaker one: `validate` checked only
+  that an edge's endpoints exist, with no cycle detection, no TPQ/TAQ
+  contradiction check and no vocabulary check on the relationship, all of
+  which `BayesianRequest`'s validators do before an analysis is ever run.
+  `relationships` renamed three keys. Keeping them as "API surface for
+  external consumers" would have meant publishing a validator that passes
+  models the real one rejects.
+- The decision was deferred through the 2026-08-13 cleanup on the grounds
+  that removing live endpoints is a bigger call than deleting dead frontend
+  code. It is, and this is the deliberate version of it rather than a
+  drive-by.
 
 ### 7. ~~Database connection pooling~~
 **Done 2026-08-19**, with the job queue (#3) that made it stop being optional:
@@ -360,9 +360,9 @@ each is a real edge.
     loaded curve rather than against a second constant: what makes the point
     count right is that it is counted, which is exactly what the hand-written
     table it replaced could not claim.
-- **Not covered:** `harris_matrix.py` still has no tests at all — consistent
-  with it being unused by the frontend; see #6 above. `results.py` and
-  `curves.py` are no longer in this list.
+- **Not covered:** nothing, now. `harris_matrix.py` was the last untested
+  router and has been deleted (see #6); `results.py` and `curves.py` gained
+  coverage before it.
 - **Frontend: 137 tests** (Vitest, `npm test` in `frontend/`), in
   `utils/harrisLayout.test.ts` (27), `components/ModelTreeEditor.test.ts` (15),
   `utils/distribution.test.ts` (12), `utils/hpd.test.ts` (10),
@@ -467,12 +467,11 @@ each is a real edge.
 4. ~~**The event-loop fix**, then **async runs** proper~~ — **both done
    2026-08-19**, per [`docs/ASYNC_JOBS_PLAN.md`](docs/ASYNC_JOBS_PLAN.md).
    Connection pooling (#7) landed with them.
-5. ~~**Wire up the curves API**~~ — **done 2026-08-18** (see #6); decide
-   whether `harris_matrix.py` stays.
-6. **Frontend tests** for the pure utils, then the untested backend router
-   (`harris_matrix.py` — `results.py` and `curves.py` are now covered).
-7. Everything else — auth, Alembic, pooling, comparison UI, curve
-   management — as concrete need arises.
+5. ~~**Wire up the curves API**~~ — **done 2026-08-18**; ~~decide whether
+   `harris_matrix.py` stays~~ — **deleted 2026-08-19** (see #6).
+6. ~~**Frontend tests** for the pure utils, then the untested backend
+   router~~ — the utils are covered, and the untested router is gone.
+7. Everything else — auth, Alembic, comparison UI — as concrete need arises.
 
 ---
 
@@ -487,4 +486,4 @@ start feeling broken as projects grow; both halves of it were fixed on
 2026-08-19, scoped and recorded in `docs/ASYNC_JOBS_PLAN.md` — a solver run
 no longer holds the event loop against every other request, and no longer
 holds the caller's connection either. What is left in this file is
-authentication, Alembic, and the delete-or-keep call on harris_matrix.py.*
+authentication and Alembic.*

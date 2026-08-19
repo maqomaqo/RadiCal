@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 import os
-from app.api import curves, analysis, harris_matrix, results, projects, project_samples, imports, jobs
+from app.api import curves, analysis, results, projects, project_samples, imports, jobs
 from app.database import init_db
 
 load_dotenv()
@@ -47,7 +47,6 @@ except Exception as e:
 # API Routes
 app.include_router(curves.router, prefix="/api", tags=["calibration curves"])
 app.include_router(analysis.router, prefix="/api", tags=["analysis"])
-app.include_router(harris_matrix.router, prefix="/api", tags=["harris matrix"])
 app.include_router(results.router, prefix="/api", tags=["results"])
 app.include_router(projects.router, prefix="/api", tags=["projects"])
 app.include_router(project_samples.router, prefix="/api", tags=["project dates"])
