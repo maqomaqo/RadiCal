@@ -141,13 +141,38 @@ also claimed MIT; the repo's `LICENSE` file is CC0.
 
 
 ### 3. Async MCMC processing
-- **Current:** still fully synchronous in the request handler. This got more
-  pressing, not less: "Re-run All" on a project now runs *every* analysis in
-  one blocking request, and deploy→edit→run is a normal flow.
-- **Needed:** a task queue (Celery/RQ) plus a job-status endpoint the UI can
-  poll; `Analysis.status` already has the `pending`/`running`/`completed`/
-  `failed` vocabulary to carry it.
-- **Effort:** 3–4 hours.
+**Scoped 2026-08-19 — see [`docs/ASYNC_JOBS_PLAN.md`](docs/ASYNC_JOBS_PLAN.md).**
+Measuring it split one item into three, and moved the worst part of it out of
+this priority band:
+
+- **The severe half was not the queue, and is now fixed (2026-08-19).** All 50
+  route handlers were `async def` with nothing offloaded, so every solver run
+  and PDF render executed *on the event loop* — the whole server unresponsive
+  for the length of it, not just the caller. Measured: `GET /api/curves` cost
+  2.3 ms idle and **3.85 s** when issued during a 4.9 s PDF render. Every
+  handler is now a plain `def`; the three that read an upload keep `async def`
+  for the read alone and hand their bodies to `run_in_threadpool`. The same
+  measurement now reads **2.9 ms**, and 2.6–8.1 ms during a live Gibbs run.
+  `tests/test_event_loop.py` holds the invariant: a new blocking `async def`
+  route fails the suite.
+- **Current, for the caller:** still fully synchronous. Measured Gibbs runs are
+  12.7 s (8 dates) to 43.4 s (60 dates), with `MAX_SWEEPS` bounding a model
+  that fights convergence at ~2 min (30 dates) to ~5 min (60 dates). "Re-run
+  All" is that, times every analysis in the project, in one request — past any
+  reverse proxy's default timeout.
+- **Needed:** a `jobs` table, a single-worker executor, `GET /api/jobs/{id}` to
+  poll, and one progress/cancel callback inside `gibbs.run`. `Analysis.status`
+  already carries `pending`/`running`/`completed`/`failed`, and the frontend
+  already discards the inline results it would stop receiving, which is what
+  keeps the change small. Celery/RQ + Redis buys durability across restarts and
+  true parallelism, neither of which a single local user needs yet; the plan
+  shapes the executor so that stays a swap rather than a rewrite.
+- **Effort:** 0.5 h for the event-loop fix, ~6 h for the whole of it. The
+  3–4 hours previously estimated here was about right for an in-process job
+  table and clearly wrong for the Celery/RQ design named beside it.
+- **Now coupled to item 7:** a background worker holds a second connection for
+  the length of a run, so the unsized connection pool stops being independent
+  of this and should land with it.
 
 ### 4. Authentication & user management
 - **Current:** none. Anyone can read/modify/delete any project or analysis.
@@ -430,8 +455,9 @@ each is a real edge.
    along with the dead `app/models/sample.py`, the orphaned
    `frontend/src/services/api.ts`, six unused npm dependencies, and the
    config drift both had left behind (see Environment Notes).
-4. **Async MCMC** — the synchronous "Re-run All" is the most likely thing to
-   feel broken as projects grow.
+4. ~~**The event-loop fix**~~ — **done 2026-08-19**: one analysis no longer
+   freezes the app for everyone. **Async runs** proper is what remains, per
+   [`docs/ASYNC_JOBS_PLAN.md`](docs/ASYNC_JOBS_PLAN.md).
 5. ~~**Wire up the curves API**~~ — **done 2026-08-18** (see #6); decide
    whether `harris_matrix.py` stays.
 6. **Frontend tests** for the pure utils, then the untested backend router
@@ -447,5 +473,8 @@ duplicate/edit and re-run all working end to end. Documentation now matches
 the app (2026-08-13, again 2026-08-19 for the PDF report) and the codebase's
 accumulated dead files/config have been cleared out. Every high-priority gap
 this file has listed is now closed; what remains is the medium and low
-priority work above, of which async MCMC (Priority #3) is the one most
-likely to start feeling broken as projects grow.*
+priority work above, of which async runs (Priority #3, scoped
+2026-08-19 in `docs/ASYNC_JOBS_PLAN.md`) is the one most likely to start
+feeling broken as projects grow. Its worst symptom — a solver run holding
+the event loop against every other request — was fixed on 2026-08-19; what
+is left is the caller's own wait, which is what a job queue is for.*

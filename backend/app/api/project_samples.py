@@ -59,7 +59,7 @@ def _serialize(sample: ProjectSample) -> dict:
 
 
 @router.get("/projects/{project_id}/samples")
-async def list_project_samples(project_id: str, db: Session = Depends(get_db)):
+def list_project_samples(project_id: str, db: Session = Depends(get_db)):
     """List every date in this project's collection, oldest entry first."""
     _require_project(project_id, db)
     samples = (
@@ -72,7 +72,7 @@ async def list_project_samples(project_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/projects/{project_id}/samples")
-async def create_project_samples(
+def create_project_samples(
     project_id: str,
     request: ProjectSampleBulkInput,
     db: Session = Depends(get_db),
@@ -116,7 +116,7 @@ async def create_project_samples(
 
 
 @router.patch("/projects/{project_id}/samples/{sample_id}")
-async def update_project_sample(
+def update_project_sample(
     project_id: str,
     sample_id: str,
     updates: ProjectSampleUpdate,
@@ -163,7 +163,7 @@ async def update_project_sample(
 
 
 @router.delete("/projects/{project_id}/samples/{sample_id}")
-async def delete_project_sample(project_id: str, sample_id: str, db: Session = Depends(get_db)):
+def delete_project_sample(project_id: str, sample_id: str, db: Session = Depends(get_db)):
     """
     Remove a date from the collection. Analyses already deployed from it
     keep their own copies and are unaffected.
@@ -183,7 +183,7 @@ async def delete_project_sample(project_id: str, sample_id: str, db: Session = D
 
 
 @router.post("/projects/{project_id}/deploy")
-async def deploy_samples_to_analysis(
+def deploy_samples_to_analysis(
     project_id: str,
     request: DeployRequest,
     db: Session = Depends(get_db),

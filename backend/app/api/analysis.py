@@ -489,7 +489,7 @@ def _tree_from_request(request: BayesianRequest) -> Tuple[Dict, Dict, List[Dict]
 
 
 @router.post("/analysis/calibrate")
-async def calibrate_single(measurement: CalibrateRequest, db: Session = Depends(get_db)):
+def calibrate_single(measurement: CalibrateRequest, db: Session = Depends(get_db)):
     """
     Calibrate a single radiocarbon measurement.
 
@@ -640,7 +640,7 @@ async def calibrate_single(measurement: CalibrateRequest, db: Session = Depends(
 
 
 @router.post("/analysis/calibrate-group")
-async def calibrate_group(request: GroupCalibrationRequest, db: Session = Depends(get_db)):
+def calibrate_group(request: GroupCalibrationRequest, db: Session = Depends(get_db)):
     """
     Calibrate several radiocarbon measurements independently -- each
     exactly as /analysis/calibrate would calibrate it alone -- and save
@@ -704,7 +704,7 @@ async def calibrate_group(request: GroupCalibrationRequest, db: Session = Depend
 
 
 @router.post("/analysis/bayesian")
-async def bayesian_analysis(request: BayesianRequest, db: Session = Depends(get_db)):
+def bayesian_analysis(request: BayesianRequest, db: Session = Depends(get_db)):
     """
     Perform Bayesian chronological analysis.
 
@@ -922,7 +922,7 @@ async def bayesian_analysis(request: BayesianRequest, db: Session = Depends(get_
         raise HTTPException(status_code=400, detail=str(e))
 
 @router.get("/analysis/{analysis_id}")
-async def get_analysis(analysis_id: str, db: Session = Depends(get_db)):
+def get_analysis(analysis_id: str, db: Session = Depends(get_db)):
     """Retrieve analysis results"""
     analysis = db.query(Analysis).filter(Analysis.id == analysis_id).first()
     if not analysis:
@@ -1140,7 +1140,7 @@ async def get_analysis(analysis_id: str, db: Session = Depends(get_db)):
     }
 
 @router.get("/analysis")
-async def list_analyses(
+def list_analyses(
     page: int = 1,
     per_page: int = 10,
     project_id: Optional[str] = None,
@@ -1191,7 +1191,7 @@ async def list_analyses(
 
 
 @router.delete("/analysis/{analysis_id}")
-async def delete_analysis(analysis_id: str, db: Session = Depends(get_db)):
+def delete_analysis(analysis_id: str, db: Session = Depends(get_db)):
     """
     Permanently delete an analysis and everything tied to it (samples,
     results, stratigraphic relationships, groups). Unlike project deletion,
@@ -1222,7 +1222,7 @@ async def delete_analysis(analysis_id: str, db: Session = Depends(get_db)):
 
 
 @router.patch("/analysis/{analysis_id}")
-async def update_analysis(analysis_id: str, updates: Dict, db: Session = Depends(get_db)):
+def update_analysis(analysis_id: str, updates: Dict, db: Session = Depends(get_db)):
     """
     Update an analysis's project assignment (and/or name). Used to file an
     existing analysis into a project after the fact, or move it between
@@ -1381,7 +1381,7 @@ def _rerun_analysis(analysis: Analysis, db: Session) -> None:
 
 
 @router.post("/analysis/{analysis_id}/rerun")
-async def rerun_analysis(analysis_id: str, db: Session = Depends(get_db)):
+def rerun_analysis(analysis_id: str, db: Session = Depends(get_db)):
     """
     Recompute an already-saved analysis's results in place, from its own
     persisted inputs -- same analysis id/URL, old results replaced. Useful
@@ -1406,7 +1406,7 @@ async def rerun_analysis(analysis_id: str, db: Session = Depends(get_db)):
 
 
 @router.put("/analysis/{analysis_id}/model-tree")
-async def replace_model_tree(analysis_id: str, payload: Dict, db: Session = Depends(get_db)):
+def replace_model_tree(analysis_id: str, payload: Dict, db: Session = Depends(get_db)):
     """
     Replace an analysis's model structure -- the nested tree of Sequences,
     Phases, Boundaries and Hiatuses (see services/model_tree.py).
@@ -1479,7 +1479,7 @@ async def replace_model_tree(analysis_id: str, payload: Dict, db: Session = Depe
 
 
 @router.post("/analysis/{analysis_id}/duplicate")
-async def duplicate_analysis(analysis_id: str, db: Session = Depends(get_db)):
+def duplicate_analysis(analysis_id: str, db: Session = Depends(get_db)):
     """
     Deep-copy an analysis's INPUTS into a brand-new analysis, so a variant
     can be built from an existing one instead of re-entering every date by
@@ -1597,7 +1597,7 @@ async def duplicate_analysis(analysis_id: str, db: Session = Depends(get_db)):
 
 
 @router.put("/analysis/{analysis_id}/inputs")
-async def replace_analysis_inputs(
+def replace_analysis_inputs(
     analysis_id: str,
     request: BayesianRequest,
     db: Session = Depends(get_db),

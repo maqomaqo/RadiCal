@@ -11,7 +11,7 @@ router = APIRouter()
 
 
 @router.post("/projects")
-async def create_project(project: ProjectCreate, db: Session = Depends(get_db)):
+def create_project(project: ProjectCreate, db: Session = Depends(get_db)):
     """Create a new project to group analyses under."""
     if not project.name or not project.name.strip():
         raise HTTPException(status_code=400, detail="Project name is required")
@@ -35,7 +35,7 @@ async def create_project(project: ProjectCreate, db: Session = Depends(get_db)):
 
 
 @router.get("/projects")
-async def list_projects(db: Session = Depends(get_db)):
+def list_projects(db: Session = Depends(get_db)):
     """
     List all projects, each with its analysis count, plus a synthetic
     'Unassigned' bucket for analyses that aren't filed under any project
@@ -72,7 +72,7 @@ async def list_projects(db: Session = Depends(get_db)):
 
 
 @router.get("/projects/{project_id}")
-async def get_project(project_id: str, db: Session = Depends(get_db)):
+def get_project(project_id: str, db: Session = Depends(get_db)):
     """Retrieve a project and the analyses filed under it."""
     project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
@@ -109,7 +109,7 @@ async def get_project(project_id: str, db: Session = Depends(get_db)):
 
 
 @router.patch("/projects/{project_id}")
-async def update_project(project_id: str, updates: ProjectUpdate, db: Session = Depends(get_db)):
+def update_project(project_id: str, updates: ProjectUpdate, db: Session = Depends(get_db)):
     """Rename a project or edit its description."""
     project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
@@ -138,7 +138,7 @@ async def update_project(project_id: str, updates: ProjectUpdate, db: Session = 
 
 
 @router.post("/projects/{project_id}/rerun")
-async def rerun_project(project_id: str, db: Session = Depends(get_db)):
+def rerun_project(project_id: str, db: Session = Depends(get_db)):
     """
     Recompute every analysis in this project in place, from each one's own
     persisted inputs (see analysis.py's _rerun_analysis) -- one analysis
@@ -173,7 +173,7 @@ async def rerun_project(project_id: str, db: Session = Depends(get_db)):
 
 
 @router.delete("/projects/{project_id}")
-async def delete_project(project_id: str, db: Session = Depends(get_db)):
+def delete_project(project_id: str, db: Session = Depends(get_db)):
     """
     Delete a project. Analyses filed under it are NOT deleted -- they're
     unassigned (project_id set to NULL) so calibration results are never

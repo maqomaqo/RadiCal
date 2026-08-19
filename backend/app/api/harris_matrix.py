@@ -4,7 +4,7 @@ from typing import List, Dict
 router = APIRouter()
 
 @router.post("/harris-matrix/validate")
-async def validate_matrix(data: Dict):
+def validate_matrix(data: Dict):
     """Validate Harris matrix relationships"""
     nodes = data.get('nodes', [])
     edges = data.get('edges', [])
@@ -29,7 +29,7 @@ async def validate_matrix(data: Dict):
     }
 
 @router.post("/harris-matrix/relationships")
-async def generate_relationships(data: Dict):
+def generate_relationships(data: Dict):
     """Generate stratigraphic relationships from Harris matrix"""
     relationships = []
     edges = data.get('edges', [])

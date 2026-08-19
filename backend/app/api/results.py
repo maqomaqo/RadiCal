@@ -373,7 +373,7 @@ def _build_csv(analysis_id: str, db: Session, date_format: Optional[str] = None)
 
 
 @router.get("/results/{analysis_id}/table")
-async def export_table(analysis_id: str, date_format: Optional[str] = None, db: Session = Depends(get_db)):
+def export_table(analysis_id: str, date_format: Optional[str] = None, db: Session = Depends(get_db)):
     """Export results as a CSV table (same content as /export/csv, kept as a separate route for backwards compatibility)."""
     csv_content = _build_csv(analysis_id, db, date_format)
     return StreamingResponse(
@@ -384,7 +384,7 @@ async def export_table(analysis_id: str, date_format: Optional[str] = None, db: 
 
 
 @router.get("/results/{analysis_id}/export/csv")
-async def export_csv(analysis_id: str, date_format: Optional[str] = None, db: Session = Depends(get_db)):
+def export_csv(analysis_id: str, date_format: Optional[str] = None, db: Session = Depends(get_db)):
     """
     Export an analysis's results as CSV, in the model's own reading order.
 
@@ -442,7 +442,7 @@ def _structure_payload(structure: List[Dict]) -> List[Dict]:
 
 
 @router.get("/results/{analysis_id}/export/json")
-async def export_json(analysis_id: str, db: Session = Depends(get_db)):
+def export_json(analysis_id: str, db: Session = Depends(get_db)):
     """
     Export an analysis's results as JSON, including sample details merged
     into each result row.
@@ -502,7 +502,7 @@ def _context_spans(analysis_id: str, db: Session) -> List[Dict]:
 
 
 @router.get("/results/{analysis_id}/pdf")
-async def export_pdf(analysis_id: str, date_format: Optional[str] = None,
+def export_pdf(analysis_id: str, date_format: Optional[str] = None,
                      db: Session = Depends(get_db)):
     """
     Export an analysis as a printable PDF report: metadata, the curves and
@@ -557,7 +557,7 @@ async def export_pdf(analysis_id: str, date_format: Optional[str] = None,
 
 
 @router.get("/results/{analysis_id}/graphs")
-async def get_graphs(analysis_id: str, db: Session = Depends(get_db)):
+def get_graphs(analysis_id: str, db: Session = Depends(get_db)):
     """
     Returns each sample's probability distribution for external plotting.
     Note: the Results page does not call this -- it renders plots from the
@@ -580,15 +580,15 @@ async def get_graphs(analysis_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/results/{analysis_id}/export")
-async def export_results(analysis_id: str, options: Dict, db: Session = Depends(get_db)):
+def export_results(analysis_id: str, options: Dict, db: Session = Depends(get_db)):
     """Export results in the specified format: 'csv', 'json' or 'pdf'."""
     format_type = options.get('format', 'csv')
 
     if format_type == 'csv':
-        return await export_csv(analysis_id, options.get('date_format'), db)
+        return export_csv(analysis_id, options.get('date_format'), db)
     elif format_type == 'json':
-        return await export_json(analysis_id, db)
+        return export_json(analysis_id, db)
     elif format_type == 'pdf':
-        return await export_pdf(analysis_id, options.get('date_format'), db)
+        return export_pdf(analysis_id, options.get('date_format'), db)
     else:
         raise HTTPException(status_code=400, detail=f"Unsupported format: {format_type}")

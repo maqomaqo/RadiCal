@@ -31,9 +31,10 @@ the database.
 Mixed curves have a column and a lifecycle here but no endpoint yet -- see
 docs/CURVE_MANAGER_PLAN.md §4.3.
 """
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -56,7 +57,7 @@ DEFAULT_LIMIT = 100
 
 
 @router.get("/curves")
-async def list_curves(limit: int = DEFAULT_LIMIT, include_archived: bool = False):
+def list_curves(limit: int = DEFAULT_LIMIT, include_archived: bool = False):
     """
     Every curve available for calibration, in the order they should be
     offered. This is the list the frontend's curve pickers are built from,
@@ -78,7 +79,7 @@ async def list_curves(limit: int = DEFAULT_LIMIT, include_archived: bool = False
 
 
 @router.get("/curves/compare")
-async def compare_curves(
+def compare_curves(
     a: str = Query(..., description="First curve id"),
     b: str = Query(..., description="Second curve id"),
     cal_from: Optional[float] = Query(None),
@@ -115,7 +116,7 @@ async def compare_curves(
 
 
 @router.get("/curves/{curve_id}")
-async def get_curve(curve_id: str):
+def get_curve(curve_id: str):
     """One curve's full description, including its measured metadata."""
     try:
         spec = curve_registry.get_spec(curve_id)
@@ -125,7 +126,7 @@ async def get_curve(curve_id: str):
 
 
 @router.get("/curves/type/{curve_type}")
-async def get_curves_by_type(curve_type: str):
+def get_curves_by_type(curve_type: str):
     """
     Curves of one display type ('terrestrial', 'marine',
     'southern_hemisphere'). An unknown type is an empty list, not a 404: it
@@ -139,7 +140,7 @@ async def get_curves_by_type(curve_type: str):
 
 
 @router.get("/curves/{curve_id}/points")
-async def curve_points(
+def curve_points(
     curve_id: str,
     cal_from: Optional[float] = Query(None, description="Window start, cal BP"),
     cal_to: Optional[float] = Query(None, description="Window end, cal BP"),
@@ -165,7 +166,7 @@ async def curve_points(
 
 
 @router.post("/curves/{curve_id}/simulate")
-async def simulate_date(curve_id: str, request: SimulateRequest):
+def simulate_date(curve_id: str, request: SimulateRequest):
     """
     What a date from a given calendar year would look like.
 
@@ -213,7 +214,7 @@ async def simulate_date(curve_id: str, request: SimulateRequest):
 
 
 @router.get("/curves/{curve_id}/points.csv")
-async def curve_points_csv(
+def curve_points_csv(
     curve_id: str,
     cal_from: Optional[float] = Query(None),
     cal_to: Optional[float] = Query(None),
@@ -244,7 +245,7 @@ WIDE_SPAN_YEARS = 20000
 
 
 @router.get("/curves/{curve_id}/resolution")
-async def curve_resolution(
+def curve_resolution(
     curve_id: str,
     cal_from: Optional[float] = Query(None, description="Window start, cal BP"),
     cal_to: Optional[float] = Query(None, description="Window end, cal BP"),
@@ -286,7 +287,7 @@ async def curve_resolution(
 
 
 @router.get("/curves/{curve_id}/resolution.csv")
-async def curve_resolution_csv(
+def curve_resolution_csv(
     curve_id: str,
     u0: float = Query(resolution.DEFAULT_U0, gt=0, le=500),
     stride: int = Query(5, ge=1, le=200),
@@ -342,19 +343,29 @@ async def preview_curve(
     answer is the list of what is wrong. `data.ok` carries the verdict, and
     `data.preview` a downsampled series so the dialog can draw the curve
     before it is accepted.
+
+    One of the three handlers that must stay `async def`, since reading an
+    upload is genuinely awaitable. Everything after that read is parsing --
+    a whole .14c file's worth -- so it goes to the threadpool rather than
+    running on the event loop. See _preview_curve.
     """
+    content = await file.read()
+    return await run_in_threadpool(
+        _preview_curve, file.filename or '', content, calendar)
+
+
+def _preview_curve(filename: str, content: bytes, calendar: str) -> Dict:
     if calendar not in ('cal_bp', 'bc_ad'):
         raise HTTPException(
             status_code=422,
             detail="calendar must be 'cal_bp' or 'bc_ad'.",
         )
-    content = await file.read()
     _check_size(content)
 
-    result = curve_import.parse_upload(file.filename or '', content, calendar=calendar)
+    result = curve_import.parse_upload(filename, content, calendar=calendar)
     payload = result.as_dict()
-    payload['filename'] = file.filename
-    payload['suggested_id'] = slugify(result.suggested_name or file.filename or 'curve')
+    payload['filename'] = filename
+    payload['suggested_id'] = slugify(result.suggested_name or filename or 'curve')
     return {"success": True, "data": payload}
 
 
@@ -374,10 +385,19 @@ async def create_curve(
     by which curve data could reach the database -- the arrangement
     api/imports.py's docstring argues against at length. Re-parsing costs
     milliseconds and cannot disagree with the preview.
+
+    `async def` for the upload read only; the parse and the insert are
+    handed to the threadpool, for the reason preview_curve above gives.
     """
+    content = await file.read()
+    return await run_in_threadpool(
+        _create_curve, file.filename, content, metadata, calendar, curve_id, db)
+
+
+def _create_curve(filename: Optional[str], content: bytes, metadata: str,
+                  calendar: str, curve_id: Optional[str], db: Session) -> Dict:
     meta = CurveMetadata.model_validate_json(metadata)
 
-    content = await file.read()
     _check_size(content)
     text = curve_import.decode(content)
     result = curve_import.parse_curve(text, calendar=calendar)
@@ -433,7 +453,7 @@ async def create_curve(
         type=meta.type,
         sample_type=meta.sample_type,
         source_text=text,
-        source_filename=file.filename,
+        source_filename=filename,
         parse_options=result.parse_options,
         content_sha256=curve_registry.content_hash(curve),
         aliases=meta.aliases,
@@ -452,7 +472,7 @@ async def create_curve(
 
 
 @router.post("/curves/mixed", status_code=201)
-async def create_mixed_curve(request: MixedCurveRequest, db: Session = Depends(get_db)):
+def create_mixed_curve(request: MixedCurveRequest, db: Session = Depends(get_db)):
     """
     Define a curve as a proportional mixture of two others, for samples whose
     carbon came from more than one reservoir -- most often a human or animal
@@ -572,7 +592,7 @@ def _stored_or_404(curve_id: str, db: Session) -> StoredCalibrationCurve:
 
 
 @router.patch("/curves/{curve_id}")
-async def update_curve(
+def update_curve(
     curve_id: str,
     update: CurveMetadataUpdate,
     db: Session = Depends(get_db),
@@ -603,7 +623,7 @@ async def update_curve(
 
 
 @router.get("/curves/{curve_id}/usage")
-async def curve_usage(curve_id: str):
+def curve_usage(curve_id: str):
     """What is already calibrated against this curve. Empty for a curve
     nothing uses, which is the only kind that can be deleted outright."""
     if not curve_registry.exists(curve_id):
@@ -612,7 +632,7 @@ async def curve_usage(curve_id: str):
 
 
 @router.delete("/curves/{curve_id}")
-async def delete_curve(
+def delete_curve(
     curve_id: str,
     archive: bool = Query(False, description="Archive instead of deleting"),
     db: Session = Depends(get_db),
@@ -654,7 +674,7 @@ async def delete_curve(
 
 
 @router.post("/curves/{curve_id}/restore")
-async def restore_curve(curve_id: str, db: Session = Depends(get_db)):
+def restore_curve(curve_id: str, db: Session = Depends(get_db)):
     """Bring an archived curve back into the pickers."""
     row = _stored_or_404(curve_id, db)
     row.archived = False
@@ -664,7 +684,7 @@ async def restore_curve(curve_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/curves/{curve_id}/export")
-async def export_curve(curve_id: str):
+def export_curve(curve_id: str):
     """
     The curve as a .14c file.
 

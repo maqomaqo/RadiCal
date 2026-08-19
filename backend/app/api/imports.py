@@ -22,6 +22,7 @@ failures keeps 'the upload broke' distinguishable from 'row 12 has a letter in
 the age column'. `data.ok` and `data.errors` carry the verdict.
 """
 from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 
 from app.services.date_import import (
@@ -48,8 +49,15 @@ async def import_dates(file: UploadFile = File(...)):
     differently: `errors` (nothing was imported), `warnings` (imported, but
     something could not be honoured) and `notes` (imported, and here is what
     was assumed). See services/date_import.ImportResult.
+
+    `async def` for the upload read only -- parsing an .oxcal model is
+    ordinary blocking work and goes to the threadpool with everything else.
     """
     content = await file.read()
+    return await run_in_threadpool(_import_dates, file.filename or "", content)
+
+
+def _import_dates(filename: str, content: bytes):
     if not content:
         raise HTTPException(status_code=400, detail="The uploaded file is empty.")
     if len(content) > MAX_CONTENT_BYTES:
@@ -61,14 +69,14 @@ async def import_dates(file: UploadFile = File(...)):
             ),
         )
 
-    result = parse_upload(file.filename or "", content)
+    result = parse_upload(filename, content)
     payload = result.as_dict()
-    payload["filename"] = file.filename
+    payload["filename"] = filename
     return {"success": True, "data": payload}
 
 
 @router.get("/import/csv-template")
-async def csv_template():
+def csv_template():
     """
     The CSV template, as a download.
 
@@ -84,7 +92,7 @@ async def csv_template():
 
 
 @router.get("/import/csv-columns")
-async def csv_columns():
+def csv_columns():
     """
     The columns the CSV importer reads, for the format help shown in the
     upload dialog.
