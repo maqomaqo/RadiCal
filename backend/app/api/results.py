@@ -2,10 +2,11 @@ from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from app.database import get_db
-from app.models import Analysis, RadiocarbonSample, AnalysisResult, ModelElement
+from app.models import Analysis, RadiocarbonSample, AnalysisResult, ModelElement, SampleGroup
 from app.services.model_tree import rows_to_tree, flatten_structure
 from app.services.calibration import get_curve
 from app.services import date_format as date_format_service
+from app.services import pdf_report
 from typing import Dict, List, Optional
 import io
 import csv
@@ -477,20 +478,82 @@ async def export_json(analysis_id: str, db: Session = Depends(get_db)):
     }
 
 
+def _context_spans(analysis_id: str, db: Session) -> List[Dict]:
+    """
+    Each context's modelled start and end, for analyses whose model carries
+    no explicit Boundary elements to report them instead.
+
+    The raw MCMC draws are dropped on the way out for the same reason
+    _posterior_summary drops them from the JSON export: they are tens of
+    thousands of floats per boundary and nothing in a report is going to
+    print them.
+    """
+    groups = db.query(SampleGroup).filter(SampleGroup.analysis_id == analysis_id).all()
+    spans = []
+    for group in groups:
+        if not (group.modeled_start and group.modeled_end):
+            continue
+        spans.append({
+            'name': group.name,
+            'start': _posterior_summary(group.modeled_start),
+            'end': _posterior_summary(group.modeled_end),
+        })
+    return spans
+
+
 @router.get("/results/{analysis_id}/pdf")
-async def export_pdf(analysis_id: str, db: Session = Depends(get_db)):
+async def export_pdf(analysis_id: str, date_format: Optional[str] = None,
+                     db: Session = Depends(get_db)):
     """
-    PDF report generation is not implemented yet (needs ReportLab
-    rendering of the results table + posterior plots). Explicitly 501
-    rather than a fake 200 "success" so callers don't mistake this for a
-    working export.
+    Export an analysis as a printable PDF report: metadata, the curves and
+    solver that produced it, the results table in the model's own reading
+    order, each context's modelled span, and a posterior plot per modelled
+    parameter.
+
+    Built from the same assembly the CSV and JSON exports use, so the three
+    downloads of one analysis cannot report different numbers. `date_format`
+    is the reporting convention the results page is showing, carried the
+    same way the CSV carries it; an unrecognised value falls back to cal BP
+    rather than failing the download.
+
+    Rendering is synchronous and costs a matplotlib figure per modelled
+    parameter, so a large model takes a few seconds. That is a deliberate
+    trade for now -- a download that takes four seconds is better than a job
+    queue nobody asked for -- but it is the thing to revisit if models grow.
     """
-    # Still validate the analysis exists, so the error a caller sees
-    # distinguishes "not built yet" from "wrong analysis id".
-    analysis = db.query(Analysis).filter(Analysis.id == analysis_id).first()
-    if not analysis:
-        raise HTTPException(status_code=404, detail="Analysis not found")
-    raise HTTPException(status_code=501, detail="PDF export is not implemented yet")
+    data = _gather_export_rows(analysis_id, db)
+    analysis = data['analysis']
+    structure = _structure_rows(analysis_id, db, data['rows'], data['samples_by_id'])
+
+    # The per-date posterior series, fetched here rather than through the
+    # shared assembly: the CSV and JSON exports have no use for a few
+    # hundred numbers per date, so _gather_export_rows leaves the column
+    # unselected on purpose. Only the plots need it.
+    distributions = {
+        sample_id: distribution
+        for sample_id, distribution in db.query(
+            AnalysisResult.sample_id, AnalysisResult.probability_distribution
+        ).filter(AnalysisResult.analysis_id == analysis_id).all()
+    }
+
+    pdf_bytes = pdf_report.render_report(
+        analysis=analysis,
+        structure=structure,
+        rows=data['rows'],
+        samples_by_id=data['samples_by_id'],
+        distributions=distributions,
+        context_spans=_context_spans(analysis_id, db),
+        project_name=analysis.project.name if analysis.project else None,
+        date_format=date_format,
+    )
+    return StreamingResponse(
+        iter([pdf_bytes]),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition":
+                f"attachment; filename=analysis-{analysis_id}-report.pdf"
+        },
+    )
 
 
 @router.get("/results/{analysis_id}/graphs")
@@ -518,7 +581,7 @@ async def get_graphs(analysis_id: str, db: Session = Depends(get_db)):
 
 @router.post("/results/{analysis_id}/export")
 async def export_results(analysis_id: str, options: Dict, db: Session = Depends(get_db)):
-    """Export results in the specified format ('csv' or 'json'; 'pdf' is not implemented yet)."""
+    """Export results in the specified format: 'csv', 'json' or 'pdf'."""
     format_type = options.get('format', 'csv')
 
     if format_type == 'csv':
@@ -526,6 +589,6 @@ async def export_results(analysis_id: str, options: Dict, db: Session = Depends(
     elif format_type == 'json':
         return await export_json(analysis_id, db)
     elif format_type == 'pdf':
-        return await export_pdf(analysis_id, db)
+        return await export_pdf(analysis_id, options.get('date_format'), db)
     else:
         raise HTTPException(status_code=400, detail=f"Unsupported format: {format_type}")

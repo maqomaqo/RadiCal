@@ -308,9 +308,12 @@ Calibration with "Save this analysis" on) navigates straight to its Results page
   the curve as CSV (calendar age, radiocarbon age, error, local gradient); **Export profile** saves
   its whole expected-resolution profile. A curve itself can be downloaded from the Curves page, and
   an imported one comes back byte-for-byte as it was uploaded.
-- **PDF** — not implemented. `GET /api/results/{id}/pdf` exists and returns a `501` rather than a
-  fake success, so this is a deliberate gap, not a bug, and there's nothing to click for it in the
-  UI.
+- **Export PDF** (on the Results page) — a printable report of the whole analysis: what it is and
+  when it was run, the curve(s) it was calibrated against with their references, which solver
+  computed the posteriors, the results table in the model's own reading order, and a plot of every
+  date and Boundary with its HPD ranges marked. Like the CSV it reads in the date format currently
+  selected. It is rendered on the server and draws a plot per modelled parameter, so a large model
+  takes a few seconds — the button says so while it works.
 
 ## Projects and Date Collections
 

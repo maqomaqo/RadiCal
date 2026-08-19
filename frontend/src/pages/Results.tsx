@@ -492,6 +492,7 @@ export default function Results() {
   const [rerunOpen, setRerunOpen] = useState(false)
   const [rerunning, setRerunning] = useState(false)
   const [duplicating, setDuplicating] = useState(false)
+  const [exportingPdf, setExportingPdf] = useState(false)
   // Posterior mean/median are opt-in reporting choices, not shown by
   // default -- HPD ranges are the primary convention for reporting a
   // (possibly multimodal) calibrated/Bayesian result; a single point
@@ -574,6 +575,13 @@ export default function Results() {
       const response = await fetch(
         `/api/results/${analysisId}/export/csv?date_format=${encodeURIComponent(dateFormat)}`
       )
+      // An error response is JSON, and a spreadsheet will open that
+      // perfectly happily as a one-cell file -- so without this check a
+      // failed export is saved as a .csv and only noticed later, by
+      // whoever opens it looking for their results.
+      if (!response.ok) {
+        throw new Error(formatApiError(await response.json().catch(() => null)))
+      }
       const blob = await response.blob()
       const url = window.URL.createObjectURL(blob)
       const a = document.createElement('a')
@@ -585,6 +593,40 @@ export default function Results() {
       document.body.removeChild(a)
     } catch (err) {
       notify('Failed to export CSV: ' + (err as Error).message)
+    }
+  }
+
+  // The PDF is rendered server-side and costs a plot per modelled
+  // parameter, so a large model takes a few seconds. That is long enough
+  // that a button which just sits there reads as broken -- hence the
+  // explicit pending state, which the CSV (returned in milliseconds) has
+  // never needed.
+  const handleExportPDF = async () => {
+    if (!analysisId) return
+    setExportingPdf(true)
+    try {
+      const response = await fetch(
+        `/api/results/${analysisId}/pdf?date_format=${encodeURIComponent(dateFormat)}`
+      )
+      // Checked before reading the body: an error response is JSON, and
+      // saving it under a .pdf name would hand the user a file that only
+      // fails when they try to open it.
+      if (!response.ok) {
+        throw new Error(formatApiError(await response.json().catch(() => null)))
+      }
+      const blob = await response.blob()
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `analysis-${analysisId}-report.pdf`
+      document.body.appendChild(a)
+      a.click()
+      window.URL.revokeObjectURL(url)
+      document.body.removeChild(a)
+    } catch (err) {
+      notify('Failed to export PDF: ' + (err as Error).message)
+    } finally {
+      setExportingPdf(false)
     }
   }
 
@@ -1230,13 +1272,25 @@ export default function Results() {
               </FormGroup>
             </Stack>
           </Box>
-          <Button
-            startIcon={<DownloadIcon />}
-            onClick={handleExportCSV}
-            variant="outlined"
-          >
-            Export CSV
-          </Button>
+          <Stack direction="row" spacing={1}>
+            <Button
+              startIcon={<DownloadIcon />}
+              onClick={handleExportCSV}
+              variant="outlined"
+            >
+              Export CSV
+            </Button>
+            <Button
+              startIcon={
+                exportingPdf ? <CircularProgress size={16} color="inherit" /> : <DownloadIcon />
+              }
+              onClick={handleExportPDF}
+              variant="outlined"
+              disabled={exportingPdf}
+            >
+              {exportingPdf ? 'Building PDF…' : 'Export PDF'}
+            </Button>
+          </Stack>
         </Box>
 
         {/* Said once at the top as well as marked on each row: a long table

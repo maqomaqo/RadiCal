@@ -60,7 +60,7 @@ previous revisions of this file understated parts of it.
 - **Posterior visualization** — Plotly charts with shaded HPD bands, modelled
   vs unmodelled comparison, selectable HPD confidence, and opt-in point
   estimates.
-- **Real CSV/JSON export**, **input validation** on all analysis endpoints,
+- **Real CSV/JSON/PDF export**, **input validation** on all analysis endpoints,
   and **self-healing schema drift** (`database.py`, for added columns; new
   tables come from `create_all()`).
 - **Backend tests** — 80, in `backend/tests/`.
@@ -70,14 +70,34 @@ previous revisions of this file understated parts of it.
 ## Priority: HIGH
 
 ### 1. PDF report generation
-- **Current:** `GET /results/{id}/pdf` returns a proper `501` (it does not
-  pretend to work), but the feature doesn't exist.
-- **Needed:** ReportLab report — metadata, results table, posterior plots,
-  sample details, curve/method references. `reportlab` is already in
-  `requirements.txt`.
-- **Impact:** High. Still the largest gap between what `README.md` claims and
-  what the app does, and there's no citable/shareable output without it.
-- **Effort:** 2–3 hours.
+**Resolved 2026-08-19.** `GET /results/{id}/pdf` renders a real report:
+metadata, a method note naming the curves (with their references, read from
+the curve registry) and which solver actually ran, the results table in the
+model's own reading order with dates and Boundaries reporting through the
+same columns, each context's modelled span where nothing else already
+reports it, and a posterior plot per modelled parameter with the unmodelled
+calibration behind each date. `services/pdf_report.py` renders; the route
+assembles. It takes `?date_format=` exactly as the CSV does, and an analysis
+with no results still produces a report saying so rather than failing the
+download.
+
+Two things worth knowing, since neither is visible from the route:
+
+- The report renders from what `_gather_export_rows`/`_structure_rows`
+  already assemble for the CSV and JSON, so the three downloads of one
+  analysis cannot disagree. The one exception is the per-date posterior
+  series, which that assembly deliberately does not select — a spreadsheet
+  has no use for a few hundred numbers per date — so the PDF route queries
+  it separately rather than adding it to rows the JSON export would then
+  carry too.
+- Columns are chosen by what the run actually produced rather than by its
+  declared type, so a plain calibration is not padded out with the agreement
+  index and unmodelled comparison that only a model has.
+
+Rendering is synchronous and costs a matplotlib figure per modelled
+parameter: about four seconds for a 45-parameter model, which the Results
+page's button states while it works. That is the thing to revisit if models
+grow, and it is a smaller problem than a job queue.
 
 ### 2. Documentation is materially wrong
 **Resolved 2026-08-13.** `README.md`, `docs/USER_MANUAL.md` and
@@ -236,9 +256,17 @@ each is a real edge.
    reachable from the UI — `ProjectSampleTable` always sends `bayesian` — but
    the API allows it and would silently drop the other dates. Either reject
    multi-date calibration deploys or loop over the samples.
-2. **CSV/JSON export omits context Boundaries.** `results.py` exports
-   per-sample rows only, so the modelled start/end shown on the Results page
-   can't be exported. Worth adding when PDF export is built.
+2. ~~**CSV/JSON export omits context Boundaries.**~~ **Stale as written,
+   resolved 2026-08-19.** The CSV has exported Boundaries in model order
+   since `_structure_rows` landed — this note predates that. What was
+   genuinely missing is the *Context Spans* table (`SampleGroup.modeled_start`
+   / `modeled_end`), which the PDF report now carries. Note that it is a
+   legacy path either way: every Bayesian run since model trees persists
+   explicit Boundary elements, and adjacent contexts share a boundary, so
+   reporting both would print each transition twice — once as one context's
+   end and again as the next one's start. Both the report and the results
+   page suppress the table whenever the model has Boundaries of its own,
+   which leaves it showing only for analyses stored before trees existed.
 3. **A context with only 2–3 dates gets very wide Boundaries** (95% HPD can
    span thousands of years). This is mathematically correct — `E[a+b]` is
    only finite for K ≥ 4, so few dates genuinely don't constrain a phase's
@@ -262,13 +290,17 @@ each is a real edge.
 
 ## Testing & QA
 
-- **Backend: 491 tests** (`pytest --collect-only`, 2026-08-14) in
-  `backend/tests/`, including several files added since the 80-test count
-  above was first recorded: `test_agreement.py` (the agreement index),
-  `test_charcoal_outlier.py`, `test_solver_reporting.py`,
-  `test_exports.py` (47 tests covering `results.py`'s export/table/graphs/pdf
-  routes — see below), and `test_imports.py` (92 tests covering CSV and
-  `.oxcal` file import). Still present from before:
+- **Backend: 679 tests** (`pytest --collect-only`, 2026-08-19; 678 pass, 1
+  skips) in `backend/tests/`, including several files added since the
+  80-test count above was first recorded: `test_agreement.py` (the agreement
+  index), `test_charcoal_outlier.py`, `test_solver_reporting.py`,
+  `test_exports.py` (44 tests covering `results.py`'s export/table/graphs
+  routes — see below), `test_pdf_report.py` (32 tests covering the PDF
+  report and the route that serves it — it reads the text back out of the
+  generated PDF with nothing but the standard library, so the assertions are
+  about what the report says rather than about it being a PDF at all), and
+  `test_imports.py` (92 tests covering CSV and `.oxcal` file import). Still
+  present from before:
   - `test_calibration.py` — calibration and HPD logic.
   - `test_validation.py` — request validation.
   - `test_stratigraphy.py` — cycle detection, group expansion, TPQ/TAQ.
@@ -392,8 +424,8 @@ each is a real edge.
 
 1. ~~Rewrite `README.md` and `docs/USER_MANUAL.md` to match reality~~ —
    **done 2026-08-13**, along with `docs/INSTALLATION.md`.
-2. **PDF export** — the last big advertised-but-missing feature; fold in the
-   context Boundaries that CSV export also misses (gap #2).
+2. ~~**PDF export**~~ — **done 2026-08-19**, along with the Context Spans
+   that no export carried (gap #2, whose other half turned out to be stale).
 3. ~~Delete the four superseded component stubs~~ — **done 2026-08-13**,
    along with the dead `app/models/sample.py`, the orphaned
    `frontend/src/services/api.ts`, six unused npm dependencies, and the
@@ -412,5 +444,8 @@ each is a real edge.
 *Status: calibration and Bayesian math correct and tested (including
 OxCal-style Boundaries); project management, date collections, deploy,
 duplicate/edit and re-run all working end to end. Documentation now matches
-the app (2026-08-13) and the codebase's accumulated dead files/config have
-been cleared out. PDF export is the one remaining high-priority gap.*
+the app (2026-08-13, again 2026-08-19 for the PDF report) and the codebase's
+accumulated dead files/config have been cleared out. Every high-priority gap
+this file has listed is now closed; what remains is the medium and low
+priority work above, of which async MCMC (Priority #3) is the one most
+likely to start feeling broken as projects grow.*

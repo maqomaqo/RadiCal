@@ -77,7 +77,12 @@ Boundaries), and interactive posterior visualization.
   model — a non-uniform Boundary, `C_Date`, `R_Combine`, a deposition-model sequence, an unknown
   curve — fails the import naming itself rather than being read as the nearest thing that is
   implemented.
-- **Export**: CSV and JSON. (PDF export is not implemented — see below.)
+- **Export**: CSV, JSON, and a printable PDF report — the analysis's metadata, the curves and
+  solver that actually produced it, the results table in the model's own reading order with dates
+  and Boundaries reporting through the same columns, and a posterior plot for each of them with its
+  unmodelled calibration behind it. All three come from one assembly, so the three downloads of one
+  analysis cannot disagree; a column appears in the report only when the run has something to put
+  in it, so a plain calibration is not padded out with the diagnostics only a model produces.
 
 ## Tech Stack
 
@@ -93,6 +98,9 @@ Boundaries), and interactive posterior visualization.
 - **NumPy/SciPy** for the calibration math and both Bayesian solvers (exact integration for
   chain-shaped models, OxCal's own MH/Gibbs scheme otherwise — no PyMC, no MCMC sampler dependency)
 - **SQLAlchemy** ORM over **PostgreSQL**
+- **ReportLab** and **Matplotlib** for the PDF report — the figures are drawn through matplotlib's
+  object API rather than pyplot, whose global figure registry is a leak waiting to happen in a
+  long-lived server process
 
 ## Project Structure
 
@@ -209,8 +217,9 @@ Full interactive documentation (generated from the actual FastAPI routes) is at
   through the endpoints above, so an upload is not a second route into the database with its own
   validation to drift out of step.
 - **Results** (`/api/results/{id}/export/csv`, `/api/results/{id}/export/json`,
-  `/api/results/{id}/table`) — export a completed analysis. `/api/results/{id}/pdf` exists but
-  returns `501 Not Implemented` — see [`REMAINING_WORK.md`](REMAINING_WORK.md).
+  `/api/results/{id}/pdf`, `/api/results/{id}/table`) — export a completed analysis. The CSV and
+  the PDF both take `?date_format=`, the reporting convention the results page is showing. An
+  analysis with no results still exports, saying so, rather than failing the download.
 
 ## Documentation
 

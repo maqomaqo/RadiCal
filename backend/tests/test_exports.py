@@ -1,6 +1,7 @@
 """
-Tests for the results export routes: /table, /export/json, /graphs, /pdf,
-and the POST /export dispatcher.
+Tests for the results export routes: /table, /export/json, /graphs, and
+the POST /export dispatcher. The PDF report has its own file
+(test_pdf_report.py), which needs machinery none of these do.
 
 The CSV body itself is covered by test_model_tree.py's TestCsvExport,
 which pins the structure ordering the CSV shares with the results table.
@@ -521,11 +522,6 @@ class TestPostExport:
         assert posted.status_code == 200
         assert posted.json() == client.get(f"/api/results/{analysis_id}/export/json").json()
 
-    def test_pdf_reports_not_implemented(self, client):
-        analysis_id = _calibration(client)
-        response = client.post(f"/api/results/{analysis_id}/export", json={"format": "pdf"})
-        assert response.status_code == 501
-
     def test_unsupported_format_400s_and_names_it(self, client):
         analysis_id = _calibration(client)
         response = client.post(f"/api/results/{analysis_id}/export", json={"format": "xlsx"})
@@ -544,32 +540,19 @@ class TestPostExport:
             response = client.post("/api/results/ghost/export", json=body)
             assert response.status_code == 404, body
 
-    def test_unknown_analysis_beats_not_implemented(self, client):
+    def test_unknown_analysis_404s_on_every_format(self, client):
         """
-        A bad id on the pdf format reports 404, not 501 -- export_pdf checks
-        the analysis exists first, so the caller can tell "wrong id" from
-        "this format isn't built yet".
+        A bad id is reported as a bad id whichever format was asked for --
+        every branch resolves the analysis before it renders anything.
         """
-        assert client.post("/api/results/ghost/export", json={"format": "pdf"}).status_code == 404
+        for fmt in ("csv", "json", "pdf"):
+            response = client.post("/api/results/ghost/export", json={"format": fmt})
+            assert response.status_code == 404, fmt
 
 
-class TestPdfExport:
-    """
-    PDF rendering isn't built. The route exists so callers get an explicit
-    501 instead of a fake success, which is only worth anything if it keeps
-    saying so.
-    """
-
-    def test_reports_not_implemented(self, client):
-        analysis_id = _calibration(client)
-        response = client.get(f"/api/results/{analysis_id}/pdf")
-        assert response.status_code == 501
-        assert "not implemented" in response.json()["detail"].lower()
-
-    def test_unknown_analysis_404s(self, client):
-        # Checked before the format is refused, so a bad id is reported as a
-        # bad id rather than as an unbuilt feature.
-        assert client.get("/api/results/ghost/pdf").status_code == 404
+# The PDF report -- the route, what the document says, and the pieces it is
+# assembled from -- lives in tests/test_pdf_report.py, which carries the
+# machinery for reading text back out of a PDF.
 
 
 class TestCsvDateFormat:
