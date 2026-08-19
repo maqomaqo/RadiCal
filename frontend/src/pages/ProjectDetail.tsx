@@ -35,6 +35,9 @@ import { useNotify } from '@/contexts/NotificationContext'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import AssignProjectDialog from '@/components/AssignProjectDialog'
 import ProjectSampleTable from '@/components/ProjectSampleTable'
+import JobProgress from '@/components/JobProgress'
+import { cancelJob } from '@/api/jobs'
+import { useJob } from '@/hooks/useJob'
 
 interface AnalysisSummary {
   id: string
@@ -99,10 +102,48 @@ export default function ProjectDetail() {
   const [rerunAllOpen, setRerunAllOpen] = useState(false)
   const [rerunningAll, setRerunningAll] = useState(false)
   const [rerunSummary, setRerunSummary] = useState<RerunSummary | null>(null)
+  const [jobId, setJobId] = useState<string | null>(null)
+  const [cancelling, setCancelling] = useState(false)
 
   useEffect(() => {
     if (projectId) fetchProject(projectId)
   }, [projectId])
+
+  // Only a job this page started is followed. Unlike the results page there
+  // is no useful fallback by target: a project's most recent job may be from
+  // last week, and a progress bar for something long finished is worse than
+  // none. Arriving mid-run therefore shows the analyses' own status chips,
+  // which are already accurate.
+  const { job, active: jobActive } = useJob({
+    jobId,
+    onFinished: (finished) => {
+      setCancelling(false)
+      if (projectId) fetchProject(projectId)
+      const failed = finished.detail?.failed
+      if (finished.state === 'failed') {
+        setRerunSummary({ severity: 'warning', headline: finished.error_message || 'The re-run did not finish.' })
+      } else if (finished.state === 'cancelled') {
+        setRerunSummary({ severity: 'warning', headline: 'The re-run was stopped. Analyses already finished keep their new results.' })
+      } else if (failed && failed.length > 0) {
+        setRerunSummary({
+          severity: 'warning',
+          headline: `${(finished.detail?.completed ?? 0) - failed.length} rerun successfully. ${failed.length} failed:`,
+          details: failed.map((f) => `${f.name}: ${f.error}`),
+        })
+      }
+    },
+  })
+
+  const handleCancelRerun = async () => {
+    if (!job) return
+    setCancelling(true)
+    try {
+      await cancelJob(job.job_id)
+    } catch (err) {
+      notify((err as Error).message)
+      setCancelling(false)
+    }
+  }
 
   const fetchProject = async (id: string) => {
     setLoading(true)
@@ -229,6 +270,9 @@ export default function ProjectDetail() {
     }
   }
 
+  // Both rerun paths now queue rather than run: the endpoints answer 202 as
+  // soon as the work is accepted, and this page follows the job instead of
+  // holding a request open for what can be minutes.
   const handleRerunOne = async () => {
     if (!rerunTarget || !project) return
     setRerunningOne(true)
@@ -237,6 +281,7 @@ export default function ProjectDetail() {
       const data = await response.json()
       if (data.success) {
         setRerunTarget(null)
+        setJobId(data.data.job_id ?? null)
         fetchProject(project.id)
       } else {
         notify('Failed to rerun analysis: ' + formatApiError(data))
@@ -248,16 +293,19 @@ export default function ProjectDetail() {
     }
   }
 
-  // Real project: one batch call. Unassigned pseudo-project: there's no
-  // real project id to hit a batch endpoint with, so rerun each listed
-  // analysis individually instead -- same end result, just client-side
-  // fan-out rather than a single request.
+  // Real project: one job for the whole batch. Unassigned pseudo-project:
+  // one job per analysis (see below).
   const handleRerunAll = async () => {
     if (!project) return
     setRerunningAll(true)
     setRerunSummary(null)
     try {
       if (isUnassigned) {
+        // The unassigned pseudo-project has no id to hit a batch endpoint
+        // with, so each analysis is queued separately. They still run one at
+        // a time -- the queue has a single worker -- so this is a fan-out of
+        // submissions, not of work. Only the last job is followed: they run
+        // in order, so it finishing means they all have.
         const outcomes = await Promise.allSettled(
           project.analyses.map((a) => fetch(`/api/analysis/${a.id}/rerun`, { method: 'POST' }).then((r) => r.json()))
         )
@@ -265,19 +313,20 @@ export default function ProjectDetail() {
         if (failed.length > 0) {
           setRerunSummary({
             severity: 'warning',
-            headline: `Rerun finished with ${failed.length} of ${outcomes.length} analyses failing. Check them individually for details.`,
+            headline: `${failed.length} of ${outcomes.length} analyses could not be queued. Check them individually for details.`,
           })
         }
+        const queued = outcomes
+          .filter((o): o is PromiseFulfilledResult<any> => o.status === 'fulfilled' && !!o.value?.success)
+          .map((o) => o.value.data.job_id)
+          .filter(Boolean)
+        setJobId(queued.length ? queued[queued.length - 1] : null)
       } else {
         const response = await fetch(`/api/projects/${project.id}/rerun`, { method: 'POST' })
         const data = await response.json()
-        if (data.success && data.data.failed.length > 0) {
-          setRerunSummary({
-            severity: 'warning',
-            headline: `${data.data.rerun_count} rerun successfully. ${data.data.failed.length} failed:`,
-            details: data.data.failed.map((f: { name: string; error: string }) => `${f.name}: ${f.error}`),
-          })
-        } else if (!data.success) {
+        if (data.success) {
+          setJobId(data.data.job_id ?? null)
+        } else {
           notify('Failed to rerun project: ' + formatApiError(data))
         }
       }
@@ -364,6 +413,10 @@ export default function ProjectDetail() {
         </Box>
       </Box>
 </Paper>
+      {jobActive && job && (
+        <JobProgress job={job} onCancel={handleCancelRerun} cancelling={cancelling} />
+      )}
+
       {rerunSummary && (
         <Alert severity={rerunSummary.severity} onClose={() => setRerunSummary(null)} sx={{ mb: 3 }}>
           <Typography variant="body2" sx={{ fontWeight: 600 }}>

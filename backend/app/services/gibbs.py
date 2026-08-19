@@ -134,7 +134,7 @@ _span_priors for how the UniformSpanPrior correction is grouped so that it
 reduces exactly to exact_chain's on a chain and to the per-branch corrections on
 independent branches.
 """
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -979,10 +979,15 @@ class Model:
         return state, current_lp, False, wide
 
 
+class Cancelled(Exception):
+    """Raised out of run() when on_progress asked it to stop."""
+
+
 def run(model: Model, sweeps: int = DEFAULT_SWEEPS, seed: int = 42,
         burn_in: Optional[int] = None,
         target_convergence: float = TARGET_CONVERGENCE,
-        max_sweeps: Optional[int] = None) -> Dict:
+        max_sweeps: Optional[int] = None,
+        on_progress: Optional[Callable[[Dict], bool]] = None) -> Dict:
     """
     Sweep the sampler and accumulate each parameter's marginal as a histogram
     over the calendar grid, extending the run until it has converged.
@@ -1008,6 +1013,22 @@ def run(model: Model, sweeps: int = DEFAULT_SWEEPS, seed: int = 42,
     alternative -- stopping at an arbitrary length and hoping -- is the thing
     being replaced. `max_sweeps` bounds the work regardless, and the achieved
     convergence is always reported rather than assumed.
+
+    `on_progress`, when given, is called with
+    {'phase', 'sweeps', 'max_sweeps', 'convergence'} after burn-in and after
+    every round, and RETURNING FALSE STOPS THE RUN by raising Cancelled.
+    Between rounds is the honest place to stop: the accumulated histograms
+    are discarded whole, so a cancelled run leaves nothing half-written for
+    a caller to mistake for an answer.
+
+    `convergence` in that report is the WORST parameter's, which is the one
+    the stopping rule uses -- an average would tick along encouragingly while
+    the parameter actually holding the run up sat still.
+
+    Note that progress against `max_sweeps` is an upper bound, not a
+    prediction. A run stops as soon as it converges, so most finish at a
+    fraction of it; that is a success rather than a truncation, which is why
+    the achieved convergence is reported alongside.
 
     Returns {'histograms', 'sweeps', 'sweeps_kept', 'convergence', 'acceptance',
     ...} -- convergence being OxCal's own diagnostic, per parameter.
@@ -1094,9 +1115,23 @@ def run(model: Model, sweeps: int = DEFAULT_SWEEPS, seed: int = 42,
                 since_adapt[index] = took_since_adapt[index] = 0
         swept += 1
 
+    def report(phase: str, convergence: float) -> None:
+        if on_progress is None:
+            return
+        if not on_progress({'phase': phase, 'sweeps': swept,
+                            'max_sweeps': max_sweeps, 'convergence': convergence}):
+            raise Cancelled()
+
     round_length = max(1, (sweeps - burn_in) // ROUNDS)
-    for _ in range(burn_in):
+    # Burn-in is reported in chunks rather than as one silent block. It is
+    # 20% of the opening length, which on a slow model is several seconds of
+    # a progress bar that would otherwise sit at zero -- and several seconds
+    # in which a cancel would be ignored.
+    burn_chunk = max(1, burn_in // 10)
+    for done in range(burn_in):
         sweep_once()
+        if (done + 1) % burn_chunk == 0:
+            report('burn_in', 0.0)
 
     while True:
         current = new_round()
@@ -1129,6 +1164,7 @@ def run(model: Model, sweeps: int = DEFAULT_SWEEPS, seed: int = 42,
         kept_rounds = _after_burn_in(rounds)
         convergence = _convergence(kept_rounds, model.params)
         worst = min(convergence.values()) if convergence else 0.0
+        report('sampling', worst)
         if len(kept_rounds) < 2:
             continue
         if worst >= target_convergence or swept >= max_sweeps:
@@ -1200,7 +1236,8 @@ def solve(measurements: List[Dict], root: Dict, sweeps: int = DEFAULT_SWEEPS,
           uniform_span_prior: bool = True,
           grid: Optional[np.ndarray] = None,
           target_convergence: float = TARGET_CONVERGENCE,
-          max_sweeps: Optional[int] = None) -> Dict:
+          max_sweeps: Optional[int] = None,
+          on_progress: Optional[Callable[[Dict], bool]] = None) -> Dict:
     """
     Posterior summaries for every date and boundary, in the same shape
     exact_chain.solve returns -- so a caller does not need to know which
@@ -1218,7 +1255,8 @@ def solve(measurements: List[Dict], root: Dict, sweeps: int = DEFAULT_SWEEPS,
     model = Model(measurements, root, grid=grid,
                   uniform_span_prior=uniform_span_prior)
     chain = run(model, sweeps=sweeps, seed=seed,
-                target_convergence=target_convergence, max_sweeps=max_sweeps)
+                target_convergence=target_convergence, max_sweeps=max_sweeps,
+                on_progress=on_progress)
     rng = np.random.default_rng(seed)
 
     results: Dict = {'measurements': {}, 'boundaries': {}}

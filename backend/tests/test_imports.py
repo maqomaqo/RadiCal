@@ -1050,7 +1050,7 @@ class TestImportedDatesRunAsAnAnalysis:
         )
         assert result.ok, result.errors
 
-        response = client.post('/api/analysis/bayesian', json={
+        response = client.post('/api/analysis/bayesian?wait=true', json={
             'name': 'Imported Nenthorn',
             'measurements': [
                 {k: v for k, v in d.items() if k != 'phase_name'} for d in result.dates
@@ -1073,7 +1073,7 @@ class TestImportedDatesRunAsAnAnalysis:
         )
         assert result.ok, result.errors
 
-        response = client.post('/api/analysis/bayesian', json={
+        response = client.post('/api/analysis/bayesian?wait=true', json={
             'name': 'Imported CSV',
             'measurements': [
                 {k: v for k, v in d.items() if k != 'phase_name'} for d in result.dates

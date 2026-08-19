@@ -1,10 +1,12 @@
 from fastapi import APIRouter, HTTPException, Depends
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.schemas.sample import CalibrateRequest, BayesianRequest, GroupCalibrationRequest
 from app.services.calibration import get_curve, CalibrationCurve
 from app.services import exact_chain
 from app.services import gibbs
+from app.services import jobs
 from app.services import agreement as agreement_service
 from app.services.model_tree import (
     migrate_from_relationships,
@@ -17,7 +19,7 @@ from app.models import (
     Analysis, RadiocarbonSample, AnalysisResult, StratigraphicRelationship,
     SampleGroup, Project, ModelElement,
 )
-from typing import List, Dict, Optional, Tuple
+from typing import Callable, List, Dict, Optional, Tuple
 import numpy as np
 import uuid
 
@@ -290,6 +292,7 @@ def _run_bayesian(
     measurements: List[Dict],
     model_tree: Dict,
     bayesian_config: Dict,
+    on_progress: Optional[Callable[[Dict], bool]] = None,
 ) -> Tuple[Dict, Dict, Dict]:
     """
     Solve the model against an explicit model tree, returning (per-sample
@@ -414,10 +417,15 @@ def _run_bayesian(
             'implicit_boundaries': exact_needs_boundaries,
         }
 
+    # Only the sampler takes a progress callback: exact integration does not
+    # iterate towards an answer, so it has no fraction to report and nothing
+    # to interrupt between. A model solved exactly simply goes from queued to
+    # completed, which is honest about how it was computed.
     sampled = gibbs.solve(
         measurements, model_tree,
         num_samples=bayesian_config.get('mcmc_samples', 2000),
         uniform_span_prior=bayesian_config.get('uniform_span_prior', True),
+        on_progress=on_progress,
     )
     agreement_service.attach(sampled['measurements'], measurements)
     return sampled['measurements'], sampled['boundaries'], {
@@ -444,6 +452,32 @@ def _run_bayesian(
         # hyperparameter, not just the dates it fed into.
         'outlier_scale': sampled['outlier_scale'],
     }
+
+
+def _job_progress(handle: jobs.JobHandle):
+    """
+    Adapt a JobHandle to the sampler's on_progress protocol.
+
+    The sampler's contract is that returning False stops the run (raising
+    gibbs.Cancelled), so cancellation is a return value here rather than an
+    exception thrown through the middle of a sweep loop.
+
+    Progress is sweeps against the cap, which is an upper bound: most runs
+    converge long before it and finish at a fraction. The bar is therefore
+    accompanied by the achieved convergence rather than left to imply that a
+    run stopping at 30% was cut short.
+    """
+    def report(info: Dict) -> bool:
+        cap = info.get('max_sweeps') or 0
+        handle.update(
+            progress=(info.get('sweeps', 0) / cap) if cap else None,
+            phase=info.get('phase'),
+            sweeps=info.get('sweeps'),
+            max_sweeps=cap or None,
+            convergence=info.get('convergence'),
+        )
+        return not handle.cancelled
+    return report
 
 
 def _tree_from_request(request: BayesianRequest) -> Tuple[Dict, Dict, List[Dict]]:
@@ -704,9 +738,20 @@ def calibrate_group(request: GroupCalibrationRequest, db: Session = Depends(get_
 
 
 @router.post("/analysis/bayesian")
-def bayesian_analysis(request: BayesianRequest, db: Session = Depends(get_db)):
+def bayesian_analysis(request: BayesianRequest, wait: bool = False,
+                      db: Session = Depends(get_db)):
     """
     Perform Bayesian chronological analysis.
+
+    The inputs are validated and persisted in THIS request -- so a malformed
+    model still answers 422 immediately, as it always did -- and the solve is
+    then queued, answering 202 with a job_id to poll at
+    GET /api/jobs/{job_id}. See docs/ASYNC_JOBS_PLAN.md.
+
+    Two cases stay synchronous. `wait=true` asks for it (see
+    rerun_analysis), and `save=false` has no choice: nothing is persisted, so
+    there is no analysis for a later poll to fetch results from and no row to
+    hang a job on. A quick test run is answered in full, as before.
 
     The request body is validated by BayesianRequest (schemas/sample.py):
     every measurement goes through the same checks as /analysis/calibrate
@@ -742,6 +787,10 @@ def bayesian_analysis(request: BayesianRequest, db: Session = Depends(get_db)):
             db.add(analysis)
             db.commit()
             db.refresh(analysis)
+        # Captured now, as a plain string. The solve may run in another
+        # thread against another session, where the `analysis` object above
+        # is not usable but its id still is. None when nothing was saved.
+        analysis_id = analysis.id if save else None
 
         # Create group (phase) records first, so samples can reference their
         # real DB group id via groups_map (client id -> persisted id).
@@ -795,89 +844,162 @@ def bayesian_analysis(request: BayesianRequest, db: Session = Depends(get_db)):
                 ))
             db.commit()
 
-        # _run_bayesian works with plain dicts (measurements keyed by
-        # 'id'/'age_bp'/etc, relationships keyed by 'from_sample_id' etc)
-        # -- converting the validated Pydantic models to dicts here keeps
-        # the solvers' existing dict-based interface untouched. This uses
-        # the request's own client-side ids throughout (not the persisted
-        # DB ids), since build_model() needs to match against the internal
-        # `ages` dict, which is also keyed by the client-side measurement id.
-        root, group_boundaries, tree_measurements = _tree_from_request(request)
-        results, boundary_results, solver = _run_bayesian(
-            tree_measurements, root, request.bayesian_config.model_dump(),
-        )
-        # Report per-context start/end from the boundaries now bracketing each
-        # context, preserving the existing response shape. Note that adjacent
-        # contexts share a boundary, so one context's end and the next one's
-        # start are now the SAME parameter rather than two independent ones.
-        context_results = {}
-        for group_id, (start_bid, end_bid) in group_boundaries.items():
-            start, end = boundary_results.get(start_bid), boundary_results.get(end_bid)
-            if not start or not end:
-                continue
-            context_results[group_id] = {
-                'name': next((g.name for g in request.groups if g.id == group_id), None),
-                'start': start['posterior'],
-                'end': end['posterior'],
-            }
+        def _solve_and_store(db: Session, handle) -> Tuple[Dict, Dict, Dict]:
+            """
+            Solve the model and write what it produced.
 
-        if save:
-            # Store results in database using the sample IDs
-            for measurement_id, result in results.items():
-                sample_id = samples_map.get(measurement_id, measurement_id)
-                db.add(_analysis_result_row(analysis.id, sample_id, result))
+            Split out of the handler body so the same code serves both
+            paths: called directly for a synchronous run, or handed to the
+            job queue for the usual one. It closes over the request and
+            over groups_map/samples_map -- plain data and dicts of ids, all
+            of it safe to read from another thread -- but NOT over the
+            `analysis` row, which belongs to the request's session and is
+            re-fetched here from whichever session is running.
+            """
+            analysis = (db.query(Analysis).filter(Analysis.id == analysis_id).first()
+                        if analysis_id else None)
+            if save and analysis is None:
+                raise ValueError(f"Analysis '{analysis_id}' no longer exists")
 
-            # Persist each context's modelled start/end onto its SampleGroup
-            # row (client-side group id -> persisted DB id via groups_map).
-            for client_group_id, ctx in context_results.items():
-                db_group_id = groups_map.get(client_group_id)
-                if not db_group_id:
+            # _run_bayesian works with plain dicts (measurements keyed by
+            # 'id'/'age_bp'/etc, relationships keyed by 'from_sample_id' etc)
+            # -- converting the validated Pydantic models to dicts here keeps
+            # the solvers' existing dict-based interface untouched. This uses
+            # the request's own client-side ids throughout (not the persisted
+            # DB ids), since build_model() needs to match against the internal
+            # `ages` dict, which is also keyed by the client-side measurement id.
+            root, group_boundaries, tree_measurements = _tree_from_request(request)
+            results, boundary_results, solver = _run_bayesian(
+                tree_measurements, root, request.bayesian_config.model_dump(),
+                on_progress=_job_progress(handle),
+            )
+            # Report per-context start/end from the boundaries now bracketing each
+            # context, preserving the existing response shape. Note that adjacent
+            # contexts share a boundary, so one context's end and the next one's
+            # start are now the SAME parameter rather than two independent ones.
+            context_results = {}
+            for group_id, (start_bid, end_bid) in group_boundaries.items():
+                start, end = boundary_results.get(start_bid), boundary_results.get(end_bid)
+                if not start or not end:
                     continue
-                group_row = db.query(SampleGroup).filter(SampleGroup.id == db_group_id).first()
-                if group_row:
-                    group_row.modeled_start = ctx['start']
-                    group_row.modeled_end = ctx['end']
+                context_results[group_id] = {
+                    'name': next((g.name for g in request.groups if g.id == group_id), None),
+                    'start': start['posterior'],
+                    'end': end['posterior'],
+                }
 
-            # Persist the model tree itself, with each boundary's posterior on
-            # it, translating the request's client-side ids to the persisted
-            # ones so the stored tree lines up with the stored samples.
-            _relabel_tree(root, groups_map)
-            for element in _iter_tree(root):
-                if element['element_type'] == 'boundary':
-                    found = boundary_results.get(element['id'])
-                    element['posterior'] = found['posterior'] if found else None
-            _persist_tree(analysis.id, root, db)
-            # Which phase each date ended up in, as decided when the tree was
-            # built. Recomputing it from groups_map instead would lose the
-            # dates that belong to no context: _tree_from_request gives those
-            # a phase of their own ("Unassigned dates"), and that phase's id
-            # is not a context id, so a groups_map lookup yields nothing and
-            # the date is stored pointing at no element at all -- which the
-            # next edit rejects as "not assigned to any model element".
-            element_by_measurement = {
-                m['id']: m.get('element_id') for m in tree_measurements
-            }
-            for measurement in request.measurements:
-                sample_id = samples_map.get(measurement.id)
-                if request.model_tree is not None:
-                    # Client-authored tree: its phase ids are used as-is, so
-                    # the measurement's own element_id already points at one.
-                    element_id = measurement.element_id
-                else:
-                    # The tree carries client-side context ids, which
-                    # _relabel_tree has just rewritten to the ids the contexts
-                    # were saved under; a generated phase id isn't in that map
-                    # and passes through unchanged.
-                    assigned = element_by_measurement.get(measurement.id)
-                    element_id = groups_map.get(assigned, assigned)
-                if sample_id:
-                    db.query(RadiocarbonSample).filter(
-                        RadiocarbonSample.id == sample_id
-                    ).update({'element_id': element_id}, synchronize_session=False)
+            if save:
+                # Store results in database using the sample IDs
+                for measurement_id, result in results.items():
+                    sample_id = samples_map.get(measurement_id, measurement_id)
+                    db.add(_analysis_result_row(analysis.id, sample_id, result))
 
-            analysis.solver = solver
-            analysis.status = 'completed'
+                # Persist each context's modelled start/end onto its SampleGroup
+                # row (client-side group id -> persisted DB id via groups_map).
+                for client_group_id, ctx in context_results.items():
+                    db_group_id = groups_map.get(client_group_id)
+                    if not db_group_id:
+                        continue
+                    group_row = db.query(SampleGroup).filter(SampleGroup.id == db_group_id).first()
+                    if group_row:
+                        group_row.modeled_start = ctx['start']
+                        group_row.modeled_end = ctx['end']
+
+                # Persist the model tree itself, with each boundary's posterior on
+                # it, translating the request's client-side ids to the persisted
+                # ones so the stored tree lines up with the stored samples.
+                _relabel_tree(root, groups_map)
+                for element in _iter_tree(root):
+                    if element['element_type'] == 'boundary':
+                        found = boundary_results.get(element['id'])
+                        element['posterior'] = found['posterior'] if found else None
+                _persist_tree(analysis.id, root, db)
+                # Which phase each date ended up in, as decided when the tree was
+                # built. Recomputing it from groups_map instead would lose the
+                # dates that belong to no context: _tree_from_request gives those
+                # a phase of their own ("Unassigned dates"), and that phase's id
+                # is not a context id, so a groups_map lookup yields nothing and
+                # the date is stored pointing at no element at all -- which the
+                # next edit rejects as "not assigned to any model element".
+                element_by_measurement = {
+                    m['id']: m.get('element_id') for m in tree_measurements
+                }
+                for measurement in request.measurements:
+                    sample_id = samples_map.get(measurement.id)
+                    if request.model_tree is not None:
+                        # Client-authored tree: its phase ids are used as-is, so
+                        # the measurement's own element_id already points at one.
+                        element_id = measurement.element_id
+                    else:
+                        # The tree carries client-side context ids, which
+                        # _relabel_tree has just rewritten to the ids the contexts
+                        # were saved under; a generated phase id isn't in that map
+                        # and passes through unchanged.
+                        assigned = element_by_measurement.get(measurement.id)
+                        element_id = groups_map.get(assigned, assigned)
+                    if sample_id:
+                        db.query(RadiocarbonSample).filter(
+                            RadiocarbonSample.id == sample_id
+                        ).update({'element_id': element_id}, synchronize_session=False)
+
+                analysis.solver = solver
+                analysis.status = 'completed'
+                db.commit()
+            return results, context_results, solver
+
+        if save and not wait:
+            # Queued. The inputs are already persisted and the analysis is
+            # readable at its own URL, which is where the client is sent;
+            # the results arrive there when the job finishes.
+            analysis.status = 'pending'
             db.commit()
+
+            def _work(db: Session, handle) -> Dict:
+                worker_analysis = db.query(Analysis).filter(
+                    Analysis.id == analysis_id).first()
+                if worker_analysis is not None:
+                    worker_analysis.status = 'running'
+                    db.commit()
+                try:
+                    _, _, solver = _solve_and_store(db, handle)
+                except gibbs.Cancelled:
+                    db.rollback()
+                    worker_analysis = db.query(Analysis).filter(
+                        Analysis.id == analysis_id).first()
+                    if worker_analysis is not None:
+                        # Nothing was written, so it is back to never having
+                        # been run rather than to some earlier answer.
+                        worker_analysis.status = 'pending'
+                        db.commit()
+                    raise jobs.Cancelled()
+                except Exception as exc:
+                    db.rollback()
+                    worker_analysis = db.query(Analysis).filter(
+                        Analysis.id == analysis_id).first()
+                    if worker_analysis is not None:
+                        worker_analysis.status = 'failed'
+                        worker_analysis.error_message = str(exc)
+                        db.commit()
+                    raise
+                return {'analysis_id': analysis_id,
+                        'solver': solver.get('method')}
+
+            job_id = jobs.submit('analysis_run', analysis_id, _work)
+            return JSONResponse(status_code=202, content={
+                "success": True,
+                "data": {
+                    "id": analysis_id,
+                    "name": request.name,
+                    "analysis_type": "bayesian",
+                    "status": "queued",
+                    "saved": True,
+                    "project_id": project_id,
+                    "job_id": job_id,
+                    "measurements_count": len(request.measurements),
+                },
+            })
+
+        results, context_results, solver = _solve_and_store(db, jobs.NullHandle())
 
         # Prepare response with summary stats + the compact plottable
         # distribution (exclude the huge raw posterior_samples array, which
@@ -1251,7 +1373,8 @@ def update_analysis(analysis_id: str, updates: Dict, db: Session = Depends(get_d
     }
 
 
-def _rerun_analysis(analysis: Analysis, db: Session) -> None:
+def _rerun_analysis(analysis: Analysis, db: Session,
+                    on_progress: Optional[Callable[[Dict], bool]] = None) -> None:
     """
     Recompute an already-saved analysis's results from its own persisted
     inputs -- no new Analysis/RadiocarbonSample/SampleGroup rows, since
@@ -1331,6 +1454,7 @@ def _rerun_analysis(analysis: Analysis, db: Session) -> None:
 
         results, boundary_results, solver = _run_bayesian(
             measurement_dicts, root, analysis.bayesian_config or {},
+            on_progress=on_progress,
         )
         analysis.solver = solver
 
@@ -1380,29 +1504,91 @@ def _rerun_analysis(analysis: Analysis, db: Session) -> None:
     db.commit()
 
 
+def _run_analysis_job(analysis_id: str):
+    """
+    The work function for an 'analysis_run' job: solve one saved analysis
+    from its own persisted inputs.
+
+    Takes an id rather than an Analysis, because the row has to be loaded in
+    the worker's own session -- the request's was closed when its response
+    was sent.
+    """
+    def work(db: Session, handle: jobs.JobHandle) -> Dict:
+        analysis = db.query(Analysis).filter(Analysis.id == analysis_id).first()
+        if analysis is None:
+            raise ValueError(f"Analysis '{analysis_id}' no longer exists")
+        analysis.status = 'running'
+        analysis.error_message = None
+        db.commit()
+        try:
+            _rerun_analysis(analysis, db, on_progress=_job_progress(handle))
+        except gibbs.Cancelled:
+            # A cancelled run wrote nothing -- _rerun_analysis commits only
+            # on success -- so the analysis keeps the results it already had
+            # and goes back to saying so.
+            db.rollback()
+            analysis = db.query(Analysis).filter(Analysis.id == analysis_id).first()
+            if analysis is not None:
+                analysis.status = 'completed' if analysis.results else 'pending'
+                db.commit()
+            raise jobs.Cancelled()
+        except Exception as exc:
+            db.rollback()
+            analysis = db.query(Analysis).filter(Analysis.id == analysis_id).first()
+            if analysis is not None:
+                analysis.status = 'failed'
+                analysis.error_message = str(exc)
+                db.commit()
+            raise
+        return {'analysis_id': analysis_id, 'solver': (analysis.solver or {}).get('method')}
+    return work
+
+
+# Not `status_code=202` on the decorator: that would be the route's default
+# for BOTH branches, and the wait=true branch answers 200 with a finished
+# result. The queued branch sets 202 on its own response instead.
 @router.post("/analysis/{analysis_id}/rerun")
-def rerun_analysis(analysis_id: str, db: Session = Depends(get_db)):
+def rerun_analysis(analysis_id: str, wait: bool = False,
+                   db: Session = Depends(get_db)):
     """
     Recompute an already-saved analysis's results in place, from its own
     persisted inputs -- same analysis id/URL, old results replaced. Useful
     e.g. after a change to the underlying model (like the Boundary
     parameter change for context Modelled Start/End) to refresh stale
     results without re-entering every input from scratch.
+
+    Queued rather than run here: a Bayesian model takes tens of seconds and
+    can take minutes (see docs/ASYNC_JOBS_PLAN.md). Answers 202 with a
+    job_id to poll at GET /api/jobs/{job_id}.
+
+    `wait=true` runs it in the request and answers 200 when it is finished,
+    which is the old behaviour. Kept permanently, not as a migration aid:
+    this app has no client library, so anything scripting it from outside a
+    browser has no event loop to poll from.
     """
     analysis = db.query(Analysis).filter(Analysis.id == analysis_id).first()
     if not analysis:
         raise HTTPException(status_code=404, detail="Analysis not found")
 
-    try:
-        _rerun_analysis(analysis, db)
-    except Exception as e:
-        db.rollback()
-        analysis.status = 'failed'
-        analysis.error_message = str(e)
-        db.commit()
-        raise HTTPException(status_code=400, detail=str(e))
+    if wait:
+        try:
+            _rerun_analysis(analysis, db)
+        except Exception as e:
+            db.rollback()
+            analysis.status = 'failed'
+            analysis.error_message = str(e)
+            db.commit()
+            raise HTTPException(status_code=400, detail=str(e))
+        return {"success": True, "data": {"id": analysis.id, "status": analysis.status}}
 
-    return {"success": True, "data": {"id": analysis.id, "status": analysis.status}}
+    analysis.status = 'pending'
+    analysis.error_message = None
+    db.commit()
+    job_id = jobs.submit('analysis_run', analysis.id, _run_analysis_job(analysis.id))
+    return JSONResponse(status_code=202, content={
+        "success": True,
+        "data": {"id": analysis.id, "status": "queued", "job_id": job_id},
+    })
 
 
 @router.put("/analysis/{analysis_id}/model-tree")

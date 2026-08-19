@@ -1,0 +1,88 @@
+"""
+Reading and cancelling background work.
+
+A run is queued rather than held open in the request that asked for it (see
+services/jobs.py and docs/ASYNC_JOBS_PLAN.md); this is how a client finds out
+what happened to it.
+
+Polling rather than a WebSocket or an event stream. A Bayesian run takes tens
+of seconds, occasionally minutes, and a poll a second is finer than anyone
+reads a progress bar. A push channel would add a connection to hold open, a
+reconnect to get right, and a second code path for the same three facts.
+"""
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.orm import Session
+
+from app.database import get_db
+from app.models import Job
+from app.services import jobs
+
+router = APIRouter()
+
+
+@router.get("/jobs/{job_id}")
+def get_job(job_id: str, db: Session = Depends(get_db)):
+    """
+    One job's state, progress and detail.
+
+    `state` is 'queued', 'running', 'completed', 'failed' or 'cancelled'.
+    Stop polling on the last three.
+
+    `progress` is a fraction, and for a sampled model an UPPER BOUND rather
+    than a prediction: the sampler stops as soon as it converges, so most
+    runs finish well short of 1.0 having succeeded. `detail.convergence` is
+    what says how well, and is the figure to show beside a bar that is about
+    to jump from 0.3 to done.
+    """
+    row = db.query(Job).filter(Job.id == job_id).first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return {"success": True, "data": jobs.as_dict(row)}
+
+
+@router.get("/jobs")
+def list_jobs(
+    target_id: Optional[str] = Query(None, description="Analysis or project id"),
+    limit: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    """
+    Recent jobs, newest first, optionally about one analysis or project.
+
+    `target_id` is what a page loaded from a bookmark uses: it arrives
+    holding an analysis id and no job id, and still needs to know whether
+    something is running before it decides to show results or a progress bar.
+    """
+    query = db.query(Job)
+    if target_id:
+        query = query.filter(Job.target_id == target_id)
+    rows = query.order_by(Job.created_at.desc()).limit(limit).all()
+    return {"success": True, "data": {"jobs": [jobs.as_dict(r) for r in rows]}}
+
+
+@router.delete("/jobs/{job_id}")
+def cancel_job(job_id: str, db: Session = Depends(get_db)):
+    """
+    Ask a job to stop.
+
+    Cooperative and therefore not instant: a queued job is dropped before it
+    starts, and a running one stops at its next checkpoint -- the end of the
+    current sampling round, or the gap between two analyses of a project
+    rerun. The response says the request was accepted, not that the job has
+    stopped; poll for `state` to become 'cancelled'.
+
+    A cancelled analysis run writes nothing, so the analysis keeps whatever
+    results it had before. It is a stop, not an undo.
+    """
+    row = db.query(Job).filter(Job.id == job_id).first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if row.state not in ('queued', 'running'):
+        raise HTTPException(
+            status_code=409,
+            detail=f"This job has already {row.state}; there is nothing to cancel.",
+        )
+    jobs.cancel(job_id)
+    return {"success": True, "data": {"job_id": job_id, "cancellation_requested": True}}

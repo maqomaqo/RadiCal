@@ -58,7 +58,7 @@ def _measurement(mid, element_id, age_bp=3000):
 
 
 def _run(client, tag, tree, measurements):
-    return client.post('/api/analysis/bayesian', json={
+    return client.post('/api/analysis/bayesian?wait=true', json={
         'name': f'Solver {tag}',
         'measurements': measurements,
         'model_tree': tree,
@@ -119,7 +119,7 @@ class TestExactPath:
         """
         tag = f'sr{next(_IDS)}'
         tree, measurements = self._ordered_without_a_boundary(tag)
-        created = client.post('/api/analysis/bayesian', json={
+        created = client.post('/api/analysis/bayesian?wait=true', json={
             'name': f'Solver {tag}',
             'measurements': measurements,
             'model_tree': tree,
@@ -310,7 +310,7 @@ class TestSolverOverride:
         """The override has to survive being saved, or a rerun would silently
         revert to the automatic choice."""
         tag = f'so{next(_IDS)}'
-        created = client.post('/api/analysis/bayesian', json={
+        created = client.post('/api/analysis/bayesian?wait=true', json={
             'name': f'Override {tag}',
             'measurements': [_measurement(f'{tag}s1', f'{tag}p1')],
             'model_tree': _chain_tree(tag),
@@ -324,7 +324,7 @@ class TestSolverOverride:
         fetched = client.get(f'/api/analysis/{analysis_id}').json()['data']
         assert fetched['bayesian_config']['solver'] == 'gibbs'
 
-        rerun = client.post(f'/api/analysis/{analysis_id}/rerun')
+        rerun = client.post(f'/api/analysis/{analysis_id}/rerun?wait=true')
         assert rerun.status_code == 200, rerun.text
         after = client.get(f'/api/analysis/{analysis_id}').json()['data']
         assert after['solver']['method'] == 'gibbs', 'the rerun reverted to automatic'
@@ -334,7 +334,7 @@ class TestSolverOverride:
         """The refusal reaches the client as an error carrying the reason, rather
         than a result quietly computed some other way."""
         tag = f'so{next(_IDS)}'
-        created = client.post('/api/analysis/bayesian', json={
+        created = client.post('/api/analysis/bayesian?wait=true', json={
             'name': f'Impossible {tag}',
             'measurements': [
                 _measurement(f'{tag}s1', f'{tag}p1', age_bp=3200),
@@ -360,7 +360,7 @@ class TestSolverOverride:
             _measurement(f'{tag}s2', f'{tag}p2', age_bp=3100),
             _measurement(f'{tag}s3', f'{tag}p3', age_bp=3000),
         ]
-        created = client.post('/api/analysis/bayesian', json={
+        created = client.post('/api/analysis/bayesian?wait=true', json={
             'name': f'Then broken {tag}',
             'measurements': measurements,
             'model_tree': _unbounded_tree(tag),
@@ -391,7 +391,7 @@ class TestSolverOverride:
         })
         assert replaced.status_code == 200, replaced.text
 
-        rerun = client.post(f'/api/analysis/{analysis_id}/rerun')
+        rerun = client.post(f'/api/analysis/{analysis_id}/rerun?wait=true')
         assert rerun.status_code == 400, rerun.text
 
         after = client.get(f'/api/analysis/{analysis_id}').json()['data']
@@ -402,7 +402,7 @@ class TestSolverOverride:
 
     def test_an_unknown_solver_is_refused_rather_than_guessed(self, client):
         tag = f'so{next(_IDS)}'
-        response = client.post('/api/analysis/bayesian', json={
+        response = client.post('/api/analysis/bayesian?wait=true', json={
             'name': f'Bad {tag}',
             'measurements': [_measurement(f'{tag}s1', f'{tag}p1')],
             'model_tree': _chain_tree(tag),
@@ -454,7 +454,7 @@ class TestStaleRecords:
         assert created.status_code == 200, created.text
         analysis_id = created.json()['data']['id']
 
-        rerun = client.post(f'/api/analysis/{analysis_id}/rerun')
+        rerun = client.post(f'/api/analysis/{analysis_id}/rerun?wait=true')
         assert rerun.status_code == 200, rerun.text
         assert client.get(f'/api/analysis/{analysis_id}').json()['data']['solver']['method'] == 'exact'
 

@@ -110,7 +110,7 @@ def _modelled(client) -> str:
         ],
     }
     created = client.post(
-        "/api/analysis/bayesian",
+        "/api/analysis/bayesian?wait=true",
         json={
             "name": "Pdf structure",
             "measurements": [
@@ -321,7 +321,7 @@ class TestContextSpans:
         fallback needs a test.
         """
         created = client.post(
-            "/api/analysis/bayesian",
+            "/api/analysis/bayesian?wait=true",
             json={
                 "name": "Pdf contexts",
                 "measurements": [

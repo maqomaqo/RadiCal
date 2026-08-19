@@ -178,7 +178,7 @@ one client polling once a second, which is what the job polling in §4.6 will be
   still show `await file.read()` and `run_in_threadpool` in its source. A new blocking
   `async def` route fails the suite.
 
-### Option 2 — in-process job table and a polling endpoint. Recommended.
+### Option 2 — in-process job table and a polling endpoint. **Built 2026-08-19.**
 
 A `jobs` table, a single-worker `ThreadPoolExecutor`, and a status endpoint. No new services, no
 new runtime dependency, nothing added to `docker-compose.yml`.
@@ -187,8 +187,32 @@ new runtime dependency, nothing added to `docker-compose.yml`.
   surviving the restart.
 - **Cost:** 4–6 hours including tests and the frontend polling (§4 breaks it down).
 - **Risk:** the executor is a process-local singleton, so it is correct only while the backend
-  runs as one process. That is exactly how it is deployed and the assumption should be asserted
-  at startup, not left implicit.
+  runs as one process. That is exactly how it is deployed, and the startup reconciliation in
+  §4.5 is what makes the assumption visible rather than silent.
+
+Built as specified, with two departures worth naming:
+
+- **The PDF route did not join the queue**, per the recommendation in §7. At 4.9 s it is under
+  the threshold where a job record earns its keep, and the event-loop fix already stopped it
+  freezing the server.
+- **`POST /analysis/bayesian` splits rather than defers.** Validation and input persistence stay
+  in the request — so a malformed model still answers 422 immediately, as it always did — and
+  only the solve-and-store half is queued. That half became a closure over the request and over
+  `groups_map`/`samples_map`, which is available precisely *because* the queue is in-process:
+  there is no serialization boundary to marshal them across. It does not close over the
+  `analysis` row, which belongs to the request's session; the worker re-fetches it by id.
+
+Measured after, on the same 12-date model used throughout:
+
+```
+POST /api/analysis/bayesian    0.026 s   (was 6.5 s, the length of the run)
+job runs, reporting progress   7.1 s     burn-in, then convergence 0.867 -> 0.951
+cancel during a run            0.3 s     to stop, at the next round boundary
+```
+
+The progress trace is worth reading for one detail: that run finished at **15% of the sweep
+cap**, having converged. A bar that reaches 0.15 and then says "done" reads as a bug, which is
+why the convergence figure is shown beside it and never on its own.
 
 ### Option 3 — Redis + Celery/RQ, as the item originally proposed.
 
@@ -323,17 +347,21 @@ in `running` and the UI polling forever. This is what makes C tolerable rather t
 | | |
 |---|---|
 | ~~Option 1 — `async def` → `def`, plus `tests/test_event_loop.py`~~ | **done 2026-08-19** |
+| ~~Option 2 — everything in §4, plus `tests/test_jobs.py`~~ | **done 2026-08-19** |
 | `Job` model + `services/jobs.py` executor + startup reconciliation | 1.5 h |
 | Endpoints: 202 responses, `GET`/`DELETE /api/jobs/{id}`, `?wait=true` | 1.0 h |
 | `gibbs.run` progress/cancel callback | 0.5 h |
 | Frontend polling, progress bar, cancel, Re-run All as one job | 1.5 h |
 | Tests (§4.7) | 1.0 h |
 | Connection pool sizing (item 7, now coupled) | 0.25 h |
-| | **≈ 5.5 h remaining; the worst symptom is already fixed** |
+| | **all of it landed 2026-08-19** |
 
 ---
 
-## 7. Decisions worth taking before starting
+## 7. Decisions taken
+
+All three were settled as recommended when this was built.
+
 
 1. **Redis or not** — Option 2 or Option 3. Turns on whether this app is ever deployed for more
    than one user. Recommendation: Option 2, and revisit with authentication (item 4), since

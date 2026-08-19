@@ -169,7 +169,7 @@ class TestJsonExport:
             ],
         }
         created = client.post(
-            "/api/analysis/bayesian",
+            "/api/analysis/bayesian?wait=true",
             json={
                 "name": "Json structure",
                 "measurements": [
@@ -227,7 +227,7 @@ class TestJsonStructure:
             ],
         }
         created = client.post(
-            "/api/analysis/bayesian",
+            "/api/analysis/bayesian?wait=true",
             json={
                 "name": "Json model structure",
                 "measurements": [
@@ -466,7 +466,7 @@ class TestGraphs:
             ],
         }
         created = client.post(
-            "/api/analysis/bayesian",
+            "/api/analysis/bayesian?wait=true",
             json={
                 "name": "Graphs structure",
                 "measurements": [

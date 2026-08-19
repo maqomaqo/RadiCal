@@ -413,3 +413,63 @@ class StratigraphicRelationship(Base):
     to_type = Column(String, nullable=False, default='sample')  # 'sample' or 'group'
     relationship = Column(String, nullable=False)  # 'above', 'below', or 'equal'
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class Job(Base):
+    """
+    One unit of work running outside the request that asked for it.
+
+    Why a table of its own rather than columns on Analysis. A project rerun
+    spans many analyses and a run started with save=False belongs to none,
+    so there is no single Analysis row to hang the state on. Keeping them
+    apart also keeps their meanings apart: `Analysis.status` answers "does
+    this analysis have results", and a Job answers "is something happening
+    right now, how far has it got, and can I stop it". An analysis whose
+    rerun fails keeps its previous results and its 'completed' status while
+    the JOB reads 'failed' -- which is the truth, and would be
+    unrepresentable if the two shared a column.
+
+    Rows are kept after they finish. They are the only record of how long a
+    run took and what convergence it reached, they are what the UI polls
+    immediately after a redirect, and they are small.
+
+    See docs/ASYNC_JOBS_PLAN.md for the design this implements.
+    """
+    __tablename__ = "jobs"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+
+    # 'analysis_run'  -- solve one analysis (a fresh run or a rerun)
+    # 'project_rerun' -- rerun every analysis in one project
+    kind = Column(String, nullable=False)
+
+    # The analysis or project this is about. Not a ForeignKey: it points at
+    # two different tables depending on `kind`, the same polymorphism
+    # StratigraphicRelationship's docstring explains. Indexed because the
+    # results page looks a job up by the analysis it belongs to.
+    target_id = Column(String, nullable=True, index=True)
+
+    # 'queued' -> 'running' -> 'completed' | 'failed' | 'cancelled'.
+    # A job cancelled before it starts goes straight from queued to
+    # cancelled without ever running.
+    state = Column(String, nullable=False, default='queued')
+
+    # 0..1, and an UPPER BOUND on the work rather than a prediction: the
+    # sampler stops as soon as it converges, so a run that finishes at 0.3
+    # succeeded early rather than being cut short. The UI shows the achieved
+    # convergence beside the bar for exactly that reason. Null for work with
+    # no meaningful fraction to report.
+    progress = Column(Float, nullable=True)
+
+    # Whatever the running job wants to say about itself, by kind:
+    #   analysis_run   {'phase', 'sweeps', 'max_sweeps', 'convergence'}
+    #   project_rerun  {'completed', 'total', 'failed': [{id, name, error}]}
+    # Free-form on purpose -- it is read by the progress display and by
+    # nothing that depends on its shape.
+    detail = Column(JSON, nullable=True)
+
+    error_message = Column(String, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    started_at = Column(DateTime, nullable=True)
+    finished_at = Column(DateTime, nullable=True)

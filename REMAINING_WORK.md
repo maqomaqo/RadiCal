@@ -155,24 +155,30 @@ this priority band:
   measurement now reads **2.9 ms**, and 2.6–8.1 ms during a live Gibbs run.
   `tests/test_event_loop.py` holds the invariant: a new blocking `async def`
   route fails the suite.
-- **Current, for the caller:** still fully synchronous. Measured Gibbs runs are
-  12.7 s (8 dates) to 43.4 s (60 dates), with `MAX_SWEEPS` bounding a model
-  that fights convergence at ~2 min (30 dates) to ~5 min (60 dates). "Re-run
-  All" is that, times every analysis in the project, in one request — past any
-  reverse proxy's default timeout.
-- **Needed:** a `jobs` table, a single-worker executor, `GET /api/jobs/{id}` to
-  poll, and one progress/cancel callback inside `gibbs.run`. `Analysis.status`
-  already carries `pending`/`running`/`completed`/`failed`, and the frontend
-  already discards the inline results it would stop receiving, which is what
-  keeps the change small. Celery/RQ + Redis buys durability across restarts and
-  true parallelism, neither of which a single local user needs yet; the plan
-  shapes the executor so that stays a swap rather than a rewrite.
-- **Effort:** 0.5 h for the event-loop fix, ~6 h for the whole of it. The
-  3–4 hours previously estimated here was about right for an in-process job
-  table and clearly wrong for the Celery/RQ design named beside it.
-- **Now coupled to item 7:** a background worker holds a second connection for
-  the length of a run, so the unsized connection pool stops being independent
-  of this and should land with it.
+- **The caller's own wait is fixed too (2026-08-19).** `POST /analysis/bayesian`,
+  `POST /analysis/{id}/rerun` and `POST /projects/{id}/rerun` answer **202**
+  with a `job_id` as soon as the work is accepted — measured at 26 ms for a run
+  that used to hold the connection for 6.5 s — and the page follows it at
+  `GET /api/jobs/{job_id}`. A `jobs` table, a single-worker executor
+  (`services/jobs.py`), and one progress/cancel callback inside `gibbs.run`.
+  `?wait=true` keeps the old synchronous behaviour permanently, for anything
+  scripting the API without an event loop to poll from.
+- **Progress and cancellation are real.** The sampler reports its phase, sweep
+  count and achieved convergence after every round; a cancel stops it at the
+  next round boundary — measured at 0.3 s — and writes nothing, so the analysis
+  keeps the results it already had. Note that progress is a fraction of the
+  sweep *cap*, and a converged run typically finishes around 15% of it: that is
+  a success, which is why the convergence figure is always shown beside the bar.
+- **Not Celery/RQ.** A broker buys durability across restarts and parallel runs;
+  a single local user with no authentication needs neither yet. Anything left
+  mid-flight by a restart is failed at startup instead
+  (`jobs.reconcile_orphans`), and the executor is a seam a distributed backend
+  would replace without touching a caller. Revisit alongside item 4.
+- **Item 7 landed with it**, as predicted: the worker holds a connection for the
+  whole length of a run, so `database.py` now sizes the pool (Postgres only —
+  SQLite takes none of those arguments, and the suite runs on SQLite).
+- Covered by `tests/test_jobs.py` (16 tests). The pre-existing tests that assert
+  on results now ask for `?wait=true`, which is what they always meant.
 
 ### 4. Authentication & user management
 - **Current:** none. Anyone can read/modify/delete any project or analysis.
@@ -216,10 +222,13 @@ this priority band:
   looks live but isn't connected to anything.
 - **Effort:** harris_matrix.py is a delete-or-keep decision more than effort.
 
-### 7. Database connection pooling
-- **Current:** `create_engine(DATABASE_URL, echo=False)` with no
-  `pool_size`/`max_overflow`. Only bites under concurrent load.
-- **Effort:** 15 minutes.
+### 7. ~~Database connection pooling~~
+**Done 2026-08-19**, with the job queue (#3) that made it stop being optional:
+a background worker holds a connection for the whole length of a run, which is
+exactly the "concurrent load" this was waiting for. `database.py` now sets
+`pool_size`/`max_overflow`/`pool_pre_ping`/`pool_recycle` — on Postgres only,
+since SQLite has no pool worth the name and rejects the arguments, and the test
+suite runs on SQLite.
 
 ---
 
@@ -455,9 +464,9 @@ each is a real edge.
    along with the dead `app/models/sample.py`, the orphaned
    `frontend/src/services/api.ts`, six unused npm dependencies, and the
    config drift both had left behind (see Environment Notes).
-4. ~~**The event-loop fix**~~ — **done 2026-08-19**: one analysis no longer
-   freezes the app for everyone. **Async runs** proper is what remains, per
-   [`docs/ASYNC_JOBS_PLAN.md`](docs/ASYNC_JOBS_PLAN.md).
+4. ~~**The event-loop fix**, then **async runs** proper~~ — **both done
+   2026-08-19**, per [`docs/ASYNC_JOBS_PLAN.md`](docs/ASYNC_JOBS_PLAN.md).
+   Connection pooling (#7) landed with them.
 5. ~~**Wire up the curves API**~~ — **done 2026-08-18** (see #6); decide
    whether `harris_matrix.py` stays.
 6. **Frontend tests** for the pure utils, then the untested backend router
@@ -473,8 +482,9 @@ duplicate/edit and re-run all working end to end. Documentation now matches
 the app (2026-08-13, again 2026-08-19 for the PDF report) and the codebase's
 accumulated dead files/config have been cleared out. Every high-priority gap
 this file has listed is now closed; what remains is the medium and low
-priority work above, of which async runs (Priority #3, scoped
-2026-08-19 in `docs/ASYNC_JOBS_PLAN.md`) is the one most likely to start
-feeling broken as projects grow. Its worst symptom — a solver run holding
-the event loop against every other request — was fixed on 2026-08-19; what
-is left is the caller's own wait, which is what a job queue is for.*
+priority work above. Async runs (Priority #3) was the item most likely to
+start feeling broken as projects grow; both halves of it were fixed on
+2026-08-19, scoped and recorded in `docs/ASYNC_JOBS_PLAN.md` — a solver run
+no longer holds the event loop against every other request, and no longer
+holds the caller's connection either. What is left in this file is
+authentication, Alembic, and the delete-or-keep call on harris_matrix.py.*

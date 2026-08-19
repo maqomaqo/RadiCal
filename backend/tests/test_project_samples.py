@@ -193,7 +193,7 @@ class TestSnapshotSemantics:
 class TestDuplicate:
     def _saved_bayesian(self, client, name="Original"):
         return client.post(
-            "/api/analysis/bayesian",
+            "/api/analysis/bayesian?wait=true",
             json={
                 "name": name,
                 "measurements": [
@@ -248,7 +248,7 @@ class TestDuplicate:
         before = client.get(f"/api/analysis/{original_id}").json()["data"]
 
         copy_id = client.post(f"/api/analysis/{original_id}/duplicate").json()["data"]["id"]
-        assert client.post(f"/api/analysis/{copy_id}/rerun").status_code == 200
+        assert client.post(f"/api/analysis/{copy_id}/rerun?wait=true").status_code == 200
 
         after = client.get(f"/api/analysis/{original_id}").json()["data"]
         assert after["status"] == before["status"]
@@ -275,7 +275,7 @@ class TestReplaceInputs:
 
     def test_replacing_inputs_clears_stale_results(self, client):
         created = client.post(
-            "/api/analysis/bayesian",
+            "/api/analysis/bayesian?wait=true",
             json={
                 "name": "Original",
                 "measurements": [
@@ -307,7 +307,7 @@ class TestReplaceInputs:
         assert after["model_tree"] is not None
 
         # And it can be run again from the new inputs.
-        assert client.post(f"/api/analysis/{created}/rerun").status_code == 200
+        assert client.post(f"/api/analysis/{created}/rerun?wait=true").status_code == 200
         assert len(client.get(f"/api/analysis/{created}").json()["data"]["results"]) == 2
 
     def test_replacing_inputs_rejects_a_cycle(self, client):

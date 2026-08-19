@@ -127,7 +127,7 @@ class TestBayesianValidation:
 
     def test_empty_measurements_rejected(self, client):
         response = client.post(
-            "/api/analysis/bayesian",
+            "/api/analysis/bayesian?wait=true",
             json={"name": "Empty", "measurements": [], "save": False},
         )
         assert response.status_code == 422
@@ -139,7 +139,7 @@ class TestBayesianValidation:
         else branch. Now it's rejected before the request is even
         processed."""
         response = client.post(
-            "/api/analysis/bayesian",
+            "/api/analysis/bayesian?wait=true",
             json={
                 "name": "Test sequence",
                 "measurements": [self._measurement("s1"), self._measurement("s2", 3200)],
@@ -153,7 +153,7 @@ class TestBayesianValidation:
 
     def test_bad_mcmc_chains_rejected(self, client):
         response = client.post(
-            "/api/analysis/bayesian",
+            "/api/analysis/bayesian?wait=true",
             json={
                 "name": "Test",
                 "measurements": [self._measurement("s1")],
@@ -165,7 +165,7 @@ class TestBayesianValidation:
 
     def test_measurement_with_negative_age_rejected(self, client):
         response = client.post(
-            "/api/analysis/bayesian",
+            "/api/analysis/bayesian?wait=true",
             json={
                 "name": "Test",
                 "measurements": [self._measurement("s1", age_bp=-100)],

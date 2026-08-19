@@ -75,11 +75,11 @@ class TestProjectAssignment:
 
 class TestRerunNotFound:
     def test_rerun_unknown_analysis_404s(self, client):
-        response = client.post("/api/analysis/does-not-exist/rerun")
+        response = client.post("/api/analysis/does-not-exist/rerun?wait=true")
         assert response.status_code == 404
 
     def test_rerun_unknown_project_404s(self, client):
-        response = client.post("/api/projects/does-not-exist/rerun")
+        response = client.post("/api/projects/does-not-exist/rerun?wait=true")
         assert response.status_code == 404
 
 
@@ -92,7 +92,7 @@ class TestRerunAnalysis:
         analysis_id = create_resp.json()["data"]["id"]
         original_mean = create_resp.json()["data"]["posterior_mean"]
 
-        rerun_resp = client.post(f"/api/analysis/{analysis_id}/rerun")
+        rerun_resp = client.post(f"/api/analysis/{analysis_id}/rerun?wait=true")
         assert rerun_resp.status_code == 200
         assert rerun_resp.json()["data"]["status"] == "completed"
 
@@ -103,7 +103,7 @@ class TestRerunAnalysis:
 
     def test_rerun_bayesian_analysis_refreshes_boundary(self, client):
         create_resp = client.post(
-            "/api/analysis/bayesian",
+            "/api/analysis/bayesian?wait=true",
             json={
                 "name": "Rerun target",
                 "measurements": [
@@ -118,7 +118,7 @@ class TestRerunAnalysis:
         )
         analysis_id = create_resp.json()["data"]["id"]
 
-        rerun_resp = client.post(f"/api/analysis/{analysis_id}/rerun")
+        rerun_resp = client.post(f"/api/analysis/{analysis_id}/rerun?wait=true")
         assert rerun_resp.status_code == 200
         assert rerun_resp.json()["data"]["status"] == "completed"
 
@@ -144,7 +144,7 @@ class TestRerunProject:
                 },
             )
 
-        rerun_resp = client.post(f"/api/projects/{project_id}/rerun")
+        rerun_resp = client.post(f"/api/projects/{project_id}/rerun?wait=true")
         assert rerun_resp.status_code == 200
         data = rerun_resp.json()["data"]
         assert data["rerun_count"] == 2
@@ -182,7 +182,7 @@ class TestEditRoundTrip:
             ],
         }
         return client.post(
-            "/api/analysis/bayesian",
+            "/api/analysis/bayesian?wait=true",
             json={
                 "name": "Round trip",
                 "measurements": [
@@ -287,7 +287,7 @@ class TestEditRoundTrip:
         extras = {"reservoir_age": 400, "depth_cm": 125.5,
                   "location": "Trench 4", "notes": "possible bioturbation"}
         created = client.post(
-            "/api/analysis/bayesian",
+            "/api/analysis/bayesian?wait=true",
             json={
                 "name": "Extra fields",
                 "measurements": [
@@ -347,7 +347,7 @@ class TestEditRoundTrip:
         """
         tag = f"ls{next(_ROUND_TRIP_IDS)}"
         created = client.post(
-            "/api/analysis/bayesian",
+            "/api/analysis/bayesian?wait=true",
             json={
                 "name": "Loose dates",
                 "measurements": [
@@ -406,7 +406,7 @@ class TestEditRoundTrip:
 
         def build(**offset):
             return client.post(
-                "/api/analysis/bayesian",
+                "/api/analysis/bayesian?wait=true",
                 json={
                     "name": "Reservoir offset",
                     "measurements": [
@@ -430,7 +430,7 @@ class TestEditRoundTrip:
 
         # Persisted, returned, and preserved by an edit.
         saved_resp = client.post(
-            "/api/analysis/bayesian",
+            "/api/analysis/bayesian?wait=true",
             json={
                 "name": "Reservoir offset saved",
                 "measurements": [
@@ -505,7 +505,7 @@ class TestEditRoundTrip:
         stored = client.get(f"/api/analysis/{analysis_id}").json()["data"]["measurements"][0]
         assert (stored["delta_r"], stored["delta_r_error"]) == (400, 50)
 
-        assert client.post(f"/api/analysis/{analysis_id}/rerun").status_code == 200
+        assert client.post(f"/api/analysis/{analysis_id}/rerun?wait=true").status_code == 200
         rerun = client.get(f"/api/analysis/{analysis_id}").json()["data"]["results"][0]
         assert rerun["posterior_median"] == pytest.approx(first_run, rel=1e-6)
 
@@ -545,7 +545,7 @@ class TestRerunKeepsDiagnostics:
     def _create(self, client, tag, outlier_prior):
         dates = [(f'{tag}_a', 3000), (f'{tag}_b', 3020), (f'{tag}_c', 3040),
                  (f'{tag}_d', 3060), (f'{tag}_e', 3600)]
-        created = client.post('/api/analysis/bayesian', json={
+        created = client.post('/api/analysis/bayesian?wait=true', json={
             'name': tag,
             'measurements': [
                 {'id': i, 'sample_name': i, 'age_bp': a, 'error_1sigma': 30,
@@ -587,7 +587,7 @@ class TestRerunKeepsDiagnostics:
         before = self._columns(client, analysis_id)['Agreement %']
         assert before and all(v != '' for v in before.values()), before
 
-        assert client.post(f'/api/analysis/{analysis_id}/rerun').status_code == 200
+        assert client.post(f'/api/analysis/{analysis_id}/rerun?wait=true').status_code == 200
         after = self._columns(client, analysis_id)['Agreement %']
         assert set(after) == set(before)
         assert all(v != '' for v in after.values()), after
@@ -609,7 +609,7 @@ class TestRerunKeepsDiagnostics:
         assert float(before[f'{tag}_e']) > max(
             float(v) for k, v in before.items() if k != f'{tag}_e')
 
-        assert client.post(f'/api/analysis/{analysis_id}/rerun').status_code == 200
+        assert client.post(f'/api/analysis/{analysis_id}/rerun?wait=true').status_code == 200
         after = self._columns(client, analysis_id)['Outlier %']
         assert all(v != '' for v in after.values()), after
         for name in before:
@@ -620,7 +620,7 @@ class TestRerunKeepsDiagnostics:
         tag = self._tag('no')
         analysis_id = self._create(client, tag, outlier_prior=0.0)
         assert all(v == '' for v in self._columns(client, analysis_id)['Outlier %'].values())
-        assert client.post(f'/api/analysis/{analysis_id}/rerun').status_code == 200
+        assert client.post(f'/api/analysis/{analysis_id}/rerun?wait=true').status_code == 200
         assert all(v == '' for v in self._columns(client, analysis_id)['Outlier %'].values())
 
 
@@ -677,7 +677,7 @@ class TestEditingKeepsTheOutlierSetting:
     def test_replacing_inputs_keeps_it(self, client):
         tag = self._tag()
         payload = dict(self._payload(tag), save=True)
-        created = client.post('/api/analysis/bayesian', json=payload)
+        created = client.post('/api/analysis/bayesian?wait=true', json=payload)
         assert created.status_code == 200, created.text
         analysis_id = created.json()['data']['id']
         before = self._outlier_column(client, analysis_id)
@@ -686,7 +686,7 @@ class TestEditingKeepsTheOutlierSetting:
         # The edit page resubmits the payload it was given and re-runs.
         replaced = client.put(f'/api/analysis/{analysis_id}/inputs', json=self._payload(tag))
         assert replaced.status_code == 200, replaced.text
-        assert client.post(f'/api/analysis/{analysis_id}/rerun').status_code == 200
+        assert client.post(f'/api/analysis/{analysis_id}/rerun?wait=true').status_code == 200
 
         stored = client.get(f'/api/analysis/{analysis_id}').json()['data']['measurements']
         assert all(m['outlier_prior'] == 0.05 for m in stored), stored
@@ -700,7 +700,7 @@ class TestEditingKeepsTheOutlierSetting:
     def test_duplicating_keeps_it(self, client):
         """The third copy of the row builder, and the one nothing else covers."""
         tag = self._tag()
-        created = client.post('/api/analysis/bayesian', json=dict(self._payload(tag), save=True))
+        created = client.post('/api/analysis/bayesian?wait=true', json=dict(self._payload(tag), save=True))
         assert created.status_code == 200, created.text
         source_id = created.json()['data']['id']
 
@@ -745,7 +745,7 @@ def test_get_analysis_reports_diagnostics_on_each_result(client):
         'bayesian_config': {'mcmc_samples': 300, 'mcmc_tune': 200, 'mcmc_chains': 1},
         'save': True,
     }
-    created = client.post('/api/analysis/bayesian', json=payload)
+    created = client.post('/api/analysis/bayesian?wait=true', json=payload)
     assert created.status_code == 200, created.text
     analysis_id = created.json()['data']['id']
 
@@ -796,7 +796,7 @@ def test_outlier_values_survive_a_rerun_of_an_ordered_sibling_model(client):
         {'id': f'{tag}_c', 'sample_name': 'C', 'age_bp': 3000, 'error_1sigma': 30,
          'element_id': f'{tag}_p2', 'outlier_prior': 0.05, 'outlier_model': 'general'},
     ]
-    created = client.post('/api/analysis/bayesian', json={
+    created = client.post('/api/analysis/bayesian?wait=true', json={
         'name': tag, 'measurements': measurements, 'model_tree': tree,
         'bayesian_config': {'mcmc_samples': 300, 'mcmc_tune': 200, 'mcmc_chains': 1},
         'save': True,
@@ -821,7 +821,7 @@ def test_outlier_values_survive_a_rerun_of_an_ordered_sibling_model(client):
     # sit near their 5% prior rather than scattered across it.
     assert max(float(v) for v in before.values()) < 20.0, before
 
-    assert client.post(f'/api/analysis/{analysis_id}/rerun').status_code == 200
+    assert client.post(f'/api/analysis/{analysis_id}/rerun?wait=true').status_code == 200
     after = outlier_column()
     assert all(v != '' for v in after.values()), after
     for name in before:

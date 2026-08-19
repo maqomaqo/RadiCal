@@ -100,7 +100,7 @@ def _measurement(sample_id, age_bp=3000, **overrides):
 class TestBayesianRequestValidation:
     def test_circular_relationship_rejected(self, client):
         response = client.post(
-            "/api/analysis/bayesian",
+            "/api/analysis/bayesian?wait=true",
             json={
                 "name": "Cyclic",
                 "measurements": [_measurement("a"), _measurement("b"), _measurement("c")],
@@ -117,7 +117,7 @@ class TestBayesianRequestValidation:
 
     def test_relationship_references_unknown_group_rejected(self, client):
         response = client.post(
-            "/api/analysis/bayesian",
+            "/api/analysis/bayesian?wait=true",
             json={
                 "name": "Bad group ref",
                 "measurements": [_measurement("a")],
@@ -132,7 +132,7 @@ class TestBayesianRequestValidation:
 
     def test_measurement_references_unknown_group_rejected(self, client):
         response = client.post(
-            "/api/analysis/bayesian",
+            "/api/analysis/bayesian?wait=true",
             json={
                 "name": "Bad measurement group",
                 "measurements": [_measurement("a", group_id="ghost-group")],
@@ -144,7 +144,7 @@ class TestBayesianRequestValidation:
 
     def test_sample_tpq_taq_contradiction_rejected(self, client):
         response = client.post(
-            "/api/analysis/bayesian",
+            "/api/analysis/bayesian?wait=true",
             json={
                 "name": "Bad TPQ/TAQ",
                 "measurements": [_measurement("a", tpq_age_bp=100, taq_age_bp=500)],
@@ -155,7 +155,7 @@ class TestBayesianRequestValidation:
 
     def test_group_tpq_taq_contradiction_rejected(self, client):
         response = client.post(
-            "/api/analysis/bayesian",
+            "/api/analysis/bayesian?wait=true",
             json={
                 "name": "Bad group TPQ/TAQ",
                 "measurements": [_measurement("a", group_id="g1")],
@@ -167,7 +167,7 @@ class TestBayesianRequestValidation:
 
     def test_duplicate_measurement_and_group_id_rejected(self, client):
         response = client.post(
-            "/api/analysis/bayesian",
+            "/api/analysis/bayesian?wait=true",
             json={
                 "name": "Colliding ids",
                 "measurements": [_measurement("shared-id")],
@@ -183,7 +183,7 @@ class TestBayesianRequestValidation:
         can't complete in this environment without pymc -- it should fail
         later, if at all, for a different reason than a 422."""
         response = client.post(
-            "/api/analysis/bayesian",
+            "/api/analysis/bayesian?wait=true",
             json={
                 "name": "Valid stratigraphy",
                 "measurements": [
@@ -207,7 +207,7 @@ class TestBayesianRequestValidation:
 class TestStratigraphyPersistence:
     def test_groups_and_relationships_round_trip(self, client):
         response = client.post(
-            "/api/analysis/bayesian",
+            "/api/analysis/bayesian?wait=true",
             json={
                 "name": "Persisted stratigraphy",
                 "measurements": [

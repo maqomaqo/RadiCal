@@ -10,7 +10,27 @@ DATABASE_URL = os.getenv(
     "postgresql://radiocarbon:password@localhost:5432/radiocarbon_db"
 )
 
-engine = create_engine(DATABASE_URL, echo=False)
+# Pool sizing. This used to be left at SQLAlchemy's defaults, filed as
+# REMAINING_WORK item 7 and true enough to say it "only bites under
+# concurrent load" -- but the background worker IS concurrent load: it holds
+# a connection for the whole length of a run (tens of seconds, sometimes
+# minutes) while requests continue to arrive and take their own. The request
+# threadpool and one job worker want more than the default five, and a
+# connection idle for half an hour behind a container network is one the
+# database may already have dropped, which pre_ping catches instead of
+# handing out a dead socket.
+#
+# SQLite takes none of these arguments (it has no connection pool worth the
+# name), and the test suite runs on SQLite, so they are applied only where
+# they mean something.
+_POOL_OPTIONS = {} if DATABASE_URL.startswith('sqlite') else {
+    'pool_size': 10,
+    'max_overflow': 20,
+    'pool_pre_ping': True,
+    'pool_recycle': 1800,
+}
+
+engine = create_engine(DATABASE_URL, echo=False, **_POOL_OPTIONS)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 

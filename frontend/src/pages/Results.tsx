@@ -38,6 +38,9 @@ import ReplayIcon from '@mui/icons-material/Replay'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import EditIcon from '@mui/icons-material/Edit'
 import KeyboardArrowRightIcon from '@mui/icons-material/KeyboardArrowRight'
+import JobProgress from '../components/JobProgress'
+import { cancelJob } from '../api/jobs'
+import { useJob } from '../hooks/useJob'
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown'
 import PosteriorPlot from '@/components/PosteriorPlot'
 import StackedPosteriorPlot from '@/components/StackedPosteriorPlot'
@@ -491,6 +494,12 @@ export default function Results() {
   const [deleting, setDeleting] = useState(false)
   const [rerunOpen, setRerunOpen] = useState(false)
   const [rerunning, setRerunning] = useState(false)
+  // The run this page started, if it started one. Null on a page reached by
+  // any other route -- a bookmark, a reload, a link from the dashboard --
+  // where the analysis id is all there is, and useJob falls back to asking
+  // what the most recent job for it was.
+  const [jobId, setJobId] = useState<string | null>(null)
+  const [cancelling, setCancelling] = useState(false)
   const [duplicating, setDuplicating] = useState(false)
   const [exportingPdf, setExportingPdf] = useState(false)
   // Posterior mean/median are opt-in reporting choices, not shown by
@@ -563,6 +572,29 @@ export default function Results() {
       setError((err as Error).message)
     } finally {
       setLoading(false)
+    }
+  }
+
+  // Follow whatever is running against this analysis, and reload the page's
+  // data when it stops -- however it stopped. A failed or cancelled run
+  // changes what the page should show just as much as a successful one does.
+  const { job, active: jobActive } = useJob({
+    jobId,
+    targetId: jobId ? null : analysisId,
+    onFinished: () => {
+      if (analysisId) fetchAnalysis(analysisId)
+      setCancelling(false)
+    },
+  })
+
+  const handleCancelRun = async () => {
+    if (!job) return
+    setCancelling(true)
+    try {
+      await cancelJob(job.job_id)
+    } catch (err) {
+      notify((err as Error).message)
+      setCancelling(false)
     }
   }
 
@@ -669,6 +701,8 @@ export default function Results() {
     }
   }
 
+  // Queued, not awaited: the endpoint answers 202 with a job id as soon as
+  // it has accepted the work, and the progress display takes it from there.
   const handleRerun = async () => {
     if (!analysisId) return
     setRerunning(true)
@@ -677,6 +711,7 @@ export default function Results() {
       const data = await response.json()
       if (data.success) {
         setRerunOpen(false)
+        setJobId(data.data.job_id ?? null)
         fetchAnalysis(analysisId)
       } else {
         notify('Failed to rerun analysis: ' + formatApiError(data))
@@ -1151,7 +1186,14 @@ export default function Results() {
           "failed" in the status card, leaving the user to guess -- and one way to
           fail is now a deliberate choice (requiring the exact solver on a model
           that cannot support it), where the reason names exactly what to change. */}
-      {analysis.status === 'failed' && (
+      {/* A run in progress, with what it is doing and a way to stop it. Sits
+          above the failure alert because a re-run of a failed analysis should
+          lead with what is happening now, not with why the last one didn't. */}
+      {jobActive && job && (
+        <JobProgress job={job} onCancel={handleCancelRun} cancelling={cancelling} />
+      )}
+
+      {analysis.status === 'failed' && !jobActive && (
         <Alert severity="error" sx={{ mb: 3 }}>
           <Typography variant="subtitle2" gutterBottom>
             This analysis did not complete

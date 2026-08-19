@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 import os
-from app.api import curves, analysis, harris_matrix, results, projects, project_samples, imports
+from app.api import curves, analysis, harris_matrix, results, projects, project_samples, imports, jobs
 from app.database import init_db
 
 load_dotenv()
@@ -30,6 +30,20 @@ try:
 except Exception as e:
     print(f"⚠ Warning: Database initialization failed: {e}")
 
+# Nothing survives the process that was running it: the job queue is an
+# in-process thread pool, not a broker (see services/jobs.py for why). A row
+# still reading 'queued' or 'running' at startup therefore describes work
+# that will never finish, and left alone it would be polled forever by a page
+# with no way to tell the difference. This is what stands in for durability
+# -- it does not save the work, it stops the app lying about it.
+try:
+    from app.services.jobs import reconcile_orphans
+    _orphans = reconcile_orphans()
+    if _orphans:
+        print(f"✓ Failed {_orphans} job(s) left mid-flight by a restart")
+except Exception as e:
+    print(f"⚠ Warning: could not reconcile interrupted jobs: {e}")
+
 # API Routes
 app.include_router(curves.router, prefix="/api", tags=["calibration curves"])
 app.include_router(analysis.router, prefix="/api", tags=["analysis"])
@@ -38,6 +52,7 @@ app.include_router(results.router, prefix="/api", tags=["results"])
 app.include_router(projects.router, prefix="/api", tags=["projects"])
 app.include_router(project_samples.router, prefix="/api", tags=["project dates"])
 app.include_router(imports.router, prefix="/api", tags=["import"])
+app.include_router(jobs.router, prefix="/api", tags=["jobs"])
 
 @app.get("/api/health")
 async def health_check():

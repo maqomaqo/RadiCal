@@ -272,7 +272,7 @@ class TestCsvExport:
             _boundary("cb2", "End"),
         ])
         created = client.post(
-            "/api/analysis/bayesian",
+            "/api/analysis/bayesian?wait=true",
             json={
                 "name": "CSV structure",
                 "measurements": [
@@ -351,7 +351,7 @@ class TestCsvExport:
             _boundary("ub2", "End"),
         ])
         created = client.post(
-            "/api/analysis/bayesian",
+            "/api/analysis/bayesian?wait=true",
             json={
                 "name": "Unmodelled column",
                 "measurements": [
@@ -400,7 +400,7 @@ class TestCsvExport:
 class TestModelTreeApi:
     def _analysis(self, client):
         return client.post(
-            "/api/analysis/bayesian",
+            "/api/analysis/bayesian?wait=true",
             json={
                 "name": "Tree api",
                 "measurements": [
@@ -452,7 +452,7 @@ class TestModelTreeApi:
             "boundary", "phase", "boundary"]
 
         # And it runs from the new structure.
-        assert client.post(f"/api/analysis/{analysis_id}/rerun").status_code == 200
+        assert client.post(f"/api/analysis/{analysis_id}/rerun?wait=true").status_code == 200
         rerun = client.get(f"/api/analysis/{analysis_id}").json()["data"]
         assert len(rerun["results"]) == 2
 
@@ -479,7 +479,7 @@ class TestModelTreeApi:
             _boundary("b2", "Site end"),
         ])
         response = client.post(
-            "/api/analysis/bayesian",
+            "/api/analysis/bayesian?wait=true",
             json={
                 "name": "Authored as a tree",
                 "measurements": [
@@ -528,7 +528,7 @@ class TestModelTreeApi:
             _boundary("eb2", "Site end"),
         ])
         created = client.post(
-            "/api/analysis/bayesian",
+            "/api/analysis/bayesian?wait=true",
             json={
                 "name": "Tree edit",
                 "measurements": [
@@ -561,7 +561,7 @@ class TestModelTreeApi:
             },
         )
         assert replaced.status_code == 200, replaced.text
-        assert client.post(f"/api/analysis/{analysis_id}/rerun").status_code == 200
+        assert client.post(f"/api/analysis/{analysis_id}/rerun?wait=true").status_code == 200
 
         after = client.get(f"/api/analysis/{analysis_id}").json()["data"]
         assert [c["name"] for c in after["model_tree"]["children"]] == [
@@ -575,7 +575,7 @@ class TestModelTreeApi:
 
     def test_create_rejects_a_tree_with_an_orphan_date(self, client):
         response = client.post(
-            "/api/analysis/bayesian",
+            "/api/analysis/bayesian?wait=true",
             json={
                 "name": "Bad tree",
                 "measurements": [

@@ -259,7 +259,7 @@ class TestWhatItCanAndCannotSee:
                     'id': f'{tag}_{gi}_{j}', 'sample_name': f'S{gi}{j}',
                     'age_bp': age, 'error_1sigma': 30, 'element_id': pid,
                 })
-        created = client.post('/api/analysis/bayesian', json={
+        created = client.post('/api/analysis/bayesian?wait=true', json={
             'name': tag,
             'measurements': measurements,
             'model_tree': {'id': f'{tag}_seq', 'element_type': 'sequence', 'name': 'Site',

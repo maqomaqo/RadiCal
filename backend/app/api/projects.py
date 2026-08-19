@@ -1,11 +1,13 @@
 from fastapi import APIRouter, HTTPException, Depends
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from app.database import get_db
 from app.models import Project, Analysis
 from app.schemas.project import ProjectCreate, ProjectUpdate
 from app.api.analysis import _rerun_analysis
-from typing import Optional
+from app.services import jobs
+from typing import Dict, Optional
 
 router = APIRouter()
 
@@ -137,39 +139,102 @@ def update_project(project_id: str, updates: ProjectUpdate, db: Session = Depend
     }
 
 
+def _rerun_project_job(project_id: str):
+    """
+    The work function for a 'project_rerun' job: every analysis in one
+    project, in turn.
+
+    One analysis failing does not abort the rest -- a project is a filing
+    cabinet, not a transaction, and a single bad curve reference should not
+    stop the other nine analyses being refreshed. Failures are collected and
+    reported in the job's detail.
+
+    Progress is analyses finished over analyses to do, not sweeps: across a
+    mixed project the sampler's own fraction would jump about meaninglessly
+    as each model converged at its own length.
+    """
+    def work(db: Session, handle: jobs.JobHandle) -> Dict:
+        analyses = db.query(Analysis).filter(Analysis.project_id == project_id).all()
+        total = len(analyses)
+        rerun_count = 0
+        failed = []
+
+        handle.update(progress=0.0, force=True, completed=0, total=total, failed=[])
+        for analysis in analyses:
+            # Between analyses, not within one: stopping mid-solve would
+            # leave the job's own count honest but is checked by the sampler
+            # anyway, and this is the boundary where a partial project rerun
+            # is a coherent state to stop at.
+            handle.check_cancelled()
+            try:
+                _rerun_analysis(analysis, db)
+                rerun_count += 1
+            except jobs.Cancelled:
+                raise
+            except Exception as e:
+                db.rollback()
+                analysis.status = 'failed'
+                analysis.error_message = str(e)
+                db.commit()
+                failed.append({"id": analysis.id, "name": analysis.name, "error": str(e)})
+            handle.update(
+                progress=(rerun_count + len(failed)) / total if total else 1.0,
+                force=True,
+                completed=rerun_count + len(failed), total=total, failed=failed,
+            )
+
+        return {"rerun_count": rerun_count, "total": total, "failed": failed,
+                "completed": rerun_count + len(failed)}
+    return work
+
+
+# See analysis.rerun_analysis for why 202 is set on the response rather than
+# declared on the route.
 @router.post("/projects/{project_id}/rerun")
-def rerun_project(project_id: str, db: Session = Depends(get_db)):
+def rerun_project(project_id: str, wait: bool = False, db: Session = Depends(get_db)):
     """
     Recompute every analysis in this project in place, from each one's own
     persisted inputs (see analysis.py's _rerun_analysis) -- one analysis
     failing (e.g. a curve/MCMC error) doesn't abort the rest; failures are
-    collected and reported back instead. Runs synchronously in this
-    request (no background job queue exists yet), so this can take a
-    while for a project with several/large Bayesian analyses.
+    collected and reported back instead.
+
+    Queued rather than run here. This is the endpoint that made a job queue
+    necessary: it is a Bayesian run per analysis, back to back, in one
+    request -- minutes for a project of any size, well past the point a
+    reverse proxy or a browser gives up. Answers 202 with a job_id to poll,
+    whose detail carries {completed, total, failed}.
+
+    `wait=true` runs it in the request, as it used to. See
+    analysis.rerun_analysis for why that stays.
     """
     project = db.query(Project.id).filter(Project.id == project_id).first()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    analyses = db.query(Analysis).filter(Analysis.project_id == project_id).all()
+    if wait:
+        analyses = db.query(Analysis).filter(Analysis.project_id == project_id).all()
+        rerun_count = 0
+        failed = []
+        for analysis in analyses:
+            try:
+                _rerun_analysis(analysis, db)
+                rerun_count += 1
+            except Exception as e:
+                db.rollback()
+                analysis.status = 'failed'
+                analysis.error_message = str(e)
+                db.commit()
+                failed.append({"id": analysis.id, "name": analysis.name, "error": str(e)})
+        return {
+            "success": True,
+            "data": {"rerun_count": rerun_count, "failed": failed},
+        }
 
-    rerun_count = 0
-    failed = []
-    for analysis in analyses:
-        try:
-            _rerun_analysis(analysis, db)
-            rerun_count += 1
-        except Exception as e:
-            db.rollback()
-            analysis.status = 'failed'
-            analysis.error_message = str(e)
-            db.commit()
-            failed.append({"id": analysis.id, "name": analysis.name, "error": str(e)})
-
-    return {
+    job_id = jobs.submit('project_rerun', project_id, _rerun_project_job(project_id))
+    return JSONResponse(status_code=202, content={
         "success": True,
-        "data": {"rerun_count": rerun_count, "failed": failed},
-    }
+        "data": {"project_id": project_id, "status": "queued", "job_id": job_id},
+    })
 
 
 @router.delete("/projects/{project_id}")
