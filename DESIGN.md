@@ -1,0 +1,266 @@
+---
+name: RadiCal
+description: A calibrated instrument for radiocarbon dating and OxCal-style Bayesian chronological modelling.
+colors:
+  calibration-blue: "#4a7dc4"
+  burnt-coral: "#e14a56"
+  aged-paper: "#faf6f3"
+  paper-white: "#ffffff"
+  warm-ink: "#2b2320"
+  boundary-coral: "#f15d5f"
+  boundary-coral-ink: "#d23f4a"
+  phase-green: "#1f7a62"
+  hiatus-violet: "#7a5c99"
+  context-ochre: "#b5651d"
+typography:
+  headline:
+    fontFamily: "Roboto, sans-serif"
+    fontSize: "2.5rem"
+    fontWeight: 600
+    lineHeight: 1.167
+  title:
+    fontFamily: "Roboto, sans-serif"
+    fontSize: "2rem"
+    fontWeight: 600
+    lineHeight: 1.2
+  body:
+    fontFamily: "Roboto, sans-serif"
+    fontSize: "1rem"
+    fontWeight: 400
+    lineHeight: 1.5
+rounded:
+  base: "8px"
+spacing:
+  sm: "8px"
+  md: "16px"
+  lg: "24px"
+  xl: "32px"
+components:
+  button-primary:
+    backgroundColor: "{colors.calibration-blue}"
+    textColor: "{colors.paper-white}"
+    rounded: "{rounded.base}"
+    padding: "6px 16px"
+  button-primary-hover:
+    backgroundColor: "{colors.calibration-blue}"
+  chip-status-positive:
+    backgroundColor: "transparent"
+    textColor: "#2e7d32"
+    rounded: "16px"
+  chip-neutral:
+    backgroundColor: "transparent"
+    textColor: "{colors.warm-ink}"
+    rounded: "16px"
+---
+
+# Design System: RadiCal
+
+## Overview
+
+**Creative North Star: "The Calibrated Instrument"**
+
+RadiCal reads like a well-made scientific instrument, not a generic SaaS dashboard: every color
+carries a specific, load-bearing meaning, and nothing decorative is allowed to compete with the
+data it is displaying. The palette was pulled directly from the app's own logo rather than left at
+MUI's stock defaults — the theme file states outright that the original `#1976d2` primary /
+`#dc004e` secondary were "verbatim restating" Material's out-of-the-box blue and pink, and replaces
+them with colors that belong to this app specifically. Surfaces sit on a warm paper background
+instead of clinical white, and every MUI shadow in the app is recolored from pure black to a warm
+ink so elevation reads as lifted paper rather than a cold UI-kit default.
+
+Confirmed anti-reference: MUI's un-customized default palette and its stock black shadow scale.
+Both were the literal starting point and were deliberately replaced.
+
+The instrument metaphor is most exact in the diagramming and plotting layer: a Boundary is coral
+everywhere it is drawn (the model-tree editor, the Harris matrix, the posterior plot), a Phase is
+always the same green, and paired quantities that are one thing at two strengths — the 95%/68% HPD
+intervals, mean and median — are rendered as one hue at two opacities rather than as two unrelated
+colors. `success`/`warning` are kept for genuine semantic state (a solved solver, a real warning on
+the Results page) precisely because they used to be borrowed for Phase/Boundary and made the model
+editor read as a status display.
+
+**Key Characteristics:**
+- Warm paper-and-ink surface language instead of cold neutral grey or pure white/black.
+- A small, deliberately restrained accent set: interactive chrome runs almost entirely on one
+  primary blue; the brand coral is used sparingly, not splashed across every button.
+- Color as encoding, not decoration — in the diagram and plot layer especially, a given hue is a
+  claim about what something *is*, so it is never reused for something else.
+- MUI's structural defaults (shape, elevation levels, component APIs) are kept; the craft is in
+  which values they're fed, not in replacing the framework's behavior.
+
+## Colors
+
+A small, purposeful palette: one interactive blue does almost all of the work, a warm paper-and-ink
+pair carries surfaces and depth, and a separate small set of hues is reserved entirely for encoding
+meaning in the model-tree diagrams and posterior plots.
+
+### Primary
+- **Slate Blue** (`#4a7dc4`): the one color interactive chrome runs on — primary buttons, filled
+  chips, links, focus states, the "Sequence" element in the model tree, and the posterior line in
+  every plot. Saturated up from the logo's pale tint (`#f0f0fc`), which is a wash, not a usable
+  interactive color on its own.
+
+### Secondary
+- **Burnt Coral** (`#e14a56`): darkened from the logo's raw coral (`#f05460`) for AA contrast as
+  white-on-color text. Used sparingly and almost never for interactive chrome (one confirmed use
+  site in the codebase) — the logo's exact coral is reserved for illustration, and even this
+  darkened version stays mostly out of the way so it doesn't collide with Boundary Coral's distinct
+  diagram meaning below.
+
+### Neutral
+- **Aged Paper** (`#faf6f3`): the app's canvas (`background.default`) — warm-tinted on purpose, so
+  elevated white Cards and Paper actually read as lifted off the page instead of blending into a
+  plain white background.
+- **Paper White** (`#ffffff`): elevated surface color (`background.paper`) — Cards, Dialogs, Menus,
+  and the plot area itself. Kept a known, uncolored white specifically so every translucent fill
+  drawn on top of it (HPD bands, prior/posterior fills) composites against the same base rather than
+  drifting muddier depending on what's behind it.
+- **Warm Ink** (`#2b2320`): not a UI-chrome color but the tint behind two things — every recolored
+  MUI shadow (`rgba(43, 35, 32, *)` in place of pure black) and the mean/median point-estimate marks
+  on posterior plots, which read as pencil annotation over the data rather than data of their own.
+
+### Diagram & Plot Palette (reserved for element-type encoding)
+- **Boundary Coral** (`#f15d5f`, ink variant `#d23f4a`): a Boundary, wherever it is drawn — tree
+  editor, Harris matrix, or posterior plot line/fill. The ink variant carries the 4.5:1 contrast
+  cases (label text, plot lines); the base carries 3:1 graphic use (borders, rules, tints).
+- **Deep Green** (`#1f7a62`): a Phase, everywhere. Also the base hue for HPD interval fills, at two
+  alpha strengths for the two nested confidence levels (72% for 68% HPD, 30% for 95% HPD) — one hue,
+  two strengths, because they are one quantity, not two categories.
+- **Muted Violet** (`#7a5c99`): a Hiatus, everywhere.
+
+### Named Rules
+**The One Object, One Color Rule.** A Boundary, Phase, or Hiatus is the same hue in the tree editor,
+the Harris matrix, and the posterior plot — never a per-view palette.
+
+**The Borrowed-Status Rule.** `success`/`warning`/`error` are reserved for genuine semantic state
+(a solved solver, an actual warning, a destructive confirm action). They are never repurposed as a
+categorical label for structural elements — that reads as a status display where none is intended.
+
+## Typography
+
+**Body & UI Font:** Roboto (with system-ui/sans-serif fallback), via `@fontsource/roboto`.
+
+**Character:** A single, unadorned grotesque doing all the work — no display face, no accent
+typeface. Precision comes from hierarchy and restraint (two explicit heading overrides, everything
+else at MUI's Roboto defaults), not from typographic flourish.
+
+### Hierarchy
+- **Headline** (600, 2.5rem, line-height 1.167): page-level titles (`h1`) — e.g. "RadiCal
+  Dashboard".
+- **Title** (600, 2rem, line-height 1.2): section-level titles (`h2`).
+- **Body** (400, 1rem, line-height 1.5): the MUI Roboto default, unmodified — the bulk of form
+  labels, table content, and descriptive text.
+
+### Named Rules
+**The Two-Override Rule.** Only `h1` and `h2` carry explicit weight/size overrides. Every other
+level is trusted to MUI's own Roboto scale rather than re-specified — restraint applied to the type
+system itself, not just the palette.
+
+## Layout
+
+Every page is wrapped in a MUI `Container` (`maxWidth="lg"` is the standard content width) with
+generous vertical breathing room (`py: 4` = 32px) and a `Paper` as the primary content surface
+(`p: 3` = 24px internal padding). Spacing runs on MUI's default 8px unit throughout — `gap: 2` (16px)
+is the common inline-control gap, `mb: 3`/`mb: 4` (24px/32px) separate major sections.
+
+The primary navigation is a sticky `AppBar` that never scrolls out of view, since analyses and model
+trees can run long. Below the `sm` breakpoint the three secondary nav links (Dashboard, Projects,
+Curves) collapse into a hamburger menu rather than wrapping the bar to a second line — a wrapped
+sticky bar would push all page content down a row on every load. The primary action, "New Analysis",
+stays visible at every width; it never collapses into the menu.
+
+## Elevation & Depth
+
+MUI's stock 25-step shadow scale is kept intact (the tuning per elevation level is preserved) but
+globally recolored: every `rgba(0, 0, 0, *)` is replaced with `rgba(43, 35, 32, *)` — Warm Ink — so
+every elevated surface (Card, Menu, Dialog, Snackbar, the sticky AppBar) picks up the same warm cast
+as the rest of the app instead of a generic cool-black shadow. This is a single global substitution,
+not a bespoke shadow per component.
+
+The one deliberate flattening: a dense `Accordion` inside a dialog (`ImportDatesDialog`) drops to
+`elevation={0}` with a 1px `divider`-colored border instead of a shadow — nested elevation inside an
+already-elevated Dialog reads as noise, so the boundary is drawn with a line instead.
+
+### Named Rules
+**The Warm Shadow Rule.** No elevated surface in the app uses a black-tinted shadow. Shadows are
+always the recolored warm-ink scale, applied by the one global substitution in the theme, never
+overridden per component.
+
+## Shapes
+
+A single corner radius (`shape.borderRadius: 8`, 8px) applies globally through MUI's own component
+defaults — Buttons, Cards, Dialogs, Chips, TextFields all inherit it rather than each carrying its
+own radius override. There is no secondary "sharp" or "pill" family layered on top, except where
+MUI's own component semantics already call for one (e.g. a `Chip`'s pill shape is MUI's default,
+not a RadiCal-specific choice).
+
+## Components
+
+### Buttons
+- **Shape:** 8px corner radius (theme default), MUI's standard contained/outlined/text padding.
+- **Primary:** `variant="contained" color="primary"` — Slate Blue fill, white text. Used for the
+  one primary action per view (e.g. "New Analysis" on the Dashboard).
+- **Secondary actions:** `variant="outlined"`, typically without a color prop (inherits ink/border),
+  or with an icon (`startIcon`) when it helps scanability ("Projects" with a folder icon).
+- **On the AppBar:** `color="inherit"` rather than `primary`/`outlined` defaults, since the bar
+  itself is already the brand color — buttons get a translucent white hover
+  (`rgba(255,255,255,0.1)`) instead. The "New Analysis" nav button is the one exception, getting an
+  explicit `variant="outlined"` with a white-tinted border so the primary action stays visually
+  distinct even against the colored bar.
+
+### Chips
+- **Neutral/tag use** (default variant, no color prop): plain descriptive labels — "archived",
+  "Assigned", a path breadcrumb. No semantic weight; these are metadata, not status.
+- **Status use** (`color="success"`, outlined): reserved for a genuine diagnostic fact, e.g. "Exact
+  solver" confirming which Bayesian solver actually ran. Color is spent only when it is true
+  information, per the Borrowed-Status Rule above.
+
+### Cards / Containers
+- **Corner Style:** 8px (theme default).
+- **Background:** Paper White (`#ffffff`), sitting on the Aged Paper canvas.
+- **Shadow Strategy:** MUI's default elevation scale, warm-ink tinted (see Elevation & Depth).
+- **Internal Padding:** 24px (`p: 3`) is the standard for a page's primary content Paper.
+
+### Dialogs
+- Standard MUI `Dialog` composition (`DialogTitle` / `DialogContent` / `DialogActions`).
+- `ConfirmDialog` is the canonical confirmation pattern (`maxWidth="xs" fullWidth`), replacing the
+  browser's native `confirm()`. Destructive actions use `color="error"` (MUI's standard error red,
+  deliberately *not* the brand's Boundary Coral, which stays reserved for diagram meaning) on the
+  confirm button; a `loading` state disables both actions and swaps the confirm label to an
+  in-progress "Working…" state rather than leaving the dialog silently unresponsive.
+
+### Navigation
+- Sticky `AppBar`, primary-colored. Wordmark is the 36×36 logo mark plus "RadiCal" (h6, 600 weight)
+  linking home. Links inline at `sm` and above; a hamburger `Menu` below `sm`. See Layout for the
+  collapse behavior and why "New Analysis" never collapses.
+
+### Progress & Status (signature component)
+- `JobProgress` uses MUI's `Alert severity="info"` for a run in progress — deliberately not a
+  bespoke color, so that `info`/`warning`/`error` stay meaningful elsewhere on the same page.
+- The progress bar switches between `determinate` and `indeterminate` based on whether the current
+  phase has a meaningful fraction to show: queued and burn-in phases show `indeterminate` rather
+  than pinning at 0%, which would read as "stuck" instead of "started, no estimate yet."
+
+## Do's and Don'ts
+
+### Do:
+- **Do** keep a Boundary/Phase/Hiatus the same color everywhere it's drawn (tree editor, Harris
+  matrix, posterior plot) — see the One Object, One Color Rule.
+- **Do** render paired/nested quantities (68%/95% HPD, mean/median) as one hue at two opacities,
+  never as two different hues.
+- **Do** apply the Warm Ink shadow substitution to any new elevated MUI surface rather than writing
+  a bespoke shadow.
+- **Do** reserve `success`/`warning`/`error` chip and alert colors for genuine semantic state; use
+  the neutral default chip variant for plain descriptive tags.
+- **Do** keep the plot/diagram surface a known, uncolored white so translucent fills composite
+  predictably.
+
+### Don't:
+- **Don't** fall back to MUI's stock blue (`#1976d2`) or pink (`#dc004e`) — both were the literal
+  starting point and were explicitly replaced with colors pulled from the app's own logo.
+- **Don't** reuse `success`/`warning` as categorical labels for structural model-tree elements — it
+  was tried, and it made the editor read as a status display instead of a diagram.
+- **Don't** give Boundary Coral to a "danger"/destructive UI action — that hue is reserved for
+  diagram meaning; destructive confirms use MUI's standard `error` red instead.
+- **Don't** spend the brand coral (Burnt Coral) freely on interactive chrome — it is used almost
+  nowhere in the app today, and that scarcity is deliberate, not an oversight to "fix."
