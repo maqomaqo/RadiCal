@@ -1389,24 +1389,25 @@ def _rerun_analysis(analysis: Analysis, db: Session,
     if not samples:
         raise ValueError("Analysis has no measurements to rerun")
 
-    if analysis.analysis_type == 'calibration':
-        sample = samples[0]
-        curve = get_curve(sample.curve_id)
-        stats = _compute_calibration_stats(
-            curve, sample.age_bp, sample.error_1sigma,
-            sample.delta_r, sample.delta_r_error,
-        )
-        existing = db.query(AnalysisResult).filter(AnalysisResult.analysis_id == analysis.id).first()
-        result = _calibration_result_row(analysis.id, sample.id, stats, existing)
-        if not existing:
-            db.add(result)
-
-    elif analysis.analysis_type == 'group_calibration':
-        # Unlike 'calibration', every sample is recalibrated -- a group
-        # calibration has no single "the" sample, and its member set never
-        # changes between a save and a rerun (that goes through duplicate
-        # or a fresh calibrate-group instead), so this is always exactly
-        # one result per existing sample, matched by id.
+    if analysis.analysis_type in ('calibration', 'group_calibration'):
+        # Every sample, for both types. A 'calibration' analysis holds exactly
+        # one date and a 'group_calibration' holds several, but the work is
+        # identical either way -- each date is calibrated against its own curve
+        # with no model relating them -- so the difference belongs in what the
+        # results page calls it, not in what gets computed.
+        #
+        # This used to read samples[0] for 'calibration', which was true when a
+        # single-date analysis was the only way to reach it. Deploying several
+        # dates under that type then dropped all but the first, without saying
+        # so. The deploy endpoint no longer creates that state
+        # (api/project_samples.deploy_samples routes it to group_calibration),
+        # and looping here means an analysis already stored in it is repaired
+        # by a rerun rather than truncated again.
+        #
+        # Results are matched to samples by id, so a rerun updates each date's
+        # existing row rather than accumulating duplicates. The member set does
+        # not change between a save and a rerun -- that goes through duplicate
+        # or a fresh calibrate-group instead.
         existing_by_sample = {
             r.sample_id: r
             for r in db.query(AnalysisResult).filter(AnalysisResult.analysis_id == analysis.id).all()

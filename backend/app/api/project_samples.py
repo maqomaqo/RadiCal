@@ -201,6 +201,10 @@ def deploy_samples_to_analysis(
     The analysis is created with status 'pending': it has inputs but has
     not been run. Run it with POST /analysis/{id}/rerun (which computes
     from persisted inputs), typically after adjusting its stratigraphy.
+
+    Deploying more than one date as `calibration` produces a
+    `group_calibration` -- see below. `data.analysis_type` in the response is
+    always the type actually created.
     """
     _require_project(project_id, db)
 
@@ -221,9 +225,21 @@ def deploy_samples_to_analysis(
     by_id = {s.id: s for s in samples}
     ordered = [by_id[sid] for sid in request.sample_ids]
 
+    # 'calibration' means ONE date calibrated on its own -- _rerun_analysis's
+    # calibration branch reads samples[0] and nothing else, which is correct
+    # for the single-date analyses that were all this app had when it was
+    # written. Deploying several dates under that type used to reach it and
+    # silently keep only the first. Several independent dates calibrated
+    # without a model is exactly what 'group_calibration' is, so that is what
+    # the caller gets; the response reports the type actually created rather
+    # than echoing the one asked for.
+    analysis_type = request.analysis_type
+    if analysis_type == 'calibration' and len(ordered) > 1:
+        analysis_type = 'group_calibration'
+
     analysis = Analysis(
         name=request.name,
-        analysis_type=request.analysis_type,
+        analysis_type=analysis_type,
         status='pending',
         bayesian_config={},
         project_id=project_id,

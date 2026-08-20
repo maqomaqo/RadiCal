@@ -70,16 +70,18 @@ previous revisions of this file understated parts of it.
 - **Background job queue** — a long solve is queued rather than held open in
   the request that asked for it (`services/jobs.py`), with progress,
   cancellation and a polling endpoint. See `docs/ASYNC_JOBS_PLAN.md`.
-- **Backend tests** — 708, in `backend/tests/`; **frontend tests** — 141.
+- **Backend tests** — 713, in `backend/tests/`; **frontend tests** — 141.
 
 ---
 
 # Open Work
 
-**Nothing is high priority.** Every gap this file has carried under that
-heading is closed. What follows is real but elective: the app does what it
-claims for a single archaeologist running it locally, and the first item is
-the one that stops being elective the moment that is no longer true.
+**Nothing is high priority, and there are no known bugs.** Every gap this
+file has carried under that heading is closed, and the one genuine defect it
+found — #2 below — was fixed the next day. What follows is real but elective:
+the app does what it claims for a single archaeologist running it locally,
+and the first item is the one that stops being elective the moment that is no
+longer true.
 
 ## Priority: MEDIUM
 
@@ -92,23 +94,7 @@ the one that stops being elective the moment that is no longer true.
   one user (see Done #4). Revisit those together with this.
 - **Effort:** 3–4 hours for basic JWT + user table.
 
-### 2. Deploying as `analysis_type: "calibration"` silently drops all but the first date
-*Promoted 2026-08-20 from "Known Gaps" — it was filed as a rough edge, but
-silently discarding a user's data on a path the API accepts is a bug, and it
-is the only one in this file.*
-- `DeployRequest` accepts `calibration` (`schemas/sample.py:233`), but
-  `_rerun_analysis`'s calibration branch does `sample = samples[0]`
-  (`api/analysis.py:1393`) — correct for single-date calibration analyses,
-  which is all that existed when it was written. The `group_calibration`
-  branch beside it loops properly.
-- Not reachable from the UI: `ProjectSampleTable` always sends `bayesian`.
-  The API allows it, and would drop the rest without saying so.
-- **Needed:** either reject a multi-date `calibration` deploy at the schema,
-  or route it to `group_calibration`, which is what the caller meant. The
-  second is more useful and no harder.
-- **Effort:** under an hour, including the test that would have caught it.
-
-### 3. Legacy calibration distributions are stored in the old units
+### 2. Legacy calibration distributions are stored in the old units
 - **Current:** `CalibrationCurve.get_display_distribution` now returns a
   probability DENSITY (integrating to 1 over calendar years) rather than the
   per-point masses it used to, so the series can be plotted against a
@@ -134,12 +120,12 @@ is the only one in this file.*
 
 ## Priority: LOW
 
-### 4. Multi-analysis comparison UI
+### 3. Multi-analysis comparison UI
 Considerably more useful than when first listed: deploying one set of dates
 into several differently-modelled analyses is a first-class workflow, and
 there is still no way to view those results side by side. ~2–3 hours.
 
-### 5. Excel export
+### 4. Excel export
 *Halved 2026-08-20.* This was "Excel export **and** measurement import into an
 analysis". The import half is done — `ImportDatesDialog` is wired into
 `NewAnalysis.tsx:1142` as well as into the project collection, so a CSV or
@@ -147,7 +133,7 @@ analysis". The import half is done — `ImportDatesDialog` is wired into
 Excel-formatted output; CSV, JSON and PDF all work. ~1 hour, and worth asking
 whether anyone wants it before spending it — a CSV opens in Excel.
 
-### 6. Phase-duration priors and custom priors
+### 5. Phase-duration priors and custom priors
 *Reduced 2026-08-20.* This was "Advanced Bayesian features", listing four
 things, and two of them have since been built: **outlier detection** is
 implemented as OxCal's own General and Charcoal models with a sampled shared
@@ -160,12 +146,12 @@ Still missing: explicit phase-duration priors (the uniform span prior is
 there, but not a user-specified duration), and custom per-date priors.
 ~2 hours.
 
-### 7. No error boundaries in the frontend
+### 6. No error boundaries in the frontend
 Most pages have `try/catch` and an error state, but an unexpected render-time
 exception still blanks the page. No `ErrorBoundary` or `componentDidCatch`
 exists anywhere in `frontend/src` (checked 2026-08-20). ~1 hour.
 
-### 8. `ProjectSample` has no per-analysis provenance link
+### 7. `ProjectSample` has no per-analysis provenance link
 Deploy copies values deliberately (see the snapshot decision), but nothing
 records *which* collection entry an analysis sample came from, so there is no
 "this analysis is using an outdated version of this date" indicator. Adding a
@@ -173,7 +159,7 @@ nullable `source_project_sample_id` would enable that without weakening the
 snapshot guarantee — and, since Alembic landed, adding the column is a
 migration rather than an entry on a hand-maintained list.
 
-### 9. A failed run reports its cause as a raw exception
+### 8. A failed run reports its cause as a raw exception
 *Halved 2026-08-20.* This was "MCMC failure modes aren't distinguished",
 and part of it has resolved itself: bad input is rejected by
 `BayesianRequest`'s validators with a 422 before anything runs, and
@@ -189,13 +175,13 @@ job as well as the analysis — so "this curve no longer exists" and an internal
 error read the same to a user. ~1 hour to classify the handful that actually
 occur.
 
-### 10. A context with only 2–3 dates gets very wide Boundaries
+### 9. A context with only 2–3 dates gets very wide Boundaries
 95% HPD can span thousands of years. This is mathematically correct —
 `E[a+b]` is only finite for K ≥ 4, so few dates genuinely do not constrain a
 phase's duration — and OxCal behaves the same way, but it surprises people. A
 short note in the UI beside the affected figures would help. ~30 minutes.
 
-### 11. No linting
+### 10. No linting
 The `lint` script was dropped: there has never been an ESLint config anywhere
 in the repo, so it only ever exited "couldn't find a configuration file" — a
 script that cannot run is worse than no script, since it reads as coverage
@@ -411,11 +397,38 @@ the documentation for all of it — `USER_MANUAL.md` has a Calibration Curves
 section, and every figure quoted in it was checked against the running app.
 **Nothing remaining**; the whole plan is delivered.
 
+### 9. ~~Deploying as `analysis_type: "calibration"` silently drops all but the first date~~
+**Fixed 2026-08-20**, the day after this audit promoted it out of "Known
+Gaps" — it was filed as a rough edge, but silently discarding a user's dates
+on a path the API accepts is a bug.
+
+Fixed in both places it lived:
+
+- **The entry point.** `deploy_samples` routes a multi-date `calibration`
+  request to `group_calibration`, which is what several independent dates
+  with no model relating them already is. One date is still a plain
+  `calibration` — the routing is for the case that was broken, not a
+  redefinition of the type. The response reports the type actually created
+  rather than echoing the one asked for.
+- **The truncation itself.** `_rerun_analysis`'s calibration branch read
+  `samples[0]`, correct when a single-date analysis was the only way to reach
+  it. It now loops, sharing one branch with `group_calibration` — the work is
+  identical for both, so the difference belongs in what the results page calls
+  it, not in what gets computed. Deploy can no longer create the bad state,
+  but a database may already hold one, and a rerun now repairs it rather than
+  truncating again.
+
+Five tests in `TestDeployingAsCalibration`, checked by reverting the fix: they
+fail with "a date was dropped: 1 == 3". Verified against the live Postgres
+stack as well — three dates in, three results out, three distinct sample ids.
+No stored analysis was affected: the live database held no multi-date
+`calibration` analyses and no result rows with a null `sample_id`.
+
 ---
 
 ## Testing & QA
 
-- **Backend: 708 tests** (`pytest --collect-only`, 2026-08-20; 707 pass, 1
+- **Backend: 713 tests** (`pytest --collect-only`, 2026-08-20; 712 pass, 1
   skips) in `backend/tests/`. By file:
 
   | | | | |
@@ -423,7 +436,7 @@ section, and every figure quoted in it was checked against the running app.
   | `test_imports.py` 103 | `test_exact_chain.py` 66 | `test_oxcal_agreement.py` 44 | `test_exports.py` 44 |
   | `test_curve_import.py` 41 | `test_gibbs.py` 40 | `test_pdf_report.py` 32 | `test_curve_view.py` 32 |
   | `test_model_tree.py` 31 | `test_curves.py` 30 | `test_agreement.py` 27 | `test_rerun.py` 23 |
-  | `test_project_samples.py` 21 | `test_curve_mix.py` 21 | `test_calibration.py` 21 | `test_solver_reporting.py` 18 |
+  | `test_project_samples.py` 26 | `test_curve_mix.py` 21 | `test_calibration.py` 21 | `test_solver_reporting.py` 18 |
   | `test_date_format.py` 18 | `test_charcoal_outlier.py` 18 | `test_stratigraphy.py` 17 | `test_resolution.py` 17 |
   | `test_jobs.py` 16 | `test_validation.py` 15 | `test_migrations.py` 8 | `test_event_loop.py` 5 |
 
@@ -554,15 +567,13 @@ section, and every figure quoted in it was checked against the running app.
 
 1. **Nothing, if this stays a single-user local tool.** That is the honest
    answer, and the reason there is no HIGH section any more.
-2. **Open #2** (deploy silently dropping dates) if you want the one actual
-   bug gone — under an hour, and it is data loss on a path the API accepts.
-3. **Open #1** (authentication) is the gate. It is the only item that changes
+2. **Open #1** (authentication) is the gate. It is the only item that changes
    what the rest of the app should be, and two deliberate decisions —
    a thread pool rather than a broker, a pool sized for one worker — are
    waiting on it.
-4. **Open #7 and #10** are an hour and a half between them and both make the
+3. **Open #6 and #9** are an hour and a half between them and both make the
    app less surprising to someone who is not its author.
-5. Everything else as concrete need arises.
+4. Everything else as concrete need arises.
 
 ---
 
@@ -572,5 +583,6 @@ management, date collections, deploy, duplicate/edit and re-run working end
 to end; a long run is queued, reports progress and can be stopped; the schema
 is versioned. Documentation matches the app. Every HIGH and MEDIUM item this
 file has carried is closed except authentication, which is a deployment
-decision rather than a defect, and one genuine bug (Open #2) found by this
-audit rather than by a user.*
+decision rather than a defect. The one genuine bug the 2026-08-20 audit found
+— a multi-date `calibration` deploy keeping only the first date — was fixed
+the same day, and no stored analysis had been affected by it.*
