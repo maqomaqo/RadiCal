@@ -23,9 +23,12 @@ from app.database import get_db
 from app.models import Project, ProjectSample, Analysis, RadiocarbonSample, SampleGroup
 from app.schemas.sample import (
     ProjectSampleBulkInput,
+    ProjectSampleBulkDelete,
+    ProjectSampleBulkUpdate,
     ProjectSampleUpdate,
     DeployRequest,
 )
+from app.services import curve_registry
 
 router = APIRouter()
 
@@ -48,6 +51,8 @@ def _serialize(sample: ProjectSample) -> dict:
         "sample_type": sample.sample_type,
         "curve_id": sample.curve_id,
         "reservoir_age": sample.reservoir_age,
+        "delta_r": sample.delta_r,
+        "delta_r_error": sample.delta_r_error,
         "depth_cm": sample.depth_cm,
         "location": sample.location,
         "notes": sample.notes,
@@ -98,6 +103,8 @@ def create_project_samples(
             sample_type=sample_type,
             curve_id=item.curve_id,
             reservoir_age=item.reservoir_age,
+            delta_r=item.delta_r,
+            delta_r_error=item.delta_r_error,
             depth_cm=item.depth_cm,
             location=item.location,
             notes=item.notes,
@@ -180,6 +187,170 @@ def delete_project_sample(project_id: str, sample_id: str, db: Session = Depends
     db.delete(sample)
     db.commit()
     return {"success": True, "data": {"deleted_sample_id": sample_id}}
+
+
+def _is_marine(sample: ProjectSample) -> bool:
+    """
+    Whether a Delta-R means anything for this date.
+
+    The declared sample type answers it when set; otherwise the curve does,
+    read from the registry so an imported marine curve counts the same as the
+    bundled Marine20. This mirrors isMarineMeasurement in the frontend's
+    MeasurementFields -- the same question, asked in the two places that have
+    to agree about it.
+    """
+    if (sample.sample_type or 'terrestrial') == 'marine':
+        return True
+    try:
+        return curve_registry.get_spec(sample.curve_id).sample_type == 'marine'
+    except Exception:
+        # A curve that no longer resolves is not evidence of anything; the
+        # declared type above has already had its say.
+        return False
+
+
+@router.patch("/projects/{project_id}/samples")
+def bulk_update_project_samples(
+    project_id: str,
+    request: ProjectSampleBulkUpdate,
+    db: Session = Depends(get_db),
+):
+    """
+    Apply one value across a selection of this project's dates.
+
+    Two fields, with a rule each, because neither is a plain assignment.
+
+    **curve_id** carries the sample type with it. A date calibrated against a
+    marine curve is marine, and the single-date form already keeps the two in
+    step in the other direction (choosing a sample type moves the curve to
+    suit it); doing less here would leave a date whose curve and declared type
+    disagree, which nothing else in the app can produce.
+
+    **delta_r** is applied only to the marine dates in the selection, and the
+    response says how many it skipped. Delta-R is a correction to a marine
+    curve's global average reservoir effect, so on a terrestrial date it is
+    not merely unnecessary but wrong -- it would be applied at calibration and
+    move the result. Skipping rather than refusing means a mixed selection
+    still works, which matters because "everything from this site" is the
+    natural way to select dates that share an offset, and a site rarely
+    yields only marine material.
+
+    Sending `delta_r: null` clears the offset (and its uncertainty with it);
+    omitting the key leaves both alone. The endpoint reads
+    `model_fields_set` rather than checking for None, so the two cases stay
+    distinguishable.
+
+    Analyses already deployed from these dates are untouched -- they hold
+    their own copies (see models.ProjectSample).
+    """
+    _require_project(project_id, db)
+
+    samples = (
+        db.query(ProjectSample)
+        .filter(ProjectSample.project_id == project_id,
+                ProjectSample.id.in_(request.sample_ids))
+        .all()
+    )
+    found = {s.id for s in samples}
+    missing = [sid for sid in request.sample_ids if sid not in found]
+    if missing:
+        raise HTTPException(
+            status_code=404,
+            detail=f"These dates are not in this project's collection: {', '.join(missing)}",
+        )
+
+    sent = request.model_fields_set
+    updated, skipped, type_changed = [], [], 0
+
+    if 'curve_id' in sent:
+        spec = curve_registry.get_spec(request.curve_id)
+        sample_type = 'marine' if spec.sample_type == 'marine' else 'terrestrial'
+        for sample in samples:
+            sample.curve_id = request.curve_id
+            if (sample.sample_type or 'terrestrial') != sample_type:
+                sample.sample_type = sample_type
+                type_changed += 1
+
+    if 'delta_r' in sent:
+        for sample in samples:
+            # Read AFTER any curve change above, so assigning a marine curve
+            # and an offset in one request applies the offset to the dates
+            # that request just made marine. The alternative -- judging
+            # against the type they had on arrival -- would skip exactly the
+            # dates the caller was correcting.
+            if _is_marine(sample):
+                sample.delta_r = request.delta_r
+                sample.delta_r_error = (
+                    request.delta_r_error if request.delta_r is not None else None)
+                updated.append(sample.id)
+            else:
+                skipped.append(sample.id)
+    else:
+        updated = [s.id for s in samples]
+
+    db.commit()
+    for sample in samples:
+        db.refresh(sample)
+
+    return {
+        "success": True,
+        "data": {
+            "updated_count": len(updated),
+            "skipped_count": len(skipped),
+            "skipped_sample_ids": skipped,
+            "sample_type_changed_count": type_changed,
+            "items": [_serialize(s) for s in samples],
+        },
+    }
+
+
+@router.delete("/projects/{project_id}/samples")
+def bulk_delete_project_samples(
+    project_id: str,
+    request: ProjectSampleBulkDelete,
+    db: Session = Depends(get_db),
+):
+    """
+    Remove several dates from the collection at once.
+
+    All-or-nothing on the ids: an id that is not in this project fails the
+    whole request rather than deleting the rest, because a partial delete is
+    not something a caller can sensibly recover from -- it cannot tell which
+    of its ids went without diffing the collection afterwards.
+
+    The request body carries the ids. DELETE with a body is unusual enough to
+    be worth naming: the alternative is a query string, which has a length
+    limit this can exceed (500 uuids is about 18KB) and which reads worse.
+    An intermediary that strips the body produces a 422 naming the missing
+    field, not a silent no-op.
+
+    Analyses already deployed from these dates keep their own copies and are
+    unaffected.
+    """
+    _require_project(project_id, db)
+
+    samples = (
+        db.query(ProjectSample)
+        .filter(ProjectSample.project_id == project_id,
+                ProjectSample.id.in_(request.sample_ids))
+        .all()
+    )
+    found = {s.id for s in samples}
+    missing = [sid for sid in request.sample_ids if sid not in found]
+    if missing:
+        raise HTTPException(
+            status_code=404,
+            detail=f"These dates are not in this project's collection: {', '.join(missing)}",
+        )
+
+    for sample in samples:
+        db.delete(sample)
+    db.commit()
+
+    return {
+        "success": True,
+        "data": {"deleted_count": len(found), "deleted_sample_ids": sorted(found)},
+    }
 
 
 @router.post("/projects/{project_id}/deploy")
@@ -272,6 +443,12 @@ def deploy_samples_to_analysis(
             sample_type=src.sample_type,
             curve_id=src.curve_id,
             reservoir_age=src.reservoir_age,
+            # Carried into the analysis rather than left behind: a
+            # reservoir offset belongs to where the sample came from, so
+            # a date deployed out of a collection should arrive already
+            # corrected rather than needing it re-entered.
+            delta_r=src.delta_r,
+            delta_r_error=src.delta_r_error,
             depth_cm=src.depth_cm,
             location=src.location,
             notes=src.notes,

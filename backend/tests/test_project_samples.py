@@ -276,6 +276,247 @@ class TestDeployingAsCalibration:
         assert len(analysis["results"]) == 3, "the stored analysis was truncated again"
 
 
+class TestBulkUpdate:
+    """
+    PATCH /projects/{id}/samples -- one value across a selection.
+
+    Two rules carry the weight here, and both exist because neither field is
+    a plain assignment: a curve brings the sample type with it, and a
+    reservoir offset is skipped on dates it would be wrong for.
+    """
+
+    def _mixed(self, client, tag):
+        """Two marine dates and one terrestrial, which is the selection both
+        rules are actually about."""
+        pid = _make_project(client, f"Bulk {tag}")
+        ids = [d["id"] for d in _add_dates(client, pid, [
+            _date(f"{tag}-M1", 3000, sample_type="marine", curve_id="marine20",
+                  material_type="shell"),
+            _date(f"{tag}-M2", 3100, sample_type="marine", curve_id="marine20",
+                  material_type="shell"),
+            _date(f"{tag}-T1", 3200),
+        ])]
+        return pid, ids
+
+    def test_delta_r_reaches_the_marine_dates_and_skips_the_rest(self, client):
+        """
+        The confirmed behaviour: a mixed selection still works, and the ones
+        it could not apply to are reported rather than silently included.
+        Delta-R corrects a marine curve's global average, so writing it to a
+        terrestrial date is not redundant but wrong -- it would be applied at
+        calibration and move the result.
+        """
+        pid, ids = self._mixed(client, "dr")
+        response = client.patch(f"/api/projects/{pid}/samples",
+                                json={"sample_ids": ids, "delta_r": -120,
+                                      "delta_r_error": 40})
+        assert response.status_code == 200, response.text
+        data = response.json()["data"]
+        assert (data["updated_count"], data["skipped_count"]) == (2, 1)
+
+        by_name = {s["sample_name"]: s for s in data["items"]}
+        assert by_name["dr-M1"]["delta_r"] == -120
+        assert by_name["dr-M1"]["delta_r_error"] == 40
+        assert by_name["dr-T1"]["delta_r"] is None
+
+    def test_delta_r_without_its_uncertainty_is_rejected(self, client):
+        """Same rule as a single measurement's, applied to a whole selection:
+        an offset with no uncertainty would understate every date it touched."""
+        pid, ids = self._mixed(client, "dre")
+        response = client.patch(f"/api/projects/{pid}/samples",
+                                json={"sample_ids": ids, "delta_r": -120})
+        assert response.status_code == 422
+        assert "delta_r_error is required" in response.text
+
+    def test_delta_r_error_alone_is_rejected(self, client):
+        pid, ids = self._mixed(client, "dro")
+        response = client.patch(f"/api/projects/{pid}/samples",
+                                json={"sample_ids": ids, "delta_r_error": 40})
+        assert response.status_code == 422
+
+    def test_a_null_offset_clears_both_halves(self, client):
+        """
+        Clearing has to take the uncertainty with it, or a stray error is left
+        behind with no offset to belong to. `delta_r: null` means clear;
+        omitting the key entirely means leave alone, which is the distinction
+        the endpoint reads from model_fields_set rather than from the value.
+        """
+        pid, ids = self._mixed(client, "drc")
+        client.patch(f"/api/projects/{pid}/samples",
+                     json={"sample_ids": ids, "delta_r": -120, "delta_r_error": 40})
+
+        response = client.patch(f"/api/projects/{pid}/samples",
+                                json={"sample_ids": ids, "delta_r": None})
+        assert response.status_code == 200
+        for item in response.json()["data"]["items"]:
+            assert item["delta_r"] is None
+            assert item["delta_r_error"] is None
+
+    def test_omitting_delta_r_leaves_it_alone(self, client):
+        """The other half of the same distinction: a curve-only request must
+        not wipe an offset that was already there."""
+        pid, ids = self._mixed(client, "drk")
+        client.patch(f"/api/projects/{pid}/samples",
+                     json={"sample_ids": ids, "delta_r": -80, "delta_r_error": 20})
+
+        response = client.patch(f"/api/projects/{pid}/samples",
+                                json={"sample_ids": ids, "curve_id": "marine20"})
+        assert response.status_code == 200
+        marine = [s for s in response.json()["data"]["items"]
+                  if s["sample_name"] != "drk-T1"]
+        assert all(s["delta_r"] == -80 for s in marine)
+
+    def test_the_sample_type_follows_the_curve(self, client):
+        """
+        A date calibrated against a marine curve is marine. The single-date
+        form already keeps the two in step in the other direction; doing less
+        here would leave a date whose curve and declared type disagree, which
+        nothing else in the app can produce.
+        """
+        pid, ids = self._mixed(client, "ct")
+        response = client.patch(f"/api/projects/{pid}/samples",
+                                json={"sample_ids": ids, "curve_id": "marine20"})
+        assert response.status_code == 200
+        data = response.json()["data"]
+        assert data["sample_type_changed_count"] == 1
+        assert all(s["sample_type"] == "marine" for s in data["items"])
+
+        response = client.patch(f"/api/projects/{pid}/samples",
+                                json={"sample_ids": ids, "curve_id": "intcal20"})
+        data = response.json()["data"]
+        assert data["sample_type_changed_count"] == 3
+        assert all(s["sample_type"] == "terrestrial" for s in data["items"])
+
+    def test_a_curve_and_an_offset_in_one_request_agree_with_each_other(self, client):
+        """
+        The offset is applied against the type the SAME request just set, not
+        the one the dates arrived with. Judging against the old type would
+        skip exactly the dates the caller was correcting -- the terrestrial
+        date they have just declared marine.
+        """
+        pid, ids = self._mixed(client, "cd")
+        response = client.patch(f"/api/projects/{pid}/samples",
+                                json={"sample_ids": ids, "curve_id": "marine20",
+                                      "delta_r": -60, "delta_r_error": 15})
+        assert response.status_code == 200
+        data = response.json()["data"]
+        assert (data["updated_count"], data["skipped_count"]) == (3, 0)
+        assert all(s["delta_r"] == -60 for s in data["items"])
+
+    def test_an_unknown_curve_is_rejected(self, client):
+        pid, ids = self._mixed(client, "cu")
+        response = client.patch(f"/api/projects/{pid}/samples",
+                                json={"sample_ids": ids, "curve_id": "no-such-curve"})
+        assert response.status_code == 422
+
+    def test_an_empty_request_is_rejected(self, client):
+        """Sending only ids is a request that says nothing; answering 200 to
+        it would suggest something happened."""
+        pid, ids = self._mixed(client, "ce")
+        assert client.patch(f"/api/projects/{pid}/samples",
+                            json={"sample_ids": ids}).status_code == 422
+
+    def test_an_id_from_another_project_is_rejected(self, client):
+        pid, ids = self._mixed(client, "cx")
+        assert client.patch(f"/api/projects/{pid}/samples",
+                            json={"sample_ids": ids + ["ghost"],
+                                  "curve_id": "intcal20"}).status_code == 404
+
+    def test_a_deployed_analysis_keeps_the_values_it_was_given(self, client):
+        """
+        The snapshot rule, applied to bulk edits: an analysis deployed before
+        the edit holds its own copies and must not move. This is the same
+        guarantee TestSnapshotSemantics makes for single edits, and bulk is
+        exactly where it would be easiest to break.
+        """
+        pid, ids = self._mixed(client, "cs")
+        deployed = client.post(f"/api/projects/{pid}/deploy",
+                               json={"name": "Before", "sample_ids": ids}).json()["data"]
+
+        client.patch(f"/api/projects/{pid}/samples",
+                     json={"sample_ids": ids, "curve_id": "intcal20"})
+
+        analysis = client.get(f"/api/analysis/{deployed['id']}").json()["data"]
+        curves = {m["curve_id"] for m in analysis["measurements"]}
+        assert "marine20" in curves, "a bulk edit reached an already-deployed analysis"
+
+
+class TestDeltaRTravelsWithADeployedDate:
+    def test_a_deployed_date_arrives_already_corrected(self, client):
+        """
+        Delta-R is a property of where a sample came from, so it belongs to
+        the collection entry and has to survive the copy into an analysis.
+        Before it was stored here, a marine date deployed out of a collection
+        lost its reservoir correction silently and had to have it re-entered
+        on every analysis it was deployed into.
+        """
+        pid = _make_project(client, "Delta R deploy")
+        ids = [d["id"] for d in _add_dates(client, pid, [
+            _date("DD-M1", 3000, sample_type="marine", curve_id="marine20",
+                  material_type="shell"),
+        ])]
+        client.patch(f"/api/projects/{pid}/samples",
+                     json={"sample_ids": ids, "delta_r": -95, "delta_r_error": 30})
+
+        deployed = client.post(f"/api/projects/{pid}/deploy",
+                               json={"name": "Carried", "sample_ids": ids}).json()["data"]
+        measurement = client.get(
+            f"/api/analysis/{deployed['id']}").json()["data"]["measurements"][0]
+        assert measurement["delta_r"] == -95
+        assert measurement["delta_r_error"] == 30
+
+
+class TestBulkDelete:
+    def test_several_dates_go_at_once(self, client):
+        pid = _make_project(client, "Bulk delete")
+        ids = [d["id"] for d in _add_dates(client, pid, [
+            _date("BD-1", 3000), _date("BD-2", 3100), _date("BD-3", 3200)])]
+
+        response = client.request("DELETE", f"/api/projects/{pid}/samples",
+                                  json={"sample_ids": ids[:2]})
+        assert response.status_code == 200, response.text
+        assert response.json()["data"]["deleted_count"] == 2
+
+        remaining = client.get(f"/api/projects/{pid}/samples").json()["data"]["items"]
+        assert [s["sample_name"] for s in remaining] == ["BD-3"]
+
+    def test_one_bad_id_deletes_nothing(self, client):
+        """
+        All-or-nothing on purpose. A partial delete is not something a caller
+        can recover from: it cannot tell which of its ids went without
+        diffing the collection afterwards.
+        """
+        pid = _make_project(client, "Bulk delete partial")
+        ids = [d["id"] for d in _add_dates(client, pid, [
+            _date("BP-1", 3000), _date("BP-2", 3100)])]
+
+        response = client.request("DELETE", f"/api/projects/{pid}/samples",
+                                  json={"sample_ids": ids + ["ghost"]})
+        assert response.status_code == 404
+        assert len(client.get(f"/api/projects/{pid}/samples").json()["data"]["items"]) == 2
+
+    def test_a_deployed_analysis_survives_the_collection_entry(self, client):
+        """Deleting from the collection is not deleting the analysis -- it
+        holds its own copies."""
+        pid = _make_project(client, "Bulk delete deployed")
+        ids = [d["id"] for d in _add_dates(client, pid, [
+            _date("BX-1", 3000), _date("BX-2", 3100)])]
+        deployed = client.post(f"/api/projects/{pid}/deploy",
+                               json={"name": "Kept", "sample_ids": ids}).json()["data"]
+
+        client.request("DELETE", f"/api/projects/{pid}/samples", json={"sample_ids": ids})
+
+        analysis = client.get(f"/api/analysis/{deployed['id']}").json()["data"]
+        assert len(analysis["measurements"]) == 2
+
+    def test_a_duplicate_id_is_rejected(self, client):
+        pid = _make_project(client, "Bulk delete dupe")
+        ids = [d["id"] for d in _add_dates(client, pid, [_date("BQ-1", 3000)])]
+        response = client.request("DELETE", f"/api/projects/{pid}/samples",
+                                  json={"sample_ids": ids + ids})
+        assert response.status_code == 422
+
+
 class TestSnapshotSemantics:
     def test_editing_a_collected_date_does_not_touch_deployed_analyses(self, client):
         pid = _make_project(client)

@@ -26,10 +26,10 @@ import AddIcon from '@mui/icons-material/Add'
 import DeleteIcon from '@mui/icons-material/Delete'
 import EditIcon from '@mui/icons-material/Edit'
 import PlaylistAddIcon from '@mui/icons-material/PlaylistAdd'
-import RocketLaunchIcon from '@mui/icons-material/RocketLaunch'
 import UploadFileIcon from '@mui/icons-material/UploadFile'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import ImportDatesDialog, { type ImportPreview } from '@/components/ImportDatesDialog'
+import SampleSelectionBar, { type DeltaRValue } from '@/components/SampleSelectionBar'
 import { formatApiError } from '@/utils/apiError'
 import { useNotify } from '@/contexts/NotificationContext'
 import { curveLabel, curveOptions } from '@/api/curves'
@@ -47,6 +47,8 @@ export interface ProjectSample {
   material_type: string
   sample_type: 'terrestrial' | 'marine'
   curve_id: string
+  delta_r: number | null
+  delta_r_error: number | null
   default_context_name: string | null
   tpq_age_bp: number | null
   taq_age_bp: number | null
@@ -197,6 +199,11 @@ export default function ProjectSampleTable({ projectId }: Props) {
 
   const [deleteTarget, setDeleteTarget] = useState<ProjectSample | null>(null)
   const [deleting, setDeleting] = useState(false)
+
+  // One flag for every bulk action: they all act on the same selection, so
+  // two of them running at once would be two answers to the same question.
+  const [bulkBusy, setBulkBusy] = useState(false)
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false)
 
   const [deployOpen, setDeployOpen] = useState(false)
   const [deployName, setDeployName] = useState('')
@@ -376,6 +383,111 @@ export default function ProjectSampleTable({ projectId }: Props) {
     }
   }
 
+  // The three bulk actions. Each reports what the server actually did rather
+  // than what was asked: a Delta-R applied to a mixed selection lands on the
+  // marine dates only, and assigning a marine curve changes sample types with
+  // it. Saying so afterwards is the difference between an action the reader
+  // can trust and one they have to go and check.
+  const runBulk = async (
+    request: () => Promise<Response>,
+    describe: (data: any) => { message: string; severity?: 'success' | 'info' },
+    failure: string,
+  ) => {
+    setBulkBusy(true)
+    try {
+      const response = await request()
+      const data = await response.json()
+      if (data.success) {
+        // notify() defaults to 'error', which is right for the call sites it
+        // was built for and wrong for these -- a completed bulk edit reported
+        // in red reads as a failure. 'info' rather than 'success' where the
+        // server skipped some of the selection: nothing went wrong, but not
+        // everything the reader ticked changed, and that deserves to look
+        // different at a glance.
+        const { message, severity = 'success' } = describe(data.data)
+        notify(message, severity)
+        await fetchSamples()
+        return true
+      }
+      notify(`${failure}: ${formatApiError(data)}`)
+    } catch (err) {
+      notify(`${failure}: ${(err as Error).message}`)
+    } finally {
+      setBulkBusy(false)
+    }
+    return false
+  }
+
+  const handleAssignCurve = (curveId: string) =>
+    runBulk(
+      () =>
+        fetch(`/api/projects/${projectId}/samples`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sample_ids: [...selected], curve_id: curveId }),
+        }),
+      (data) => {
+        const name = curveLabel(curves, curveId)
+        const changed = data.sample_type_changed_count
+        return {
+          message:
+            `${data.items.length} date${data.items.length === 1 ? '' : 's'} set to ${name}` +
+            (changed ? `, and ${changed} sample type${changed === 1 ? '' : 's'} with them` : ''),
+        }
+      },
+      'Could not set the curve',
+    )
+
+  const handleAssignDeltaR = (value: DeltaRValue) =>
+    runBulk(
+      () =>
+        fetch(`/api/projects/${projectId}/samples`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sample_ids: [...selected], ...value }),
+        }),
+      (data) => {
+        if (value.delta_r === null) {
+          return {
+            message: `ΔR removed from ${data.updated_count} date${
+              data.updated_count === 1 ? '' : 's'
+            }`,
+          }
+        }
+        const applied = `ΔR ${value.delta_r} ± ${value.delta_r_error} applied to ${data.updated_count} date${
+          data.updated_count === 1 ? '' : 's'
+        }`
+        return data.skipped_count
+          ? {
+              message: `${applied}; ${data.skipped_count} terrestrial date${
+                data.skipped_count === 1 ? '' : 's'
+              } skipped`,
+              severity: 'info' as const,
+            }
+          : { message: applied }
+      },
+      'Could not apply ΔR',
+    )
+
+  const handleBulkDelete = async () => {
+    const ok = await runBulk(
+      () =>
+        fetch(`/api/projects/${projectId}/samples`, {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sample_ids: [...selected] }),
+        }),
+      (data) => ({
+        message: `${data.deleted_count} date${data.deleted_count === 1 ? '' : 's'} deleted`,
+      }),
+      'Could not delete the selected dates',
+    )
+    if (ok) {
+      setSelected(new Set())
+      setBulkDeleteOpen(false)
+    }
+  }
+
   const handleDeploy = async () => {
     setDeploying(true)
     try {
@@ -447,24 +559,26 @@ export default function ProjectSampleTable({ projectId }: Props) {
         >
           Import File
         </Button>
-        <Box sx={{ flexGrow: 1 }} />
-        <Tooltip title={selected.size === 0 ? 'Select dates to deploy' : ''}>
-          <span>
-            <Button
-              variant="contained"
-              color="secondary"
-              startIcon={<RocketLaunchIcon />}
-              disabled={selected.size === 0}
-              onClick={() => {
-                setDeployName('')
-                setDeployOpen(true)
-              }}
-            >
-              Deploy to New Analysis ({selected.size})
-            </Button>
-          </span>
-        </Tooltip>
       </Box>
+
+      {/* Everything that acts on a selection lives here, and appears only
+          when there is one -- including Deploy, which used to sit at the end
+          of the toolbar above permanently greyed out. */}
+      {selected.size > 0 && (
+        <SampleSelectionBar
+          selected={samples.filter((s) => selected.has(s.id))}
+          curves={curves}
+          busy={bulkBusy}
+          onClear={() => setSelected(new Set())}
+          onDeploy={() => {
+            setDeployName('')
+            setDeployOpen(true)
+          }}
+          onAssignCurve={handleAssignCurve}
+          onAssignDeltaR={handleAssignDeltaR}
+          onDelete={() => setBulkDeleteOpen(true)}
+        />
+      )}
 
       {error && (
         <Alert severity="error" sx={{ mb: 2 }}>
@@ -690,6 +804,21 @@ export default function ProjectSampleTable({ projectId }: Props) {
         target="collection"
         confirming={importing}
         onConfirm={handleImport}
+      />
+
+      <ConfirmDialog
+        open={bulkDeleteOpen}
+        title={`Remove ${selected.size} date${selected.size === 1 ? '' : 's'} from collection?`}
+        message={
+          `Removes ${selected.size === 1 ? 'this date' : 'these dates'} from this project's date ` +
+          `collection. Analyses already deployed from ${selected.size === 1 ? 'it' : 'them'} keep ` +
+          'their own copies and are unaffected.'
+        }
+        confirmLabel="Delete"
+        danger
+        loading={bulkBusy}
+        onConfirm={handleBulkDelete}
+        onCancel={() => setBulkDeleteOpen(false)}
       />
 
       <ConfirmDialog

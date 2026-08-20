@@ -57,6 +57,21 @@ class ProjectSample(Base):
     sample_type = Column(String, nullable=False)  # 'terrestrial' or 'marine'
     curve_id = Column(String, default='intcal20')
     reservoir_age = Column(Float, nullable=True)
+
+    # Local marine reservoir offset and its uncertainty, same meaning as on
+    # RadiocarbonSample: the deviation from the global average the marine
+    # curve already models, not a whole reservoir age.
+    #
+    # These arrived late (2026-08-20). Until then a collection could not hold
+    # a Delta-R at all, so a marine date deployed out of one lost its
+    # reservoir correction silently and had to have it re-entered on every
+    # analysis it was deployed into -- which is exactly backwards, since
+    # Delta-R is a property of where the sample came from and therefore of
+    # the collection, not of any one analysis. Dates from one site share one
+    # value, which is why they can be set across a selection in bulk.
+    delta_r = Column(Float, nullable=True)
+    delta_r_error = Column(Float, nullable=True)
+
     depth_cm = Column(Float, nullable=True)
     location = Column(String, nullable=True)
     notes = Column(String, nullable=True)

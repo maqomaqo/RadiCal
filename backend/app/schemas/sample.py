@@ -196,6 +196,8 @@ class ProjectSampleUpdate(BaseModel):
     def _known_curve(cls, value: Optional[str]) -> Optional[str]:
         return validate_curve_id(value)
     reservoir_age: Optional[float] = Field(default=None, ge=-500, le=2000)
+    delta_r: Optional[float] = Field(default=None, ge=-5000, le=5000)
+    delta_r_error: Optional[float] = Field(default=None, ge=0, le=5000)
     depth_cm: Optional[float] = Field(default=None, ge=0, le=10000)
     location: Optional[str] = Field(default=None, max_length=500)
     notes: Optional[str] = Field(default=None, max_length=2000)
@@ -220,6 +222,92 @@ class ProjectSampleBulkInput(BaseModel):
     UI's "paste several dates at once" path is a single request.
     """
     samples: List[ProjectSampleInput] = Field(..., min_length=1, max_length=500)
+
+
+class ProjectSampleBulkUpdate(BaseModel):
+    """
+    PATCH body for applying one value across a selection of a project's
+    collected dates -- the calibration curve, or a Delta-R shared by
+    everything from one site or water body.
+
+    Delta-R is per-provenance rather than per-date, which is what makes a
+    bulk form of this worth having: an analyst has one published local offset
+    for a site and needs it on all forty of its marine dates, not typed forty
+    times.
+
+    Whether a field was SENT matters, not whether it is null: `delta_r: null`
+    clears the offset, while omitting the key leaves it alone. Pydantic
+    records that distinction in `model_fields_set`, so this needs no sentinel
+    value -- see api/project_samples.bulk_update_project_samples.
+    """
+    sample_ids: List[str] = Field(..., min_length=1, max_length=500)
+    curve_id: Optional[str] = None
+    delta_r: Optional[float] = Field(default=None, ge=-5000, le=5000)
+    delta_r_error: Optional[float] = Field(default=None, ge=0, le=5000)
+
+    @field_validator('curve_id')
+    @classmethod
+    def _known_curve(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            raise ValueError("curve_id cannot be cleared -- every date needs a curve")
+        return validate_curve_id(value)
+
+    @field_validator("sample_ids")
+    @classmethod
+    def _no_duplicate_ids(cls, v: List[str]) -> List[str]:
+        if len(set(v)) != len(v):
+            raise ValueError("sample_ids contains a duplicate id")
+        return v
+
+    @model_validator(mode="after")
+    def _something_to_do(self):
+        if not ({'curve_id', 'delta_r', 'delta_r_error'} & self.model_fields_set):
+            raise ValueError(
+                "nothing to apply -- send curve_id, delta_r, or both"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _delta_r_has_an_uncertainty(self):
+        """
+        Same rule as MeasurementInput's, and for the same reason: a reservoir
+        offset has its own uncertainty, and accepting one without it would
+        report dates more precise than the evidence supports -- across a whole
+        selection at once, here.
+
+        Clearing is symmetrical. `delta_r: null` clears the error too, so a
+        stray uncertainty cannot be left behind with no offset to belong to.
+        """
+        sent = self.model_fields_set
+        if 'delta_r' in sent and self.delta_r is not None and self.delta_r_error is None:
+            raise ValueError(
+                "delta_r_error is required when delta_r is given -- a "
+                "reservoir offset has its own uncertainty, and omitting it "
+                "would understate the uncertainty of every date it is "
+                "applied to"
+            )
+        if 'delta_r_error' in sent and 'delta_r' not in sent:
+            raise ValueError(
+                "delta_r_error cannot be set on its own -- send the offset it "
+                "belongs to"
+            )
+        return self
+
+
+class ProjectSampleBulkDelete(BaseModel):
+    """
+    DELETE body for removing several dates from a project's collection at
+    once. Analyses already deployed from them keep their own copies and are
+    unaffected -- see models.ProjectSample.
+    """
+    sample_ids: List[str] = Field(..., min_length=1, max_length=500)
+
+    @field_validator("sample_ids")
+    @classmethod
+    def _no_duplicate_ids(cls, v: List[str]) -> List[str]:
+        if len(set(v)) != len(v):
+            raise ValueError("sample_ids contains a duplicate id")
+        return v
 
 
 class DeployRequest(BaseModel):
