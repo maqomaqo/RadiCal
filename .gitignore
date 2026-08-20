@@ -21,3 +21,4 @@ uploads/
 .coverage
 htmlcov/
 .claude/
+.impeccable/
