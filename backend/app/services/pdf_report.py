@@ -547,6 +547,80 @@ def _context_spans_table(
     return table
 
 
+_INTERVAL_LABELS = {
+    'sequence_duration': 'Sequence',
+    'phase_duration': 'Phase',
+    'sample_duration': 'Dated events',
+}
+
+
+def _years_text(ranges: Optional[List[Dict]]) -> str:
+    """A duration's HPD, smallest first -- a length reads upwards, unlike the
+    calendar ranges _hpd_text writes oldest first."""
+    if not ranges:
+        return ''
+    return '; '.join(
+        f"{r['min']:.0f}-{r['max']:.0f} yr ({r['probability_percent']:.1f}%)"
+        for r in sorted(ranges, key=lambda r: r['min'])
+    )
+
+
+def _intervals_table(records: List[Dict], columns: List[Tuple[str, float]],
+                     cells, styles: Dict[str, ParagraphStyle]) -> Table:
+    """One table for durations, another for differences, sharing a look."""
+    data: List[List[Any]] = [[Paragraph(label, styles['th']) for label, _ in columns]]
+    for record in records:
+        data.append([Paragraph(str(value), styles['td']) for value in cells(record)])
+    table = Table(data, colWidths=_scaled_widths([w for _, w in columns]), repeatRows=1)
+    table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#f2efec')),
+        ('LINEBELOW', (0, 0), (-1, 0), 0.6, colors.HexColor(INK)),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('TOPPADDING', (0, 0), (-1, -1), 3),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+        ('GRID', (0, 0), (-1, -1), 0.25, colors.HexColor('#ded7d2')),
+    ]))
+    return table
+
+
+def _durations_table(records: List[Dict], styles: Dict[str, ParagraphStyle]) -> Table:
+    columns = [('What', 1.4), ('Name', 2.4), ('Mean (yr)', 1.2),
+               ('68% (yr)', 2.6), ('95% (yr)', 2.6)]
+
+    def cells(record: Dict) -> List[Any]:
+        years = record.get('years') or {}
+        return [
+            _INTERVAL_LABELS.get(record.get('kind'), record.get('kind') or ''),
+            record.get('name') or '',
+            _number(years.get('mean')),
+            _years_text(years.get('hpd_68_ranges')),
+            _years_text(years.get('hpd_95_ranges')),
+        ]
+
+    return _intervals_table(records, columns, cells, styles)
+
+
+def _differences_table(records: List[Dict], styles: Dict[str, ParagraphStyle]) -> Table:
+    columns = [('', 2.0), ('Compared with', 2.0), ('Mean (yr)', 1.1),
+               ('95% (yr)', 2.4), ('Overlap', 1.5)]
+
+    def cells(record: Dict) -> List[Any]:
+        years = record.get('years') or {}
+        overlap = record.get('overlap')
+        word = record.get('severity') or ''
+        if overlap is not None:
+            word = f"{word} ({overlap * 100:.0f}%)"
+        return [
+            record.get('from_name') or '',
+            record.get('to_name') or '',
+            _number(years.get('mean')),
+            _years_text(years.get('hpd_95_ranges')),
+            word,
+        ]
+
+    return _intervals_table(records, columns, cells, styles)
+
+
 # --- narrative -----------------------------------------------------------
 
 _SOLVER_NAMES = {
@@ -759,6 +833,7 @@ def render_report(
     samples_by_id: Dict[str, Any],
     distributions: Dict[str, Any],
     context_spans: List[Dict],
+    intervals: Optional[Dict] = None,
     project_name: Optional[str] = None,
     date_format: Optional[str] = None,
 ) -> bytes:
@@ -770,6 +845,13 @@ def render_report(
     `context_spans` the modelled start/end stored on each SampleGroup.
     Nothing is re-derived from the database here, so the PDF cannot report
     a different run from the CSV downloaded beside it.
+
+    `intervals` is the durations-and-differences block stored on the analysis
+    (services/intervals.py), passed in rather than read here for the same
+    reason as everything else: the report describes the run the CSV beside it
+    describes. None when the run was not asked for them, in which case the
+    report simply has no such section -- an empty one would read as "nothing
+    lasted any time", which is not what a missing option means.
 
     `distributions` maps sample id to that date's posterior series, and is
     passed separately because the shared assembly deliberately leaves it
@@ -877,6 +959,35 @@ def render_report(
             styles['note'],
         ))
         story.append(_context_spans_table(context_spans, date_format, styles))
+
+    # --- durations and differences, when the run was asked for them
+    durations = (intervals or {}).get('durations') or []
+    differences = (intervals or {}).get('differences') or []
+    if durations or differences:
+        story.append(Paragraph('Durations and Differences', styles['heading']))
+        story.append(Paragraph(
+            "Lengths of time, in years, rather than calendar dates -- so these are not "
+            "converted to the reporting era. A phase's duration is the interval its "
+            "Boundaries enclose and is longer than the span of its dated events, since "
+            "those events are a sample of the phase rather than the whole of it. "
+            f"Estimated from {(intervals or {}).get('draws') or 0:,} joint draws, so unlike "
+            "every other figure in this report they carry a Monte Carlo error.",
+            styles['note'],
+        ))
+        if durations:
+            story.append(_durations_table(durations, styles))
+        if differences:
+            story.append(Paragraph(
+                "Differences are positive for a gap and negative for an overlap. "
+                "\"Overlap\" is the probability that the two cannot be separated in "
+                "time -- for two phases, that their modelled intervals intersect; for "
+                "two dates, that the model cannot say which came first -- graded at the "
+                "same 68% and 95% levels the HPD regions use.",
+                styles['note'],
+            ))
+            story.append(_differences_table(differences, styles))
+        if (intervals or {}).get('note'):
+            story.append(Paragraph(str(intervals['note']), styles['note']))
 
     # --- one figure per modelled parameter
     figures: List[Any] = []

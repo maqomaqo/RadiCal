@@ -120,6 +120,77 @@ export interface PosteriorSummary {
   probability_distribution: Array<[number, number]>
 }
 
+// --- durations and differences ---
+//
+// Mirrors backend/app/services/intervals.py. Deliberately NOT shaped like
+// PosteriorSummary above: every figure here is a LENGTH OF TIME in years, not
+// a calendar age, so none of it may go through formatCalendarAge or the
+// BC/AD conversion. Different field names are what makes that mistake
+// impossible rather than merely discouraged.
+export interface DurationSummary {
+  mean: number
+  median: number
+  std: number
+  hpd_68: [number, number] | null
+  hpd_95: [number, number] | null
+  hpd_68_ranges?: HPDRange[]
+  hpd_95_ranges?: HPDRange[]
+  // The bin width the ranges above are quoted at, in years. Widens for a
+  // duration spanning millennia, so a reader can see what resolution the
+  // answer is actually at.
+  step: number
+  distribution: Array<[number, number]>
+}
+
+export type DurationKind = 'sequence_duration' | 'phase_duration' | 'sample_duration'
+
+export interface DurationRecord {
+  kind: DurationKind
+  id: string
+  name: string
+  // The model element this is about, when exactly one -- null for a bounded
+  // group holding several.
+  element_id?: string | null
+  // How many dated events a sample duration spans; null for the others.
+  dates?: number | null
+  years: DurationSummary
+}
+
+export interface DifferenceRecord {
+  kind: 'phase_difference' | 'date_difference'
+  id: string
+  from_id: string
+  from_name: string
+  to_id: string
+  to_name: string
+  // Signed years. For two phases, positive is a gap and negative an overlap;
+  // for two dates, positive means `from` is the older.
+  years: DurationSummary
+  // 0-1: how far the two are from being separable in time. For phases, the
+  // probability their modelled intervals intersect; for dates, the probability
+  // the model cannot say which came first.
+  overlap: number
+  severity: 'none' | 'slight' | 'moderate' | 'substantial' | 'significant'
+  // Dates only: P(`from` is older than `to`).
+  older_probability?: number
+  // Phases only: the two share a Boundary, so their gap is zero because the
+  // model says so rather than because the dates do.
+  shared_boundary?: boolean
+}
+
+export interface IntervalsBlock {
+  durations: DurationRecord[]
+  differences: DifferenceRecord[]
+  // How many joint draws these were estimated from, and whether those draws
+  // were independent (the exact solver, or a group calibration) or an MCMC
+  // chain, where the effective count is smaller than the count.
+  draws: number
+  independent: boolean
+  // Set when the difference table had to be cut down -- see MAX_PAIRS on the
+  // backend.
+  note?: string | null
+}
+
 export interface DraftGroup {
   id: string
   name: string

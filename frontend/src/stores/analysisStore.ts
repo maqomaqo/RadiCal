@@ -23,6 +23,12 @@ export interface McmcConfig {
   // BayesianConfigInput.uniform_span_prior on the backend for what it does.
   // On by default there and here.
   uniform_span_prior: boolean
+  // Also estimate how long each sequence, phase and set of dated events
+  // lasted, and how far apart the phases sit. Off by default, matching
+  // BayesianConfigInput.estimate_durations on the backend -- a duration is a
+  // claim about a phase's extent that the analyst makes rather than one the
+  // app makes for them.
+  estimate_durations: boolean
 }
 
 // 4000 draws is how many posterior samples a result carries, not how long the
@@ -34,6 +40,7 @@ export const DEFAULT_MCMC: McmcConfig = {
   mcmc_tune: 1000,
   mcmc_chains: 4,
   uniform_span_prior: true,
+  estimate_durations: false,
 }
 
 interface AnalysisDraftState {

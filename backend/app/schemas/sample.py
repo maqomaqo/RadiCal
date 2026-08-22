@@ -459,6 +459,18 @@ class BayesianConfigInput(BaseModel):
     # changes, and services/gibbs.Model._span_priors for how it is grouped
     # when a model has several sequences.
     uniform_span_prior: bool = True
+    # Also estimate how long each sequence, phase and set of dated events
+    # lasted, and how far apart the phases sit -- see services/intervals.py.
+    #
+    # Opt-in rather than always-on, for two reasons that are not "it is slow"
+    # (it costs one extra pass on the exact path and nothing per sweep on the
+    # sampled one). A phase duration is a claim that the dates are a fair
+    # sample of a bounded episode, which is a modelling assumption the analyst
+    # makes rather than one the app should make on their behalf; and these are
+    # the only figures in the app carrying Monte Carlo error, since they can
+    # only be read off JOINT draws, so they are reported when asked for and not
+    # slipped in beside numbers that carry none.
+    estimate_durations: bool = False
 
 
 class GroupCalibrationRequest(BaseModel):
@@ -481,6 +493,15 @@ class GroupCalibrationRequest(BaseModel):
     measurements: List[BayesianMeasurementInput] = Field(..., min_length=1)
     project_id: Optional[str] = None
     save: bool = True
+    # Also report the difference between every pair of these dates: how many
+    # years apart they are and how confidently the model can order them. The
+    # same option BayesianConfigInput.estimate_durations offers a model, with
+    # only the differences to report -- dates laid out with no relationship
+    # asserted between them have no phase and so no duration. Cheap and exact
+    # here (the dates are independent, so drawing them separately IS drawing
+    # from the joint), and still opt-in so a group calibration of thirty dates
+    # does not answer with a table of 435 pairs nobody asked for.
+    estimate_durations: bool = False
 
     @field_validator("name")
     @classmethod
@@ -513,6 +534,15 @@ class BayesianRequest(BaseModel):
     # groups/relationships are converted into an equivalent tree server-side,
     # so older clients keep working unchanged.
     model_tree: Optional[Dict[str, Any]] = None
+    # Only PUT /analysis/{id}/inputs reads this: it is what the analysis
+    # should BECOME, so that editing a saved analysis and changing its type
+    # converts that analysis rather than leaving it behind. None means "leave
+    # the type as it is", which is what every older client sends.
+    #
+    # POST /analysis/bayesian ignores it -- that route creates a Bayesian
+    # analysis by definition, and accepting a type there would let a request
+    # ask one endpoint for another endpoint's job.
+    analysis_type: Optional[Literal["calibration", "group_calibration", "bayesian"]] = None
 
     @field_validator("name")
     @classmethod

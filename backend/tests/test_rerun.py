@@ -830,3 +830,119 @@ def test_outlier_values_survive_a_rerun_of_an_ordered_sibling_model(client):
     # ...and the results page reads the same numbers off the GET.
     results = client.get(f'/api/analysis/{analysis_id}').json()['data']['results']
     assert all(r['outlier_probability'] is not None for r in results), results
+
+
+_CONVERT_IDS = itertools.count(1)
+
+
+class TestChangingAnAnalysisType:
+    """
+    Editing an analysis and changing its type has to convert THAT analysis.
+
+    The bug this pins: deploying a project's dates always creates a pending
+    Bayesian analysis and drops the user into its editor, so choosing Group
+    Calibration there was the ordinary way to reach the type switch. The edit
+    posted a brand-new analysis instead of replacing the one being edited,
+    leaving two analyses with the same name and the original stuck at
+    'pending' for ever.
+    """
+
+    def _deployed(self, client, name="Deployed dates"):
+        """A project, two collected dates, and the pending Bayesian analysis
+        deploying them produces -- the exact state the bug started from."""
+        tag = f"cv{next(_CONVERT_IDS)}"
+        project_id = client.post(
+            "/api/projects", json={"name": f"Project {tag}"}).json()["data"]["id"]
+        created = client.post(
+            f"/api/projects/{project_id}/samples",
+            json={"samples": [
+                {"sample_name": f"{tag}-{index}", "age_bp": age, "error_1sigma": 30,
+                 "material_type": "charcoal", "sample_type": "terrestrial",
+                 "curve_id": "intcal20"}
+                for index, age in enumerate((3000, 2900))
+            ]},
+        )
+        assert created.status_code in (200, 201), created.text
+        sample_ids = [s["id"] for s in created.json()["data"]["items"]]
+
+        deployed = client.post(
+            f"/api/projects/{project_id}/deploy",
+            json={"name": name, "sample_ids": sample_ids, "analysis_type": "bayesian"},
+        )
+        assert deployed.status_code == 200, deployed.text
+        return project_id, deployed.json()["data"]["id"], sample_ids
+
+    def _measurements(self, client, analysis_id):
+        """The dates as the edit page resubmits them: read back from the
+        analysis, with no context and no phase, which is what a group
+        calibration has."""
+        fetched = client.get(f"/api/analysis/{analysis_id}").json()["data"]
+        return [
+            {"id": m["id"], "sample_name": m["sample_name"], "age_bp": m["age_bp"],
+             "error_1sigma": m["error_1sigma"], "material_type": m["material_type"],
+             "sample_type": m["sample_type"], "curve_id": m["curve_id"],
+             "group_id": None, "element_id": None}
+            for m in fetched["measurements"]
+        ]
+
+    def test_switching_to_group_calibration_converts_it_in_place(self, client):
+        project_id, analysis_id, _ = self._deployed(client, name="Converted")
+        before = client.get(f"/api/analysis?project_id={project_id}").json()["data"]
+        assert before["total"] == 1
+
+        replaced = client.put(
+            f"/api/analysis/{analysis_id}/inputs",
+            json={"name": "Converted", "analysis_type": "group_calibration",
+                  "measurements": self._measurements(client, analysis_id),
+                  "groups": [], "relationships": [], "project_id": project_id},
+        )
+        assert replaced.status_code == 200, replaced.text
+        assert replaced.json()["data"]["analysis_type"] == "group_calibration"
+
+        # wait=true so the run finishes inside the request; the page uses the
+        # queued form and polls, which is the same work either way.
+        ran = client.post(f"/api/analysis/{analysis_id}/rerun?wait=true")
+        assert ran.status_code == 200, ran.text
+
+        after = client.get(f"/api/analysis?project_id={project_id}").json()["data"]
+        assert after["total"] == 1, (
+            "editing an analysis must not leave a second one behind: "
+            f"{[(a['name'], a['status']) for a in after['items']]}"
+        )
+        fetched = client.get(f"/api/analysis/{analysis_id}").json()["data"]
+        assert fetched["analysis_type"] == "group_calibration"
+        assert fetched["status"] == "completed"
+        assert len(fetched["results"]) == 2, "both dates must still be calibrated"
+        # A group calibration has no model, so nothing may be left claiming it
+        # sits in one.
+        assert fetched["model_tree"] is None
+        assert all(m["element_id"] is None for m in fetched["measurements"])
+
+    def test_a_single_calibration_of_several_dates_is_stored_as_a_group(self, client):
+        """
+        'calibration' means ONE date on its own, so several of them are
+        stored as the group calibration they actually are -- the same
+        promotion deploying makes. Silently keeping the label would leave
+        the results page describing an analysis it is not.
+        """
+        project_id, analysis_id, _ = self._deployed(client)
+        replaced = client.put(
+            f"/api/analysis/{analysis_id}/inputs",
+            json={"name": "Two dates", "analysis_type": "calibration",
+                  "measurements": self._measurements(client, analysis_id),
+                  "groups": [], "relationships": [], "project_id": project_id},
+        )
+        assert replaced.status_code == 200, replaced.text
+        assert replaced.json()["data"]["analysis_type"] == "group_calibration"
+
+    def test_omitting_the_type_leaves_it_alone(self, client):
+        """An ordinary same-type edit, and every older client's request."""
+        _project_id, analysis_id, _ = self._deployed(client)
+        replaced = client.put(
+            f"/api/analysis/{analysis_id}/inputs",
+            json={"name": "Untouched",
+                  "measurements": self._measurements(client, analysis_id),
+                  "groups": [], "relationships": []},
+        )
+        assert replaced.status_code == 200, replaced.text
+        assert replaced.json()["data"]["analysis_type"] == "bayesian"

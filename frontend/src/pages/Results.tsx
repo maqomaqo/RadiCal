@@ -45,6 +45,7 @@ import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown'
 import PosteriorPlot from '@/components/PosteriorPlot'
 import StackedPosteriorPlot from '@/components/StackedPosteriorPlot'
 import HarrisMatrixDiagram from '@/components/HarrisMatrixDiagram'
+import DurationsPanel from '@/components/DurationsPanel'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import { formatApiError } from '@/utils/apiError'
 import { useNotify } from '@/contexts/NotificationContext'
@@ -61,7 +62,14 @@ import {
   HPDRange,
 } from '@/utils/dateFormat'
 import { hpdEnvelopeFromHistogram } from '@/utils/hpd'
-import type { MatrixMeasurement, DraftGroup, DraftRelationship, ModelElement, PosteriorSummary } from '@/types'
+import type {
+  MatrixMeasurement,
+  DraftGroup,
+  DraftRelationship,
+  IntervalsBlock,
+  ModelElement,
+  PosteriorSummary,
+} from '@/types'
 
 interface AnalysisResult {
   id: string
@@ -109,6 +117,10 @@ interface AnalysisResult {
     draws?: number
     chains?: number
   } | null
+  // How long things lasted and how far apart they sit. Null when the run was
+  // not asked for them, which is not the same as "there are none" -- the page
+  // says so and points at the option rather than showing an empty table.
+  intervals?: IntervalsBlock | null
   results: SampleResult[]
 }
 
@@ -1638,6 +1650,38 @@ export default function Results() {
           </Box>
           )}
         </Paper>
+      )}
+
+      {/* Durations and differences, last on the page. Every figure in it is a
+          length of time rather than a calendar age, and it is read after the
+          dates and Boundaries it is derived from rather than before them. */}
+      {analysis.intervals && (
+        <DurationsPanel
+          intervals={analysis.intervals}
+          confidence={confidence}
+          confidenceLabel={CONFIDENCE_LABEL}
+          showMean={showMean}
+          showMedian={showMedian}
+        />
+      )}
+
+      {/* Said once, quietly, and only where it could have applied: a run that
+          was not asked for durations has none, and the difference between
+          that and "there were none to find" is not something the reader can
+          work out from an absent table. */}
+      {!analysis.intervals
+        && analysis.status === 'completed'
+        && (isBayesian || analysis.analysis_type === 'group_calibration')
+        && (analysis.results || []).length > 1 && (
+        <Typography variant="body2" color="textSecondary" sx={{ mb: 3 }}>
+          This run did not estimate{' '}
+          {isBayesian ? 'durations and differences' : 'differences between the dates'}.{' '}
+          <Link component={RouterLink} to={`/analysis/${analysis.id}/edit`}>
+            Edit
+          </Link>{' '}
+          it, turn the option on under {isBayesian ? 'Model Settings' : 'Reporting'}, and run
+          it again.
+        </Typography>
       )}
 
       <Box sx={{ mt: 4 }}>

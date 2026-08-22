@@ -60,6 +60,18 @@ Boundaries), and interactive posterior visualization.
   — nesting shown as boxes within boxes, Boundaries as labelled rules carrying their modelled
   range, and an arrow only between adjacent blocks that nothing else already separates. Laid out
   from the tree by `utils/harrisLayout.ts`, whose geometry is unit-tested rather than eyeballed.
+- **Durations and differences** (opt-in): how long each Sequence, each Phase, and each phase's set
+  of *dated events* lasted, and how far apart the phases sit — a gap in years where they are
+  separate, an overlap where they are not, each graded from "none" to "significant" at the same
+  68%/95% levels the HPD regions use. The three durations are three different questions: a Phase's
+  duration is the interval its Boundaries enclose, its dated events span less than that, and the
+  distance between the two is how much of the phase the dates did not catch. Every one of these is a
+  function of several modelled ages at once, so they are read off *joint* draws of the posterior —
+  exactly what the marginal distributions elsewhere in the app cannot give you (pairing two boundary
+  marginals puts 8% of one test phase's durations below zero). On the exact solver those draws are
+  independent draws from the true posterior, by backward sampling over the same chain it already
+  built. A group calibration gets the differences without the durations: dates with no relationship
+  asserted between them belong to no phase.
 - **Diagnostics**: an OxCal-style agreement index per date (how much the model had to move it away
   from its own unconstrained calibration) and an outlier posterior probability where an outlier model
   is applied.
@@ -79,9 +91,9 @@ Boundaries), and interactive posterior visualization.
   implemented.
 - **Export**: CSV, JSON, and a printable PDF report — the analysis's metadata, the curves and
   solver that actually produced it, the results table in the model's own reading order with dates
-  and Boundaries reporting through the same columns, and a posterior plot for each of them with its
-  unmodelled calibration behind it. All three come from one assembly, so the three downloads of one
-  analysis cannot disagree; a column appears in the report only when the run has something to put
+  and Boundaries reporting through the same columns, the durations-and-differences table where one
+  was produced, and a posterior plot for each parameter with its unmodelled calibration behind it.
+  All three come from one assembly, so the three downloads of one analysis cannot disagree; a column appears in the report only when the run has something to put
   in it, so a plain calibration is not padded out with the diagnostics only a model produces.
 
 ## Tech Stack

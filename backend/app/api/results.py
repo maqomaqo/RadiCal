@@ -35,6 +35,80 @@ def _format_hpd_ranges(ranges: Optional[List[Dict]], fallback_min, fallback_max)
     return ''
 
 
+# The durations-and-differences block, as spreadsheet rows. A second table in
+# the same file rather than a fourth download: it belongs to the same run, it
+# is short, and splitting it out would be one more thing to forget to fetch.
+# Its own header because it shares no column with the results table above --
+# every figure here is a length in years, and none of them is a calendar date,
+# so none of them may be converted to BC/AD (the same rule _FORMATTED_COLUMNS
+# already states for Posterior Std).
+INTERVAL_HEADER = [
+    'Row Type', 'Name', 'Compared With', 'Mean (yr)', 'Median (yr)', 'Std (yr)',
+    '68% Range (yr)', '95% Range (yr)', 'Overlap Probability', 'Overlap',
+    'Dated Events',
+]
+
+INTERVAL_LABELS = {
+    'sequence_duration': 'Sequence Duration',
+    'phase_duration': 'Phase Duration',
+    'sample_duration': 'Sample Duration',
+    'phase_difference': 'Phase Difference',
+    'date_difference': 'Date Difference',
+}
+
+
+def _years(value: Optional[float]) -> str:
+    return '' if value is None else f"{value:.0f}"
+
+
+def _years_ranges(ranges: Optional[List[Dict]]) -> str:
+    """
+    A duration's HPD as one cell, e.g. "0-125 (95.4%)".
+
+    Written smallest-first, unlike _format_hpd_ranges above, which writes a
+    calendar range oldest-first: a duration is a length, and lengths read
+    upwards.
+    """
+    if not ranges:
+        return ''
+    return '; '.join(
+        f"{r['min']:.0f}-{r['max']:.0f} ({r['probability_percent']:.1f}%)"
+        for r in sorted(ranges, key=lambda r: r['min'])
+    )
+
+
+def _interval_rows(intervals: Optional[Dict]) -> List[List]:
+    """Every duration and difference as a row, durations first."""
+    if not intervals:
+        return []
+    rows = []
+    for record in (intervals.get('durations') or []):
+        years = record.get('years') or {}
+        rows.append([
+            INTERVAL_LABELS.get(record.get('kind'), record.get('kind')),
+            record.get('name') or '', '',
+            _years(years.get('mean')), _years(years.get('median')),
+            _years(years.get('std')),
+            _years_ranges(years.get('hpd_68_ranges')),
+            _years_ranges(years.get('hpd_95_ranges')),
+            '', '', record.get('dates') if record.get('dates') else '',
+        ])
+    for record in (intervals.get('differences') or []):
+        years = record.get('years') or {}
+        overlap = record.get('overlap')
+        rows.append([
+            INTERVAL_LABELS.get(record.get('kind'), record.get('kind')),
+            record.get('from_name') or '', record.get('to_name') or '',
+            _years(years.get('mean')), _years(years.get('median')),
+            _years(years.get('std')),
+            _years_ranges(years.get('hpd_68_ranges')),
+            _years_ranges(years.get('hpd_95_ranges')),
+            '' if overlap is None else f"{overlap:.3f}",
+            record.get('severity') or '', '',
+        ])
+    return rows
+
+
 def _unmodelled_ranges(sample, analysis_type: str) -> Dict:
     """
     What this date calibrates to on its own, with no stratigraphic
@@ -297,6 +371,25 @@ def _boundary_as_result(posterior: Dict) -> Dict:
     }
 
 
+def _write_intervals(writer, analysis) -> None:
+    """
+    The durations-and-differences table, appended below the results table with
+    a blank line and its own header.
+
+    Two tables in one file is unusual, and the alternative was worse: a fourth
+    download for a dozen rows that belong to the same run, which is one more
+    thing to fetch and one more thing to forget. A spreadsheet reads it as a
+    second block; the blank row and the repeated header say where it starts.
+    """
+    rows = _interval_rows(analysis.intervals)
+    if not rows:
+        return
+    writer.writerow([])
+    writer.writerow(INTERVAL_HEADER)
+    for row in rows:
+        writer.writerow(row)
+
+
 def _build_csv(analysis_id: str, db: Session, date_format: Optional[str] = None) -> str:
     """
     One row per modelled entity -- sequences, phases, boundaries and dates
@@ -342,6 +435,7 @@ def _build_csv(analysis_id: str, db: Session, date_format: Optional[str] = None)
                 + _posterior_cells(row) + ['', '']
                 + extra(row, None, None)
             )
+        _write_intervals(writer, analysis)
         return output.getvalue()
 
     for order, row in enumerate(structure, start=1):
@@ -369,6 +463,7 @@ def _build_csv(analysis_id: str, db: Session, date_format: Optional[str] = None)
             + extra(result, row['tpq_age_bp'], row['taq_age_bp'])
         )
 
+    _write_intervals(writer, analysis)
     return output.getvalue()
 
 
@@ -474,6 +569,12 @@ def export_json(analysis_id: str, db: Session = Depends(get_db)):
             "project_id": analysis.project_id,
             "results": data['rows'],
             "structure": _structure_payload(structure),
+            # How long things lasted and how far apart they sit, when the run
+            # was asked for them. Null otherwise -- see Analysis.intervals, and
+            # services/intervals.py for the shape. Carried whole rather than
+            # flattened the way the CSV flattens it, since JSON has room for
+            # the full HPD breakdown and the plottable series.
+            "intervals": analysis.intervals,
         }
     }
 
@@ -543,6 +644,7 @@ def export_pdf(analysis_id: str, date_format: Optional[str] = None,
         samples_by_id=data['samples_by_id'],
         distributions=distributions,
         context_spans=_context_spans(analysis_id, db),
+        intervals=analysis.intervals,
         project_name=analysis.project.name if analysis.project else None,
         date_format=date_format,
     )

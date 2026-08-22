@@ -49,6 +49,7 @@ import {
   saveDateFormatPreference,
 } from '@/utils/dateFormat'
 import { formatApiError } from '@/utils/apiError'
+import { buildInputsPayload } from '@/utils/analysisPayload'
 import { useNotify } from '@/contexts/NotificationContext'
 import { useAnalysisDraftStore, DEFAULT_MCMC } from '@/stores/analysisStore'
 import type { McmcConfig, SolverChoice } from '@/stores/analysisStore'
@@ -654,6 +655,50 @@ export default function NewAnalysis() {
     }
   }
 
+  /**
+   * Why the run must not go ahead, or null. Only the Bayesian type has a
+   * structure to be wrong: a calibration has none to check.
+   */
+  const structureProblem = (): string | null => {
+    if (analysisType !== 'bayesian') return null
+    // An invalid model structure would only be rejected with a 422 after
+    // submitting, so stop here and point back at the editor instead. The
+    // detail lives in the persistent "Model structure problems: ..." banner
+    // further down the page (see structureInvalid below) -- this toast is
+    // only the acknowledgment that clicking Run didn't do anything, and why
+    // to look down there.
+    if (modelTree && treeProblems.length > 0) {
+      return 'Cannot run: the model structure has problems shown below. Fix them on the Model Structure page first.'
+    }
+    // The backend rejects a circular relationship set with a 422 before
+    // running anything, but checking here avoids sending a request already
+    // known to be invalid. Only relevant to the legacy relationship path --
+    // a model tree cannot contain a cycle, which is one of the things
+    // authoring one directly buys.
+    if (!modelTree && cycle) {
+      return 'Cannot run: the stratigraphic relationships are circular. Fix this on the Model Structure page first.'
+    }
+    return null
+  }
+
+  // Stratigraphy is authored as an explicit model tree (see Stratigraphy.tsx's
+  // Editor tab) and submitted as-is; the groups/relationships fields are still
+  // sent for a draft that predates a tree being built, in which case the
+  // backend converts them into one. See utils/analysisPayload.ts for what a
+  // non-Bayesian type has to clear.
+  const inputsPayload = () =>
+    buildInputsPayload({
+      name: analysisName,
+      analysisType,
+      measurements,
+      groups,
+      relationships,
+      modelTree,
+      elementAssignments,
+      projectId,
+      mcmc,
+    })
+
   const handleRunAnalysis = async () => {
     if (!analysisName || measurements.length === 0) {
       setRunError('Please provide analysis name and at least one measurement.')
@@ -664,7 +709,51 @@ export default function NewAnalysis() {
     setLoading(true)
     setPreviewResult(null)
     try {
-      if (analysisType === 'calibration') {
+      const blocked = structureProblem()
+      if (blocked) {
+        notify(blocked)
+        setLoading(false)
+        return
+      }
+
+      // Editing replaces THIS analysis's inputs whatever type it is being
+      // changed to, so switching a saved analysis to another type CONVERTS
+      // it. Only the Bayesian branch below used to take this path: the other
+      // two always posted a fresh analysis, leaving the one being edited
+      // behind as a pending duplicate under the same name. Deploying a
+      // project's dates and then choosing Group Calibration hit that every
+      // time, since deploying always creates a pending Bayesian analysis and
+      // drops you into its editor.
+      if (isEditing) {
+        const response = await fetch(`/api/analysis/${editRouteId}/inputs`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(inputsPayload()),
+        })
+        const data = await response.json()
+        if (!data.success) {
+          setRunError('Analysis failed: ' + formatApiError(data))
+          return
+        }
+        // Several dates with no model between them are stored as a group
+        // calibration however the form labelled them -- say so rather than
+        // leaving the results page contradicting what was just chosen.
+        if (data.data.analysis_type && data.data.analysis_type !== analysisType) {
+          notify(
+            `Saved as a group calibration: a single calibration is one date, and this has ${measurements.length}.`
+          )
+        }
+        const runResponse = await fetch(`/api/analysis/${editRouteId}/rerun`, { method: 'POST' })
+        const runData = await runResponse.json()
+        if (!runData.success) {
+          setRunError('Inputs saved, but the run failed: ' + formatApiError(runData))
+          setLoading(false)
+          return
+        }
+        saveDateFormatPreference(editRouteId!, dateFormat)
+        resetDraft()
+        navigate(`/results/${editRouteId}`)
+      } else if (analysisType === 'calibration') {
         // For single calibration, send just the first measurement -- but all
         // of it. Sending only age/error/curve dropped everything else the
         // form had collected: the sample's own name (so it saved as the
@@ -708,10 +797,8 @@ export default function NewAnalysis() {
         // the Bayesian draft builds (see GroupCalibrationRequest's
         // docstring), so group_id/outlier fields ride along unused.
         //
-        // Like Bayesian, always saved -- and like 'calibration' above,
-        // editing does not replace this analysis's inputs in place; it
-        // always creates a new one. Fixing that is a pre-existing gap in
-        // 'calibration' too, not something introduced here.
+        // Creating only: an edit went through PUT /inputs above, whatever
+        // type it is being changed to.
         const response = await fetch('/api/analysis/calibrate-group', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -719,6 +806,10 @@ export default function NewAnalysis() {
             name: analysisName,
             measurements,
             project_id: projectId || null,
+            // The one model setting that means anything without a model: how
+            // far apart these dates are, and whether they can be told apart
+            // at all. There are no phases here to have durations.
+            estimate_durations: mcmc.estimate_durations,
           }),
         })
         const data = await response.json()
@@ -730,79 +821,20 @@ export default function NewAnalysis() {
           setRunError('Analysis failed: ' + formatApiError(data))
         }
       } else {
-        // For Bayesian, send the full stratigraphy defined on the
-        // Model Structure page too (groups, relationships, and any TPQ/TAQ
-        // limiters set there or inline on a measurement) -- previously
-        // this always sent relationships: [], so the working constraint
-        // logic on the backend was unreachable from the UI entirely.
-        //
-        // The backend rejects a circular relationship set with a 422
-        // before running any MCMC, but checking here too avoids sending
-        // a request that's already known to be invalid. Only relevant to
-        // the legacy relationship path -- a model tree cannot contain a
-        // cycle, which is one of the things authoring one directly buys.
-        // An invalid model structure would only be rejected with a 422 after
-        // submitting, so stop here and point back at the editor instead.
-        // The detail lives in the persistent "Model structure problems: ..."
-        // banner further down the page (see structureInvalid below) --
-        // this toast is only the acknowledgment that clicking Run didn't
-        // do anything, and why to look down there.
-        if (modelTree && treeProblems.length > 0) {
-          notify('Cannot run: the model structure has problems shown below. Fix them on the Model Structure page first.')
-          setLoading(false)
-          return
-        }
-        if (!modelTree && cycle) {
-          notify('Cannot run: the stratigraphic relationships are circular. Fix this on the Model Structure page first.')
-          setLoading(false)
-          return
-        }
-        // Stratigraphy is authored as an explicit model tree (see
-        // Stratigraphy.tsx's Editor tab), submitted as-is. The
-        // groups/relationships fields are still sent for a draft that
-        // predates a tree being built, in which case the backend converts
-        // them into an equivalent one.
-        const payload: Record<string, unknown> = {
-          name: analysisName,
-          measurements: modelTree
-            ? measurements.map((m) => ({ ...m, element_id: elementAssignments[m.id] || null }))
-            : measurements,
-          groups: modelTree ? [] : groups,
-          relationships: modelTree ? [] : relationships.map(({ id: _id, ...r }) => r),
-          project_id: projectId || null,
-          bayesian_config: mcmc,
-        }
-        if (modelTree) payload.model_tree = modelTree
-
-        // Editing an existing analysis replaces its inputs and then re-runs
-        // it in place, keeping the same id/URL. Creating a new one posts to
-        // /analysis/bayesian, which validates, persists and runs in one go.
-        const response = isEditing
-          ? await fetch(`/api/analysis/${editRouteId}/inputs`, {
-              method: 'PUT',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(payload),
-            })
-          : await fetch('/api/analysis/bayesian', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(payload),
-            })
+        // Creating a Bayesian analysis: /analysis/bayesian validates,
+        // persists and runs it in one go. The full stratigraphy defined on
+        // the Model Structure page goes with it -- contexts, relationships,
+        // and any TPQ/TAQ limiters set there or inline on a measurement.
+        const response = await fetch('/api/analysis/bayesian', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(inputsPayload()),
+        })
         const data = await response.json()
         if (data.success) {
-          const resultId = isEditing ? editRouteId! : data.data.id
-          if (isEditing) {
-            const runResponse = await fetch(`/api/analysis/${resultId}/rerun`, { method: 'POST' })
-            const runData = await runResponse.json()
-            if (!runData.success) {
-              setRunError('Inputs saved, but the run failed: ' + formatApiError(runData))
-              setLoading(false)
-              return
-            }
-          }
-          saveDateFormatPreference(resultId, dateFormat)
+          saveDateFormatPreference(data.data.id, dateFormat)
           resetDraft()
-          navigate(`/results/${resultId}`)
+          navigate(`/results/${data.data.id}`)
         } else {
           setRunError('Analysis failed: ' + formatApiError(data))
         }
@@ -991,6 +1023,45 @@ export default function NewAnalysis() {
                     </Tooltip>
                   }
                 />
+                <FormControlLabel
+                  sx={{ mt: 0.5, display: 'flex' }}
+                  control={
+                    <Switch
+                      checked={mcmc.estimate_durations}
+                      onChange={(e) => setMcmc({ estimate_durations: e.target.checked })}
+                    />
+                  }
+                  label={<span>Durations and differences</span>}
+                />
+                <FormHelperText sx={{ mt: 0, ml: 0 }}>
+                  How long each sequence, phase and set of dated events lasted, and how
+                  far apart the phases sit. Off by default: a phase&rsquo;s duration
+                  assumes its dates sample a bounded episode.
+                </FormHelperText>
+              </Box>
+            )}
+
+            {/* A group calibration has no phases, so nothing here has a
+                duration -- but the dates can still be compared with each
+                other, which is the half of this option that applies. */}
+            {analysisType === 'group_calibration' && (
+              <Box sx={{ mb: 2 }}>
+                <Typography variant="subtitle2" gutterBottom>
+                  Reporting
+                </Typography>
+                <FormControlLabel
+                  control={
+                    <Switch
+                      checked={mcmc.estimate_durations}
+                      onChange={(e) => setMcmc({ estimate_durations: e.target.checked })}
+                    />
+                  }
+                  label={<span>Differences between dates</span>}
+                />
+                <FormHelperText sx={{ mt: 0, ml: 0 }}>
+                  How many years apart each pair of dates is, and how confidently they
+                  can be put in order.
+                </FormHelperText>
               </Box>
             )}
           </Paper>

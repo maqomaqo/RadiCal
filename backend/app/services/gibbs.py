@@ -138,6 +138,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 
+from app.services import intervals
 from app.services.exact_chain import (
     DEFAULT_OUTLIER_MODEL,
     OUTLIER_KERNEL_HALF_WIDTH_YEARS,
@@ -987,6 +988,7 @@ def run(model: Model, sweeps: int = DEFAULT_SWEEPS, seed: int = 42,
         burn_in: Optional[int] = None,
         target_convergence: float = TARGET_CONVERGENCE,
         max_sweeps: Optional[int] = None,
+        collect_draws: int = 0,
         on_progress: Optional[Callable[[Dict], bool]] = None) -> Dict:
     """
     Sweep the sampler and accumulate each parameter's marginal as a histogram
@@ -1030,6 +1032,17 @@ def run(model: Model, sweeps: int = DEFAULT_SWEEPS, seed: int = 42,
     fraction of it; that is a success rather than a truncation, which is why
     the achieved convergence is reported alongside.
 
+    `collect_draws`, when non-zero, additionally keeps roughly that many WHOLE
+    STATES -- every parameter's position at the same sweep -- thinned evenly
+    through the run and returned as `draws`. The histograms above are marginals
+    and a duration is not (see services/intervals.py), so a quantity like "how
+    long did this phase last" can only be read off states kept jointly. They are
+    kept per round and folded exactly as the histograms are, so the burn-in
+    discard applies to both alike and the memory stays flat however long the run
+    extends. Unlike exact_chain's, these draws are an MCMC chain: consecutive
+    ones are correlated, so `collect_draws` of them are worth fewer than that
+    many independent draws.
+
     Returns {'histograms', 'sweeps', 'sweeps_kept', 'convergence', 'acceptance',
     ...} -- convergence being OxCal's own diagnostic, per parameter.
     """
@@ -1067,6 +1080,12 @@ def run(model: Model, sweeps: int = DEFAULT_SWEEPS, seed: int = 42,
     # reported density afterwards.
     outlier_total = {d: 0.0 for d in model.likelihood_at}
     accumulated = 0
+    # Whole states, one array per round so they fold alongside the histograms.
+    # Indices rather than years: that is what the state already holds, and an
+    # int32 per parameter per draw keeps this a few megabytes at the sizes
+    # involved.
+    per_round_draws = max(1, collect_draws // ROUNDS) if collect_draws else 0
+    round_draws: List[np.ndarray] = []
 
     def new_round() -> Dict[str, np.ndarray]:
         return {p: np.zeros(model.M) for p in model.params}
@@ -1135,7 +1154,12 @@ def run(model: Model, sweeps: int = DEFAULT_SWEEPS, seed: int = 42,
 
     while True:
         current = new_round()
-        for _ in range(round_length):
+        # Even thinning across the round, recomputed each time because
+        # round_length doubles whenever the rounds are folded -- so a round
+        # keeps about per_round_draws states however long the run gets.
+        stride = max(1, round_length // per_round_draws) if per_round_draws else 0
+        kept_states: List[List[int]] = []
+        for step in range(round_length):
             sweep_once()
             for param in model.params:
                 current[param][state.index[param]] += 1.0
@@ -1145,8 +1169,13 @@ def run(model: Model, sweeps: int = DEFAULT_SWEEPS, seed: int = 42,
                 node = model._scale_of(date_id, state)
                 outlier_total[date_id] += float(
                     model.responsibility_at[date_id][node][state.index[date_id]])
+            if stride and step % stride == 0:
+                kept_states.append([state.index[p] for p in model.params])
             accumulated += 1
         rounds.append(current)
+        if per_round_draws:
+            round_draws.append(np.array(kept_states, dtype=np.int32).reshape(
+                len(kept_states), len(model.params)))
 
         if len(rounds) > 2 * ROUNDS:
             # Fold adjacent pairs: same accumulated distribution, half the
@@ -1159,6 +1188,17 @@ def run(model: Model, sweeps: int = DEFAULT_SWEEPS, seed: int = 42,
             if len(rounds) % 2:
                 merged.append(rounds[-1])
             rounds = merged
+            if per_round_draws:
+                # The same fold, then thinned back down: two rounds' states
+                # become one round's, so a folded round holds no more of them
+                # than an unfolded one and the total stays bounded.
+                folded = []
+                for i in range(0, len(round_draws) - 1, 2):
+                    folded.append(np.concatenate(
+                        [round_draws[i], round_draws[i + 1]])[::2])
+                if len(round_draws) % 2:
+                    folded.append(round_draws[-1])
+                round_draws = folded
             round_length *= 2
 
         kept_rounds = _after_burn_in(rounds)
@@ -1172,8 +1212,14 @@ def run(model: Model, sweeps: int = DEFAULT_SWEEPS, seed: int = 42,
 
     kept_rounds = _after_burn_in(rounds)
     counts = {p: sum(r[p] for r in kept_rounds) for p in model.params}
+    # The same rounds the histograms come from, so the two views of the run
+    # cannot describe different stretches of it.
+    kept_draws = round_draws[_burn_in_start(len(rounds)):] if round_draws else []
     return {
         'histograms': counts,
+        'draws': (np.concatenate([d for d in kept_draws if len(d)])
+                  if any(len(d) for d in kept_draws) else None),
+        'draw_params': list(model.params),
         'scale_histograms': scale_counts,
         'outlier_probability': {d: (v / accumulated if accumulated else 0.0)
                                 for d, v in outlier_total.items()},
@@ -1203,9 +1249,17 @@ def _after_burn_in(
     and came out 6.17 years from the exact answer after 214,000 sweeps, WORSE
     than 1.46 at a fixed 100,000. Scaling the discard fixed that.
     """
-    if len(rounds) < 3:
-        return rounds
-    return rounds[int(len(rounds) * BURN_IN_FRACTION):]
+    return rounds[_burn_in_start(len(rounds)):]
+
+
+def _burn_in_start(count: int) -> int:
+    """
+    Index of the first round to report from. Split out of _after_burn_in so the
+    joint draws kept alongside the histograms are cut at exactly the same
+    place -- two burn-in rules would let the marginals and the durations
+    describe different stretches of one run.
+    """
+    return 0 if count < 3 else int(count * BURN_IN_FRACTION)
 
 
 def _convergence(rounds: List[Dict[str, np.ndarray]],
@@ -1237,6 +1291,8 @@ def solve(measurements: List[Dict], root: Dict, sweeps: int = DEFAULT_SWEEPS,
           grid: Optional[np.ndarray] = None,
           target_convergence: float = TARGET_CONVERGENCE,
           max_sweeps: Optional[int] = None,
+          estimate_durations: bool = False,
+          interval_draws: int = intervals.DEFAULT_DRAWS,
           on_progress: Optional[Callable[[Dict], bool]] = None) -> Dict:
     """
     Posterior summaries for every date and boundary, in the same shape
@@ -1251,11 +1307,20 @@ def solve(measurements: List[Dict], root: Dict, sweeps: int = DEFAULT_SWEEPS,
 
     `grid` is accepted so a caller can force exact_chain's own grid and compare
     the two solvers without a resolution difference confounding the answer.
+
+    `estimate_durations` adds `intervals` to the result, exactly as
+    exact_chain.solve's flag of the same name does, from `interval_draws` whole
+    states kept jointly through the run. Off by default for the same reasons,
+    plus one specific to here: keeping states costs nothing per sweep, but they
+    are an MCMC chain rather than independent draws, so a duration read off them
+    converges more slowly than the marginals beside it and the run is not
+    extended on its account.
     """
     model = Model(measurements, root, grid=grid,
                   uniform_span_prior=uniform_span_prior)
     chain = run(model, sweeps=sweeps, seed=seed,
                 target_convergence=target_convergence, max_sweeps=max_sweeps,
+                collect_draws=interval_draws if estimate_durations else 0,
                 on_progress=on_progress)
     rng = np.random.default_rng(seed)
 
@@ -1309,4 +1374,9 @@ def solve(measurements: List[Dict], root: Dict, sweeps: int = DEFAULT_SWEEPS,
         }
     results['grid'] = {'lower': float(model.grid[0]), 'upper': float(model.grid[-1]),
                        'step': model.dt}
+    if estimate_durations and chain['draws'] is not None:
+        joint = {param: model.grid[chain['draws'][:, column]]
+                 for column, param in enumerate(chain['draw_params'])}
+        results['intervals'] = intervals.report(
+            measurements=measurements, root=root, draws=joint, independent=False)
     return results

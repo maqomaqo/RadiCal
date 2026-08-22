@@ -146,6 +146,13 @@ Still missing: explicit phase-duration priors (the uniform span prior is
 there, but not a user-specified duration), and custom per-date priors.
 ~2 hours.
 
+Note the direction: durations are now REPORTED (Done #10), which is the
+posterior side. This item is the prior side -- telling the model a phase
+lasted at most a century before it sees the dates -- and the two are
+independent. Having the reporting makes this easier to judge, though: a
+user-specified duration prior is worth something exactly where the reported
+duration comes back far wider than the archaeology allows.
+
 ### 6. No error boundaries in the frontend
 Most pages have `try/catch` and an error state, but an unexpected render-time
 exception still blanks the page. No `ErrorBoundary` or `componentDidCatch`
@@ -586,3 +593,43 @@ file has carried is closed except authentication, which is a deployment
 decision rather than a defect. The one genuine bug the 2026-08-20 audit found
 — a multi-date `calibration` deploy keeping only the first date — was fixed
 the same day, and no stored analysis had been affected by it.*
+
+### 10. Durations, differences, and joint draws
+**Added 2026-08-22.** Not a gap this file had listed -- a feature request. It
+answers "how long did this phase last" and "how far apart are these two",
+which nothing in the app could say before because every number it reported was
+a MARGINAL and every quantity here is a function of several modelled ages at
+once.
+
+`services/intervals.py` holds the vocabulary and the arithmetic; the work was
+getting it the joint posterior to work from.
+
+- **exact_chain** gained forward-filter/backward-sampling over the chain it
+  already builds (`_messages(...)[2]`), so the draws are INDEPENDENT draws
+  from the true joint -- no MCMC, no burn-in. The UniformSpanPrior correction
+  breaks the Markov property, so that path draws the two ends together from
+  `C * A[n]` and fills the interior in between them; both are held against
+  hand-written distributions in `test_intervals.TestTheJointSampler`.
+- **gibbs** keeps whole states as it sweeps, folded and burnt in on exactly
+  the same schedule as its histograms (`_burn_in_start`), so the marginals and
+  the durations describe one stretch of one run.
+
+Two decisions worth knowing:
+
+- **It is Monte Carlo, and says so.** Only a single phase's duration is cheaply
+  exact; a sequence duration couples the ends of the chain and a sample
+  duration is the range of K dates, and neither factorises. Reporting one
+  exactly and the other from draws would put a systematic difference between
+  two quantities whose whole point is being compared. `draws` and `independent`
+  ride on the stored block, and the UI and the PDF both state it.
+- **The reported bin width is 40 bins over a percentile spread, not min-to-max.**
+  An HPD region is assembled bin by bin in order of density, so bins near the
+  cut go in or out on their own sampling noise: at a five-year step a
+  single-humped gap came back as eight fragments. Forty bins plus a [1,2,1]/4
+  smoothing of the counts collapses that to one range, and taking the spread
+  from percentiles keeps more draws from COARSENING the answer (from min/max,
+  20k -> 60k draws moved the step from 10 years to 15).
+
+What it does not do: no duration for a phase with no Boundaries around it (the
+bracket IS the interval), no comparison between two phases the model brackets
+identically, and nothing at all unless the run was asked for it.

@@ -10,9 +10,10 @@
 6. [Model Structure (Bayesian only)](#model-structure-bayesian-only)
 7. [Running an Analysis](#running-an-analysis)
 8. [Viewing Results](#viewing-results)
-9. [Exporting Data](#exporting-data)
-10. [Projects and Date Collections](#projects-and-date-collections)
-11. [Best Practices](#best-practices)
+9. [Durations and Differences](#durations-and-differences)
+10. [Exporting Data](#exporting-data)
+11. [Projects and Date Collections](#projects-and-date-collections)
+12. [Best Practices](#best-practices)
 
 ## Getting Started
 
@@ -271,6 +272,10 @@ the group that contains it — so it is laid out rather than arranged by hand.
 - **Uniform span prior** — OxCal's `UniformSpanPrior` correction (on by default), which keeps a
   sequence's overall span prior independent of how finely it's subdivided. Only affects a sequence
   with three or more Boundaries.
+- **Durations and differences** — off by default; see
+  [Durations and Differences](#durations-and-differences) below for what it adds and when to want
+  it. A Group Calibration has the same option, labelled **Differences between dates**, under
+  **Reporting**.
 
 ## Running an Analysis
 
@@ -286,6 +291,9 @@ Calibration with "Save this analysis" on) navigates straight to its Results page
 - **Show Mean / Show Median** — optional point estimates alongside the HPD ranges.
 - Any date whose diagnostics are worth a second look (poor agreement with its own unconstrained
   calibration, or a high outlier probability) is called out in a banner above the table.
+- **Durations and Differences** — above the results table, when the run was asked for them. See
+  [Durations and Differences](#durations-and-differences); a run that was not asked for them says
+  so in one line rather than showing an empty table.
 - **Model Structure** — a summary (phase and ordering-relationship counts) and, for a Bayesian
   analysis, the read-only Harris matrix diagram of the constraints actually used.
 - **Posterior Distributions** — Plotly charts, oldest first:
@@ -298,10 +306,65 @@ Calibration with "Save this analysis" on) navigates straight to its Results page
     calibration (no stratigraphic constraints) as a grey shadow behind its modelled posterior, so
     you can see exactly how far the model moved it.
 
+## Durations and Differences
+
+Off by default, and turned on before the run — under **Model Settings** for a Bayesian analysis
+(**Durations and differences**) or **Reporting** for a Group Calibration (**Differences between
+dates**). To add it to an analysis that has already run, **Edit** it, turn the option on, and run it
+again; **Re-run** on its own reuses the settings the analysis was saved with.
+
+Everything in this section is a **length of time in years**, never a calendar date, so none of it is
+converted to BC/AD when you change the reporting format.
+
+### The three durations
+
+- **Sequence** — from a Sequence's first Boundary to its last. How long the whole of it was in use.
+- **Phase** — the interval a Phase's two Boundaries enclose. This is OxCal's `Interval()`, and it is
+  the *modelled* duration: it is normally longer than the spread of the dates inside, because those
+  dates are treated as a sample of the phase rather than the whole of it.
+- **Dated events** — from the oldest to the youngest dated event in a Phase (OxCal's `Span()`).
+  Nothing is inferred beyond the dates themselves.
+
+Reading the second against the third is the point of having both. A phase whose dated events span 30
+years but whose modelled duration is 250 is a phase your dates have barely sampled.
+
+A Phase with fewer than two dates gets no "dated events" row — one date has no span. A Sequence with
+only one bounded group gets no Sequence row, because its Phase duration is already the same quantity.
+
+### Differences
+
+One row per pair. For two **phases** the figure is signed: **positive is a gap** between them in
+years, **negative is an overlap**. For two **dates** in a Group Calibration, positive means the first
+of the pair is the older.
+
+**Overlap** grades how far the two are from being separable in time, from `none` to `significant`.
+For phases it is the probability that their modelled intervals intersect; for dates it is how far
+the model is from being able to say which came first (100% is a coin flip). The bands are the same
+68.3% and 95.4% levels every HPD in the app is quoted at, so `none` means "separated at 2 sigma" and
+`significant` means "overlapping at 2 sigma".
+
+Two phases either side of a single shared Boundary read **shares a transition** rather than a
+figure: one phase's end *is* the next one's start, so the model gives them no gap by construction.
+Put a **Hiatus** between two Boundaries where you want the gap itself modelled. Two phases sitting
+inside the *same* pair of Boundaries are not compared at all — the model brackets them identically,
+so it has nothing to say about their order.
+
+### What these cost
+
+Every quantity here depends on several modelled ages at once, which means it can only be read off
+*joint* draws of the posterior rather than the per-parameter distributions the rest of the page
+shows. Those draws are the only Monte Carlo in the exact solver's output, so these are the one set
+of figures in the app carrying a sampling error — the panel says how many draws they came from, and
+whether those draws were independent (the exact solver, or a Group Calibration) or an MCMC chain.
+The reported ranges are quoted at a step that widens for a very long duration, rather than claiming
+five-year precision the draws cannot support.
+
 ## Exporting Data
 
 - **Export CSV** (on the Results page) — the full results table, including the unmodelled
-  comparison, in the currently-selected date format.
+  comparison, in the currently-selected date format. Where a run produced durations and differences,
+  they follow as a second block below it, after a blank line and their own header — they share no
+  column with the results table, since every figure in them is a length rather than a date.
 - **JSON** — available via the API (`GET /api/results/{id}/export/json`) for anyone who wants the
   full result machine-readable; there's no button for it in the UI yet.
 - **Curve data** (on a curve's browser page) — **Export this window** saves the visible stretch of
@@ -310,8 +373,8 @@ Calibration with "Save this analysis" on) navigates straight to its Results page
   an imported one comes back byte-for-byte as it was uploaded.
 - **Export PDF** (on the Results page) — a printable report of the whole analysis: what it is and
   when it was run, the curve(s) it was calibrated against with their references, which solver
-  computed the posteriors, the results table in the model's own reading order, and a plot of every
-  date and Boundary with its HPD ranges marked. Like the CSV it reads in the date format currently
+  computed the posteriors, the results table in the model's own reading order, the durations and
+  differences where there are any, and a plot of every date and Boundary with its HPD ranges marked. Like the CSV it reads in the date format currently
   selected. It is rendered on the server and draws a plot per modelled parameter, so a large model
   takes a few seconds — the button says so while it works.
 
@@ -328,7 +391,11 @@ dates can be deployed more than once to model them differently each time.
 
 From a project page you can also re-run every analysis in it at once, or re-run, duplicate, or edit
 the inputs of a single analysis (editing replaces its saved inputs and re-runs it in place, keeping
-the same result page).
+the same result page). Deploying always creates a **Bayesian** analysis and opens its editor, so
+changing the Analysis Type there is the usual way to end up with a group calibration — that
+converts the analysis you are editing rather than creating a second one. Choosing Single
+Calibration for more than one date stores it as a group calibration, since a single calibration is
+one date on its own.
 
 ## Best Practices
 

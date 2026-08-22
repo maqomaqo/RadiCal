@@ -192,6 +192,22 @@ class Analysis(Base):
     # analysis, and on any bayesian analysis run before this was recorded.
     solver = Column(JSON, nullable=True)
 
+    # How long things lasted and how far apart they sit -- the quantities that
+    # are functions of SEVERAL modelled ages at once rather than of one, so
+    # they have nowhere to live on an AnalysisResult row beside a single date's
+    # posterior the way every other result here does. Shape and vocabulary in
+    # services/intervals.py. Written only when the run was asked for them
+    # (bayesian_config.estimate_durations), so NULL means "not asked for" --
+    # which is not the same as "nothing to report", and is why the results page
+    # offers to re-run rather than showing an empty table.
+    #
+    # One JSON column rather than a table of its own: nothing queries across
+    # these, they are written once per run and read whole, and a duration's
+    # identity is the model structure that produced it -- which is itself
+    # rewritten wholesale on every rerun, so rows keyed to it would be deleted
+    # and rebuilt every time anyway.
+    intervals = Column(JSON, nullable=True)
+
     # Relations
     project = relationship('Project', back_populates='analyses')
     measurements = relationship('RadiocarbonSample', back_populates='analysis', cascade='all, delete-orphan')

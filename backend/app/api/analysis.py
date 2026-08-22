@@ -8,6 +8,7 @@ from app.services import exact_chain
 from app.services import gibbs
 from app.services import jobs
 from app.services import agreement as agreement_service
+from app.services import intervals
 from app.services.model_tree import (
     migrate_from_relationships,
     rows_to_tree,
@@ -98,6 +99,39 @@ def _compute_calibration_stats(
     }
 
 
+def _date_difference_block(samples: List, seed: int = 42) -> Dict:
+    """
+    How far apart every pair of dates in a group calibration is, and how
+    confidently the model can order them -- Analysis.intervals for an analysis
+    that has no model.
+
+    No solver involved, because none is needed: a group calibration asserts no
+    relationship between its dates, so they are independent and drawing each
+    from its own calibrated posterior IS a draw from the joint. That is the one
+    case where the joint distribution these quantities need comes for free;
+    everywhere else it takes services/exact_chain's backward sampling or the
+    states services/gibbs keeps as it sweeps.
+
+    Pairs read oldest-first, matching the order the results page and every
+    export already put the dates in, so a positive difference always means the
+    first of the pair is the older.
+    """
+    rng = np.random.default_rng(seed)
+    draws: Dict[str, np.ndarray] = {}
+    dates = []
+    for sample in samples:
+        curve = get_curve(sample.curve_id)
+        cal_ages, probs = curve.calibrate(
+            sample.age_bp, sample.error_1sigma, sample.delta_r, sample.delta_r_error)
+        drawn = intervals.draws_from_distribution(
+            cal_ages, probs, rng, intervals.DEFAULT_DRAWS)
+        draws[sample.id] = drawn
+        dates.append({'id': sample.id, 'name': sample.sample_name,
+                      'median': float(np.median(drawn))})
+    dates.sort(key=lambda d: d['median'], reverse=True)
+    return intervals.report_dates(dates, draws)
+
+
 def _calibration_result_row(
     analysis_id: str,
     sample_id: str,
@@ -146,6 +180,39 @@ def _relabel_tree(root: Dict, id_map: Dict[str, str]) -> None:
     for element in _iter_tree(root):
         if element['id'] in id_map:
             element['id'] = id_map[element['id']]
+
+
+def _relabel_intervals(block: Optional[Dict], id_map: Dict[str, str]) -> Optional[Dict]:
+    """
+    The same client-id -> persisted-id rewrite _relabel_tree does to the model
+    tree, applied to a durations-and-differences block.
+
+    Every record names the model elements it is about -- a phase's duration,
+    the gap between two phases -- and its `id` is those element ids joined with
+    colons so the record has a stable identity across a rerun. Mapping each
+    colon-separated part covers both without the record shapes having to be
+    enumerated here: a part that is not a client id (the 'phase' / 'sequence'
+    prefix, a boundary id, which _persist_tree keeps as-is) is simply not in
+    the map and passes through.
+    """
+    if not block or not id_map:
+        return block
+
+    def rename(value):
+        if not isinstance(value, str):
+            return value
+        return ':'.join(id_map.get(part, part) for part in value.split(':'))
+
+    relabelled = dict(block)
+    for key in ('durations', 'differences'):
+        relabelled[key] = [
+            {**record,
+             **{field: rename(record[field])
+                for field in ('id', 'element_id', 'from_id', 'to_id')
+                if record.get(field)}}
+            for record in block.get(key) or []
+        ]
+    return relabelled
 
 
 def _persist_tree(analysis_id: str, root: Dict, db: Session) -> None:
@@ -293,11 +360,17 @@ def _run_bayesian(
     model_tree: Dict,
     bayesian_config: Dict,
     on_progress: Optional[Callable[[Dict], bool]] = None,
-) -> Tuple[Dict, Dict, Dict]:
+) -> Tuple[Dict, Dict, Dict, Optional[Dict]]:
     """
     Solve the model against an explicit model tree, returning (per-sample
-    results, per-boundary results, solver record). Shared between a fresh run
-    and a rerun so the two can't drift apart.
+    results, per-boundary results, solver record, durations and differences).
+    Shared between a fresh run and a rerun so the two can't drift apart.
+
+    The last of those is None unless bayesian_config.estimate_durations asked
+    for it; see services/intervals.py for what it holds and why it is a
+    separate return rather than more fields on the per-sample results (it is
+    not per-sample -- every quantity in it is a function of several modelled
+    ages at once).
 
     A chain-shaped model -- a Sequence of Phases separated by Boundaries, the
     ordinary archaeological shape -- is integrated EXACTLY by
@@ -357,6 +430,7 @@ def _run_bayesian(
          inferred, which only the sampler estimates (see services/gibbs.py)}
     """
     requested = bayesian_config.get('solver') or 'auto'
+    estimate_durations = bool(bayesian_config.get('estimate_durations'))
 
     # Each solver gets the tree it can actually take: the sampler the model as
     # AUTHORED, the exact solver a copy with the transitions the ordering implies
@@ -408,6 +482,7 @@ def _run_bayesian(
             measurements, exact_tree, chain,
             num_samples=bayesian_config.get('mcmc_samples', 2000),
             uniform_span_prior=bayesian_config.get('uniform_span_prior', True),
+            estimate_durations=estimate_durations,
         )
         agreement_service.attach(solved['measurements'], measurements)
         return solved['measurements'], solved['boundaries'], {
@@ -415,7 +490,7 @@ def _run_bayesian(
             'requested': requested,
             'reason': None,
             'implicit_boundaries': exact_needs_boundaries,
-        }
+        }, solved.get('intervals')
 
     # Only the sampler takes a progress callback: exact integration does not
     # iterate towards an answer, so it has no fraction to report and nothing
@@ -425,6 +500,7 @@ def _run_bayesian(
         measurements, model_tree,
         num_samples=bayesian_config.get('mcmc_samples', 2000),
         uniform_span_prior=bayesian_config.get('uniform_span_prior', True),
+        estimate_durations=estimate_durations,
         on_progress=on_progress,
     )
     agreement_service.attach(sampled['measurements'], measurements)
@@ -451,7 +527,7 @@ def _run_bayesian(
         # analyst reproducing a published run can compare the inferred
         # hyperparameter, not just the dates it fed into.
         'outlier_scale': sampled['outlier_scale'],
-    }
+    }, sampled.get('intervals')
 
 
 def _job_progress(handle: jobs.JobHandle):
@@ -696,7 +772,10 @@ def calibrate_group(request: GroupCalibrationRequest, db: Session = Depends(get_
             name=request.name,
             analysis_type='group_calibration',
             status='completed',
-            bayesian_config={},
+            # A group calibration has no solver to configure, but the one
+            # option it does take is recorded here so a rerun and an edit
+            # round-trip it the same way a Bayesian analysis's config does.
+            bayesian_config={'estimate_durations': request.estimate_durations},
             project_id=project_id,
         )
         db.add(analysis)
@@ -704,10 +783,12 @@ def calibrate_group(request: GroupCalibrationRequest, db: Session = Depends(get_
 
         # No group_id/element_id passed through -- a group calibration has
         # no phases or model tree for a measurement to belong to.
+        saved_samples = []
         for measurement in request.measurements:
             sample = _sample_row(analysis.id, measurement)
             db.add(sample)
             db.flush()
+            saved_samples.append(sample)
 
             curve = get_curve(sample.curve_id)
             stats = _compute_calibration_stats(
@@ -715,6 +796,11 @@ def calibrate_group(request: GroupCalibrationRequest, db: Session = Depends(get_
                 sample.delta_r, sample.delta_r_error,
             )
             db.add(_calibration_result_row(analysis.id, sample.id, stats))
+
+        # Pairwise differences, when asked for. One date has nothing to differ
+        # from, so the option is simply inert there rather than an error.
+        if request.estimate_durations and len(saved_samples) > 1:
+            analysis.intervals = _date_difference_block(saved_samples)
 
         db.commit()
         db.refresh(analysis)
@@ -844,7 +930,7 @@ def bayesian_analysis(request: BayesianRequest, wait: bool = False,
                 ))
             db.commit()
 
-        def _solve_and_store(db: Session, handle) -> Tuple[Dict, Dict, Dict]:
+        def _solve_and_store(db: Session, handle) -> Tuple[Dict, Dict, Dict, Optional[Dict]]:
             """
             Solve the model and write what it produced.
 
@@ -869,7 +955,7 @@ def bayesian_analysis(request: BayesianRequest, wait: bool = False,
             # DB ids), since build_model() needs to match against the internal
             # `ages` dict, which is also keyed by the client-side measurement id.
             root, group_boundaries, tree_measurements = _tree_from_request(request)
-            results, boundary_results, solver = _run_bayesian(
+            results, boundary_results, solver, interval_block = _run_bayesian(
                 tree_measurements, root, request.bayesian_config.model_dump(),
                 on_progress=_job_progress(handle),
             )
@@ -943,9 +1029,15 @@ def bayesian_analysis(request: BayesianRequest, wait: bool = False,
                         ).update({'element_id': element_id}, synchronize_session=False)
 
                 analysis.solver = solver
+                # Relabelled alongside the tree above: these records name
+                # phases by element id, and the tree's client-side ids have
+                # just been rewritten to the ones the contexts were saved
+                # under, so leaving them would file every duration against an
+                # element that no longer exists.
+                analysis.intervals = _relabel_intervals(interval_block, groups_map)
                 analysis.status = 'completed'
                 db.commit()
-            return results, context_results, solver
+            return results, context_results, solver, interval_block
 
         if save and not wait:
             # Queued. The inputs are already persisted and the analysis is
@@ -961,7 +1053,7 @@ def bayesian_analysis(request: BayesianRequest, wait: bool = False,
                     worker_analysis.status = 'running'
                     db.commit()
                 try:
-                    _, _, solver = _solve_and_store(db, handle)
+                    _, _, solver, _intervals = _solve_and_store(db, handle)
                 except gibbs.Cancelled:
                     db.rollback()
                     worker_analysis = db.query(Analysis).filter(
@@ -999,7 +1091,8 @@ def bayesian_analysis(request: BayesianRequest, wait: bool = False,
                 },
             })
 
-        results, context_results, solver = _solve_and_store(db, jobs.NullHandle())
+        results, context_results, solver, interval_block = _solve_and_store(
+            db, jobs.NullHandle())
 
         # Prepare response with summary stats + the compact plottable
         # distribution (exclude the huge raw posterior_samples array, which
@@ -1033,6 +1126,9 @@ def bayesian_analysis(request: BayesianRequest, wait: bool = False,
                 "results": results_summary,
                 "contexts": context_summary,
                 "solver": solver,
+                # Durations and differences, when the run was asked for them.
+                # Null otherwise -- see Analysis.intervals.
+                "intervals": interval_block,
                 "measurements_count": len(request.measurements)
             }
         }
@@ -1162,6 +1258,12 @@ def get_analysis(analysis_id: str, db: Session = Depends(get_db)):
             # analysis run before this was recorded, which the Results page
             # renders as "not recorded" rather than claiming either method.
             "solver": analysis.solver,
+            # How long each sequence, phase and set of dated events lasted, and
+            # how far apart the phases sit -- present only when the run was
+            # asked for them. Null both for a run that was not and for one
+            # predating the option, which the Results page treats the same way:
+            # it offers to re-run rather than showing an empty table.
+            "intervals": analysis.intervals,
             # The explicit model structure (nested sequences/phases/
             # boundaries/hiatuses), migrated from the old contexts +
             # relationships on first access. Boundary elements carry their
@@ -1422,6 +1524,14 @@ def _rerun_analysis(analysis: Analysis, db: Session,
             result = _calibration_result_row(analysis.id, sample.id, stats, existing)
             if not existing:
                 db.add(result)
+        # Recomputed on a rerun rather than left as it was: a rerun exists to
+        # pick up an edited date, and a difference between two dates is not
+        # still true once one of them has moved.
+        analysis.intervals = (
+            _date_difference_block(samples)
+            if (analysis.bayesian_config or {}).get('estimate_durations')
+            and len(samples) > 1 else None
+        )
 
     elif analysis.analysis_type == 'bayesian':
         groups = db.query(SampleGroup).filter(SampleGroup.analysis_id == analysis.id).all()
@@ -1453,11 +1563,14 @@ def _rerun_analysis(analysis: Analysis, db: Session,
             for s in samples
         ]
 
-        results, boundary_results, solver = _run_bayesian(
+        results, boundary_results, solver, interval_block = _run_bayesian(
             measurement_dicts, root, analysis.bayesian_config or {},
             on_progress=on_progress,
         )
         analysis.solver = solver
+        # No relabelling here, unlike a fresh run: the tree came out of the
+        # database, so every id in these records is already the persisted one.
+        analysis.intervals = interval_block
 
         # Store each boundary's posterior on its element, and mirror it onto
         # the old per-context start/end for anything still reading that.
@@ -1806,6 +1919,17 @@ def replace_analysis_inputs(
     otherwise be silently mismatched against what's now displayed
     alongside them; status goes back to 'pending' until the analysis is
     re-run.
+
+    `analysis_type` in the body CONVERTS the analysis, and that is the point:
+    an edit that changes the type has to change THIS analysis. Before it was
+    read, only a Bayesian edit came through here at all -- switching a saved
+    analysis to a group calibration created a second one instead, so the
+    analysis being edited was left behind as a pending duplicate under the
+    same name. Deploying a project's dates hit that every time, since
+    deploying always creates a pending Bayesian analysis to edit.
+
+    Omitting it leaves the type alone, which is what an older client sends
+    and what an ordinary same-type edit means.
     """
     analysis = db.query(Analysis).filter(Analysis.id == analysis_id).first()
     if not analysis:
@@ -1894,6 +2018,18 @@ def replace_analysis_inputs(
 
         if request.name:
             analysis.name = request.name
+        if request.analysis_type:
+            # 'calibration' means ONE date calibrated on its own. Several
+            # independent dates with no model between them IS a group
+            # calibration, so that is what several of them become -- the same
+            # promotion api/project_samples.deploy_samples_to_analysis makes,
+            # for the same reason, rather than storing a label the analysis
+            # does not fit. The response reports the type actually stored.
+            analysis.analysis_type = (
+                'group_calibration'
+                if request.analysis_type == 'calibration' and len(request.measurements) > 1
+                else request.analysis_type
+            )
         analysis.bayesian_config = request.bayesian_config.model_dump()
         analysis.status = 'pending'
         analysis.error_message = None
@@ -1902,6 +2038,10 @@ def replace_analysis_inputs(
         # -- keeping it would label the pending analysis "exact" on the
         # strength of a model that no longer exists. The rerun sets it again.
         analysis.solver = None
+        # Same reasoning, more sharply: every duration and difference names a
+        # phase of the structure just replaced, so keeping them would report
+        # how long a phase lasted against a model that no longer has it.
+        analysis.intervals = None
         db.commit()
     except HTTPException:
         raise
@@ -1915,6 +2055,10 @@ def replace_analysis_inputs(
             "id": analysis.id,
             "name": analysis.name,
             "status": analysis.status,
+            # The type actually stored, which is not always the one asked for
+            # -- see the promotion above. The client says so rather than
+            # showing the user a label the analysis does not carry.
+            "analysis_type": analysis.analysis_type,
             "measurements_count": len(request.measurements),
         },
     }

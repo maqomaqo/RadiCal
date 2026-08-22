@@ -104,6 +104,7 @@ import numpy as np
 from scipy.signal import fftconvolve
 from scipy.special import gammaln
 
+from app.services import intervals
 from app.services.calibration import get_curve, hpd_ranges_from_distribution
 from app.services.model_tree import inherited_bounds, plan_model
 from app.services.stratigraphy import effective_bounds
@@ -1033,13 +1034,44 @@ def _span_prior_correction(grid: np.ndarray, num_boundaries: int, enabled: bool,
     return total
 
 
+def _sample_indices(rng, weights: np.ndarray, count: int) -> np.ndarray:
+    """`count` inverse-CDF draws of an index into a 1-D weight array."""
+    total = float(weights.sum())
+    if not np.isfinite(total) or total <= 0:
+        raise ValueError('a posterior came out empty; the model may be contradictory')
+    cdf = np.cumsum(weights)
+    return np.clip(np.searchsorted(cdf, rng.random(count) * total),
+                   0, len(weights) - 1)
+
+
+def _sample_columns(rng, weights: np.ndarray) -> np.ndarray:
+    """
+    One column index per ROW of a (rows x M) weight matrix -- a batch of
+    independent inverse-CDF draws, each from its own row.
+    """
+    cumulative = np.cumsum(weights, axis=1)
+    totals = cumulative[:, -1]
+    if np.any(totals <= 0) or not np.all(np.isfinite(totals)):
+        raise ValueError('a conditional came out empty while drawing from the '
+                         'joint posterior; the model may be contradictory')
+    draw = rng.random(len(totals)) * totals
+    return np.clip((cumulative < draw[:, None]).sum(axis=1), 0, weights.shape[1] - 1)
+
+
+# Draws taken at a time when sampling the joint posterior. One block holds a
+# (block x M) float matrix, so this is a memory knob rather than a statistical
+# one: 512 x 2000 doubles is 8 MB.
+JOINT_DRAW_BLOCK = 512
+
+
 def _messages(chain: Chain, allowed: Dict, transfer):
     """
     Forward/backward over the boundaries, the O(M^2) case.
 
-    Returns (pair_weight, boundary_density): pair_weight(k) is everything
-    outside group k as a matrix indexed [younger boundary, older boundary],
-    and boundary_density(i) is boundary i's unnormalised marginal.
+    Returns (pair_weight, boundary_density, draw_boundaries): pair_weight(k) is
+    everything outside group k as a matrix indexed [younger boundary, older
+    boundary], boundary_density(i) is boundary i's unnormalised marginal, and
+    draw_boundaries(rng, count) returns joint draws -- see below.
     """
     alpha = [np.where(allowed[chain.boundary_ids[0]], 1.0, 0.0)]
     for i in range(len(chain.groups)):
@@ -1049,8 +1081,38 @@ def _messages(chain: Chain, allowed: Dict, transfer):
     for i in range(len(chain.groups) - 1, -1, -1):
         beta[i] = (transfer(i) * beta[i + 1][:, None]).sum(axis=0)
 
+    def draw_boundaries(rng, count: int) -> np.ndarray:
+        """
+        `count` INDEPENDENT draws of every boundary at once, as grid indices,
+        shaped (count, number of boundaries) with the oldest boundary first.
+
+        Forward-filter/backward-sample: the messages above already are the
+        forward filter, and the chain is Markov in the boundaries, so drawing
+        the youngest boundary from its own marginal and then each earlier one
+        from alpha_i(b_i) T_i(b_i, b_(i+1)) given the boundary after it is an
+        exact draw from the joint. No MCMC and no burn-in -- these are as
+        independent as the marginals are exact.
+
+        This is the piece services/intervals.py needs and the marginals cannot
+        supply: two boundaries either side of a phase are strongly correlated
+        (the same dates hold them apart), so a duration built by subtracting
+        their marginals would be far too wide.
+        """
+        num_groups = len(chain.groups)
+        indices = np.empty((count, num_groups + 1), dtype=np.int64)
+        indices[:, num_groups] = _sample_indices(
+            rng, alpha[num_groups] * beta[num_groups], count)
+        for i in range(num_groups - 1, -1, -1):
+            matrix = transfer(i)                       # [younger, older]
+            for start in range(0, count, JOINT_DRAW_BLOCK):
+                stop = min(start + JOINT_DRAW_BLOCK, count)
+                rows = matrix[indices[start:stop, i + 1]] * alpha[i][None, :]
+                indices[start:stop, i] = _sample_columns(rng, rows)
+        return indices
+
     return (lambda k: alpha[k][None, :] * beta[k + 1][:, None],
-            lambda i: alpha[i] * beta[i])
+            lambda i: alpha[i] * beta[i],
+            draw_boundaries)
 
 
 def _normalised(matrix: np.ndarray) -> np.ndarray:
@@ -1104,12 +1166,87 @@ def _messages_with_span_prior(chain: Chain, allowed: Dict, transfer,
     def boundary_density(i):
         return np.diagonal(A[i].T @ C @ D[i].T).copy()
 
-    return pair_weight, boundary_density
+    def draw_boundaries(rng, count: int) -> np.ndarray:
+        """
+        Joint draws, as in the plain case -- but the correction makes the chain
+        non-Markov, so the sampling order changes with it.
+
+        C couples b_first to b_last, so no backward pass over single boundaries
+        exists. What does still hold is that CONDITIONAL on both ends the rest
+        is an ordinary chain again, because C is then a constant. So the two
+        ends are drawn together from their own joint C * A[n] -- a plain 2-D
+        distribution over an M x M grid -- and the interior is then filled in
+        forwards, each boundary from T_i(b_i, b_(i+1)) D_(i+1)(b_(i+1), b_last)
+        given the one before it and the far end.
+
+        The last step needs no special case: D[n] is diagonal on the allowed
+        last boundary, so the final draw can only land on the b_last already
+        drawn, which is the consistency check falling out of the maths rather
+        than being imposed on it.
+        """
+        num_groups = len(chain.groups)
+        joint = C * A[num_groups]                     # [b_first, b_last]
+        width = joint.shape[1]
+        flat = _sample_indices(rng, joint.ravel(), count)
+        indices = np.empty((count, num_groups + 1), dtype=np.int64)
+        indices[:, 0] = flat // width
+        indices[:, num_groups] = flat % width
+        for i in range(num_groups - 1):
+            older_to_younger = transfer(i).T          # [older, younger]
+            reach = D[i + 1].T                        # [b_last, b_(i+1)]
+            for start in range(0, count, JOINT_DRAW_BLOCK):
+                stop = min(start + JOINT_DRAW_BLOCK, count)
+                rows = (older_to_younger[indices[start:stop, i]]
+                        * reach[indices[start:stop, num_groups]])
+                indices[start:stop, i + 1] = _sample_columns(rng, rows)
+        return indices
+
+    return pair_weight, boundary_density, draw_boundaries
+
+
+def _draw_dates(rng, chain: Chain, cumulative: Dict[str, np.ndarray],
+                boundary_draws: np.ndarray) -> Dict[str, np.ndarray]:
+    """
+    A calendar index for every date, one per joint boundary draw.
+
+    Conditional on the pair of boundaries enclosing it, a date is simply its
+    own likelihood truncated to that interval -- that IS the phase model -- and
+    the dates in a group are then conditionally independent, so each can be
+    drawn by inverse CDF on the interval without reference to the others.
+
+    The truncation uses the plain cumulative rather than the trapezoidal
+    _interval_integral the solver's own weights use. The two differ by half a
+    grid cell at each end of the interval, which moves a drawn date by at most
+    one cell and is far below the five-year step these draws are reported at.
+    """
+    draws: Dict[str, np.ndarray] = {}
+    for index, date_ids in enumerate(chain.groups):
+        older = boundary_draws[:, index]
+        younger = boundary_draws[:, index + 1]
+        low = np.minimum(older, younger)
+        high = np.maximum(older, younger)
+        for date_id in date_ids:
+            cum = cumulative[date_id]
+            below = np.concatenate([[0.0], cum])
+            floor, ceiling = below[low], cum[high]
+            uniform = rng.random(len(low))
+            picked = np.searchsorted(cum, floor + uniform * (ceiling - floor))
+            # An interval holding no likelihood at all (a date whose support
+            # lies entirely outside where its boundaries landed) still has to
+            # yield a value inside it rather than an out-of-range index.
+            empty = ceiling <= floor
+            if np.any(empty):
+                spread = (low + uniform * (high - low + 1)).astype(np.int64)
+                picked = np.where(empty, spread, picked)
+            draws[date_id] = np.clip(picked, low, high)
+    return draws
 
 
 def solve(measurements: List[Dict], root: Dict, chain: Chain,
           num_samples: int = 4000, seed: int = 42,
-          uniform_span_prior: bool = True) -> Dict:
+          uniform_span_prior: bool = True,
+          estimate_durations: bool = False,
+          interval_draws: int = intervals.DEFAULT_DRAWS) -> Dict:
     """
     Exact marginal posteriors for every date and every boundary in `chain`.
 
@@ -1119,13 +1256,22 @@ def solve(measurements: List[Dict], root: Dict, chain: Chain,
     code is unchanged.
 
     Those draws are from the MARGINALS, so unlike MCMC output they carry no
-    joint correlation between dates. Nothing downstream uses the joint
-    structure, but a future caller wanting, say, P(date A older than date B)
-    must not read it off these.
+    joint correlation between dates. Nothing reads the joint structure off
+    them: `estimate_durations` below is the one caller that needs it, and it
+    gets its own draws from the joint posterior rather than these.
 
     `uniform_span_prior` applies OxCal's correction of the same name (on by
     default there too); see _span_prior_correction for what it does and what
     it measurably costs.
+
+    `estimate_durations` adds `intervals` to the result -- how long each
+    sequence, phase and set of dated events lasted, and how far apart the
+    phases are (see services/intervals.py). Off by default because it costs
+    `interval_draws` joint draws and a second pass over the transfer matrices,
+    and because a duration is a claim about a phase's extent that not every
+    analysis wants to make. It changes nothing else about the answer: the draws
+    are taken with their own generator, so every other number this returns is
+    bit-for-bit what it would be with the flag off.
     """
     element_bounds = inherited_bounds(root)
     by_id = {m['id']: m for m in measurements}
@@ -1189,15 +1335,17 @@ def solve(measurements: List[Dict], root: Dict, chain: Chain,
             # would move to the O(M^3) path for a couple of percent.
             log_T[0] = log_T[0] + np.where(np.isfinite(log_correction),
                                            log_correction, -np.inf)
-            pair_weight, boundary_density = _messages(chain, allowed, transfer)
+            pair_weight, boundary_density, draw_boundaries = _messages(
+                chain, allowed, transfer)
         else:
             correction = np.where(np.isfinite(log_correction),
                                   np.exp(_rescaled(log_correction)), 0.0)
             correction = np.where(np.isfinite(correction), correction, 0.0)
-            pair_weight, boundary_density = _messages_with_span_prior(
+            pair_weight, boundary_density, draw_boundaries = _messages_with_span_prior(
                 chain, allowed, transfer, correction)
     else:
-        pair_weight, boundary_density = _messages(chain, allowed, transfer)
+        pair_weight, boundary_density, draw_boundaries = _messages(
+            chain, allowed, transfer)
 
     rng = np.random.default_rng(seed)
     results = {'measurements': {}, 'boundaries': {}}
@@ -1235,6 +1383,20 @@ def solve(measurements: List[Dict], root: Dict, chain: Chain,
             'name': chain.boundary_names.get(bid, 'Boundary'),
             'posterior': _summarize(grid, density, rng, num_samples),
         }
+
+    if estimate_durations:
+        # Its own generator, seeded apart from the one above: every other
+        # number this function returns then stays bit-for-bit identical
+        # whether or not durations were asked for, so turning the option on
+        # cannot look like it moved a date.
+        joint_rng = np.random.default_rng(seed + 1)
+        boundary_draws = draw_boundaries(joint_rng, interval_draws)
+        date_draws = _draw_dates(joint_rng, chain, cumulative, boundary_draws)
+        joint = {bid: grid[boundary_draws[:, i]]
+                 for i, bid in enumerate(chain.boundary_ids)}
+        joint.update({date_id: grid[idx] for date_id, idx in date_draws.items()})
+        results['intervals'] = intervals.report(
+            root, measurements, joint, independent=True)
 
     results['method'] = 'exact'
     results['uniform_span_prior'] = log_correction is not None
