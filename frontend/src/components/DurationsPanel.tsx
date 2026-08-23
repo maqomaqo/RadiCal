@@ -299,7 +299,14 @@ export default function DurationsPanel({
               />
               {/* Detail on demand: the selected pair's own figures, in the
                   same words and at the same confidence as everything else. */}
+              {/* aria-live: selecting a square rewrites this box 40px away
+                  from the grid, and a screen-reader user hears the cell's own
+                  label but never the figures that appear because of it. The
+                  years difference exists nowhere else on the page for a pair
+                  the reader has singled out. "polite" because it follows a
+                  deliberate action rather than interrupting one. */}
               <Box
+                aria-live="polite"
                 sx={{
                   mb: 3,
                   py: 1.5,
@@ -332,6 +339,8 @@ export default function DurationsPanel({
               </Box>
               <Button
                 size="small"
+                aria-expanded={pairsOpen}
+                aria-controls="all-pairs-table"
                 onClick={() => setPairsOpen((open) => !open)}
                 startIcon={
                   <ExpandMoreIcon
@@ -348,6 +357,12 @@ export default function DurationsPanel({
             </>
           )}
 
+          {/* The id lives on a wrapper that is always in the DOM, not on the
+              Collapse: unmountOnExit removes its child while closed, which
+              left aria-controls pointing at nothing exactly when the button
+              said "Show". Keeping 55 rows mounted to satisfy the reference
+              would defeat the disclosure. */}
+          <Box id="all-pairs-table">
           <Collapse in={!showMatrix || pairsOpen} unmountOnExit>
           {/* Below sm the same rows are stacked cards rather than a grid.
               At 375px this table measured 452px inside a 295px container: the
@@ -438,6 +453,7 @@ export default function DurationsPanel({
           </TableContainer>
           )}
           </Collapse>
+          </Box>
         </>
       )}
 

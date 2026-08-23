@@ -196,15 +196,16 @@ interface PlottableSeries {
 }
 
 /**
- * Copy this row's reading as it would be cited.
+ * Copy the headline reading as it would be cited.
  *
- * Quiet until the row is hovered or the control is focused, but always in the
- * tab order and always named -- a copy affordance that only exists on hover is
- * the same mistake the diagnostics tooltip made, and this one has a keyboard
- * user's name on it. The retyping it replaces is a real step: the range is
- * 14px text in the middle of a wide row, and it ends up in a manuscript.
+ * One per page, beside the number the analysis was run to produce. There was
+ * briefly one of these on every table row too; it was removed. Nobody
+ * reassembles a results table a line at a time when CSV, JSON and PDF exports
+ * carry the whole thing -- and sixty-odd buttons kept permanently in the DOM
+ * at `opacity: 0` bought that non-feature a spacing shift on every numeric
+ * cell and sixty-seven stops in the tab order.
  */
-function CopyCitation({ text, always = false }: { text: string; always?: boolean }) {
+function CopyCitation({ text }: { text: string }) {
   const [copied, setCopied] = useState(false)
   return (
     <Tooltip title={copied ? 'Copied' : 'Copy as cited'} describeChild>
@@ -229,12 +230,6 @@ function CopyCitation({ text, always = false }: { text: string; always?: boolean
           minWidth: 24,
           minHeight: 24,
           my: '-3px',
-          // In a table this stays out of the way until the row is hovered or
-          // the control is focused -- sixty always-on copy icons would be
-          // noise. In the headline there is exactly one, and it is the point.
-          opacity: always || copied ? 1 : 0,
-          transition: 'opacity 120ms ease-out',
-          'tr:hover &, &:focus-visible': { opacity: 1 },
         }}
       >
         {copied ? (
@@ -274,7 +269,10 @@ export function citationLine(
   confidenceLabel: string,
   provenance: string[]
 ): string {
-  const qualifiers = [`${confidenceLabel} HPD`, ...provenance].filter(Boolean).join(', ')
+  // "span", matching the column it is copied from. A citation is the last
+  // place to call outer bounds an HPD: it is the one string that leaves the
+  // app and gets defended in review.
+  const qualifiers = [`${confidenceLabel} span`, ...provenance].filter(Boolean).join(', ')
   return `${name}: ${range} (${qualifiers})`
 }
 
@@ -343,6 +341,14 @@ function stickyNameCell(background: string) {
     left: 0,
     zIndex: 2,
     backgroundColor: background,
+    // Capped on phones only. Pinning the name fixed "a number with no name",
+    // but at 375px an uncapped column took 170px of a 295px container and
+    // occluded 88% of the span column at full scroll -- you could read the
+    // name or the answer, not both. Desktop has room and keeps the full name.
+    maxWidth: { xs: 116, sm: 'none' },
+    overflow: { xs: 'hidden', sm: 'visible' },
+    textOverflow: 'ellipsis',
+    whiteSpace: { xs: 'nowrap', sm: 'normal' },
   }
 }
 
@@ -449,8 +455,7 @@ function concernFor(result?: SampleResult, outlierPrior?: number | null): Concer
  * the transitions legible against the dates they bracket.
  */
 function StructureTableRow({
-  row, result, isBayesian, showMean, showMedian, confidence, confidenceLabel,
-  provenance, dateFormat,
+  row, result, isBayesian, showMean, showMedian, confidence, dateFormat,
   isCollapsible, isCollapsed, onToggleCollapse,
 }: {
   row: StructureRow
@@ -459,9 +464,6 @@ function StructureTableRow({
   showMean: boolean
   showMedian: boolean
   confidence: number
-  confidenceLabel: string
-  /** Curve and solver, for this row's citation string. */
-  provenance: string[]
   dateFormat: DateFormat
   /** Whether this row is a Sequence/Phase with something nested under it -- only those get a disclosure control. */
   isCollapsible: boolean
@@ -523,6 +525,7 @@ function StructureTableRow({
       }}
     >
       <TableCell
+        title={row.name}
         sx={{
           pl: 2 + row.depth * 2.5,
           ...stickyNameCell(tint ?? (isHeading ? '#f4ede7' : '#ffffff')),
@@ -617,16 +620,6 @@ function StructureTableRow({
       )}
       <TableCell align="right" sx={NUMERIC_CELL_SX}>
         {cell(envelope ? formatCalendarRange(envelope[0], envelope[1], dateFormat) : 'N/A')}
-        {!isHeading && envelope && (
-          <CopyCitation
-            text={citationLine(
-              row.name,
-              formatCalendarRange(envelope[0], envelope[1], dateFormat),
-              confidenceLabel,
-              provenance
-            )}
-          />
-        )}
       </TableCell>
       {isBayesian && (
         <TableCell align="right" sx={NUMERIC_CELL_SX}>
@@ -675,6 +668,10 @@ export default function Results() {
   const navigate = useNavigate()
   const notify = useNotify()
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null)
+  // Whether the failure was a 404 specifically. "Gone" and "unreachable" get
+  // different copy and different offers -- a Try again button on a deleted
+  // analysis just fetches the same 404 back.
+  const [missing, setMissing] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [dateFormat, setDateFormat] = useState<DateFormat>(() =>
@@ -755,19 +752,40 @@ export default function Results() {
     }
   }, [analysisId])
 
+  /**
+   * Load the analysis, distinguishing "this one is gone" from "the server is
+   * unreachable" -- they need different words and different offers.
+   *
+   * The 404 branch is why this checks `response.ok`. Without it a deleted or
+   * mistyped analysis fell through to a generic "Failed to load analysis",
+   * which reads as a transient fault and invites a pointless reload, while
+   * the backend's own accurate "Analysis not found" was parsed and thrown
+   * away. Every other request on this page already routes its failure through
+   * formatApiError; the page's own load was the one that did not.
+   */
   const fetchAnalysis = async (id: string) => {
     setLoading(true)
     setError(null)
+    setMissing(false)
     try {
       const response = await fetch(`/api/analysis/${id}`)
-      const data = await response.json()
-      if (data.success) {
+      const data = await response.json().catch(() => null)
+      if (response.ok && data?.success) {
         setAnalysis(data.data)
-      } else {
-        setError('Failed to load analysis')
+        return
       }
-    } catch (err) {
-      setError((err as Error).message)
+      if (response.status === 404) {
+        setMissing(true)
+        setError(formatApiError(data) || 'Analysis not found')
+        return
+      }
+      setError(formatApiError(data) || `The server returned ${response.status}.`)
+    } catch {
+      // Network-level: fetch itself rejected, so there is no response to read
+      // and nothing to quote. The browser's own wording here is "Failed to
+      // fetch", which names an API rather than a problem -- the reader needs
+      // to know it is the connection and not their data.
+      setError('Could not reach the server. It may be down, or your connection may have dropped.')
     } finally {
       setLoading(false)
     }
@@ -949,19 +967,77 @@ export default function Results() {
   // curves actually used and the solver that actually ran. Both are facts the
   // page already displays; a citation that omits them is the reason a reviewer
   // asks where a number came from.
-  const provenance = useMemo(() => {
+  const solverName =
+    analysis?.solver?.method === 'exact'
+      ? 'exact solver'
+      : analysis?.solver?.method
+      ? 'MH/Gibbs solver'
+      : null
+
+  // Provenance for ONE row, not one string for the page.
+  //
+  // This used to join every distinct curve in the analysis with " / " and
+  // attach that to every citation, which is wrong on precisely the analyses
+  // RadiCal exists for: the Wairau model runs 59 dates on SHCal20 and 4 on
+  // Marine20, and every copied line claimed both. A date is calibrated
+  // against exactly one curve, and that is the one its citation has to name.
+  //
+  // A Boundary has no curve at all -- it is a modelled transition, not a
+  // measurement -- so it names the solver alone rather than borrowing a curve
+  // from the dates around it.
+  const curveNameFor = useMemo(() => {
+    const byId = new Map(curves.map((c) => [c.id, c.name]))
+    return (curveId?: string | null) => (curveId ? byId.get(curveId) ?? curveId : null)
+  }, [curves])
+
+  const provenanceForSample = useMemo(() => {
+    const curveBySampleId = new Map(
+      (analysis?.measurements || []).map((m) => [m.id, m.curve_id])
+    )
+    return (sampleId?: string | null): string[] =>
+      [sampleId ? curveNameFor(curveBySampleId.get(sampleId)) : null, solverName].filter(
+        (v): v is string => Boolean(v)
+      )
+  }, [analysis?.measurements, curveNameFor, solverName])
+
+  /**
+   * The plot bands for one series, computed once per confidence level.
+   *
+   * `plotOrder` below is rebuilt on every render, and each series called
+   * `hpdBands`, which runs two `hpdRangesFromCurve` passes -- each sorting a
+   * ~1000-point distribution. On the 63-date model that is ~126 sorts, and it
+   * was happening on every keystroke of every unrelated control: ticking Show
+   * Mean, switching plot view, collapsing a phase. Measured at 127ms median
+   * to paint for a single checkbox.
+   *
+   * The bands depend on exactly two things -- the distribution and the
+   * selected confidence -- so they are cached against the series key and the
+   * cache is thrown away when the confidence changes, which is the only time
+   * the answers actually differ. Declared here, above the loading/error early
+   * returns, because a hook after a conditional return is only called on some
+   * renders.
+   */
+  const bandsFor = useMemo(() => {
+    const cache = new Map<string, HPDBand[]>()
+    return (key: string, distribution?: Array<[number, number]>): HPDBand[] => {
+      if (!distribution) return []
+      const hit = cache.get(key)
+      if (hit) return hit
+      const bands = hpdBands(distribution, confidence, CONFIDENCE_LABEL)
+      cache.set(key, bands)
+      return bands
+    }
+  }, [confidence, CONFIDENCE_LABEL])
+
+  // For the page-level qualifier under the headline only, where naming every
+  // curve the analysis used IS the honest statement.
+  const analysisProvenance = useMemo(() => {
     const curveIds = [
       ...new Set((analysis?.measurements || []).map((m) => m.curve_id).filter(Boolean)),
     ]
-    const curveNames = curveIds.map((id) => curves.find((c) => c.id === id)?.name ?? id)
-    const solverName =
-      analysis?.solver?.method === 'exact'
-        ? 'exact solver'
-        : analysis?.solver?.method
-        ? 'MH/Gibbs solver'
-        : null
+    const curveNames = curveIds.map((id) => curveNameFor(id)).filter(Boolean) as string[]
     return [curveNames.join(' / '), solverName].filter((v): v is string => Boolean(v))
-  }, [analysis?.measurements, analysis?.solver?.method, curves])
+  }, [analysis?.measurements, curveNameFor, solverName])
 
   if (loading) {
     return (
@@ -972,14 +1048,40 @@ export default function Results() {
   }
 
   if (error || !analysis) {
+    // component="main" and role="alert": the success branch got the landmark
+    // and this one did not, so the route a stale bookmark actually lands on
+    // was the one with no way past the AppBar and no announcement at all.
     return (
-      <Container maxWidth="lg" sx={{ py: 4 }}>
-        <Typography color="error" variant="h6">
-          {error || 'Analysis not found'}
-        </Typography>
-        <Button onClick={() => navigate('/')} sx={{ mt: 2 }}>
-          Back to Dashboard
-        </Button>
+      <Container component="main" maxWidth="lg" sx={{ py: 4 }}>
+        <Paper sx={{ p: 3, maxWidth: 560 }} role="alert">
+          <Typography variant="h6" component="h1" gutterBottom>
+            {missing ? 'That analysis doesn’t exist' : 'Couldn’t load this analysis'}
+          </Typography>
+          <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
+            {missing
+              ? 'It may have been deleted, or the link may be wrong. Your other analyses are unaffected.'
+              : error}
+          </Typography>
+          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+            {/* Retry only where retrying could work. Offering it on a 404
+                would invite the same answer a second time. */}
+            {!missing && analysisId && (
+              <Button
+                variant="contained"
+                startIcon={<ReplayIcon />}
+                onClick={() => fetchAnalysis(analysisId)}
+              >
+                Try again
+              </Button>
+            )}
+            <Button variant={missing ? 'contained' : 'outlined'} onClick={() => navigate('/')}>
+              Back to Dashboard
+            </Button>
+            <Button variant="outlined" onClick={() => navigate('/projects')}>
+              Browse projects
+            </Button>
+          </Stack>
+        </Paper>
       </Container>
     )
   }
@@ -1110,7 +1212,7 @@ export default function Results() {
         title: result.sample_name || 'Date',
         path: row.path,
         distribution: result.probability_distribution,
-        bands: hpdBands(result.probability_distribution, confidence, CONFIDENCE_LABEL),
+        bands: bandsFor(`date-${row.sampleId}`, result.probability_distribution),
         priorDistribution: result.unmodelled_distribution ?? undefined,
         pointEstimates: {
           mean: result.posterior_mean,
@@ -1127,7 +1229,7 @@ export default function Results() {
         title: row.name,
         path: row.path,
         distribution: p.probability_distribution,
-        bands: hpdBands(p.probability_distribution, confidence, CONFIDENCE_LABEL),
+        bands: bandsFor(`boundary-${row.elementId}`, p.probability_distribution),
         pointEstimates: {
           mean: p.posterior_mean,
           median: p.posterior_median,
@@ -1144,7 +1246,7 @@ export default function Results() {
       title: result.sample_name || 'Date',
       path: null,
       distribution: result.probability_distribution,
-      bands: hpdBands(result.probability_distribution, confidence, CONFIDENCE_LABEL),
+      bands: bandsFor(`date-${result.sample_id}`, result.probability_distribution),
       priorDistribution: result.unmodelled_distribution ?? undefined,
       pointEstimates: {
         mean: result.posterior_mean,
@@ -1402,8 +1504,12 @@ export default function Results() {
                     >
                       {range}
                       <CopyCitation
-                        always
-                        text={citationLine(row.name, range, CONFIDENCE_LABEL, provenance)}
+                        text={citationLine(
+                          row.name,
+                          range,
+                          CONFIDENCE_LABEL,
+                          provenanceForSample(row.sampleId)
+                        )}
                       />
                     </Typography>
                   </Box>
@@ -1411,7 +1517,7 @@ export default function Results() {
               })}
             </Stack>
             <Typography variant="body2" color="textSecondary" sx={{ mt: 1 }}>
-              {[`${CONFIDENCE_LABEL} HPD`, ...provenance].join(' · ')}
+              {[`${CONFIDENCE_LABEL} span`, ...analysisProvenance].join(' · ')}
             </Typography>
           </Box>
         )}
@@ -1424,8 +1530,19 @@ export default function Results() {
             they'd force the page to scroll sideways instead of wrapping. */}
         <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, alignItems: 'center', mt: 3 }}>
           <FormControl size="small" sx={{ minWidth: 220 }}>
-            <InputLabel>Date Format</InputLabel>
-            <Select value={dateFormat} label="Date Format" onChange={handleDateFormatChange}>
+            {/* id + labelId, not just <InputLabel>: without the pair MUI
+                renders a <label> with no `for` and a role="combobox" with no
+                accessible name, so this announced only its current value --
+                "cal BP (years before 1950), combobox" -- with nothing saying
+                what it governs, and voice control had no target to say. */}
+            <InputLabel id="date-format-label">Date Format</InputLabel>
+            <Select
+              labelId="date-format-label"
+              id="date-format"
+              value={dateFormat}
+              label="Date Format"
+              onChange={handleDateFormatChange}
+            >
               {DATE_FORMAT_OPTIONS.map((option) => (
                 <MenuItem key={option.value} value={option.value}>
                   {option.label}
@@ -1519,10 +1636,10 @@ export default function Results() {
                   <TableCell>Context</TableCell>
                   {showMean && <TableCell align="right">Start Mean</TableCell>}
                   {showMedian && <TableCell align="right">Start Median</TableCell>}
-                  <TableCell align="right">Modelled Start ({CONFIDENCE_LABEL} HPD)</TableCell>
+                  <TableCell align="right">Modelled Start ({CONFIDENCE_LABEL} span)</TableCell>
                   {showMean && <TableCell align="right">End Mean</TableCell>}
                   {showMedian && <TableCell align="right">End Median</TableCell>}
-                  <TableCell align="right">Modelled End ({CONFIDENCE_LABEL} HPD)</TableCell>
+                  <TableCell align="right">Modelled End ({CONFIDENCE_LABEL} span)</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -1576,8 +1693,13 @@ export default function Results() {
             </Typography>
             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ sm: 'center' }}>
               <FormControl size="small" sx={{ minWidth: 140 }}>
-                <InputLabel>HPD Confidence</InputLabel>
+                {/* The most consequential control on the page: it sets the
+                    level every figure here is reported at. It announced
+                    "95.4%, combobox" and nothing else. */}
+                <InputLabel id="hpd-confidence-label">HPD Confidence</InputLabel>
                 <Select
+                  labelId="hpd-confidence-label"
+                  id="hpd-confidence"
                   value={confidence}
                   label="HPD Confidence"
                   onChange={(e) => setConfidence(Number(e.target.value))}
@@ -1672,7 +1794,15 @@ export default function Results() {
                 {showMedian && <TableCell align="right">Posterior Median</TableCell>}
                 {isBayesian && <TableCell align="right">Unmodelled Calibration</TableCell>}
                 <TableCell align="right">
-                  {isBayesian ? 'Posterior' : 'Calibrated'} {CONFIDENCE_LABEL} HPD Range
+                  {/* "Span", not "HPD Range". This column reports the OUTER
+                      BOUNDS of the highest-density region -- its earliest and
+                      latest calendar age -- which is one number a reader can
+                      scan down. Where the posterior is multimodal the region
+                      is genuinely several disjoint ranges, and calling this
+                      single pair an HPD claimed probability in the gaps
+                      between them. The full breakdown is in the plot and in
+                      every export; the note under this table says so. */}
+                  {isBayesian ? 'Posterior' : 'Calibrated'} {CONFIDENCE_LABEL} span
                 </TableCell>
                 {isBayesian && (
                   /* The explanation used to be a Tooltip wrapping this cell,
@@ -1725,8 +1855,6 @@ export default function Results() {
                       showMean={showMean}
                       showMedian={showMedian}
                       confidence={confidence}
-                      confidenceLabel={CONFIDENCE_LABEL}
-                      provenance={provenance}
                       dateFormat={dateFormat}
                       // A date row's elementId is its PARENT phase's id (see
                       // the comment on the key above), so these must also
@@ -1757,7 +1885,10 @@ export default function Results() {
                     const modelledEnvelope = hpdEnvelopeFromHistogram(result.probability_distribution, confidence)
                     return (
                       <TableRow key={result.sample_id}>
-                        <TableCell sx={stickyNameCell('#ffffff')}>
+                        <TableCell
+                          title={result.sample_name || `Sample ${idx + 1}`}
+                          sx={stickyNameCell('#ffffff')}
+                        >
                           {result.sample_name || `Sample ${idx + 1}`}
                         </TableCell>
                         {showMean && (
@@ -1786,16 +1917,6 @@ export default function Results() {
                         )}
                         <TableCell align="right" sx={NUMERIC_CELL_SX}>
                           {modelledEnvelope ? formatCalendarRange(modelledEnvelope[0], modelledEnvelope[1], dateFormat) : 'N/A'}
-                          {modelledEnvelope && (
-                            <CopyCitation
-                              text={citationLine(
-                                result.sample_name || `Sample ${idx + 1}`,
-                                formatCalendarRange(modelledEnvelope[0], modelledEnvelope[1], dateFormat),
-                                CONFIDENCE_LABEL,
-                                provenance
-                              )}
-                            />
-                          )}
                         </TableCell>
                       </TableRow>
                     )
@@ -1803,6 +1924,22 @@ export default function Results() {
             </TableBody>
           </Table>
         </TableContainer>
+        {/* What the span column is, and where the rest of it lives.
+            Unconditional, because it applies to every analysis type and
+            because it is the page's only expansion of "HPD" -- a term that
+            appears here, in the confidence selector and in every plot legend,
+            and was defined nowhere. The column deliberately shows one pair of
+            bounds rather than every disjoint range: a multimodal posterior
+            can produce four, and four per row would make the table unreadable
+            for the sake of a case the plot already draws correctly. */}
+        <Typography variant="caption" color="textSecondary" component="p" sx={{ mt: 1.5 }}>
+          <strong>{CONFIDENCE_LABEL} span</strong> is the earliest and latest calendar age of
+          the {CONFIDENCE_LABEL} HPD (highest posterior density) region — the narrowest set of
+          ages holding that much of the probability. Where a calibration is multimodal that
+          region breaks into several separate ranges, and the span covers the gaps between
+          them: the plots below draw each range on its own, and the CSV, JSON and PDF exports
+          list them in full.
+        </Typography>
         {/* The key a first-time reader needs, present without a hover: the
             two diagnostics letters, spelled out once under the table they
             label. Same words as the header's help control, from the one
