@@ -337,11 +337,11 @@ One row per pair. For two **phases** the figure is signed: **positive is a gap**
 years, **negative is an overlap**. For two **dates** in a Group Calibration, positive means the first
 of the pair is the older.
 
-**Overlap** grades how far the two are from being separable in time, from `none` to `significant`.
+**Overlap** grades how far the two are from being separable in time, from `none` to `extensive`.
 For phases it is the probability that their modelled intervals intersect; for dates it is how far
 the model is from being able to say which came first (100% is a coin flip). The bands are the same
 68.3% and 95.4% levels every HPD in the app is quoted at, so `none` means "separated at 2 sigma" and
-`significant` means "overlapping at 2 sigma".
+`extensive` means "overlapping at 2 sigma".
 
 Two phases either side of a single shared Boundary read **shares a transition** rather than a
 figure: one phase's end *is* the next one's start, so the model gives them no gap by construction.

@@ -176,22 +176,25 @@ export default function DurationsPanel({
   // The pairs the model genuinely cannot put in order -- the finding the
   // 55-row table buried among its near-identical neighbours.
   const unorderable = useMemo(
-    () => differences.filter((d) => d.severity === 'substantial' || d.severity === 'significant'),
+    () => differences.filter((d) => d.severity === 'substantial' || d.severity === 'extensive'),
     [differences]
   )
   const selectedPair = differences.find((d) => d.id === selectedPairId) ?? null
 
   return (
     <Paper sx={{ p: 3, mb: 3 }}>
+      {/* Named for what this analysis actually produced. A group calibration
+          has no phases and so no durations, and the heading still said
+          "Durations and Differences" over a section containing one table --
+          announcing a table that is not there, then explaining it. */}
       <Typography variant="h6" component="h2" gutterBottom>
-        Durations and Differences
+        {durations.length > 0 && differences.length > 0
+          ? 'Durations and Differences'
+          : durations.length > 0
+          ? 'Durations'
+          : 'Differences'}
       </Typography>
-      <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
-        Lengths of time in years, not calendar dates — so these are not converted to the
-        reporting era. Estimated from {intervals.draws.toLocaleString()}{' '}
-        {intervals.independent ? 'independent' : 'sampled'} joint draws, which is why they
-        are the only figures on this page carrying a Monte Carlo error.
-      </Typography>
+
 
       {durations.length > 0 && (
         <TableContainer sx={{ mb: differences.length > 0 ? 3 : 0 }}>
@@ -247,29 +250,11 @@ export default function DurationsPanel({
 
       {differences.length > 0 && (
         <>
-          <Typography variant="body2" color="textSecondary" sx={{ mb: 1 }}>
-            {comparingDates
-              ? 'A positive difference means the first date is the older of the two. “Overlap” is how far the model is from being able to put them in order at all.'
-              : 'Positive is a gap between the two phases, negative an overlap. “Overlap” is the probability that their modelled intervals intersect.'}
-          </Typography>
 
-          {/* The five words the Overlap column uses, in order, stated once.
-              They were defined nowhere in the UI, and they are not rankable
-              from English alone: "significant" reads as the strong result when
-              it in fact means the model can say the LEAST -- the one place a
-              reader could mistake a failure to separate for a finding. */}
-          <Typography variant="caption" color="textSecondary" component="p" sx={{ mb: 2 }}>
-            Overlap runs <strong>none</strong> → <strong>slight</strong> →{' '}
-            <strong>moderate</strong> → <strong>substantial</strong> →{' '}
-            <strong>significant</strong>. “None” is a pair the model separates cleanly;
-            “significant” is one it effectively cannot separate at all.
-          </Typography>
-
-          {/* The headline the table could not give: of every pair compared,
-              how many the model cannot actually order. Named while there are
-              few enough to name -- past that the matrix below is the answer. */}
           {comparingDates && (
-            <Typography variant="body2" sx={{ mb: 2 }}>
+  
+            <Typography variant="body1" sx={{ mb: 0.5 }}>
+                    Use the matrix below to identify clusters of overlapping and non-overlapping dates. Squares are ordered oldest first along both axes. <br />
               {unorderable.length === 0 ? (
                 <>The model can order all {differences.length} pairs.</>
               ) : (
@@ -291,12 +276,28 @@ export default function DurationsPanel({
 
           {showMatrix && (
             <>
-              <OrderingMatrix
-                differences={differences}
-                axis={axis}
-                selectedId={selectedPairId}
-                onSelect={(record) => setSelectedPairId(record ? record.id : null)}
-              />
+              <Typography variant="body2" color="textSecondary" sx={{ mb: 1.5 }}>
+                      Results are estimated from {intervals.draws.toLocaleString()}{' '}
+        {intervals.independent ? 'independent' : 'sampled'} joint draws.
+              </Typography>
+              {/* Side by side above md: the grid caps its cells at 56px, which
+                  left a quarter of the card empty to its right while the
+                  readout it feeds sat underneath. Putting the readout in that
+                  space uses the width and ties the number to the square that
+                  produced it. Stacks below md, where the grid needs the room. */}
+              <Stack
+                direction={{ xs: 'column', md: 'row' }}
+                spacing={{ xs: 0, md: 3 }}
+                alignItems="flex-start"
+              >
+                <Box sx={{ flexShrink: 0, maxWidth: '100%' }}>
+                  <OrderingMatrix
+                    differences={differences}
+                    axis={axis}
+                    selectedId={selectedPairId}
+                    onSelect={(record) => setSelectedPairId(record ? record.id : null)}
+                  />
+                </Box>
               {/* Detail on demand: the selected pair's own figures, in the
                   same words and at the same confidence as everything else. */}
               {/* aria-live: selecting a square rewrites this box 40px away
@@ -312,6 +313,9 @@ export default function DurationsPanel({
                   py: 1.5,
                   px: 2,
                   minHeight: 68,
+                  flexGrow: 1,
+                  alignSelf: { xs: 'stretch', md: 'flex-start' },
+                  width: { xs: '100%', md: 'auto' },
                   borderRadius: 1,
                   border: 1,
                   borderColor: 'divider',
@@ -323,9 +327,9 @@ export default function DurationsPanel({
                       {selectedPair.from_name} → {selectedPair.to_name}
                     </Typography>
                     <Typography variant="body2" color="textSecondary">
-                      {differenceHeading} ({confidenceLabel}){' '}
+                      {differenceHeading} {' '} of {' '}
                       <Box component="span" sx={{ fontVariantNumeric: 'tabular-nums' }}>
-                        {envelope(selectedPair.years, confidence)}
+                        {envelope(selectedPair.years, confidence)} {' '} (at {confidenceLabel} confidence)
                       </Box>
                       . {orderingSentence(selectedPair)}
                     </Typography>
@@ -337,6 +341,7 @@ export default function DurationsPanel({
                   </Typography>
                 )}
               </Box>
+              </Stack>
               <Button
                 size="small"
                 aria-expanded={pairsOpen}
@@ -364,6 +369,11 @@ export default function DurationsPanel({
               would defeat the disclosure. */}
           <Box id="all-pairs-table">
           <Collapse in={!showMatrix || pairsOpen} unmountOnExit>
+          <Typography variant="body2" color="textSecondary" sx={{ mb: 1 }}>
+            {comparingDates
+              ? 'A positive difference means the first date is the older of the two.'
+              : 'Positive is a gap between the two phases, negative an overlap. “Overlap” is the probability that their modelled intervals intersect.'}
+          </Typography>
           {/* Below sm the same rows are stacked cards rather than a grid.
               At 375px this table measured 452px inside a 295px container: the
               value clipped mid-unit ("-60 to 130 y", the r cut off) and the

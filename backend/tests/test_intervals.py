@@ -140,8 +140,8 @@ class TestSeverity:
         assert intervals.severity(0.05) == 'slight'
         assert intervals.severity(0.5) == 'moderate'
         assert intervals.severity(0.8) == 'substantial'
-        assert intervals.severity(0.96) == 'significant'
-        assert intervals.severity(1.0) == 'significant'
+        assert intervals.severity(0.96) == 'extensive'
+        assert intervals.severity(1.0) == 'extensive'
 
     def test_every_band_has_a_word(self):
         found = {intervals.severity(p) for p in np.linspace(0, 1, 501)}
@@ -383,7 +383,7 @@ class TestTheDifference:
         _d, [crossing] = intervals.evaluate([], [spec], draws)
         assert crossing['years']['mean'] == pytest.approx(-50.0)
         assert crossing['overlap'] == 1.0
-        assert crossing['severity'] == 'significant'
+        assert crossing['severity'] == 'extensive'
 
     def test_two_dates_that_cannot_be_ordered_overlap_completely(self):
         rng = np.random.default_rng(9)
@@ -394,7 +394,7 @@ class TestTheDifference:
             'a': same, 'b': rng.normal(3000, 40, 40000)})
         assert record['older_probability'] == pytest.approx(0.5, abs=0.02)
         assert record['overlap'] == pytest.approx(1.0, abs=0.04)
-        assert record['severity'] == 'significant'
+        assert record['severity'] == 'extensive'
 
     def test_two_dates_the_model_separates_do_not_overlap(self):
         rng = np.random.default_rng(10)

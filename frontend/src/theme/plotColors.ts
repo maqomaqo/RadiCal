@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { alpha, useTheme } from '@mui/material/styles'
-import { BOUNDARY_CORAL_INK, PHASE_GREEN } from './diagramColors'
+import { BOUNDARY_CORAL_INK, PHASE_GREEN, WARM_INK } from './diagramColors'
 
 /**
  * Colours for the posterior plots, shared by the single-date and stacked
@@ -44,8 +44,9 @@ export interface PlotColors {
 // The app's warm ink, as used by the theme's shadows. Point estimates are
 // annotation over the data rather than data themselves, so they read as
 // pencil marks instead of taking a hue of their own and competing with the
-// curve they mark.
-const INK = '#2b2320'
+// curve they mark. Shared from diagramColors so the matrix and the plots
+// cannot drift to two different inks.
+const INK = WARM_INK
 
 export function usePlotColors(): PlotColors {
   const theme = useTheme()

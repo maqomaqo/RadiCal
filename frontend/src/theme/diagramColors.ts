@@ -26,6 +26,21 @@ export const BOUNDARY_CORAL_INK = '#d23f4a'
 export const PHASE_GREEN = '#1f7a62'
 export const HIATUS_VIOLET = '#7a5c99'
 
+/**
+ * The app's warm ink -- the tint behind every recoloured MUI shadow.
+ *
+ * Not an element colour and deliberately not a hue: it is what the app draws
+ * with when the mark is ABOUT the data rather than being a category of it.
+ * The point estimates on a posterior plot are ink because they annotate the
+ * curve; the ordering matrix is ink because overlap measures what the model
+ * could not resolve, which is fog over a reading rather than another kind of
+ * thing beside it.
+ *
+ * Lives here rather than in plotColors.ts, which held the only copy while two
+ * other surfaces needed the same value.
+ */
+export const WARM_INK = '#2b2320'
+
 export interface ElementTypeColor {
   /** Borders, rules and tints. Graphic use, which only needs 3:1. */
   main: string

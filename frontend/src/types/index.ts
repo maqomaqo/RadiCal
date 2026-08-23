@@ -170,7 +170,7 @@ export interface DifferenceRecord {
   // probability their modelled intervals intersect; for dates, the probability
   // the model cannot say which came first.
   overlap: number
-  severity: 'none' | 'slight' | 'moderate' | 'substantial' | 'significant'
+  severity: 'none' | 'slight' | 'moderate' | 'substantial' | 'extensive'
   // Dates only: P(`from` is older than `to`).
   older_probability?: number
   // Phases only: the two share a Boundary, so their gap is zero because the

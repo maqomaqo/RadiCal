@@ -56,7 +56,7 @@ so one severity vocabulary serves both. The bands are the app's own reporting
 confidences rather than round numbers picked to look decisive: 0.046 and 0.954
 are the complements of the 95.4% (2 sigma) level, 0.317 and 0.683 those of the
 68.3% (1 sigma) level, which are the same thresholds every HPD in this app is
-quoted at. So "none" means separated at 2 sigma and "significant" means
+quoted at. So "none" means separated at 2 sigma and "extensive" means
 overlapping at 2 sigma, and neither is a new convention the reader has to
 learn.
 
@@ -145,7 +145,14 @@ SEVERITY_BANDS: Tuple[Tuple[float, str], ...] = (
     (0.683, 'moderate'),
     (0.954, 'substantial'),
 )
-SEVERITY_TOP = 'significant'
+# "extensive", not "significant": the top band is where the model can say the
+# LEAST about the ordering, and "significant" reads as a finding to anyone who
+# has met the word in statistics -- the one place a reader could mistake a
+# failure to separate for a result. Renamed at the source rather than relabelled
+# in the UI because this string is persisted on the analysis and printed
+# verbatim into the CSV and the PDF; a display-only rename would have the screen
+# and the exports disagree about the same pair.
+SEVERITY_TOP = 'extensive'
 SEVERITY_WORDS = tuple(word for _, word in SEVERITY_BANDS) + (SEVERITY_TOP,)
 
 

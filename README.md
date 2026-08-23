@@ -62,7 +62,7 @@ Boundaries), and interactive posterior visualization.
   from the tree by `utils/harrisLayout.ts`, whose geometry is unit-tested rather than eyeballed.
 - **Durations and differences** (opt-in): how long each Sequence, each Phase, and each phase's set
   of *dated events* lasted, and how far apart the phases sit — a gap in years where they are
-  separate, an overlap where they are not, each graded from "none" to "significant" at the same
+  separate, an overlap where they are not, each graded from "none" to "extensive" at the same
   68%/95% levels the HPD regions use. The three durations are three different questions: a Phase's
   duration is the interval its Boundaries enclose, its dated events span less than that, and the
   distance between the two is how much of the phase the dates did not catch. Every one of these is a
