@@ -48,6 +48,7 @@ import {
   type LaidOutNode,
 } from '@/utils/harrisLayout'
 import { DEFAULT_DATE_FORMAT, formatCalendarRange, type DateFormat } from '@/utils/dateFormat'
+import { hpdEnvelopeFromHistogram } from '@/utils/hpd'
 
 interface NodeData {
   node: LaidOutNode
@@ -56,6 +57,11 @@ interface NodeData {
    *  than left translucent -- see `tint`. */
   surface: string
   dateFormat: DateFormat
+  /** The level the page is reporting at, and how it is written. Both are
+   *  needed here: a boundary's range has to be re-selected at the same
+   *  confidence the results table used, and then say which one that was. */
+  confidence: number
+  confidenceLabel: string
 }
 
 // Handles are hidden but must exist: reactflow anchors every edge to one, and
@@ -136,12 +142,23 @@ function GroupNode({ data }: NodeProps<NodeData>) {
 }
 
 function BoundaryNode({ data }: NodeProps<NodeData>) {
-  const { node, color, dateFormat } = data
-  // The 95% modelled range for this transition, once the analysis has run.
-  // Shown on the rule itself so the diagram says WHEN a transition happened,
-  // not merely that there is one -- the same figure the results table reports.
-  const range = node.posterior
-    ? formatCalendarRange(node.posterior.hpd_95[0], node.posterior.hpd_95[1], dateFormat)
+  const { node, color, dateFormat, confidence, confidenceLabel } = data
+  // The modelled range for this transition, once the analysis has run. Shown
+  // on the rule itself so the diagram says WHEN a transition happened, not
+  // merely that there is one.
+  //
+  // Re-selected from the boundary's own distribution at the page's current
+  // confidence, through the SAME helper the results table calls -- not read
+  // off the stored hpd_95, which is what used to make the diagram and the
+  // table state the same boundary as two different ranges four years apart,
+  // with the diagram silently frozen at 95% while the selector said 99.7%.
+  // The level is printed beside the figure so the number carries its own
+  // qualifier when someone screenshots the diagram into a paper.
+  const envelope = node.posterior
+    ? hpdEnvelopeFromHistogram(node.posterior.probability_distribution, confidence)
+    : null
+  const range = envelope
+    ? `${formatCalendarRange(envelope[0], envelope[1], dateFormat)} (${confidenceLabel})`
     : null
 
   return (
@@ -185,6 +202,10 @@ interface Props {
    *  each date's own element_id/group_id when absent. */
   assignments?: Record<string, string>
   dateFormat?: DateFormat
+  /** The confidence the rest of the page is reporting at. Defaults to 2 sigma
+   *  for the draft-model callers that have no selector of their own. */
+  confidence?: number
+  confidenceLabel?: string
   height?: number
 }
 
@@ -193,6 +214,8 @@ export default function HarrisMatrixDiagram({
   measurements,
   assignments = NO_ASSIGNMENTS,
   dateFormat = DEFAULT_DATE_FORMAT,
+  confidence = 0.954,
+  confidenceLabel = '95.4%',
   height = 520,
 }: Props) {
   const theme = useTheme()
@@ -231,7 +254,14 @@ export default function HarrisMatrixDiagram({
         // harrisLayout already produces.
         position: { x: node.x, y: node.y },
         style: { width: node.width, height: node.height },
-        data: { node, color, surface: theme.palette.background.paper, dateFormat },
+        data: {
+          node,
+          color,
+          surface: theme.palette.background.paper,
+          dateFormat,
+          confidence,
+          confidenceLabel,
+        },
         draggable: false,
         selectable: false,
         connectable: false,
@@ -240,7 +270,7 @@ export default function HarrisMatrixDiagram({
     })
     // layout.nodes is already parent-before-child (the layout emits each
     // container before descending into it), which reactflow requires.
-  }, [layout, theme, elementTypeColors, dateFormat])
+  }, [layout, theme, elementTypeColors, dateFormat, confidence, confidenceLabel])
 
   const edges = useMemo<Edge[]>(
     () =>
@@ -274,7 +304,20 @@ export default function HarrisMatrixDiagram({
         </Alert>
       )}
 
-      <Box sx={{ width: '100%', height, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
+      {/* The React Flow attribution stays -- hiding it is theirs to license,
+          not ours to decide -- but its default #999 measures 2.85:1 on white,
+          the last text on this page below AA. Restyled to the page's own
+          secondary ink, which is a presentation change, not a removal. */}
+      <Box
+        sx={{
+          width: '100%',
+          height,
+          border: '1px solid',
+          borderColor: 'divider',
+          borderRadius: 1,
+          '& .react-flow__attribution a': { color: 'text.secondary' },
+        }}
+      >
         <ReactFlow
           nodes={nodes}
           edges={edges}

@@ -113,6 +113,87 @@ export function hpdRangesFromCurve(
   return ranges
 }
 
+/**
+ * The tighter of the two intervals a posterior plot draws: 1 sigma, fixed.
+ * The outer band follows the reader's confidence selector; this one stays put
+ * so there is a constant reference to read the selected level against.
+ */
+export const INNER_CONFIDENCE = 0.682
+export const INNER_CONFIDENCE_LABEL = '68.2%'
+
+/**
+ * One HPD band on a plot: the ranges to draw, and the level to call them.
+ * The label travels WITH the ranges rather than being written into the plot
+ * components, which is what used to let a figure say "95% HPD" while the
+ * reader had selected 99.7% -- the legend can no longer name a level the
+ * geometry was not computed at.
+ */
+export interface HPDBand {
+  /** The disjoint calendar ranges holding this share of the posterior. */
+  ranges: HPDRange[]
+  /** How the level is written on screen. The legend says this and nothing else. */
+  label: string
+  /** 'outer' is the level the reader selected; 'inner' is the fixed 1-sigma
+   *  reference beneath it. Drives strip and alpha only, never the label. */
+  tone: 'outer' | 'inner'
+}
+
+/**
+ * The bands to draw for one posterior at the page's selected confidence,
+ * outer first. Derived from the same distribution and the same selection
+ * logic the results table reads, so a figure and the row above it cannot
+ * report different numbers for the same quantity.
+ *
+ * Selecting 68.2% collapses to a single band rather than drawing 1 sigma
+ * twice at two strengths, which would claim a nesting that isn't there.
+ */
+export function hpdBands(
+  distribution: Array<[number, number]> | undefined | null,
+  confidence: number,
+  confidenceLabel: string
+): HPDBand[] {
+  const outer = hpdRangesFromCurve(distribution, confidence)
+  if (outer.length === 0) return []
+  const bands: HPDBand[] = [{ ranges: outer, label: confidenceLabel, tone: 'outer' }]
+  if (confidence > INNER_CONFIDENCE + 1e-6) {
+    const inner = hpdRangesFromCurve(distribution, INNER_CONFIDENCE)
+    if (inner.length > 0) {
+      bands.push({ ranges: inner, label: INNER_CONFIDENCE_LABEL, tone: 'inner' })
+    }
+  }
+  return bands
+}
+
+/**
+ * Bands from the backend's stored fixed-level ranges, for the preview
+ * surfaces that have no confidence selector to follow. Labelled 68%/95%
+ * because that is the level the backend computed them at -- not 68.2%/95.4%,
+ * which are the Gaussian-equivalent levels the Results page re-selects at.
+ * The distinction is small and worth keeping: a label here always names the
+ * level its own geometry came from.
+ */
+export function storedHpdBands(
+  hpd68Ranges: HPDRange[] | undefined | null,
+  hpd95Ranges: HPDRange[] | undefined | null,
+  hpd68?: [number, number] | null,
+  hpd95?: [number, number] | null
+): HPDBand[] {
+  const asRanges = (
+    ranges: HPDRange[] | undefined | null,
+    envelope?: [number, number] | null
+  ): HPDRange[] => {
+    if (ranges && ranges.length > 0) return ranges
+    if (envelope) return [{ min: envelope[0], max: envelope[1], probability_percent: 0 }]
+    return []
+  }
+  const bands: HPDBand[] = []
+  const outer = asRanges(hpd95Ranges, hpd95)
+  if (outer.length > 0) bands.push({ ranges: outer, label: '95%', tone: 'outer' })
+  const inner = asRanges(hpd68Ranges, hpd68)
+  if (inner.length > 0) bands.push({ ranges: inner, label: '68%', tone: 'inner' })
+  return bands
+}
+
 export function hpdEnvelopeFromHistogram(
   distribution: Array<[number, number]> | undefined | null,
   confidence: number

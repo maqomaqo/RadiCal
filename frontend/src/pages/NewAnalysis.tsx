@@ -35,6 +35,7 @@ import AddIcon from '@mui/icons-material/Add'
 import AccountTreeIcon from '@mui/icons-material/AccountTree'
 import UploadFileIcon from '@mui/icons-material/UploadFile'
 import PosteriorPlot from '@/components/PosteriorPlot'
+import { storedHpdBands } from '@/utils/hpd'
 import ImportDatesDialog, { type ImportPreview } from '@/components/ImportDatesDialog'
 import MeasurementFields, {
   deltaRErrorMissing,
@@ -1442,10 +1443,12 @@ export default function NewAnalysis() {
           <PosteriorPlot
             calAges={previewResult.probability_distribution.map(([age]) => age)}
             probabilities={previewResult.probability_distribution.map(([, prob]) => prob)}
-            hpd68={[previewResult.hpd_68.min, previewResult.hpd_68.max]}
-            hpd95={[previewResult.hpd_95.min, previewResult.hpd_95.max]}
-            hpd68Ranges={previewResult.hpd_68_ranges}
-            hpd95Ranges={previewResult.hpd_95_ranges}
+            bands={storedHpdBands(
+              previewResult.hpd_68_ranges,
+              previewResult.hpd_95_ranges,
+              [previewResult.hpd_68.min, previewResult.hpd_68.max],
+              [previewResult.hpd_95.min, previewResult.hpd_95.max]
+            )}
             sampleName={analysisName}
             pointEstimates={{
               mean: previewResult.posterior_mean,

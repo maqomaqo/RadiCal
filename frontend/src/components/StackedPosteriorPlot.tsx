@@ -9,7 +9,7 @@ import {
   calendarAxisTitle,
   formatCalendarAge,
 } from '@/utils/dateFormat'
-import type { HPDRange } from '@/utils/dateFormat'
+import type { HPDBand } from '@/utils/hpd'
 import { stackedPlotGeometry } from '@/utils/stackedPlotGeometry'
 import { toUnitArea } from '@/utils/distribution'
 import { usePlotColors } from '@/theme/plotColors'
@@ -30,10 +30,10 @@ export interface StackedSeries {
   /** Where it sits in the structure ("Site > Phase J"); null if unplaced. */
   path: string | null
   distribution?: Array<[number, number]>
-  hpd68?: [number, number]
-  hpd95?: [number, number]
-  hpd68Ranges?: HPDRange[]
-  hpd95Ranges?: HPDRange[]
+  /** The HPD bands to draw, outer first, already computed at the page's
+   *  selected confidence -- see utils/hpd.hpdBands. The level's name travels
+   *  with its ranges so the legend cannot outlive the selection it describes. */
+  bands?: HPDBand[]
   /** Same date's plain calibration with no stratigraphic constraints -- see showPrior below. */
   priorDistribution?: Array<[number, number]>
   pointEstimates: { mean?: number; median?: number; std?: number }
@@ -58,8 +58,10 @@ interface StackedPosteriorPlotProps {
 // The curve occupies the upper part of its row and the two HPD bars sit in
 // the gap beneath it, so no row can ever paint into its neighbour.
 const CURVE_HEIGHT = 0.78
-const HPD95_BAR: [number, number] = [-0.09, -0.03]
-const HPD68_BAR: [number, number] = [-0.19, -0.13]
+// Named by position, not by level: which confidence each strip carries is
+// the caller's decision now, not this component's.
+const OUTER_BAR: [number, number] = [-0.09, -0.03]
+const INNER_BAR: [number, number] = [-0.19, -0.13]
 // Room for the row names, and the offset the phase labels are placed at
 // within it. On a phone the wide version took half the available width and
 // left the curves squeezed into the rest, so it shrinks with the viewport --
@@ -153,7 +155,7 @@ export default function StackedPosteriorPlot({
     const data: any[] = []
     // One legend entry per kind of mark, taken from whichever row happens to
     // carry it first -- otherwise a 15-date model prints 15 identical
-    // "95% HPD" rows down the side of the figure.
+    // "95.4% HPD" rows down the side of the figure.
     const legendUsed = new Set<string>()
     const claimLegend = (key: string) => {
       if (legendUsed.has(key)) return false
@@ -191,29 +193,20 @@ export default function StackedPosteriorPlot({
       // Each disjoint range gets its own bar: a multimodal posterior's HPD
       // is not the span between its outermost peaks, and drawing it as one
       // bar would claim the gap between them.
-      const ranges95: Array<[number, number]> =
-        s.hpd95Ranges && s.hpd95Ranges.length > 0
-          ? s.hpd95Ranges.map((r) => [r.min, r.max])
-          : s.hpd95
-          ? [s.hpd95]
-          : []
-      const ranges68: Array<[number, number]> =
-        s.hpd68Ranges && s.hpd68Ranges.length > 0
-          ? s.hpd68Ranges.map((r) => [r.min, r.max])
-          : s.hpd68
-          ? [s.hpd68]
-          : []
-
-      ranges95.forEach(([min, max]) =>
-        data.push(
-          bar(min, max, yBase, HPD95_BAR, plot.hpd95, '95% HPD', claimLegend('hpd95'), 'hpd95')
+      // A lone band is the tightest interval in the row with nothing nested
+      // inside it, so it takes the stronger fill: the two alphas encode
+      // "tighter", not "which slot".
+      const bands = s.bands ?? []
+      const soleBand = bands.length === 1
+      bands.forEach((band) => {
+        const slot = band.tone === 'outer' ? OUTER_BAR : INNER_BAR
+        const fill = soleBand || band.tone === 'inner' ? plot.hpd68 : plot.hpd95
+        band.ranges.forEach((r) =>
+          data.push(
+            bar(r.min, r.max, yBase, slot, fill, `${band.label} HPD`, claimLegend(band.tone), `hpd-${band.tone}`)
+          )
         )
-      )
-      ranges68.forEach(([min, max]) =>
-        data.push(
-          bar(min, max, yBase, HPD68_BAR, plot.hpd68, '68% HPD', claimLegend('hpd68'), 'hpd68')
-        )
-      )
+      })
 
       // The prior (unmodelled) shadow, scaled by this row's OWN scale factor
       // rather than its own peak -- so it reads directly against the
@@ -357,11 +350,10 @@ export default function StackedPosteriorPlot({
   const xRange = useMemo(() => {
     const bounds: number[] = []
     drawable.forEach((s) => {
-      if (s.hpd95Ranges && s.hpd95Ranges.length > 0) {
-        s.hpd95Ranges.forEach((r) => bounds.push(r.min, r.max))
-      } else if (s.hpd95) {
-        bounds.push(s.hpd95[0], s.hpd95[1])
-      }
+      // The widest band in the row -- the outer one when there are two,
+      // the only one when the reader has selected 1 sigma.
+      const widest = s.bands?.[0]
+      if (widest) widest.ranges.forEach((r) => bounds.push(r.min, r.max))
     })
     if (bounds.length === 0) return null
     const min = Math.min(...bounds)

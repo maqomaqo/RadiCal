@@ -14,7 +14,13 @@
 // it before.
 import { describe, expect, it } from 'vitest'
 
-import { hpdEnvelopeFromHistogram, hpdRangesFromCurve } from './hpd'
+import {
+  INNER_CONFIDENCE_LABEL,
+  hpdBands,
+  hpdEnvelopeFromHistogram,
+  hpdRangesFromCurve,
+  storedHpdBands,
+} from './hpd'
 
 type Series = Array<[number, number]>
 
@@ -124,5 +130,106 @@ describe('hpdRangesFromCurve', () => {
     expect(hpdRangesFromCurve([], 0.95)).toEqual([])
     expect(hpdRangesFromCurve(null, 0.95)).toEqual([])
     expect(hpdRangesFromCurve(flat(0, 50, 10, 0), 0.95)).toEqual([])
+  })
+})
+
+// The bands a posterior plot draws, and the one property that matters about
+// them: a band's LABEL and its GEOMETRY are computed at the same confidence.
+//
+// These exist because the failure they guard against was invisible. The plot
+// components used to hold the strings '95% HPD' and '68% HPD' as literals
+// while the page's selector moved independently, so a figure exported at
+// 99.7% carried a legend claiming 95% -- and the Harris matrix read a stored
+// hpd_95 while the results table re-selected from the distribution, which put
+// two different ranges for one boundary on screen at once. Nothing failed;
+// the numbers were simply wrong together.
+describe('hpdBands', () => {
+  // A single peak with tails, so the 1-sigma and 2-sigma selections genuinely
+  // differ rather than both taking the whole series.
+  const peaked: Series = [
+    [0, 0.001], [10, 0.01], [20, 0.08], [30, 0.4], [40, 0.8],
+    [50, 0.4], [60, 0.08], [70, 0.01], [80, 0.001],
+  ]
+
+  it('labels every band with the level its ranges were computed at', () => {
+    const bands = hpdBands(peaked, 0.954, '95.4%')
+
+    expect(bands.map((b) => b.label)).toEqual(['95.4%', INNER_CONFIDENCE_LABEL])
+    expect(bands[0].ranges).toEqual(hpdRangesFromCurve(peaked, 0.954))
+    expect(bands[1].ranges).toEqual(hpdRangesFromCurve(peaked, 0.682))
+  })
+
+  it('follows the selected confidence rather than a fixed level', () => {
+    const at95 = hpdBands(peaked, 0.954, '95.4%')
+    const at997 = hpdBands(peaked, 0.997, '99.7%')
+
+    expect(at997[0].label).toBe('99.7%')
+    // The outer band genuinely moved -- a frozen band would make these equal.
+    expect(at997[0].ranges).not.toEqual(at95[0].ranges)
+  })
+
+  it('draws one band at 1 sigma rather than the same interval twice', () => {
+    const bands = hpdBands(peaked, 0.682, '68.2%')
+
+    expect(bands).toHaveLength(1)
+    expect(bands[0].label).toBe('68.2%')
+  })
+
+  it('orders bands outer first, and the outer band contains the inner one', () => {
+    const [outer, inner] = hpdBands(peaked, 0.954, '95.4%')
+
+    expect(outer.tone).toBe('outer')
+    expect(inner.tone).toBe('inner')
+    expect(Math.min(...outer.ranges.map((r) => r.min)))
+      .toBeLessThanOrEqual(Math.min(...inner.ranges.map((r) => r.min)))
+    expect(Math.max(...outer.ranges.map((r) => r.max)))
+      .toBeGreaterThanOrEqual(Math.max(...inner.ranges.map((r) => r.max)))
+  })
+
+  it('is empty for nothing to select from', () => {
+    expect(hpdBands([], 0.954, '95.4%')).toEqual([])
+    expect(hpdBands(null, 0.954, '95.4%')).toEqual([])
+  })
+
+  // The Harris matrix and the results table both read a boundary through
+  // hpdEnvelopeFromHistogram at the page's confidence. Same input, same call,
+  // same answer -- and it has to MOVE with the selector, which is precisely
+  // what the diagram's stored hpd_95 did not do.
+  it('agrees with the envelope the results table reports, at every level', () => {
+    for (const confidence of [0.682, 0.954, 0.997]) {
+      const bands = hpdBands(peaked, confidence, 'x')
+      const envelope = hpdEnvelopeFromHistogram(peaked, confidence)!
+      const widest = bands[0].ranges
+
+      // The envelope is the ranges' span, widened by half a bin at each end.
+      expect(envelope[0]).toBeLessThanOrEqual(Math.min(...widest.map((r) => r.min)))
+      expect(envelope[1]).toBeGreaterThanOrEqual(Math.max(...widest.map((r) => r.max)))
+    }
+
+    expect(hpdEnvelopeFromHistogram(peaked, 0.997))
+      .not.toEqual(hpdEnvelopeFromHistogram(peaked, 0.682))
+  })
+})
+
+describe('storedHpdBands', () => {
+  const r = (min: number, max: number) => ({ min, max, probability_percent: 50 })
+
+  it('names the backend levels, not the page ones', () => {
+    const bands = storedHpdBands([r(20, 40)], [r(10, 50)])
+
+    expect(bands.map((b) => b.label)).toEqual(['95%', '68%'])
+    expect(bands.map((b) => b.tone)).toEqual(['outer', 'inner'])
+  })
+
+  it('falls back to the plain envelope when no breakdown was sent', () => {
+    const bands = storedHpdBands(null, null, [20, 40], [10, 50])
+
+    expect(bands[0].ranges).toEqual([{ min: 10, max: 50, probability_percent: 0 }])
+    expect(bands[1].ranges).toEqual([{ min: 20, max: 40, probability_percent: 0 }])
+  })
+
+  it('omits a band it has nothing for', () => {
+    expect(storedHpdBands(null, [r(10, 50)])).toHaveLength(1)
+    expect(storedHpdBands(null, null)).toEqual([])
   })
 })

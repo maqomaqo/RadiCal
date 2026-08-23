@@ -33,8 +33,17 @@ interface UseJob {
  * project) when no id is known — which is the case for a page opened from a
  * bookmark rather than reached by starting the run.
  *
- * `onFinished` fires once, when the job stops, whatever it stopped as. It is
+ * `onFinished` fires once, when a job STOPS — whatever it stopped as. It is
  * how the page knows to go and fetch the results it has been waiting for.
+ *
+ * "Stops" is the load-bearing word. Opening a completed analysis finds a
+ * terminal job sitting in `latestJobFor`, and treating that as a stop fired
+ * onFinished on every cold page load — so Results re-fetched the whole
+ * analysis, every posterior distribution included, immediately after loading
+ * it. A run that was already over when the page opened was never being waited
+ * for. An explicit `jobId` is different: the caller has just started that run
+ * and is waiting for it, so a job already terminal on the first poll is still
+ * the event they asked about.
  */
 export function useJob(
   { jobId, targetId, onFinished }:
@@ -48,6 +57,9 @@ export function useJob(
   const finishedCallback = useRef(onFinished)
   finishedCallback.current = onFinished
   const alreadyFinished = useRef(false)
+  // Whether this hook has ever seen the job in a non-terminal state. Only
+  // meaningful in the targetId case; see the note above onFinished.
+  const sawActive = useRef(false)
 
   const stop = useCallback(() => {
     if (timer.current) {
@@ -63,12 +75,14 @@ export function useJob(
         setJob(next)
         if (isFinished(next.state)) {
           stop()
-          if (!alreadyFinished.current) {
+          const wasWaitedFor = Boolean(jobId) || sawActive.current
+          if (!alreadyFinished.current && wasWaitedFor) {
             alreadyFinished.current = true
             finishedCallback.current?.(next)
           }
           return
         }
+        sawActive.current = true
       } else {
         // No job at all for this target: nothing is running, and there is
         // nothing to wait for.
@@ -90,6 +104,7 @@ export function useJob(
     if (!jobId && !targetId) return
     startedAt.current = Date.now()
     alreadyFinished.current = false
+    sawActive.current = false
     poll()
     return stop
   }, [jobId, targetId, poll, stop])

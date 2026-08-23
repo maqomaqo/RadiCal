@@ -9,7 +9,7 @@ import {
   calendarAxisTitle,
   formatCalendarAge,
 } from '@/utils/dateFormat'
-import type { HPDRange } from '@/utils/dateFormat'
+import type { HPDBand } from '@/utils/hpd'
 import { usePlotColors } from '@/theme/plotColors'
 import { PNG_EXPORT_SCALE, exportFilename } from '@/utils/plotExport'
 
@@ -43,13 +43,16 @@ function bar(
 
 // Bar geometry, as fractions of the posterior's own peak density -- negative
 // values sit below the curve's zero baseline. Ordered top to bottom: curve,
-// a gap, the 95% bar, a gap, the 68% bar, then AXIS_BOTTOM_MARGIN of clear
+// a gap, the outer bar, a gap, the inner bar, then AXIS_BOTTOM_MARGIN of clear
 // space before the x-axis itself. That last margin is what keeps the axis
-// line/ticks/title from landing on top of the 68% bar -- an explicit
+// line/ticks/title from landing on top of the inner bar -- an explicit
 // yaxis.range (below) is what makes this margin real rather than something
 // Plotly's autorange could shrink away.
-const HPD95_BAR: [number, number] = [-0.11, -0.04]
-const HPD68_BAR: [number, number] = [-0.22, -0.15]
+// The strip nearer the curve carries the band the reader selected; the one
+// below it carries the fixed 1-sigma reference. Named by position rather than
+// by level, because the levels are now the caller's to decide.
+const OUTER_BAR: [number, number] = [-0.11, -0.04]
+const INNER_BAR: [number, number] = [-0.22, -0.15]
 const AXIS_BOTTOM_MARGIN = 0.07
 
 // react-plotly.js's <Plot> wraps the imperative Plotly.js API so this
@@ -71,21 +74,22 @@ const Plot = createPlotlyComponent(Plotly)
 interface PosteriorPlotProps {
   calAges: number[]
   probabilities: number[]
-  /** Overall min/max envelope, used only if the corresponding *Ranges prop below isn't provided. */
-  hpd68?: [number, number]
-  hpd95?: [number, number]
   /**
-   * Full HPD breakdown as one or more disjoint ranges (calibration curves
-   * are non-monotonic, so a posterior is often multimodal). When provided,
-   * each range is drawn as its own shaded band instead of one band
-   * spanning the full envelope, so the gap between separate peaks isn't
-   * shown as if it were part of the HPD region. Only the first band in
-   * each level gets its own legend entry (see plotData below) -- a
-   * heavily fragmented posterior would otherwise print one "68% HPD
-   * (x.x%)" row per disjoint segment.
+   * The HPD bands to draw, outer first, already computed at the confidence
+   * the page is showing -- see utils/hpd.hpdBands. This component no longer
+   * decides or names a level: it is handed the ranges and the label that
+   * belongs to them, so the legend cannot claim a level the geometry was not
+   * computed at. That is exactly what used to go wrong, with '95% HPD'
+   * hardcoded here while the reader had selected 99.7%.
+   *
+   * Each band carries one or more disjoint ranges, because calibration curves
+   * are non-monotonic and a posterior is often multimodal; each range is drawn
+   * as its own bar rather than one bar spanning the full envelope, which would
+   * claim the gap between peaks as part of the region. Only the first bar of a
+   * band gets a legend entry, so a fragmented posterior prints one row rather
+   * than one per segment.
    */
-  hpd68Ranges?: HPDRange[]
-  hpd95Ranges?: HPDRange[]
+  bands?: HPDBand[]
   /**
    * The same date's plain calibration with no stratigraphic constraints --
    * "what it would say alone" -- drawn as a light grey shadow behind the
@@ -128,10 +132,7 @@ interface PosteriorPlotProps {
 export default function PosteriorPlot({
   calAges,
   probabilities,
-  hpd68,
-  hpd95,
-  hpd68Ranges,
-  hpd95Ranges,
+  bands = [],
   priorDistribution,
   showPrior = false,
   isBoundary = false,
@@ -223,24 +224,20 @@ export default function PosteriorPlot({
     // the gap between peaks as part of the HPD region. Only the first bar
     // at each level gets showlegend: true, so a fragmented posterior still
     // shows one legend row rather than one per segment.
-    const hpd95Y: [number, number] = [HPD95_BAR[0] * peak, HPD95_BAR[1] * peak]
-    const hpd68Y: [number, number] = [HPD68_BAR[0] * peak, HPD68_BAR[1] * peak]
-
-    if (hpd95Ranges && hpd95Ranges.length > 0) {
-      hpd95Ranges.forEach((range, idx) =>
-        data.push(bar(range.min, range.max, hpd95Y[0], hpd95Y[1], plot.hpd95, '95% HPD', idx === 0, 'hpd95'))
+    // A lone band is the tightest interval on the plot with nothing nested
+    // inside it, so it takes the stronger fill even though it sits in the
+    // outer strip -- the two alphas encode "tighter", not "which slot".
+    const soleBand = bands.length === 1
+    bands.forEach((band) => {
+      const slot = band.tone === 'outer' ? OUTER_BAR : INNER_BAR
+      const fill = soleBand || band.tone === 'inner' ? plot.hpd68 : plot.hpd95
+      const [y0, y1] = [slot[0] * peak, slot[1] * peak]
+      band.ranges.forEach((range, idx) =>
+        data.push(
+          bar(range.min, range.max, y0, y1, fill, `${band.label} HPD`, idx === 0, `hpd-${band.tone}`)
+        )
       )
-    } else if (hpd95) {
-      data.push(bar(hpd95[0], hpd95[1], hpd95Y[0], hpd95Y[1], plot.hpd95, '95% HPD', true, 'hpd95'))
-    }
-
-    if (hpd68Ranges && hpd68Ranges.length > 0) {
-      hpd68Ranges.forEach((range, idx) =>
-        data.push(bar(range.min, range.max, hpd68Y[0], hpd68Y[1], plot.hpd68, '68% HPD', idx === 0, 'hpd68'))
-      )
-    } else if (hpd68) {
-      data.push(bar(hpd68[0], hpd68[1], hpd68Y[0], hpd68Y[1], plot.hpd68, '68% HPD', true, 'hpd68'))
-    }
+    })
 
     // Vertical line at mean
     if (showMean && isNum(pointEstimates?.mean)) {
@@ -249,7 +246,7 @@ export default function PosteriorPlot({
         y: [0, Math.max(...probabilities)],
         mode: 'lines',
         line: { color: plot.mean, width: 2, dash: 'dash' },
-        name: `Mean: ${pointEstimates.mean.toFixed(0)} cal BP`,
+        name: `Mean: ${formatCalendarAge(pointEstimates.mean, dateFormat)}`,
         hovertemplate: '',
         showlegend: true,
       })
@@ -262,7 +259,7 @@ export default function PosteriorPlot({
         y: [0, Math.max(...probabilities)],
         mode: 'lines',
         line: { color: plot.median, width: 2, dash: 'dot' },
-        name: `Median: ${pointEstimates.median.toFixed(0)} cal BP`,
+        name: `Median: ${formatCalendarAge(pointEstimates.median, dateFormat)}`,
         hovertemplate: '',
         showlegend: true,
       })
@@ -274,10 +271,7 @@ export default function PosteriorPlot({
     probabilities,
     peak,
     plot,
-    hpd68,
-    hpd95,
-    hpd68Ranges,
-    hpd95Ranges,
+    bands,
     priorDistribution,
     showPrior,
     isBoundary,
@@ -304,7 +298,7 @@ export default function PosteriorPlot({
   // (fit tightly to the tallest/widest trace) would otherwise shrink back
   // down to nothing whenever a plot happened to have no bars taller than
   // the curve itself. Floats the curve up and pulls the x-axis down with
-  // it -- see HPD95_BAR/HPD68_BAR/AXIS_BOTTOM_MARGIN above for the geometry.
+  // it -- see OUTER_BAR/INNER_BAR/AXIS_BOTTOM_MARGIN above for the geometry.
   const yRange = useMemo(() => {
     if (!(peak > 0)) return null
     let top = peak
@@ -312,7 +306,7 @@ export default function PosteriorPlot({
       const priorPeak = Math.max(...priorDistribution.map(([, prob]) => prob))
       if (priorPeak > top) top = priorPeak
     }
-    return [(HPD68_BAR[0] - AXIS_BOTTOM_MARGIN) * peak, top * 1.08]
+    return [(INNER_BAR[0] - AXIS_BOTTOM_MARGIN) * peak, top * 1.08]
   }, [peak, showPrior, priorDistribution])
 
   const layout = useMemo(
@@ -372,8 +366,13 @@ export default function PosteriorPlot({
     )
   }
 
+  // elevation={0} with a hairline instead of a shadow: this card renders
+  // INSIDE the Posterior Distributions card, and on a 63-date model that is
+  // sixty-five stacked shadows. Same call DESIGN.md records for the dense
+  // Accordion in ImportDatesDialog -- nested elevation reads as noise, so the
+  // boundary is drawn with a line.
   return (
-    <Paper sx={{ p: 2, mb: 2 }}>
+    <Paper elevation={0} variant="outlined" sx={{ p: 2, mb: 2 }}>
       <Plot
         data={plotData}
         layout={layout}
@@ -382,7 +381,7 @@ export default function PosteriorPlot({
         style={{ width: '100%', height: `${height}px`, minHeight: '300px' }}
       />
       {pointEstimates && (showMean || showMedian) && (
-        <Box sx={{ mt: 2, p: 1, backgroundColor: 'grey.100', borderRadius: 1 }}>
+        <Box sx={{ mt: 2, p: 1, backgroundColor: 'background.muted', borderRadius: 1 }}>
           <Typography variant="body2" color="textSecondary" gutterBottom>
             <strong>Point Estimates:</strong>
           </Typography>

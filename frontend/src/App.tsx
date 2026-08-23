@@ -11,6 +11,15 @@ import Curves from '@/pages/Curves'
 import CurveBrowser from '@/pages/CurveBrowser'
 import ProjectDetail from '@/pages/ProjectDetail'
 
+// `background.muted` is ours, not MUI's -- declared so `sx={{ backgroundColor:
+// 'background.muted' }}` resolves and typechecks like any built-in token.
+declare module '@mui/material/styles' {
+  interface TypeBackground {
+    /** A banded surface inside an elevated one: table headers, stat strips. */
+    muted: string
+  }
+}
+
 // MUI's default shadows are tuned (offset/blur/spread) per elevation level,
 // but colored pure black -- recoloring them to the theme's own ink rather
 // than replacing the 25-entry scale by hand keeps that tuning intact while
@@ -30,7 +39,15 @@ const theme = createTheme({
       // The logo's pale blue (#f0f0fc) is a tint, not a usable interactive
       // color -- this is that same hue saturated up enough for buttons,
       // filled chips, and focus states.
-      main: '#4a7dc4',
+      //
+      // Darkened from #4a7dc4, which measured 4.18:1 against white and 3.89:1
+      // against the canvas -- below AA's 4.5:1 for normal text in BOTH
+      // directions, so every AppBar link (white on blue) and every text button
+      // (blue on paper) failed on one token. Same hue (215 degrees) and same
+      // saturation, one step down in lightness: 5.00:1 on white, 4.65:1 on the
+      // canvas. Secondary was darkened for exactly this reason and the primary
+      // never was.
+      main: '#3c70b8',
     },
     secondary: {
       // Darkened from the logo's own #f05460 for AA contrast as white-on-
@@ -43,6 +60,13 @@ const theme = createTheme({
       // white Cards/Paper actually read as lifted off the page rather than
       // blending into it.
       default: '#faf6f3',
+      // A banded surface INSIDE an elevated white one -- table header rows,
+      // a stat strip under a chart. Every one of these used MUI's grey.100
+      // (#f5f5f5), a perfectly neutral R=G=B that is the one palette this
+      // theme exists to replace, sitting on the warmest background in the
+      // app. Warmer and a step darker than the canvas so it reads as a band
+      // on paper rather than as a hole in it.
+      muted: '#f4ede7',
     },
   },
   shape: {

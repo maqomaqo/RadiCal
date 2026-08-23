@@ -31,6 +31,9 @@ import {
   ToggleButtonGroup,
 } from '@mui/material'
 import { alpha, useTheme } from '@mui/material/styles'
+import { visuallyHidden } from '@mui/utils'
+import HelpOutlineIcon from '@mui/icons-material/HelpOutline'
+import CheckIcon from '@mui/icons-material/Check'
 import DownloadIcon from '@mui/icons-material/Download'
 import AccountTreeIcon from '@mui/icons-material/AccountTree'
 import DeleteIcon from '@mui/icons-material/Delete'
@@ -49,6 +52,7 @@ import DurationsPanel from '@/components/DurationsPanel'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import { formatApiError } from '@/utils/apiError'
 import { useNotify } from '@/contexts/NotificationContext'
+import { useCurves } from '@/hooks/useCurves'
 import { flattenStructure } from '@/utils/stratigraphy'
 import type { StructureRow } from '@/utils/stratigraphy'
 import {
@@ -61,7 +65,7 @@ import {
   saveDateFormatPreference,
   HPDRange,
 } from '@/utils/dateFormat'
-import { hpdEnvelopeFromHistogram } from '@/utils/hpd'
+import { hpdBands, hpdEnvelopeFromHistogram, type HPDBand } from '@/utils/hpd'
 import type {
   MatrixMeasurement,
   DraftGroup,
@@ -86,7 +90,11 @@ interface AnalysisResult {
   // present for analyses saved after the stratigraphy feature was added;
   // older stored analyses will have empty groups/relationships (there
   // were none to persist) but still have measurements.
-  measurements?: MatrixMeasurement[]
+  // Widened past what the Harris matrix needs: the citation strings name the
+  // curve each date was calibrated against, and curve_id is on the response
+  // even though MatrixMeasurement -- which exists for the diagram -- has no
+  // reason to carry it.
+  measurements?: Array<MatrixMeasurement & { curve_id?: string }>
   groups?: DraftGroup[]
   // Explicit model structure; boundary elements carry their own posterior.
   model_tree?: ModelElement | null
@@ -178,13 +186,65 @@ interface PlottableSeries {
   /** Where it sits in the structure; null for a date the structure omits. */
   path: string | null
   distribution?: Array<[number, number]>
-  hpd68?: [number, number]
-  hpd95?: [number, number]
-  hpd68Ranges?: HPDRange[]
-  hpd95Ranges?: HPDRange[]
+  /** HPD bands at the page's selected confidence, outer first -- computed
+   *  from the same distribution the results table reads, so a figure and the
+   *  row above it can never report different numbers for one quantity. */
+  bands?: HPDBand[]
   /** A date's plain calibration with no stratigraphic constraints applied; absent for a boundary, which has no such counterpart. */
   priorDistribution?: Array<[number, number]>
   pointEstimates: { mean?: number; median?: number; std?: number }
+}
+
+/**
+ * Copy this row's reading as it would be cited.
+ *
+ * Quiet until the row is hovered or the control is focused, but always in the
+ * tab order and always named -- a copy affordance that only exists on hover is
+ * the same mistake the diagnostics tooltip made, and this one has a keyboard
+ * user's name on it. The retyping it replaces is a real step: the range is
+ * 14px text in the middle of a wide row, and it ends up in a manuscript.
+ */
+function CopyCitation({ text, always = false }: { text: string; always?: boolean }) {
+  const [copied, setCopied] = useState(false)
+  return (
+    <Tooltip title={copied ? 'Copied' : 'Copy as cited'} describeChild>
+      <IconButton
+        size="small"
+        aria-label={`Copy ${text}`}
+        onClick={() => {
+          navigator.clipboard?.writeText(text).then(
+            () => {
+              setCopied(true)
+              window.setTimeout(() => setCopied(false), 1600)
+            },
+            () => undefined
+          )
+        }}
+        sx={{
+          ml: 0.5,
+          p: 0.25,
+          verticalAlign: 'baseline',
+          // 24x24 is WCAG 2.5.8's floor; the negative margin keeps the target
+          // from pushing the line box taller than the text it sits in.
+          minWidth: 24,
+          minHeight: 24,
+          my: '-3px',
+          // In a table this stays out of the way until the row is hovered or
+          // the control is focused -- sixty always-on copy icons would be
+          // noise. In the headline there is exactly one, and it is the point.
+          opacity: always || copied ? 1 : 0,
+          transition: 'opacity 120ms ease-out',
+          'tr:hover &, &:focus-visible': { opacity: 1 },
+        }}
+      >
+        {copied ? (
+          <CheckIcon sx={{ fontSize: 15, color: 'success.main' }} />
+        ) : (
+          <ContentCopyIcon sx={{ fontSize: 15 }} />
+        )}
+      </IconButton>
+    </Tooltip>
+  )
 }
 
 /** The precomputed unmodelled ranges for the confidence currently selected. */
@@ -197,6 +257,36 @@ function unmodelledRangesFor(
   )
   return match ? match.ranges : []
 }
+
+/**
+ * A reading in the form it would be written into a manuscript. Built here
+ * rather than at each call site so the string a reader copies is assembled
+ * once, from the same envelope the cell beside it prints.
+ *
+ * Everything in it is a fact the page already holds -- the range at the
+ * selected level, which curve produced it, which solver ran. Nothing is
+ * inferred, and a part the page does not know is simply left out rather than
+ * guessed at.
+ */
+export function citationLine(
+  name: string,
+  range: string,
+  confidenceLabel: string,
+  provenance: string[]
+): string {
+  const qualifiers = [`${confidenceLabel} HPD`, ...provenance].filter(Boolean).join(', ')
+  return `${name}: ${range} (${qualifiers})`
+}
+
+// Said in one place because it is said in two: the header's help control and
+// the persistent key under the table. Two copies of this drifting apart would
+// be the same defect the page had elsewhere, in prose instead of numbers.
+const DIAGNOSTICS_HELP =
+  'A = agreement index: how well the modelled date still fits the prior distribution ' +
+  '(below 60 is worth re-examining). O = posterior probability the date is an outlier, ' +
+  'when an outlier model was applied to it. "Suspect"/"Check" identifies an outlier ' +
+  'probability greater than the prior it was given; "Assigned" means the data stayed ' +
+  'close to the assigned prior.'
 
 // The three standard Gaussian-equivalent confidence levels radiocarbon
 // results are conventionally reported at (1/2/3-sigma) -- OxCal's own
@@ -217,6 +307,14 @@ const STRUCTURE_MARKER: Record<string, string> = {
   boundary: '◆', hiatus: '⋯', unassigned: '⚠', date: '·',
 }
 
+// What each glyph above says, for readers who get no glyph. Only the ones
+// that carry information: the date bullet is decoration and the boundary/
+// hiatus kind is already printed beside the name, so the one that genuinely
+// needs a voice is the unassigned warning.
+const STRUCTURE_MARKER_LABEL: Record<string, string> = {
+  unassigned: 'Not assigned to any element',
+}
+
 // Every numeric column in the results table (ages, HPD ranges, percentages,
 // agreement/outlier diagnostics) gets this -- a multi-range HPD string is
 // long enough to wrap on an ordinary tablet width, and wrapping mid-value
@@ -225,6 +323,45 @@ const STRUCTURE_MARKER: Record<string, string> = {
 // lets the table grow wider than its container, which TableContainer
 // already scrolls horizontally for -- nothing here ever silently clips.
 const NUMERIC_CELL_SX = { whiteSpace: 'nowrap' } as const
+
+/**
+ * The name column stays put while the numbers scroll under it.
+ *
+ * The comment above NUMERIC_CELL_SX is right that TableContainer scrolls
+ * rather than clipping -- but at 375px this table is 894px wide inside a
+ * 295px box, so scrolling to reach the HPD range takes the sample's NAME off
+ * screen with it. A reader ends up looking at "633-557 cal BP · A 109 · O 3%"
+ * with nothing saying whose it is, which is worse than not showing the number.
+ *
+ * Needs its own opaque background: a sticky cell is painted over by whatever
+ * scrolls beneath it otherwise. Callers pass the row's own tint so a flagged
+ * row keeps its colour under the sticky column too.
+ */
+function stickyNameCell(background: string) {
+  return {
+    position: 'sticky' as const,
+    left: 0,
+    zIndex: 2,
+    backgroundColor: background,
+  }
+}
+
+/**
+ * A shadow at the right edge that appears only while there is more table to
+ * scroll to, and fades out at the end. Otherwise the overflow is silent: the
+ * Overlap column simply is not there, and nothing on screen suggests it
+ * could be. `background-attachment: local` is what ties it to the scroll
+ * position rather than the viewport.
+ */
+const SCROLL_HINT_SX = {
+  backgroundImage:
+    'linear-gradient(to left, var(--mui-paper, #fff) 40%, rgba(255,255,255,0)),' +
+    'radial-gradient(farthest-side at 100% 50%, rgba(43,35,32,0.16), rgba(43,35,32,0))',
+  backgroundPosition: 'right center, right center',
+  backgroundSize: '32px 100%, 14px 100%',
+  backgroundRepeat: 'no-repeat',
+  backgroundAttachment: 'local, scroll',
+} as const
 
 // Below this, OxCal's convention is that a date is worth re-examining
 // (Bronk Ramsey 1995).
@@ -312,7 +449,8 @@ function concernFor(result?: SampleResult, outlierPrior?: number | null): Concer
  * the transitions legible against the dates they bracket.
  */
 function StructureTableRow({
-  row, result, isBayesian, showMean, showMedian, confidence, dateFormat,
+  row, result, isBayesian, showMean, showMedian, confidence, confidenceLabel,
+  provenance, dateFormat,
   isCollapsible, isCollapsed, onToggleCollapse,
 }: {
   row: StructureRow
@@ -321,6 +459,9 @@ function StructureTableRow({
   showMean: boolean
   showMedian: boolean
   confidence: number
+  confidenceLabel: string
+  /** Curve and solver, for this row's citation string. */
+  provenance: string[]
   dateFormat: DateFormat
   /** Whether this row is a Sequence/Phase with something nested under it -- only those get a disclosure control. */
   isCollapsible: boolean
@@ -375,13 +516,18 @@ function StructureTableRow({
   return (
     <TableRow
       sx={{
-        backgroundColor: tint ?? (isHeading ? 'grey.50' : undefined),
+        backgroundColor: tint ?? (isHeading ? 'background.muted' : undefined),
         ...(concern
           ? { borderLeft: 3, borderColor: concern.level === 'suspect' ? 'error.main' : 'warning.main' }
           : {}),
       }}
     >
-      <TableCell sx={{ pl: 2 + row.depth * 2.5 }}>
+      <TableCell
+        sx={{
+          pl: 2 + row.depth * 2.5,
+          ...stickyNameCell(tint ?? (isHeading ? '#f4ede7' : '#ffffff')),
+        }}
+      >
         {/* The disclosure control replaces the old static ▸/▪ glyph for
             Sequence/Phase rows entirely, rather than sitting beside it --
             two symbols both saying "this is a heading" would be redundant
@@ -394,7 +540,18 @@ function StructureTableRow({
             size="small"
             onClick={onToggleCollapse}
             aria-label={`${isCollapsed ? 'Expand' : 'Collapse'} ${row.name}`}
-            sx={{ p: 0.25, mr: 0.25, verticalAlign: 'middle' }}
+            // The visible chevron stays small -- it sits inline in a dense
+            // table row -- but the thing a finger or a stylus has to hit does
+            // not: a negative margin lets the 44px target overlap the row's
+            // own padding rather than setting the row height.
+            sx={{
+              p: 0.25,
+              mr: 0.25,
+              verticalAlign: 'middle',
+              width: 44,
+              height: 44,
+              my: '-10px',
+            }}
           >
             {isCollapsed ? (
               <KeyboardArrowRightIcon fontSize="small" />
@@ -403,10 +560,21 @@ function StructureTableRow({
             )}
           </IconButton>
         )}
+        {/* aria-hidden on the glyph, with the word beside it for anything
+            that is not read out loud: "!" was the ONLY marker on an
+            unassigned date, so a screen reader heard nothing at all where a
+            sighted reader saw a warning. */}
         {STRUCTURE_MARKER[row.kind] && (
-          <Box component="span" sx={{ color: 'text.secondary', mr: 1 }}>
-            {STRUCTURE_MARKER[row.kind]}
-          </Box>
+          <>
+            <Box component="span" aria-hidden sx={{ color: 'text.secondary', mr: 1 }}>
+              {STRUCTURE_MARKER[row.kind]}
+            </Box>
+            {STRUCTURE_MARKER_LABEL[row.kind] && (
+              <Box component="span" sx={visuallyHidden}>
+                {STRUCTURE_MARKER_LABEL[row.kind]},{' '}
+              </Box>
+            )}
+          </>
         )}
         <Box component="span" sx={{ fontWeight: isHeading ? 600 : 400 }}>
           {row.name}
@@ -449,6 +617,16 @@ function StructureTableRow({
       )}
       <TableCell align="right" sx={NUMERIC_CELL_SX}>
         {cell(envelope ? formatCalendarRange(envelope[0], envelope[1], dateFormat) : 'N/A')}
+        {!isHeading && envelope && (
+          <CopyCitation
+            text={citationLine(
+              row.name,
+              formatCalendarRange(envelope[0], envelope[1], dateFormat),
+              confidenceLabel,
+              provenance
+            )}
+          />
+        )}
       </TableCell>
       {isBayesian && (
         <TableCell align="right" sx={NUMERIC_CELL_SX}>
@@ -541,7 +719,15 @@ export default function Results() {
   // the most commonly cited "95% confidence" convention in archaeological
   // reporting; switchable to 68.2% or 99.7% without a network round trip
   // (see utils/hpd.ts).
+  // Only to turn a stored curve_id into the curve's own name in the citation
+  // strings. The request is shared across the app (see api/curves.ts), and a
+  // failure degrades to the id rather than dropping the curve from the line.
+  const { curves } = useCurves()
   const [confidence, setConfidence] = useState<number>(0.954)
+  // How that level is written wherever the page names it -- one string, so a
+  // column heading, a plot legend and a diagram label cannot disagree about
+  // which confidence the figures beside them were computed at.
+  const CONFIDENCE_LABEL = CONFIDENCE_OPTIONS.find((o) => o.value === confidence)?.label ?? ''
   // Which Sequence/Phase headings in the results table are collapsed, keyed
   // by element id. Nothing collapsed by default -- matches the table's
   // previous always-expanded behaviour, so this is additive rather than a
@@ -756,6 +942,27 @@ export default function Results() {
     [analysis]
   )
 
+  // Declared here, above the loading/error early returns below: a hook after
+  // a conditional return is only called on some renders, which is what "Rendered
+  // more hooks than during the previous render" means.
+  // What produced every figure on the page, for the citation strings: the
+  // curves actually used and the solver that actually ran. Both are facts the
+  // page already displays; a citation that omits them is the reason a reviewer
+  // asks where a number came from.
+  const provenance = useMemo(() => {
+    const curveIds = [
+      ...new Set((analysis?.measurements || []).map((m) => m.curve_id).filter(Boolean)),
+    ]
+    const curveNames = curveIds.map((id) => curves.find((c) => c.id === id)?.name ?? id)
+    const solverName =
+      analysis?.solver?.method === 'exact'
+        ? 'exact solver'
+        : analysis?.solver?.method
+        ? 'MH/Gibbs solver'
+        : null
+    return [curveNames.join(' / '), solverName].filter((v): v is string => Boolean(v))
+  }, [analysis?.measurements, analysis?.solver?.method, curves])
+
   if (loading) {
     return (
       <Container sx={{ py: 4, display: 'flex', justifyContent: 'center' }}>
@@ -903,10 +1110,7 @@ export default function Results() {
         title: result.sample_name || 'Date',
         path: row.path,
         distribution: result.probability_distribution,
-        hpd68: result.hpd_68,
-        hpd95: result.hpd_95,
-        hpd68Ranges: result.hpd_68_ranges,
-        hpd95Ranges: result.hpd_95_ranges,
+        bands: hpdBands(result.probability_distribution, confidence, CONFIDENCE_LABEL),
         priorDistribution: result.unmodelled_distribution ?? undefined,
         pointEstimates: {
           mean: result.posterior_mean,
@@ -923,10 +1127,7 @@ export default function Results() {
         title: row.name,
         path: row.path,
         distribution: p.probability_distribution,
-        hpd68: p.hpd_68,
-        hpd95: p.hpd_95,
-        hpd68Ranges: p.hpd_68_ranges,
-        hpd95Ranges: p.hpd_95_ranges,
+        bands: hpdBands(p.probability_distribution, confidence, CONFIDENCE_LABEL),
         pointEstimates: {
           mean: p.posterior_mean,
           median: p.posterior_median,
@@ -943,10 +1144,7 @@ export default function Results() {
       title: result.sample_name || 'Date',
       path: null,
       distribution: result.probability_distribution,
-      hpd68: result.hpd_68,
-      hpd95: result.hpd_95,
-      hpd68Ranges: result.hpd_68_ranges,
-      hpd95Ranges: result.hpd_95_ranges,
+      bands: hpdBands(result.probability_distribution, confidence, CONFIDENCE_LABEL),
       priorDistribution: result.unmodelled_distribution ?? undefined,
       pointEstimates: {
         mean: result.posterior_mean,
@@ -956,10 +1154,27 @@ export default function Results() {
     })
   }
   const boundaryPlotCount = plotOrder.filter((s) => s.kind === 'boundary').length
+  // The page's primary reading: the transitions this model was built to
+  // estimate. A sequence's outermost Boundaries ARE the answer -- the same
+  // reasoning the collapse behaviour already encodes, where collapsing a
+  // Phase keeps its Boundaries because "the dates were the noise; the
+  // transitions were the answer".
+  //
+  // Deliberately empty for a calibration: dates laid out with no relationship
+  // asserted between them have no modelled transition, and inventing a
+  // headline span for them would be a claim the analysis does not make. There
+  // the table is the answer, and this block simply does not appear.
+  const headlineBoundaries = structureRows.filter(
+    (row) => row.kind === 'boundary' && row.posterior
+  )
+  const primaryReading =
+    headlineBoundaries.length >= 2
+      ? [headlineBoundaries[0], headlineBoundaries[headlineBoundaries.length - 1]]
+      : []
+
   const visiblePlots = showBoundaryPlots
     ? plotOrder
     : plotOrder.filter((s) => s.kind !== 'boundary')
-  const CONFIDENCE_LABEL = CONFIDENCE_OPTIONS.find((o) => o.value === confidence)?.label ?? ''
 
   // Which solver produced every number on the page -- qualifies all of them
   // rather than any one, so it sits with the other summary chips rather than
@@ -979,7 +1194,12 @@ export default function Results() {
       )
     } else if (analysis.solver.method === 'exact') {
       solverChip = (
+        // describeChild: without it MUI makes the tooltip the chip's NAME, so
+        // the visible "MH/Gibbs (chosen) — 95% converged" was never announced
+        // and voice control had nothing to target. As a description it is
+        // additive, which is what a tooltip is for.
         <Tooltip
+          describeChild
           title={
             'The posterior was integrated exactly on a calendar grid -- no sampler, ' +
             'so nothing to converge and no calibration lobe to miss.' +
@@ -1054,7 +1274,12 @@ export default function Results() {
       // published analysis or to cross-check the exact solver, and calling
       // that "sampled because we had to" would be false.
       solverChip = (
+        // describeChild: without it MUI makes the tooltip the chip's NAME, so
+        // the visible "MH/Gibbs (chosen) — 95% converged" was never announced
+        // and voice control had nothing to target. As a description it is
+        // additive, which is what a tooltip is for.
         <Tooltip
+          describeChild
           title={
             (analysis.solver.exact_needs_boundaries
               ? `This model was sampled with the Metropolis-Hastings/Gibbs scheme. Integrating this model exactly would mean supplying ${
@@ -1089,10 +1314,16 @@ export default function Results() {
   }
 
   return (
-    <Container maxWidth="lg" sx={{ py: 4 }}>
+    // component="main": the page had no main landmark at all, so there was no
+    // way past the AppBar for anyone navigating by landmark.
+    <Container component="main" maxWidth="lg" sx={{ py: 4 }}>
       <Paper sx={{ p: 3, mb: 3 }}>
         <Box>
-          <Typography variant="h3" component="h1" gutterBottom>
+          {/* variant="h1", not h3: the theme defines h1 as 2.5rem/600 -- the
+              design system's Headline -- and this page was rendering its title
+              at MUI's stock h3 (3rem/400), bigger and lighter than the token
+              written for exactly this job. */}
+          <Typography variant="h1" component="h1" gutterBottom>
             {analysis.name}
           </Typography>
           <Typography variant="body1" color="textSecondary" gutterBottom>
@@ -1143,6 +1374,47 @@ export default function Results() {
             />
           )}
         </Stack>
+
+        {/* The one thing a reader came for, set as the one thing on the page.
+            Everything below this is the working: the table, the diagram, the
+            figures. This is the reading, at the size of a reading, with the
+            qualifiers a citation needs attached to it rather than scattered
+            across a header row and a chip. */}
+        {primaryReading.length === 2 && (
+          <Box sx={{ mt: 3 }}>
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={{ xs: 1.5, sm: 5 }}>
+              {primaryReading.map((row) => {
+                const envelope = hpdEnvelopeFromHistogram(
+                  row.posterior!.probability_distribution,
+                  confidence
+                )
+                if (!envelope) return null
+                const range = formatCalendarRange(envelope[0], envelope[1], dateFormat)
+                return (
+                  <Box key={row.elementId ?? row.name}>
+                    <Typography variant="body2" color="textSecondary">
+                      {row.name}
+                    </Typography>
+                    <Typography
+                      variant="h4"
+                      component="p"
+                      sx={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums', lineHeight: 1.15 }}
+                    >
+                      {range}
+                      <CopyCitation
+                        always
+                        text={citationLine(row.name, range, CONFIDENCE_LABEL, provenance)}
+                      />
+                    </Typography>
+                  </Box>
+                )
+              })}
+            </Stack>
+            <Typography variant="body2" color="textSecondary" sx={{ mt: 1 }}>
+              {[`${CONFIDENCE_LABEL} HPD`, ...provenance].join(' · ')}
+            </Typography>
+          </Box>
+        )}
 
         {/* Its own row below the title/chips rather than beside the title,
             so a 220px-minimum select plus four buttons has the full card
@@ -1229,7 +1501,7 @@ export default function Results() {
 
       {boundaryRows.length === 0 && contextsWithModeledSpan.length > 0 && (
         <Paper sx={{ p: 3, mb: 3 }}>
-          <Typography variant="h5" gutterBottom>
+          <Typography variant="h6" component="h2" gutterBottom>
             Context Spans
           </Typography>
           <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
@@ -1239,8 +1511,11 @@ export default function Results() {
           </Typography>
           <TableContainer>
             <Table size="small">
+              <caption style={visuallyHidden}>
+                Modelled start and end of each context in this analysis.
+              </caption>
               <TableHead>
-                <TableRow sx={{ backgroundColor: 'grey.100' }}>
+                <TableRow sx={{ backgroundColor: 'background.muted' }}>
                   <TableCell>Context</TableCell>
                   {showMean && <TableCell align="right">Start Mean</TableCell>}
                   {showMedian && <TableCell align="right">Start Median</TableCell>}
@@ -1296,7 +1571,7 @@ export default function Results() {
       <Paper sx={{ p: 3, mb: 3 }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 2, mb: 2 }}>
           <Box>
-            <Typography variant="h5" gutterBottom>
+            <Typography variant="h6" component="h2" gutterBottom>
               Results Summary
             </Typography>
             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ sm: 'center' }}>
@@ -1375,7 +1650,7 @@ export default function Results() {
           </Alert>
         )}
 
-        <TableContainer>
+        <TableContainer sx={SCROLL_HINT_SX}>
           {/* tabular-nums so every numeric column -- ages, percentages,
               agreement/outlier diagnostics -- lines up digit-for-digit down
               the column instead of drifting with each digit's own width.
@@ -1383,9 +1658,15 @@ export default function Results() {
               Suspect/Check/Assigned chips, which is harmless: none of that
               text has digits whose alignment matters. */}
           <Table size="small" sx={{ fontVariantNumeric: 'tabular-nums' }}>
+            <caption style={visuallyHidden}>
+              {isBayesian ? 'Modelled' : 'Calibrated'} calendar age for every date in this
+              analysis, oldest first, at {CONFIDENCE_LABEL} HPD.
+            </caption>
             <TableHead>
-              <TableRow sx={{ backgroundColor: 'grey.100' }}>
-                <TableCell>{structureRows.length > 0 ? 'Structure / Sample' : 'Sample'}</TableCell>
+              <TableRow sx={{ backgroundColor: 'background.muted' }}>
+                <TableCell sx={{ ...stickyNameCell('#f4ede7'), zIndex: 3 }}>
+                  {structureRows.length > 0 ? 'Structure / Sample' : 'Sample'}
+                </TableCell>
                 {showMean && <TableCell align="right">Posterior Mean</TableCell>}
                 {showMean && <TableCell align="right">Posterior Std (yr)</TableCell>}
                 {showMedian && <TableCell align="right">Posterior Median</TableCell>}
@@ -1394,11 +1675,34 @@ export default function Results() {
                   {isBayesian ? 'Posterior' : 'Calibrated'} {CONFIDENCE_LABEL} HPD Range
                 </TableCell>
                 {isBayesian && (
-                  <Tooltip
-                    title='A = agreement index: how well the modelled date still fits the prior distribution (below 60 is worth re-examining). O = posterior probability the date is an outlier, when an outlier model was applied to it. "Suspect"/"Check" identifies an outlier probability greater than the prior it was given; "Assigned" means the data stayed close to the assigned prior.'
-                  >
-                    <TableCell align="right">Diagnostics</TableCell>
-                  </Tooltip>
+                  /* The explanation used to be a Tooltip wrapping this cell,
+                     which set the whole paragraph as the header's accessible
+                     name -- so a screen reader announced sixty words in place
+                     of "Diagnostics" against every data cell in the column,
+                     while a keyboard or touch user got nothing at all (the
+                     <th> was not focusable, and there is no hover on a
+                     tablet). A focusable button beside the label reaches all
+                     three and the column keeps its own name. The persistent
+                     key under the table is what a first-time reader needs. */
+                  <TableCell align="right">
+                    Diagnostics
+                    <Tooltip title={DIAGNOSTICS_HELP} describeChild>
+                      <IconButton
+                        size="small"
+                        aria-label="What the diagnostics columns mean"
+                        sx={{
+                          ml: 0.5,
+                          p: 0.25,
+                          verticalAlign: 'baseline',
+                          minWidth: 24,
+                          minHeight: 24,
+                          my: '-3px',
+                        }}
+                      >
+                        <HelpOutlineIcon sx={{ fontSize: 15 }} />
+                      </IconButton>
+                    </Tooltip>
+                  </TableCell>
                 )}
               </TableRow>
             </TableHead>
@@ -1421,6 +1725,8 @@ export default function Results() {
                       showMean={showMean}
                       showMedian={showMedian}
                       confidence={confidence}
+                      confidenceLabel={CONFIDENCE_LABEL}
+                      provenance={provenance}
                       dateFormat={dateFormat}
                       // A date row's elementId is its PARENT phase's id (see
                       // the comment on the key above), so these must also
@@ -1451,7 +1757,9 @@ export default function Results() {
                     const modelledEnvelope = hpdEnvelopeFromHistogram(result.probability_distribution, confidence)
                     return (
                       <TableRow key={result.sample_id}>
-                        <TableCell>{result.sample_name || `Sample ${idx + 1}`}</TableCell>
+                        <TableCell sx={stickyNameCell('#ffffff')}>
+                          {result.sample_name || `Sample ${idx + 1}`}
+                        </TableCell>
                         {showMean && (
                           <TableCell align="right" sx={NUMERIC_CELL_SX}>
                             {result.posterior_mean != null
@@ -1478,6 +1786,16 @@ export default function Results() {
                         )}
                         <TableCell align="right" sx={NUMERIC_CELL_SX}>
                           {modelledEnvelope ? formatCalendarRange(modelledEnvelope[0], modelledEnvelope[1], dateFormat) : 'N/A'}
+                          {modelledEnvelope && (
+                            <CopyCitation
+                              text={citationLine(
+                                result.sample_name || `Sample ${idx + 1}`,
+                                formatCalendarRange(modelledEnvelope[0], modelledEnvelope[1], dateFormat),
+                                CONFIDENCE_LABEL,
+                                provenance
+                              )}
+                            />
+                          )}
                         </TableCell>
                       </TableRow>
                     )
@@ -1485,6 +1803,17 @@ export default function Results() {
             </TableBody>
           </Table>
         </TableContainer>
+        {/* The key a first-time reader needs, present without a hover: the
+            two diagnostics letters, spelled out once under the table they
+            label. Same words as the header's help control, from the one
+            constant, so the two cannot drift. */}
+        {isBayesian && (
+          <Typography variant="caption" color="textSecondary" component="p" sx={{ mt: 1.5 }}>
+            <strong>A</strong> = agreement index — how well the modelled date still fits its
+            unmodelled calibration; below 60 is worth re-examining.{' '}
+            <strong>O</strong> = the probability the date is an outlier.
+          </Typography>
+        )}
       </Paper>
 
       {/* Model Structure -- read-only view of the groups/relationships/TPQ-TAQ
@@ -1500,13 +1829,17 @@ export default function Results() {
         <Paper sx={{ p: 3, mb: 3 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
             <AccountTreeIcon color="action" />
-            <Typography variant="h5">Model Structure used</Typography>
+            <Typography variant="h6" component="h2">
+              Model Structure used
+            </Typography>
           </Box>
           <HarrisMatrixDiagram
             tree={analysis.model_tree}
             measurements={analysis.measurements || []}
             assignments={structureAssignments}
             dateFormat={dateFormat}
+            confidence={confidence}
+            confidenceLabel={CONFIDENCE_LABEL}
           />
         </Paper>
       )}
@@ -1537,7 +1870,9 @@ export default function Results() {
               clicked it. Beside a heading of fixed text it cannot move except
               by the page being resized. */}
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 2 }}>
-            <Typography variant="h5">Posterior Distributions</Typography>
+            <Typography variant="h6" component="h2">
+              Posterior Distributions
+            </Typography>
             <ToggleButtonGroup
               size="small"
               exclusive
@@ -1627,10 +1962,7 @@ export default function Results() {
                   <PosteriorPlot
                     calAges={series.distribution.map(([age]) => age)}
                     probabilities={series.distribution.map(([, prob]) => prob)}
-                    hpd68={series.hpd68}
-                    hpd95={series.hpd95}
-                    hpd68Ranges={series.hpd68Ranges}
-                    hpd95Ranges={series.hpd95Ranges}
+                    bands={series.bands}
                     priorDistribution={series.priorDistribution}
                     showPrior={showPrior}
                     isBoundary={series.kind === 'boundary'}
@@ -1662,6 +1994,13 @@ export default function Results() {
           confidenceLabel={CONFIDENCE_LABEL}
           showMean={showMean}
           showMedian={showMedian}
+          // Oldest first, the same order the table and the plots use -- so a
+          // well-ordered chronology reads down the ordering matrix's diagonal
+          // rather than being scattered across it.
+          dateAxis={chronologicalResults.map((r) => ({
+            id: r.sample_id,
+            name: r.sample_name || 'Date',
+          }))}
         />
       )}
 

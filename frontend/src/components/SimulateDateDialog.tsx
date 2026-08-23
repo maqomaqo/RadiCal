@@ -14,6 +14,7 @@ import {
 import PosteriorPlot from '@/components/PosteriorPlot'
 import { simulateDate, type SimulatedDate } from '@/api/curves'
 import { formatCalendarAge, formatHPDRanges, type DateFormat } from '@/utils/dateFormat'
+import { storedHpdBands } from '@/utils/hpd'
 import { useNotify } from '@/contexts/NotificationContext'
 
 /**
@@ -113,8 +114,7 @@ export default function SimulateDateDialog({
             <PosteriorPlot
               calAges={result.probability_distribution.map(([age]) => age)}
               probabilities={result.probability_distribution.map(([, p]) => p)}
-              hpd68Ranges={result.hpd_68_ranges}
-              hpd95Ranges={result.hpd_95_ranges}
+              bands={storedHpdBands(result.hpd_68_ranges, result.hpd_95_ranges)}
               sampleName={`Simulated at ${formatCalendarAge(result.cal_age, dateFormat)}`}
               dateFormat={dateFormat}
               height={340}
