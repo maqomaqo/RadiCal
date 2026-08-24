@@ -2,7 +2,7 @@
 name: RadiCal
 description: A calibrated instrument for radiocarbon dating and OxCal-style Bayesian chronological modelling.
 colors:
-  calibration-blue: "#4a7dc4"
+  calibration-blue: "#3c70b8"
   burnt-coral: "#e14a56"
   aged-paper: "#faf6f3"
   paper-white: "#ffffff"
@@ -11,7 +11,9 @@ colors:
   boundary-coral-ink: "#d23f4a"
   phase-green: "#1f7a62"
   hiatus-violet: "#7a5c99"
-  context-ochre: "#b5651d"
+  muted-surface: "#f4ede7"
+  context-shade-lightest: "#35826e"
+  context-shade-darkest: "#04372a"
 typography:
   headline:
     fontFamily: "Roboto, sans-serif"
@@ -95,10 +97,13 @@ pair carries surfaces and depth, and a separate small set of hues is reserved en
 meaning in the model-tree diagrams and posterior plots.
 
 ### Primary
-- **Slate Blue** (`#4a7dc4`): the one color interactive chrome runs on — primary buttons, filled
+- **Slate Blue** (`#3c70b8`): the one color interactive chrome runs on — primary buttons, filled
   chips, links, focus states, the "Sequence" element in the model tree, and the posterior line in
   every plot. Saturated up from the logo's pale tint (`#f0f0fc`), which is a wash, not a usable
-  interactive color on its own.
+  interactive color on its own, then darkened from `#4a7dc4` for AA: that value measured 4.18:1 on
+  white and 3.89:1 on the canvas — under 4.5:1 in *both* directions, so every AppBar link (white on
+  blue) and every text button (blue on paper) failed on one token. Same hue and saturation, one step
+  down in lightness: 5.00:1 on white, 4.65:1 on the canvas.
 
 ### Secondary
 - **Burnt Coral** (`#e14a56`): darkened from the logo's raw coral (`#f05460`) for AA contrast as
@@ -115,9 +120,16 @@ meaning in the model-tree diagrams and posterior plots.
   and the plot area itself. Kept a known, uncolored white specifically so every translucent fill
   drawn on top of it (HPD bands, prior/posterior fills) composites against the same base rather than
   drifting muddier depending on what's behind it.
-- **Warm Ink** (`#2b2320`): not a UI-chrome color but the tint behind two things — every recolored
-  MUI shadow (`rgba(43, 35, 32, *)` in place of pure black) and the mean/median point-estimate marks
-  on posterior plots, which read as pencil annotation over the data rather than data of their own.
+- **Muted Surface** (`#f4ede7`, `background.muted`): a banded surface *inside* an elevated white
+  one — table header rows, the stat strip under a chart. Every one of these used MUI's `grey.100`
+  (`#f5f5f5`), a perfectly neutral R=G=B sitting on the warmest background in the app, which is the
+  one palette this theme exists to replace. Warmer and a step darker than the canvas so it reads as
+  a band on paper rather than a hole in it.
+- **Warm Ink** (`#2b2320`): not a UI-chrome color. It is what the app draws with when a mark is
+  *about* the data rather than a category of it — every recolored MUI shadow (`rgba(43, 35, 32, *)`
+  in place of pure black), the mean/median point-estimate marks on posterior plots, and the ordering
+  matrix, where overlap measures what the model could not resolve. Exported from `diagramColors.ts`
+  so the plots and the matrix cannot drift to two different inks.
 
 ### Diagram & Plot Palette (reserved for element-type encoding)
 - **Boundary Coral** (`#f15d5f`, ink variant `#d23f4a`): a Boundary, wherever it is drawn — tree
@@ -127,10 +139,27 @@ meaning in the model-tree diagrams and posterior plots.
   alpha strengths for the two nested confidence levels (72% for 68% HPD, 30% for 95% HPD) — one hue,
   two strengths, because they are one quantity, not two categories.
 - **Muted Violet** (`#7a5c99`): a Hiatus, everywhere.
+- **Context shades** (`#35826e` → `#04372a`): one *stratigraphic context* against another in the
+  Harris matrix. Six graded steps of the Phase hue, not six hues: hue held at 164°, only lightness
+  and chroma moving, every step clearing 4.5:1 on white because these carry 10px node labels as well
+  as borders. `contextShades(count)` spreads across the ramp rather than taking it in order, so a
+  two-context model uses the extremes. This replaced eight Material swatches whose first entry was
+  `blue[700]` = `#1976d2` — the anti-reference named below — and which also contained the Hiatus and
+  Phase hues, so a Phase could be painted as a Hiatus. The cost was accepted deliberately: two
+  contexts are no longer told apart at a glance the way two hues were. What it buys is that none of
+  them can be mistaken for a Boundary, a Hiatus, or the Sequence.
+- **Overlap ink** (Warm Ink at five strengths): how far the model is from being able to order two
+  dates, in the ordering matrix. Ink rather than a hue because overlap is not an object type — it is
+  the *absence* of information — and because every hue above is already a claim about what something
+  is. Discrete, matching the five bands `services/intervals.py` classifies into
+  (`none` → `extensive`), so the legend is a key a reader can match a square to.
 
 ### Named Rules
 **The One Object, One Color Rule.** A Boundary, Phase, or Hiatus is the same hue in the tree editor,
-the Harris matrix, and the posterior plot — never a per-view palette.
+the Harris matrix, and the posterior plot — never a per-view palette. Its corollary, learned the hard
+way: a categorical palette for things that are *instances of one kind* — contexts, not element types
+— must not be built from hues those element types already own. Distinguish instances by strength or
+position, and leave hue to say what a thing is.
 
 **The Borrowed-Status Rule.** `success`/`warning`/`error` are reserved for genuine semantic state
 (a solved solver, an actual warning, a destructive confirm action). They are never repurposed as a
@@ -257,10 +286,18 @@ not a RadiCal-specific choice).
 
 ### Don't:
 - **Don't** fall back to MUI's stock blue (`#1976d2`) or pink (`#dc004e`) — both were the literal
-  starting point and were explicitly replaced with colors pulled from the app's own logo.
+  starting point and were explicitly replaced with colors pulled from the app's own logo. `#1976d2`
+  in particular sits a few degrees from the app's own primary, so a context painted in it read as the
+  Sequence container; it reached the Harris matrix once via a categorical palette built from Material
+  swatches, and was removed.
 - **Don't** reuse `success`/`warning` as categorical labels for structural model-tree elements — it
   was tried, and it made the editor read as a status display instead of a diagram.
 - **Don't** give Boundary Coral to a "danger"/destructive UI action — that hue is reserved for
   diagram meaning; destructive confirms use MUI's standard `error` red instead.
 - **Don't** spend the brand coral (Burnt Coral) freely on interactive chrome — it is used almost
   nowhere in the app today, and that scarcity is deliberate, not an oversight to "fix."
+- **Don't** reach for MUI's `grey.*` for a banded surface inside a card — `background.muted` exists
+  for that, and a neutral R=G=B grey on the warmest canvas in the app is the one palette this theme
+  was written to replace.
+- **Don't** encode a measurement in a hue that already names an object. An overlap, a duration, a
+  confidence — these are quantities, and they take one hue (or the ink) at graded strength.

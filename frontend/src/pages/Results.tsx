@@ -379,11 +379,13 @@ export function citationLine(
 // the persistent key under the table. Two copies of this drifting apart would
 // be the same defect the page had elsewhere, in prose instead of numbers.
 const DIAGNOSTICS_HELP =
-  'A = agreement index: how well the modelled date still fits the prior distribution ' +
-  '(below 60 is worth re-examining). O = posterior probability the date is an outlier, ' +
-  'when an outlier model was applied to it. "Suspect"/"Check" identifies an outlier ' +
-  'probability greater than the prior it was given; "Assigned" means the data stayed ' +
-  'close to the assigned prior.'
+  'A = agreement index: how well the modelled date still fits its own unmodelled ' +
+  'calibration. 100 means the model left it where it was; above 100 means the model ' +
+  'sharpened it onto the peak of its own calibration, which is normal; below about 60 ' +
+  'is the conventional threshold for a second look. O = posterior probability the date ' +
+  'is an outlier, when an outlier model was applied to it. "Suspect"/"Check" identifies ' +
+  'an outlier probability greater than the prior it was given; "Assigned" means the ' +
+  'data stayed close to the assigned prior.'
 
 // The three standard Gaussian-equivalent confidence levels radiocarbon
 // results are conventionally reported at (1/2/3-sigma) -- OxCal's own
@@ -2170,8 +2172,16 @@ export default function Results() {
             constant, so the two cannot drift. */}
         {isBayesian && (
           <Typography variant="caption" color="textSecondary" component="p" sx={{ mt: 1.5 }}>
+            {/* Why "above 100" is stated: it is the number a reader is most
+                likely to mistake for a fault. services/agreement.py's own
+                docstring says a date the model sharpens onto its own peak
+                scores above 100 "which is why values over 100 are normal and
+                not a bug" -- and the key said only what LOW meant, so a
+                column showing A 141 read as broken. */}
             <strong>A</strong> = agreement index — how well the modelled date still fits its
-            unmodelled calibration; below 60 is worth re-examining.{' '}
+            own unmodelled calibration. 100 means the model left it where it was, above 100
+            that it sharpened the date onto its own peak, and below 60 that it is worth
+            re-examining.{' '}
             <strong>O</strong> = the probability the date is an outlier.
           </Typography>
         )}
