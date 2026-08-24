@@ -1,5 +1,6 @@
-import { useMemo } from 'react'
-import { Box, Paper, Typography } from '@mui/material'
+import { useMemo, useRef } from 'react'
+import { Box, Button, Paper, Typography } from '@mui/material'
+import DownloadIcon from '@mui/icons-material/Download'
 import Plotly from 'plotly.js-dist-min'
 import createPlotlyComponent from 'react-plotly.js/factory'
 import {
@@ -11,7 +12,7 @@ import {
 } from '@/utils/dateFormat'
 import type { HPDBand } from '@/utils/hpd'
 import { usePlotColors } from '@/theme/plotColors'
-import { PNG_EXPORT_SCALE, exportFilename } from '@/utils/plotExport'
+import { downloadPlotPng } from '@/utils/plotExport'
 
 /**
  * A filled rectangle in data coordinates, as a closed polygon trace -- same
@@ -309,8 +310,14 @@ export default function PosteriorPlot({
     return [(INNER_BAR[0] - AXIS_BOTTOM_MARGIN) * peak, top * 1.08]
   }, [peak, showPrior, priorDistribution])
 
+  const plotBox = useRef<HTMLDivElement | null>(null)
+
   const layout = useMemo(
     () => ({
+      // A layout property, not a config one: hiding the modebar does not stop
+      // Plotly's default drag-to-box-zoom, which would leave a reader able to
+      // zoom in with no visible way back out.
+      dragmode: false as const,
       title: sampleName ? `Posterior Distribution: ${sampleName}` : 'Posterior Distribution',
       xaxis: {
         title: calendarAxisTitle(dateFormat),
@@ -346,16 +353,17 @@ export default function PosteriorPlot({
   const config = useMemo(
     () => ({
       responsive: true,
-      displayModeBar: true,
+      // No modebar, and the canvas is locked. The bar rendered six <a>
+      // elements with no href, no role and no accessible name, none of which
+      // could take focus -- 98 of them on a 12-date Individual view -- and the
+      // PNG export behind it is how a figure reaches a paper. The app draws
+      // that control itself now. dragmode:false because hiding the bar does
+      // NOT disable zooming: Plotly's default is drag-to-box-zoom, which would
+      // leave a plot the reader can zoom into with no visible way back out.
+      displayModeBar: false as const,
       displaylogo: false,
-      modeBarButtonsToRemove: ['lasso2d', 'select2d'],
-      toImageButtonOptions: {
-        format: 'png' as const,
-        scale: PNG_EXPORT_SCALE,
-        filename: exportFilename(sampleName ? `posterior-${sampleName}` : 'posterior'),
-      },
     }),
-    [sampleName]
+    []
   )
 
   if (plotData.length === 0) {
@@ -372,7 +380,7 @@ export default function PosteriorPlot({
   // Accordion in ImportDatesDialog -- nested elevation reads as noise, so the
   // boundary is drawn with a line.
   return (
-    <Paper elevation={0} variant="outlined" sx={{ p: 2, mb: 2 }}>
+    <Paper elevation={0} variant="outlined" sx={{ p: 2, mb: 2 }} ref={plotBox}>
       <Plot
         data={plotData}
         layout={layout}
@@ -380,6 +388,19 @@ export default function PosteriorPlot({
         useResizeHandler
         style={{ width: '100%', height: `${height}px`, minHeight: '300px' }}
       />
+      {/* The control that replaced the modebar's camera icon -- labelled,
+          in the tab order, and next to the figure it saves. */}
+      <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 0.5 }}>
+        <Button
+          size="small"
+          startIcon={<DownloadIcon />}
+          onClick={() =>
+            downloadPlotPng(plotBox.current, sampleName ? `posterior-${sampleName}` : 'posterior')
+          }
+        >
+          Download PNG
+        </Button>
+      </Box>
       {pointEstimates && (showMean || showMedian) && (
         <Box sx={{ mt: 2, p: 1, backgroundColor: 'background.muted', borderRadius: 1 }}>
           <Typography variant="body2" color="textSecondary" gutterBottom>

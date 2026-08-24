@@ -1,10 +1,10 @@
-// How the plots' "download as PNG" button behaves. Shared by the
-// single-date and stacked views so an exported figure is the same quality
-// whichever one it came from.
+import Plotly from 'plotly.js-dist-min'
+
+// How the plots' "Download PNG" button behaves. Shared by every plot surface
+// so an exported figure is the same quality whichever one it came from.
 
 /**
- * Multiplier applied to the on-screen size when the modebar's camera
- * button saves a PNG.
+ * Multiplier applied to the on-screen size when a plot is saved as a PNG.
  *
  * Plotly's default is 1 -- the plot at exactly its on-screen pixel size,
  * which is a screenshot: fine on screen, visibly soft the moment it goes
@@ -14,6 +14,37 @@
  * a re-laid-out one.
  */
 export const PNG_EXPORT_SCALE = 3
+
+/**
+ * Save a plot as a PNG at PNG_EXPORT_SCALE.
+ *
+ * Exists because the app now draws its own download control rather than
+ * showing Plotly's modebar. That bar rendered six <a> elements with no href,
+ * no role and no accessible name, none of which could take focus -- so the
+ * path a figure takes into a publication needed a mouse. A real button can be
+ * labelled, reached by Tab, and put where the reader is already looking.
+ *
+ * Takes the container rather than the graph div: callers hold a ref to the
+ * element they render, and Plotly's own div is created inside it.
+ */
+export function downloadPlotPng(
+  container: HTMLElement | null,
+  filename: string
+): void {
+  const graph = container?.querySelector<HTMLElement>('.js-plotly-plot')
+  if (!graph) return
+  // Cast: plotly.js-dist-min ships no types for downloadImage, and the
+  // project's own d.ts (types/plotly.d.ts) deliberately keeps the surface
+  // narrow rather than restating Plotly's API.
+  const plotly = Plotly as unknown as {
+    downloadImage(gd: HTMLElement, opts: Record<string, unknown>): Promise<string>
+  }
+  void plotly.downloadImage(graph, {
+    format: 'png',
+    scale: PNG_EXPORT_SCALE,
+    filename: exportFilename(filename),
+  })
+}
 
 /**
  * A saved-file name that survives every OS -- no spaces, slashes or

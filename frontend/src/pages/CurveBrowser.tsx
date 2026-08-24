@@ -20,6 +20,7 @@ import {
 } from '@mui/material'
 import Plotly from 'plotly.js-dist-min'
 import createPlotlyComponent from 'react-plotly.js/factory'
+import DownloadIcon from '@mui/icons-material/Download'
 import CurveScrubber from '@/components/CurveScrubber'
 import {
   compareCurves,
@@ -43,7 +44,7 @@ import {
   formatCalendarAge,
   type DateFormat,
 } from '@/utils/dateFormat'
-import { PNG_EXPORT_SCALE, exportFilename } from '@/utils/plotExport'
+import { downloadPlotPng } from '@/utils/plotExport'
 import {
   clampWindow,
   pointsForWidth,
@@ -534,15 +535,50 @@ export default function CurveBrowser() {
     () => ({
       responsive: true,
       displaylogo: false,
-      displayModeBar: true,
-      modeBarButtonsToRemove: ['lasso2d', 'select2d', 'autoScale2d'],
-      toImageButtonOptions: {
-        format: 'png' as const,
-        scale: PNG_EXPORT_SCALE,
-        filename: exportFilename(`curve-${curveId}`),
-      },
+      // The bar goes; the CANVAS stays. Plotly's modebar duplicated zoom and
+      // pan controls this page already has as real buttons -- and duplicated
+      // them badly, because it mutates the axis range directly while this
+      // page's `window` state, which the buttons, the presets, the scrubber
+      // and "Export this window" all read, never heard about it. Measured:
+      // Plotly zoom-in twice took the view to 34375-20625, then the app's own
+      // "Zoom in" snapped it back to the full 55000-0. The button zoomed OUT,
+      // four-fold.
+      //
+      // Drag-to-zoom is worth keeping -- it is the best way to pick a plateau
+      // out of a calibration curve -- so it stays and reports what it did
+      // through onRelayout below.
+      displayModeBar: false as const,
     }),
-    [curveId]
+    []
+  )
+
+  /**
+   * Feed Plotly's own drag-zoom back into the window this page owns.
+   *
+   * Without this the two disagree silently, and not only visually: `Export
+   * this window` builds its CSV URL from window.from/to, so a reader who
+   * box-zoomed to a plateau and hit export got the PREVIOUS window's data in a
+   * file that looks like the one on screen.
+   *
+   * Only acts on an explicit range: Plotly also emits relayout for autorange,
+   * resizes and dragmode changes, and re-applying state on those would fight
+   * the render that caused them.
+   */
+  const handleRelayout = useCallback(
+    (event: Record<string, unknown>) => {
+      if (!extent) return
+      const lo = event['xaxis.range[0]']
+      const hi = event['xaxis.range[1]']
+      if (typeof lo !== 'number' || typeof hi !== 'number') return
+      // The axis is reversed, so which end arrives first is not guaranteed.
+      const next = clampWindow({ from: Math.min(lo, hi), to: Math.max(lo, hi) }, extent)
+      setWindow((current) =>
+        current && Math.abs(current.from - next.from) < 0.5 && Math.abs(current.to - next.to) < 0.5
+          ? current
+          : next
+      )
+    },
+    [extent]
   )
 
   const setPreset = useCallback(
@@ -674,6 +710,7 @@ export default function CurveBrowser() {
           config={config}
           useResizeHandler
           style={{ width: '100%', height: `${chartHeight}px` }}
+          onRelayout={handleRelayout}
           onHover={(event: any) => setHover(event?.points?.[0]?.x ?? null)}
           onUnhover={() => setHover(null)}
           // Clicking a year asks what a date from it would actually look
@@ -960,7 +997,20 @@ export default function CurveBrowser() {
           <Button size="small" onClick={() => setPreset(2350, 2800)}>
             Hallstatt plateau
           </Button>
+          {/* Reset belongs with the other view controls now that Plotly's
+              own autoscale is gone -- and it always agreed with `window`
+              anyway, which Plotly's never did. */}
+          <Button size="small" onClick={() => setPreset(extent.min, extent.max)}>
+            Reset view
+          </Button>
           <Box sx={{ flexGrow: 1 }} />
+          <Button
+            size="small"
+            startIcon={<DownloadIcon />}
+            onClick={() => downloadPlotPng(plotBoxRef.current, `curve-${curveId}`)}
+          >
+            Download PNG
+          </Button>
           <Button
             size="small"
             component="a"

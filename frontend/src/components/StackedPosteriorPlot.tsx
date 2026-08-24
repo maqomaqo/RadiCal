@@ -1,5 +1,7 @@
-import { useMemo } from 'react'
-import { Paper, Typography, useMediaQuery, useTheme } from '@mui/material'
+import { useMemo, useRef, useState } from 'react'
+import { Box, Button, Paper, Typography, useMediaQuery, useTheme } from '@mui/material'
+import DownloadIcon from '@mui/icons-material/Download'
+import FitWidthIcon from '@mui/icons-material/SettingsEthernet'
 import Plotly from 'plotly.js-dist-min'
 import createPlotlyComponent from 'react-plotly.js/factory'
 import {
@@ -13,7 +15,7 @@ import type { HPDBand } from '@/utils/hpd'
 import { stackedPlotGeometry } from '@/utils/stackedPlotGeometry'
 import { toUnitArea } from '@/utils/distribution'
 import { usePlotColors } from '@/theme/plotColors'
-import { PNG_EXPORT_SCALE } from '@/utils/plotExport'
+import { downloadPlotPng } from '@/utils/plotExport'
 
 // Same binding as PosteriorPlot -- see the note there for why the factory is
 // bound to the packaged plotly.js rather than a CDN global.
@@ -149,6 +151,10 @@ export default function StackedPosteriorPlot({
   const plot = usePlotColors()
   const narrow = useMediaQuery(theme.breakpoints.down('sm'))
   const marginLeft = narrow ? MARGIN_LEFT_NARROW : MARGIN_LEFT
+
+  // Off by default: the cropped range is the better read almost always -- see
+  // the note on xRange for the one case it is not.
+  const [fitWidth, setFitWidth] = useState(false)
 
   const seriesSignature = series
     .map((s) => {
@@ -378,28 +384,54 @@ export default function StackedPosteriorPlot({
     return { shapes, annotations }
   }, [drawable, marginLeft])
 
-  // The axis is set from the HPD regions, not from the full extent of every
-  // curve. A posterior's tails run far wider than anything it says: on a real
-  // sequence they stretched the shared axis to three times the span the dates
-  // actually occupy, squeezing every curve into the middle third. Padding
-  // keeps the tails visible where they matter, and Autoscale on the modebar
-  // still restores the full extent.
+  /**
+   * The axis is set from the HPD regions, not from the full extent of every
+   * curve. A posterior's tails run far wider than anything it says: on a real
+   * sequence they stretched the shared axis to three times the span the dates
+   * actually occupy, squeezing every curve into the middle third.
+   *
+   * That default clips one case, which is what Fit width exists for: with the
+   * prior shadow shown, an OUTLIER's unmodelled calibration is much wider than
+   * the posterior the model pulled it into, so the thing the comparison is
+   * being made against runs off both ends of the axis. The escape hatch used
+   * to be Autoscale on Plotly's modebar; that bar is gone, so the app draws
+   * the control itself -- and fits to what is actually DRAWN rather than to
+   * the raw data, which would re-admit the tails this range exists to crop.
+   */
   const xRange = useMemo(() => {
     const bounds: number[] = []
-    drawable.forEach((s) => {
-      // The widest band in the row -- the outer one when there are two,
-      // the only one when the reader has selected 1 sigma.
-      const widest = s.bands?.[0]
-      if (widest) widest.ranges.forEach((r) => bounds.push(r.min, r.max))
-    })
+    if (fitWidth) {
+      drawable.forEach((s) => {
+        const curve = trimTails(toUnitArea(s.distribution!))
+        if (curve.ages.length > 0) {
+          bounds.push(curve.ages[0], curve.ages[curve.ages.length - 1])
+        }
+        if (showPrior && s.priorDistribution && s.priorDistribution.length > 0) {
+          const prior = trimTails(toUnitArea(s.priorDistribution))
+          if (prior.ages.length > 0) {
+            bounds.push(prior.ages[0], prior.ages[prior.ages.length - 1])
+          }
+        }
+      })
+    } else {
+      drawable.forEach((s) => {
+        // The widest band in the row -- the outer one when there are two,
+        // the only one when the reader has selected 1 sigma.
+        const widest = s.bands?.[0]
+        if (widest) widest.ranges.forEach((r) => bounds.push(r.min, r.max))
+      })
+    }
     if (bounds.length === 0) return null
     const min = Math.min(...bounds)
     const max = Math.max(...bounds)
-    const pad = Math.max((max - min) * 0.35, 25)
+    // Fit width has already included everything on screen, so it needs only
+    // enough room not to clip a stroke; the HPD-based range needs enough to
+    // keep the tails either side of the interval legible.
+    const pad = fitWidth ? Math.max((max - min) * 0.02, 5) : Math.max((max - min) * 0.35, 25)
     // Reversed axis: Plotly takes the range in axis order, so the older
     // (larger cal BP) end comes first.
     return [max + pad, min - pad]
-  }, [drawable])
+  }, [drawable, fitWidth, showPrior])
 
   // Ticks span whatever the axis actually shows, so a clipped view doesn't
   // label years that were left off it.
@@ -413,8 +445,14 @@ export default function StackedPosteriorPlot({
   // Pixel budget for everything below the axis -- see stackedPlotGeometry.
   const geometry = useMemo(() => stackedPlotGeometry(drawable.length), [drawable.length])
 
+  const plotBox = useRef<HTMLDivElement | null>(null)
+
   const layout = useMemo(
     () => ({
+      // A layout property, not a config one: hiding the modebar does not stop
+      // Plotly's default drag-to-box-zoom, which would leave a reader able to
+      // zoom in with no visible way back out.
+      dragmode: false as const,
       xaxis: {
         // An explicit standoff pins the title just under the tick labels.
         // Left to itself Plotly places it against the bottom of whatever
@@ -457,16 +495,15 @@ export default function StackedPosteriorPlot({
   const config = useMemo(
     () => ({
       responsive: true,
-      displayModeBar: true,
+      // No modebar, and the canvas is locked. The bar rendered six <a>
+      // elements with no href, no role and no accessible name, none of which
+      // could take focus -- 98 of them on a 12-date Individual view -- and the
+      // PNG export behind it is how a figure reaches a paper. The app draws
+      // that control itself now. dragmode:false because hiding the bar does
+      // NOT disable zooming: Plotly's default is drag-to-box-zoom, which would
+      // leave a plot the reader can zoom into with no visible way back out.
+      displayModeBar: false as const,
       displaylogo: false,
-      modeBarButtonsToRemove: ['lasso2d', 'select2d'],
-      // This is the figure most likely to end up in a paper, so it is the
-      // one that most needs not to be a screenshot -- see PNG_EXPORT_SCALE.
-      toImageButtonOptions: {
-        format: 'png' as const,
-        scale: PNG_EXPORT_SCALE,
-        filename: 'posterior-stack',
-      },
     }),
     []
   )
@@ -480,15 +517,45 @@ export default function StackedPosteriorPlot({
   }
 
   return (
-    <Plot
-      data={plotData}
-      layout={layout}
-      config={config}
-      useResizeHandler
-      style={{
-        width: '100%',
-        height: `${geometry.height}px`,
-      }}
-    />
+    <Box ref={plotBox}>
+      {/* Above the figure, not below it. The Results page renders Show prior
+          and Show boundary plots immediately above this component, and Fit
+          width is the answer to what Show prior reveals -- a reader who ticks
+          the prior, sees an outlier's calibration run off both ends, and has
+          to scroll three thousand pixels to find the control that fixes it
+          has been sent on an errand. All the plot's controls sit together. */}
+      <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1, mb: 0.5 }}>
+        {/* The one control the removed modebar was genuinely carrying. Named
+            for what it does to the figure, not for the gesture: "Autoscale"
+            described Plotly's internals. */}
+        <Button
+          size="small"
+          aria-pressed={fitWidth}
+          startIcon={<FitWidthIcon />}
+          onClick={() => setFitWidth((v) => !v)}
+        >
+          {fitWidth ? 'Fit to ranges' : 'Fit width'}
+        </Button>
+        <Button
+          size="small"
+          startIcon={<DownloadIcon />}
+          onClick={() => downloadPlotPng(plotBox.current, 'posterior-stack')}
+        >
+          Download PNG
+        </Button>
+      </Box>
+      <Plot
+        data={plotData}
+        layout={layout}
+        config={config}
+        useResizeHandler
+        style={{
+          width: '100%',
+          height: `${geometry.height}px`,
+        }}
+      />
+      {/* This is the figure most likely to end up in a paper, so it is the one
+          that most needs a control a keyboard can reach -- see PNG_EXPORT_SCALE. */}
+    </Box>
   )
 }
