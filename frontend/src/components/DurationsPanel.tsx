@@ -26,6 +26,7 @@ import {
   Typography,
 } from '@mui/material'
 import { alpha, useTheme } from '@mui/material/styles'
+import { useElementTypeColors } from '@/theme/diagramColors'
 import useMediaQuery from '@mui/material/useMediaQuery'
 import { visuallyHidden } from '@mui/utils'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
@@ -46,6 +47,24 @@ const DURATION_LABELS: Record<DurationRecord['kind'], string> = {
   sequence_duration: 'Sequence',
   phase_duration: 'Phase',
   sample_duration: 'Dated events',
+}
+
+/**
+ * The element-type ink for a duration's kind, matching the results table's
+ * type label and the Harris matrix.
+ *
+ * `sample_duration` gets none: "Dated events" is not an element type — it is
+ * the span the dates themselves cover — so colouring it as one would make it
+ * look like a fourth kind of model element.
+ */
+function useDurationKindColor() {
+  const colors = useElementTypeColors()
+  return (kind: DurationRecord['kind']): string | undefined =>
+    kind === 'sequence_duration'
+      ? colors.sequence.ink
+      : kind === 'phase_duration'
+      ? colors.phase.ink
+      : undefined
 }
 
 const DURATION_HELP: Record<DurationRecord['kind'], string> = {
@@ -158,6 +177,7 @@ export default function DurationsPanel({
   dateAxis = [],
 }: Props) {
   const theme = useTheme()
+  const durationKindColor = useDurationKindColor()
   // Not a pixel breakpoint picked by hand: the same `sm` the rest of the app
   // collapses at, so the differences view changes shape where everything else
   // already does.
@@ -233,14 +253,24 @@ export default function DurationsPanel({
             {intervals.draws.toLocaleString()}{' '}
             {intervals.independent ? 'independent' : 'sampled'} joint draws.
           </Typography>
+        {/* maxHeight below so stickyHeader has a scroll container of its own.
+            A sticky header with no scrolling ancestor sticks to the VIEWPORT
+            instead, and slides under the app bar. Short tables never reach
+            this height, so nothing scrolls that does not need to. */}
         {durations.length > 0 && (
-          <TableContainer sx={{ mb: differences.length > 0 ? 3 : 0 }}>
-            <Table size="small" sx={{ fontVariantNumeric: 'tabular-nums' }}>
+          <TableContainer sx={{ mb: differences.length > 0 ? 3 : 0, maxHeight: { xs: 'none', md: '70vh' } }}>
+            <Table stickyHeader size="small" sx={{
+                fontVariantNumeric: 'tabular-nums',
+                // Banded on the CELLS, not the row: a sticky <tr> does not
+                // work, and a header that scrolls away over 33 rows of pairs
+                // is the same defect the results table had.
+                '& thead th': { backgroundColor: 'background.muted', top: { xs: 'auto', md: 0 } },
+              }}>
                 <caption style={visuallyHidden}>
                   How long each sequence, phase and set of dated events lasted, in years.
                 </caption>
               <TableHead>
-                <TableRow sx={{ backgroundColor: 'background.muted' }}>
+                <TableRow>
                   <TableCell>What</TableCell>
                   <TableCell>Name</TableCell>
                   {showMean && <TableCell align="right">Mean</TableCell>}
@@ -253,7 +283,12 @@ export default function DurationsPanel({
                   <TableRow key={record.id}>
                     <TableCell>
                       <Tooltip title={DURATION_HELP[record.kind]}>
-                        <span>{DURATION_LABELS[record.kind] ?? record.kind}</span>
+                        {/* Same fact, same colour as the results table's
+                            type label: a Phase is Phase green wherever the
+                            page names one. */}
+                        <Box component="span" sx={{ color: durationKindColor(record.kind), fontWeight: 500 }}>
+                          {DURATION_LABELS[record.kind] ?? record.kind}
+                        </Box>
                       </Tooltip>
                     </TableCell>
                     <TableCell>
@@ -477,14 +512,20 @@ export default function DurationsPanel({
                 ))}
               </Stack>
             ) : (
-            <TableContainer>
-              <Table size="small" sx={{ fontVariantNumeric: 'tabular-nums' }}>
+            <TableContainer sx={{ maxHeight: { xs: 'none', md: '70vh' } }}>
+              <Table stickyHeader size="small" sx={{
+                fontVariantNumeric: 'tabular-nums',
+                // Banded on the CELLS, not the row: a sticky <tr> does not
+                // work, and a header that scrolls away over 33 rows of pairs
+                // is the same defect the results table had.
+                '& thead th': { backgroundColor: 'background.muted', top: { xs: 'auto', md: 0 } },
+              }}>
                   <caption style={visuallyHidden}>
                     Every pair compared: how many years apart they sit and how confidently the
                     model can order them.
                   </caption>
                 <TableHead>
-                  <TableRow sx={{ backgroundColor: 'background.muted' }}>
+                  <TableRow>
                     <TableCell>{comparingDates ? 'Date' : 'Phase'}</TableCell>
                     <TableCell>Compared with</TableCell>
                     {showMean && <TableCell align="right">Mean</TableCell>}

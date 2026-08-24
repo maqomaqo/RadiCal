@@ -31,6 +31,7 @@ import {
   ToggleButtonGroup,
 } from '@mui/material'
 import { alpha, useTheme } from '@mui/material/styles'
+import { useElementTypeColors } from '@/theme/diagramColors'
 import { visuallyHidden } from '@mui/utils'
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline'
 import UnfoldMoreIcon from '@mui/icons-material/UnfoldMore'
@@ -403,7 +404,15 @@ const CONFIDENCE_OPTIONS = [
 // chevron doing that job (see StructureTableRow), so a second, static
 // glyph next to it would just be redundant.
 const STRUCTURE_MARKER: Record<string, string> = {
-  boundary: '◆', hiatus: '⋯', unassigned: '⚠', date: '·',
+  // Only the warning. ◆ for a boundary and ⋯ for a hiatus said what the row
+  // WAS -- a job the coloured type label beside the name now does, in the
+  // hue that element already has in the tree editor, the Harris matrix and
+  // every plot. Two marks for one fact, one of them a glyph with no legend
+  // anywhere on the page, was one too many.
+  //
+  // "Unassigned" stays a glyph because it is not an element type: it is a
+  // warning that a date belongs to nothing, and it has no colour of its own.
+  unassigned: '⚠',
 }
 
 // What each glyph above says, for readers who get no glyph. Only the ones
@@ -586,6 +595,13 @@ function StructureTableRow({
   onToggleCollapse?: () => void
 }) {
   const theme = useTheme()
+  // The same map the Harris matrix and the tree editor colour their nodes
+  // from, so one element type cannot be two colours across the app.
+  const elementTypeColors = useElementTypeColors()
+  const typeColor =
+    row.kind !== 'date' && row.kind !== 'unassigned'
+      ? elementTypeColors[row.kind]?.ink
+      : undefined
   const isDate = row.kind === 'date'
   const posterior = row.posterior
   // A heading (sequence/phase/hiatus) has no posterior of its own -- its
@@ -641,7 +657,16 @@ function StructureTableRow({
   return (
     <TableRow
       sx={{
-        backgroundColor: tint ?? (isHeading ? 'background.muted' : undefined),
+        // No fill on headings. A Sequence or Phase row carries a name and
+        // nothing else, so tinting the whole row painted a warm band across
+        // three empty columns -- and a deeply nested model stacks seven of
+        // them in the first twenty rows, which reads as a broken table rather
+        // than as grouping. Weight and indentation already say "heading"; the
+        // hairline above gives the group a top edge without a slab of colour.
+        backgroundColor: tint ?? undefined,
+        ...(isHeading && row.depth === 0
+          ? { '& > td': { borderTop: 1, borderColor: 'divider' } }
+          : {}),
         ...(concern
           ? { borderLeft: 3, borderColor: concern.level === 'suspect' ? 'error.main' : 'warning.main' }
           : {}),
@@ -651,7 +676,7 @@ function StructureTableRow({
         title={row.name}
         sx={{
           pl: 2 + row.depth * 2.5,
-          ...stickyNameCell(tint ?? (isHeading ? MUTED : PAPER)),
+          ...stickyNameCell(tint ?? PAPER),
         }}
       >
         {/* The disclosure control replaces the old static ▸/▪ glyph for
@@ -705,11 +730,30 @@ function StructureTableRow({
         <Box component="span" sx={{ fontWeight: isHeading ? 600 : 400 }}>
           {row.name}
         </Box>
-        {/* Only when it adds something: an element named "Site sequence" or
-            "Phase 1" already says what it is, but a boundary named "Start"
-            does not. */}
-        {!isDate && !row.name.toLowerCase().includes(String(row.kind)) && (
-          <Box component="span" sx={{ ml: 1, color: 'text.secondary', fontSize: '0.75rem' }}>
+        {/* The row's element type, in that type's own colour.
+            
+            Not decoration and not removable: this is the ONLY thing in the
+            table that distinguishes a Sequence from a Phase, and the two are
+            not interchangeable -- a Sequence orders what it contains, a Phase
+            does not, so the same dates under one mean something different
+            from the same dates under the other. Counted across the real
+            models in this database: every one of 45 phases and 18 of 26
+            sequences would show nothing at all without it.
+            
+            The colour is the app's existing element-type palette, so a Phase
+            is the same green here as in the tree editor, the Harris matrix
+            and the plots. The table was the last view of the model still
+            saying element type in grey. All four inks clear 4.5:1 at this
+            size; the word carries it for anyone who cannot see the hue.
+            
+            Still suppressed when the name already says it -- an element
+            called "Boundary" does not need "boundary" after it, and briefly
+            did. */}
+        {!isDate && typeColor && !row.name.toLowerCase().includes(String(row.kind)) && (
+          <Box
+            component="span"
+            sx={{ ml: 1, color: typeColor, fontSize: '0.75rem', fontWeight: 500 }}
+          >
             {row.kind}
           </Box>
         )}
@@ -1586,10 +1630,7 @@ export default function Results() {
           <Typography variant="h1" component="h1" gutterBottom>
             {analysis.name}
           </Typography>
-          <Typography variant="body1" color="textSecondary" gutterBottom>
-            Created: {new Date(analysis.created_at).toLocaleString()}
-          </Typography>
-          <Typography variant="body2" color="textSecondary">
+        <Typography variant="body2" color="textSecondary">
             Project:{' '}
             {analysis.project_id ? (
               <Link
@@ -1604,16 +1645,64 @@ export default function Results() {
               'Unassigned'
             )}
           </Typography>
+          <Typography variant="body2" color="textSecondary" gutterBottom>
+            Created: {new Date(analysis.created_at).toLocaleString()}
+          </Typography>
         </Box>
-
-        {/* A compact line, not four hero stat cards -- this is a single record's
-            detail view, not a dashboard, and two of the four numbers those
-            cards showed (Samples, Results) are the same number in every normal
-            case: one result per measurement. Identical hero numbers read as a
-            bug even when they aren't. The "results" chip only appears at all
+        
+{/* Highlighted main finding of the analysis.
+    Everything below this is the working: the table, the diagram, the
+            figures. */}
+        {primaryReading.length === 2 && (
+          <Box sx={{ mt: 2 }}>
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={{ xs: 1.5, sm: 5 }}>
+              {primaryReading.map((row, idx) => {
+                const envelope = hpdEnvelopeFromHistogram(
+                  row.posterior!.probability_distribution,
+                  confidence
+                )
+                if (!envelope) return null
+                const range = formatCalendarRange(envelope[0], envelope[1], dateFormat)
+                return (
+                  <Box key={row.elementId ?? row.name}>
+                    {/* The page says what these two ARE; the analyst's own name
+                        for them is in the table. `primaryReading` is the first
+                        and last Boundary of the model by construction, so this
+                        is a fact about the pair, not a guess.
+                         */}
+                    <Typography variant="body2" color="textSecondary">
+                      {idx === 0 ? 'Sequence begins' : 'Sequence ends'}
+                    </Typography>
+                    <Typography
+                      variant="h5"
+                      component="p"
+                      sx={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums', lineHeight: 1.15 }}
+                    >
+                      {range}
+                      <CopyCitation
+                        text={citationLine(
+                          row.name,
+                          range,
+                          CONFIDENCE_LABEL,
+                          provenanceForSample(row.sampleId)
+                        )}
+                      />
+                    </Typography>
+                  </Box>
+                )
+              })}
+            </Stack>
+            <Typography variant="body2" color="textSecondary" sx={{ mt: 1 }}>
+              {[`${CONFIDENCE_LABEL} span`, ...analysisProvenance].join(' · ')}
+            </Typography>
+          </Box>
+        )}
+        
+        {/* A compact line -- this is a single record's
+            detail view, not a dashboard. The "results" chip only appears at all
             when the counts actually diverge -- a pending/failed/partial run --
             which is exactly when that divergence is worth a reader's attention. */}
-        <Stack direction="row" spacing={1} sx={{ mt: 2 }} flexWrap="wrap" useFlexGap alignItems="center">
+        <Stack direction="row" spacing={1} sx={{ mt: 3 }} flexWrap="wrap" useFlexGap alignItems="center">
           {solverChip}
           <Chip
             label={analysis.analysis_type === 'group_calibration' ? 'calibration' : analysis.analysis_type}
@@ -1635,67 +1724,7 @@ export default function Results() {
           )}
         </Stack>
 
-        {/* The one thing a reader came for, set as the one thing on the page.
-            Everything below this is the working: the table, the diagram, the
-            figures. This is the reading, at the size of a reading, with the
-            qualifiers a citation needs attached to it rather than scattered
-            across a header row and a chip. */}
-        {primaryReading.length === 2 && (
-          <Box sx={{ mt: 3 }}>
-            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={{ xs: 1.5, sm: 5 }}>
-              {primaryReading.map((row, idx) => {
-                const envelope = hpdEnvelopeFromHistogram(
-                  row.posterior!.probability_distribution,
-                  confidence
-                )
-                if (!envelope) return null
-                const range = formatCalendarRange(envelope[0], envelope[1], dateFormat)
-                return (
-                  <Box key={row.elementId ?? row.name}>
-                    {/* The page says what these two ARE; the analyst's own name
-                        for them reads underneath. `primaryReading` is the first
-                        and last Boundary of the model by construction, so this
-                        is a fact about the pair, not a guess. It used to print
-                        row.name alone as the only framing above the biggest
-                        number on the page -- which on a real 39-date model
-                        rendered as "Go 656-598 cal BP" and "stop 589-500 cal
-                        BP", because that is what the boundaries were called.
-                        The largest type on a page should not be legible only
-                        when someone else typed carefully. */}
-                    <Typography variant="body2" color="textSecondary">
-                      {idx === 0 ? 'Sequence begins' : 'Sequence ends'}
-                    </Typography>
-                    <Typography
-                      variant="h4"
-                      component="p"
-                      sx={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums', lineHeight: 1.15 }}
-                    >
-                      {range}
-                      <CopyCitation
-                        text={citationLine(
-                          row.name,
-                          range,
-                          CONFIDENCE_LABEL,
-                          provenanceForSample(row.sampleId)
-                        )}
-                      />
-                    </Typography>
-                    {/* The element's own name, kept and demoted rather than
-                        dropped: it is how the analyst refers to this boundary
-                        everywhere else in the app, and it is what the citation
-                        above copies. */}
-                    <Typography variant="caption" color="textSecondary">
-                      {row.name}
-                    </Typography>
-                  </Box>
-                )
-              })}
-            </Stack>
-            <Typography variant="body2" color="textSecondary" sx={{ mt: 1 }}>
-              {[`${CONFIDENCE_LABEL} span`, ...analysisProvenance].join(' · ')}
-            </Typography>
-          </Box>
-        )}
+        
 
         {/* Its own row below the title/chips rather than beside the title,
             so a 220px-minimum select plus four buttons has the full card
@@ -1954,7 +1983,7 @@ export default function Results() {
             comparing two adjacent right-aligned numeric columns with nothing
             saying which was which. Capped at 70vh so the page still scrolls as
             one document on short models. */}
-        <TableContainer sx={{ ...SCROLL_HINT_SX, maxHeight: '70vh' }}>
+        <TableContainer sx={{ ...SCROLL_HINT_SX, maxHeight: { xs: 'none', md: '70vh' } }}>
           {/* tabular-nums so every numeric column -- ages, percentages,
               agreement/outlier diagnostics -- lines up digit-for-digit down
               the column instead of drifting with each digit's own width.
@@ -1966,12 +1995,30 @@ export default function Results() {
               column was already doing on `left` alone. The cells need their own
               opaque background -- a sticky cell is painted over by whatever
               scrolls beneath it. */}
+          {/* Full width, with every column nowrap.
+              
+              The name column used to take 396px of 1104 (36%) for codes like
+              "WK50104", because it was the only column that could wrap and so
+              the only one that could absorb the table's slack. Making it
+              nowrap too means no column can grow by wrapping, and the browser
+              spreads the surplus across all of them instead of pooling it in
+              one 400px gap. Content-width was tried and reverted: it fixed the
+              gap by leaving a quarter of the card empty, which is a worse
+              trade on a card this wide. */}
           <Table
             stickyHeader
             size="small"
             sx={{
               fontVariantNumeric: 'tabular-nums',
-              '& thead th': { backgroundColor: MUTED },
+              // Vertical stick is a desktop affordance: it needs a scroll
+              // container, and a nested vertical scroller on touch fights the
+              // page scroll. `top: auto` below md leaves the header in flow
+              // while KEEPING position:sticky, so the results table's
+              // horizontal pin on the name column still works.
+              '& thead th': { backgroundColor: MUTED, top: { xs: 'auto', md: 0 } },
+              // The name column takes what it needs and no more; the numeric
+              // columns are nowrap already, so nothing else can claim slack.
+              '& tbody td:first-of-type, & thead th:first-of-type': { whiteSpace: 'nowrap' },
             }}
           >
             <caption style={visuallyHidden}>
@@ -1980,7 +2027,15 @@ export default function Results() {
             </caption>
             <TableHead>
               <TableRow>
-                <TableCell sx={{ ...stickyNameCell(MUTED), top: 0, zIndex: 4 }}>
+                {/* width: 1% is the shrink-to-content idiom for an auto-layout
+                    table: the browser cannot honour it, so the column falls to
+                    its min-content width and every other column shares the
+                    surplus. Without it this column absorbed all of it -- 36% of
+                    the table for codes like "WK50104", and 220px of nothing
+                    between a date and its own result. It settles at 27%, which
+                    is the deepest-indented name plus its type label, and the
+                    gap halves to 124px. */}
+                <TableCell sx={{ ...stickyNameCell(MUTED), top: 0, zIndex: 4, width: '1%' }}>
                   {structureRows.length > 0 ? 'Structure / Sample' : 'Sample'}
                 </TableCell>
                 {isBayesian && (
@@ -1993,7 +2048,7 @@ export default function Results() {
                   </TableCell>
                 )}
                 {showMean && <TableCell align="right">Posterior Mean</TableCell>}
-                {showMean && <TableCell align="right">Posterior Std (yr)</TableCell>}
+                {showMean && <TableCell align="right">σ (yr)</TableCell>}
                 {showMedian && <TableCell align="right">Posterior Median</TableCell>}
                 <TableCell align="right">
                   {/* "Span", not "HPD Range". This column reports the OUTER
