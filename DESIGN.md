@@ -32,6 +32,7 @@ typography:
     lineHeight: 1.5
 rounded:
   base: "8px"
+  cell: "2px"
 spacing:
   sm: "8px"
   md: "16px"
@@ -53,6 +54,14 @@ components:
     backgroundColor: "transparent"
     textColor: "{colors.warm-ink}"
     rounded: "16px"
+  table-header-cell:
+    backgroundColor: "{colors.muted-surface}"
+    textColor: "{colors.warm-ink}"
+    padding: "6px 16px"
+  matrix-cell:
+    backgroundColor: "{colors.warm-ink}"
+    rounded: "{rounded.cell}"
+    size: "28px"
 ---
 
 # Design System: RadiCal
@@ -75,8 +84,8 @@ Both were the literal starting point and were deliberately replaced.
 
 The instrument metaphor is most exact in the diagramming and plotting layer: a Boundary is coral
 everywhere it is drawn (the model-tree editor, the Harris matrix, the posterior plot), a Phase is
-always the same green, and paired quantities that are one thing at two strengths — the 95%/68% HPD
-intervals, mean and median — are rendered as one hue at two opacities rather than as two unrelated
+always the same green, and paired quantities that are one thing at two strengths — the two nested
+HPD bands, mean and median — are rendered as one hue at two opacities rather than as two unrelated
 colors. `success`/`warning` are kept for genuine semantic state (a solved solver, a real warning on
 the Results page) precisely because they used to be borrowed for Phase/Boundary and made the model
 editor read as a status display.
@@ -136,8 +145,10 @@ meaning in the model-tree diagrams and posterior plots.
   editor, Harris matrix, or posterior plot line/fill. The ink variant carries the 4.5:1 contrast
   cases (label text, plot lines); the base carries 3:1 graphic use (borders, rules, tints).
 - **Deep Green** (`#1f7a62`): a Phase, everywhere. Also the base hue for HPD interval fills, at two
-  alpha strengths for the two nested confidence levels (72% for 68% HPD, 30% for 95% HPD) — one hue,
-  two strengths, because they are one quantity, not two categories.
+  alpha strengths for the two nested confidence levels (72% for the inner 1-sigma band, 30% for the
+  outer) — one hue, two strengths, because they are one quantity, not two categories. The levels
+  themselves are never written into a plot: a band carries its own label from `utils/hpd.hpdBands`,
+  so a legend cannot name a level its geometry was not computed at.
 - **Muted Violet** (`#7a5c99`): a Hiatus, everywhere.
 - **Context shades** (`#35826e` → `#04372a`): one *stratigraphic context* against another in the
   Harris matrix. Six graded steps of the Phase hue, not six hues: hue held at 164°, only lightness
@@ -197,6 +208,35 @@ trees can run long. Below the `sm` breakpoint the three secondary nav links (Das
 Curves) collapse into a hamburger menu rather than wrapping the bar to a second line — a wrapped
 sticky bar would push all page content down a row on every load. The primary action, "New Analysis",
 stays visible at every width; it never collapses into the menu.
+
+### Data tables
+
+Tables are the densest thing this app draws, and they follow one shape wherever they appear. A
+table fills its card rather than shrinking to its content: content width was tried and reverted,
+because on a `lg` container it leaves a quarter of the card empty, which reads worse than the gap
+it removes.
+
+Which column absorbs the surplus is the decision that matters. A label column — a sample name, a
+context name — will take every spare pixel if allowed to, because it is usually the only column
+that can wrap. Give it `width: '1%'` and it falls to its min-content width instead, and the
+surplus spreads across the columns that carry numbers. On the results table that moved the name
+column from 36% of the table to 27%, and halved the distance from a date to its own result.
+
+Numeric cells are `white-space: nowrap`, so a dash-joined calendar range never breaks across two
+lines and reads as two numbers. Every numeric column is `tabular-nums`, so digits line up down the
+column rather than drifting with each digit's own width.
+
+### Named Rules
+
+**The Sticky-Where-It-Scrolls Rule.** A header sticks only where there is a container for it to
+stick inside. `stickyHeader` plus a `maxHeight` on the container is a desktop affordance
+(`{ xs: 'none', md: '70vh' }`); below `md` the header keeps `position: sticky` with `top: auto`, so
+it stays in flow. A sticky header with no scrolling ancestor sticks to the VIEWPORT and slides
+under the app bar, and a nested vertical scroller on touch fights the page scroll.
+
+**The Band-On-Cells Rule.** A header's background goes on the `th`, never on the `tr`. A sticky
+`tr` does not work: the row scrolls out from under its own colour. The same applies to a sticky
+first column, which needs its own opaque background or whatever scrolls beneath shows through.
 
 ## Elevation & Depth
 
@@ -270,12 +310,68 @@ not a RadiCal-specific choice).
   phase has a meaningful fraction to show: queued and burn-in phases show `indeterminate` rather
   than pinning at 0%, which would read as "stuck" instead of "started, no estimate yet."
 
+### Data tables (signature pattern)
+
+The page's most reused component and the one most worth copying exactly. See Layout for the width
+and sticky rules; what follows is what a table *says*.
+
+- **Element type is a coloured word**, in that type's own hue from the diagram palette — `sequence`
+  in the Sequence blue, `phase` in Phase green, `boundary` in Boundary coral, at `0.75rem`/500
+  beside the name. This is the only thing distinguishing a Sequence from a Phase in a tree table,
+  and the two are not interchangeable: a Sequence orders what it contains and a Phase does not.
+  Suppressed when the name already says it, so an element called "Boundary" is not labelled twice.
+- **No type glyphs.** A coloured word and a symbol are two marks for one fact, and a symbol needs a
+  legend the table does not have. The one glyph that survives is `⚠` for a date belonging to no
+  element — a warning, not a type, with no colour of its own.
+- **Headings are weight and indentation, not a band.** A tinted heading row paints colour across
+  columns that carry nothing, and a deeply nested model stacks seven of them in twenty rows. A
+  hairline above a top-level group gives it an edge without a slab.
+- **The answer column carries weight (600), not a fill.** Flagged rows already carry a background
+  tint; a column fill compositing under those would make a suspect row's answer a different colour
+  from every other row's.
+- **A range column shows a span and unfolds to its ranges**, from a control in its own header. One
+  span per column is the scannable form and lets two columns be compared down the row; the full
+  disjoint breakdown is a question a reader asks about one column at a time.
+
+### Plots
+
+- **No vendor chrome.** `displayModeBar: false` everywhere. The modebar rendered unlabelled `<a>`
+  elements that could not take focus, and on the Curve browser it duplicated zoom controls the page
+  already owned — while mutating axis state the page never learned about.
+- **The app draws the controls**: a labelled `Download PNG` on every plot (at `PNG_EXPORT_SCALE`,
+  3×, so a figure clears 300dpi in a paper), plus `Fit width` where a fixed axis can clip.
+- **Lock the canvas unless the page can follow it.** `dragmode: false` where nothing tracks the
+  view; where drag-to-zoom is worth keeping, an `onRelayout` handler must feed it back into the
+  page's own state, or the two disagree and every control reading that state is wrong with them.
+- **Controls sit above the figure**, with the toggles that govern it. Below a 3,000px plot they are
+  an errand.
+
+### Ordering matrix (signature component)
+
+All-pairs date differences as a triangular grid: one cell per pair, rows and columns in the page's
+chronological order. It exists because pairs grow as n(n-1)/2 and a list cannot show the finding —
+a cluster of dates none of which can be ordered against each other is a solid block here and thirty
+scattered rows in a table.
+
+- **Drawn in Warm Ink at five discrete strengths** (0.06 / 0.20 / 0.38 / 0.58 / 0.80), matching the
+  five bands the backend classifies into. Ink rather than a hue because overlap is not an object
+  type — it is the absence of information — and every hue is already a claim about what something
+  is. Discrete because a continuous ramp put a third of the cells within two decades of each other.
+- **The legend is the key**: five labelled swatches at the exact fills they encode, in order, which
+  is also the ranking. The words do not sort in English and the last one names the case where the
+  model can say the least.
+- **Primary blue is reserved for selection and focus** on this grid, drawn as a ring outside the
+  cell so it reads on the palest and darkest fill alike.
+- **Cells size from a budget handed down by the parent**, never from their own wrapper — a
+  shrink-to-fit wrapper measured against its own content is circular, and silently caps the grid.
+  Floor 28px so a cell stays a touch target; ceiling 56px so it stays a heatmap rather than tiles.
+
 ## Do's and Don'ts
 
 ### Do:
 - **Do** keep a Boundary/Phase/Hiatus the same color everywhere it's drawn (tree editor, Harris
   matrix, posterior plot) — see the One Object, One Color Rule.
-- **Do** render paired/nested quantities (68%/95% HPD, mean/median) as one hue at two opacities,
+- **Do** render paired/nested quantities (the two nested HPD bands, mean/median) as one hue at two opacities,
   never as two different hues.
 - **Do** apply the Warm Ink shadow substitution to any new elevated MUI surface rather than writing
   a bespoke shadow.
@@ -283,6 +379,13 @@ not a RadiCal-specific choice).
   the neutral default chip variant for plain descriptive tags.
 - **Do** keep the plot/diagram surface a known, uncolored white so translucent fills composite
   predictably.
+- **Do** let a label column fall to `width: '1%'` so the columns carrying numbers share the surplus
+  — see The Sticky-Where-It-Scrolls Rule and the Layout notes on tables.
+- **Do** give a band or a sticky offset to the cells, never the row.
+- **Do** draw the app's own plot controls, labelled and focusable, rather than shipping a vendor's
+  toolbar.
+- **Do** hand a component the space it may use. A component that measures its own wrapper measures
+  a number it produced.
 
 ### Don't:
 - **Don't** fall back to MUI's stock blue (`#1976d2`) or pink (`#dc004e`) — both were the literal
@@ -301,3 +404,11 @@ not a RadiCal-specific choice).
   was written to replace.
 - **Don't** encode a measurement in a hue that already names an object. An overlap, a duration, a
   confidence — these are quantities, and they take one hue (or the ink) at graded strength.
+- **Don't** mark an element's type twice. A coloured word or a glyph, not both — and prefer the
+  word, because a glyph needs a legend the surface rarely has.
+- **Don't** tint a heading row across columns that carry nothing. Weight and indentation say
+  "heading"; a full-width band on a nested tree says "broken table".
+- **Don't** write a confidence level into a plot legend or an axis label. A band carries its own
+  label with its geometry, so the two cannot disagree.
+- **Don't** leave a vendor control interacting with state the app also owns. Either the app follows
+  it or the canvas is locked.
