@@ -250,6 +250,3 @@ Full interactive documentation (generated from the actual FastAPI routes) is at
 - Heaton, T. J., et al. (2020). Marine20—the marine radiocarbon age calibration curve. Radiocarbon, 62(4).
 - Nicholls, G., and Jones, M. (2001). Radiocarbon dating with temporal order constraints. Applied Statistics, 50(4).
 
-## License
-
-[CC0 1.0 Universal](LICENSE) — public domain dedication.
