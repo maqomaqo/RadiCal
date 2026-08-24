@@ -2319,12 +2319,12 @@ export default function Results() {
           </Box>
           <Typography variant="body2" color="textSecondary" sx={{ mt: 1 }}>
             {plotView === 'stacked'
-              ? `One row per ${
+              ? `Every ${
                   isBayesian ? 'date and modelled transition' : 'date'
-                }, oldest first, on a shared calendar axis — the same order as the table above. Each row is scaled to its own peak, so heights compare precision, not probability.`
+                } in one plot. Oldest first, in the same order as the table above. Each row is scaled to its own peak, so heights compare precision, not probability.`
               : `One plot per ${
                   isBayesian ? 'date and modelled transition' : 'date'
-                }, oldest first — the same order as the table above.`}
+                }, oldest first, in the same order as the table above.`}
           </Typography>
 
           {/* Above the plots rather than beside the table's controls, so the
