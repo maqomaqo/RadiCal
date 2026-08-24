@@ -212,314 +212,329 @@ export default function DurationsPanel({
   const selectedPair = differences.find((d) => d.id === selectedPairId) ?? null
 
   return (
-    <Paper sx={{ p: 3, mb: 3 }}>
-      {/* Named for what this analysis actually produced. A group calibration
-          has no phases and so no durations, and the heading still said
-          "Durations and Differences" over a section containing one table --
-          announcing a table that is not there, then explaining it. */}
-      <Typography variant="h6" component="h2" gutterBottom>
-        {durations.length > 0 && differences.length > 0
-          ? 'Durations and Differences'
-          : durations.length > 0
-          ? 'Durations'
-          : 'Differences'}
-      </Typography>
+    <>
+      {/* Two cards, not one. They answer different questions -- how long
+          things lasted, and how far apart they sit -- and every other section
+          on this page is its own Paper with its own heading. A single
+          "Durations and Differences" heading sat above the durations table and
+          left the differences table underneath it with no heading of its own,
+          under a title that was half about something else.
 
-
+          Either can be absent: a group calibration has no phases and so no
+          durations, and a model can be run without pairwise differences. */}
       {durations.length > 0 && (
-        <TableContainer sx={{ mb: differences.length > 0 ? 3 : 0 }}>
-          <Table size="small" sx={{ fontVariantNumeric: 'tabular-nums' }}>
-              <caption style={visuallyHidden}>
-                How long each sequence, phase and set of dated events lasted, in years.
-              </caption>
-            <TableHead>
-              <TableRow sx={{ backgroundColor: 'background.muted' }}>
-                <TableCell>What</TableCell>
-                <TableCell>Name</TableCell>
-                {showMean && <TableCell align="right">Mean</TableCell>}
-                {showMedian && <TableCell align="right">Median</TableCell>}
-                <TableCell align="right">Duration ({confidenceLabel})</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {durations.map((record) => (
-                <TableRow key={record.id}>
-                  <TableCell>
-                    <Tooltip title={DURATION_HELP[record.kind]}>
-                      <span>{DURATION_LABELS[record.kind] ?? record.kind}</span>
-                    </Tooltip>
-                  </TableCell>
-                  <TableCell>
-                    {record.name}
-                    {record.kind === 'sample_duration' && record.dates ? (
-                      <Typography component="span" variant="body2" color="textSecondary">
-                        {' '}
-                        ({record.dates} dates)
-                      </Typography>
-                    ) : null}
-                  </TableCell>
-                  {showMean && (
-                    <TableCell align="right" sx={NUMERIC_CELL_SX}>
-                      {years(record.years.mean)}
-                    </TableCell>
-                  )}
-                  {showMedian && (
-                    <TableCell align="right" sx={NUMERIC_CELL_SX}>
-                      {years(record.years.median)}
-                    </TableCell>
-                  )}
-                  <TableCell align="right" sx={NUMERIC_CELL_SX}>
-                    {envelope(record.years, confidence)}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </TableContainer>
-      )}
-
-      {differences.length > 0 && (
-        <>
-
-          {comparingDates && (
-  
-            <Typography variant="body1" sx={{ mb: 0.5 }}>
-              {/* Only promise the grid when the grid renders. `showMatrix`
-                  needs >=5 dates AND a complete pair set, and past MAX_PAIRS
-                  (300, i.e. 26 dates) the backend returns consecutive pairs
-                  instead -- so this sentence pointed at squares that were not
-                  there at both ends of the range. */}
-              {showMatrix && (
-                <>
-                  Use the matrix below to identify clusters of overlapping and non-overlapping
-                  dates. Squares are ordered oldest first along both axes. <br />
-                </>
-              )}
-              {unorderable.length === 0 ? (
-                <>The model can order all {differences.length} pairs.</>
-              ) : (
-                <>
-                  The model cannot confidently order{' '}
-                  <strong>
-                    {unorderable.length} of {differences.length}
-                  </strong>{' '}
-                  pairs
-                  {unorderable.length <= 4 ? (
-                    <>: {unorderable.map((d) => `${d.from_name} and ${d.to_name}`).join('; ')}.</>
-                  ) : (
-                    <> — the strongest squares below.</>
-                  )}
-                </>
-              )}
-            </Typography>
-          )}
-
-          {showMatrix && (
-            <>
-              <Typography variant="body2" color="textSecondary" sx={{ mb: 1.5 }}>
-                      Results are estimated from {intervals.draws.toLocaleString()}{' '}
-        {intervals.independent ? 'independent' : 'sampled'} joint draws.
-              </Typography>
-              {/* Side by side above md: the grid caps its cells at 56px, which
-                  left a quarter of the card empty to its right while the
-                  readout it feeds sat underneath. Putting the readout in that
-                  space uses the width and ties the number to the square that
-                  produced it. Stacks below md, where the grid needs the room. */}
-              <Stack
-                ref={rowRef}
-                direction={{ xs: 'column', md: 'row' }}
-                spacing={{ xs: 0, md: 3 }}
-                alignItems="flex-start"
-              >
-                <Box sx={{ flexShrink: 0, maxWidth: '100%' }}>
-                  <OrderingMatrix
-                    differences={differences}
-                    axis={axis}
-                    selectedId={selectedPairId}
-                    onSelect={(record) => setSelectedPairId(record ? record.id : null)}
-                    availableWidth={
-                      rowWidth > 0
-                        ? sideBySide
-                          ? Math.max(240, rowWidth - READOUT_MIN_WIDTH - 24)
-                          : rowWidth
-                        : 0
-                    }
-                  />
-                </Box>
-              {/* Detail on demand: the selected pair's own figures, in the
-                  same words and at the same confidence as everything else. */}
-              {/* aria-live: selecting a square rewrites this box 40px away
-                  from the grid, and a screen-reader user hears the cell's own
-                  label but never the figures that appear because of it. The
-                  years difference exists nowhere else on the page for a pair
-                  the reader has singled out. "polite" because it follows a
-                  deliberate action rather than interrupting one. */}
-              <Box
-                aria-live="polite"
-                sx={{
-                  mb: 3,
-                  py: 1.5,
-                  px: 2,
-                  minHeight: 68,
-                  flexGrow: 1,
-                  alignSelf: { xs: 'stretch', md: 'flex-start' },
-                  width: { xs: '100%', md: 'auto' },
-                  borderRadius: 1,
-                  border: 1,
-                  borderColor: 'divider',
-                }}
-              >
-                {selectedPair ? (
-                  <>
-                    <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                      {selectedPair.from_name} → {selectedPair.to_name}
-                    </Typography>
-                    <Typography variant="body2" color="textSecondary">
-                      {differenceHeading} {' '} of {' '}
-                      <Box component="span" sx={{ fontVariantNumeric: 'tabular-nums' }}>
-                        {envelope(selectedPair.years, confidence)} {' '} (at {confidenceLabel} confidence)
-                      </Box>
-                      . {orderingSentence(selectedPair)}
-                    </Typography>
-                  </>
-                ) : (
-                  <Typography variant="body2" color="textSecondary">
-                    Select a square to read that pair’s difference and how confidently the
-                    model orders it.
-                  </Typography>
-                )}
-              </Box>
-              </Stack>
-              <Button
-                size="small"
-                aria-expanded={pairsOpen}
-                aria-controls="all-pairs-table"
-                onClick={() => setPairsOpen((open) => !open)}
-                startIcon={
-                  <ExpandMoreIcon
-                    sx={{
-                      transform: pairsOpen ? 'rotate(180deg)' : 'none',
-                      transition: 'transform 160ms ease-out',
-                    }}
-                  />
-                }
-                sx={{ mb: 1 }}
-              >
-                {pairsOpen ? 'Hide' : 'Show'} all {differences.length} pairs
-              </Button>
-            </>
-          )}
-
-          {/* The id lives on a wrapper that is always in the DOM, not on the
-              Collapse: unmountOnExit removes its child while closed, which
-              left aria-controls pointing at nothing exactly when the button
-              said "Show". Keeping 55 rows mounted to satisfy the reference
-              would defeat the disclosure. */}
-          <Box id="all-pairs-table">
-          <Collapse in={!showMatrix || pairsOpen} unmountOnExit>
-          <Typography variant="body2" color="textSecondary" sx={{ mb: 1 }}>
-            {comparingDates
-              ? 'A positive difference means the first date is the older of the two.'
-              : 'Positive is a gap between the two phases, negative an overlap. “Overlap” is the probability that their modelled intervals intersect.'}
+        <Paper sx={{ p: 3, mb: 3 }}>
+          <Typography variant="h6" component="h2" gutterBottom>
+            Durations
           </Typography>
-          {/* Below sm the same rows are stacked cards rather than a grid.
-              At 375px this table measured 452px inside a 295px container: the
-              value clipped mid-unit ("-60 to 130 y", the r cut off) and the
-              Overlap column -- the actual finding -- sat entirely off screen
-              with nothing to say it was there. A pair is three facts, which
-              stacks honestly; forcing them into columns at that width does
-              not. */}
-          {narrow ? (
-            <Stack spacing={1.5} sx={{ mb: 1 }}>
-              {differences.map((record) => (
-                <Box
-                  key={record.id}
-                  sx={{ p: 1.5, border: 1, borderColor: 'divider', borderRadius: 1 }}
-                >
-                  <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                    {record.from_name} → {record.to_name}
-                  </Typography>
-                  <Typography
-                    variant="body2"
-                    color="textSecondary"
-                    sx={{ mt: 0.5, fontVariantNumeric: 'tabular-nums' }}
-                  >
-                    {differenceHeading} ({confidenceLabel}){' '}
-                    {record.shared_boundary ? 'shares a transition' : envelope(record.years, confidence)}
-                  </Typography>
-                  {showMean && (
-                    <Typography
-                      variant="body2"
-                      color="textSecondary"
-                      sx={{ fontVariantNumeric: 'tabular-nums' }}
-                    >
-                      Mean {years(record.years.mean)}
-                    </Typography>
-                  )}
-                  <Box sx={{ mt: 1 }}>
-                    <OverlapMeter record={record} />
-                  </Box>
-                </Box>
-              ))}
-            </Stack>
-          ) : (
-          <TableContainer>
+          <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
+            How long each sequence, phase and set of dated events lasted, in years — not
+            calendar dates, so these are not converted to the reporting era. Estimated from{' '}
+            {intervals.draws.toLocaleString()}{' '}
+            {intervals.independent ? 'independent' : 'sampled'} joint draws.
+          </Typography>
+        {durations.length > 0 && (
+          <TableContainer sx={{ mb: differences.length > 0 ? 3 : 0 }}>
             <Table size="small" sx={{ fontVariantNumeric: 'tabular-nums' }}>
                 <caption style={visuallyHidden}>
-                  Every pair compared: how many years apart they sit and how confidently the
-                  model can order them.
+                  How long each sequence, phase and set of dated events lasted, in years.
                 </caption>
               <TableHead>
                 <TableRow sx={{ backgroundColor: 'background.muted' }}>
-                  <TableCell>{comparingDates ? 'Date' : 'Phase'}</TableCell>
-                  <TableCell>Compared with</TableCell>
+                  <TableCell>What</TableCell>
+                  <TableCell>Name</TableCell>
                   {showMean && <TableCell align="right">Mean</TableCell>}
-                  <TableCell align="right">
-                    {differenceHeading} ({confidenceLabel})
-                  </TableCell>
-                  <TableCell>Overlap</TableCell>
+                  {showMedian && <TableCell align="right">Median</TableCell>}
+                  <TableCell align="right">Duration ({confidenceLabel})</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
-                {differences.map((record) => (
+                {durations.map((record) => (
                   <TableRow key={record.id}>
-                    <TableCell>{record.from_name}</TableCell>
-                    <TableCell>{record.to_name}</TableCell>
+                    <TableCell>
+                      <Tooltip title={DURATION_HELP[record.kind]}>
+                        <span>{DURATION_LABELS[record.kind] ?? record.kind}</span>
+                      </Tooltip>
+                    </TableCell>
+                    <TableCell>
+                      {record.name}
+                      {record.kind === 'sample_duration' && record.dates ? (
+                        <Typography component="span" variant="body2" color="textSecondary">
+                          {' '}
+                          ({record.dates} dates)
+                        </Typography>
+                      ) : null}
+                    </TableCell>
                     {showMean && (
                       <TableCell align="right" sx={NUMERIC_CELL_SX}>
                         {years(record.years.mean)}
                       </TableCell>
                     )}
+                    {showMedian && (
+                      <TableCell align="right" sx={NUMERIC_CELL_SX}>
+                        {years(record.years.median)}
+                      </TableCell>
+                    )}
                     <TableCell align="right" sx={NUMERIC_CELL_SX}>
-                      {record.shared_boundary ? (
-                        <Tooltip title="These two phases share a Boundary, so the model gives them no gap — one phase's end is the other's start, by construction rather than by inference.">
-                          <Typography variant="body2" color="textSecondary">
-                            shares a transition
-                          </Typography>
-                        </Tooltip>
-                      ) : (
-                        envelope(record.years, confidence)
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <OverlapMeter record={record} />
+                      {envelope(record.years, confidence)}
                     </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
             </Table>
           </TableContainer>
-          )}
-          </Collapse>
-          </Box>
-        </>
+        )}
+        </Paper>
       )}
 
-      {intervals.note && (
-        <Typography variant="body2" color="textSecondary" sx={{ mt: 2 }}>
-          {intervals.note}
-        </Typography>
+      {differences.length > 0 && (
+        <Paper sx={{ p: 3, mb: 3 }}>
+          <Typography variant="h6" component="h2" gutterBottom>
+            Differences
+          </Typography>
+        {differences.length > 0 && (
+          <>
+
+            {comparingDates && (
+  
+              <Typography variant="body1" sx={{ mb: 0.5 }}>
+                {/* Only promise the grid when the grid renders. `showMatrix`
+                    needs >=5 dates AND a complete pair set, and past MAX_PAIRS
+                    (300, i.e. 26 dates) the backend returns consecutive pairs
+                    instead -- so this sentence pointed at squares that were not
+                    there at both ends of the range. */}
+                {showMatrix && (
+                  <>
+                    Use the matrix below to identify clusters of overlapping and non-overlapping
+                    dates. Squares are ordered oldest first along both axes. <br />
+                  </>
+                )}
+                {unorderable.length === 0 ? (
+                  <>The model can order all {differences.length} pairs.</>
+                ) : (
+                  <>
+                    The model cannot confidently order{' '}
+                    <strong>
+                      {unorderable.length} of {differences.length}
+                    </strong>{' '}
+                    pairs
+                    {unorderable.length <= 4 ? (
+                      <>: {unorderable.map((d) => `${d.from_name} and ${d.to_name}`).join('; ')}.</>
+                    ) : (
+                      <> — the strongest squares below.</>
+                    )}
+                  </>
+                )}
+              </Typography>
+            )}
+
+            {showMatrix && (
+              <>
+                <Typography variant="body2" color="textSecondary" sx={{ mb: 1.5 }}>
+                        Results are estimated from {intervals.draws.toLocaleString()}{' '}
+          {intervals.independent ? 'independent' : 'sampled'} joint draws.
+                </Typography>
+                {/* Side by side above md: the grid caps its cells at 56px, which
+                    left a quarter of the card empty to its right while the
+                    readout it feeds sat underneath. Putting the readout in that
+                    space uses the width and ties the number to the square that
+                    produced it. Stacks below md, where the grid needs the room. */}
+                <Stack
+                  ref={rowRef}
+                  direction={{ xs: 'column', md: 'row' }}
+                  spacing={{ xs: 0, md: 3 }}
+                  alignItems="flex-start"
+                >
+                  <Box sx={{ flexShrink: 0, maxWidth: '100%' }}>
+                    <OrderingMatrix
+                      differences={differences}
+                      axis={axis}
+                      selectedId={selectedPairId}
+                      onSelect={(record) => setSelectedPairId(record ? record.id : null)}
+                      availableWidth={
+                        rowWidth > 0
+                          ? sideBySide
+                            ? Math.max(240, rowWidth - READOUT_MIN_WIDTH - 24)
+                            : rowWidth
+                          : 0
+                      }
+                    />
+                  </Box>
+                {/* Detail on demand: the selected pair's own figures, in the
+                    same words and at the same confidence as everything else. */}
+                {/* aria-live: selecting a square rewrites this box 40px away
+                    from the grid, and a screen-reader user hears the cell's own
+                    label but never the figures that appear because of it. The
+                    years difference exists nowhere else on the page for a pair
+                    the reader has singled out. "polite" because it follows a
+                    deliberate action rather than interrupting one. */}
+                <Box
+                  aria-live="polite"
+                  sx={{
+                    mb: 3,
+                    py: 1.5,
+                    px: 2,
+                    minHeight: 68,
+                    flexGrow: 1,
+                    alignSelf: { xs: 'stretch', md: 'flex-start' },
+                    width: { xs: '100%', md: 'auto' },
+                    borderRadius: 1,
+                    border: 1,
+                    borderColor: 'divider',
+                  }}
+                >
+                  {selectedPair ? (
+                    <>
+                      <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                        {selectedPair.from_name} → {selectedPair.to_name}
+                      </Typography>
+                      <Typography variant="body2" color="textSecondary">
+                        {differenceHeading} {' '} of {' '}
+                        <Box component="span" sx={{ fontVariantNumeric: 'tabular-nums' }}>
+                          {envelope(selectedPair.years, confidence)} {' '} (at {confidenceLabel} confidence)
+                        </Box>
+                        . {orderingSentence(selectedPair)}
+                      </Typography>
+                    </>
+                  ) : (
+                    <Typography variant="body2" color="textSecondary">
+                      Select a square to read that pair’s difference and how confidently the
+                      model orders it.
+                    </Typography>
+                  )}
+                </Box>
+                </Stack>
+                <Button
+                  size="small"
+                  aria-expanded={pairsOpen}
+                  aria-controls="all-pairs-table"
+                  onClick={() => setPairsOpen((open) => !open)}
+                  startIcon={
+                    <ExpandMoreIcon
+                      sx={{
+                        transform: pairsOpen ? 'rotate(180deg)' : 'none',
+                        transition: 'transform 160ms ease-out',
+                      }}
+                    />
+                  }
+                  sx={{ mb: 1 }}
+                >
+                  {pairsOpen ? 'Hide' : 'Show'} all {differences.length} pairs
+                </Button>
+              </>
+            )}
+
+            {/* The id lives on a wrapper that is always in the DOM, not on the
+                Collapse: unmountOnExit removes its child while closed, which
+                left aria-controls pointing at nothing exactly when the button
+                said "Show". Keeping 55 rows mounted to satisfy the reference
+                would defeat the disclosure. */}
+            <Box id="all-pairs-table">
+            <Collapse in={!showMatrix || pairsOpen} unmountOnExit>
+            <Typography variant="body2" color="textSecondary" sx={{ mb: 1 }}>
+              {comparingDates
+                ? 'A positive difference means the first date is the older of the two.'
+                : 'Positive is a gap between the two phases, negative an overlap. “Overlap” is the probability that their modelled intervals intersect.'}
+            </Typography>
+            {/* Below sm the same rows are stacked cards rather than a grid.
+                At 375px this table measured 452px inside a 295px container: the
+                value clipped mid-unit ("-60 to 130 y", the r cut off) and the
+                Overlap column -- the actual finding -- sat entirely off screen
+                with nothing to say it was there. A pair is three facts, which
+                stacks honestly; forcing them into columns at that width does
+                not. */}
+            {narrow ? (
+              <Stack spacing={1.5} sx={{ mb: 1 }}>
+                {differences.map((record) => (
+                  <Box
+                    key={record.id}
+                    sx={{ p: 1.5, border: 1, borderColor: 'divider', borderRadius: 1 }}
+                  >
+                    <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                      {record.from_name} → {record.to_name}
+                    </Typography>
+                    <Typography
+                      variant="body2"
+                      color="textSecondary"
+                      sx={{ mt: 0.5, fontVariantNumeric: 'tabular-nums' }}
+                    >
+                      {differenceHeading} ({confidenceLabel}){' '}
+                      {record.shared_boundary ? 'shares a transition' : envelope(record.years, confidence)}
+                    </Typography>
+                    {showMean && (
+                      <Typography
+                        variant="body2"
+                        color="textSecondary"
+                        sx={{ fontVariantNumeric: 'tabular-nums' }}
+                      >
+                        Mean {years(record.years.mean)}
+                      </Typography>
+                    )}
+                    <Box sx={{ mt: 1 }}>
+                      <OverlapMeter record={record} />
+                    </Box>
+                  </Box>
+                ))}
+              </Stack>
+            ) : (
+            <TableContainer>
+              <Table size="small" sx={{ fontVariantNumeric: 'tabular-nums' }}>
+                  <caption style={visuallyHidden}>
+                    Every pair compared: how many years apart they sit and how confidently the
+                    model can order them.
+                  </caption>
+                <TableHead>
+                  <TableRow sx={{ backgroundColor: 'background.muted' }}>
+                    <TableCell>{comparingDates ? 'Date' : 'Phase'}</TableCell>
+                    <TableCell>Compared with</TableCell>
+                    {showMean && <TableCell align="right">Mean</TableCell>}
+                    <TableCell align="right">
+                      {differenceHeading} ({confidenceLabel})
+                    </TableCell>
+                    <TableCell>Overlap</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {differences.map((record) => (
+                    <TableRow key={record.id}>
+                      <TableCell>{record.from_name}</TableCell>
+                      <TableCell>{record.to_name}</TableCell>
+                      {showMean && (
+                        <TableCell align="right" sx={NUMERIC_CELL_SX}>
+                          {years(record.years.mean)}
+                        </TableCell>
+                      )}
+                      <TableCell align="right" sx={NUMERIC_CELL_SX}>
+                        {record.shared_boundary ? (
+                          <Tooltip title="These two phases share a Boundary, so the model gives them no gap — one phase's end is the other's start, by construction rather than by inference.">
+                            <Typography variant="body2" color="textSecondary">
+                              shares a transition
+                            </Typography>
+                          </Tooltip>
+                        ) : (
+                          envelope(record.years, confidence)
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <OverlapMeter record={record} />
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
+            )}
+            </Collapse>
+            </Box>
+          </>
+        )}
+        {intervals.note && (
+          <Typography variant="body2" color="textSecondary" sx={{ mt: 2 }}>
+            {intervals.note}
+          </Typography>
+        )}
+        </Paper>
       )}
-    </Paper>
+    </>
   )
 }
