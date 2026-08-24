@@ -42,7 +42,7 @@ import 'reactflow/dist/style.css'
 import { Alert, Box, Typography } from '@mui/material'
 import { useTheme } from '@mui/material/styles'
 import type { MatrixMeasurement, ModelElement } from '@/types'
-import { CONTEXT_PALETTE, tint, useElementTypeColors } from '@/theme/diagramColors'
+import { CONTEXT_PALETTE, contextShades, tint, useElementTypeColors } from '@/theme/diagramColors'
 import {
   layoutHarrisMatrix,
   type LaidOutNode,
@@ -227,14 +227,16 @@ export default function HarrisMatrixDiagram({
   )
 
   const nodes = useMemo<Node<NodeData>[]>(() => {
-    // Contexts are coloured categorically so two of them are told apart at a
-    // glance; containers and rules take a structural colour instead, since
-    // what matters about them is what they ARE, not which one they are.
+    // Contexts share the Phase hue and differ only in strength -- see
+    // contextShades. The shades are chosen from the COUNT first, so a
+    // three-context model gets three widely spaced steps rather than the three
+    // most similar ones at the head of the ramp.
+    const shades = contextShades(layout.nodes.filter((n) => n.kind === 'context').length)
     let contextIndex = 0
     return layout.nodes.map((node) => {
       let color: string
       if (node.kind === 'context') {
-        color = CONTEXT_PALETTE[contextIndex++ % CONTEXT_PALETTE.length]
+        color = shades[contextIndex++] ?? CONTEXT_PALETTE[0]
       } else if (node.kind === 'boundary') {
         // The deeper coral, not the flat one: a boundary here is a rule AND
         // its own label, so this colour has to carry 10px text as well.

@@ -33,6 +33,8 @@ import {
 import { alpha, useTheme } from '@mui/material/styles'
 import { visuallyHidden } from '@mui/utils'
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline'
+import UnfoldMoreIcon from '@mui/icons-material/UnfoldMore'
+import UnfoldLessIcon from '@mui/icons-material/UnfoldLess'
 import CheckIcon from '@mui/icons-material/Check'
 import DownloadIcon from '@mui/icons-material/Download'
 import AccountTreeIcon from '@mui/icons-material/AccountTree'
@@ -65,7 +67,7 @@ import {
   saveDateFormatPreference,
   HPDRange,
 } from '@/utils/dateFormat'
-import { hpdBands, hpdEnvelopeFromHistogram, type HPDBand } from '@/utils/hpd'
+import { hpdBands, hpdEnvelopeFromHistogram, hpdRangesFromCurve, type HPDBand } from '@/utils/hpd'
 import type {
   MatrixMeasurement,
   DraftGroup,
@@ -242,6 +244,103 @@ function CopyCitation({ text }: { text: string }) {
   )
 }
 
+/**
+ * The outer bounds of a set of HPD ranges — the same "span" the posterior
+ * column reports, derived for a column that arrives as ranges rather than as a
+ * distribution.
+ *
+ * Both range columns now default to this and expand to the full breakdown on
+ * request, so they state the same KIND of thing by default and can be compared
+ * down the row. Before, one column showed a span and the one beside it showed
+ * three ranges with percentages, which is why the unmodelled column took 48%
+ * of the table and the answer took 16%.
+ */
+function spanOfRanges(ranges: HPDRange[]): [number, number] | null {
+  if (!ranges || ranges.length === 0) return null
+  return [Math.min(...ranges.map((r) => r.min)), Math.max(...ranges.map((r) => r.max))]
+}
+
+/**
+ * A range column's cell: the span, or every disjoint range, depending on what
+ * the column's own header toggle says.
+ */
+function RangeCell({
+  ranges,
+  span,
+  expanded,
+  dateFormat,
+  emphasis = false,
+}: {
+  ranges: HPDRange[]
+  span: [number, number] | null
+  expanded: boolean
+  dateFormat: DateFormat
+  emphasis?: boolean
+}) {
+  if (expanded && ranges.length > 0) {
+    return (
+      <Box component="span" sx={{ fontWeight: emphasis ? 600 : 400 }}>
+        {formatHPDRanges(ranges, dateFormat)}
+      </Box>
+    )
+  }
+  return (
+    <Box component="span" sx={{ fontWeight: emphasis ? 600 : 400 }}>
+      {span ? formatCalendarRange(span[0], span[1], dateFormat) : 'N/A'}
+    </Box>
+  )
+}
+
+/**
+ * A column header that can unfold its own column.
+ *
+ * The control sits on the thing it changes rather than in the control band
+ * above the table, which is what makes the table explorable rather than a
+ * fixed choice someone else made: each range column is asked separately, in
+ * place, and the reader can hold one open against the other closed.
+ */
+function RangeColumnHeader({
+  label,
+  expanded,
+  onToggle,
+}: {
+  label: React.ReactNode
+  expanded: boolean
+  onToggle(): void
+}) {
+  return (
+    <>
+      {label}
+      <Tooltip title={expanded ? 'Show the span only' : 'Show every range'} describeChild>
+        <IconButton
+          size="small"
+          aria-pressed={expanded}
+          aria-label={
+            expanded
+              ? 'Collapse to the span'
+              : 'Expand to every range in this column'
+          }
+          onClick={onToggle}
+          sx={{
+            ml: 0.5,
+            p: 0.25,
+            verticalAlign: 'baseline',
+            minWidth: 24,
+            minHeight: 24,
+            my: '-3px',
+          }}
+        >
+          {expanded ? (
+            <UnfoldLessIcon sx={{ fontSize: 15 }} />
+          ) : (
+            <UnfoldMoreIcon sx={{ fontSize: 15 }} />
+          )}
+        </IconButton>
+      </Tooltip>
+    </>
+  )
+}
+
 /** The precomputed unmodelled ranges for the confidence currently selected. */
 function unmodelledRangesFor(
   result: SampleResult | undefined,
@@ -335,6 +434,13 @@ const NUMERIC_CELL_SX = { whiteSpace: 'nowrap' } as const
  * scrolls beneath it otherwise. Callers pass the row's own tint so a flagged
  * row keeps its colour under the sticky column too.
  */
+/** The two surfaces a sticky cell composites against, named once. These were
+ *  '#f4ede7' and '#ffffff' literals at three call sites -- the same values the
+ *  theme already carries as background.muted and background.paper, restated by
+ *  hand because sx colour tokens do not resolve inside a plain style object. */
+const MUTED = '#f4ede7'
+const PAPER = '#ffffff'
+
 function stickyNameCell(background: string) {
   return {
     position: 'sticky' as const,
@@ -361,7 +467,10 @@ function stickyNameCell(background: string) {
  */
 const SCROLL_HINT_SX = {
   backgroundImage:
-    'linear-gradient(to left, var(--mui-paper, #fff) 40%, rgba(255,255,255,0)),' +
+    // PAPER, not var(--mui-paper): that custom property is never defined
+    // anywhere in this app, so the gradient always fell back to pure white --
+    // including where it fades across the table's warm #f4ede7 header band.
+    `linear-gradient(to left, ${PAPER} 40%, ${alpha(PAPER, 0)}),` +
     'radial-gradient(farthest-side at 100% 50%, rgba(43,35,32,0.16), rgba(43,35,32,0))',
   backgroundPosition: 'right center, right center',
   backgroundSize: '32px 100%, 14px 100%',
@@ -456,6 +565,7 @@ function concernFor(result?: SampleResult, outlierPrior?: number | null): Concer
  */
 function StructureTableRow({
   row, result, isBayesian, showMean, showMedian, confidence, dateFormat,
+  unmodelledExpanded, posteriorExpanded,
   isCollapsible, isCollapsed, onToggleCollapse,
 }: {
   row: StructureRow
@@ -465,6 +575,9 @@ function StructureTableRow({
   showMedian: boolean
   confidence: number
   dateFormat: DateFormat
+  /** Whether each range column is showing every range or just its span. */
+  unmodelledExpanded: boolean
+  posteriorExpanded: boolean
   /** Whether this row is a Sequence/Phase with something nested under it -- only those get a disclosure control. */
   isCollapsible: boolean
   isCollapsed: boolean
@@ -482,6 +595,14 @@ function StructureTableRow({
   const std = isDate ? result?.posterior_std : posterior?.posterior_std
   const distribution = isDate ? result?.probability_distribution : posterior?.probability_distribution
   const envelope = distribution ? hpdEnvelopeFromHistogram(distribution, confidence) : null
+  // The disjoint ranges behind that envelope, for when the column is unfolded.
+  // The envelope is half a bin wider at each end by design (a point is the
+  // centre of the width it stands for), so the span is not exactly the min and
+  // max of these -- that is correct, not a rounding slip.
+  const posteriorRanges = useMemo(
+    () => (posteriorExpanded && distribution ? hpdRangesFromCurve(distribution, confidence) : []),
+    [posteriorExpanded, distribution, confidence]
+  )
   const unmodelledRanges = isDate && isBayesian
     ? unmodelledRangesFor(result, confidence)
     : []
@@ -528,7 +649,7 @@ function StructureTableRow({
         title={row.name}
         sx={{
           pl: 2 + row.depth * 2.5,
-          ...stickyNameCell(tint ?? (isHeading ? '#f4ede7' : '#ffffff')),
+          ...stickyNameCell(tint ?? (isHeading ? MUTED : PAPER)),
         }}
       >
         {/* The disclosure control replaces the old static ▸/▪ glyph for
@@ -596,6 +717,26 @@ function StructureTableRow({
           </Box>
         )}
       </TableCell>
+      {/* Unmodelled first, then everything the MODEL produced: mean, std,
+          median, span. The point estimates used to sit left of the unmodelled
+          column, which put three posterior quantities inside the raw
+          calibration's half of the table. */}
+      {isBayesian && (
+        <TableCell align="right" sx={NUMERIC_CELL_SX}>
+          {/* Only a date has an unmodelled counterpart -- a boundary exists
+              solely as a modelled parameter. */}
+          {isDate ? (
+            <RangeCell
+              ranges={unmodelledRanges}
+              span={spanOfRanges(unmodelledRanges)}
+              expanded={unmodelledExpanded}
+              dateFormat={dateFormat}
+            />
+          ) : (
+            ''
+          )}
+        </TableCell>
+      )}
       {showMean && (
         <TableCell align="right" sx={NUMERIC_CELL_SX}>
           {cell(mean != null ? formatCalendarAge(mean, dateFormat) : 'N/A')}
@@ -611,15 +752,23 @@ function StructureTableRow({
           {cell(median != null ? formatCalendarAge(median, dateFormat) : 'N/A')}
         </TableCell>
       )}
-      {isBayesian && (
-        <TableCell align="right" sx={NUMERIC_CELL_SX}>
-          {/* Only a date has an unmodelled counterpart -- a boundary exists
-              solely as a modelled parameter. */}
-          {isDate ? (unmodelledRanges.length > 0 ? formatHPDRanges(unmodelledRanges, dateFormat) : 'N/A') : ''}
-        </TableCell>
-      )}
+      {/* Weight, not a cell fill: the flagged-date rows already carry a
+          background tint, and a column fill compositing under those would
+          make a Suspect row's answer a different colour from everyone
+          else's. 600 reads as emphasis in a tabular-nums column without
+          touching the row's own colour. */}
       <TableCell align="right" sx={NUMERIC_CELL_SX}>
-        {cell(envelope ? formatCalendarRange(envelope[0], envelope[1], dateFormat) : 'N/A')}
+        {isHeading ? (
+          ''
+        ) : (
+          <RangeCell
+            ranges={posteriorRanges}
+            span={envelope}
+            expanded={posteriorExpanded}
+            dateFormat={dateFormat}
+            emphasis
+          />
+        )}
       </TableCell>
       {isBayesian && (
         <TableCell align="right" sx={NUMERIC_CELL_SX}>
@@ -721,6 +870,11 @@ export default function Results() {
   // failure degrades to the id rather than dropping the curve from the line.
   const { curves } = useCurves()
   const [confidence, setConfidence] = useState<number>(0.954)
+  // Each range column unfolds on its own, from its own header. Off by default:
+  // a span per column is the scannable form, and the breakdown is a question a
+  // reader asks about one column at a time.
+  const [unmodelledExpanded, setUnmodelledExpanded] = useState(false)
+  const [posteriorExpanded, setPosteriorExpanded] = useState(false)
   // How that level is written wherever the page names it -- one string, so a
   // column heading, a plot legend and a diagram label cannot disagree about
   // which confidence the figures beside them were computed at.
@@ -1054,7 +1208,9 @@ export default function Results() {
     return (
       <Container component="main" maxWidth="lg" sx={{ py: 4 }}>
         <Paper sx={{ p: 3, maxWidth: 560 }} role="alert">
-          <Typography variant="h6" component="h1" gutterBottom>
+          {/* h5, not h6: this is the page's only heading on this route, and
+              at 1.25rem it read as a card title on a blank page. */}
+          <Typography variant="h5" component="h1" gutterBottom>
             {missing ? 'That analysis doesn’t exist' : 'Couldn’t load this analysis'}
           </Typography>
           <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
@@ -1485,7 +1641,7 @@ export default function Results() {
         {primaryReading.length === 2 && (
           <Box sx={{ mt: 3 }}>
             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={{ xs: 1.5, sm: 5 }}>
-              {primaryReading.map((row) => {
+              {primaryReading.map((row, idx) => {
                 const envelope = hpdEnvelopeFromHistogram(
                   row.posterior!.probability_distribution,
                   confidence
@@ -1494,8 +1650,18 @@ export default function Results() {
                 const range = formatCalendarRange(envelope[0], envelope[1], dateFormat)
                 return (
                   <Box key={row.elementId ?? row.name}>
+                    {/* The page says what these two ARE; the analyst's own name
+                        for them reads underneath. `primaryReading` is the first
+                        and last Boundary of the model by construction, so this
+                        is a fact about the pair, not a guess. It used to print
+                        row.name alone as the only framing above the biggest
+                        number on the page -- which on a real 39-date model
+                        rendered as "Go 656-598 cal BP" and "stop 589-500 cal
+                        BP", because that is what the boundaries were called.
+                        The largest type on a page should not be legible only
+                        when someone else typed carefully. */}
                     <Typography variant="body2" color="textSecondary">
-                      {row.name}
+                      {idx === 0 ? 'Sequence begins' : 'Sequence ends'}
                     </Typography>
                     <Typography
                       variant="h4"
@@ -1511,6 +1677,13 @@ export default function Results() {
                           provenanceForSample(row.sampleId)
                         )}
                       />
+                    </Typography>
+                    {/* The element's own name, kept and demoted rather than
+                        dropped: it is how the analyst refers to this boundary
+                        everywhere else in the app, and it is what the citation
+                        above copies. */}
+                    <Typography variant="caption" color="textSecondary">
+                      {row.name}
                     </Typography>
                   </Box>
                 )
@@ -1772,27 +1945,54 @@ export default function Results() {
           </Alert>
         )}
 
-        <TableContainer sx={SCROLL_HINT_SX}>
+        {/* maxHeight + a sticky header row: <thead> was position:static and
+            the container had no height, so only the name column was sticky and
+            only horizontally. On the 63-date model 1,532px of a 2,432px table
+            scrolled past with no column headings on screen -- the reader was
+            comparing two adjacent right-aligned numeric columns with nothing
+            saying which was which. Capped at 70vh so the page still scrolls as
+            one document on short models. */}
+        <TableContainer sx={{ ...SCROLL_HINT_SX, maxHeight: '70vh' }}>
           {/* tabular-nums so every numeric column -- ages, percentages,
               agreement/outlier diagnostics -- lines up digit-for-digit down
               the column instead of drifting with each digit's own width.
               Inherited onto every cell including the header labels and the
               Suspect/Check/Assigned chips, which is harmless: none of that
               text has digits whose alignment matters. */}
-          <Table size="small" sx={{ fontVariantNumeric: 'tabular-nums' }}>
+          {/* stickyHeader, with the container's maxHeight above: MUI puts
+              position:sticky; top:0 on every head cell, which is what the name
+              column was already doing on `left` alone. The cells need their own
+              opaque background -- a sticky cell is painted over by whatever
+              scrolls beneath it. */}
+          <Table
+            stickyHeader
+            size="small"
+            sx={{
+              fontVariantNumeric: 'tabular-nums',
+              '& thead th': { backgroundColor: MUTED },
+            }}
+          >
             <caption style={visuallyHidden}>
               {isBayesian ? 'Modelled' : 'Calibrated'} calendar age for every date in this
               analysis, oldest first, at {CONFIDENCE_LABEL} HPD.
             </caption>
             <TableHead>
-              <TableRow sx={{ backgroundColor: 'background.muted' }}>
-                <TableCell sx={{ ...stickyNameCell('#f4ede7'), zIndex: 3 }}>
+              <TableRow>
+                <TableCell sx={{ ...stickyNameCell(MUTED), top: 0, zIndex: 4 }}>
                   {structureRows.length > 0 ? 'Structure / Sample' : 'Sample'}
                 </TableCell>
+                {isBayesian && (
+                  <TableCell align="right">
+                    <RangeColumnHeader
+                      label={<>Unmodelled {CONFIDENCE_LABEL} span</>}
+                      expanded={unmodelledExpanded}
+                      onToggle={() => setUnmodelledExpanded((v) => !v)}
+                    />
+                  </TableCell>
+                )}
                 {showMean && <TableCell align="right">Posterior Mean</TableCell>}
                 {showMean && <TableCell align="right">Posterior Std (yr)</TableCell>}
                 {showMedian && <TableCell align="right">Posterior Median</TableCell>}
-                {isBayesian && <TableCell align="right">Unmodelled Calibration</TableCell>}
                 <TableCell align="right">
                   {/* "Span", not "HPD Range". This column reports the OUTER
                       BOUNDS of the highest-density region -- its earliest and
@@ -1802,7 +2002,15 @@ export default function Results() {
                       single pair an HPD claimed probability in the gaps
                       between them. The full breakdown is in the plot and in
                       every export; the note under this table says so. */}
-                  {isBayesian ? 'Posterior' : 'Calibrated'} {CONFIDENCE_LABEL} span
+                  <RangeColumnHeader
+                    label={
+                      <>
+                        {isBayesian ? 'Posterior' : 'Calibrated'} {CONFIDENCE_LABEL} span
+                      </>
+                    }
+                    expanded={posteriorExpanded}
+                    onToggle={() => setPosteriorExpanded((v) => !v)}
+                  />
                 </TableCell>
                 {isBayesian && (
                   /* The explanation used to be a Tooltip wrapping this cell,
@@ -1856,6 +2064,8 @@ export default function Results() {
                       showMedian={showMedian}
                       confidence={confidence}
                       dateFormat={dateFormat}
+                      unmodelledExpanded={unmodelledExpanded}
+                      posteriorExpanded={posteriorExpanded}
                       // A date row's elementId is its PARENT phase's id (see
                       // the comment on the key above), so these must also
                       // check row.kind -- otherwise every date would inherit
@@ -1883,14 +2093,27 @@ export default function Results() {
                       ? unmodelledRangesFor(result, confidence)
                       : []
                     const modelledEnvelope = hpdEnvelopeFromHistogram(result.probability_distribution, confidence)
+                    const modelledRanges = posteriorExpanded
+                      ? hpdRangesFromCurve(result.probability_distribution, confidence)
+                      : []
                     return (
                       <TableRow key={result.sample_id}>
                         <TableCell
                           title={result.sample_name || `Sample ${idx + 1}`}
-                          sx={stickyNameCell('#ffffff')}
+                          sx={stickyNameCell(PAPER)}
                         >
                           {result.sample_name || `Sample ${idx + 1}`}
                         </TableCell>
+                        {isBayesian && (
+                          <TableCell align="right" sx={NUMERIC_CELL_SX}>
+                            <RangeCell
+                              ranges={unmodelledRanges}
+                              span={spanOfRanges(unmodelledRanges)}
+                              expanded={unmodelledExpanded}
+                              dateFormat={dateFormat}
+                            />
+                          </TableCell>
+                        )}
                         {showMean && (
                           <TableCell align="right" sx={NUMERIC_CELL_SX}>
                             {result.posterior_mean != null
@@ -1910,13 +2133,14 @@ export default function Results() {
                               : 'N/A'}
                           </TableCell>
                         )}
-                        {isBayesian && (
-                          <TableCell align="right" sx={NUMERIC_CELL_SX}>
-                            {unmodelledRanges.length > 0 ? formatHPDRanges(unmodelledRanges, dateFormat) : 'N/A'}
-                          </TableCell>
-                        )}
                         <TableCell align="right" sx={NUMERIC_CELL_SX}>
-                          {modelledEnvelope ? formatCalendarRange(modelledEnvelope[0], modelledEnvelope[1], dateFormat) : 'N/A'}
+                          <RangeCell
+                            ranges={modelledRanges}
+                            span={modelledEnvelope}
+                            expanded={posteriorExpanded}
+                            dateFormat={dateFormat}
+                            emphasis
+                          />
                         </TableCell>
                       </TableRow>
                     )
@@ -1937,8 +2161,8 @@ export default function Results() {
           the {CONFIDENCE_LABEL} HPD (highest posterior density) region — the narrowest set of
           ages holding that much of the probability. Where a calibration is multimodal that
           region breaks into several separate ranges, and the span covers the gaps between
-          them: the plots below draw each range on its own, and the CSV, JSON and PDF exports
-          list them in full.
+          them — use a column’s <strong>unfold</strong> control to read those ranges in place.
+          The plots below draw each one, and the CSV, JSON and PDF exports list them in full.
         </Typography>
         {/* The key a first-time reader needs, present without a hover: the
             two diagnostics letters, spelled out once under the table they
@@ -2070,6 +2294,7 @@ export default function Results() {
             <Box sx={{ mt: 2 }}>
               <StackedPosteriorPlot
                 series={visiblePlots}
+                isModelled={isBayesian}
                 showMean={showMean}
                 showMedian={showMedian}
                 showPrior={showPrior}

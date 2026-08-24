@@ -21,7 +21,7 @@
 // Beyond MAX_PAIRS the backend reports consecutive pairs only, which is a
 // chain rather than a matrix, so this never renders for that case -- see
 // services/intervals.py and `intervals.note`.
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { Box, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Typography } from '@mui/material'
 import { alpha, useTheme } from '@mui/material/styles'
 import { visuallyHidden } from '@mui/utils'
@@ -42,6 +42,22 @@ interface Props {
   axis: OrderingAxisEntry[]
   selectedId: string | null
   onSelect(record: DifferenceRecord | null): void
+  /**
+   * How much horizontal room the grid may take, in px, measured by the parent.
+   *
+   * Passed in rather than measured here, and that is the whole point. This
+   * component used to observe its own wrapper -- but the wrapper is a
+   * `flex-shrink: 0` item with `width: auto`, so it shrink-to-fits its widest
+   * child, and its widest child is this component's own legend. Measured:
+   * wrapper 441.078px, legend 441px. The grid was therefore sized by its own
+   * key rather than by the 1104px row it sits in, which capped an 11-date
+   * matrix at 34px cells and 436px -- the exact defect the observer was added
+   * to fix, reintroduced by the layout that was supposed to showcase it.
+   *
+   * A budget handed down cannot close that loop: nothing this component
+   * renders can change the number it is given.
+   */
+  availableWidth: number
 }
 
 /** How much room the rotated column labels get. Sample codes are short
@@ -95,8 +111,16 @@ function strengthFromOverlap(overlap: number): number {
   return SEVERITY_STEPS[index].strength
 }
 
-/** Cells never go below this or above it, whatever the container allows. */
-const CELL_MIN = 18
+/**
+ * Cells never go below this or above it, whatever the container allows.
+ *
+ * The floor is WCAG 2.5.8's 24px target minimum plus a little, not a
+ * space-filling minimum. At 375px a 10-date grid shrank to 20x20 to avoid
+ * scrolling -- but clicking a square is the only way to read a pair, so a grid
+ * that fits and cannot be tapped is worse than one that scrolls and can. Past
+ * this floor the container scrolls, which is what its scroll hint is for.
+ */
+const CELL_MIN = 28
 const CELL_MAX = 56
 
 /** Reserved for the row labels down the left. Sample codes are short. */
@@ -119,13 +143,18 @@ export function orderingSentence(record: DifferenceRecord): string {
   return `These two dates overlap ${pct}%. It is ${(share * 100).toFixed(0)}% likely ${name} is the older.`
 }
 
-export default function OrderingMatrix({ differences, axis, selectedId, onSelect }: Props) {
+export default function OrderingMatrix({
+  differences,
+  axis,
+  selectedId,
+  onSelect,
+  availableWidth,
+}: Props) {
   const theme = useTheme()
   // One tab stop for the whole grid, then arrow keys within it. A cell per
   // tab stop would put 276 of them between the matrix and whatever follows.
   const [focusCell, setFocusCell] = useState<[number, number]>([0, 1])
   const gridRef = useRef<HTMLTableElement | null>(null)
-  const wrapRef = useRef<HTMLDivElement | null>(null)
 
   const byPair = useMemo(() => {
     const map = new Map<string, DifferenceRecord>()
@@ -136,27 +165,13 @@ export default function OrderingMatrix({ differences, axis, selectedId, onSelect
   const recordAt = (row: number, col: number): DifferenceRecord | undefined =>
     byPair.get(pairKey(axis[row].id, axis[col].id))
 
-  // Cells are sized from the space the grid actually has, not from a constant.
-  // `760 / (n - 1)` capped an 11-date matrix at 34px and drew it 425px wide
-  // inside a 1152px card -- the one artifact here no neighbouring tool offers,
-  // rendered at thumbnail scale with 61% of its own section empty.
-  const [available, setAvailable] = useState(0)
-  useEffect(() => {
-    const node = wrapRef.current
-    if (!node) return
-    const observer = new ResizeObserver(([entry]) => setAvailable(entry.contentRect.width))
-    observer.observe(node)
-    setAvailable(node.getBoundingClientRect().width)
-    return () => observer.disconnect()
-  }, [])
-
   const columns = Math.max(axis.length - 1, 1)
   const cell = useMemo(() => {
     // The row-label gutter and the 2px border-spacing each column carries.
-    const forGrid = available - ROW_LABEL_WIDTH - columns * 2
+    const forGrid = availableWidth - ROW_LABEL_WIDTH - columns * 2
     if (!(forGrid > 0)) return CELL_MIN
     return Math.max(CELL_MIN, Math.min(CELL_MAX, Math.floor(forGrid / columns)))
-  }, [available, columns])
+  }, [availableWidth, columns])
 
   /**
    * Move focus within the triangle. A cell exists only where `col > row`, so
@@ -180,7 +195,7 @@ export default function OrderingMatrix({ differences, axis, selectedId, onSelect
   }
 
   return (
-    <Box ref={wrapRef} sx={{ mb: 2 }}>
+    <Box sx={{ mb: 2 }}>
       {/* The scroll hint the results table already had, on the artifact that
           clips harder: at 375px this grid is wider than its container, and
           without it the far columns simply are not there. */}
@@ -298,8 +313,20 @@ export default function OrderingMatrix({ differences, axis, selectedId, onSelect
                         data-cell={`${row}-${col}`}
                         tabIndex={isFocus ? 0 : -1}
                         disabled={!record}
-                        onClick={() => record && onSelect(isSelected ? null : record)}
-                        onFocus={() => setFocusCell([row, col])}
+                        // Selection follows focus, and click selects rather
+                        // than toggles. Arrow-key traversal used to move focus
+                        // through all 55 cells while the readout beside them
+                        // never changed -- so the roving-tabindex accelerator
+                        // let a keyboard user cross the whole grid without ever
+                        // reading a value, and the aria-live region announced
+                        // only on click. Toggling-off went with it: with
+                        // follow-focus, a click that deselected the cell the
+                        // pointer had just focused was incoherent.
+                        onClick={() => record && onSelect(record)}
+                        onFocus={() => {
+                          setFocusCell([row, col])
+                          if (record) onSelect(record)
+                        }}
                         onKeyDown={(e: React.KeyboardEvent) => {
                           const moves: Record<string, [number, number]> = {
                             ArrowUp: [-1, 0],

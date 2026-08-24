@@ -51,6 +51,9 @@ interface StackedPosteriorPlotProps {
    * every reading of the stack needs.
    */
   showPrior?: boolean
+  /** Whether a model actually ran. Drives one word in the legend; a plain
+   *  calibration has a calibrated distribution, not a modelled posterior. */
+  isModelled?: boolean
   dateFormat?: DateFormat
 }
 
@@ -139,6 +142,7 @@ export default function StackedPosteriorPlot({
   showMean = false,
   showMedian = false,
   showPrior = false,
+  isModelled = true,
   dateFormat = DEFAULT_DATE_FORMAT,
 }: StackedPosteriorPlotProps) {
   const theme = useTheme()
@@ -278,7 +282,14 @@ export default function StackedPosteriorPlot({
           dash: isBoundary ? 'dot' : 'solid',
         },
         mode: 'lines',
-        name: isBoundary ? 'Boundary (modelled transition)' : 'Posterior (modelled)',
+        // "Modelled" is the word separating a Bayesian posterior from a raw
+        // calibration, and it was printed on both -- so a group calibration's
+        // legend claimed a model under a column headed "Calibrated 95.4% span".
+        name: isBoundary
+          ? 'Boundary (modelled transition)'
+          : isModelled
+          ? 'Posterior (modelled)'
+          : 'Calibrated',
         legendgroup: isBoundary ? 'boundary' : 'posterior',
         showlegend: claimLegend(isBoundary ? 'boundary' : 'posterior'),
         // Hover on the curve's own points, not on the area it encloses. A
@@ -313,7 +324,7 @@ export default function StackedPosteriorPlot({
     })
 
     return data
-  }, [drawable, plot, showMean, showMedian, showPrior, dateFormat])
+  }, [drawable, plot, showMean, showMedian, showPrior, dateFormat, isModelled])
 
   // Phase groupings: a light rule where the dates change phase, with the
   // phase named once beside its first date. The table above says the same

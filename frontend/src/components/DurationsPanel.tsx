@@ -9,7 +9,7 @@
 // Two tables rather than one: a duration has a name and a length, a
 // difference has two names and a sign, and forcing them through shared
 // columns would leave half of every row blank.
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Box,
   Button,
@@ -34,6 +34,11 @@ import OrderingMatrix, { orderingSentence, type OrderingAxisEntry } from '@/comp
 import type { DifferenceRecord, DurationRecord, DurationSummary, IntervalsBlock } from '@/types'
 
 const NUMERIC_CELL_SX = { whiteSpace: 'nowrap' } as const
+
+/** The readout beside the matrix never shrinks below this; the grid gets the
+ *  rest. A pair's figures wrapping to five lines to buy the grid 40px is a bad
+ *  trade in both directions. */
+const READOUT_MIN_WIDTH = 300
 
 // What each duration is of, in the same words the model tree uses for the
 // elements themselves.
@@ -100,7 +105,10 @@ function OverlapMeter({ record }: { record: DifferenceRecord }) {
   return (
     <Tooltip title={help}>
       <Box sx={{ width: 104 }}>
-        <Typography variant="body2" sx={{ textTransform: 'capitalize' }}>
+        {/* Lower case, as in the matrix legend. The same five words were
+            Capitalized here and lower case there, so a reader matching a
+            square to its name was matching two spellings. */}
+        <Typography variant="body2">
           {record.severity}{' '}
           <Typography component="span" variant="body2" color="textSecondary">
             ({(share * 100).toFixed(0)}%)
@@ -154,6 +162,28 @@ export default function DurationsPanel({
   // collapses at, so the differences view changes shape where everything else
   // already does.
   const narrow = useMediaQuery(theme.breakpoints.down('sm'))
+  // Matches the Stack's own md breakpoint below: above it the matrix and its
+  // readout share a row, so the grid's budget is the row minus the readout.
+  const sideBySide = useMediaQuery(theme.breakpoints.up('md'))
+  /**
+   * How wide the matrix may draw.
+   *
+   * Measured on the flex ROW, not on the matrix's own wrapper. The wrapper is
+   * a `flex-shrink: 0` item, so its width IS its content's width -- observing
+   * it made the grid size itself from its own legend (wrapper 441.078px,
+   * legend 441px, cells capped at 34px). The row is fixed by the card, so
+   * nothing the grid renders can move it.
+   */
+  const rowRef = useRef<HTMLDivElement | null>(null)
+  const [rowWidth, setRowWidth] = useState(0)
+  useEffect(() => {
+    const node = rowRef.current
+    if (!node) return
+    const observer = new ResizeObserver(([entry]) => setRowWidth(entry.contentRect.width))
+    observer.observe(node)
+    setRowWidth(node.getBoundingClientRect().width)
+    return () => observer.disconnect()
+  }, [])
   const { durations, differences } = intervals
   const [selectedPairId, setSelectedPairId] = useState<string | null>(null)
   const [pairsOpen, setPairsOpen] = useState(false)
@@ -254,7 +284,17 @@ export default function DurationsPanel({
           {comparingDates && (
   
             <Typography variant="body1" sx={{ mb: 0.5 }}>
-                    Use the matrix below to identify clusters of overlapping and non-overlapping dates. Squares are ordered oldest first along both axes. <br />
+              {/* Only promise the grid when the grid renders. `showMatrix`
+                  needs >=5 dates AND a complete pair set, and past MAX_PAIRS
+                  (300, i.e. 26 dates) the backend returns consecutive pairs
+                  instead -- so this sentence pointed at squares that were not
+                  there at both ends of the range. */}
+              {showMatrix && (
+                <>
+                  Use the matrix below to identify clusters of overlapping and non-overlapping
+                  dates. Squares are ordered oldest first along both axes. <br />
+                </>
+              )}
               {unorderable.length === 0 ? (
                 <>The model can order all {differences.length} pairs.</>
               ) : (
@@ -286,6 +326,7 @@ export default function DurationsPanel({
                   space uses the width and ties the number to the square that
                   produced it. Stacks below md, where the grid needs the room. */}
               <Stack
+                ref={rowRef}
                 direction={{ xs: 'column', md: 'row' }}
                 spacing={{ xs: 0, md: 3 }}
                 alignItems="flex-start"
@@ -296,6 +337,13 @@ export default function DurationsPanel({
                     axis={axis}
                     selectedId={selectedPairId}
                     onSelect={(record) => setSelectedPairId(record ? record.id : null)}
+                    availableWidth={
+                      rowWidth > 0
+                        ? sideBySide
+                          ? Math.max(240, rowWidth - READOUT_MIN_WIDTH - 24)
+                          : rowWidth
+                        : 0
+                    }
                   />
                 </Box>
               {/* Detail on demand: the selected pair's own figures, in the

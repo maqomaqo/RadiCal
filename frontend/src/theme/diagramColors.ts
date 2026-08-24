@@ -1,6 +1,5 @@
 import { useMemo } from 'react'
 import { decomposeColor, recomposeColor, useTheme } from '@mui/material/styles'
-import { blue, lightBlue, pink, brown, blueGrey } from '@mui/material/colors'
 import type { ElementType } from '@/types'
 
 /**
@@ -104,25 +103,61 @@ export function tint(color: string, weight: number, base: string): string {
 }
 
 /**
- * Categorical palette for distinguishing individual stratigraphic contexts
- * in the Harris matrix diagram. Needs more distinct hues than the four
- * element-type colours above serve, so it mostly draws straight from
- * Material's standard swatches (there's no "context 5 of 8" concept for
- * the theme to have an opinion about).
+ * Shades for telling one stratigraphic context from another in the Harris
+ * matrix. One hue, graded -- not a categorical set of hues.
  *
- * The two entries that aren't stock swatches are the ones that would
- * otherwise collide with an element type in the same diagram: a context
- * in Material's green or orange reads as a Phase or a Boundary at a
- * glance, so those slots take the Phase green itself and a browner orange
- * that can't be mistaken for the boundary coral.
+ * This was eight Material swatches, and it broke the diagram's own premise.
+ * Its first entry was `blue[700]` = #1976d2, the colour DESIGN.md names as the
+ * literal anti-reference and a few degrees from the app's own #3c70b8, so the
+ * first context in every model read as the Sequence container. The list also
+ * held HIATUS_VIOLET and PHASE_GREEN, which meant a Phase could be painted in
+ * the hue reserved for a Hiatus -- in a drawing whose whole premise is that a
+ * hue is a claim about WHAT SOMETHING IS.
+ *
+ * A context is not a different KIND of thing from its neighbour; it is another
+ * one of the same thing. So they share the Phase hue and differ only in
+ * strength, and identity is carried by position and label rather than by
+ * colour. The cost is real and was chosen deliberately: two contexts are no
+ * longer told apart at a glance the way two hues would be. What is bought is
+ * that no context can be mistaken for a Boundary, a Hiatus, or the Sequence.
+ *
+ * Hue is held at 164 degrees across every step; only lightness and chroma
+ * move. Every step clears 4.5:1 on white, because these carry 10px labels as
+ * well as borders, and adjacent steps sit ~1.2:1 apart -- the widest spacing
+ * the contrast floor allows over six steps.
  */
 export const CONTEXT_PALETTE = [
-  blue[700],
-  HIATUS_VIOLET,
-  PHASE_GREEN,
-  '#b5651d',
-  lightBlue[700],
-  pink[700],
-  brown[700],
-  blueGrey[700],
+  '#35826e',
+  '#26735f',
+  '#196450',
+  '#105442',
+  '#084434',
+  '#04372a',
 ]
+
+/**
+ * Which shades to use for `count` contexts, spread across the ramp.
+ *
+ * Taking them in order would give three contexts the three most similar
+ * shades in the set and leave the rest of the range unused -- the worst
+ * outcome for a ramp whose steps are only ~1.2:1 apart. Spreading means a
+ * two-context model uses the extremes.
+ *
+ * Past the length of the ramp it repeats, which is the honest limit of one
+ * hue: a model with seven contexts cannot have seven distinguishable shades
+ * of one green, and pretending otherwise would be the categorical palette
+ * again in disguise.
+ */
+export function contextShades(count: number): string[] {
+  const last = CONTEXT_PALETTE.length - 1
+  if (count <= 0) return []
+  // One context takes the middle of the ramp -- the canonical Phase green --
+  // rather than the palest end, which would read as a container tint.
+  if (count === 1) return [CONTEXT_PALETTE[2]]
+  if (count > CONTEXT_PALETTE.length) {
+    return Array.from({ length: count }, (_, i) => CONTEXT_PALETTE[i % CONTEXT_PALETTE.length])
+  }
+  return Array.from({ length: count }, (_, i) =>
+    CONTEXT_PALETTE[Math.round((i * last) / (count - 1))]
+  )
+}
