@@ -37,7 +37,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 
-from app.services.calibration import CalibrationCurve, hpd_ranges_from_distribution
+from app.services.calibration import SIGMA_2, CalibrationCurve, hpd_ranges_from_distribution
 
 # Twice the mean life of 14C, in years -- the constant in the uncertainty
 # scaling law. (Libby's 5568-year half-life corresponds to a mean life of
@@ -57,8 +57,9 @@ MEAN_LIFE_DOUBLED = 2 * 8033.0
 # parity test against res14c asks for it explicitly.
 DEFAULT_U0 = 25.0
 
-# 2 sigma, and the same 95.45% the rest of this app reports HPD ranges at.
-CONFIDENCE = 0.9545
+# 2 sigma -- the same level every other HPD region in this app is reported
+# at, which it now is by construction rather than by a matching literal.
+CONFIDENCE = SIGMA_2
 
 # Beyond this many combined sigma a measurement contributes nothing to a
 # calendar age, and masking it out is what makes this computable in a request.

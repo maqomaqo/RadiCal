@@ -48,7 +48,7 @@ import {
   type LaidOutNode,
 } from '@/utils/harrisLayout'
 import { DEFAULT_DATE_FORMAT, formatCalendarRange, type DateFormat } from '@/utils/dateFormat'
-import { hpdEnvelopeFromHistogram } from '@/utils/hpd'
+import { SIGMA_2, hpdEnvelopeFromHistogram } from '@/utils/hpd'
 
 interface NodeData {
   node: LaidOutNode
@@ -214,7 +214,7 @@ export default function HarrisMatrixDiagram({
   measurements,
   assignments = NO_ASSIGNMENTS,
   dateFormat = DEFAULT_DATE_FORMAT,
-  confidence = 0.954,
+  confidence = SIGMA_2,
   confidenceLabel = '95.4%',
   height = 520,
 }: Props) {

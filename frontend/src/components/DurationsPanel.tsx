@@ -99,7 +99,7 @@ function envelope(summary: DurationSummary, confidence: number): string {
   const storedIsOneSigma = confidence <= 0.7
   const stored = storedIsOneSigma ? summary.hpd_68 : summary.hpd_95
   if (!stored) return 'N/A'
-  const storedLabel = storedIsOneSigma ? '68.2%' : '95.4%'
+  const storedLabel = storedIsOneSigma ? '68.3%' : '95.4%'
   return `${Math.round(stored[0]).toLocaleString()} to ${years(stored[1])} (${storedLabel})`
 }
 

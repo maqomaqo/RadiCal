@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import Analysis, RadiocarbonSample, AnalysisResult, ModelElement, SampleGroup
 from app.services.model_tree import rows_to_tree, flatten_structure
-from app.services.calibration import get_curve
+from app.services.calibration import SIGMA_1, SIGMA_2, get_curve
 from app.services import date_format as date_format_service
 from app.services import pdf_report
 from typing import Dict, List, Optional
@@ -44,7 +44,7 @@ def _format_hpd_ranges(ranges: Optional[List[Dict]], fallback_min, fallback_max)
 # already states for Posterior Std).
 INTERVAL_HEADER = [
     'Row Type', 'Name', 'Compared With', 'Mean (yr)', 'Median (yr)', 'Std (yr)',
-    '68% Range (yr)', '95% Range (yr)', 'Overlap Probability', 'Overlap',
+    '68.3% Range (yr)', '95.4% Range (yr)', 'Overlap Probability', 'Overlap',
     'Dated Events',
 ]
 
@@ -138,8 +138,8 @@ def _unmodelled_ranges(sample, analysis_type: str) -> Dict:
             sample.age_bp, sample.error_1sigma, sample.delta_r, sample.delta_r_error,
         )
         return {
-            'unmodelled_hpd_68_ranges': curve.get_hpd_ranges(cal_ages, probs, 0.68),
-            'unmodelled_hpd_95_ranges': curve.get_hpd_ranges(cal_ages, probs, 0.95),
+            'unmodelled_hpd_68_ranges': curve.get_hpd_ranges(cal_ages, probs, SIGMA_1),
+            'unmodelled_hpd_95_ranges': curve.get_hpd_ranges(cal_ages, probs, SIGMA_2),
         }
     except Exception:
         # A sample whose curve_id no longer resolves (say a renamed curve)
@@ -239,8 +239,8 @@ def _structure_rows(analysis_id: str, db: Session, export_rows: List[Dict],
 CSV_HEADER = [
     'Order', 'Row Type', 'Depth', 'Structure Path', 'Name',
     'Age BP', '1-Sigma Error', 'Material', 'Sample Type', 'Curve',
-    'Unmodelled 95% HPD', 'Posterior Mean', 'Posterior Median', 'Posterior Std',
-    '68% HPD', '95% HPD', 'Agreement %', 'Outlier %', 'TPQ BP', 'TAQ BP',
+    'Unmodelled 95.4% HPD', 'Posterior Mean', 'Posterior Median', 'Posterior Std',
+    '68.3% HPD', '95.4% HPD', 'Agreement %', 'Outlier %', 'TPQ BP', 'TAQ BP',
 ]
 
 # The calendar-age columns, in the order their formatted counterparts are
@@ -249,8 +249,8 @@ CSV_HEADER = [
 # years -- none of them is a calendar date, so converting them to BC/AD
 # would be nonsense.
 _FORMATTED_COLUMNS = [
-    'Unmodelled 95% HPD', 'Posterior Mean', 'Posterior Median',
-    '68% HPD', '95% HPD', 'TPQ BP', 'TAQ BP',
+    'Unmodelled 95.4% HPD', 'Posterior Mean', 'Posterior Median',
+    '68.3% HPD', '95.4% HPD', 'TPQ BP', 'TAQ BP',
 ]
 
 

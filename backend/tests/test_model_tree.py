@@ -333,7 +333,7 @@ class TestCsvExport:
         # No unmodelled column for a plain calibration: the modelled columns
         # already ARE the unmodelled result, so filling it in would invite
         # the reader to compare a number with itself.
-        unmodelled = rows[0].index('Unmodelled 95% HPD')
+        unmodelled = rows[0].index('Unmodelled 95.4% HPD')
         assert rows[1][unmodelled] == ''
 
     def test_csv_reports_the_unmodelled_calibration_beside_the_modelled(self, client):
@@ -371,7 +371,8 @@ class TestCsvExport:
         header, data = rows[0], rows[1:]
 
         assert 'Calibrated Age BP (mode)' not in header
-        unmodelled, modelled = header.index('Unmodelled 95% HPD'), header.index('95% HPD')
+        unmodelled, modelled = (header.index('Unmodelled 95.4% HPD'),
+                                header.index('95.4% HPD'))
         # The unmodelled column was repurposed in place rather than appended,
         # so it sits before the modelled ones and nothing downstream shifted.
         assert unmodelled < modelled

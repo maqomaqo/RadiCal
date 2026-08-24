@@ -63,7 +63,7 @@ Boundaries), and interactive posterior visualization.
 - **Durations and differences** (opt-in): how long each Sequence, each Phase, and each phase's set
   of *dated events* lasted, and how far apart the phases sit — a gap in years where they are
   separate, an overlap where they are not, each graded from "none" to "extensive" at the same
-  68%/95% levels the HPD regions use. The three durations are three different questions: a Phase's
+  68.3%/95.4% levels the HPD regions use. The three durations are three different questions: a Phase's
   duration is the interval its Boundaries enclose, its dated events span less than that, and the
   distance between the two is how much of the phase the dates did not catch. Every one of these is a
   function of several modelled ages at once, so they are read off *joint* draws of the posterior —
@@ -76,7 +76,7 @@ Boundaries), and interactive posterior visualization.
   from its own unconstrained calibration) and an outlier posterior probability where an outlier model
   is applied.
 - **Posterior visualization**: Plotly charts, individually or all stacked on one shared calendar
-  axis, with HPD range bars at 68%/95%/99.7% confidence, optional mean/median markers, and an
+  axis, with HPD range bars at 68.3%/95.4%/99.7% confidence, optional mean/median markers, and an
   optional overlay of each date's unconstrained ("prior") calibration behind its modelled posterior.
 - **Projects and date collections**: group analyses under a project; keep a project's own collection
   of dates (entered individually, by bulk paste, or by file import) and deploy any selection of them

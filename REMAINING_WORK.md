@@ -633,3 +633,53 @@ Two decisions worth knowing:
 What it does not do: no duration for a phase with no Boundaries around it (the
 bracket IS the interval), no comparison between two phases the model brackets
 identically, and nothing at all unless the run was asked for it.
+
+### 11. One sigma was three different numbers, and labelled as a fourth
+**Fixed 2026-08-23.** Raised as "the results page says 68.2% but the convention
+is 68.3% -- is that just the label?". It was not just the label.
+
+`confidence` is the threshold an HPD set is accumulated to
+(`hpd_ranges_from_distribution`), so the digits are the reported range. The app
+had grown three values for one sigma and three for two, in different layers:
+
+| | 1 sigma | 2 sigma |
+|---|---|---|
+| stored plain/group calibrations, unmodelled export column, curve endpoints | 0.68 | 0.95 |
+| results page selector, precomputed unmodelled ranges | 0.682 | 0.954 |
+| both solvers, the durations | 0.683 | 0.954 |
+| resolution profile | — | 0.9545 |
+
+Measured over thirty IntCal20 calibrations (500–10,000 BP at ±15/25/40)
+against the exact coverages:
+
+- **1 sigma:** 0.68 differed in 11 of 30 cases, by up to 5 years. 0.682 in 0 of
+  30; 0.683 in 1 of 30, by 1 year.
+- **2 sigma:** 0.95 differed in **27 of 30**, by up to 10 years. 0.954 in 9 of
+  30 by up to 5; 0.9545 in 0 of 30.
+- **3 sigma:** 0.997 differed in 24 of 30, by up to 10 years.
+
+So the two-decimal truncations were the material error and the three-decimal
+forms were nearly right. The label was wrong on its own terms too: erf(1/√2) =
+0.68269, which **rounds to 68.3%**, and 68.2% is a truncation. 95.4% and 99.7%
+were already correct.
+
+`SIGMA_1/2/3` now live in `services/calibration.py`, computed as erf(n/√2)
+rather than typed, and every call site reads them. `utils/hpd.ts` mirrors them
+(JavaScript has no erf) and pins the digits in its own suite; the mirror is
+deliberate, and is the arrangement `services/pdf_report.py` already uses for
+the plot palette.
+
+Two consequences worth knowing:
+
+- **Stored results keep their old numbers until re-run.** The same call this
+  file's open item #2 makes about the legacy distribution units: rewriting
+  stored results is a bigger decision than correcting what gets written next.
+  A Bayesian analysis's unmodelled column is derived at read time and so
+  updates immediately, while its modelled ranges do not — so an analysis that
+  has not been re-run since is internally a few years out of step. Re-running
+  it fixes it.
+- **`storedHpdBands` lost a distinction it was keeping on purpose.** It
+  labelled the backend's stored ranges a bare "68%/95%" precisely because that
+  really was the level behind them while the results page re-selected at the
+  sigma coverages. Both sides are on the sigma coverages now, so the label says
+  68.3%/95.4% like everything else.

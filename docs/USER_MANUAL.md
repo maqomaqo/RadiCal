@@ -287,7 +287,11 @@ Calibration with "Save this analysis" on) navigates straight to its Results page
 - **Results Summary** — one row per date (and, for a Bayesian model, per Boundary), in the model's
   own structure order. Columns: the date's unconstrained ("unmodelled") calibration, its modelled
   posterior HPD range at the confidence you've selected, and diagnostics.
-- **HPD Confidence** — 68.2%, 95.4%, or 99.7% (the Gaussian-equivalent 1/2/3-sigma conventions).
+- **HPD Confidence** — 68.3%, 95.4%, or 99.7%: the two-sided normal coverages of 1, 2 and 3
+  standard deviations, which is what "1 sigma" means and what OxCal reports against. These are
+  the exact coverages (68.269%, 95.450%, 99.730%), not the labels rounded back into the
+  calculation — the level is the threshold an HPD region is accumulated to, so the digits move
+  the reported range.
 - **Show Mean / Show Median** — optional point estimates alongside the HPD ranges.
 - Any date whose diagnostics are worth a second look (poor agreement with its own unconstrained
   calibration, or a high outlier probability) is called out in a banner above the table.

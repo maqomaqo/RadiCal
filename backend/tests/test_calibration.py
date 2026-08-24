@@ -331,3 +331,82 @@ class TestDisplayDistributionIsADensity:
 
         curve = get_curve('intcal20')
         assert curve.get_display_distribution(np.array([]), np.array([])) == []
+
+
+class TestTheReportingLevels:
+    """
+    The coverages every HPD region in this app is quoted at.
+
+    These are not labels over a nominal level: `confidence` is the threshold
+    the HPD set is accumulated to, so the digits ARE the reported range. The
+    app had grown three different numbers for one sigma (0.68, 0.682, 0.683)
+    and three for two sigma (0.95, 0.954, 0.9545), spread across the solvers,
+    the API and the browser -- these tests exist so that cannot happen again.
+
+    frontend/src/utils/hpd.ts writes the same three values out (JavaScript has
+    no erf) and pins them in its own suite. The mirror is deliberate and is the
+    same arrangement services/pdf_report.py uses for the plot palette; it is
+    not checked from here, because the frontend source is not mounted where
+    this suite runs and a check that silently skips is worse than none.
+    """
+
+    def test_they_are_the_exact_two_sided_normal_coverages(self):
+        from math import erf, sqrt
+
+        from app.services.calibration import SIGMA_1, SIGMA_2, SIGMA_3
+
+        assert SIGMA_1 == erf(1 / sqrt(2))
+        assert SIGMA_2 == erf(2 / sqrt(2))
+        assert SIGMA_3 == erf(3 / sqrt(2))
+
+    def test_the_labels_round_rather_than_truncate(self):
+        """68.269 rounds to 68.3%. The 68.2% this app used to print was the
+        truncation, which is the bug these constants were introduced for."""
+        from app.services.calibration import CONFIDENCE_LABELS, REPORTING_CONFIDENCE_LEVELS
+
+        assert [CONFIDENCE_LABELS[level] for level in REPORTING_CONFIDENCE_LEVELS] == [
+            '68.3%', '95.4%', '99.7%']
+        for level, label in CONFIDENCE_LABELS.items():
+            assert label == f"{level * 100:.1f}%"
+
+    def test_a_region_covers_at_least_the_level_it_is_labelled_with(self):
+        """
+        The level reaches the HPD construction unrounded. If a call site
+        rounded 0.6827 down to 0.68 on the way in -- which several of them
+        did -- the region would come back short of what its label claims.
+        """
+        from app.services.calibration import REPORTING_CONFIDENCE_LEVELS, get_curve
+
+        curve = get_curve('intcal20')
+        for age in (1000, 2450, 3000, 5000):
+            cal_ages, probs = curve.calibrate(age, 30)
+            for level in REPORTING_CONFIDENCE_LEVELS:
+                ranges = curve.get_hpd_ranges(cal_ages, probs, level)
+                covered = sum(r['probability_percent'] for r in ranges) / 100.0
+                assert covered >= level - 1e-9, (
+                    f'a {level:.4f} region at {age} BP covered only {covered:.4f}')
+
+    def test_one_sigma_is_not_the_two_decimal_truncation(self):
+        """
+        The difference is real, not notional. Over IntCal20 the 0.68 this app
+        used to accumulate to gives a measurably narrower region than the
+        actual 1-sigma coverage -- which is the whole reason for the change,
+        and is invisible unless something asserts it.
+        """
+        from app.services.calibration import SIGMA_1, get_curve
+
+        curve = get_curve('intcal20')
+        narrower = 0
+        for age in (1000, 2000, 2450, 3000, 4000, 5000, 7000):
+            cal_ages, probs = curve.calibrate(age, 25)
+            def width(level):
+                return sum(r['max'] - r['min']
+                           for r in curve.get_hpd_ranges(cal_ages, probs, level))
+            truncated, exact = width(0.68), width(SIGMA_1)
+            assert truncated <= exact, 'a lower level cannot give a wider region'
+            if truncated < exact:
+                narrower += 1
+        assert narrower >= 3, (
+            '0.68 and the true 1-sigma coverage now agree everywhere tested, so '
+            'this no longer demonstrates anything -- check the curve or the ages'
+        )

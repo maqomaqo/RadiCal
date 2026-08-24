@@ -15,7 +15,11 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  CONFIDENCE_LEVELS,
   INNER_CONFIDENCE_LABEL,
+  SIGMA_1,
+  SIGMA_2,
+  SIGMA_3,
   hpdBands,
   hpdEnvelopeFromHistogram,
   hpdRangesFromCurve,
@@ -156,7 +160,7 @@ describe('hpdBands', () => {
 
     expect(bands.map((b) => b.label)).toEqual(['95.4%', INNER_CONFIDENCE_LABEL])
     expect(bands[0].ranges).toEqual(hpdRangesFromCurve(peaked, 0.954))
-    expect(bands[1].ranges).toEqual(hpdRangesFromCurve(peaked, 0.682))
+    expect(bands[1].ranges).toEqual(hpdRangesFromCurve(peaked, SIGMA_1))
   })
 
   it('follows the selected confidence rather than a fixed level', () => {
@@ -169,10 +173,10 @@ describe('hpdBands', () => {
   })
 
   it('draws one band at 1 sigma rather than the same interval twice', () => {
-    const bands = hpdBands(peaked, 0.682, '68.2%')
+    const bands = hpdBands(peaked, SIGMA_1, '68.3%')
 
     expect(bands).toHaveLength(1)
-    expect(bands[0].label).toBe('68.2%')
+    expect(bands[0].label).toBe('68.3%')
   })
 
   it('orders bands outer first, and the outer band contains the inner one', () => {
@@ -196,7 +200,7 @@ describe('hpdBands', () => {
   // same answer -- and it has to MOVE with the selector, which is precisely
   // what the diagram's stored hpd_95 did not do.
   it('agrees with the envelope the results table reports, at every level', () => {
-    for (const confidence of [0.682, 0.954, 0.997]) {
+    for (const confidence of [SIGMA_1, SIGMA_2, SIGMA_3]) {
       const bands = hpdBands(peaked, confidence, 'x')
       const envelope = hpdEnvelopeFromHistogram(peaked, confidence)!
       const widest = bands[0].ranges
@@ -207,7 +211,7 @@ describe('hpdBands', () => {
     }
 
     expect(hpdEnvelopeFromHistogram(peaked, 0.997))
-      .not.toEqual(hpdEnvelopeFromHistogram(peaked, 0.682))
+      .not.toEqual(hpdEnvelopeFromHistogram(peaked, SIGMA_1))
   })
 })
 
@@ -217,7 +221,7 @@ describe('storedHpdBands', () => {
   it('names the backend levels, not the page ones', () => {
     const bands = storedHpdBands([r(20, 40)], [r(10, 50)])
 
-    expect(bands.map((b) => b.label)).toEqual(['95%', '68%'])
+    expect(bands.map((b) => b.label)).toEqual(['95.4%', '68.3%'])
     expect(bands.map((b) => b.tone)).toEqual(['outer', 'inner'])
   })
 
@@ -231,5 +235,41 @@ describe('storedHpdBands', () => {
   it('omits a band it has nothing for', () => {
     expect(storedHpdBands(null, [r(10, 50)])).toHaveLength(1)
     expect(storedHpdBands(null, null)).toEqual([])
+  })
+})
+
+
+describe('the reporting levels', () => {
+  /**
+   * The digits, not the labels. `confidence` is the threshold an HPD region is
+   * accumulated to, so these ARE the reported range -- and the app used to
+   * carry three different numbers for one sigma (0.68, 0.682, 0.683) and three
+   * for two sigma (0.95, 0.954, 0.9545) across the solvers, the API and here.
+   *
+   * JavaScript has no erf, so these are written out. The values below are
+   * erf(n/sqrt(2)) to full double precision and must match
+   * SIGMA_1/SIGMA_2/SIGMA_3 in backend/app/services/calibration.py, which
+   * computes them -- the page re-selects a region client-side from a
+   * distribution the backend produced, so the two arriving at different levels
+   * is exactly the drift this pins.
+   */
+  it('are the exact two-sided normal coverages', () => {
+    expect(SIGMA_1).toBe(0.6826894921370859)
+    expect(SIGMA_2).toBe(0.9544997361036416)
+    expect(SIGMA_3).toBe(0.9973002039367398)
+  })
+
+  it('are labelled by rounding, not truncation', () => {
+    // 68.269 rounds to 68.3, which is what OxCal quotes. 68.2% -- what this
+    // app printed before -- is the truncation, and is the bug this pins.
+    expect(CONFIDENCE_LEVELS.map((l) => l.label)).toEqual(['68.3%', '95.4%', '99.7%'])
+    for (const { value, label } of CONFIDENCE_LEVELS) {
+      expect(label).toBe(`${(value * 100).toFixed(1)}%`)
+    }
+  })
+
+  it('offers them in order, tightest first', () => {
+    const values = CONFIDENCE_LEVELS.map((l) => l.value)
+    expect(values).toEqual([...values].sort((a, b) => a - b))
   })
 })

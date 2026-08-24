@@ -68,7 +68,14 @@ import {
   saveDateFormatPreference,
   HPDRange,
 } from '@/utils/dateFormat'
-import { hpdBands, hpdEnvelopeFromHistogram, hpdRangesFromCurve, type HPDBand } from '@/utils/hpd'
+import {
+  CONFIDENCE_LEVELS,
+  SIGMA_2,
+  hpdBands,
+  hpdEnvelopeFromHistogram,
+  hpdRangesFromCurve,
+  type HPDBand,
+} from '@/utils/hpd'
 import type {
   MatrixMeasurement,
   DraftGroup,
@@ -391,12 +398,11 @@ const DIAGNOSTICS_HELP =
 // The three standard Gaussian-equivalent confidence levels radiocarbon
 // results are conventionally reported at (1/2/3-sigma) -- OxCal's own
 // convention, offered here as a single user choice rather than always
-// showing the fixed 68%/95% pair.
-const CONFIDENCE_OPTIONS = [
-  { value: 0.682, label: '68.2%' },
-  { value: 0.954, label: '95.4%' },
-  { value: 0.997, label: '99.7%' },
-] as const
+// showing the fixed 68%/95% pair. Values and labels come from utils/hpd, which
+// mirrors the backend's own definition of them; they used to be written out
+// here, and the 1-sigma one was written out wrong (68.2%, a truncation of
+// 68.27% rather than a rounding).
+const CONFIDENCE_OPTIONS = CONFIDENCE_LEVELS
 
 // Indentation and marker for one row of the model structure. Sequences and
 // phases are headings; boundaries and dates are the rows carrying numbers.
@@ -909,13 +915,13 @@ export default function Results() {
   const [plotView, setPlotView] = useState<'stacked' | 'individual'>('stacked')
   // Confidence level for the HPD columns below -- default 95.4% (2-sigma),
   // the most commonly cited "95% confidence" convention in archaeological
-  // reporting; switchable to 68.2% or 99.7% without a network round trip
+  // reporting; switchable to 68.3% or 99.7% without a network round trip
   // (see utils/hpd.ts).
   // Only to turn a stored curve_id into the curve's own name in the citation
   // strings. The request is shared across the app (see api/curves.ts), and a
   // failure degrades to the id rather than dropping the curve from the line.
   const { curves } = useCurves()
-  const [confidence, setConfidence] = useState<number>(0.954)
+  const [confidence, setConfidence] = useState<number>(SIGMA_2)
   // Each range column unfolds on its own, from its own header. Off by default:
   // a span per column is the scannable form, and the breakdown is a question a
   // reader asks about one column at a time.

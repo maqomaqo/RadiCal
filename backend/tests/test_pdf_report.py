@@ -199,8 +199,8 @@ class TestReportContent:
     def test_reports_the_hpd_ranges(self, client):
         analysis_id = _calibration(client)
         text = pdf_text(_pdf(client, analysis_id))
-        assert "68% HPD" in text
-        assert "95% HPD" in text
+        assert "68.3% HPD" in text
+        assert "95.4% HPD" in text
         assert "cal BP" in text
 
     def test_reads_in_the_requested_date_format(self, client):
@@ -259,7 +259,7 @@ class TestReportContent:
         # The whole point of a Bayesian report: what the date says on its
         # own, beside what the model made of it.
         analysis_id = _modelled(client)
-        assert "Unmodelled 95% HPD" in pdf_text(_pdf(client, analysis_id))
+        assert "Unmodelled 95.4% HPD" in pdf_text(_pdf(client, analysis_id))
 
     def test_a_plain_calibration_omits_the_modelled_only_columns(self, client):
         """

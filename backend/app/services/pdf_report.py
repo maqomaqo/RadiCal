@@ -356,8 +356,8 @@ def _posterior_figure(
         label='Boundary (modelled transition)' if is_boundary else 'Posterior (modelled)',
     )
 
-    _draw_hpd_bars(ax, hpd_95_ranges, hpd_95_envelope, peak, HPD95_BAR, HPD95_ALPHA, '95% HPD')
-    _draw_hpd_bars(ax, hpd_68_ranges, hpd_68_envelope, peak, HPD68_BAR, HPD68_ALPHA, '68% HPD')
+    _draw_hpd_bars(ax, hpd_95_ranges, hpd_95_envelope, peak, HPD95_BAR, HPD95_ALPHA, '95.4% HPD')
+    _draw_hpd_bars(ax, hpd_68_ranges, hpd_68_envelope, peak, HPD68_BAR, HPD68_ALPHA, '68.3% HPD')
 
     top = peak
     if prior_probs:
@@ -518,7 +518,8 @@ def _context_spans_table(
     transition twice, once as one context's end and again as the next
     one's start. The results page suppresses it on the same test.
     """
-    header = ['Context', 'Modelled Start (95% HPD)', 'Modelled End (95% HPD)', 'Start Mean', 'End Mean']
+    header = ['Context', 'Modelled Start (95.4% HPD)', 'Modelled End (95.4% HPD)',
+              'Start Mean', 'End Mean']
     data: List[List[Any]] = [[Paragraph(label, styles['th']) for label in header]]
 
     def span_text(posterior: Dict) -> str:
@@ -585,7 +586,7 @@ def _intervals_table(records: List[Dict], columns: List[Tuple[str, float]],
 
 def _durations_table(records: List[Dict], styles: Dict[str, ParagraphStyle]) -> Table:
     columns = [('What', 1.4), ('Name', 2.4), ('Mean (yr)', 1.2),
-               ('68% (yr)', 2.6), ('95% (yr)', 2.6)]
+               ('68.3% (yr)', 2.6), ('95.4% (yr)', 2.6)]
 
     def cells(record: Dict) -> List[Any]:
         years = record.get('years') or {}
@@ -602,7 +603,7 @@ def _durations_table(records: List[Dict], styles: Dict[str, ParagraphStyle]) -> 
 
 def _differences_table(records: List[Dict], styles: Dict[str, ParagraphStyle]) -> Table:
     columns = [('', 2.0), ('Compared with', 2.0), ('Mean (yr)', 1.1),
-               ('95% (yr)', 2.4), ('Overlap', 1.5)]
+               ('95.4% (yr)', 2.4), ('Overlap', 1.5)]
 
     def cells(record: Dict) -> List[Any]:
         years = record.get('years') or {}
@@ -753,13 +754,13 @@ def _columns(
         ('curve', 'Curve', 1.1),
     ]
     if is_bayesian and _has_any(result_rows, 'unmodelled_hpd_95_ranges'):
-        columns.append(('unmodelled', 'Unmodelled 95% HPD', 2.6))
+        columns.append(('unmodelled', 'Unmodelled 95.4% HPD', 2.6))
     if _has_any(result_rows, 'posterior_mean'):
         columns.append(('mean', 'Mean', 1.2))
     if _has_any(result_rows, 'posterior_median'):
         columns.append(('median', 'Median', 1.2))
-    columns.append(('hpd68', '68% HPD', 2.6))
-    columns.append(('hpd95', '95% HPD', 2.6))
+    columns.append(('hpd68', '68.3% HPD', 2.6))
+    columns.append(('hpd95', '95.4% HPD', 2.6))
     if _has_any(result_rows, 'agreement_index'):
         columns.append(('agreement', 'Agree %', 1.2))
     if _has_any(result_rows, 'outlier_probability'):
@@ -933,7 +934,8 @@ def render_report(
     story.append(Paragraph(
         "Radiocarbon ages are conventional ages BP with their 1-sigma measurement error. "
         f"Calendar ages are reported in {era}. Highest Posterior Density (HPD) regions are given "
-        "at 68% and 95%; where a region falls in more than one part, each part is listed with its "
+        "at 68.3% and 95.4% -- the coverages of one and two standard deviations; where a region "
+        "falls in more than one part, each part is listed with its "
         "own share of the probability rather than being collapsed into a single span.",
         styles['note'],
     ))
@@ -982,7 +984,7 @@ def render_report(
                 "\"Overlap\" is the probability that the two cannot be separated in "
                 "time -- for two phases, that their modelled intervals intersect; for "
                 "two dates, that the model cannot say which came first -- graded at the "
-                "same 68% and 95% levels the HPD regions use.",
+                "same 68.3% and 95.4% levels the HPD regions use.",
                 styles['note'],
             ))
             story.append(_differences_table(differences, styles))

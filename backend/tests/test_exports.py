@@ -367,7 +367,7 @@ class TestJsonStructure:
         analysis_id = self._structured(client)
         rows = client.get(f"/api/results/{analysis_id}/export/json").json()["data"]["results"]
         header, csv_rows = _csv_rows(client, analysis_id)
-        column = header.index('Unmodelled 95% HPD')
+        column = header.index('Unmodelled 95.4% HPD')
 
         def formatted(ranges):
             return '; '.join(
@@ -584,8 +584,8 @@ class TestCsvDateFormat:
         # The original columns are untouched and still first.
         assert header[:len(base_header)] == base_header
         assert header[len(base_header):] == [
-            'Unmodelled 95% HPD (BC/AD)', 'Posterior Mean (BC/AD)',
-            'Posterior Median (BC/AD)', '68% HPD (BC/AD)', '95% HPD (BC/AD)',
+            'Unmodelled 95.4% HPD (BC/AD)', 'Posterior Mean (BC/AD)',
+            'Posterior Median (BC/AD)', '68.3% HPD (BC/AD)', '95.4% HPD (BC/AD)',
             'TPQ BP (BC/AD)', 'TAQ BP (BC/AD)',
         ]
 

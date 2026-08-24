@@ -183,8 +183,11 @@ REQUIRED_COLUMNS = ('sample_name', 'age_bp', 'error_1sigma')
 # data nor warns about a dozen columns the user did not add.
 _RESULT_ONLY_PREFIXES = ('posterior_', 'unmodelled_', 'agreement', 'outlier_percent')
 
-# '68% HPD' and '95% HPD' normalise to '68percent_hpd' / '95percent_hpd'.
-_HPD_COLUMN = re.compile(r'^\d+percent_hpd')
+# '95.4% HPD' normalises to '95_4percent_hpd'; a file exported before the
+# reporting levels were corrected says '95% HPD' -> '95percent_hpd', and both
+# have to be recognised or re-importing an older results table would read its
+# posterior columns back in as data.
+_HPD_COLUMN = re.compile(r'^\d+(?:_\d+)?percent_hpd')
 
 # Every calendar column is exported a second time in the chosen era, e.g.
 # 'TPQ BP (BC/AD)' -> 'tpq_bp_bc_ad'. Those are renderings of a column that is

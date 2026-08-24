@@ -569,8 +569,8 @@ class TestThroughTheApi:
         body = client.get(f'/api/results/{analysis_id}/export/csv').text
         rows = list(csv.reader(io.StringIO(body)))
         start = rows.index(['Row Type', 'Name', 'Compared With', 'Mean (yr)',
-                            'Median (yr)', 'Std (yr)', '68% Range (yr)',
-                            '95% Range (yr)', 'Overlap Probability', 'Overlap',
+                            'Median (yr)', 'Std (yr)', '68.3% Range (yr)',
+                            '95.4% Range (yr)', 'Overlap Probability', 'Overlap',
                             'Dated Events'])
         labels = [r[0] for r in rows[start + 1:] if r]
         assert 'Sequence Duration' in labels

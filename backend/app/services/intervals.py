@@ -53,10 +53,9 @@ slightly different things because a phase is an interval and a date is a point:
 Both are on the same scale and are read the same way -- 1 means "the model
 cannot tell these apart in time", 0 means "the model separates them cleanly" --
 so one severity vocabulary serves both. The bands are the app's own reporting
-confidences rather than round numbers picked to look decisive: 0.046 and 0.954
-are the complements of the 95.4% (2 sigma) level, 0.317 and 0.683 those of the
-68.3% (1 sigma) level, which are the same thresholds every HPD in this app is
-quoted at. So "none" means separated at 2 sigma and "extensive" means
+confidences rather than round numbers picked to look decisive: the four bands
+are 1 - SIGMA_2, 1 - SIGMA_1, SIGMA_1 and SIGMA_2 -- the same 68.3% and 95.4%
+coverages every HPD in this app is quoted at, and their complements. So "none" means separated at 2 sigma and "extensive" means
 overlapping at 2 sigma, and neither is a new convention the reader has to
 learn.
 
@@ -86,7 +85,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
-from app.services.calibration import hpd_ranges_from_distribution
+from app.services.calibration import SIGMA_1, SIGMA_2, hpd_ranges_from_distribution
 
 # Joint draws taken on the exact path and for a group calibration, where they
 # are independent and therefore cost only their own arithmetic. The sampled
@@ -140,10 +139,10 @@ MAX_PAIRS = 300
 # above the last is SEVERITY_TOP. See the module docstring for why these four
 # numbers and not four rounder ones.
 SEVERITY_BANDS: Tuple[Tuple[float, str], ...] = (
-    (0.046, 'none'),
-    (0.317, 'slight'),
-    (0.683, 'moderate'),
-    (0.954, 'substantial'),
+    (1.0 - SIGMA_2, 'none'),        # separated at 2 sigma
+    (1.0 - SIGMA_1, 'slight'),      # separated at 1 sigma
+    (SIGMA_1, 'moderate'),
+    (SIGMA_2, 'substantial'),
 )
 # "extensive", not "significant": the top band is where the model can say the
 # LEAST about the ordering, and "significant" reads as a finding to anyone who
@@ -254,8 +253,8 @@ def summarise(values: Sequence[float]) -> Optional[Dict]:
     smoothed = _smoothed(counts)
     density = smoothed / (smoothed.sum() * step) if smoothed.sum() > 0 else smoothed
 
-    hpd_68 = _ranges(centres, smoothed, 0.683, step)
-    hpd_95 = _ranges(centres, smoothed, 0.954, step)
+    hpd_68 = _ranges(centres, smoothed, SIGMA_1, step)
+    hpd_95 = _ranges(centres, smoothed, SIGMA_2, step)
     # Trimmed to where there is mass, but CONTIGUOUS across it -- an empty bin
     # in the middle is kept. The page re-derives its own HPD from this series
     # when the confidence selector moves (utils/hpd.hpdEnvelopeFromHistogram),

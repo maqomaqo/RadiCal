@@ -40,7 +40,7 @@ from sqlalchemy.orm import Session
 
 from app.database import SessionLocal, get_db
 from app.models import StoredCalibrationCurve
-from app.services.calibration import CalibrationCurve
+from app.services.calibration import SIGMA_1, SIGMA_2, CalibrationCurve
 from app.schemas.curve import (
     CurveMetadata, CurveMetadataUpdate, MixedCurveRequest, SimulateRequest,
     SLUG_PATTERN, slugify,
@@ -205,8 +205,8 @@ def simulate_date(curve_id: str, request: SimulateRequest):
             "c14_age": float(c14_age),
             "curve_error": float(curve_sigma),
             "error": request.error,
-            "hpd_68_ranges": curve.get_hpd_ranges(cal_ages, probabilities, 0.68),
-            "hpd_95_ranges": curve.get_hpd_ranges(cal_ages, probabilities, 0.95),
+            "hpd_68_ranges": curve.get_hpd_ranges(cal_ages, probabilities, SIGMA_1),
+            "hpd_95_ranges": curve.get_hpd_ranges(cal_ages, probabilities, SIGMA_2),
             "point_estimates": curve.get_point_estimate(cal_ages, probabilities),
             "probability_distribution": curve.get_display_distribution(cal_ages, probabilities),
         },

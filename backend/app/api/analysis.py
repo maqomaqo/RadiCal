@@ -3,7 +3,13 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.schemas.sample import CalibrateRequest, BayesianRequest, GroupCalibrationRequest
-from app.services.calibration import get_curve, CalibrationCurve
+from app.services.calibration import (
+    REPORTING_CONFIDENCE_LEVELS,
+    SIGMA_1,
+    SIGMA_2,
+    CalibrationCurve,
+    get_curve,
+)
 from app.services import exact_chain
 from app.services import gibbs
 from app.services import jobs
@@ -26,13 +32,15 @@ import uuid
 
 router = APIRouter()
 
-# The confidence levels the Results page offers (its CONFIDENCE_OPTIONS):
-# the Gaussian-equivalent 1/2/3-sigma coverages radiocarbon results are
-# conventionally reported at. Unmodelled HPD ranges are precomputed at all
-# three so switching the selector doesn't need a refetch -- and so the page
-# never has to derive them from a downsampled plot series, which is what
-# used to make it disagree with the CSV in the last digit.
-REPORTING_CONFIDENCE_LEVELS = (0.682, 0.954, 0.997)
+# The confidence levels the Results page offers (its CONFIDENCE_OPTIONS) come
+# from services/calibration, which is where the exact 1/2/3-sigma coverages are
+# defined for the whole app. Unmodelled HPD ranges are precomputed at all three
+# so switching the selector doesn't need a refetch -- and so the page never has
+# to derive them from a downsampled plot series, which is what used to make it
+# disagree with the CSV in the last digit.
+#
+# This used to be its own tuple, (0.682, 0.954, 0.997), which is where one of
+# the app's several near-copies of "1 sigma" lived.
 
 
 def _validate_project_id(project_id: Optional[str], db: Session) -> Optional[str]:
@@ -72,8 +80,8 @@ def _compute_calibration_stats(
     # envelope for simple display; hpd_68_ranges/hpd_95_ranges carry the
     # actual per-range breakdown with each range's own probability share,
     # standard OxCal/CALIB-style.
-    hpd_68_ranges = curve.get_hpd_ranges(cal_ages, probs, 0.68)
-    hpd_95_ranges = curve.get_hpd_ranges(cal_ages, probs, 0.95)
+    hpd_68_ranges = curve.get_hpd_ranges(cal_ages, probs, SIGMA_1)
+    hpd_95_ranges = curve.get_hpd_ranges(cal_ages, probs, SIGMA_2)
     hpd_68 = (
         min(r['min'] for r in hpd_68_ranges),
         max(r['max'] for r in hpd_68_ranges),

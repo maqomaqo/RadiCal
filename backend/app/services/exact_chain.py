@@ -105,7 +105,7 @@ from scipy.signal import fftconvolve
 from scipy.special import gammaln
 
 from app.services import intervals
-from app.services.calibration import get_curve, hpd_ranges_from_distribution
+from app.services.calibration import SIGMA_1, SIGMA_2, get_curve, hpd_ranges_from_distribution
 from app.services.model_tree import inherited_bounds, plan_model
 from app.services.stratigraphy import effective_bounds
 
@@ -1522,8 +1522,8 @@ def _summarize(grid: np.ndarray, density: np.ndarray, rng, num_samples: int) -> 
     cdf = np.cumsum(mass)
     median = float(np.interp(0.5, cdf, grid))
 
-    hpd_68 = _reported_ranges(grid, mass, 0.683)
-    hpd_95 = _reported_ranges(grid, mass, 0.954)
+    hpd_68 = _reported_ranges(grid, mass, SIGMA_1)
+    hpd_95 = _reported_ranges(grid, mass, SIGMA_2)
 
     draws = np.interp(rng.random(num_samples), cdf, grid)
 

@@ -1,5 +1,5 @@
 // Client-side HPD (highest posterior density) computation at an
-// arbitrary, user-selected confidence level (68.2% / 95.4% / 99.7%),
+// arbitrary, user-selected confidence level (68.3% / 95.4% / 99.7%),
 // applied to a distribution the backend already sent in full -- so
 // switching confidence in the Results table UI is instant, with no
 // re-run or network round trip. Mirrors the selection logic in
@@ -114,12 +114,39 @@ export function hpdRangesFromCurve(
 }
 
 /**
+ * The three coverages this app reports HPD regions at, and the labels it
+ * quotes them under.
+ *
+ * "1 sigma" is the two-sided normal coverage of one standard deviation,
+ * erf(1/sqrt(2)) = 0.6826894921, which rounds to 68.3% -- not the 68.2% this
+ * app used to print, which was a truncation. Likewise 95.4% and 99.7%.
+ *
+ * These are not labels over a nominal level: `confidence` is the threshold the
+ * HPD set is accumulated to, so the digits change the reported range. This
+ * mirrors SIGMA_1/SIGMA_2/SIGMA_3 in backend/app/services/calibration.py,
+ * which is where they are derived; JavaScript has no erf, so the digits are
+ * written out here and pinned by a test. Both sides must agree, because the
+ * page re-selects a region client-side from a distribution the backend
+ * computed -- the two arriving at different levels is exactly the drift this
+ * removes.
+ */
+export const SIGMA_1 = 0.6826894921370859
+export const SIGMA_2 = 0.9544997361036416
+export const SIGMA_3 = 0.9973002039367398
+
+export const CONFIDENCE_LEVELS = [
+  { value: SIGMA_1, label: '68.3%' },
+  { value: SIGMA_2, label: '95.4%' },
+  { value: SIGMA_3, label: '99.7%' },
+] as const
+
+/**
  * The tighter of the two intervals a posterior plot draws: 1 sigma, fixed.
  * The outer band follows the reader's confidence selector; this one stays put
  * so there is a constant reference to read the selected level against.
  */
-export const INNER_CONFIDENCE = 0.682
-export const INNER_CONFIDENCE_LABEL = '68.2%'
+export const INNER_CONFIDENCE = SIGMA_1
+export const INNER_CONFIDENCE_LABEL = '68.3%'
 
 /**
  * One HPD band on a plot: the ranges to draw, and the level to call them.
@@ -144,7 +171,7 @@ export interface HPDBand {
  * logic the results table reads, so a figure and the row above it cannot
  * report different numbers for the same quantity.
  *
- * Selecting 68.2% collapses to a single band rather than drawing 1 sigma
+ * Selecting 68.3% collapses to a single band rather than drawing 1 sigma
  * twice at two strengths, which would claim a nesting that isn't there.
  */
 export function hpdBands(
@@ -166,11 +193,15 @@ export function hpdBands(
 
 /**
  * Bands from the backend's stored fixed-level ranges, for the preview
- * surfaces that have no confidence selector to follow. Labelled 68%/95%
- * because that is the level the backend computed them at -- not 68.2%/95.4%,
- * which are the Gaussian-equivalent levels the Results page re-selects at.
- * The distinction is small and worth keeping: a label here always names the
- * level its own geometry came from.
+ * surfaces that have no confidence selector to follow.
+ *
+ * Labelled 68.3%/95.4%, which is what the backend now computes them at. They
+ * used to be labelled a bare 68%/95% because that really was the level behind
+ * them -- the stored ranges were accumulated to 0.68 and 0.95 while the
+ * Results page re-selected at the sigma coverages, so the same posterior was
+ * reported at two different levels depending on which surface showed it. Both
+ * sides are on the sigma coverages now, so the distinction is gone and the
+ * label can say what a reader expects to compare against.
  */
 export function storedHpdBands(
   hpd68Ranges: HPDRange[] | undefined | null,
@@ -188,9 +219,9 @@ export function storedHpdBands(
   }
   const bands: HPDBand[] = []
   const outer = asRanges(hpd95Ranges, hpd95)
-  if (outer.length > 0) bands.push({ ranges: outer, label: '95%', tone: 'outer' })
+  if (outer.length > 0) bands.push({ ranges: outer, label: '95.4%', tone: 'outer' })
   const inner = asRanges(hpd68Ranges, hpd68)
-  if (inner.length > 0) bands.push({ ranges: inner, label: '68%', tone: 'inner' })
+  if (inner.length > 0) bands.push({ ranges: inner, label: '68.3%', tone: 'inner' })
   return bands
 }
 

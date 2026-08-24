@@ -1,10 +1,57 @@
 import numpy as np
 from scipy.interpolate import interp1d
 from dataclasses import dataclass
+from math import erf, sqrt
 from typing import Tuple, Optional, List, Dict
 from functools import lru_cache
 import os
 import csv
+
+# --------------------------------------------------------------------------
+# The coverages every HPD region in this app is reported at
+# --------------------------------------------------------------------------
+#
+# "1 sigma" means the two-sided normal coverage of one standard deviation --
+# erf(1/sqrt(2)) = 0.682689..., quoted as 68.3%. Likewise 95.4% and 99.7%.
+# These are the levels OxCal reports against, and the levels this app's own
+# labels claim.
+#
+# They live here, computed rather than typed, because the digits were the
+# whole problem. The app had grown THREE different numbers for one sigma and
+# three for two sigma, spread across the solvers, the API and the browser:
+#
+#   1 sigma   0.68 (stored plain/group calibrations, the unmodelled export
+#             column, the curve endpoints), 0.682 (the results page selector
+#             and its precomputed unmodelled ranges), 0.683 (both solvers and
+#             the durations).
+#   2 sigma   0.95 (the same calibration paths), 0.954 (solvers, browser),
+#             0.9545 (the resolution profile).
+#
+# None of that is cosmetic: `confidence` is the threshold the HPD set is
+# accumulated to (see hpd_ranges_from_distribution), so a different number is
+# a different reported range. Measured over thirty IntCal20 calibrations
+# spanning 500-10,000 BP at +/-15, 25 and 40, against the exact coverages:
+#
+#   1 sigma   0.68 differed in 11 of 30 cases, by up to 5 years
+#             0.682 in 0 of 30, 0.683 in 1 of 30 by 1 year
+#   2 sigma   0.95 differed in 27 of 30 cases, by up to 10 years
+#             0.954 in 9 of 30 by up to 5 years, 0.9545 in 0 of 30
+#   3 sigma   0.997 differed in 24 of 30 cases, by up to 10 years
+#
+# So the truncated two-decimal forms were the material error and the
+# three-decimal ones were nearly right; using the exact value costs nothing
+# and removes the question.
+SIGMA_1 = erf(1 / sqrt(2))      # 0.6826894921...  reported as 68.3%
+SIGMA_2 = erf(2 / sqrt(2))      # 0.9544997361...  reported as 95.4%
+SIGMA_3 = erf(3 / sqrt(2))      # 0.9973002039...  reported as 99.7%
+
+# The levels the results page offers, in the order it offers them, with the
+# label each is quoted under. One decimal place, correctly ROUNDED: 68.27%
+# rounds to 68.3%, and the 68.2% this app used to print was a truncation.
+# frontend/src/utils/hpd.ts carries the same three pairs -- see the note there.
+REPORTING_CONFIDENCE_LEVELS = (SIGMA_1, SIGMA_2, SIGMA_3)
+CONFIDENCE_LABELS = {SIGMA_1: '68.3%', SIGMA_2: '95.4%', SIGMA_3: '99.7%'}
+
 
 @dataclass
 class CalibrationPoint:
@@ -13,7 +60,7 @@ class CalibrationPoint:
     c14_error: float
 
 
-def hpd_ranges_from_distribution(ages, weights, confidence: float = 0.95) -> List[Dict[str, float]]:
+def hpd_ranges_from_distribution(ages, weights, confidence: float = SIGMA_2) -> List[Dict[str, float]]:
     """
     Compute one or more Highest Posterior Density (HPD) ranges from a
     discretized calendar-age probability distribution, following standard
@@ -29,9 +76,10 @@ def hpd_ranges_from_distribution(ages, weights, confidence: float = 0.95) -> Lis
     total probability, e.g.:
         [{'min': 3300, 'max': 3360, 'probability_percent': 13.5},
          {'min': 3100, 'max': 3270, 'probability_percent': 81.9}]
-    which for a 95% request sums to 95.4% rather than exactly 95%, because
-    the HPD set is built from whole grid points -- this matches the
-    familiar "at 95.4% probability" style used in OxCal output.
+    whose shares sum to slightly MORE than the level asked for, because the
+    HPD set is built from whole grid points and the last one taken usually
+    overshoots. That is the familiar "at 95.4% probability" style used in
+    OxCal output.
 
     Shared by CalibrationCurve.get_hpd_ranges() (grid points from a
     calibration curve) and the Bayesian posterior extraction in
@@ -43,7 +91,8 @@ def hpd_ranges_from_distribution(ages, weights, confidence: float = 0.95) -> Lis
         ages: 1D array of calendar ages, sorted ascending
         weights: 1D array of probability weights aligned with `ages`
             (need not already be normalized to sum to 1)
-        confidence: target coverage, e.g. 0.68 or 0.95
+        confidence: target coverage -- SIGMA_1 / SIGMA_2 / SIGMA_3 above,
+            which are the levels this app reports at
 
     Returns:
         List of dicts, ordered oldest-first (largest 'max' first), each
@@ -240,7 +289,7 @@ class CalibrationCurve:
         c14_error = np.interp(cal_age, self.cal_ages, self.c14_errors)
         return c14_age, c14_error
     
-    def get_hpd_interval(self, cal_ages: np.ndarray, probs: np.ndarray, confidence: float = 0.95) -> Tuple[float, float]:
+    def get_hpd_interval(self, cal_ages: np.ndarray, probs: np.ndarray, confidence: float = SIGMA_2) -> Tuple[float, float]:
         """
         Calculate the overall Highest Posterior Density (HPD) envelope.
 
@@ -259,7 +308,7 @@ class CalibrationCurve:
         Args:
             cal_ages: Calendar ages (years BP)
             probs: Posterior probabilities
-            confidence: Confidence level (0.68 = 1-sigma, 0.95 = 2-sigma)
+            confidence: Confidence level (SIGMA_1 = 1 sigma, SIGMA_2 = 2 sigma)
 
         Returns:
             (hpd_min, hpd_max) in calendar years BP
@@ -269,7 +318,7 @@ class CalibrationCurve:
         hpd_max = max(r['max'] for r in ranges)
         return float(hpd_min), float(hpd_max)
 
-    def get_hpd_ranges(self, cal_ages: np.ndarray, probs: np.ndarray, confidence: float = 0.95) -> list:
+    def get_hpd_ranges(self, cal_ages: np.ndarray, probs: np.ndarray, confidence: float = SIGMA_2) -> list:
         """
         Calculate the Highest Posterior Density (HPD) region as one or more
         disjoint calendar-age ranges, each with its own share of the total

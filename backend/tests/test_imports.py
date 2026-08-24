@@ -849,13 +849,29 @@ class TestReImportingOurOwnExports:
         """They are output. Recognised so they do not raise an 'unrecognised
         column' warning, and never read back in as data."""
         result = parse_csv(
-            'Name,Age BP,1-Sigma Error,Posterior Mean,95% HPD,Agreement %\n'
+            'Name,Age BP,1-Sigma Error,Posterior Mean,95.4% HPD,Agreement %\n'
             'OxA-1,3000,25,3120.4,3100-3140,98.2\n'
         )
 
         assert result.ok, result.errors
         assert result.warnings == []
         assert 'posterior_mean' not in result.dates[0]
+
+    def test_an_hpd_column_from_an_older_export_is_still_recognised(self):
+        """
+        The HPD columns were headed '68% HPD' / '95% HPD' until the reporting
+        levels were corrected to the exact sigma coverages; they now say
+        '68.3%' / '95.4%'. A file exported before that has to keep importing,
+        or re-importing an older results table would read its posterior back in
+        as data.
+        """
+        for header in ('68% HPD', '68.3% HPD', '95% HPD', '95.4% HPD'):
+            result = parse_csv(
+                f'Name,Age BP,1-Sigma Error,{header}\n'
+                'OxA-1,3000,25,3100-3140\n'
+            )
+            assert result.ok, (header, result.errors)
+            assert result.warnings == [], (header, result.warnings)
 
     def test_the_era_formatted_duplicate_columns_are_ignored(self):
         """
