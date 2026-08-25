@@ -118,9 +118,8 @@ export default function Dashboard() {
       <Box
         sx={{ display: 'flex', alignItems: 'baseline', gap: 2, flexWrap: 'wrap', mt: 4, mb: 1 }}
       >
-        {/* variant="h1", not h3: the theme defines h1 as 2.5rem/600 -- the
-            design system's Headline -- and this page was rendering at MUI's
-            stock h3 (3rem/400) instead. The title names the view rather than
+        {/* variant="h1": the theme defines h1 as 2.5rem/600, the
+            design system's Headline. The title names the view rather than
             the app; the wordmark in the AppBar already says RadiCal. */}
         <Typography variant="h1" component="h1">
           Recent analyses
@@ -492,19 +491,10 @@ function AnalysisRow({
 /**
  * The ways into the product, above the list and always present.
  *
- * Orientation used to be a property of the empty state, which meant it
- * existed exactly until the user's first analysis and then vanished for
- * good. That is the wrong shape for this audience: PRODUCT.md's readership
- * includes someone calibrating for the first time, and a student who ran one
- * date three weeks ago and came back is no longer "empty" but is no more
- * oriented than they were.
- *
  * It carries real information rather than restating the app bar -- three
  * distinct routes in, one of which (the curve browser) is the only surface
  * that shows what calibration DOES before asking anyone to commit a
- * measurement to it. That is what separates this from the hero it replaced,
- * which spent 251px on a title repeating the wordmark and two buttons
- * repeating the nav.
+ * measurement to it.
  *
  * A worked example belongs in this set and is deliberately absent: there is
  * no seeded dataset to open, and inventing archaeological data to teach with
@@ -516,7 +506,7 @@ const WAYS_IN = [
     to: '/new-analysis',
     title: 'Calibrate a date',
     action: 'New analysis',
-    body: 'Turn one radiocarbon measurement into a calendar range. The quickest way to a first result.',
+    body: 'Turn a radiocarbon measurement into a calendar date range. The quickest way to a first result.',
     primary: true,
   },
   {
@@ -529,7 +519,7 @@ const WAYS_IN = [
     to: '/curves',
     title: 'Browse a calibration curve',
     action: 'Open curve browser',
-    body: 'See IntCal20, Marine20 and SHCal20 directly — including what a plateau costs you before you commission a date.',
+    body: 'See IntCal20, Marine20 and SHCal20 directly, and the likely resolution for your period of interest.',
   },
 ]
 
@@ -548,12 +538,8 @@ function WaysIn() {
     // without one.
     <Paper component="section" aria-label="Ways to start" sx={{ p: { xs: 2, sm: 3 } }}>
       <Typography color="text.secondary" sx={{ maxWidth: '64ch' }}>
-        RadiCal turns radiocarbon measurements into calendar dates you can cite, and models them
-        against stratigraphy. Start wherever you are — or read the{' '}
-        <Link component={RouterLink} to="/reference">
-          reference
-        </Link>{' '}
-        first if the vocabulary is new.
+        RadiCal turns radiocarbon measurements into calendar dates you can cite, and lets you model them
+        against stratigraphy or other chronological constraint.
       </Typography>
 
       <Box

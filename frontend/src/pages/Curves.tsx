@@ -190,12 +190,10 @@ export default function Curves() {
             <Typography variant="h1" gutterBottom>
               Calibration Curves
             </Typography>
-            <Typography variant="body2" color="textSecondary">
-              The curves this app can calibrate against. Three are shipped with it;
-              any others were imported here and can be used on a date exactly as the
-              bundled ones are. Everything measured below — point count, range, grid
-              spacing — is read from the curve itself rather than recorded separately,
-              so it cannot drift from what a calibration actually uses.
+             <Typography color="text.secondary" sx={{ maxWidth: '64ch' }}>
+              Explore and manage calibration curves here. Three come supplied, and you can import or mix your own. Data below is derived from each curve itself.
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
             </Typography>
           </Box>
           <Stack direction="row" spacing={1}>

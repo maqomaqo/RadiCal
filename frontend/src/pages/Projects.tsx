@@ -119,7 +119,7 @@ export default function Projects() {
             Projects
           </Typography>
           <Typography variant="body1" color="textSecondary">
-            Group analyses by site, dig season, or research question.
+            Group analyses by site, region, or research question.
           </Typography>
         </Box>
         <Button variant="contained" startIcon={<AddIcon />} onClick={() => setDialogOpen(true)}>
