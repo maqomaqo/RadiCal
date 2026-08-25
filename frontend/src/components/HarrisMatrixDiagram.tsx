@@ -44,6 +44,9 @@ import { useTheme } from '@mui/material/styles'
 import type { MatrixMeasurement, ModelElement } from '@/types'
 import { CONTEXT_PALETTE, contextShades, tint, useElementTypeColors } from '@/theme/diagramColors'
 import {
+  LABEL_FONT_SIZE,
+  RULE_LABEL_GAP,
+  RULE_STUB,
   layoutHarrisMatrix,
   type LaidOutNode,
 } from '@/utils/harrisLayout'
@@ -56,12 +59,6 @@ interface NodeData {
   /** What a box is painted over. Fills are composited against this rather
    *  than left translucent -- see `tint`. */
   surface: string
-  dateFormat: DateFormat
-  /** The level the page is reporting at, and how it is written. Both are
-   *  needed here: a boundary's range has to be re-selected at the same
-   *  confidence the results table used, and then say which one that was. */
-  confidence: number
-  confidenceLabel: string
 }
 
 // Handles are hidden but must exist: reactflow anchors every edge to one, and
@@ -141,25 +138,18 @@ function GroupNode({ data }: NodeProps<NodeData>) {
   )
 }
 
+// The rule either side of the label: it grows to fill a wide box, and it never
+// shrinks below RULE_STUB. The refusal to shrink is the point. The layout has
+// already found room for both stubs (see harrisLayout's boundarySpan), and a
+// stub that shrinks in proportion with the label spends that room a second
+// time -- 24px of measured rule came out as 15px of drawn rule.
+const stubSx = (color: string) => ({
+  flex: `1 0 ${RULE_STUB}px`,
+  borderTop: `2px solid ${color}`,
+})
+
 function BoundaryNode({ data }: NodeProps<NodeData>) {
-  const { node, color, dateFormat, confidence, confidenceLabel } = data
-  // The modelled range for this transition, once the analysis has run. Shown
-  // on the rule itself so the diagram says WHEN a transition happened, not
-  // merely that there is one.
-  //
-  // Re-selected from the boundary's own distribution at the page's current
-  // confidence, through the SAME helper the results table calls -- not read
-  // off the stored hpd_95, which is what used to make the diagram and the
-  // table state the same boundary as two different ranges four years apart,
-  // with the diagram silently frozen at 95% while the selector said 99.7%.
-  // The level is printed beside the figure so the number carries its own
-  // qualifier when someone screenshots the diagram into a paper.
-  const envelope = node.posterior
-    ? hpdEnvelopeFromHistogram(node.posterior.probability_distribution, confidence)
-    : null
-  const range = envelope
-    ? `${formatCalendarRange(envelope[0], envelope[1], dateFormat)} (${confidenceLabel})`
-    : null
+  const { node, color } = data
 
   return (
     <Box
@@ -168,21 +158,68 @@ function BoundaryNode({ data }: NodeProps<NodeData>) {
         height: '100%',
         display: 'flex',
         alignItems: 'center',
-        gap: 1,
+        gap: `${RULE_LABEL_GAP}px`,
         boxSizing: 'border-box',
       }}
     >
       <Handle type="target" position={Position.Top} style={HIDDEN_HANDLE} />
-      <Box sx={{ flex: 1, borderTop: `2px solid ${color}` }} />
-      <Typography sx={{ fontSize: 10, fontWeight: 700, color, whiteSpace: 'nowrap' }}>
-        {node.name}
-        {range && (
-          <Typography component="span" sx={{ fontSize: 10, fontWeight: 400, opacity: 0.8, ml: 0.75 }}>
-            {range}
+      <Box sx={stubSx(color)} />
+      {/*
+        The name and the range are siblings that wrap, not one line of text.
+
+        The label used to be a single nowrap run, and a run of text that
+        cannot wrap cannot be made narrower than itself -- so on a sequence
+        holding one context, a 172px box carried a 219px label and 47px of red
+        hung outside the box. The layout now sizes every container to hold the
+        wider of these two lines (see harrisLayout's boundarySpan), which is
+        what fixes it. This wraps as the backstop for the case the estimate is
+        wrong: the range drops below the name, both stay whole, and neither
+        can be pushed past the edge.
+      */}
+      <Box
+        sx={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          justifyContent: 'center',
+          alignItems: 'baseline',
+          columnGap: 0.75,
+          minWidth: 0,
+          maxWidth: '100%',
+        }}
+      >
+        <Typography
+          sx={{
+            fontSize: LABEL_FONT_SIZE,
+            fontWeight: 700,
+            lineHeight: 1.3,
+            color,
+            whiteSpace: 'nowrap',
+            maxWidth: '100%',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+          }}
+        >
+          {node.name}
+        </Typography>
+        {node.rangeLabel && (
+          <Typography
+            sx={{
+              fontSize: LABEL_FONT_SIZE,
+              fontWeight: 400,
+              lineHeight: 1.3,
+              color,
+              opacity: 0.8,
+              whiteSpace: 'nowrap',
+              maxWidth: '100%',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+            }}
+          >
+            {node.rangeLabel}
           </Typography>
         )}
-      </Typography>
-      <Box sx={{ flex: 1, borderTop: `2px solid ${color}` }} />
+      </Box>
+      <Box sx={stubSx(color)} />
       <Handle type="source" position={Position.Bottom} style={HIDDEN_HANDLE} />
     </Box>
   )
@@ -221,9 +258,43 @@ export default function HarrisMatrixDiagram({
   const theme = useTheme()
   const elementTypeColors = useElementTypeColors()
 
+  /**
+   * The modelled range each boundary carries, once the analysis has run.
+   * Formatted here, before the layout runs, because the layout has to size
+   * each container around the label it will hold -- see harrisLayout's
+   * `boundaryRanges`. BoundaryNode then draws this same string rather than
+   * deriving its own.
+   *
+   * Re-selected from the boundary's own distribution at the page's current
+   * confidence, through the SAME helper the results table calls -- not read
+   * off the stored hpd_95, which is what used to make the diagram and the
+   * table state the same boundary as two different ranges four years apart,
+   * with the diagram silently frozen at 95% while the selector said 99.7%.
+   * The level is printed beside the figure so the number carries its own
+   * qualifier when someone screenshots the diagram into a paper.
+   */
+  const boundaryRanges = useMemo(() => {
+    const ranges: Record<string, string> = {}
+    const walk = (element: ModelElement) => {
+      if (element.element_type === 'boundary' && element.posterior) {
+        const envelope = hpdEnvelopeFromHistogram(
+          element.posterior.probability_distribution,
+          confidence
+        )
+        if (envelope) {
+          ranges[element.id] =
+            `${formatCalendarRange(envelope[0], envelope[1], dateFormat)} (${confidenceLabel})`
+        }
+      }
+      for (const child of element.children || []) walk(child)
+    }
+    if (tree) walk(tree)
+    return ranges
+  }, [tree, dateFormat, confidence, confidenceLabel])
+
   const layout = useMemo(
-    () => layoutHarrisMatrix(tree, measurements, assignments),
-    [tree, measurements, assignments]
+    () => layoutHarrisMatrix(tree, measurements, assignments, boundaryRanges),
+    [tree, measurements, assignments, boundaryRanges]
   )
 
   const nodes = useMemo<Node<NodeData>[]>(() => {
@@ -260,9 +331,6 @@ export default function HarrisMatrixDiagram({
           node,
           color,
           surface: theme.palette.background.paper,
-          dateFormat,
-          confidence,
-          confidenceLabel,
         },
         draggable: false,
         selectable: false,
@@ -272,7 +340,7 @@ export default function HarrisMatrixDiagram({
     })
     // layout.nodes is already parent-before-child (the layout emits each
     // container before descending into it), which reactflow requires.
-  }, [layout, theme, elementTypeColors, dateFormat, confidence, confidenceLabel])
+  }, [layout, theme, elementTypeColors])
 
   const edges = useMemo<Edge[]>(
     () =>

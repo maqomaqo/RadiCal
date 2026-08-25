@@ -19,12 +19,16 @@ import { describe, expect, it } from 'vitest'
 import {
   CONTEXT_HEIGHT,
   CONTEXT_WIDTH,
+  LABEL_FONT_SIZE,
   PADDING,
+  RULE_LABEL_GAP,
+  RULE_STUB,
   layoutHarrisMatrix,
   summariseTree,
   type HarrisLayout,
   type LaidOutNode,
 } from './harrisLayout'
+import { estimateTextWidth } from './textWidth'
 import type { MatrixMeasurement, ModelElement } from '@/types'
 
 function el(
@@ -264,6 +268,95 @@ describe('reading direction and spacing', () => {
       expect(rule.x).toBe(PADDING)
       expect(rule.width).toBe(root.width - PADDING * 2)
     }
+  })
+})
+
+// The complaint these were written for: on Nenthorn J > A > K every rule
+// carried a name and a modelled range, the box was sized for the contexts
+// alone, and 47px of red text hung outside it.
+describe('a boundary rule is wide enough for its own label', () => {
+  /** The model the overflow was reported on: three contexts in one sequence,
+   *  divided by boundaries whose names are longer than the boxes. */
+  function nenthornJAK(): ModelElement {
+    return el('site', 'sequence', 'Site sequence', [
+      el('b0', 'boundary', 'Start of sequence'),
+      el('ff_j', 'phase', 'Fire_Feature_J'),
+      el('b1', 'boundary', 'End of Fire_Feature_J'),
+      el('ff_a', 'phase', 'Fire_Feature_A'),
+      el('b2', 'boundary', 'End of Fire_Feature_A'),
+      el('ff_k', 'phase', 'Fire_Feature_K'),
+      el('b3', 'boundary', 'End of sequence'),
+    ])
+  }
+
+  const ranges = {
+    b0: '663–561 cal BP (95.4%)',
+    b1: '642–560 cal BP (95.4%)',
+    b2: '632–557 cal BP (95.4%)',
+    b3: '628–547 cal BP (95.4%)',
+  }
+
+  /** What the node needs: the wider of its two lines, plus a stub of rule and
+   *  a gap on each side. */
+  function labelSpan(name: string, range: string | undefined): number {
+    const line = Math.max(
+      estimateTextWidth(name, LABEL_FONT_SIZE, true),
+      range ? estimateTextWidth(range, LABEL_FONT_SIZE) : 0
+    )
+    return line + (RULE_STUB + RULE_LABEL_GAP) * 2
+  }
+
+  it('fits the name and the modelled range on the rule', () => {
+    const layout = layoutHarrisMatrix(nenthornJAK(), [], {}, ranges)
+    const nodes = byId(layout)
+
+    for (const [id, range] of Object.entries(ranges)) {
+      const rule = nodes.get(id)!
+      expect(rule.width, `${rule.name} is narrower than its label`).toBeGreaterThanOrEqual(
+        labelSpan(rule.name, range)
+      )
+    }
+  })
+
+  it('fits a long name even before the analysis has run', () => {
+    // No ranges: the draft model in the Model Structure editor. The names
+    // alone can still outrun a 172px context box.
+    const layout = layoutHarrisMatrix(nenthornJAK(), [])
+    const rule = byId(layout).get('b1')!
+
+    expect(rule.width).toBeGreaterThanOrEqual(labelSpan(rule.name, undefined))
+  })
+
+  it('carries the range it was measured for through to the node', () => {
+    const nodes = byId(layoutHarrisMatrix(nenthornJAK(), [], {}, ranges))
+
+    expect(nodes.get('b1')!.rangeLabel).toBe(ranges.b1)
+    // Nothing else has one -- a context is not a modelled transition.
+    expect(nodes.get('ff_j')!.rangeLabel).toBeNull()
+  })
+
+  it('widens the container rather than the boxes inside it', () => {
+    const layout = layoutHarrisMatrix(nenthornJAK(), [], {}, ranges)
+    const nodes = byId(layout)
+
+    // The contexts keep their own size and stay centred; it is the sequence
+    // around them that grows to hold the rules.
+    expect(nodes.get('ff_j')!.width).toBe(CONTEXT_WIDTH)
+    expect(nodes.get('site')!.width).toBeGreaterThan(CONTEXT_WIDTH + PADDING * 2)
+  })
+
+  it('leaves a container alone when its contents are already wider', () => {
+    // Six contexts side by side is far wider than any boundary label, so the
+    // rule floor must not add anything.
+    const wide = el('site', 'sequence', 'Site', [
+      el('b0', 'boundary', 'Start'),
+      el('row', 'phase', 'Row', Array.from({ length: 6 }, (_, i) =>
+        el(`p${i}`, 'phase', `P${i}`))),
+    ])
+    const layout = layoutHarrisMatrix(wide, [], {}, { b0: '663–561 cal BP (95.4%)' })
+    const nodes = byId(layout)
+
+    expect(nodes.get('site')!.width).toBe(nodes.get('row')!.width + PADDING * 2)
   })
 })
 

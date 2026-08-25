@@ -388,7 +388,9 @@ export default function StackedPosteriorPlot({
         yanchor: 'middle',
         text: phase,
         showarrow: false,
-        font: { size: 11, color: 'rgba(0,0,0,0.75)' },
+        // Same weight the results table gives a Sequence/Phase heading, so a
+        // phase name reads as the same kind of thing in both places.
+        font: { size: 11, color: 'rgba(0,0,0,0.75)', weight: 600 },
       })
     })
     return { shapes, annotations }
