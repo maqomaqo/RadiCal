@@ -44,7 +44,7 @@ import {
   formatCalendarAge,
   type DateFormat,
 } from '@/utils/dateFormat'
-import { downloadPlotPng } from '@/utils/plotExport'
+import { downloadPlotPng } from '@/utils/downloadPlot'
 import {
   clampWindow,
   pointsForWidth,

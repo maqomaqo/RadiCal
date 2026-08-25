@@ -13,9 +13,9 @@ import {
 } from '@/utils/dateFormat'
 import type { HPDBand } from '@/utils/hpd'
 import { stackedPlotGeometry } from '@/utils/stackedPlotGeometry'
-import { toUnitArea } from '@/utils/distribution'
+import { toUnitArea, trimTails } from '@/utils/distribution'
 import { usePlotColors } from '@/theme/plotColors'
-import { downloadPlotPng } from '@/utils/plotExport'
+import { downloadPlotPng } from '@/utils/downloadPlot'
 
 // Same binding as PosteriorPlot -- see the note there for why the factory is
 // bound to the packaged plotly.js rather than a CDN global.
@@ -39,6 +39,37 @@ export interface StackedSeries {
   /** Same date's plain calibration with no stratigraphic constraints -- see showPrior below. */
   priorDistribution?: Array<[number, number]>
   pointEstimates: { mean?: number; median?: number; std?: number }
+  /**
+   * The laboratory measurement this date was calibrated FROM, and the curve it
+   * was calibrated against. Absent for a boundary, which is a modelled
+   * transition rather than a dated thing, and absent for any date whose
+   * measurement the page could not match to its result.
+   *
+   * Only the Curve view reads it -- the stacked and per-date views work in
+   * calendar years throughout and have no radiocarbon axis to put it on -- but
+   * it is declared here so one array of series feeds all three.
+   */
+  measurement?: SeriesMeasurement
+}
+
+/**
+ * A date's radiocarbon measurement, already reduced to what a plot needs.
+ *
+ * `ageBp` and `error1Sigma` are the reservoir-CORRECTED figures where a marine
+ * offset applies: a marine sample of calendar age t is expected to measure
+ * curve(t) + Delta-R, so the value that can be read against the drawn curve is
+ * the measured age minus Delta-R, with the offset's own uncertainty joining in
+ * quadrature (see services/calibration.py). Correcting at the point the series
+ * is built keeps the plot free of the convention -- it draws whatever it is
+ * given against the curve it is given.
+ */
+export interface SeriesMeasurement {
+  ageBp: number
+  error1Sigma?: number
+  /** Which calibration curve this date was calibrated against. */
+  curveId?: string
+  /** True when ageBp/error1Sigma above are not the numbers on the lab report. */
+  reservoirCorrected?: boolean
 }
 
 interface StackedPosteriorPlotProps {
@@ -76,27 +107,6 @@ const MARGIN_LEFT = 150
 const MARGIN_LEFT_NARROW = 84
 
 const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
-
-/**
- * Trims a distribution's outer tails, where the density is indistinguishable
- * from zero at row scale -- left in, they draw as a flat rule running the
- * whole width of the row rather than as a curve. Only the OUTER tails go: a
- * multimodal posterior's flat gap between peaks is a real feature of the
- * calibration, not padding, so the slice stays contiguous.
- */
-function trimTails(distribution: Array<[number, number]>) {
-  const peak = Math.max(...distribution.map(([, p]) => p))
-  const significant = distribution
-    .map(([, p], i) => (p >= peak * 0.002 ? i : -1))
-    .filter((i) => i >= 0)
-  const from = significant.length > 0 ? Math.max(0, significant[0] - 1) : 0
-  const to =
-    significant.length > 0
-      ? Math.min(distribution.length - 1, significant[significant.length - 1] + 1)
-      : distribution.length - 1
-  const visible = distribution.slice(from, to + 1)
-  return { ages: visible.map(([age]) => age), probs: visible.map(([, p]) => p), peak }
-}
 
 /** The row's own baseline. Row 0 (the oldest) sits at the top. */
 const baselineFor = (index: number) => -index

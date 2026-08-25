@@ -12,7 +12,7 @@ import {
 } from '@/utils/dateFormat'
 import type { HPDBand } from '@/utils/hpd'
 import { usePlotColors } from '@/theme/plotColors'
-import { downloadPlotPng } from '@/utils/plotExport'
+import { downloadPlotPng } from '@/utils/downloadPlot'
 
 /**
  * A filled rectangle in data coordinates, as a closed polygon trace -- same

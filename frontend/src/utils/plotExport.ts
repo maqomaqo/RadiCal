@@ -1,7 +1,13 @@
-import Plotly from 'plotly.js-dist-min'
-
-// How the plots' "Download PNG" button behaves. Shared by every plot surface
-// so an exported figure is the same quality whichever one it came from.
+// What a saved figure is called and how big it is. Shared by every plot
+// surface so an exported figure is the same whichever one it came from.
+//
+// Deliberately holds no reference to Plotly. The act of saving lives next
+// door in downloadPlot.ts, and the split is not tidiness -- plotly.js-dist-min
+// is a browser bundle whose UMD wrapper reads `self` at module scope, so
+// importing it in a Node test throws "self is not defined" before a single
+// assertion runs. Both things below are pure and worth asserting; while they
+// sat beside the import, plotExport.test.ts could not run at all. Same reason
+// stackedPlotGeometry.ts and curvePlotGeometry.ts are their own modules.
 
 /**
  * Multiplier applied to the on-screen size when a plot is saved as a PNG.
@@ -14,37 +20,6 @@ import Plotly from 'plotly.js-dist-min'
  * a re-laid-out one.
  */
 export const PNG_EXPORT_SCALE = 3
-
-/**
- * Save a plot as a PNG at PNG_EXPORT_SCALE.
- *
- * Exists because the app now draws its own download control rather than
- * showing Plotly's modebar. That bar rendered six <a> elements with no href,
- * no role and no accessible name, none of which could take focus -- so the
- * path a figure takes into a publication needed a mouse. A real button can be
- * labelled, reached by Tab, and put where the reader is already looking.
- *
- * Takes the container rather than the graph div: callers hold a ref to the
- * element they render, and Plotly's own div is created inside it.
- */
-export function downloadPlotPng(
-  container: HTMLElement | null,
-  filename: string
-): void {
-  const graph = container?.querySelector<HTMLElement>('.js-plotly-plot')
-  if (!graph) return
-  // Cast: plotly.js-dist-min ships no types for downloadImage, and the
-  // project's own d.ts (types/plotly.d.ts) deliberately keeps the surface
-  // narrow rather than restating Plotly's API.
-  const plotly = Plotly as unknown as {
-    downloadImage(gd: HTMLElement, opts: Record<string, unknown>): Promise<string>
-  }
-  void plotly.downloadImage(graph, {
-    format: 'png',
-    scale: PNG_EXPORT_SCALE,
-    filename: exportFilename(filename),
-  })
-}
 
 /**
  * A saved-file name that survives every OS -- no spaces, slashes or

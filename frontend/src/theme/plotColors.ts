@@ -36,6 +36,13 @@ export interface PlotColors {
   hpd68: string
   mean: string
   median: string
+  /**
+   * Thin rules that project a value across a figure rather than carrying one
+   * -- the Curve view's line from a laboratory measurement to where it meets
+   * the calibration curve. Stronger than the grid, which it has to be
+   * readable against, and weaker than anything that is data.
+   */
+  guide: string
   /** The plot area itself. */
   surface: string
   grid: string
@@ -71,6 +78,7 @@ export function usePlotColors(): PlotColors {
       hpd68: alpha(PHASE_GREEN, 0.72),
       mean: alpha(INK, 0.85),
       median: alpha(INK, 0.45),
+      guide: alpha(INK, 0.3),
       // White, not the grey this used to be. Every fill on these plots is
       // translucent -- and has to be, since the prior reads by showing
       // through the posterior drawn over it, and in the stacked view the

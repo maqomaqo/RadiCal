@@ -49,7 +49,8 @@ import { cancelJob } from '../api/jobs'
 import { useJob } from '../hooks/useJob'
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown'
 import PosteriorPlot from '@/components/PosteriorPlot'
-import StackedPosteriorPlot from '@/components/StackedPosteriorPlot'
+import StackedPosteriorPlot, { type SeriesMeasurement } from '@/components/StackedPosteriorPlot'
+import CurvePosteriorPlot from '@/components/CurvePosteriorPlot'
 import HarrisMatrixDiagram from '@/components/HarrisMatrixDiagram'
 import DurationsPanel from '@/components/DurationsPanel'
 import ConfirmDialog from '@/components/ConfirmDialog'
@@ -103,8 +104,13 @@ interface AnalysisResult {
   // Widened past what the Harris matrix needs: the citation strings name the
   // curve each date was calibrated against, and curve_id is on the response
   // even though MatrixMeasurement -- which exists for the diagram -- has no
-  // reason to carry it.
-  measurements?: Array<MatrixMeasurement & { curve_id?: string }>
+  // reason to carry it. The marine reservoir offset is here for the same
+  // reason: the Curve view draws each measurement against the curve, and for
+  // a marine date the value that can be read against a drawn curve is the
+  // measured age minus Delta-R.
+  measurements?: Array<
+    MatrixMeasurement & { curve_id?: string; delta_r?: number | null; delta_r_error?: number | null }
+  >
   groups?: DraftGroup[]
   // Explicit model structure; boundary elements carry their own posterior.
   model_tree?: ModelElement | null
@@ -203,6 +209,9 @@ interface PlottableSeries {
   /** A date's plain calibration with no stratigraphic constraints applied; absent for a boundary, which has no such counterpart. */
   priorDistribution?: Array<[number, number]>
   pointEstimates: { mean?: number; median?: number; std?: number }
+  /** The radiocarbon measurement this date came from -- only the Curve view
+   *  reads it, and only a date has one. */
+  measurement?: SeriesMeasurement
 }
 
 /**
@@ -912,7 +921,12 @@ export default function Results() {
   // The per-date charts remain available because the stacked view trades
   // detail for comparison: they carry the full-height curve, the point
   // estimates panel and their own zoom.
-  const [plotView, setPlotView] = useState<'stacked' | 'individual'>('stacked')
+  //
+  // Curve is the third: the same posteriors drawn against the calibration
+  // curve that produced them. Both of the others answer "what came out"; that
+  // one answers "why it came out that shape", which is a question the ranges
+  // alone routinely provoke and neither of the others can address.
+  const [plotView, setPlotView] = useState<'stacked' | 'individual' | 'curve'>('stacked')
   // Confidence level for the HPD columns below -- default 95.4% (2-sigma),
   // the most commonly cited "95% confidence" convention in archaeological
   // reporting; switchable to 68.3% or 99.7% without a network round trip
@@ -1398,6 +1412,37 @@ export default function Results() {
     .filter((f): f is { name: string; concern: Concern } => f.concern !== null)
     .sort((a, b) => (a.concern.level === b.concern.level ? 0 : a.concern.level === 'suspect' ? -1 : 1))
 
+  /**
+   * A date's laboratory measurement in the form the Curve view plots it: the
+   * radiocarbon age it can be read against a DRAWN curve at.
+   *
+   * For a marine date that is not the number on the lab report. The curve
+   * models only the global average reservoir effect, so a marine sample of
+   * calendar age t is expected to measure curve(t) + Delta-R; subtracting the
+   * local offset from the measurement is the same statement, and is exactly
+   * what the calibration itself does (see services/calibration.py). Its
+   * uncertainty joins in quadrature, so a poorly known offset widens the
+   * measurement rather than only moving it -- which is what the figure should
+   * show, since it is also what widened the posterior.
+   *
+   * Returns undefined rather than a guess for a date with no usable age; the
+   * plot counts those out and says so instead of placing them at zero.
+   */
+  const seriesMeasurement = (sampleId: string): SeriesMeasurement | undefined => {
+    const m = measurementBySampleId.get(sampleId)
+    if (!m || !Number.isFinite(m.age_bp)) return undefined
+    const deltaR = m.delta_r ?? 0
+    const deltaRError = m.delta_r_error ?? 0
+    const stated = m.error_1sigma ?? 0
+    const error = Math.sqrt(stated * stated + deltaRError * deltaRError)
+    return {
+      ageBp: m.age_bp - deltaR,
+      error1Sigma: error > 0 ? error : undefined,
+      curveId: m.curve_id,
+      reservoirCorrected: deltaR !== 0 || deltaRError !== 0,
+    }
+  }
+
   // The plots, in the same order. Walking structureRows means the sequence
   // on screen is the sequence in the model -- oldest first -- and each plot
   // can say where it sits.
@@ -1422,6 +1467,7 @@ export default function Results() {
         distribution: result.probability_distribution,
         bands: bandsFor(`date-${row.sampleId}`, result.probability_distribution),
         priorDistribution: result.unmodelled_distribution ?? undefined,
+        measurement: seriesMeasurement(row.sampleId),
         pointEstimates: {
           mean: result.posterior_mean,
           median: result.posterior_median,
@@ -1456,6 +1502,7 @@ export default function Results() {
       distribution: result.probability_distribution,
       bands: bandsFor(`date-${result.sample_id}`, result.probability_distribution),
       priorDistribution: result.unmodelled_distribution ?? undefined,
+      measurement: seriesMeasurement(result.sample_id),
       pointEstimates: {
         mean: result.posterior_mean,
         median: result.posterior_median,
@@ -2315,6 +2362,7 @@ export default function Results() {
             >
               <ToggleButton value="stacked">Stacked</ToggleButton>
               <ToggleButton value="individual">Individual</ToggleButton>
+              <ToggleButton value="curve">Curve</ToggleButton>
             </ToggleButtonGroup>
           </Box>
           <Typography variant="body2" color="textSecondary" sx={{ mt: 1 }}>
@@ -2322,6 +2370,8 @@ export default function Results() {
               ? `Every ${
                   isBayesian ? 'date and modelled transition' : 'date'
                 } in one plot. Oldest first, in the same order as the table above. Each row is scaled to its own peak, so heights compare precision, not probability.`
+              : plotView === 'curve'
+              ? 'Each date drawn against the calibration curve it was run against: its measurement up the left, its calibrated distribution sitting on the curve at that radiocarbon age. Where the curve flattens or doubles back, the distribution beneath it spreads or splits — which is why.'
               : `One plot per ${
                   isBayesian ? 'date and modelled transition' : 'date'
                 }, oldest first, in the same order as the table above.`}
@@ -2330,7 +2380,10 @@ export default function Results() {
           {/* Above the plots rather than beside the table's controls, so the
               switch that hides them isn't below everything it hides. Only shown
               when there are boundary plots to hide. */}
-          {boundaryPlotCount > 0 && (
+          {/* Not offered in the Curve view, which has no radiocarbon age to
+              place a modelled transition at and therefore never draws one --
+              a switch that hides nothing is a switch that appears broken. */}
+          {boundaryPlotCount > 0 && plotView !== 'curve' && (
             <FormControlLabel
               sx={{ mt: 1 }}
               control={
@@ -2349,7 +2402,7 @@ export default function Results() {
               to shadow it against. */}
           {isBayesian && plotOrder.some((s) => s.priorDistribution) && (
             <FormControlLabel
-              sx={{ mt: 1, ml: 2 }}
+              sx={{ mt: 1, ml: boundaryPlotCount > 0 && plotView !== 'curve' ? 2 : 0 }}
               control={
                 <Checkbox
                   size="small"
@@ -2361,7 +2414,18 @@ export default function Results() {
             />
           )}
 
-          {plotView === 'stacked' ? (
+          {plotView === 'curve' ? (
+            <Box sx={{ mt: 2 }}>
+              <CurvePosteriorPlot
+                series={plotOrder}
+                isModelled={isBayesian}
+                showMean={showMean}
+                showMedian={showMedian}
+                showPrior={showPrior}
+                dateFormat={dateFormat}
+              />
+            </Box>
+          ) : plotView === 'stacked' ? (
             <Box sx={{ mt: 2 }}>
               <StackedPosteriorPlot
                 series={visiblePlots}

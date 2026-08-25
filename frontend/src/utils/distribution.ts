@@ -65,3 +65,36 @@ export function peakOf(points: Distribution): number {
   for (const [, p] of points) if (p > peak) peak = p
   return peak
 }
+
+/** A distribution reduced to what is worth drawing, with its peak. */
+export interface TrimmedDistribution {
+  ages: number[]
+  probs: number[]
+  peak: number
+}
+
+/**
+ * Trims a distribution's outer tails, where the density is indistinguishable
+ * from zero at drawing scale -- left in, they draw as a flat rule running the
+ * whole width of the figure rather than as a curve. Only the OUTER tails go: a
+ * multimodal posterior's flat gap between peaks is a real feature of the
+ * calibration, not padding, so the slice stays contiguous.
+ *
+ * Lives here rather than in a plot component because both the stacked view and
+ * the curve view draw the same lobes and must agree about where a distribution
+ * visibly starts and stops -- the curve view sets its calendar axis from
+ * exactly the extent the stacked view would draw.
+ */
+export function trimTails(distribution: Distribution): TrimmedDistribution {
+  const peak = Math.max(...distribution.map(([, p]) => p))
+  const significant = distribution
+    .map(([, p], i) => (p >= peak * 0.002 ? i : -1))
+    .filter((i) => i >= 0)
+  const from = significant.length > 0 ? Math.max(0, significant[0] - 1) : 0
+  const to =
+    significant.length > 0
+      ? Math.min(distribution.length - 1, significant[significant.length - 1] + 1)
+      : distribution.length - 1
+  const visible = distribution.slice(from, to + 1)
+  return { ages: visible.map(([age]) => age), probs: visible.map(([, p]) => p), peak }
+}
