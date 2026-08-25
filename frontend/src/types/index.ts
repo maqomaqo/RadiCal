@@ -95,6 +95,15 @@ export interface DraftMeasurement extends MatrixMeasurement {
   // Stratigraphic phase/group this sample belongs to, if any -- must
   // match a DraftGroup.id.
   group_id?: string | null
+  // The context this date arrived already filed under: a project
+  // collection's default_context_name, or the phase named in an imported
+  // file. A LABEL, not a reference -- there is no phase for it to point at
+  // until a model structure exists, and building that structure is exactly
+  // what it feeds (see utils/modelTreeDefaults.bootstrapModelTree, which
+  // turns these into the starting phases). Carried through the draft so
+  // that grouping survives the trip from the collection to the model
+  // instead of having to be re-typed from memory.
+  default_context_name?: string | null
   // Age limiters in cal BP: tpq_age_bp (terminus post quem) is a MAXIMUM
   // age bound -- "not older than" -- and taq_age_bp (terminus ante quem)
   // is a MINIMUM age bound -- "not younger than". Valid range is

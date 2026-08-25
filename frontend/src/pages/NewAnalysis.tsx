@@ -486,6 +486,15 @@ export default function NewAnalysis() {
   const measurementKey = (m: { sample_name: string; age_bp: number; error_1sigma: number }) =>
     `${m.sample_name}|${m.age_bp}|${m.error_1sigma}`
   const addedProjectSampleKeys = new Set(measurements.map(measurementKey))
+  // What "add all" would actually add: everything not already on the form.
+  // A collection is usually deployed wholesale into an analysis and only
+  // then whittled down, so ticking every row by hand was the common case,
+  // not the exception.
+  const addableProjectSamples = projectSamples.filter(
+    (s) => !addedProjectSampleKeys.has(measurementKey(s))
+  )
+  const allAddableSelected =
+    addableProjectSamples.length > 0 && addableProjectSamples.every((s) => pickerSelected.has(s.id))
 
   function projectSampleToMeasurement(s: ProjectSample): Measurement {
     return {
@@ -496,13 +505,23 @@ export default function NewAnalysis() {
       material_type: s.material_type || 'unknown',
       sample_type: s.sample_type,
       curve_id: s.curve_id || 'intcal20',
-      // The collection has no ΔR fields of its own (see ProjectSampleTable),
-      // so a marine date arrives without one and can be given one here.
-      delta_r: null,
-      delta_r_error: null,
+      // Carried rather than blanked. A reservoir offset belongs to where the
+      // sample came from -- the collection's own bulk "apply ΔR" action is
+      // how it usually gets set -- so dropping it here silently recalibrated
+      // a marine date without its local correction, which moves the answer
+      // rather than merely losing a label. Deploying the same date from the
+      // project page has always carried it.
+      delta_r: s.delta_r ?? null,
+      delta_r_error: s.delta_r_error ?? null,
       outlier_prior: 0,
       outlier_model: 'general',
       notes: s.notes ?? null,
+      // The context the collection already files this date under. Deploying
+      // turns these into the analysis's contexts, and adding a date this way
+      // is meant to be the same thing done one at a time -- so it is carried
+      // and the Model Structure page starts from it (bootstrapModelTree)
+      // rather than dropping every date into one undifferentiated phase.
+      default_context_name: s.default_context_name ?? null,
       tpq_age_bp: s.tpq_age_bp ?? null,
       taq_age_bp: s.taq_age_bp ?? null,
     }
@@ -540,6 +559,12 @@ export default function NewAnalysis() {
         tpq_age_bp: d.tpq_age_bp,
         taq_age_bp: d.taq_age_bp,
         element_id: d.element_id ?? null,
+        // A CSV names a phase per date without carrying a model tree to put
+        // it in. Kept as the date's context so the Model Structure page can
+        // start from that grouping, the same way a date added from a project
+        // collection does. Ignored when the file DID bring a tree -- the
+        // assignments above are then the real thing.
+        default_context_name: d.phase_name ?? null,
       }))
     )
     setModelTree(preview.model_tree, preview.element_assignments)
@@ -1223,6 +1248,45 @@ export default function NewAnalysis() {
           Add dates from {projects.find((p) => p.id === projectId)?.name ?? 'this project'}'s collection
         </DialogTitle>
         <DialogContent dividers sx={{ maxHeight: 420, p: 0 }}>
+          <Box
+            sx={{
+              position: 'sticky',
+              top: 0,
+              zIndex: 1,
+              backgroundColor: 'background.paper',
+              borderBottom: '1px solid',
+              borderColor: 'divider',
+              px: 2,
+              py: 0.5,
+            }}
+          >
+            <FormControlLabel
+              sx={{ mx: 0 }}
+              control={
+                <Checkbox
+                  checked={allAddableSelected}
+                  indeterminate={!allAddableSelected && pickerSelected.size > 0}
+                  disabled={addableProjectSamples.length === 0}
+                  onChange={() =>
+                    setPickerSelected(
+                      allAddableSelected ? new Set() : new Set(addableProjectSamples.map((s) => s.id))
+                    )
+                  }
+                />
+              }
+              label={
+                <Typography variant="body2">
+                  {addableProjectSamples.length === 0
+                    ? 'Every date in this collection is already in this analysis'
+                    : allAddableSelected
+                      ? 'Clear selection'
+                      : `Select all ${addableProjectSamples.length} remaining date${
+                          addableProjectSamples.length === 1 ? '' : 's'
+                        }`}
+                </Typography>
+              }
+            />
+          </Box>
           {projectSamples.map((s) => {
             const alreadyAdded = addedProjectSampleKeys.has(measurementKey(s))
             return (
@@ -1248,6 +1312,11 @@ export default function NewAnalysis() {
                     <Typography variant="body2">
                       {s.sample_name} — {s.age_bp} ± {s.error_1sigma} BP ({s.sample_type}, {s.curve_id})
                     </Typography>
+                    {s.default_context_name && (
+                      <Typography variant="caption" color="textSecondary" sx={{ display: 'block' }}>
+                        Context: {s.default_context_name}
+                      </Typography>
+                    )}
                     {alreadyAdded && (
                       <Typography variant="caption" color="textSecondary">
                         Already in this analysis
@@ -1309,6 +1378,17 @@ export default function NewAnalysis() {
                         {m.delta_r != null && (
                           <Typography variant="body2" color="textSecondary">
                             ΔR: {m.delta_r} ± {m.delta_r_error ?? 0} yr
+                          </Typography>
+                        )}
+                        {/* The context the date arrived filed under. Shown
+                            so it is visible that it survived the trip from
+                            the collection -- it is what the Model Structure
+                            page builds its starting phases from, and a
+                            grouping that silently vanished used to have to be
+                            re-created from memory. */}
+                        {m.default_context_name && (
+                          <Typography variant="body2" color="textSecondary">
+                            Context: {m.default_context_name}
                           </Typography>
                         )}
                         {/* Shown for the same reason as ΔR: it changes what

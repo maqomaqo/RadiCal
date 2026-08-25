@@ -38,6 +38,12 @@ import {
 } from '@dnd-kit/sortable'
 import { useElementTypeColors, type ElementTypeColor } from '@/theme/diagramColors'
 import type { ModelElement, ElementType, MatrixMeasurement } from '@/types'
+// Lives in utils because the starting structure built there (see
+// bootstrapModelTree) mints ids too, and both must mint the same kind.
+// Re-exported so this module stays the one place the editor is imported from.
+import { newElementId } from '@/utils/modelTreeDefaults'
+
+export { newElementId }
 
 // Editor for the explicit OxCal-style model structure: a nested, ordered
 // tree of Sequences, Phases, Boundaries and Hiatuses. Rendered as an
@@ -89,10 +95,6 @@ const TYPE_HINT: Record<ElementType, string> = {
 // outline doesn't jump when dragging is introduced.
 const INDENT_UNITS = 3
 export const INDENT_PX = INDENT_UNITS * 8
-
-export function newElementId(): string {
-  return 'el_' + Math.random().toString(36).slice(2, 11)
-}
 
 function isContainerType(type: ElementType): boolean {
   return type === 'sequence' || type === 'phase'

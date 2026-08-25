@@ -35,7 +35,8 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import { useAnalysisDraftStore } from '@/stores/analysisStore'
 import type { ModelElement, MatrixMeasurement } from '@/types'
 import HarrisMatrixDiagram from '@/components/HarrisMatrixDiagram'
-import ModelTreeEditor, { newElementId, validateTree } from '@/components/ModelTreeEditor'
+import ModelTreeEditor, { validateTree } from '@/components/ModelTreeEditor'
+import { bootstrapModelTree } from '@/utils/modelTreeDefaults'
 import { formatApiError } from '@/utils/apiError'
 import { summariseTree } from '@/utils/harrisLayout'
 
@@ -86,28 +87,24 @@ export default function Stratigraphy() {
   const [structureDirty, setStructureDirty] = useState(false)
   const [structureError, setStructureError] = useState<string | null>(null)
   const [linearized, setLinearized] = useState(false)
+  // What the analysis is saved AS, which is not always what is being edited:
+  // switching a saved group calibration to Bayesian on the New Analysis page
+  // changes the draft, and the conversion only reaches the backend through
+  // Run Analysis. Until it does, this analysis has no structure to write to
+  // (GET returns model_tree only for a Bayesian analysis), so the structure
+  // built here belongs to the unsaved edit -- see the Save block below.
+  const [savedType, setSavedType] = useState<string | null>(null)
 
-  // For a NEW analysis the tree lives in the draft store. Start it off as a
-  // site-wide Sequence bracketed by boundaries with every date in one phase
-  // -- the smallest complete model -- which the user then splits up.
+  // For a NEW analysis the tree lives in the draft store. Start it off as the
+  // smallest complete model -- a site-wide Sequence bracketed by boundaries
+  // -- with one phase per context the dates already carry, or a single phase
+  // when they carry none. See utils/modelTreeDefaults.
   useEffect(() => {
     if (editRouteId || draftTree || measurements.length === 0) return
-    const phaseId = newElementId()
-    setDraftTree(
-      {
-        id: newElementId(),
-        element_type: 'sequence',
-        name: 'Site sequence',
-        tpq_age_bp: null,
-        taq_age_bp: null,
-        children: [
-          { id: newElementId(), element_type: 'boundary', name: 'Start of sequence', tpq_age_bp: null, taq_age_bp: null, children: [] },
-          { id: phaseId, element_type: 'phase', name: 'Phase 1', tpq_age_bp: null, taq_age_bp: null, children: [] },
-          { id: newElementId(), element_type: 'boundary', name: 'End of sequence', tpq_age_bp: null, taq_age_bp: null, children: [] },
-        ],
-      },
-      Object.fromEntries(measurements.map((m) => [m.id, phaseId]))
+    const { tree, assignments: seeded } = bootstrapModelTree(
+      measurements.map((m) => ({ id: m.id, context: m.default_context_name }))
     )
+    setDraftTree(tree, seeded)
   }, [editRouteId, draftTree, measurements, setDraftTree])
 
   useEffect(() => {
@@ -121,21 +118,50 @@ export default function Stratigraphy() {
           setStructureError(formatApiError(data))
           return
         }
-        setModelTree(data.data.model_tree || null)
         setLinearized(!!data.data.model_tree_linearized)
+        setSavedType(data.data.analysis_type || null)
         const saved: MatrixMeasurement[] = data.data.measurements || []
         setSavedMeasurements(saved)
+        let tree: ModelElement | null = data.data.model_tree || null
         const initial: Record<string, string> = {}
         for (const m of saved) {
           if (m.element_id) initial[m.id] = m.element_id
           else if (m.group_id) initial[m.id] = m.group_id
         }
+        if (!tree && saved.length > 0) {
+          // A saved analysis with no structure -- a group calibration being
+          // converted to Bayesian, most often. It has dates, so start it off
+          // the same way a new analysis starts, rather than telling the user
+          // to "add some dates and save it first" about an analysis whose
+          // dates are right there. Contexts come from the SampleGroups it was
+          // deployed with, so a deployed-then-converted analysis keeps the
+          // grouping it arrived with.
+          const groupNames: Record<string, string> = Object.fromEntries(
+            (data.data.groups || []).map((g: { id: string; name: string }) => [g.id, g.name])
+          )
+          const bootstrapped = bootstrapModelTree(
+            saved.map((m) => ({
+              id: m.id,
+              context: groupNames[initial[m.id]] ?? null,
+            }))
+          )
+          tree = bootstrapped.tree
+          // The bootstrapped phases are new elements, so the saved
+          // element_id/group_id assignments no longer name anything.
+          for (const key of Object.keys(initial)) delete initial[key]
+          Object.assign(initial, bootstrapped.assignments)
+          // Nothing on the server matches this yet.
+          setStructureDirty(true)
+        }
+        setModelTree(tree)
         setAssignments(initial)
         // Mirror into the draft store as well: NewAnalysis submits the
         // draft's tree when the analysis is run, and it skips reloading a
         // draft it already holds -- so a tree only edited here would
         // otherwise be resubmitted as whatever the store loaded earlier.
-        setDraftTree(data.data.model_tree || null, initial)
+        // This is also the only route a bootstrapped structure takes to the
+        // backend when the analysis is not saved as Bayesian yet.
+        setDraftTree(tree, initial)
       })
       .catch((err) => setStructureError((err as Error).message))
       .finally(() => setLoadingStructure(false))
@@ -273,32 +299,53 @@ export default function Stratigraphy() {
                   setStructureDirty(true)
                 }}
               />
-              <Box sx={{ mt: 3, display: 'flex', gap: 2, alignItems: 'center' }}>
-                <Button
-                  variant="contained"
-                  onClick={saveStructure}
-                  disabled={savingStructure || structureProblems.length > 0}
-                >
-                  {savingStructure ? 'Saving…' : 'Save Model Structure'}
-                </Button>
-                {structureProblems.length > 0 ? (
-                  <Typography variant="caption" color="error">
-                    Fix the {structureProblems.length === 1 ? 'problem' : 'problems'} listed above
-                    before saving.
-                  </Typography>
-                ) : (
-                  structureDirty && (
-                    <Typography variant="caption" color="textSecondary">
-                      Unsaved changes. Saving clears this analysis's current results — re-run it
-                      afterwards.
+              {savedType && savedType !== 'bayesian' ? (
+                // Saved as something with no structure -- only a Bayesian
+                // analysis stores one, so there is nothing here to save the
+                // tree INTO until the conversion happens. It goes with the
+                // draft instead, and Run Analysis is what applies both.
+                <Alert severity="info" sx={{ mt: 3 }}>
+                  This analysis is still saved as a{' '}
+                  {savedType === 'group_calibration' ? 'group calibration' : savedType}, which has
+                  no model structure to write to. The structure above is part of your unsaved edit:
+                  go back and press Run Analysis to convert the analysis and apply it.
+                  {structureProblems.length > 0 && (
+                    <>
+                      {' '}
+                      Fix the {structureProblems.length === 1 ? 'problem' : 'problems'} listed above
+                      first.
+                    </>
+                  )}
+                </Alert>
+              ) : (
+                <Box sx={{ mt: 3, display: 'flex', gap: 2, alignItems: 'center' }}>
+                  <Button
+                    variant="contained"
+                    onClick={saveStructure}
+                    disabled={savingStructure || structureProblems.length > 0}
+                  >
+                    {savingStructure ? 'Saving…' : 'Save Model Structure'}
+                  </Button>
+                  {structureProblems.length > 0 ? (
+                    <Typography variant="caption" color="error">
+                      Fix the {structureProblems.length === 1 ? 'problem' : 'problems'} listed above
+                      before saving.
                     </Typography>
-                  )
-                )}
-              </Box>
+                  ) : (
+                    structureDirty && (
+                      <Typography variant="caption" color="textSecondary">
+                        Unsaved changes. Saving clears this analysis's current results — re-run it
+                        afterwards.
+                      </Typography>
+                    )
+                  )}
+                </Box>
+              )}
             </>
           ) : (
             <Alert severity="info">
-              This analysis has no model structure yet. Add some dates and save it first.
+              This analysis has no dates yet, so there is nothing to build a structure around. Add
+              some on the Edit Analysis page first.
             </Alert>
           )}
         </Paper>
