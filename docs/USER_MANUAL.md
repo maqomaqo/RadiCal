@@ -347,11 +347,22 @@ the model is from being able to say which came first (100% is a coin flip). The 
 68.3% and 95.4% levels every HPD in the app is quoted at, so `none` means "separated at 2 sigma" and
 `extensive` means "overlapping at 2 sigma".
 
-Two phases either side of a single shared Boundary read **shares a transition** rather than a
-figure: one phase's end *is* the next one's start, so the model gives them no gap by construction.
-Put a **Hiatus** between two Boundaries where you want the gap itself modelled. Two phases sitting
-inside the *same* pair of Boundaries are not compared at all — the model brackets them identically,
-so it has nothing to say about their order.
+The years column beside it is headed **Separation** for phases and **Difference** for dates. It used
+to read "Gap or overlap", which put the word *overlap* over a span of years and over a probability
+in the next column along.
+
+Two phases either side of a single shared Boundary read **shares a transition** in place of both
+figures, and the Overlap column reads **—**: one phase's end *is* the next one's start, so the model
+gives them no gap and no overlap to measure. Neither zero is a finding, which is why neither is
+printed — on screen, in the CSV or in the PDF. Put a **Hiatus** between two Boundaries where you
+want the gap itself modelled. Two phases sitting inside the *same* pair of Boundaries are not
+compared at all — the model brackets them identically, so it has nothing to say about their order.
+
+In a plain Sequence, where every Phase shares its Boundaries with its neighbours, this table has
+little to add: adjacent pairs share a transition, and the gap between two non-adjacent Phases is
+the durations of the Phases between them, which the Durations table already reports. The table
+earns its place where the model leaves the order genuinely open — Phases separated by a Hiatus, and
+Phases in different branches of the model.
 
 ### What these cost
 

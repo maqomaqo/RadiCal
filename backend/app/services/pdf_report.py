@@ -56,6 +56,7 @@ from reportlab.platypus import (
 
 from app.services import date_format as date_format_service
 from app.services.calibration import get_curve
+from app.services.intervals import SHARED_BOUNDARY_TEXT
 
 # --- page geometry -------------------------------------------------------
 
@@ -608,6 +609,14 @@ def _differences_table(records: List[Dict], styles: Dict[str, ParagraphStyle]) -
     def cells(record: Dict) -> List[Any]:
         years = record.get('years') or {}
         overlap = record.get('overlap')
+        if record.get('shared_boundary'):
+            # Both figures are zero by construction. See
+            # intervals.SHARED_BOUNDARY_TEXT.
+            return [
+                record.get('from_name') or '',
+                record.get('to_name') or '',
+                '', SHARED_BOUNDARY_TEXT, '',
+            ]
         word = record.get('severity') or ''
         if overlap is not None:
             word = f"{word} ({overlap * 100:.0f}%)"
@@ -984,7 +993,10 @@ def render_report(
                 "\"Overlap\" is the probability that the two cannot be separated in "
                 "time -- for two phases, that their modelled intervals intersect; for "
                 "two dates, that the model cannot say which came first -- graded at the "
-                "same 68.3% and 95.4% levels the HPD regions use.",
+                "same 68.3% and 95.4% levels the HPD regions use. Two phases either "
+                f"side of one shared Boundary read \"{SHARED_BOUNDARY_TEXT}\" instead: "
+                "one phase's end is the next one's start, so the model gives them no "
+                "gap and no overlap to measure.",
                 styles['note'],
             ))
             story.append(_differences_table(differences, styles))

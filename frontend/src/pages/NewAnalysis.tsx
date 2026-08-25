@@ -882,7 +882,7 @@ export default function NewAnalysis() {
 
   return (
     <Container maxWidth="lg" sx={{ py: 4 }}>
-      <Typography variant="h3" component="h1" gutterBottom>
+      <Typography variant="h1" component="h1" gutterBottom>
         {isEditing ? 'Edit Analysis' : 'New Analysis'}
       </Typography>
       {isEditing && (

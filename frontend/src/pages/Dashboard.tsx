@@ -117,9 +117,7 @@ export default function Dashboard() {
       <Box
         sx={{ display: 'flex', alignItems: 'baseline', gap: 2, flexWrap: 'wrap', mt: 4, mb: 1 }}
       >
-        {/* variant="h1": the theme defines h1 as 2.5rem/600, the
-            design system's Headline. The title names the view rather than
-            the app; the wordmark in the AppBar already says RadiCal. */}
+      
         <Typography variant="h1" component="h1">
           Recent analyses
         </Typography>

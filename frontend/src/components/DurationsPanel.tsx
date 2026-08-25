@@ -36,6 +36,22 @@ import type { DifferenceRecord, DurationRecord, DurationSummary, IntervalsBlock 
 
 const NUMERIC_CELL_SX = { whiteSpace: 'nowrap' } as const
 
+/**
+ * What a shared-boundary pair says in place of a figure.
+ *
+ * Its gap is exactly zero and its overlap probability is exactly zero, and
+ * both are constructions rather than findings — one phase's end IS the next
+ * one's start. `none` is the wrong word for the second of them: everywhere
+ * else in this app `none` means "separated at 2 sigma", which is the opposite
+ * of what a shared transition says. The same phrase is printed by the CSV and
+ * the PDF (see intervals.SHARED_BOUNDARY_TEXT), so one pair reads the same way
+ * wherever the reader meets it.
+ */
+const SHARED_BOUNDARY_TEXT = 'shares a transition'
+const SHARED_BOUNDARY_HELP =
+  'These two phases share a Boundary, so the model gives them no gap and no overlap to ' +
+  'measure \u2014 one phase\u2019s end is the other\u2019s start, by construction rather than by inference.'
+
 /** The readout beside the matrix never shrinks below this; the grid gets the
  *  rest. A pair's figures wrapping to five lines to buy the grid 40px is a bad
  *  trade in both directions. */
@@ -211,7 +227,14 @@ export default function DurationsPanel({
   // The two kinds never appear together: phases come from a model, dates from
   // a group calibration, and an analysis is one or the other.
   const comparingDates = differences[0]?.kind === 'date_difference'
-  const differenceHeading = comparingDates ? 'Difference' : 'Gap or overlap'
+  // "Separation", not "Gap or overlap": the column beside it is headed
+  // "Overlap" and holds a probability, so the word stood for a span of YEARS
+  // in one column and a probability in the next. The neighbour keeps the word,
+  // because the five grades under it (none ... extensive) are degrees of
+  // overlap and read as nothing else -- so this column is the one that gives
+  // it up. Sign still carries the distinction, and the line above the table
+  // says so: positive is a gap, negative an overlap.
+  const differenceHeading = comparingDates ? 'Difference' : 'Separation'
 
   // The matrix is only meaningful over a COMPLETE set of pairs. Past
   // MAX_PAIRS the backend reports consecutive pairs instead, which is a chain
@@ -468,8 +491,8 @@ export default function DurationsPanel({
             <Collapse in={!showMatrix || pairsOpen} unmountOnExit>
             <Typography variant="body2" color="textSecondary" sx={{ mb: 1 }}>
               {comparingDates
-                ? 'A positive difference means the first date is the older of the two.'
-                : 'Positive is a gap between the two phases, negative an overlap. “Overlap” is the probability that their modelled intervals intersect.'}
+                ? 'A positive difference means the first date is the older of the two. “Overlap” grades how far the model is from being able to say which came first.'
+                : 'Separation is positive for a gap between the two phases and negative for an overlap. “Overlap” grades the probability that their modelled intervals intersect. Two phases either side of one shared Boundary have neither measured, because one phase’s end is the next one’s start.'}
             </Typography>
             {/* Below sm the same rows are stacked cards rather than a grid.
                 At 375px this table measured 452px inside a 295px container: the
@@ -493,8 +516,14 @@ export default function DurationsPanel({
                       color="textSecondary"
                       sx={{ mt: 0.5, fontVariantNumeric: 'tabular-nums' }}
                     >
-                      {differenceHeading} ({confidenceLabel}){' '}
-                      {record.shared_boundary ? 'shares a transition' : envelope(record.years, confidence)}
+                      {record.shared_boundary ? (
+                        SHARED_BOUNDARY_TEXT
+                      ) : (
+                        <>
+                          {differenceHeading} ({confidenceLabel}){' '}
+                          {envelope(record.years, confidence)}
+                        </>
+                      )}
                     </Typography>
                     {showMean && (
                       <Typography
@@ -505,9 +534,18 @@ export default function DurationsPanel({
                         Mean {years(record.years.mean)}
                       </Typography>
                     )}
-                    <Box sx={{ mt: 1 }}>
-                      <OverlapMeter record={record} />
-                    </Box>
+                    {record.shared_boundary ? (
+                      <Typography variant="body2" color="textSecondary" sx={{ mt: 0.5 }}>
+                        {SHARED_BOUNDARY_HELP}
+                      </Typography>
+                    ) : (
+                      <Box sx={{ mt: 1 }}>
+                        <Typography variant="caption" color="textSecondary">
+                          Overlap
+                        </Typography>
+                        <OverlapMeter record={record} />
+                      </Box>
+                    )}
                   </Box>
                 ))}
               </Stack>
@@ -547,17 +585,32 @@ export default function DurationsPanel({
                       )}
                       <TableCell align="right" sx={NUMERIC_CELL_SX}>
                         {record.shared_boundary ? (
-                          <Tooltip title="These two phases share a Boundary, so the model gives them no gap — one phase's end is the other's start, by construction rather than by inference.">
+                          <Tooltip title={SHARED_BOUNDARY_HELP}>
                             <Typography variant="body2" color="textSecondary">
-                              shares a transition
+                              {SHARED_BOUNDARY_TEXT}
                             </Typography>
                           </Tooltip>
                         ) : (
                           envelope(record.years, confidence)
                         )}
                       </TableCell>
+                      {/* An em dash, not a severity word. The probability IS
+                          exactly zero, but `none` means "separated at 2 sigma"
+                          in every other row, so printing it here told the
+                          reader the model had pushed two phases apart when it
+                          had only been given no room to measure them. A dash
+                          says "not measured", and the cell beside it says
+                          why. */}
                       <TableCell>
-                        <OverlapMeter record={record} />
+                        {record.shared_boundary ? (
+                          <Tooltip title={SHARED_BOUNDARY_HELP}>
+                            <Typography variant="body2" color="textSecondary" aria-label="not measured">
+                              &mdash;
+                            </Typography>
+                          </Tooltip>
+                        ) : (
+                          <OverlapMeter record={record} />
+                        )}
                       </TableCell>
                     </TableRow>
                   ))}

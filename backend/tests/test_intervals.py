@@ -585,6 +585,45 @@ class TestThroughTheApi:
 
         assert client.get(f'/api/results/{analysis_id}/pdf').status_code == 200
 
+    def test_a_shared_transition_is_not_exported_as_a_measurement(self, client):
+        """
+        Two phases either side of one Boundary have a gap of exactly zero and
+        an overlap probability of exactly zero, both by construction. Printed
+        bare, those zeroes read as a measured separation -- and `none` reads as
+        "separated at 2 sigma", which is what the word means on every other
+        row. The export must say what the row is instead.
+        """
+        analysis_id = self._run(client, _sequence('iv5-root', [
+            _boundary('iv5-b0', 'Start'), _phase('iv5-p1', 'Lower'),
+            _boundary('iv5-b1', 'Mid'), _phase('iv5-p2', 'Upper'),
+            _boundary('iv5-b2', 'End')], name='Site'),
+            'Shared transition', True, ['iv5-a', 'iv5-b', 'iv5-c', 'iv5-d'],
+            phases=('iv5-p1', 'iv5-p2'))
+
+        stored = client.get(f'/api/analysis/{analysis_id}').json()['data']['intervals']
+        differences = stored['differences']
+        assert len(differences) == 1
+        assert differences[0]['shared_boundary'] is True, (
+            'the two phases share the Mid boundary'
+        )
+
+        from app.api.results import INTERVAL_HEADER
+
+        body = client.get(f'/api/results/{analysis_id}/export/csv').text
+        rows = list(csv.reader(io.StringIO(body)))
+        header = rows.index(INTERVAL_HEADER)
+        row = next(r for r in rows[header + 1:] if r and r[0] == 'Phase Difference')
+        cells = dict(zip(INTERVAL_HEADER, row))
+        assert cells['Overlap'] == intervals.SHARED_BOUNDARY_TEXT
+        assert cells['Overlap Probability'] == ''
+        for column in ('Mean (yr)', 'Median (yr)', 'Std (yr)',
+                       '68.3% Range (yr)', '95.4% Range (yr)'):
+            assert cells[column] == '', (
+                f'{column} must be blank, not a zero that reads as a measurement')
+
+        # The PDF renders the same rows through a different table.
+        assert client.get(f'/api/results/{analysis_id}/pdf').status_code == 200
+
     def test_editing_the_model_drops_them(self, client):
         """
         Every record names a phase of the structure being replaced, so keeping

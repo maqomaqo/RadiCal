@@ -7,6 +7,7 @@ from app.services.model_tree import rows_to_tree, flatten_structure
 from app.services.calibration import SIGMA_1, SIGMA_2, get_curve
 from app.services import date_format as date_format_service
 from app.services import pdf_report
+from app.services import intervals as intervals_service
 from typing import Dict, List, Optional
 import io
 import csv
@@ -96,9 +97,18 @@ def _interval_rows(intervals: Optional[Dict]) -> List[List]:
     for record in (intervals.get('differences') or []):
         years = record.get('years') or {}
         overlap = record.get('overlap')
+        label = INTERVAL_LABELS.get(record.get('kind'), record.get('kind'))
+        names = [record.get('from_name') or '', record.get('to_name') or '']
+        if record.get('shared_boundary'):
+            # Zero years and zero overlap, both by construction. The screen
+            # says so in place of the figures; the export used to print the
+            # zeroes bare, which reads as a measured separation and is the one
+            # row in the table a reader cannot tell apart from a finding.
+            rows.append([label] + names + ['', '', '', '', '',
+                                           '', intervals_service.SHARED_BOUNDARY_TEXT, ''])
+            continue
         rows.append([
-            INTERVAL_LABELS.get(record.get('kind'), record.get('kind')),
-            record.get('from_name') or '', record.get('to_name') or '',
+            label, *names,
             _years(years.get('mean')), _years(years.get('median')),
             _years(years.get('std')),
             _years_ranges(years.get('hpd_68_ranges')),

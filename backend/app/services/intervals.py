@@ -154,6 +154,16 @@ SEVERITY_BANDS: Tuple[Tuple[float, str], ...] = (
 SEVERITY_TOP = 'extensive'
 SEVERITY_WORDS = tuple(word for _, word in SEVERITY_BANDS) + (SEVERITY_TOP,)
 
+# What a shared-boundary pair says instead of a figure and a severity word.
+# Such a pair has a gap of exactly zero and an overlap probability of exactly
+# zero, and BOTH are constructions rather than findings: one phase's end IS the
+# next one's start, so there is nothing for the model to infer and nothing to
+# measure. Printed as this phrase everywhere -- screen, CSV and PDF -- because
+# a reader who meets `0` and `none` in an export has no way to tell a structure
+# from a result, and `none` elsewhere in this app means "separated at 2 sigma",
+# which is the opposite of what a shared transition says.
+SHARED_BOUNDARY_TEXT = 'shares a transition'
+
 
 def _reporting_step() -> float:
     """
