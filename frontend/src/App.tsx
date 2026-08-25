@@ -10,6 +10,7 @@ import Projects from '@/pages/Projects'
 import Curves from '@/pages/Curves'
 import CurveBrowser from '@/pages/CurveBrowser'
 import ProjectDetail from '@/pages/ProjectDetail'
+import Reference from '@/pages/Reference'
 
 // `background.muted` is ours, not MUI's -- declared so `sx={{ backgroundColor:
 // 'background.muted' }}` resolves and typechecks like any built-in token.
@@ -68,9 +69,40 @@ const theme = createTheme({
       // on paper rather than as a hole in it.
       muted: '#f4ede7',
     },
+    // MUI's defaults here are pure black at opacity (rgba(0,0,0,0.87) /
+    // 0.6), the same cool-neutral-on-a-warm-canvas mismatch the shadows and
+    // background.muted above were written to fix -- and text is far more of
+    // the page than either.
+    //
+    // This is a warmth change, not a contrast fix: the defaults already pass
+    // AA on this canvas (15.15:1 and 5.62:1). The replacements are the same
+    // warm ink as the shadows, at alphas chosen not to give any of that
+    // margin back -- 0.92 measures 11.34:1 on the canvas and 0.74 measures
+    // 6.30:1, so secondary text ends up slightly better than the default it
+    // replaces rather than trading legibility for tone. `disabled` is below
+    // AA by design, as MUI's own default is; disabled text is exempt, and
+    // making it pass would stop it reading as disabled.
+    text: {
+      primary: 'rgba(43, 35, 32, 0.92)',
+      secondary: 'rgba(43, 35, 32, 0.74)',
+      disabled: 'rgba(43, 35, 32, 0.40)',
+    },
   },
   shape: {
     borderRadius: 8,
+  },
+  components: {
+    MuiButton: {
+      styleOverrides: {
+        // Material's stock uppercasing is the loudest un-customized default
+        // left in the app: every button on every page shouts, including the
+        // three nav links and the primary action. The label is written in
+        // the product's own words -- "New Analysis", not "NEW ANALYSIS" --
+        // and uppercase also throws away the ascender/descender shapes that
+        // make a label quick to recognize.
+        root: { textTransform: 'none' },
+      },
+    },
   },
   shadows: warmShadows,
   typography: {
@@ -100,6 +132,7 @@ function App() {
             <Route path="/results/:analysisId" element={<Results />} />
             <Route path="/projects" element={<Projects />} />
             <Route path="/curves" element={<Curves />} />
+            <Route path="/reference" element={<Reference />} />
             <Route path="/curves/:curveId/browse" element={<CurveBrowser />} />
             <Route path="/projects/:projectId" element={<ProjectDetail />} />
           </Routes>

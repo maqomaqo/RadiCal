@@ -66,6 +66,11 @@ export function formatCalendarAge(calBP: number, format: DateFormat): string {
  * chosen reporting format, always presented in chronological order
  * (older date first) regardless of the numeric order of the inputs.
  *
+ * `compact` names the era once instead of twice ("AD 1189–1408" rather
+ * than "AD 1189 – AD 1408"), for places that repeat a range down a list
+ * and would otherwise spend half their width restating the era. It applies
+ * only when both ends share one; see compactEraRange.
+ *
  * Note: a larger cal BP value is further in the past (an earlier calendar
  * year), so "older first" means descending cal BP / ascending calendar
  * year.
@@ -73,7 +78,8 @@ export function formatCalendarAge(calBP: number, format: DateFormat): string {
 export function formatCalendarRange(
   calBPA: number,
   calBPB: number,
-  format: DateFormat
+  format: DateFormat,
+  options: { compact?: boolean } = {}
 ): string {
   if (!Number.isFinite(calBPA) || !Number.isFinite(calBPB)) return 'N/A'
 
@@ -81,10 +87,45 @@ export function formatCalendarRange(
   const younger = Math.min(calBPA, calBPB)
 
   if (format === 'calBP') {
+    // Already compact: cal BP names its unit once, at the end.
     return `${Math.round(older)}–${Math.round(younger)} cal BP`
   }
 
+  if (options.compact) {
+    const compact = compactEraRange(older, younger, format)
+    if (compact) return compact
+  }
+
   return `${formatCalendarAge(older, format)} – ${formatCalendarAge(younger, format)}`
+}
+
+/**
+ * "AD 1189–1408" / "1250–850 BC" -- the era named once, where convention
+ * puts it: before the number for AD/CE, after it for BC/BCE.
+ *
+ * Only defined when both ends share an era. A range that straddles the era
+ * boundary has no single label to hoist ("AD 50–150" would be a different
+ * range from "50 BC – AD 150"), so this returns null and the caller falls
+ * back to spelling both ends out. Compactness is never worth a date that
+ * reads as the wrong century.
+ */
+function compactEraRange(
+  olderCalBP: number,
+  youngerCalBP: number,
+  format: DateFormat
+): string | null {
+  const older = calBPToYear(olderCalBP)
+  const younger = calBPToYear(youngerCalBP)
+  if (older.isCurrentEra !== younger.isCurrentEra) return null
+
+  if (older.isCurrentEra) {
+    const prefix = format === 'bcad' ? 'AD' : ''
+    const years = `${older.year}–${younger.year}`
+    return prefix ? `${prefix} ${years}` : `${years} CE`
+  }
+
+  const suffix = format === 'bcad' ? 'BC' : 'BCE'
+  return `${older.year}–${younger.year} ${suffix}`
 }
 
 export interface HPDRange {
@@ -227,4 +268,52 @@ export function calendarAxisTicks(
     ticktext.push(formatCalendarAge(calBP, format))
   }
   return tickvals.length >= 2 ? { tickvals, ticktext } : null
+}
+
+/**
+ * Ticks for a calendar ruler drawn by the app itself, rather than by Plotly.
+ *
+ * calendarAxisTicks above returns null for cal BP, because Plotly picks
+ * better cal BP ticks than anything imposed on it. A ruler the app draws has
+ * no such fallback -- it needs positions and labels in every format -- so
+ * this always returns both.
+ *
+ * Positions are cal BP because that is the space the marks are drawn in.
+ * Only the labels change with the format, so switching the reporting format
+ * relabels a ruler without moving anything under it.
+ */
+export function calendarRulerTicks(
+  minCalBP: number,
+  maxCalBP: number,
+  format: DateFormat,
+  target = 6
+): { calBP: number; label: string }[] {
+  if (!Number.isFinite(minCalBP) || !Number.isFinite(maxCalBP) || maxCalBP <= minCalBP) {
+    return []
+  }
+
+  if (format === 'calBP') {
+    const step = niceStep(maxCalBP - minCalBP, target)
+    const ticks: { calBP: number; label: string }[] = []
+    for (let value = Math.ceil(minCalBP / step) * step; value <= maxCalBP; value += step) {
+      ticks.push({ calBP: value, label: `${Math.round(value)}` })
+    }
+    return ticks
+  }
+
+  // Round years in the display convention, not round cal BP values: a
+  // reader looking for a century wants "1300", not the "1297" that rounding
+  // in cal BP and converting would land on.
+  const from = displayYearFromCalBP(maxCalBP)
+  const to = displayYearFromCalBP(minCalBP)
+  const step = niceStep(to - from, target)
+
+  const ticks: { calBP: number; label: string }[] = []
+  for (let year = Math.ceil(from / step) * step; year <= to; year += step) {
+    if (year === 0) continue // no year zero
+    const calBP = calBPFromDisplayYear(year)
+    if (calBP < minCalBP || calBP > maxCalBP) continue
+    ticks.push({ calBP, label: `${Math.abs(year)}` })
+  }
+  return ticks
 }

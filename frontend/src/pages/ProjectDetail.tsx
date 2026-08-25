@@ -365,7 +365,7 @@ export default function ProjectDetail() {
       <Paper sx={{ p: 3, mb: 3 }}>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 4, flexWrap: 'wrap', gap: 2 }}>
         <Box>
-          <Typography variant="h3" component="h1" gutterBottom>
+          <Typography variant="h1" component="h1" gutterBottom>
             {project.name}
           </Typography>
           {project.description && (

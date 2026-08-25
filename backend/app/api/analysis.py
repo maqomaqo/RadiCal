@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import JSONResponse
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 from app.database import get_db
 from app.schemas.sample import CalibrateRequest, BayesianRequest, GroupCalibrationRequest
 from app.services.calibration import (
@@ -1371,6 +1371,65 @@ def get_analysis(analysis_id: str, db: Session = Depends(get_db)):
         }
     }
 
+def _hpd_segments(ranges) -> List[List[float]]:
+    """
+    A stored HPD region as bare [min, max] pairs, oldest range first.
+
+    Kept as disjoint segments rather than collapsed to one min/max: a
+    calibrated HPD is genuinely multi-modal wherever the curve plateaus, and
+    a single span would silently claim the probability sitting in the gap
+    between two peaks (the same reason utils/dateFormat.formatHPDRanges
+    reports every range separately).
+    """
+    if not ranges:
+        return []
+    out = [
+        [float(r["min"]), float(r["max"])]
+        for r in ranges
+        if r.get("min") is not None and r.get("max") is not None
+    ]
+    out.sort(key=lambda seg: -seg[1])
+    return out
+
+
+def _analysis_intervals(results) -> List[Dict]:
+    """
+    Per-sample HPD geometry for a list row, small enough to ship for several
+    analyses at once: two sets of segments and the point estimate, and none
+    of the posterior arrays the detail endpoint carries. No sample name --
+    at list size the bars carry no labels, and the detail page is where a
+    reader asks which sample is which.
+
+    Results with no stored ranges are omitted rather than sent as nulls --
+    a sample the solver never produced an interval for has nothing to draw,
+    and an empty list is what "nothing to draw" already means downstream.
+    """
+    out = []
+    for r in results:
+        h95 = _hpd_segments(r.hpd_95_ranges)
+        if not h95:
+            continue
+        out.append({
+            "h68": _hpd_segments(r.hpd_68_ranges),
+            "h95": h95,
+            "median": r.posterior_median,
+        })
+    return out
+
+
+def _analysis_span(results) -> Optional[List[float]]:
+    """
+    [min, max] cal BP across every sample's 95% HPD, or None when nothing in
+    the analysis has been solved yet.
+
+    This is the envelope of the intervals above, not an interval itself:
+    it says where the analysis sits on a calendar axis, which is what lets
+    several analyses share one axis without each one measuring its own.
+    """
+    edges = [v for r in results for seg in _hpd_segments(r.hpd_95_ranges) for v in seg]
+    return [min(edges), max(edges)] if edges else None
+
+
 @router.get("/analysis")
 def list_analyses(
     page: int = 1,
@@ -1394,7 +1453,12 @@ def list_analyses(
         query = query.filter(Analysis.project_id == project_id)
 
     total = query.count()
-    analyses = query.order_by(Analysis.created_at.desc()).offset(
+    # Eager-load the results: the serializer below reads every result's HPD
+    # ranges to build each analysis's calendar span, and lazy-loading those
+    # is one SELECT per analysis on a list endpoint.
+    analyses = query.order_by(Analysis.created_at.desc()).options(
+        selectinload(Analysis.results)
+    ).offset(
         (page - 1) * per_page
     ).limit(per_page).all()
 
@@ -1411,6 +1475,13 @@ def list_analyses(
                     "measurements_count": len(a.measurements),
                     "project_id": a.project_id,
                     "project_name": a.project.name if a.project else None,
+                    # The calendar answer, so a list of analyses can show what
+                    # each one FOUND rather than only that it finished. Both
+                    # fields are derived from the same result rows by
+                    # _analysis_intervals below, so the span can never
+                    # disagree with the intervals drawn inside it.
+                    "calendar_span": _analysis_span(a.results),
+                    "intervals": _analysis_intervals(a.results),
                 }
                 for a in analyses
             ],

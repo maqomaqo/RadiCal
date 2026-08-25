@@ -7,11 +7,12 @@ const NAV_LINKS = [
   { to: '/', label: 'Dashboard' },
   { to: '/projects', label: 'Projects' },
   { to: '/curves', label: 'Curves' },
+  { to: '/reference', label: 'Reference' },
 ]
 
 export default function Navigation() {
-  // Three buttons at full width (Dashboard, Projects, New Analysis) don't
-  // fit beside the wordmark below `sm` -- the row used to overflow the
+  // The links at full width don't fit beside the wordmark below `sm` --
+  // the row used to overflow the
   // viewport rather than wrap, since a sticky AppBar wrapping to a second
   // line jumps the whole page's content down by a row on every load. Below
   // `sm` the links move into this menu instead; New Analysis stays visible

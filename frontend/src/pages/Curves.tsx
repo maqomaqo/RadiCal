@@ -187,7 +187,7 @@ export default function Curves() {
       <Paper sx={{ p: 3, mb: 3 }}>
         <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 2, flexWrap: 'wrap' }}>
           <Box sx={{ flexGrow: 1, minWidth: 260 }}>
-            <Typography variant="h4" gutterBottom>
+            <Typography variant="h1" gutterBottom>
               Calibration Curves
             </Typography>
             <Typography variant="body2" color="textSecondary">
