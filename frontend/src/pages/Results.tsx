@@ -2371,7 +2371,7 @@ export default function Results() {
                   isBayesian ? 'date and modelled transition' : 'date'
                 } in one plot. Oldest first, in the same order as the table above. Each row is scaled to its own peak, so heights compare precision, not probability.`
               : plotView === 'curve'
-              ? 'Each date drawn against the calibration curve it was run against: its measurement up the left, its calibrated distribution sitting on the curve at that radiocarbon age. Where the curve flattens or doubles back, the distribution beneath it spreads or splits — which is why.'
+              ? 'Each date plotted on the curve it was calibrated against. Lab measurement on the left axis, and the calibrated distribution sitting where it intersects the curve.'
               : `One plot per ${
                   isBayesian ? 'date and modelled transition' : 'date'
                 }, oldest first, in the same order as the table above.`}

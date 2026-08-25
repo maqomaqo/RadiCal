@@ -8,7 +8,6 @@ import {
   Container,
   IconButton,
   Paper,
-  Link,
   Tooltip,
   Typography,
 } from '@mui/material'
@@ -510,10 +509,15 @@ const WAYS_IN = [
     primary: true,
   },
   {
-    to: '/new-analysis',
-    title: 'Import dates',
-    action: 'Import CSV or .oxcal',
-    body: 'Bring in a CSV of measurements, or an existing OxCal file with its model intact.',
+    // Was 'Import dates', pointing at /new-analysis -- the same destination as
+    // the door above it. Two of three ways in led to one page, which made the
+    // set look wider than it was. A project is a genuinely different starting
+    // point, and ?new=1 opens the create dialog so the label is not a promise
+    // the landing page then asks the reader to repeat.
+    to: '/projects?new=1',
+    title: 'Start a project',
+    action: 'New project',
+    body: 'Group analyses by site, region, or research question. Upload dates for reuse across different models.',
   },
   {
     to: '/curves',

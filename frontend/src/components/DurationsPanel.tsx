@@ -332,7 +332,7 @@ export default function DurationsPanel({
 
             {comparingDates && (
   
-              <Typography variant="body1" sx={{ mb: 0.5 }}>
+              <Typography variant="body2" sx={{ mb: 0.5 }}>
                 {/* Only promise the grid when the grid renders. `showMatrix`
                     needs >=5 dates AND a complete pair set, and past MAX_PAIRS
                     (300, i.e. 26 dates) the backend returns consecutive pairs

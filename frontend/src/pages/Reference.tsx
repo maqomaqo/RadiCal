@@ -41,7 +41,7 @@ const SECTIONS: Section[] = [
         id: 'bp',
         body: (
           <>
-            What the laboratory reports: an age in radiocarbon years, calculated as though
+            The laboratory reports an age in radiocarbon years (BP, for before present), calculated as though
             atmospheric radiocarbon had always been at its 1950 level. It never was, so a
             radiocarbon age is not a calendar age and the two drift apart by centuries in places.
             &ldquo;Present&rdquo; is fixed at 1950 by international convention, whenever the
@@ -145,9 +145,8 @@ const SECTIONS: Section[] = [
           <>
             The narrowest set of calendar ranges holding a given share of the probability — usually
             68% or 95%. It is reported as one or more <em>disjoint</em> ranges, each with its own
-            share, because a calibrated distribution is often multi-modal. Collapsing those into a
-            single span would claim the probability sitting in the gap between two peaks, which is
-            why RadiCal never does.
+            share, because a calibrated distribution is often multi-modal. Although collapsing those into a
+            single span seems convenient it is not accurate, since gaps between ranges are periods when the event did NOT occur.
           </>
         ),
       },
@@ -156,7 +155,7 @@ const SECTIONS: Section[] = [
         id: 'point-estimates',
         body: (
           <>
-            Single-number summaries of a calibrated distribution. Convenient, and lossy: for a
+            Single-number summaries of a calibrated distribution. Convenient, but rough: for a
             split or lopsided result the mean can land in a gap where the date almost certainly is
             not. Cite the HPD ranges; use the point estimate to sort and to place a date on an axis.
           </>
@@ -168,7 +167,7 @@ const SECTIONS: Section[] = [
     title: 'Bayesian modelling',
     id: 'modelling',
     intro:
-      'Stratigraphy carries information the measurements do not. Modelling puts the two together, so what you dug constrains what the dates are allowed to say.',
+      'If we know the order of events (as in a stratigraphic sequence) or other facts that affect when an event occurred, we have information radiocarbon measurements alone do not carry. Modelling puts these together, constraining what the dates are allowed to say.',
     entries: [
       {
         term: 'Sequence',
@@ -185,7 +184,7 @@ const SECTIONS: Section[] = [
         id: 'phase',
         body: (
           <>
-            A group whose contents are contemporary but <em>unordered</em>. A Phase and a Sequence
+            A group whose contents are probably contemporary or <em>unordered</em>. A Phase and a Sequence
             are not interchangeable: putting dates in a Phase asserts only that they belong
             together, and the model will not order them for you.
           </>
@@ -226,7 +225,7 @@ const SECTIONS: Section[] = [
     title: 'Diagnostics',
     id: 'diagnostics',
     intro:
-      'A model moves every date. These are how you find out whether it had to move one further than the evidence justifies.',
+      'A Bayesian model moves every date. These are how you find out whether it had to move one further than the evidence justifies.',
     entries: [
       {
         term: 'Agreement index',
@@ -259,15 +258,17 @@ const SECTIONS: Section[] = [
 
 export default function Reference() {
   return (
-    <Container component="main" maxWidth="lg" sx={{ py: 4 }}>
+    <Container maxWidth="lg" sx={{ py: 4 }}>
+     <Paper sx={{ p: 3, mb: 3 }}>
+         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2, flexWrap: 'wrap', gap: 2 }}>
+          <Box sx={{ flexGrow: 1, minWidth: 260 }}>
       <Typography variant="h1" component="h1">
         Reference
       </Typography>
       <Typography color="text.secondary" sx={{ mt: 1.5, maxWidth: '68ch' }}>
-        The vocabulary RadiCal uses, in the same words the literature uses. Nothing here is
-        simplified — if a term reads as jargon, that is because it is load-bearing, and knowing it
-        is what lets you read the output and everyone else&rsquo;s papers.
-      </Typography>
+        The vocabulary RadiCal uses is standard in the literature. Knowing it
+        will enable you to read the output and everyone else&rsquo;s papers.
+      </Typography> </Box> </Box> </Paper>
 
       {/* A contents list, because a glossary is a page people arrive at
           looking for one word, not a page they read top to bottom. */}

@@ -16,7 +16,7 @@ import {
   IconButton,
   Tooltip,
 } from '@mui/material'
-import { Link as RouterLink } from 'react-router-dom'
+import { Link as RouterLink, useSearchParams } from 'react-router-dom'
 import AddIcon from '@mui/icons-material/Add'
 import FolderIcon from '@mui/icons-material/Folder'
 import InboxIcon from '@mui/icons-material/Inbox'
@@ -39,7 +39,12 @@ export default function Projects() {
   const [projects, setProjects] = useState<ProjectSummary[]>([])
   const [unassignedCount, setUnassignedCount] = useState(0)
   const [loading, setLoading] = useState(true)
-  const [dialogOpen, setDialogOpen] = useState(false)
+  // ?new=1 opens the create dialog on arrival, so a link that says "New
+  // project" lands on one instead of on a list with the real control still a
+  // click away. Read once as the initial value rather than watched: this is
+  // where the dialog starts, not a lock on whether it stays open.
+  const [searchParams] = useSearchParams()
+  const [dialogOpen, setDialogOpen] = useState(searchParams.get('new') === '1')
   const [newName, setNewName] = useState('')
   const [newDescription, setNewDescription] = useState('')
   const [creating, setCreating] = useState(false)
@@ -113,13 +118,14 @@ export default function Projects() {
   return (
     <Container maxWidth="lg" sx={{ py: 4 }}>
      <Paper sx={{ p: 3, mb: 3 }}>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 4, flexWrap: 'wrap', gap: 2 }}>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2, flexWrap: 'wrap', gap: 2 }}>
         <Box>
           <Typography variant="h1" component="h1" gutterBottom>
             Projects
           </Typography>
           <Typography variant="body1" color="textSecondary">
-            Group analyses by site, region, or research question.
+            Group analyses by site, region, or research question. <br />
+            Dates collected in a project can be reused across every analysis in it.
           </Typography>
         </Box>
         <Button variant="contained" startIcon={<AddIcon />} onClick={() => setDialogOpen(true)}>
