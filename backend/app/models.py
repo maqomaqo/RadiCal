@@ -170,7 +170,16 @@ class Analysis(Base):
 
     # Relations
     project = relationship('Project', back_populates='analyses')
-    measurements = relationship('RadiocarbonSample', back_populates='analysis', cascade='all, delete-orphan')
+    # Ordered by the user's arrangement (RadiocarbonSample.sort_order), with
+    # created_at and id behind it so the order is total: rows written before
+    # sort_order existed all carry 0, and ties between them still have to come
+    # back the same way on every read.
+    measurements = relationship(
+        'RadiocarbonSample',
+        back_populates='analysis',
+        cascade='all, delete-orphan',
+        order_by='(RadiocarbonSample.sort_order, RadiocarbonSample.created_at, RadiocarbonSample.id)',
+    )
     results = relationship('AnalysisResult', back_populates='analysis', cascade='all, delete-orphan')
 
 class RadiocarbonSample(Base):
@@ -217,6 +226,18 @@ class RadiocarbonSample(Base):
     # analysis's elements are rewritten wholesale when its tree is replaced,
     # and a constraint would force a delete/insert ordering for no benefit.
     element_id = Column(String, nullable=True)
+
+    # Where this date sits in the analysis's reading order, as the user
+    # arranged it at data entry.
+    #
+    # Stored rather than left to insertion order, because insertion order is
+    # not a thing a relational database promises: a SELECT with no ORDER BY
+    # may come back in any order at all, and on Postgres that order really
+    # does change after rows are updated. The order is not cosmetic -- it is
+    # the order dates appear in within each phase of the results table, in the
+    # stacked plot, and in both exports (see model_tree.flatten_structure) --
+    # so it needs somewhere to live.
+    sort_order = Column(Integer, nullable=False, default=0, server_default='0')
 
     # Age limiters in cal BP. tpq_age_bp ("terminus post quem") is a MAXIMUM
     # age -- the sample cannot be older than it -- and taq_age_bp ("terminus

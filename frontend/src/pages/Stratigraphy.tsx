@@ -33,6 +33,7 @@ import ModelTreeEditor, { validateTree } from '@/components/ModelTreeEditor'
 import { bootstrapModelTree } from '@/utils/modelTreeDefaults'
 import { formatApiError } from '@/utils/apiError'
 import { summariseTree } from '@/utils/harrisLayout'
+import { sortMeasurements, type MeasurementSortKey } from '@/utils/sortMeasurements'
 
 const STRUCTURE_BLURB =
   'Define constraints for events here. Use a Sequence to put groups in order, a Phase for dates with no order between ' +
@@ -45,6 +46,7 @@ export default function Stratigraphy() {
   const navigate = useNavigate()
   const {
     measurements,
+    setMeasurements,
     modelTree: draftTree,
     elementAssignments: draftAssignments,
     setModelTree: setDraftTree,
@@ -154,6 +156,27 @@ export default function Stratigraphy() {
       .finally(() => setLoadingStructure(false))
   }, [tab, editRouteId, modelTree, setDraftTree])
 
+  /**
+   * Reorder the dates from the model editor.
+   *
+   * Writes to the DRAFT store, because that is the copy Run Analysis submits
+   * -- a new order is an input change like any other, and reaches the backend
+   * the same way. On the edit route the local savedMeasurements list is sorted
+   * by the same key alongside it, so what this page shows and what will be
+   * saved do not drift apart while the tab is open.
+   *
+   * Offered only when the draft holds the dates: arriving on a direct link to
+   * this page under /analysis/:id/edit leaves the store empty, and sorting
+   * then would rearrange the list on screen while changing nothing that gets
+   * saved. The measurement list on the Edit Analysis page has the control in
+   * that case.
+   */
+  const canSortDates = measurements.length > 1
+  const sortDates = (key: MeasurementSortKey) => {
+    setMeasurements(sortMeasurements(measurements, key))
+    if (editRouteId) setSavedMeasurements(sortMeasurements(savedMeasurements, key))
+  }
+
   const activeTree = editRouteId ? modelTree : draftTree
   const activeAssignments = editRouteId ? assignments : draftAssignments
   const activeMeasurements = editRouteId ? savedMeasurements : measurements
@@ -246,6 +269,7 @@ export default function Stratigraphy() {
               measurements={measurements}
               assignments={draftAssignments}
               onChange={(nextTree, nextAssignments) => setDraftTree(nextTree, nextAssignments)}
+              onSortDates={canSortDates ? sortDates : undefined}
             />
           ) : (
             <Alert severity="info">Add some dates on the New Analysis page first.</Alert>
@@ -277,6 +301,7 @@ export default function Stratigraphy() {
                 tree={modelTree}
                 measurements={savedMeasurements}
                 assignments={assignments}
+                onSortDates={canSortDates ? sortDates : undefined}
                 onChange={(nextTree, nextAssignments) => {
                   setModelTree(nextTree)
                   setAssignments(nextAssignments)

@@ -34,9 +34,15 @@ import EditIcon from '@mui/icons-material/Edit'
 import AddIcon from '@mui/icons-material/Add'
 import AccountTreeIcon from '@mui/icons-material/AccountTree'
 import UploadFileIcon from '@mui/icons-material/UploadFile'
+import LibraryAddIcon from '@mui/icons-material/LibraryAdd'
+import SortDatesButton from '@/components/SortDatesButton'
+import { sortMeasurements } from '@/utils/sortMeasurements'
 import PosteriorPlot from '@/components/PosteriorPlot'
 import { storedHpdBands } from '@/utils/hpd'
-import ImportDatesDialog, { type ImportPreview } from '@/components/ImportDatesDialog'
+import ImportDatesDialog, {
+  type ImportOptions,
+  type ImportPreview,
+} from '@/components/ImportDatesDialog'
 import MeasurementFields, {
   deltaRErrorMissing,
   isMarineMeasurement,
@@ -203,6 +209,10 @@ export default function NewAnalysis() {
       deltaRErrorMissing(editing.draft))
 
   const [importOpen, setImportOpen] = useState(false)
+  // A write to the project rather than to this draft, so it gets its own busy
+  // flag -- the import and the Run button must not look like they are waiting
+  // on it.
+  const [storingDates, setStoringDates] = useState(false)
 
   const [projects, setProjects] = useState<ProjectOption[]>([])
   // Single calibration only: a way to try a measurement without it showing up
@@ -237,19 +247,30 @@ export default function NewAnalysis() {
   }, [])
 
   // The assigned project's date collection, from the dropdown or ?project=<id>.
-  // Cleared when unassigned rather than left stale.
+  // Cleared when unassigned rather than left stale. Named rather than inlined
+  // in the effect because storing dates has to re-read it -- what is already
+  // in the collection is what storeInCollection dedupes against.
+  const fetchProjectSamples = async (id: string): Promise<ProjectSample[] | null> => {
+    try {
+      const response = await fetch(`/api/projects/${id}/samples`)
+      const data = await response.json()
+      if (!data.success) return null
+      return data.data.items as ProjectSample[]
+    } catch (err) {
+      console.error('Failed to load project dates:', err)
+      return null
+    }
+  }
+
   useEffect(() => {
     if (!projectId) {
       setProjectSamples([])
       return
     }
     let cancelled = false
-    fetch(`/api/projects/${projectId}/samples`)
-      .then((r) => r.json())
-      .then((data) => {
-        if (!cancelled && data.success) setProjectSamples(data.data.items)
-      })
-      .catch((err) => console.error('Failed to load project dates:', err))
+    fetchProjectSamples(projectId).then((items) => {
+      if (!cancelled && items) setProjectSamples(items)
+    })
     return () => {
       cancelled = true
     }
@@ -494,6 +515,92 @@ export default function NewAnalysis() {
   }
 
   /**
+   * Copy dates from this draft into the assigned project's date collection.
+   *
+   * The draft and the collection are separate stores on purpose -- an analysis
+   * keeps its own snapshot of what it ran on (see ProjectSample's docstring on
+   * the backend) -- which is why loading a file into a New Analysis leaves the
+   * project's collection untouched unless this is asked for.
+   *
+   * Skips names the collection already holds rather than adding a second row
+   * for them: the endpoint does not deduplicate, and importing the same file
+   * twice, or storing dates that were picked FROM the collection, would
+   * otherwise quietly double them up. Returns what it did so the caller can
+   * say so.
+   */
+  const storeDatesInCollection = async (
+    dates: Measurement[]
+  ): Promise<{ added: number; skipped: number } | null> => {
+    if (!projectId) return null
+    const existing = (await fetchProjectSamples(projectId)) ?? projectSamples
+    const taken = new Set(existing.map((s) => s.sample_name.trim().toLowerCase()))
+    const fresh = dates.filter((d) => !taken.has(d.sample_name.trim().toLowerCase()))
+    const skipped = dates.length - fresh.length
+    if (fresh.length === 0) return { added: 0, skipped }
+
+    try {
+      const response = await fetch(`/api/projects/${projectId}/samples`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          // The collection holds the sample, not the modelling decisions made
+          // about it: outlier priors and phase assignments belong to an
+          // analysis, while the context name is the collection's own field.
+          samples: fresh.map((d) => ({
+            sample_name: d.sample_name,
+            age_bp: d.age_bp,
+            error_1sigma: d.error_1sigma,
+            material_type: d.material_type || 'unknown',
+            curve_id: d.curve_id,
+            sample_type: d.sample_type,
+            delta_r: d.delta_r ?? null,
+            delta_r_error: d.delta_r_error ?? null,
+            default_context_name: d.default_context_name ?? null,
+            tpq_age_bp: d.tpq_age_bp ?? null,
+            taq_age_bp: d.taq_age_bp ?? null,
+            depth_cm: d.depth_cm ?? null,
+            location: d.location ?? null,
+            notes: d.notes ?? null,
+          })),
+        }),
+      })
+      const data = await response.json()
+      if (!data.success) {
+        notify('Dates were not added to the collection: ' + formatApiError(data))
+        return null
+      }
+      const refreshed = await fetchProjectSamples(projectId)
+      if (refreshed) setProjectSamples(refreshed)
+      return { added: data.data.items.length, skipped }
+    } catch (err) {
+      notify('Error adding dates to the collection: ' + (err as Error).message)
+      return null
+    }
+  }
+
+  /** How storeDatesInCollection's outcome reads in a notification. */
+  const describeStored = (result: { added: number; skipped: number } | null): string => {
+    if (!result) return ''
+    const projectName = projects.find((p) => p.id === projectId)?.name ?? 'the project'
+    if (result.added === 0) {
+      return ` All ${result.skipped === 1 ? 'of it was' : 'of them were'} already in ${projectName}'s collection.`
+    }
+    const skipped = result.skipped
+      ? ` ${result.skipped} ${result.skipped === 1 ? 'was' : 'were'} already there.`
+      : ''
+    return ` Stored ${result.added} in ${projectName}'s date collection.${skipped}`
+  }
+
+  // What storing would actually add, by the same name match storeDatesInCollection
+  // uses -- so the button can say how many rather than offering a no-op.
+  const collectionNames = new Set(
+    projectSamples.map((s) => s.sample_name.trim().toLowerCase())
+  )
+  const unstoredMeasurements = measurements.filter(
+    (m) => !collectionNames.has(m.sample_name.trim().toLowerCase())
+  )
+
+  /**
    * Load an uploaded file's dates, and its model structure when it carried
    * one, into this draft.
    *
@@ -502,44 +609,58 @@ export default function NewAnalysis() {
    * already on the form in no phase and the model refusing to run. Replacing
    * is also what the confirm button says it does.
    */
-  const handleImport = (preview: ImportPreview) => {
-    setMeasurements(
-      preview.dates.map((d) => ({
-        id: d.id,
-        sample_name: d.sample_name,
-        age_bp: d.age_bp,
-        error_1sigma: d.error_1sigma,
-        material_type: d.material_type || 'unknown',
-        // A CSV may leave this to the curve, as the backend does for a
-        // hand-entered date that omits it.
-        sample_type: d.sample_type || (d.curve_id === 'marine20' ? 'marine' : 'terrestrial'),
-        curve_id: d.curve_id,
-        delta_r: d.delta_r,
-        delta_r_error: d.delta_r_error,
-        outlier_prior: d.outlier_prior,
-        outlier_model: d.outlier_model,
-        depth_cm: d.depth_cm,
-        location: d.location,
-        notes: d.notes,
-        tpq_age_bp: d.tpq_age_bp,
-        taq_age_bp: d.taq_age_bp,
-        element_id: d.element_id ?? null,
-        // A CSV names a phase per date without carrying a tree to put it in,
-        // so it is kept as the date's context and the Model Structure page
-        // starts from that grouping. Ignored when the file DID bring a tree,
-        // where the assignments above are the real thing.
-        default_context_name: d.phase_name ?? null,
-      }))
-    )
+  const handleImport = async (preview: ImportPreview, options: ImportOptions) => {
+    const imported: Measurement[] = preview.dates.map((d) => ({
+      id: d.id,
+      sample_name: d.sample_name,
+      age_bp: d.age_bp,
+      error_1sigma: d.error_1sigma,
+      material_type: d.material_type || 'unknown',
+      // A CSV may leave this to the curve, as the backend does for a
+      // hand-entered date that omits it.
+      sample_type: d.sample_type || (d.curve_id === 'marine20' ? 'marine' : 'terrestrial'),
+      curve_id: d.curve_id,
+      delta_r: d.delta_r,
+      delta_r_error: d.delta_r_error,
+      outlier_prior: d.outlier_prior,
+      outlier_model: d.outlier_model,
+      depth_cm: d.depth_cm,
+      location: d.location,
+      notes: d.notes,
+      tpq_age_bp: d.tpq_age_bp,
+      taq_age_bp: d.taq_age_bp,
+      element_id: d.element_id ?? null,
+      // A CSV names a phase per date without carrying a tree to put it in,
+      // so it is kept as the date's context and the Model Structure page
+      // starts from that grouping. Ignored when the file DID bring a tree,
+      // where the assignments above are the real thing.
+      default_context_name: d.phase_name ?? null,
+    }))
+    setMeasurements(imported)
     setModelTree(preview.model_tree, preview.element_assignments)
     setAnalysisType(preview.suggested_analysis_type)
     if (!analysisName && preview.analysis_name) setAnalysisName(preview.analysis_name)
     setImportOpen(false)
 
+    // After the draft is populated, so a failure to reach the collection
+    // leaves the dates loaded rather than losing the import with it.
+    let stored: { added: number; skipped: number } | null = null
+    if (options.storeInCollection && projectId) {
+      setStoringDates(true)
+      stored = await storeDatesInCollection(imported)
+      setStoringDates(false)
+    }
+
     const structure = preview.model_tree
       ? ' Its model structure came with it — check it under Model Structure before running.'
       : ' The file carried no model structure, so these will be calibrated independently.'
-    notify(`Loaded ${preview.dates.length} date${preview.dates.length === 1 ? '' : 's'}.${structure}`)
+    // Explicit severity: notify() defaults to 'error', which would report a
+    // successful import in red.
+    notify(
+      `Loaded ${preview.dates.length} date${preview.dates.length === 1 ? '' : 's'}.${structure}` +
+        describeStored(stored),
+      'success'
+    )
   }
 
   const handleAddMeasurement = () => {
@@ -1182,7 +1303,11 @@ export default function NewAnalysis() {
         open={importOpen}
         onClose={() => setImportOpen(false)}
         target="analysis"
+        collectionProjectName={
+          projectId ? projects.find((p) => p.id === projectId)?.name ?? 'this project' : null
+        }
         onConfirm={handleImport}
+        confirming={storingDates}
       />
 
       <Dialog open={pickerOpen} onClose={() => setPickerOpen(false)} fullWidth maxWidth="sm">
@@ -1289,9 +1414,51 @@ export default function NewAnalysis() {
       </Dialog>
 
       <Box sx={{ mt: 3 }}>
-        <Typography variant="h5" gutterBottom>
-          Measurements ({measurements.length})
-        </Typography>
+        <Stack
+          direction={{ xs: 'column', sm: 'row' }}
+          spacing={1}
+          alignItems={{ sm: 'center' }}
+          justifyContent="space-between"
+          sx={{ mb: 1 }}
+        >
+          <Typography variant="h5">Measurements ({measurements.length})</Typography>
+          <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+            {/* Ordering the dates here orders them everywhere downstream --
+                inside each phase of the model, in the results table, and in the
+                exports -- because all of those read this one array. See
+                utils/sortMeasurements. */}
+            <SortDatesButton
+              measurements={measurements}
+              onSort={(key) => setMeasurements(sortMeasurements(measurements, key))}
+            />
+            {/* The same write the import dialog offers, reachable after the
+                fact: dates typed in here, or imported before a project was
+                picked, are otherwise stuck in this draft with no way to reach
+                the collection. */}
+            {projectId && measurements.length > 0 && (
+              <Button
+                variant="outlined"
+                size="small"
+                startIcon={<LibraryAddIcon />}
+                disabled={storingDates || unstoredMeasurements.length === 0}
+                onClick={async () => {
+                  setStoringDates(true)
+                  const stored = await storeDatesInCollection(measurements)
+                  setStoringDates(false)
+                  if (stored) notify(describeStored(stored).trim(), 'success')
+                }}
+              >
+                {storingDates
+                  ? 'Storing…'
+                  : unstoredMeasurements.length === 0
+                    ? 'All dates are in the collection'
+                    : `Store ${unstoredMeasurements.length} date${
+                        unstoredMeasurements.length === 1 ? '' : 's'
+                      } in the project collection`}
+              </Button>
+            )}
+          </Stack>
+        </Stack>
         {measurements.length === 0 ? (
           <Typography color="textSecondary">No measurements added yet</Typography>
         ) : (

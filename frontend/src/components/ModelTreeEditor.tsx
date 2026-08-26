@@ -12,6 +12,7 @@ import {
   Chip,
   Alert,
   Menu,
+  Stack,
 } from '@mui/material'
 import AddIcon from '@mui/icons-material/Add'
 import DeleteIcon from '@mui/icons-material/Delete'
@@ -38,6 +39,8 @@ import {
 } from '@dnd-kit/sortable'
 import { useElementTypeColors, type ElementTypeColor } from '@/theme/diagramColors'
 import type { ModelElement, ElementType, MatrixMeasurement } from '@/types'
+import SortDatesButton from '@/components/SortDatesButton'
+import type { MeasurementSortKey } from '@/utils/sortMeasurements'
 // Lives in utils because the starting structure built there (see
 // bootstrapModelTree) mints ids too, and both must mint the same kind.
 // Re-exported so this module stays the one place the editor is imported from.
@@ -432,6 +435,16 @@ interface Props {
   measurements: MatrixMeasurement[]
   assignments: Record<string, string>
   onChange: (tree: ModelElement, assignments: Record<string, string>) => void
+  /**
+   * Reorder the WHOLE date list. Optional because it is only offered where
+   * the new order can actually be kept -- see Stratigraphy.tsx.
+   *
+   * There is deliberately no per-phase sort. A phase's dates are a filter
+   * over `measurements` (datesIn below), not a sequence the phase stores, so
+   * one sort of the underlying list reorders every phase at once and no two
+   * phases can end up ordered by different rules.
+   */
+  onSortDates?: (key: MeasurementSortKey) => void
 }
 
 interface ElementFieldsProps {
@@ -643,7 +656,13 @@ function TreeRow({
   )
 }
 
-export default function ModelTreeEditor({ tree, measurements, assignments, onChange }: Props) {
+export default function ModelTreeEditor({
+  tree,
+  measurements,
+  assignments,
+  onChange,
+  onSortDates,
+}: Props) {
   const [addMenu, setAddMenu] = useState<{ anchor: HTMLElement; targetId: string } | null>(null)
   const [activeId, setActiveId] = useState<string | null>(null)
   // Where the block would land right now, for the indicator. Replaced only
@@ -977,9 +996,24 @@ export default function ModelTreeEditor({ tree, measurements, assignments, onCha
       </DndContext>
 
       <Paper sx={{ p: 2, mt: 3 }}>
-        <Typography variant="subtitle1" gutterBottom>
-          Assign dates to phases
-        </Typography>
+        <Stack
+          direction={{ xs: 'column', sm: 'row' }}
+          spacing={1}
+          alignItems={{ sm: 'center' }}
+          justifyContent="space-between"
+          sx={{ mb: 1 }}
+        >
+          <Typography variant="subtitle1">Assign dates to phases</Typography>
+          {onSortDates && (
+            <SortDatesButton measurements={measurements} onSort={onSortDates} />
+          )}
+        </Stack>
+        {onSortDates && measurements.length > 1 && (
+          <Typography variant="caption" color="textSecondary" sx={{ display: 'block', mb: 1.5 }}>
+            Sorting reorders every phase at once — the dates listed under each phase above are this
+            same list, filtered.
+          </Typography>
+        )}
         {measurements.length === 0 ? (
           <Typography variant="body2" color="textSecondary">
             No dates in this analysis yet.

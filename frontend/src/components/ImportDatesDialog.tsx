@@ -4,6 +4,7 @@ import {
   AlertTitle,
   Box,
   Button,
+  Checkbox,
   Chip,
   CircularProgress,
   Dialog,
@@ -11,6 +12,7 @@ import {
   DialogContent,
   DialogTitle,
   Divider,
+  FormControlLabel,
   Link,
   Paper,
   Stack,
@@ -92,8 +94,22 @@ interface Props {
    * 'analysis'    a draft analysis, which keeps the structure too.
    */
   target: 'collection' | 'analysis'
-  onConfirm: (preview: ImportPreview) => void | Promise<void>
+  /**
+   * The project the draft is assigned to, when there is one. Only meaningful
+   * for target 'analysis': a draft analysis holds its own copies of the dates,
+   * so without this offer an imported file reaches the analysis and nothing
+   * else -- the project's collection never hears about it. Null or absent
+   * hides the offer, which is the honest thing when there is no collection to
+   * put them in.
+   */
+  collectionProjectName?: string | null
+  onConfirm: (preview: ImportPreview, options: ImportOptions) => void | Promise<void>
   confirming?: boolean
+}
+
+export interface ImportOptions {
+  /** Whether the dates should also be added to the project's collection. */
+  storeInCollection: boolean
 }
 
 function formatOutlier(date: ImportedDate): string | null {
@@ -117,6 +133,7 @@ export default function ImportDatesDialog({
   open,
   onClose,
   target,
+  collectionProjectName = null,
   onConfirm,
   confirming = false,
 }: Props) {
@@ -126,6 +143,9 @@ export default function ImportDatesDialog({
   const [preview, setPreview] = useState<ImportPreview | null>(null)
   const [dragging, setDragging] = useState(false)
   const [columns, setColumns] = useState<ColumnDoc[]>([])
+  // Off by default: adding to the collection is a second, lasting write that
+  // outlives this draft, so it is asked for rather than assumed.
+  const [storeInCollection, setStoreInCollection] = useState(false)
 
   useEffect(() => {
     if (!open) return
@@ -146,6 +166,7 @@ export default function ImportDatesDialog({
       setPreview(null)
       setDragging(false)
       setUploading(false)
+      setStoreInCollection(false)
     }
   }, [open])
 
@@ -176,6 +197,10 @@ export default function ImportDatesDialog({
 
   const structureKept = target === 'analysis' && !!preview?.model_tree
   const structureDropped = target === 'collection' && !!preview?.model_tree
+  // Only worth asking once there are dates to store, and only when the draft
+  // is actually attached to a project -- the collection is the project's.
+  const offerCollection =
+    target === 'analysis' && !!collectionProjectName && !!preview?.ok && preview.dates.length > 0
 
   return (
     <Dialog open={open} onClose={onClose} fullWidth maxWidth="md">
@@ -417,12 +442,35 @@ export default function ImportDatesDialog({
           </Box>
         )}
       </DialogContent>
+      {offerCollection && (
+        <Box sx={{ px: 3, py: 1.5, borderTop: '1px solid', borderColor: 'divider' }}>
+          <FormControlLabel
+            control={
+              <Checkbox
+                size="small"
+                checked={storeInCollection}
+                onChange={(e) => setStoreInCollection(e.target.checked)}
+              />
+            }
+            label={
+              <Typography variant="body2">
+                Also store these dates in {collectionProjectName}'s date collection
+              </Typography>
+            }
+          />
+          <Typography variant="caption" color="textSecondary" sx={{ display: 'block', ml: 4 }}>
+            The analysis keeps its own copy either way. Storing them puts the dates on the
+            project as well, so later analyses can pick them without the file. Dates already
+            in the collection under the same name are left alone.
+          </Typography>
+        </Box>
+      )}
       <DialogActions>
         <Button onClick={onClose}>Cancel</Button>
         <Button
           variant="contained"
           disabled={!preview?.ok || !preview.dates.length || confirming}
-          onClick={() => preview && onConfirm(preview)}
+          onClick={() => preview && onConfirm(preview, { storeInCollection: offerCollection && storeInCollection })}
         >
           {confirming
             ? 'Importing…'

@@ -398,10 +398,14 @@ def deploy_samples_to_analysis(
         db.flush()
         groups_by_name[name] = group.id
 
-    for src in ordered:
+    for position, src in enumerate(ordered):
         name = (src.default_context_name or '').strip()
         db.add(RadiocarbonSample(
             analysis_id=analysis.id,
+            # `ordered` is the deploy order the caller chose; carrying it as
+            # sort_order means the analysis opens with the dates arranged the
+            # way they were deployed rather than in an arbitrary one.
+            sort_order=position,
             sample_name=src.sample_name,
             age_bp=src.age_bp,
             error_1sigma=src.error_1sigma,

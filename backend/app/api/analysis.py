@@ -266,6 +266,7 @@ def _sample_row(
     measurement,
     group_id: Optional[str] = None,
     element_id: Optional[str] = None,
+    sort_order: int = 0,
 ) -> RadiocarbonSample:
     """
     One measurement as a database row, shared by the two endpoints that write
@@ -278,6 +279,11 @@ def _sample_row(
     """
     return RadiocarbonSample(
         analysis_id=analysis_id,
+        # The caller's position in the submitted list. The client arranges
+        # that list deliberately (frontend utils/sortMeasurements), and it is
+        # the order the dates are read in within each phase, so it is carried
+        # rather than left to however the rows happen to come back.
+        sort_order=sort_order,
         sample_name=measurement.sample_name,
         age_bp=measurement.age_bp,
         error_1sigma=measurement.error_1sigma,
@@ -684,8 +690,8 @@ def calibrate_group(request: GroupCalibrationRequest, db: Session = Depends(get_
 
         # No group_id/element_id: a group calibration has no phases.
         saved_samples = []
-        for measurement in request.measurements:
-            sample = _sample_row(analysis.id, measurement)
+        for position, measurement in enumerate(request.measurements):
+            sample = _sample_row(analysis.id, measurement, sort_order=position)
             db.add(sample)
             db.flush()
             saved_samples.append(sample)
@@ -785,11 +791,12 @@ def bayesian_analysis(request: BayesianRequest, wait: bool = False,
 
         # Create sample records
         samples_map = {}
-        for measurement in request.measurements:
+        for position, measurement in enumerate(request.measurements):
             if save:
                 sample = _sample_row(
                     analysis.id, measurement,
                     group_id=groups_map.get(measurement.group_id) if measurement.group_id else None,
+                    sort_order=position,
                 )
                 db.add(sample)
                 db.flush()
@@ -1685,7 +1692,9 @@ def duplicate_analysis(analysis_id: str, db: Session = Depends(get_db)):
         groups_map[group.id] = new_group.id
 
     samples_map: Dict[str, str] = {}
-    for sample in source.measurements:
+    # source.measurements arrives in the original's own order (see the
+    # relationship's order_by), so enumerating it hands the copy that order.
+    for position, sample in enumerate(source.measurements):
         # A stored row carries the same attribute names a request
         # measurement does, so duplicating uses the one builder too.
         new_sample = _sample_row(
@@ -1693,6 +1702,7 @@ def duplicate_analysis(analysis_id: str, db: Session = Depends(get_db)):
             group_id=groups_map.get(sample.group_id) if sample.group_id else None,
             element_id=groups_map.get(sample.element_id or sample.group_id)
             if (sample.element_id or sample.group_id) else None,
+            sort_order=position,
         )
         db.add(new_sample)
         db.flush()
@@ -1820,7 +1830,7 @@ def replace_analysis_inputs(
             groups_map[group.id] = row.id
 
         samples_map: Dict[str, str] = {}
-        for measurement in request.measurements:
+        for position, measurement in enumerate(request.measurements):
             if request.model_tree is not None:
                 # A client-authored tree keeps its phase ids, so element_id
                 # already names the phase. Falling back to group_id would
@@ -1832,6 +1842,7 @@ def replace_analysis_inputs(
                 analysis.id, measurement,
                 group_id=groups_map.get(measurement.group_id) if measurement.group_id else None,
                 element_id=element_id,
+                sort_order=position,
             )
             db.add(row)
             db.flush()
