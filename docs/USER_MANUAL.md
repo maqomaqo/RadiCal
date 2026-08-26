@@ -347,9 +347,7 @@ the model is from being able to say which came first (100% is a coin flip). The 
 68.3% and 95.4% levels every HPD in the app is quoted at, so `none` means "separated at 2 sigma" and
 `extensive` means "overlapping at 2 sigma".
 
-The years column beside it is headed **Separation** for phases and **Difference** for dates. It used
-to read "Gap or overlap", which put the word *overlap* over a span of years and over a probability
-in the next column along.
+The years column beside it is headed **Separation** for phases and **Difference** for dates.
 
 Two phases either side of a single shared Boundary read **shares a transition** in place of both
 figures, and the Overlap column reads **—**: one phase's end *is* the next one's start, so the model
@@ -361,16 +359,14 @@ compared at all — the model brackets them identically, so it has nothing to sa
 In a plain Sequence, where every Phase shares its Boundaries with its neighbours, this table has
 little to add: adjacent pairs share a transition, and the gap between two non-adjacent Phases is
 the durations of the Phases between them, which the Durations table already reports. The table
-earns its place where the model leaves the order genuinely open — Phases separated by a Hiatus, and
+earns its place where the model leaves the order genuinely open: Phases separated by a Hiatus, and
 Phases in different branches of the model.
 
 ### What these cost
 
 Every quantity here depends on several modelled ages at once, which means it can only be read off
 *joint* draws of the posterior rather than the per-parameter distributions the rest of the page
-shows. Those draws are the only Monte Carlo in the exact solver's output, so these are the one set
-of figures in the app carrying a sampling error — the panel says how many draws they came from, and
-whether those draws were independent (the exact solver, or a Group Calibration) or an MCMC chain.
+shows. Those draws are the only Monte Carlo in the exact solver's output, so these carry a sampling error — the panel says how many draws they came from, and whether those draws were independent (the exact solver, or a Group Calibration) or an MCMC chain.
 The reported ranges are quoted at a step that widens for a very long duration, rather than claiming
 five-year precision the draws cannot support.
 
