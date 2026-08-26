@@ -55,6 +55,7 @@ import {
   loadDateFormatPreference,
   saveDateFormatPreference,
 } from '@/utils/dateFormat'
+import { concernFor, concernTitle, type Concern } from '@/utils/diagnostics'
 import { formatApiError } from '@/utils/apiError'
 import { buildInputsPayload } from '@/utils/analysisPayload'
 import { useNotify } from '@/contexts/NotificationContext'
@@ -153,6 +154,7 @@ export default function NewAnalysis() {
     modelTree,
     elementAssignments,
     editingAnalysisId,
+    lastRunConcerns,
     loadFromAnalysis,
     reset: resetDraft,
   } = useAnalysisDraftStore()
@@ -369,6 +371,15 @@ export default function NewAnalysis() {
         // group_id is the fallback because a migrated tree reuses each
         // context's id as its phase id, and those analyses carry it on
         // group_id. Every date must resolve to a phase or the run is rejected.
+        // What the run this edit is reopening said about each date. Same
+        // rule as the results table, from utils/diagnostics, so the dates
+        // chipped here are exactly the dates chipped there.
+        const loadedConcerns: Record<string, Concern> = {}
+        for (const r of a.results || []) {
+          const measurement = loadedMeasurements.find((m) => m.id === r.sample_id)
+          const concern = concernFor(r, measurement?.outlier_prior)
+          if (concern) loadedConcerns[r.sample_id] = concern
+        }
         const loadedTree: ModelElement | null = a.model_tree || null
         const loadedAssignments: Record<string, string> = Object.fromEntries(
           (a.measurements || [])
@@ -386,6 +397,7 @@ export default function NewAnalysis() {
           projectId: a.project_id || '',
           modelTree: loadedTree,
           elementAssignments: loadedAssignments,
+          lastRunConcerns: loadedConcerns,
         })
         loadedInputsRef.current = inputsSignature({
           analysisType: loadedType,
@@ -1221,6 +1233,18 @@ export default function NewAnalysis() {
       >
         <DialogTitle>Edit date</DialogTitle>
         <DialogContent dividers>
+          {/* The reason, in full, at the point of the edit: the chip on the
+              card is a marker, and a reader who has opened the date is past
+              needing a marker and into needing the numbers. */}
+          {editing && lastRunConcerns[editing.id] && (
+            <Alert
+              severity={lastRunConcerns[editing.id].level === 'suspect' ? 'error' : 'warning'}
+              sx={{ mb: 2 }}
+            >
+              {concernTitle(lastRunConcerns[editing.id])} From the last run — re-running the
+              analysis works it out again from the edited date.
+            </Alert>
+          )}
           {editing && (
             <MeasurementFields
               value={editing.draft}
@@ -1469,7 +1493,40 @@ export default function NewAnalysis() {
                   <CardContent>
                     <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}>
                       <Box>
-                        <Typography variant="h6">{m.sample_name}</Typography>
+                        {/* The results table's own verdict, carried onto the
+                            card the reader was sent here to edit. Arriving
+                            from "Edit analysis" they know a date was flagged
+                            and not which one, and the table naming it is a
+                            page behind them. Same rule and same words as the
+                            table, from utils/diagnostics.
+
+                            Left as it was found once the date is changed,
+                            with the tooltip saying which run it came from: a
+                            note that vanished on the first keystroke would
+                            disappear exactly when it was being acted on. */}
+                        <Stack direction="row" spacing={1} alignItems="center">
+                          <Typography variant="h6">{m.sample_name}</Typography>
+                          {lastRunConcerns[m.id] && (
+                            <Tooltip
+                              title={`${concernTitle(lastRunConcerns[m.id])} From the last run of this analysis.`}
+                              describeChild
+                            >
+                              <Chip
+                                size="small"
+                                tabIndex={0}
+                                color={
+                                  lastRunConcerns[m.id].level === 'suspect' ? 'error' : 'warning'
+                                }
+                                variant={
+                                  lastRunConcerns[m.id].level === 'suspect' ? 'filled' : 'outlined'
+                                }
+                                label={
+                                  lastRunConcerns[m.id].level === 'suspect' ? 'Suspect' : 'Check'
+                                }
+                              />
+                            </Tooltip>
+                          )}
+                        </Stack>
                         <Typography variant="body2" color="textSecondary">
                           {m.age_bp} ± {m.error_1sigma} BP
                         </Typography>

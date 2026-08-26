@@ -226,3 +226,13 @@ export interface HPDRange {
   max: number
   probability_percent: number
 }
+
+// The two per-date diagnostics a Bayesian run produces, as the shared
+// outlier rule in utils/diagnostics reads them. A structural subset of the
+// results page's SampleResult, so a stored result can be passed straight in
+// -- and small enough that the edit page can carry just these two numbers
+// per date without dragging a full result along.
+export interface DateDiagnostics {
+  agreement_index?: number | null
+  outlier_probability?: number | null
+}

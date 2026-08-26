@@ -33,7 +33,6 @@ import {
 import { alpha, useTheme } from '@mui/material/styles'
 import { useElementTypeColors } from '@/theme/diagramColors'
 import { visuallyHidden } from '@mui/utils'
-import HelpOutlineIcon from '@mui/icons-material/HelpOutline'
 import UnfoldMoreIcon from '@mui/icons-material/UnfoldMore'
 import UnfoldLessIcon from '@mui/icons-material/UnfoldLess'
 import CheckIcon from '@mui/icons-material/Check'
@@ -85,6 +84,13 @@ import type {
   ModelElement,
   PosteriorSummary,
 } from '@/types'
+import {
+  concernFor,
+  concernTitle,
+  NOTABLE_OUTLIER_PRIOR,
+  POOR_AGREEMENT,
+  type Concern,
+} from '@/utils/diagnostics'
 
 interface AnalysisResult {
   id: string
@@ -364,17 +370,6 @@ export function citationLine(
   return `${name}: ${range} (${qualifiers})`
 }
 
-// Declared once because it appears twice: the header's help control and the
-// persistent key under the table.
-const DIAGNOSTICS_HELP =
-  'A = agreement index: how well the modelled date still fits its own unmodelled ' +
-  'calibration. 100 means the model left it where it was; above 100 means the model ' +
-  'sharpened it onto the peak of its own calibration, which is normal; below about 60 ' +
-  'is the conventional threshold for a second look. O = posterior probability the date ' +
-  'is an outlier, when an outlier model was applied to it. "Suspect"/"Check" identifies ' +
-  'an outlier probability greater than the prior it was given; "Assigned" means the ' +
-  'data stayed close to the assigned prior.'
-
 // The 1/2/3-sigma levels radiocarbon results are conventionally reported at,
 // offered as a single user choice rather than a fixed 68%/95% pair. Values and
 // labels come from utils/hpd, which mirrors the backend's own definition.
@@ -455,71 +450,6 @@ const SCROLL_HINT_SX = {
   backgroundRepeat: 'no-repeat',
   backgroundAttachment: 'local, scroll',
 } as const
-
-// Below this, OxCal's convention is that a date is worth re-examining
-// (Bronk Ramsey 1995).
-const POOR_AGREEMENT = 60
-// How far above the PRIOR the posterior outlier probability must rise to
-// count as the model having found something. Not an absolute threshold: a
-// date at prior 1 comes back at posterior 1 by construction, so judging the
-// posterior alone would flag it for the analyst's own setting rather than for
-// anything the data said. At prior 0 the two are the same number.
-const OUTLIER_LIFT_SUSPECT = 0.5
-// ...and a rise it is unsure about. Separate rather than folded in, because
-// "probably wrong" and "worth a look" are different messages.
-const OUTLIER_LIFT_CHECK = 0.2
-// A prior at or above this is a deliberate, elevated suspicion, worth saying
-// even when the posterior did not move past it, rather than OxCal's routine 5%
-// default -- which an analyst commonly turns on across a whole phase and which
-// would put a chip on every clean row. Also the line below which
-// agreement_index is still independent evidence; see concernFor.
-const NOTABLE_OUTLIER_PRIOR = 0.2
-
-type Concern = { level: 'suspect' | 'check'; reasons: string[] }
-
-/**
- * Whether a date's own diagnostics say something is wrong with it, and what.
- *
- * The outlier check compares the posterior to the PRIOR the analyst assigned
- * (see OUTLIER_LIFT_SUSPECT), so a date sitting close to its own prior is not
- * flagged here; StructureTableRow shows that as a non-alarming "Assigned" chip,
- * being a fact about configuration rather than a finding.
- *
- * The reasons appear as text beside the colour, since a red row says something
- * is wrong without saying what, and the two diagnostics differ: agreement says
- * the model had to MOVE the date, the outlier probability that it does not
- * BELONG. Above NOTABLE_OUTLIER_PRIOR the two stop being independent -- a date
- * pulled toward its own outlier kernel is expected to drift from its
- * unmodelled calibration -- so agreement counts as evidence only below it.
- */
-function concernFor(result?: SampleResult, outlierPrior?: number | null): Concern | null {
-  if (!result) return null
-  const reasons: string[] = []
-  let level: 'suspect' | 'check' | null = null
-  const prior = outlierPrior ?? 0
-
-  const outlier = result.outlier_probability
-  if (outlier != null) {
-    const lift = outlier - prior
-    const withPrior = (message: string) =>
-      prior > 0 ? `${message} -- up from the ${Math.round(prior * 100)}% prior it was given` : message
-    if (lift >= OUTLIER_LIFT_SUSPECT) {
-      level = 'suspect'
-      reasons.push(withPrior(`${Math.round(outlier * 100)}% likely an outlier`))
-    } else if (lift >= OUTLIER_LIFT_CHECK) {
-      level = 'check'
-      reasons.push(withPrior(`${Math.round(outlier * 100)}% chance of being an outlier`))
-    }
-  }
-
-  const agreement = result.agreement_index
-  if (agreement != null && agreement < POOR_AGREEMENT && prior < NOTABLE_OUTLIER_PRIOR) {
-    level = 'suspect'
-    reasons.push(`agreement ${agreement.toFixed(0)}, below ${POOR_AGREEMENT}`)
-  }
-
-  return level ? { level, reasons } : null
-}
 
 /**
  * One row of the structure-ordered results table. A boundary reports through
@@ -765,12 +695,20 @@ function StructureTableRow({
           {isDate && (
             <Stack direction="column" spacing={0.5} alignItems="flex-end">
               {concern && (
-                <Chip
-                  size="small"
-                  color={concern.level === 'suspect' ? 'error' : 'warning'}
-                  variant={concern.level === 'suspect' ? 'filled' : 'outlined'}
-                  label={concern.level === 'suspect' ? 'Suspect' : 'Check'}
-                />
+                /* describeChild, and focusable: the sentence is the chip's
+                   description rather than its name, so a screen reader still
+                   hears "Suspect" first, and a keyboard or touch user can
+                   reach the reason at all -- a Chip is a div, and nothing in
+                   this column is hoverable on a tablet. */
+                <Tooltip title={concernTitle(concern)} describeChild>
+                  <Chip
+                    size="small"
+                    tabIndex={0}
+                    color={concern.level === 'suspect' ? 'error' : 'warning'}
+                    variant={concern.level === 'suspect' ? 'filled' : 'outlined'}
+                    label={concern.level === 'suspect' ? 'Suspect' : 'Check'}
+                  />
+                </Tooltip>
               )}
               {assignedOutlier && (
                 <Tooltip
@@ -779,8 +717,9 @@ function StructureTableRow({
                     `${assignedOutlier.model === 'charcoal' ? 'charcoal' : 'general'} outlier prior. ` +
                     'The posterior is close to that, so the data did not add anything beyond what was already assumed.'
                   }
+                  describeChild
                 >
-                  <Chip size="small" variant="outlined" label="Assigned" />
+                  <Chip size="small" tabIndex={0} variant="outlined" label="Assigned" />
                 </Tooltip>
               )}
               <Box component="span" sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>
@@ -1865,7 +1804,12 @@ export default function Results() {
 
         {/* Said once at the top as well as marked on each row: a long table
             can hide a flagged date below the fold, and the point of the
-            diagnostics is that nobody should have to go looking. */}
+            diagnostics is that nobody should have to go looking.
+
+            Names only. The reason each one was flagged is on its own chip in
+            the table, where the reader is looking when they ask; printing
+            both meant the same sentence twice, in two places that could
+            disagree once either was edited. */}
         {isBayesian && flaggedDates.length > 0 && (
           <Alert
             severity={flaggedDates.some((f) => f.concern.level === 'suspect') ? 'error' : 'warning'}
@@ -1884,9 +1828,15 @@ export default function Results() {
               {flaggedDates.length} of {analysis.results.length} dates look suspect
             </Typography>
             <Typography variant="body2">
-              {flaggedDates
-                .map((f) => `${f.name} (${f.concern.reasons.join(', ')})`)
-                .join(' · ')}
+              {flaggedDates.map((f) => f.name).join(' · ')}
+            </Typography>
+            {/* What "Edit analysis" is for. The button was the only exit from
+                this banner and said nothing about what to change once it was
+                pressed, which left the reader with a verdict and no move. */}
+            <Typography variant="body2" sx={{ mt: 0.5 }}>
+              Each is highlighted in the table below, with the reason on its chip. Edit
+              analysis reopens the model, where a date can be given an outlier prior,
+              moved to another phase, or dropped from the run.
             </Typography>
           </Alert>
         )}
@@ -1984,33 +1934,11 @@ export default function Results() {
                     onToggle={() => setPosteriorExpanded((v) => !v)}
                   />
                 </TableCell>
-                {isBayesian && (
-                  /* A focusable button beside the label rather than a Tooltip
-                     wrapping the cell: that would make the whole paragraph the
-                     header's accessible name, announcing sixty words in place
-                     of "Diagnostics" against every cell in the column, while a
-                     keyboard or touch user got nothing (the <th> is not
-                     focusable, and a tablet has no hover). */
-                  <TableCell align="right">
-                    Diagnostics
-                    <Tooltip title={DIAGNOSTICS_HELP} describeChild>
-                      <IconButton
-                        size="small"
-                        aria-label="What the diagnostics columns mean"
-                        sx={{
-                          ml: 0.5,
-                          p: 0.25,
-                          verticalAlign: 'baseline',
-                          minWidth: 24,
-                          minHeight: 24,
-                          my: '-3px',
-                        }}
-                      >
-                        <HelpOutlineIcon sx={{ fontSize: 15 }} />
-                      </IconButton>
-                    </Tooltip>
-                  </TableCell>
-                )}
+                {/* No help control beside the label: it opened the same
+                    paragraph the key under this table already prints without
+                    a hover, and a reader who had read one had no way to know
+                    the other said nothing new. */}
+                {isBayesian && <TableCell align="right">Diagnostics</TableCell>}
               </TableRow>
             </TableHead>
             <TableBody>
@@ -2145,7 +2073,16 @@ export default function Results() {
             own unmodelled calibration. 100 means the model left it where it was, above 100
             that it sharpened the date onto its own peak, and below 60 that it is worth
             re-examining.{' '}
-            <strong>O</strong> = the probability the date is an outlier.
+            <strong>O</strong> = the probability the date is an outlier.{' '}
+            {/* The chips read as a verdict with no stated rule, and the rule
+                is not guessable from the two numbers beside them: both chips
+                compare O against the PRIOR the date was given, not against a
+                fixed number. Stated here, once, next to the letters they are
+                drawn from. */}
+            A <strong>Suspect</strong> or <strong>Check</strong> chip marks a date whose
+            outlier probability rose well above the prior it was given, or whose agreement
+            fell below {POOR_AGREEMENT}; <strong>Assigned</strong> marks one that was given
+            a raised outlier prior and stayed close to it.
           </Typography>
         )}
       </Paper>

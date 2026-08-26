@@ -5,6 +5,7 @@
 // after a successful run.
 import { create } from 'zustand'
 import type { DraftMeasurement, DraftGroup, DraftRelationship, ModelElement } from '@/types'
+import type { Concern } from '@/utils/diagnostics'
 import { DateFormat, DEFAULT_DATE_FORMAT } from '@/utils/dateFormat'
 
 export type SolverChoice = 'auto' | 'exact' | 'gibbs'
@@ -57,6 +58,17 @@ interface AnalysisDraftState {
   // "Run Analysis" submits: PUT /analysis/{id}/inputs + rerun for an edit,
   // vs POST /analysis/bayesian for a new one.
   editingAnalysisId: string | null
+  // What the LAST run said about each date, keyed by measurement id, for the
+  // dates it objected to. Carried into the edit form so the reader arriving
+  // from the results table's "Edit analysis" button does not have to
+  // remember which dates were flagged -- the reason to be editing at all is
+  // usually one of these, and the table it names them in is a page away.
+  //
+  // Only the flagged ones: an entry here IS the flag. Empty for a new draft,
+  // and stale by definition once a date is changed -- the form says so
+  // rather than dropping it, since a date being edited BECAUSE it was
+  // flagged should not lose the note the moment it is touched.
+  lastRunConcerns: Record<string, Concern>
   // The explicit model structure being authored, and which phase each date
   // sits in. This is the stratigraphy for a new Bayesian analysis -- it is
   // submitted as-is rather than being derived from contexts and pairwise
@@ -85,6 +97,7 @@ interface AnalysisDraftState {
     // different structure from them.
     modelTree?: ModelElement | null
     elementAssignments?: Record<string, string>
+    lastRunConcerns?: Record<string, Concern>
   }) => void
 
   setMeasurements: (measurements: DraftMeasurement[]) => void
@@ -113,6 +126,7 @@ export const useAnalysisDraftStore = create<AnalysisDraftState>((set) => ({
   relationships: [],
   mcmc: DEFAULT_MCMC,
   editingAnalysisId: null,
+  lastRunConcerns: {},
   modelTree: null,
   elementAssignments: {},
 
@@ -130,7 +144,7 @@ export const useAnalysisDraftStore = create<AnalysisDraftState>((set) => ({
 
   loadFromAnalysis: ({
     analysisId, name, analysisType, measurements, groups, relationships, mcmc,
-    projectId, modelTree, elementAssignments,
+    projectId, modelTree, elementAssignments, lastRunConcerns,
   }) =>
     set({
       editingAnalysisId: analysisId,
@@ -143,6 +157,7 @@ export const useAnalysisDraftStore = create<AnalysisDraftState>((set) => ({
       mcmc: { ...DEFAULT_MCMC, ...(mcmc || {}) },
       modelTree: modelTree ?? null,
       elementAssignments: elementAssignments ?? {},
+      lastRunConcerns: lastRunConcerns ?? {},
     }),
 
   setMeasurements: (measurements) => set({ measurements }),
@@ -204,6 +219,7 @@ export const useAnalysisDraftStore = create<AnalysisDraftState>((set) => ({
       relationships: [],
       mcmc: DEFAULT_MCMC,
       editingAnalysisId: null,
+      lastRunConcerns: {},
       modelTree: null,
       elementAssignments: {},
     }),
