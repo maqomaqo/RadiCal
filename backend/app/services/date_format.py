@@ -2,24 +2,20 @@
 Presenting calendar ages in the reporting format the user chose: cal BP,
 BC/AD, or BCE/CE.
 
-Everything is computed and stored internally as cal BP -- what the curves
-and the Bayesian model both work in -- so this only affects presentation.
-It exists server-side purely so a CSV export can carry the same reporting
-format the results page is showing; the JSON export deliberately keeps raw
-cal BP, being data rather than a report.
+Everything is computed and stored as cal BP, so this is presentation only. It
+exists server-side so a CSV export can carry the reporting format the results
+page is showing; the JSON export keeps raw cal BP, being data rather than a
+report.
 
-Deliberately a mirror of frontend/src/utils/dateFormat.ts. Two
-implementations is not ideal, but the alternative was duplicating the whole
-CSV row assembly in the browser instead, and this is the smaller and far
-more stable half: the 1950 datum and the no-year-zero rule are fixed by
-convention and will not change. tests/test_date_format.py pins both sides
-against the same expected values.
+A mirror of frontend/src/utils/dateFormat.ts. Two implementations is not ideal,
+but the alternative was duplicating the whole CSV row assembly in the browser,
+and this is the smaller and more stable half -- the 1950 datum and the
+no-year-zero rule are fixed by convention. tests/test_date_format.py pins both
+sides against the same values.
 
-One intentional difference from the frontend: ranges are joined with a
-plain hyphen, not the en-dash used on screen. The CSV's existing range
-columns already use a hyphen, and staying ASCII avoids the mangling an
-en-dash invites when a spreadsheet opens the file as anything but UTF-8.
-Only the separator differs -- every age itself formats identically.
+One intentional difference: ranges join with a plain hyphen, not the en-dash
+used on screen, matching the CSV's other range columns and avoiding the
+mangling an en-dash invites outside UTF-8. Every age itself formats identically.
 """
 from typing import Dict, List, Optional
 
@@ -30,27 +26,26 @@ BCE_CE = 'bce_ce'
 VALID_DATE_FORMATS = (CAL_BP, BC_AD, BCE_CE)
 DEFAULT_DATE_FORMAT = CAL_BP
 
-# Radiocarbon "Present" is fixed at 1950 by international convention,
-# regardless of when the measurement or analysis actually took place.
+# Radiocarbon "Present" is fixed at 1950 by convention, whenever the
+# measurement was actually taken.
 RADIOCARBON_PRESENT = 1950
 
-# Short forms for CSV column headers, so a formatted column says which
-# convention it is in without needing the filename or a legend.
+# Short forms for CSV column headers, so a formatted column names its own
+# convention without a legend.
 ERA_LABELS = {BC_AD: 'BC/AD', BCE_CE: 'BCE/CE'}
 
 
 def normalise(date_format: Optional[str]) -> str:
     """An unrecognised or absent format falls back to cal BP rather than
-    failing the export -- the reporting format is a presentation choice, and
-    refusing to produce the file over it would be a poor trade."""
+    failing the export over a presentation choice."""
     return date_format if date_format in VALID_DATE_FORMATS else DEFAULT_DATE_FORMAT
 
 
 def _to_year(cal_bp: float):
     """
-    cal BP to a proleptic Gregorian year, using the conventional historical
-    numbering with NO year zero -- 1 BC is immediately followed by AD 1.
-    BCE/CE use the same numbers and differ only in era label.
+    cal BP to a proleptic Gregorian year in the conventional historical
+    numbering, with NO year zero: 1 BC is followed by AD 1. BCE/CE use the same
+    numbers and differ only in era label.
     """
     signed_year = RADIOCARBON_PRESENT - cal_bp
     if signed_year > 0:
@@ -88,10 +83,9 @@ def format_range(cal_bp_a: Optional[float], cal_bp_b: Optional[float], date_form
 
 def format_hpd_ranges(ranges: Optional[List[Dict]], date_format: str) -> str:
     """
-    A (possibly multimodal) HPD region as one or more ranges, each with its
-    own share of the probability -- the same convention the results page
-    shows. Collapsing to a single min-max span would claim probability in
-    the gap between separate peaks.
+    A possibly multimodal HPD region as ranges, each with its own share of the
+    probability, as the results page shows it. A single min-max span would
+    claim probability in the gap between separate peaks.
     """
     if not ranges:
         return ''

@@ -22,9 +22,8 @@ def _format_hpd_ranges(ranges: Optional[List[Dict]], fallback_min, fallback_max)
     "3234-3081 (68.0%)" or, for a multimodal posterior,
     "3329-3294 (9.4%); 3253-3103 (77.6%); 3098-3074 (8.0%)".
 
-    Falls back to the plain min/max envelope columns for older rows that
-    predate the multi-range HPD breakdown (hpd_68_ranges/hpd_95_ranges
-    were added after hpd_68_min/max already existed).
+    Falls back to the plain min/max envelope columns for rows that predate
+    the multi-range breakdown.
     """
     if ranges:
         return '; '.join(
@@ -36,13 +35,10 @@ def _format_hpd_ranges(ranges: Optional[List[Dict]], fallback_min, fallback_max)
     return ''
 
 
-# The durations-and-differences block, as spreadsheet rows. A second table in
-# the same file rather than a fourth download: it belongs to the same run, it
-# is short, and splitting it out would be one more thing to forget to fetch.
-# Its own header because it shares no column with the results table above --
-# every figure here is a length in years, and none of them is a calendar date,
-# so none of them may be converted to BC/AD (the same rule _FORMATTED_COLUMNS
-# already states for Posterior Std).
+# The durations-and-differences block, as spreadsheet rows: a second table in
+# the same file, since it belongs to the same run and is short. Its own header
+# because it shares no column with the results table -- every figure here is a
+# length in years, so none may be converted to BC/AD.
 INTERVAL_HEADER = [
     'Row Type', 'Name', 'Compared With', 'Mean (yr)', 'Median (yr)', 'Std (yr)',
     '68.3% Range (yr)', '95.4% Range (yr)', 'Overlap Probability', 'Overlap',
@@ -64,11 +60,9 @@ def _years(value: Optional[float]) -> str:
 
 def _years_ranges(ranges: Optional[List[Dict]]) -> str:
     """
-    A duration's HPD as one cell, e.g. "0-125 (95.4%)".
-
-    Written smallest-first, unlike _format_hpd_ranges above, which writes a
-    calendar range oldest-first: a duration is a length, and lengths read
-    upwards.
+    A duration's HPD as one cell, e.g. "0-125 (95.4%)". Written
+    smallest-first, unlike the oldest-first calendar ranges of
+    _format_hpd_ranges: a duration is a length, and lengths read upwards.
     """
     if not ranges:
         return ''
@@ -100,10 +94,9 @@ def _interval_rows(intervals: Optional[Dict]) -> List[List]:
         label = INTERVAL_LABELS.get(record.get('kind'), record.get('kind'))
         names = [record.get('from_name') or '', record.get('to_name') or '']
         if record.get('shared_boundary'):
-            # Zero years and zero overlap, both by construction. The screen
-            # says so in place of the figures; the export used to print the
-            # zeroes bare, which reads as a measured separation and is the one
-            # row in the table a reader cannot tell apart from a finding.
+            # Zero years and zero overlap, both by construction, so the text
+            # is printed in place of the figures. Bare zeroes would read as a
+            # measured separation.
             rows.append([label] + names + ['', '', '', '', '',
                                            '', intervals_service.SHARED_BOUNDARY_TEXT, ''])
             continue
@@ -121,23 +114,16 @@ def _interval_rows(intervals: Optional[Dict]) -> List[List]:
 
 def _unmodelled_ranges(sample, analysis_type: str) -> Dict:
     """
-    What this date calibrates to on its own, with no stratigraphic
-    constraint applied -- the "unmodelled vs modelled" comparison the
-    results page shows beside each date, and the standard way to see what
-    the model actually did.
+    What this date calibrates to on its own, with no stratigraphic constraint
+    -- the "unmodelled vs modelled" comparison shown beside each date.
 
-    Computed here rather than read from a column, for the same reason
-    GET /api/analysis/{id} computes it for the page: it is a cheap analytic
-    calibration determined entirely by the sample's current
-    age/error/curve, so deriving it cannot fall out of step with the
-    measurement the way a stored copy would.
+    Computed rather than stored: it is a cheap analytic calibration
+    determined by the sample's current age/error/curve, so it cannot fall out
+    of step with the measurement. Reported at the same two confidence levels
+    as the modelled posterior.
 
-    Reported at the same two confidence levels as the modelled posterior,
-    so a reader can compare like with like within one export.
-
-    Only meaningful for a Bayesian analysis. For a plain calibration the
-    modelled figures already *are* the unmodelled result, so repeating them
-    would just invite the reader to compare a number with itself.
+    Only meaningful for a Bayesian analysis; for a plain calibration the
+    modelled figures already ARE the unmodelled result.
     """
     blank = {'unmodelled_hpd_68_ranges': None, 'unmodelled_hpd_95_ranges': None}
     if analysis_type != 'bayesian' or sample is None:
@@ -152,23 +138,20 @@ def _unmodelled_ranges(sample, analysis_type: str) -> Dict:
             'unmodelled_hpd_95_ranges': curve.get_hpd_ranges(cal_ages, probs, SIGMA_2),
         }
     except Exception:
-        # A sample whose curve_id no longer resolves (say a renamed curve)
-        # shouldn't fail the whole export. The modelled figures are
-        # unaffected; this one just stays empty.
+        # An unresolvable curve should not fail the whole export; the
+        # modelled figures are unaffected and this column stays empty.
         return blank
 
 
 def _gather_export_rows(analysis_id: str, db: Session) -> Dict:
     """
-    Shared data assembly for every results export format (CSV/JSON/table).
-    Joins each AnalysisResult back to its RadiocarbonSample (by sample_id)
-    so the export actually reflects what was measured, not just the
-    posterior -- and raises 404 up front so every export endpoint fails
-    the same, obvious way for a bad analysis_id instead of silently
-    returning an empty/placeholder file.
+    Shared data assembly for every export format. Joins each AnalysisResult
+    back to its RadiocarbonSample so the export reflects what was measured,
+    not just the posterior, and raises 404 up front so a bad analysis_id
+    fails the same way everywhere instead of returning an empty file.
 
     The unmodelled calibration is derived here too, so the CSV and the JSON
-    report the same figure by construction rather than by coincidence.
+    report the same figure by construction.
     """
     analysis = db.query(Analysis).filter(Analysis.id == analysis_id).first()
     if not analysis:
@@ -214,11 +197,10 @@ def _structure_rows(analysis_id: str, db: Session, export_rows: List[Dict],
     The analysis's model structure in reading order, with each date's
     exported result attached to its row.
 
-    Read straight from the stored ModelElement rows rather than migrating
-    on the fly: an export is a GET and should not write, and anything with
-    results to export has already been run, which persists a tree. An
-    analysis old enough to have none yet simply exports without structure
-    (see _build_csv), and gains it the next time it's opened or re-run.
+    Read from the stored ModelElement rows rather than migrating on the fly:
+    an export is a GET and should not write. An analysis with no stored tree
+    exports without structure (see _build_csv) and gains one when next opened
+    or re-run.
     """
     element_rows = db.query(ModelElement).filter(
         ModelElement.analysis_id == analysis_id
@@ -254,10 +236,8 @@ CSV_HEADER = [
 ]
 
 # The calendar-age columns, in the order their formatted counterparts are
-# appended. Everything else is left alone on purpose: Age BP is a
-# radiocarbon age, and 1-Sigma Error and Posterior Std are durations in
-# years -- none of them is a calendar date, so converting them to BC/AD
-# would be nonsense.
+# appended. Everything else is left alone: Age BP is a radiocarbon age, and
+# 1-Sigma Error and Posterior Std are durations, so none may become BC/AD.
 _FORMATTED_COLUMNS = [
     'Unmodelled 95.4% HPD', 'Posterior Mean', 'Posterior Median',
     '68.3% HPD', '95.4% HPD', 'TPQ BP', 'TAQ BP',
@@ -267,11 +247,8 @@ _FORMATTED_COLUMNS = [
 def _csv_header(date_format: str) -> List[str]:
     """
     The header, with a formatted counterpart for each calendar-age column
-    when the chosen format isn't cal BP.
-
-    Nothing is added for cal BP: the numbers already are cal BP, so the
-    extra columns would only restate them with a suffix, and the default
-    export stays byte-for-byte what it was.
+    when the chosen format is not cal BP. Nothing is added for cal BP, where
+    the extra columns would only restate the numbers with a suffix.
     """
     era = date_format_service.ERA_LABELS.get(date_format)
     if not era:
@@ -295,11 +272,9 @@ def _measurement_cells(row: Optional[Dict]) -> List:
 def _unmodelled_cell(row: Optional[Dict]) -> str:
     """
     The unmodelled calibration for the CSV, at 95% to match the file's own
-    "95% HPD" column. Reads what _gather_export_rows already derived, so
-    the number here and the one in the JSON export are the same figure.
-
-    The JSON carries the 68% breakdown too; a column-per-level does not pay
-    for itself in a spreadsheet, where the 95% range is what gets quoted.
+    "95% HPD" column, read from what _gather_export_rows derived. The JSON
+    carries the 68% breakdown too; a column per level does not pay for itself
+    in a spreadsheet.
     """
     if not row:
         return ''
@@ -308,9 +283,8 @@ def _unmodelled_cell(row: Optional[Dict]) -> str:
 
 def _posterior_cells(row: Optional[Dict]) -> List:
     """
-    The modelled half. Dates and boundaries are both modelled parameters
-    with a posterior, so they report through exactly the same columns --
-    the whole point of exporting the structure rather than only the dates.
+    The modelled half. Dates and boundaries are both modelled parameters with
+    a posterior, so they report through the same columns.
     """
     if not row:
         return ['', '', '', '', '', '', '']
@@ -322,12 +296,11 @@ def _posterior_cells(row: Optional[Dict]) -> List:
         f"{row['posterior_std']:.1f}" if row.get('posterior_std') is not None else '',
         _format_hpd_ranges(row.get('hpd_68_ranges'), row.get('hpd_68_min'), row.get('hpd_68_max')),
         _format_hpd_ranges(row.get('hpd_95_ranges'), row.get('hpd_95_min'), row.get('hpd_95_max')),
-        # Blank rather than 0 where there is none: a boundary has no
-        # unmodelled counterpart to agree with, and a plain calibration has
-        # no model. Neither is a score of zero.
+        # Blank rather than 0: a boundary has no unmodelled counterpart to
+        # agree with, and a plain calibration has no model.
         f"{agreement:.1f}" if agreement is not None else '',
-        # Blank when no outlier model was applied to this date, which is a
-        # different statement from a zero probability that it is one.
+        # Blank when no outlier model was applied, which is not the same as
+        # a zero probability.
         f"{100 * outlier:.1f}" if outlier is not None else '',
     ]
 
@@ -339,10 +312,9 @@ def _formatted_cells(
     date_format: str,
 ) -> List:
     """
-    The same calendar ages again, in the user's reporting format -- what the
-    results page is showing them. Alongside the cal BP columns rather than
-    replacing them, so the file stays sortable and computable: "1247 BC" is
-    the readable form but arithmetic on it is not.
+    The same calendar ages in the user's reporting format, alongside the cal
+    BP columns rather than replacing them: "1247 BC" is the readable form, but
+    the file has to stay sortable and computable.
 
     Order must match _FORMATTED_COLUMNS.
     """
@@ -386,10 +358,9 @@ def _write_intervals(writer, analysis) -> None:
     The durations-and-differences table, appended below the results table with
     a blank line and its own header.
 
-    Two tables in one file is unusual, and the alternative was worse: a fourth
-    download for a dozen rows that belong to the same run, which is one more
-    thing to fetch and one more thing to forget. A spreadsheet reads it as a
-    second block; the blank row and the repeated header say where it starts.
+    Two tables in one file rather than a fourth download for a dozen rows
+    belonging to the same run. A spreadsheet reads it as a second block; the
+    blank row and repeated header say where it starts.
     """
     rows = _interval_rows(analysis.intervals)
     if not rows:
@@ -402,18 +373,15 @@ def _write_intervals(writer, analysis) -> None:
 
 def _build_csv(analysis_id: str, db: Session, date_format: Optional[str] = None) -> str:
     """
-    One row per modelled entity -- sequences, phases, boundaries and dates
-    -- in the model's own reading order, matching the results table
-    row for row.
+    One row per modelled entity -- sequences, phases, boundaries and dates --
+    in the model's reading order, matching the results table row for row.
 
-    `Order` is written out because a spreadsheet sort would otherwise
-    destroy the one thing the file exists to convey; re-sorting on it
-    restores the structure.
+    `Order` is written out because a spreadsheet sort would destroy the
+    structure the file exists to convey; re-sorting on it restores it.
 
-    `date_format` is the reporting format the results page is showing. When
-    it isn't cal BP, each calendar-age column gains a formatted counterpart
-    beside it -- see _csv_header. The cal BP columns are always present, so
-    the file remains numeric whatever the reader chose.
+    `date_format` is the reporting format the results page is showing. When it
+    is not cal BP, each calendar-age column gains a formatted counterpart (see
+    _csv_header); the cal BP columns are always present.
     """
     date_format = date_format_service.normalise(date_format)
     formatted = date_format in date_format_service.ERA_LABELS
@@ -434,9 +402,8 @@ def _build_csv(analysis_id: str, db: Session, date_format: Optional[str] = None)
     def extra(result, tpq, taq):
         return _formatted_cells(result, tpq, taq, date_format) if formatted else []
 
-    # No stored structure (a calibration, or an analysis predating trees):
-    # fall back to a flat list of dates so the export still carries the
-    # results rather than coming back empty.
+    # No stored structure, so fall back to a flat list of dates rather than
+    # coming back empty.
     if not structure:
         for order, row in enumerate(data['rows'], start=1):
             writer.writerow(
@@ -457,9 +424,8 @@ def _build_csv(analysis_id: str, db: Session, date_format: Optional[str] = None)
             measured, modelled = _measurement_cells(result), _posterior_cells(result)
             unmodelled = _unmodelled_cell(result)
         elif posterior:
-            # A boundary's posterior is summary-shaped, not a result row.
-            # It has no unmodelled counterpart either -- a boundary exists
-            # only as a modelled parameter.
+            # A boundary's posterior is summary-shaped, not a result row, and
+            # has no unmodelled counterpart.
             result = _boundary_as_result(posterior)
             measured, modelled = _measurement_cells(None), _posterior_cells(result)
         else:
@@ -479,7 +445,8 @@ def _build_csv(analysis_id: str, db: Session, date_format: Optional[str] = None)
 
 @router.get("/results/{analysis_id}/table")
 def export_table(analysis_id: str, date_format: Optional[str] = None, db: Session = Depends(get_db)):
-    """Export results as a CSV table (same content as /export/csv, kept as a separate route for backwards compatibility)."""
+    """Export results as a CSV table. Same content as /export/csv, kept as a
+    separate route for backwards compatibility."""
     csv_content = _build_csv(analysis_id, db, date_format)
     return StreamingResponse(
         iter([csv_content]),
@@ -493,10 +460,10 @@ def export_csv(analysis_id: str, date_format: Optional[str] = None, db: Session 
     """
     Export an analysis's results as CSV, in the model's own reading order.
 
-    `date_format` (calBP / bcad / bce_ce) is the reporting format the
-    results page is showing; when it isn't cal BP each calendar-age column
-    gains a formatted counterpart beside it. An unrecognised value falls
-    back to cal BP rather than failing the download.
+    `date_format` (calBP / bcad / bce_ce) is the reporting format the results
+    page is showing; when it is not cal BP each calendar-age column gains a
+    formatted counterpart. An unrecognised value falls back to cal BP rather
+    than failing the download.
     """
     csv_content = _build_csv(analysis_id, db, date_format)
     return StreamingResponse(
@@ -510,21 +477,19 @@ def _posterior_summary(posterior: Dict) -> Dict:
     """
     A boundary's posterior without its raw MCMC draws.
 
-    The stored value also holds `posterior_samples` -- the full chain, tens
-    of thousands of floats per boundary (see bayesian._summarize_posterior)
-    -- which is not what an export is for, and would dwarf everything else
-    in the file. The binned probability_distribution is kept, so a consumer
-    can still plot the transition. Dates are already summarised this way by
-    _gather_export_rows, which never selects the raw samples.
+    `posterior_samples` is tens of thousands of floats per boundary (see
+    exact_chain._summarize) and would dwarf everything else in the file. The
+    binned probability_distribution is kept, so a consumer can still plot the
+    transition. _gather_export_rows never selects the raw samples for dates.
     """
     return {k: v for k, v in posterior.items() if k != 'posterior_samples'}
 
 
 def _structure_payload(structure: List[Dict]) -> List[Dict]:
     """
-    The structure rows as JSON, in the same reading order as the CSV and
-    the results table: each date carrying its result, each boundary its
-    posterior summary, and headings carrying only their place in the tree.
+    The structure rows as JSON, in the same reading order as the CSV: each
+    date carrying its result, each boundary its posterior summary, and
+    headings only their place in the tree.
     """
     payload = []
     for row in structure:
@@ -549,20 +514,17 @@ def _structure_payload(structure: List[Dict]) -> List[Dict]:
 @router.get("/results/{analysis_id}/export/json")
 def export_json(analysis_id: str, db: Session = Depends(get_db)):
     """
-    Export an analysis's results as JSON, including sample details merged
-    into each result row.
+    Export an analysis's results as JSON, with sample details merged into
+    each result row.
 
-    Two views of the same data. `results` is the flat per-date list: one
-    entry per measured date, with what was measured joined onto what was
-    modelled. `structure` is that same run read in the model's own order --
-    sequences, phases, boundaries and dates, exactly the rows the CSV and
-    the results table show -- so a consumer can reproduce the model rather
-    than only the dates. Both come from one assembly, so they cannot
-    disagree; `structure` is empty for an analysis with no stored structure
-    (a plain calibration), where there is nothing to read in model order.
+    Two views of the same data: `results` is the flat per-date list, and
+    `structure` is the same run in the model's own order, so a consumer can
+    reproduce the model rather than only the dates. Both come from one
+    assembly, so they cannot disagree; `structure` is empty for an analysis
+    with no stored structure.
 
-    The nested tree itself is not repeated here -- GET /api/analysis/{id}
-    already returns model_tree. What this adds is the ordered, joined view.
+    The nested tree is not repeated here -- GET /api/analysis/{id} already
+    returns model_tree.
     """
     data = _gather_export_rows(analysis_id, db)
     analysis = data['analysis']
@@ -579,11 +541,9 @@ def export_json(analysis_id: str, db: Session = Depends(get_db)):
             "project_id": analysis.project_id,
             "results": data['rows'],
             "structure": _structure_payload(structure),
-            # How long things lasted and how far apart they sit, when the run
-            # was asked for them. Null otherwise -- see Analysis.intervals, and
-            # services/intervals.py for the shape. Carried whole rather than
-            # flattened the way the CSV flattens it, since JSON has room for
-            # the full HPD breakdown and the plottable series.
+            # Null unless the run was asked for them (Analysis.intervals).
+            # Carried whole rather than flattened as the CSV flattens it,
+            # since JSON has room for the full HPD breakdown.
             "intervals": analysis.intervals,
         }
     }
@@ -592,12 +552,8 @@ def export_json(analysis_id: str, db: Session = Depends(get_db)):
 def _context_spans(analysis_id: str, db: Session) -> List[Dict]:
     """
     Each context's modelled start and end, for analyses whose model carries
-    no explicit Boundary elements to report them instead.
-
-    The raw MCMC draws are dropped on the way out for the same reason
-    _posterior_summary drops them from the JSON export: they are tens of
-    thousands of floats per boundary and nothing in a report is going to
-    print them.
+    no explicit Boundary elements to report them instead. The raw draws are
+    dropped on the way out, as in _posterior_summary.
     """
     groups = db.query(SampleGroup).filter(SampleGroup.analysis_id == analysis_id).all()
     spans = []
@@ -617,29 +573,23 @@ def export_pdf(analysis_id: str, date_format: Optional[str] = None,
                      db: Session = Depends(get_db)):
     """
     Export an analysis as a printable PDF report: metadata, the curves and
-    solver that produced it, the results table in the model's own reading
-    order, each context's modelled span, and a posterior plot per modelled
-    parameter.
+    solver that produced it, the results table in reading order, each
+    context's modelled span, and a posterior plot per modelled parameter.
 
     Built from the same assembly the CSV and JSON exports use, so the three
-    downloads of one analysis cannot report different numbers. `date_format`
-    is the reporting convention the results page is showing, carried the
-    same way the CSV carries it; an unrecognised value falls back to cal BP
-    rather than failing the download.
+    downloads cannot report different numbers. `date_format` is carried the
+    same way the CSV carries it, falling back to cal BP if unrecognised.
 
     Rendering is synchronous and costs a matplotlib figure per modelled
-    parameter, so a large model takes a few seconds. That is a deliberate
-    trade for now -- a download that takes four seconds is better than a job
-    queue nobody asked for -- but it is the thing to revisit if models grow.
+    parameter, so a large model takes a few seconds -- the thing to revisit
+    if models grow.
     """
     data = _gather_export_rows(analysis_id, db)
     analysis = data['analysis']
     structure = _structure_rows(analysis_id, db, data['rows'], data['samples_by_id'])
 
-    # The per-date posterior series, fetched here rather than through the
-    # shared assembly: the CSV and JSON exports have no use for a few
-    # hundred numbers per date, so _gather_export_rows leaves the column
-    # unselected on purpose. Only the plots need it.
+    # Fetched here rather than through the shared assembly, which leaves the
+    # column unselected: only the plots need a few hundred numbers per date.
     distributions = {
         sample_id: distribution
         for sample_id, distribution in db.query(
@@ -671,10 +621,9 @@ def export_pdf(analysis_id: str, date_format: Optional[str] = None,
 @router.get("/results/{analysis_id}/graphs")
 def get_graphs(analysis_id: str, db: Session = Depends(get_db)):
     """
-    Returns each sample's probability distribution for external plotting.
-    Note: the Results page does not call this -- it renders plots from the
-    data already included in GET /api/analysis/{id}. This exists for API
-    consumers that only want the plot data.
+    Each sample's probability distribution, for API consumers that want only
+    the plot data. The Results page renders from GET /api/analysis/{id}
+    instead.
     """
     # An unknown analysis is a 404, not an empty graph list.
     if not db.query(Analysis.id).filter(Analysis.id == analysis_id).first():

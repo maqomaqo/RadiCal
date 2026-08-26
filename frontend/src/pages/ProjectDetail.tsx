@@ -57,13 +57,10 @@ interface ProjectDetailData {
   analyses: AnalysisSummary[]
 }
 
-// The result of a "re-run all" pass, once one has run -- a per-analysis
-// batch, so unlike a single failed request this can carry several distinct
-// error messages at once. Shown as a dismissible in-page Alert rather than
-// through the toast queue: a toast is sized and timed for one line, and
-// forcing "Wk-50104: sampler did not converge, Wk-50099: ..." through that
-// would either truncate the list or block behind it whatever else the
-// queue was already holding.
+// The result of a "re-run all" pass. A per-analysis batch, so unlike a single
+// failed request it can carry several error messages at once -- hence a
+// dismissible in-page Alert rather than the toast queue, which is sized and
+// timed for one line.
 interface RerunSummary {
   severity: 'success' | 'warning' | 'error'
   headline: string
@@ -90,9 +87,9 @@ export default function ProjectDetail() {
   const [deleteAnalysisTarget, setDeleteAnalysisTarget] = useState<AnalysisSummary | null>(null)
   const [deletingAnalysis, setDeletingAnalysis] = useState(false)
 
-  // 'analyses' | 'dates' -- the project's date collection lives on its own
-  // tab (see ProjectSampleTable). The Unassigned pseudo-project isn't a real
-  // project row, so it has no collection and the tabs are hidden for it.
+  // 'analyses' | 'dates': the date collection has its own tab (see
+  // ProjectSampleTable). The Unassigned pseudo-project is not a real project
+  // row, so it has no collection and the tabs are hidden.
   const [tab, setTab] = useState<'analyses' | 'dates'>('analyses')
   const [duplicating, setDuplicating] = useState(false)
 
@@ -109,11 +106,10 @@ export default function ProjectDetail() {
     if (projectId) fetchProject(projectId)
   }, [projectId])
 
-  // Only a job this page started is followed. Unlike the results page there
-  // is no useful fallback by target: a project's most recent job may be from
-  // last week, and a progress bar for something long finished is worse than
-  // none. Arriving mid-run therefore shows the analyses' own status chips,
-  // which are already accurate.
+  // Only a job this page started. Unlike the results page there is no useful
+  // fallback by target -- a project's most recent job may be from last week,
+  // and a bar for something long finished is worse than none. Arriving mid-run
+  // shows the analyses' own status chips, which are already accurate.
   const { job, active: jobActive } = useJob({
     jobId,
     onFinished: (finished) => {
@@ -270,9 +266,9 @@ export default function ProjectDetail() {
     }
   }
 
-  // Both rerun paths now queue rather than run: the endpoints answer 202 as
-  // soon as the work is accepted, and this page follows the job instead of
-  // holding a request open for what can be minutes.
+  // Both rerun paths queue rather than run: the endpoints answer 202 as soon
+  // as the work is accepted, and this page follows the job rather than holding
+  // a request open for what can be minutes.
   const handleRerunOne = async () => {
     if (!rerunTarget || !project) return
     setRerunningOne(true)
@@ -301,11 +297,11 @@ export default function ProjectDetail() {
     setRerunSummary(null)
     try {
       if (isUnassigned) {
-        // The unassigned pseudo-project has no id to hit a batch endpoint
-        // with, so each analysis is queued separately. They still run one at
-        // a time -- the queue has a single worker -- so this is a fan-out of
-        // submissions, not of work. Only the last job is followed: they run
-        // in order, so it finishing means they all have.
+        // The unassigned pseudo-project has no id for a batch endpoint, so
+        // each analysis is queued separately. They still run one at a time,
+        // the queue having a single worker, so this fans out submissions and
+        // not work. Only the last job is followed: they run in order, so it
+        // finishing means they all have.
         const outcomes = await Promise.allSettled(
           project.analyses.map((a) => fetch(`/api/analysis/${a.id}/rerun`, { method: 'POST' }).then((r) => r.json()))
         )

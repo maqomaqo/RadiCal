@@ -1,23 +1,20 @@
 """
 Serving a piece of a calibration curve to be looked at.
 
-A curve is up to 9,501 points spanning 55,000 years, and the whole point of
-browsing one is to see the wiggles -- so the two things this module has to get
-right are that a window can be asked for at all, and that reducing it to a
-drawable number of points does not erase the features being examined.
+A curve is up to 9,501 points spanning 55,000 years, and browsing one is about
+seeing the wiggles -- so reducing a window to a drawable number of points must
+not erase the features being examined.
 
-Which is why decimation here is min/max per bucket rather than "every Nth
-point". Stride sampling a wiggly curve removes exactly the extremes that make
-it wiggly: the Hallstatt plateau's reversals, the sharp drop at its start, the
-short excursions that split a calibrated date into two ranges. Taking the
-lowest and highest radiocarbon age in each bucket keeps the envelope of the
-curve intact at any zoom level, at the cost of two points per bucket instead of
-one.
+Hence decimation is min/max per bucket rather than every Nth point. Stride
+sampling removes exactly the extremes that make a curve wiggly: the Hallstatt
+plateau's reversals, the sharp drop at its start, the short excursions that
+split a calibrated date into two ranges. Keeping the lowest and highest
+radiocarbon age per bucket preserves the envelope at any zoom, at two points
+per bucket instead of one.
 
-Local slope is computed on the FULL grid before any of that and carried
-through, so a hover readout in a decimated view still reports the curve's real
-gradient rather than one measured between two surviving points that were never
-adjacent.
+Local slope is computed on the FULL grid beforehand and carried through, so a
+hover readout in a decimated view reports the curve's real gradient rather than
+one measured between two surviving points that were never adjacent.
 """
 from typing import Any, Dict, List, Optional
 
@@ -28,31 +25,26 @@ from app.services.calibration import CalibrationCurve
 # Enough to draw a curve on a wide screen without the payload getting silly.
 DEFAULT_MAX_POINTS = 800
 
-# A comparison window narrower than this is widened to it, so that two curves
-# whose grids happen to have no shared point in a very tight window still
-# produce a drawable line rather than nothing.
+# A comparison window narrower than this is widened, so two curves with no
+# shared grid point in a tight window still draw a line.
 GRID_MINIMUM_SPAN = 1.0
 MAX_MAX_POINTS = 5000
 
 
-# How far either side of a point the slope is measured over, in calendar
-# years.
+# How far either side of a point the slope is measured over, in calendar years.
 #
-# A point-to-point gradient is not usable for this. Where IntCal20 is on a
-# 1-year grid it is dominated by the curve's own year-to-year scatter, and the
-# readout swings between +4 and -3 across a stretch that is, at any scale a
-# person cares about, flat. Measured on IntCal20 over three known stretches --
-# the Hallstatt plateau (2450-2700 cal BP), an ordinary stretch (3400-3650)
-# and the early Holocene (9500-9800) -- the mean slope each half-span reports:
+# A point-to-point gradient is unusable: on IntCal20's 1-year grid it is
+# dominated by year-to-year scatter and swings between +4 and -3 across a
+# stretch that is flat at any scale a person cares about. Mean slope over three
+# known stretches -- Hallstatt plateau, an ordinary stretch, early Holocene:
 #
 #     half-span    plateau    ordinary    early Holocene
 #        25 yr        0.27        0.87            1.08     (min -1.28)
 #        50 yr        0.31        0.91            1.05     (min -0.53)
 #       100 yr        0.44        0.95            0.96     (over-smoothed)
 #
-# 50 separates a plateau from ordinary curve by a factor of three without the
-# scatter that makes 25 unreadable, and without 100's smearing of the plateau
-# into its surroundings.
+# 50 separates a plateau from ordinary curve threefold without 25's scatter or
+# 100's smearing of the plateau into its surroundings.
 SLOPE_HALF_SPAN_YEARS = 50.0
 
 
@@ -62,24 +54,22 @@ def _slope(curve: CalibrationCurve, at: np.ndarray) -> np.ndarray:
     years per calendar year, measured over a fixed calendar span rather than
     between adjacent grid points.
 
-    Measuring over a span rather than a grid step also makes the value mean
-    the same thing everywhere on the curve: the grid is 1 year near the
-    present and 20 years beyond 25,000 cal BP, so a per-step difference would
-    be describing a twenty-times longer stretch of curve at one end than the
-    other.
+    A fixed span rather than a grid step, so the value means the same thing
+    everywhere: the grid is 1 year near the present and 20 beyond 25,000 cal
+    BP, so a per-step difference would describe a twenty-times longer stretch
+    of curve at one end than the other.
 
     The value is what makes a plateau a plateau. Around 1 the curve tracks
     calendar time and a date calibrates about as tightly as it was measured;
-    near 0 the curve is flat and a measurement maps to a wide span of calendar
-    years; below 0 the curve runs backwards and one measurement necessarily
-    splits into disjoint calendar ranges.
+    near 0 a measurement maps to a wide span of calendar years; below 0 the
+    curve runs backwards and one measurement splits into disjoint ranges.
     """
     cal_min = float(curve.cal_ages.min())
     cal_max = float(curve.cal_ages.max())
 
-    # Clamped at the curve's ends, with the denominator taken from the span
-    # actually used, so an edge point reports a one-sided slope rather than a
-    # halved one.
+    # Clamped at the curve's ends with the denominator taken from the span
+    # actually used, so an edge point reports a one-sided slope, not a halved
+    # one.
     lo = np.clip(at - SLOPE_HALF_SPAN_YEARS, cal_min, cal_max)
     hi = np.clip(at + SLOPE_HALF_SPAN_YEARS, cal_min, cal_max)
     span = hi - lo
@@ -99,10 +89,9 @@ def _decimate(indices: np.ndarray, c14: np.ndarray, max_points: int) -> np.ndarr
     Reduce a run of indices to at most `max_points`, keeping the lowest and
     highest radiocarbon age in each bucket.
 
-    Returns the surviving indices in calendar order. The first and last points
-    of the window always survive, so the drawn curve still starts and ends
-    where the window does rather than at whatever the outer buckets happened
-    to contain.
+    Returns the surviving indices in calendar order. The window's first and
+    last points always survive, so the drawn curve starts and ends where the
+    window does rather than at whatever the outer buckets held.
     """
     if len(indices) <= max_points:
         return indices
@@ -138,10 +127,10 @@ def window(
             curve covers. Either omitted means "to the end of the curve".
         max_points: cap on returned points, decimated as described above.
 
-    Returns a dict with `points` as [cal BP, 14C age, 1-sigma, slope] rows in
-    calendar order, plus what the window actually turned out to be and how
-    many points it holds before decimation -- the caller needs the latter to
-    know whether it is looking at the whole curve or a summary of it.
+    Returns `points` as [cal BP, 14C age, 1-sigma, slope] rows in calendar
+    order, plus what the window turned out to be and how many points it holds
+    before decimation -- which is how the caller knows whether it has the whole
+    curve or a summary of it.
     """
     cal = curve.cal_ages
     if len(cal) == 0:
@@ -158,12 +147,10 @@ def window(
 
     selected = np.where((cal >= lo) & (cal <= hi))[0]
     if len(selected) < 2:
-        # A window narrower than the curve's own grid spacing -- 20-year steps
-        # in the old half of IntCal20 -- holds no points, or one, and neither
-        # draws a line. Widen to the points that bracket it, which is what
-        # interpolating across the window would use anyway. Fewer than two,
-        # not zero: one point is as undrawable as none, and a window landing
-        # exactly on a grid point is the common way to get one.
+        # A window narrower than the curve's grid spacing holds no points or
+        # one, and neither draws a line. Widen to the points bracketing it,
+        # which interpolating across the window would use anyway. Fewer than
+        # two rather than zero, since one point is as undrawable as none.
         if len(selected) == 0:
             right = int(np.searchsorted(cal, lo))
             left = max(0, right - 1)
@@ -174,9 +161,8 @@ def window(
         selected = np.arange(left, right + 1)
 
     kept = _decimate(selected, curve.c14_ages, max_points)
-    # Measured against the whole curve, not the window, so a point at the
-    # window's edge is not described by a slope that stops where the view
-    # does.
+    # Measured against the whole curve, not the window, so an edge point is
+    # not described by a slope that stops where the view does.
     kept_slopes = _slope(curve, cal[kept])
 
     points = [
@@ -206,17 +192,14 @@ def compare(
     """
     Two curves on one grid, with their difference.
 
-    The difference is what the comparison is actually for. Two calibration
-    curves drawn over each other look much alike at any zoom that fits a
-    millennium on screen -- the hemispheric offset between IntCal20 and
-    SHCal20 is a few decades against a vertical axis spanning thousands of
-    years, and the eye cannot read it off two nearly-coincident lines. Plotted
-    as A - B it is legible immediately, which is the difference between "these
-    look similar" and "these differ by 40 +/- 12 years here".
+    The difference is what the comparison is for. Two curves drawn over each
+    other look alike at any zoom fitting a millennium on screen -- the offset
+    between IntCal20 and SHCal20 is a few decades against a vertical axis
+    spanning thousands of years -- where A - B is legible immediately.
 
     Decimation keeps the extremes of the DIFFERENCE rather than of either
-    curve, since that is the series being examined; the two curves are
-    reported at whichever points survive.
+    curve, that being the series examined; the curves are reported at whichever
+    points survive.
 
     Returns rows of [cal BP, A, sigma_A, B, sigma_B, A - B, sigma of the
     difference], the last being the two curve errors in quadrature.
@@ -266,9 +249,9 @@ def compare(
 
 
 def to_csv(window: Dict[str, Any], curve_name: str) -> str:
-    """The visible window as CSV, in the .14c column order with the local
-    gradient alongside -- so a stretch of curve can leave this app as data,
-    not only as a picture."""
+    """The visible window as CSV, in .14c column order with the local gradient
+    alongside, so a stretch of curve can leave as data and not only a
+    picture."""
     lines = [f'# {curve_name}', '# CAL BP,14C age,Sigma,Slope (14C yr / cal yr)']
     for cal, c14, sigma, slope in window['points']:
         lines.append(f'{cal:g},{c14:g},{sigma:g},{slope:.4f}')

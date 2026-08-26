@@ -140,13 +140,11 @@ describe('hpdRangesFromCurve', () => {
 // The bands a posterior plot draws, and the one property that matters about
 // them: a band's LABEL and its GEOMETRY are computed at the same confidence.
 //
-// These exist because the failure they guard against was invisible. The plot
-// components used to hold the strings '95% HPD' and '68% HPD' as literals
-// while the page's selector moved independently, so a figure exported at
-// 99.7% carried a legend claiming 95% -- and the Harris matrix read a stored
-// hpd_95 while the results table re-selected from the distribution, which put
-// two different ranges for one boundary on screen at once. Nothing failed;
-// the numbers were simply wrong together.
+// The failure they guard against is invisible: a plot holding '95% HPD' as a
+// literal while the page's selector moves independently exports a figure at
+// 99.7% with a legend claiming 95%, and a diagram reading a stored hpd_95 while
+// the table re-selects from the distribution puts two ranges for one boundary
+// on screen at once. Nothing fails; the numbers are simply wrong together.
 describe('hpdBands', () => {
   // A single peak with tails, so the 1-sigma and 2-sigma selections genuinely
   // differ rather than both taking the whole series.
@@ -242,9 +240,8 @@ describe('storedHpdBands', () => {
 describe('the reporting levels', () => {
   /**
    * The digits, not the labels. `confidence` is the threshold an HPD region is
-   * accumulated to, so these ARE the reported range -- and the app used to
-   * carry three different numbers for one sigma (0.68, 0.682, 0.683) and three
-   * for two sigma (0.95, 0.954, 0.9545) across the solvers, the API and here.
+   * accumulated to, so these ARE the reported range: a truncated 0.68 or 0.95
+   * is a different answer, not a different spelling of the same one.
    *
    * JavaScript has no erf, so these are written out. The values below are
    * erf(n/sqrt(2)) to full double precision and must match

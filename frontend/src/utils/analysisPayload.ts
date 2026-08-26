@@ -1,14 +1,13 @@
-// The request body POST /analysis/bayesian and PUT /analysis/{id}/inputs
-// both take, built from the New Analysis / Edit Analysis draft.
+// The request body POST /analysis/bayesian and PUT /analysis/{id}/inputs both
+// take, built from the New Analysis / Edit Analysis draft.
 //
-// Extracted from the page rather than inlined there because of one rule that
-// is easy to get wrong and impossible to see going wrong: a non-Bayesian
-// analysis has no structure, so an edit that switches away from Bayesian has
-// to CLEAR its contexts, relationships, model tree and per-date phase
-// assignments -- not merely stop sending them. A date left pointing at a
-// context that is no longer in the payload is rejected as a dangling
-// reference, and a model tree left behind would have the results page drawing
-// a Harris matrix for an analysis that no longer has one.
+// Extracted from the page for one rule that is easy to get wrong and hard to
+// see going wrong: a non-Bayesian analysis has no structure, so switching away
+// from Bayesian must CLEAR its contexts, relationships, model tree and
+// per-date phase assignments rather than merely stop sending them. A date
+// pointing at a context no longer in the payload is rejected as dangling, and
+// a leftover model tree has the results page drawing a Harris matrix for an
+// analysis that no longer has one.
 import type { DraftGroup, DraftMeasurement, DraftRelationship, ModelElement } from '@/types'
 
 export type AnalysisType = 'calibration' | 'group_calibration' | 'bayesian'
@@ -19,9 +18,9 @@ export interface AnalysisDraft {
   measurements: DraftMeasurement[]
   groups: DraftGroup[]
   relationships: DraftRelationship[]
-  // The explicit model structure, when one has been authored on the Model
-  // Structure page. Null falls back to contexts + relationships, which the
-  // backend converts into an equivalent tree.
+  // The model structure, when one was authored on the Model Structure page.
+  // Null falls back to contexts + relationships, which the backend converts
+  // into an equivalent tree.
   modelTree: ModelElement | null
   // Which phase each date sits in, keyed by measurement id. Only meaningful
   // alongside a model tree.

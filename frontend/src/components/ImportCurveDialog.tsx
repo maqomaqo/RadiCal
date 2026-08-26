@@ -29,16 +29,15 @@ import { useNotify } from '@/contexts/NotificationContext'
 /**
  * Import a calibration curve from a file.
  *
- * The preview step is the whole point, more so than for dates. A date list is
- * short enough to read after importing it; a curve is thousands of rows that
- * nobody will check by eye, and a wrong one produces confident, plausible,
- * wrong calendar ages for every sample calibrated against it. So nothing is
- * stored until the file has been read, described, and drawn -- if the shape
- * below is not a calibration curve, it is visible before it is kept.
+ * The preview step is the point, more so than for dates: a date list is short
+ * enough to read afterwards, where a curve is thousands of rows nobody checks
+ * by eye and a wrong one produces confident, plausible, wrong calendar ages for
+ * every sample calibrated against it. So nothing is stored until the file has
+ * been read, described and drawn.
  *
- * Nothing here parses. The file goes to the backend to be read, and goes
- * again to be stored, so there is one parser and no way for what was
- * previewed to differ from what was kept.
+ * Nothing here parses. The file goes to the backend to be read and again to be
+ * stored, so there is one parser and no way for the preview to differ from what
+ * was kept.
  */
 
 const CURVE_TYPES = [
@@ -57,9 +56,9 @@ interface Props {
  * A curve id from its name.
  *
  * Must agree with `schemas/curve.py`'s `slugify` and satisfy its
- * `SLUG_PATTERN`, or the dialog offers an id the backend then rejects. The id
- * is a primary key, appears in URLs, and is what every date's `curve_id`
- * stores, so it cannot be changed afterwards.
+ * `SLUG_PATTERN`, or the dialog offers an id the backend rejects. The id is a
+ * primary key, appears in URLs, and is what every date's `curve_id` stores, so
+ * it cannot be changed afterwards.
  */
 export function slugify(text: string): string {
   return text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 64)

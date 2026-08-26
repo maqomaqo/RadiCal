@@ -1,31 +1,18 @@
 """
 The one place that knows what calibration curves exist.
 
-Before this module the answer was hardcoded in five places that had no way of
-agreeing with each other: the loaders in `calibration.py`, the Pydantic
-`Literal` in `schemas/sample.py`, the metadata list in `api/curves.py`, the
-OxCal name map in `oxcal_script.py`, and two separate `<MenuItem>` lists in the
-frontend. Adding a curve meant finding all five; forgetting one produced either
-a curve you could not select, a selection the API rejected, or -- worst --
-metadata describing a curve that is not the curve being calibrated against.
-That last one had already happened: `api/curves.py` claimed IntCal20 and
-SHCal20 held 5,141 points and Marine20 1,341, where the files actually loaded
-hold 9,501, 9,501 and 5,501.
+Nothing is ASSERTED here about a curve that can be measured from it instead.
+`CurveSpec` carries editorial metadata -- name, citation, which sample type the
+curve suits -- written by hand because it cannot be derived, and everything
+countable is computed from the curve that actually loaded. A stale point count
+is not something that can be written down.
 
-So nothing here is asserted about a curve that can be measured from it
-instead. `CurveSpec` carries editorial metadata (name, citation, which sample
-type the curve suits) written by hand because it cannot be derived, and
-everything countable -- point count, calendar and radiocarbon range, grid
-step structure, content hash -- computed from the curve that actually loaded.
-A stale point count is now not a thing that can be written down.
-
-Resolution is deliberately kept behind `resolve()` rather than exposed as a
-dict of loaders, because the next step is curves that live in the database
-rather than on disk. `resolve()` takes no session and never will: it opens its
-own when it has to (see the module docstring in `api/curves.py` for the
-lifecycle rules that make that safe). That keeps the fourteen existing
-`get_curve()` call sites -- several inside solvers that have no business
-holding a database session -- exactly as they are.
+Resolution sits behind `resolve()` rather than a dict of loaders, because a
+curve may live in the database rather than on disk. `resolve()` takes no
+session and never will: it opens its own when it has to (see the module
+docstring in `api/curves.py` for the lifecycle rules that make that safe), so
+the `get_curve()` call sites -- several inside solvers with no business holding
+a session -- stay as they are.
 """
 from dataclasses import dataclass, asdict
 from functools import lru_cache
@@ -60,26 +47,22 @@ class CurveSpec:
 
     id: str
     name: str
-    # Display categorisation, unchanged from the vocabulary the API has always
-    # used: terrestrial | marine | southern_hemisphere.
+    # Display categorisation: terrestrial | marine | southern_hemisphere.
     type: str
-    # Which kind of sample this curve is appropriate for. Distinct from `type`
-    # because both IntCal20 and SHCal20 are terrestrial curves for
-    # terrestrial samples but are not interchangeable, while `type` is what a
-    # user is choosing between. The frontend derives its "selecting Marine
-    # switches you to a marine curve" rule from this field rather than from
-    # its own copy of the mapping.
+    # Which kind of sample this curve suits. Distinct from `type`: IntCal20
+    # and SHCal20 are both terrestrial but not interchangeable, and `type` is
+    # what the user chooses between. The frontend's "selecting Marine switches
+    # you to a marine curve" rule reads this rather than its own mapping.
     sample_type: str
     description: str
     reference: str
     year: int
     doi: Optional[str]
-    # Where the curve came from. Only 'builtin' exists today; database-stored
-    # imports and mixed curves land here next.
+    # 'builtin', 'imported' (a file) or 'mixed' (a recipe over two curves).
     kind: str
     # Other spellings this curve answers to when read out of a file -- an
-    # OxCal `Curve("IntCal20.14c")`, or a CSV cell reading "IntCal". Matched
-    # after `_normalise`, so case and punctuation are already handled.
+    # OxCal `Curve("IntCal20.14c")`, a CSV cell reading "IntCal". Matched after
+    # `_normalise`, so case and punctuation are already handled.
     aliases: Tuple[str, ...]
 
     # --- measured from the loaded curve ---
@@ -88,16 +71,14 @@ class CurveSpec:
     cal_max: float
     c14_min: float
     c14_max: float
-    # Human-readable summary of the calendar grid, e.g.
-    # "1 yr (0-13,900), 5 yr (13,900-25,000), 10 yr (25,000-55,000)".
-    # Calibration curves are not uniformly spaced and the spacing is the
-    # first thing a curve's resolution depends on, so it is worth stating.
+    # Summary of the calendar grid, e.g. "1 yr (0-13,900), 5 yr
+    # (13,900-25,000)". Curves are not uniformly spaced, and the spacing is
+    # what a curve's resolution depends on first.
     resolution: str
-    # sha256 over the normalised numeric rows -- comment and whitespace
-    # changes do not move it, a changed number does. Lets a rerun notice that
-    # the curve underneath a stored analysis is not the curve it was run
-    # against, which is currently silent: the three builtin file paths are
-    # all overridable by environment variable.
+    # sha256 over the normalised numeric rows: comment and whitespace changes
+    # do not move it, a changed number does. Lets a rerun notice that the curve
+    # under a stored analysis is not the one it was run against -- the builtin
+    # file paths are all overridable by environment variable.
     content_sha256: str
 
     # Hidden from the pickers but still resolvable, so a rerun of an analysis
@@ -127,10 +108,9 @@ class _Builtin:
     aliases: Tuple[str, ...]
 
 
-# Order matters twice over: it is the order the API lists curves in, and the
-# first entry for a given sample_type is what the frontend switches to when
-# that sample type is selected. IntCal20 leading the terrestrial pair
-# reproduces the previous hardcoded default exactly.
+# Order matters twice: it is the order the API lists curves in, and the first
+# entry for a given sample_type is what the frontend switches to when that
+# sample type is selected.
 _BUILTINS: Tuple[_Builtin, ...] = (
     _Builtin(
         id='intcal20',
@@ -173,9 +153,8 @@ _BUILTIN_LOADERS = {
     'marine20': load_marine20,
 }
 
-# The ids `schemas/sample.py` validates against. Exported as a tuple so that
-# module can keep using it as a Pydantic `Literal` -- one list, declared here,
-# rather than a second copy maintained alongside this one.
+# The builtin ids, exported as one list declared here rather than a second
+# copy maintained alongside this one. See schemas.sample.VALID_CURVE_IDS.
 BUILTIN_CURVE_IDS: Tuple[str, ...] = tuple(b.id for b in _BUILTINS)
 
 
@@ -195,11 +174,10 @@ def _step_summary(cal_ages: np.ndarray) -> str:
     Describe the calendar grid as the runs of constant step it is actually
     made of, e.g. "1 yr (0-13,900), 5 yr (13,900-25,000)".
 
-    Curves in this family change step several times across their range and
-    the change points are informative (they are where the curve's own
-    resolution changes). A curve with more runs than are worth listing --
-    an imported one need not be regular at all -- is summarised by its range
-    of steps instead of being printed at length.
+    Curves in this family change step several times across their range, and
+    the change points are where the curve's own resolution changes. A curve
+    with too many runs to list -- an imported one need not be regular at all --
+    is summarised by its range of steps instead.
     """
     if len(cal_ages) < 2:
         return 'n/a'
@@ -238,19 +216,16 @@ def content_hash(curve: CalibrationCurve) -> str:
 # Stored curves
 # --------------------------------------------------------------------------
 #
-# Curves the user imported live in the database, not on disk. Everything below
-# resolves them without ever being handed a Session: it opens its own, briefly.
-# That is what keeps the fourteen `get_curve()` call sites -- several inside
-# solvers with no business holding a session -- exactly as they were.
+# Imported curves live in the database, not on disk. Everything below resolves
+# them without ever being handed a Session: it opens its own, briefly.
 #
 # Two caches, with different rules, because the data and the metadata have
 # different lifetimes. A stored curve's NUMBERS are immutable (see
 # models.StoredCalibrationCurve), so caching the parsed curve by id can never
-# go stale and needs no invalidation. Its editorial metadata is editable, so it
-# is read from the row every time and never cached -- a rename is visible at
-# once. The alias/existence index sits in between: it is cheap to rebuild but
-# consulted per row of an imported CSV, so it is cached for a few seconds and
-# invalidated outright whenever this process writes a curve.
+# go stale. Its editorial metadata is editable, so it is read from the row
+# every time and never cached. The alias/existence index sits in between: cheap
+# to rebuild but consulted per row of an imported CSV, so it is cached for a
+# few seconds and invalidated whenever this process writes a curve.
 
 _STORED_CURVES: Dict[str, CalibrationCurve] = {}
 
@@ -264,11 +239,10 @@ def invalidate(curve_id: Optional[str] = None) -> None:
     Forget what was cached about stored curves. Called by the endpoints that
     write one.
 
-    With more than one worker process only the writing worker runs this, so
-    another worker can briefly still list a just-deleted curve. Everything
-    that matters is guarded against it anyway: resolution of a deleted curve
-    falls through to the database and raises, and a curve in use cannot be
-    deleted at all.
+    With several worker processes only the writing one runs this, so another
+    can briefly still list a just-deleted curve. That is harmless: resolving a
+    deleted curve falls through to the database and raises, and a curve in use
+    cannot be deleted at all.
     """
     global _index_cache, _index_built_at
     _index_cache = None
@@ -286,15 +260,12 @@ _curve_table_warned = False
 
 def _no_curve_table(exc: Exception) -> None:
     """
-    Report an unreachable curve table once, and carry on with the builtin
-    curves.
+    Report an unreachable curve table once and carry on with the builtins.
 
     Calibrating against IntCal20 does not need a database and must not start
-    needing one: the curves ship with the app, and a script, a test importing
-    this service on its own, or a database that has not been initialised yet
-    should all still be able to calibrate. What is lost when this fires is
-    only the user's imported curves, and a request naming one of those fails
-    by name a moment later in resolve().
+    needing one: a script, a test importing this service alone, or an
+    uninitialised database should all still calibrate. Only imported curves are
+    lost, and a request naming one fails by name in resolve().
     """
     global _curve_table_warned
     if not _curve_table_warned:
@@ -328,14 +299,13 @@ def _stored_rows(include_archived: bool = False) -> List[StoredCalibrationCurve]
 
 def _curve_from_row(row: StoredCalibrationCurve) -> CalibrationCurve:
     """
-    Rebuild a stored curve from the file it was imported from, and refuse it
-    if the numbers are not the numbers it was stored with.
+    Rebuild a stored curve from the file it was imported from, refusing it if
+    the numbers are not the ones it was stored with.
 
     The hash check is the point. Storing the source text rather than a parsed
-    array keeps the provenance (and the citation in its header comments), but
-    it means the curve depends on the parser -- and a parser change years from
-    now would otherwise move a curve silently underneath every analysis run
-    against it. Here that becomes a loud failure instead.
+    array keeps the provenance and the citation in its header, but makes the
+    curve depend on the parser -- so a later parser change would otherwise move
+    a curve silently underneath every analysis run against it.
     """
     from app.services.curve_import import parse_curve  # local: parser imports numpy only
 
@@ -373,9 +343,8 @@ def _curve_from_row(row: StoredCalibrationCurve) -> CalibrationCurve:
     return curve
 
 
-# A mix of a mix is allowed -- OxCal permits it -- but the depth is bounded so
-# that a hand-edited row pointing a curve at itself fails with something
-# readable instead of a recursion error.
+# A mix of a mix is allowed, as in OxCal, but bounded so a hand-edited row
+# pointing a curve at itself fails readably rather than as a recursion error.
 _MAX_MIX_DEPTH = 4
 
 
@@ -383,10 +352,9 @@ def _mixed_from_row(row: StoredCalibrationCurve, depth: int = 0) -> CalibrationC
     """
     Synthesise a mixed curve from its recipe.
 
-    Its parents are resolved through the ordinary path, so a mix of an
-    imported curve works, and an ingredient that has been archived still
-    resolves -- archiving hides a curve from the pickers, it does not withdraw
-    it, and a mix built on one has to keep working.
+    Its parents resolve through the ordinary path, so a mix of an imported
+    curve works and an archived ingredient still resolves -- archiving hides a
+    curve from the pickers rather than withdrawing it.
     """
     from app.services.curve_mix import mix
 
@@ -429,12 +397,10 @@ def resolve(curve_id: str) -> CalibrationCurve:
     """
     Load a curve by id, builtin or stored.
 
-    Raises ValueError for an id this app has no curve for, rather than
-    substituting a default -- see `calibration.get_curve`, which delegates
-    here and whose docstring explains at length why a silent fallback to
-    IntCal20 is the worst available behaviour. An ARCHIVED curve still
-    resolves: it is hidden from the pickers, not withdrawn, so that rerunning
-    an analysis that used it still works.
+    Raises ValueError for an id this app has no curve for rather than
+    substituting a default; see `calibration.get_curve`. An ARCHIVED curve
+    still resolves, being hidden from the pickers rather than withdrawn, so a
+    rerun of an analysis that used it still works.
     """
     loader = _BUILTIN_LOADERS.get(curve_id)
     if loader is not None:
@@ -463,8 +429,8 @@ def resolve(curve_id: str) -> CalibrationCurve:
 def _measured(curve_id: str) -> Dict[str, Any]:
     """
     The countable half of a curve's description, measured from the curve
-    itself. Cached separately from the editorial half, which is editable and
-    so is read from the row on every request.
+    itself. Cached separately from the editorial half, which is editable and so
+    read from the row on every request.
     """
     curve = resolve(curve_id)
     return {
@@ -531,9 +497,9 @@ def get_spec(curve_id: str) -> CurveSpec:
 def list_specs(include_archived: bool = False) -> List[CurveSpec]:
     """
     Every curve this app can calibrate against, builtins first and imports in
-    the order they were added. A curve that cannot be loaded -- a missing
-    file, a stored curve whose data no longer matches its hash -- is left out
-    rather than listed as something the user can select and then fail on.
+    the order they were added. One that cannot be loaded -- a missing file, a
+    stored curve no longer matching its hash -- is left out rather than offered
+    for the user to select and then fail on.
     """
     specs = []
     for builtin in _BUILTINS:
@@ -556,9 +522,9 @@ def curve_ids(include_archived: bool = False) -> Tuple[str, ...]:
 
 def known_ids() -> Tuple[str, ...]:
     """
-    Every curve id that resolves, archived ones included, WITHOUT loading any
-    of them. Used where only the names are wanted -- an error message listing
-    what is available should not parse three curve files to write itself.
+    Every curve id that resolves, archived included, WITHOUT loading any of
+    them: an error message listing what is available should not parse three
+    curve files to write itself.
     """
     try:
         with SessionLocal() as db:
@@ -571,9 +537,9 @@ def known_ids() -> Tuple[str, ...]:
 
 def exists(curve_id: str) -> bool:
     """
-    Whether a curve id can be calibrated against. Used by the request schemas,
-    which is why builtins are answered without touching the database: a
-    payload of forty dates all on IntCal20 should cost no queries at all.
+    Whether a curve id can be calibrated against. Builtins are answered without
+    touching the database, so a payload of forty dates all on IntCal20 costs no
+    queries.
     """
     if curve_id in _BUILTIN_LOADERS:
         return True
@@ -582,10 +548,9 @@ def exists(curve_id: str) -> bool:
 
 def _stored_index() -> Dict[str, str]:
     """
-    Name -> id for every stored curve, including archived ones and their
-    aliases. Cached briefly rather than per-request: it is consulted once per
-    row of an imported CSV, and rebuilding it per row would turn a 500-row
-    import into 500 queries.
+    Name -> id for every stored curve, archived ones and aliases included.
+    Cached briefly because it is consulted once per row of an imported CSV, and
+    rebuilding it per row would turn a 500-row import into 500 queries.
     """
     global _index_cache, _index_built_at
     now = time.monotonic()
@@ -620,12 +585,11 @@ def resolve_alias(name: str) -> Optional[str]:
     cell reading 'IntCal', a filename 'intcal20.14c' -- mapped to the id this
     app loads it under, or None if it names no curve we have.
 
-    Returning None rather than a default is the point: `date_import` and
-    `oxcal_script` both turn that None into an error naming the curve that
-    was asked for, because a file calibrated against a curve we do not have
-    is not a file we can honour by quietly using a different one. Importing
-    that curve is what makes such a file readable -- which is why stored
-    curves answer to their aliases here too.
+    None rather than a default: `date_import` and `oxcal_script` both turn it
+    into an error naming the curve that was asked for, because a file
+    calibrated against a curve we do not have cannot be honoured by quietly
+    using a different one. Importing that curve is what makes the file
+    readable, which is why stored curves answer to their aliases here too.
     """
     key = _normalise(name)
     if not key:
@@ -636,11 +600,9 @@ def resolve_alias(name: str) -> Optional[str]:
     return _stored_index().get(key)
 
 
-# How close a stored mixture has to be to a requested one to be the same
-# mixture. Percentages in .oxcal files are written to whole numbers, so
-# anything within a tenth is the same recipe written differently -- and
-# anything further apart is a different mixture that would calibrate
-# differently.
+# How close a stored mixture must be to a requested one to be the same.
+# Percentages in .oxcal files are written to whole numbers, so anything within
+# a tenth is the same recipe written differently.
 MIX_MATCH_TOLERANCE = 0.1
 
 
@@ -648,15 +610,13 @@ def find_mixed(a_id: str, b_id: str, percent_a: float, percent_a_error: float) -
     """
     A stored mixed curve built from this recipe, or None.
 
-    Both orderings are checked, with the percentage flipped between them: 30%
-    IntCal20 with Marine20 IS 70% Marine20 with IntCal20, and refusing to
-    recognise one written the other way round would be pedantry.
+    Both orderings are checked with the percentage flipped: 30% IntCal20 with
+    Marine20 IS 70% Marine20 with IntCal20.
 
     Used twice, which is why it lives here rather than in either caller: the
-    OxCal importer matches a file's Mix_Curves against what this app already
-    has, and the create endpoint uses it to refuse a duplicate -- two curves
-    with the same recipe would be the same numbers under two names, and would
-    make that import matching arbitrary.
+    OxCal importer matches a file's Mix_Curves against what this app has, and
+    the create endpoint refuses a duplicate -- two curves with one recipe would
+    be the same numbers under two names, making that matching arbitrary.
     """
     try:
         with SessionLocal() as db:
@@ -686,11 +646,9 @@ def usage(curve_id: str) -> Dict[str, Any]:
     """
     What is already calibrated against this curve.
 
-    Deleting a curve out from under a stored analysis would leave a saved
-    result that can be displayed but never reproduced, so this is what
-    api/curves.py checks before allowing it -- and what it reports back
-    instead of a bare refusal, since "used by 3 analyses" is actionable and
-    "409" is not.
+    Deleting a curve out from under a stored analysis would leave a result that
+    can be displayed but never reproduced, so api/curves.py checks this first
+    and reports it back: "used by 3 analyses" is actionable where "409" is not.
     """
     with SessionLocal() as db:
         analysis_ids = [
@@ -703,8 +661,8 @@ def usage(curve_id: str) -> Dict[str, Any]:
             .filter(ProjectSample.curve_id == curve_id)
             .distinct().all()
         ]
-        # A mixed curve holds its parents by id, so an ingredient counts as
-        # in use for as long as the mix exists.
+        # A mixed curve holds its parents by id, so an ingredient is in use
+        # for as long as the mix exists.
         mixed = [
             row.id for row in db.query(StoredCalibrationCurve)
             .filter(StoredCalibrationCurve.kind == 'mixed').all()

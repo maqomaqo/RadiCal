@@ -13,42 +13,21 @@ import csv
 #
 # "1 sigma" means the two-sided normal coverage of one standard deviation --
 # erf(1/sqrt(2)) = 0.682689..., quoted as 68.3%. Likewise 95.4% and 99.7%.
-# These are the levels OxCal reports against, and the levels this app's own
-# labels claim.
+# These are the levels OxCal reports against and the ones this app's labels
+# claim.
 #
-# They live here, computed rather than typed, because the digits were the
-# whole problem. The app had grown THREE different numbers for one sigma and
-# three for two sigma, spread across the solvers, the API and the browser:
-#
-#   1 sigma   0.68 (stored plain/group calibrations, the unmodelled export
-#             column, the curve endpoints), 0.682 (the results page selector
-#             and its precomputed unmodelled ranges), 0.683 (both solvers and
-#             the durations).
-#   2 sigma   0.95 (the same calibration paths), 0.954 (solvers, browser),
-#             0.9545 (the resolution profile).
-#
-# None of that is cosmetic: `confidence` is the threshold the HPD set is
-# accumulated to (see hpd_ranges_from_distribution), so a different number is
-# a different reported range. Measured over thirty IntCal20 calibrations
-# spanning 500-10,000 BP at +/-15, 25 and 40, against the exact coverages:
-#
-#   1 sigma   0.68 differed in 11 of 30 cases, by up to 5 years
-#             0.682 in 0 of 30, 0.683 in 1 of 30 by 1 year
-#   2 sigma   0.95 differed in 27 of 30 cases, by up to 10 years
-#             0.954 in 9 of 30 by up to 5 years, 0.9545 in 0 of 30
-#   3 sigma   0.997 differed in 24 of 30 cases, by up to 10 years
-#
-# So the truncated two-decimal forms were the material error and the
-# three-decimal ones were nearly right; using the exact value costs nothing
-# and removes the question.
+# Computed rather than typed, because `confidence` is the threshold the HPD
+# set is accumulated to (see hpd_ranges_from_distribution) and so a truncated
+# value is a different reported range: over thirty IntCal20 calibrations from
+# 500-10,000 BP, a two-sigma level of 0.95 differed from the exact coverage in
+# 27 of 30 cases, by up to 10 years.
 SIGMA_1 = erf(1 / sqrt(2))      # 0.6826894921...  reported as 68.3%
 SIGMA_2 = erf(2 / sqrt(2))      # 0.9544997361...  reported as 95.4%
 SIGMA_3 = erf(3 / sqrt(2))      # 0.9973002039...  reported as 99.7%
 
-# The levels the results page offers, in the order it offers them, with the
-# label each is quoted under. One decimal place, correctly ROUNDED: 68.27%
-# rounds to 68.3%, and the 68.2% this app used to print was a truncation.
-# frontend/src/utils/hpd.ts carries the same three pairs -- see the note there.
+# The levels the results page offers, in order, with the label each is quoted
+# under. One decimal place, correctly ROUNDED: 68.27% rounds to 68.3%.
+# frontend/src/utils/hpd.ts carries the same three pairs.
 REPORTING_CONFIDENCE_LEVELS = (SIGMA_1, SIGMA_2, SIGMA_3)
 CONFIDENCE_LABELS = {SIGMA_1: '68.3%', SIGMA_2: '95.4%', SIGMA_3: '99.7%'}
 
@@ -62,30 +41,21 @@ class CalibrationPoint:
 
 def hpd_ranges_from_distribution(ages, weights, confidence: float = SIGMA_2) -> List[Dict[str, float]]:
     """
-    Compute one or more Highest Posterior Density (HPD) ranges from a
-    discretized calendar-age probability distribution, following standard
-    radiocarbon calibration reporting practice (OxCal/CALIB-style).
+    Highest Posterior Density (HPD) ranges from a discretized calendar-age
+    distribution, in OxCal/CALIB reporting style.
 
-    Radiocarbon calibration curves are non-monotonic -- plateaus and
-    "wiggles" mean a single measurement can map to two or more separate,
-    disjoint calendar-age ranges rather than one contiguous span. Reporting
-    only the overall min/max envelope in that situation silently implies
-    probability mass in the (often large, near-zero-density) gap between
-    the ranges, which is misleading. This function instead returns each
-    disjoint range in the HPD set individually, with its own share of the
-    total probability, e.g.:
+    Calibration curves are non-monotonic, so one measurement can map to
+    several disjoint calendar-age ranges. Reporting only the min/max envelope
+    would imply probability mass in the near-zero-density gap between them, so
+    each range is returned with its own share of the total:
         [{'min': 3300, 'max': 3360, 'probability_percent': 13.5},
          {'min': 3100, 'max': 3270, 'probability_percent': 81.9}]
-    whose shares sum to slightly MORE than the level asked for, because the
-    HPD set is built from whole grid points and the last one taken usually
-    overshoots. That is the familiar "at 95.4% probability" style used in
-    OxCal output.
+    The shares sum to slightly MORE than the level asked for, because the set
+    is built from whole grid points and the last one taken overshoots.
 
-    Shared by CalibrationCurve.get_hpd_ranges() (grid points from a
-    calibration curve) and the Bayesian posterior extraction in
-    the samplers (bins from a histogram of draws) -- both are just
-    (age, weight) series at that point, so the same logic applies to
-    either.
+    Shared by CalibrationCurve.get_hpd_ranges (curve grid points) and the
+    solvers' posterior extraction (histogram bins) -- both are (age, weight)
+    series.
 
     Args:
         ages: 1D array of calendar ages, sorted ascending
@@ -111,24 +81,20 @@ def hpd_ranges_from_distribution(ages, weights, confidence: float = SIGMA_2) -> 
 
     norm_weights = weights / total
 
-    # Sort by probability (descending) and accumulate until reaching the
-    # requested confidence level -- this is the standard HPD construction:
-    # include the highest-density points first, regardless of where they
-    # fall on the age axis.
+    # The standard HPD construction: take the highest-density points first,
+    # regardless of where they fall on the age axis, until the level is met.
     sorted_indices = np.argsort(-norm_weights)
     cumsum = np.cumsum(norm_weights[sorted_indices])
     idx = np.where(cumsum >= confidence)[0]
     if len(idx) == 0:
-        # Even the full distribution doesn't reach the requested
-        # confidence (can happen with a few NaN/zero weights) -- fall back
-        # to the entire range as one segment.
+        # Even the full distribution falls short of the requested
+        # confidence, which a few NaN/zero weights can cause.
         selected = np.arange(len(ages))
     else:
         selected = sorted_indices[:idx[0] + 1]
 
-    # Group the selected grid points into contiguous runs by array index
-    # (ages are sorted ascending, so adjacent indices are adjacent in
-    # calendar time) -- each run is one disjoint range in the HPD set.
+    # Ages are sorted ascending, so each contiguous run of indices is one
+    # disjoint range in the HPD set.
     selected_sorted = np.sort(selected)
     segments = []
     start = prev = int(selected_sorted[0])
@@ -167,14 +133,10 @@ class CalibrationCurve:
 
     def _grid_weights(self) -> np.ndarray:
         """
-        Trapezoidal weight (effective calendar-year width) represented by each
-        curve grid point. Calibration curves like IntCal20 are NOT uniformly
-        spaced (e.g. 1-year steps near the present, 20+ year steps further
-        back), so summing raw likelihood values without accounting for this
-        would bias the posterior toward densely-sampled regions of the curve
-        regardless of how likely they actually are. Weighting each point by
-        the calendar-year interval it represents (and integrating, i.e.
-        weighted-summing, rather than plain-summing) corrects for that.
+        The calendar-year width each curve grid point stands for. Curves like
+        IntCal20 are NOT uniformly spaced -- 1-year steps near the present,
+        20+ further back -- so plain-summing the likelihood would bias the
+        posterior toward densely-sampled stretches of curve.
         """
         if self._grid_weights_cache is not None:
             return self._grid_weights_cache
@@ -202,31 +164,22 @@ class CalibrationCurve:
         delta_r_error: Optional[float] = None,
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
-        Calibrate radiocarbon age to calendar age using the probability method.
+        Calibrate a radiocarbon age to a calendar age by the probability
+        method: at each curve point, combine the curve and sample errors in
+        quadrature, evaluate the Gaussian likelihood, weight by the
+        calendar-year interval the point represents, and normalise.
 
-        For each point on the calibration curve:
-        - Calculate combined uncertainty (curve error + sample error in quadrature)
-        - Compute likelihood: P(observed c14_age | cal_age) using a Gaussian
-          PDF, including the 1/sigma normalization term (not just the
-          exponential). Early calibration programs (and OxCal <=3.2) dropped
-          this term, using p(t) ~ exp(-(rm-r(t))^2 / 2(sigma_m^2+sigma(t)^2))
-          -- see Bronk Ramsey (2001) eq. 1. Because calibration curve error
-          sigma(t) varies substantially with age (e.g. IntCal20 in the early
-          Holocene), omitting the term biases the posterior toward
-          high-curve-error regions. Later OxCal versions and CALIB (Stuiver &
-          Reimer 1993) fixed this by dividing by sqrt(sigma_m^2+sigma(t)^2)
-          (eq. 2), which is what we do here.
-        - Weight by the calendar-year interval each grid point represents
-          (trapezoidal rule) so uneven curve resolution doesn't bias the result
-        - Normalize to get posterior probability distribution
+        The likelihood includes the 1/sigma normalisation term, not just the
+        exponential. Curve error varies substantially with age, so omitting it
+        biases the posterior toward high-curve-error regions -- the fix CALIB
+        (Stuiver & Reimer 1993) and later OxCal made; see Bronk Ramsey (2001)
+        eqs. 1 and 2.
 
         A local marine reservoir offset (Delta-R) shifts the age the curve
-        predicts: a marine sample of calendar age t is expected to measure
-        curve(t) + delta_r, because the curve models only the global average
-        reservoir effect. Comparing (c14_age - delta_r) against the curve is
-        the same statement, and its uncertainty joins the quadrature sum --
-        so an offset that is poorly known widens the calibrated range rather
-        than just moving it.
+        predicts, since the curve models only the global average: a marine
+        sample of calendar age t is expected to measure curve(t) + delta_r.
+        Its uncertainty joins the quadrature sum, so a poorly known offset
+        widens the calibrated range rather than only moving it.
 
         Args:
             c14_age: Measured radiocarbon age (years BP)
@@ -246,16 +199,14 @@ class CalibrationCurve:
         # Combined uncertainty: sqrt(sigma_curve^2 + sigma_measurement^2 + sigma_deltaR^2)
         combined_error = np.sqrt(self.c14_errors**2 + c14_error**2 + offset_error**2)
 
-        # Likelihood: P(c14_obs | cal_age) = exp(-0.5 * ((c14_obs - c14_model) / sigma)^2) / sigma
-        # This is the (correctly normalized, up to the shared 1/sqrt(2*pi)
-        # constant) Gaussian probability of observing c14_age given each
-        # cal_age on the curve. The 1/sigma factor matters here because
-        # sigma = combined_error varies from point to point along the curve.
+        # P(c14_obs | cal_age), normalised up to the shared 1/sqrt(2*pi).
+        # The 1/sigma factor matters because combined_error varies from point
+        # to point along the curve.
         log_likelihood = -0.5 * ((self.c14_ages - (c14_age - offset)) / combined_error)**2
         likelihood = np.exp(log_likelihood) / combined_error
 
-        # Weight by local grid spacing before normalizing so calendar-year
-        # density in the curve file doesn't distort the posterior shape.
+        # Weighted by local grid spacing before normalising, so the curve
+        # file's calendar-year density does not distort the posterior shape.
         weighted_likelihood = likelihood * self._grid_weights()
 
         total = np.sum(weighted_likelihood)
@@ -291,19 +242,11 @@ class CalibrationCurve:
     
     def get_hpd_interval(self, cal_ages: np.ndarray, probs: np.ndarray, confidence: float = SIGMA_2) -> Tuple[float, float]:
         """
-        Calculate the overall Highest Posterior Density (HPD) envelope.
-
-        Radiocarbon posteriors are frequently multimodal -- calibration
-        curve plateaus and wiggles routinely produce two or more disjoint
-        calendar-age ranges rather than one contiguous span (this is why
-        OxCal/CALIB report "at 95.4% probability: 3360-3300 (13.5%),
-        3270-3100 (81.9%)" rather than a single "3360-3100" span, which
-        would silently claim probability mass in the gap between the
-        peaks). This method returns just the min/max envelope across
-        *all* HPD ranges combined, kept for callers that only need a
-        single span (e.g. a compact table column or a quick summary
-        statistic). For the actual per-range breakdown with each
-        segment's probability share, use get_hpd_ranges() instead.
+        The overall HPD envelope: the min/max across all disjoint ranges
+        combined, for callers that only need a single span. Because
+        radiocarbon posteriors are frequently multimodal, that span claims
+        probability mass in the gap between peaks -- use get_hpd_ranges() for
+        the per-range breakdown.
 
         Args:
             cal_ages: Calendar ages (years BP)
@@ -320,24 +263,17 @@ class CalibrationCurve:
 
     def get_hpd_ranges(self, cal_ages: np.ndarray, probs: np.ndarray, confidence: float = SIGMA_2) -> list:
         """
-        Calculate the Highest Posterior Density (HPD) region as one or more
-        disjoint calendar-age ranges, each with its own share of the total
-        probability -- this is standard radiocarbon calibration reporting
-        practice (see OxCal/CALIB output), needed because calibration
-        curves are not monotonic. A single steep or plateaued stretch of
-        curve can map one measurement to multiple separate calendar-age
-        peaks; collapsing those into one min/max span (as get_hpd_interval
-        does) misrepresents the result by implying probability mass across
-        the low-density gap between the peaks.
+        The HPD region as one or more disjoint calendar-age ranges, each with
+        its own share of the total probability -- standard radiocarbon
+        reporting practice, needed because calibration curves are not
+        monotonic.
 
         Returns:
-            List of dicts, ordered oldest-first, each:
+            List of dicts, oldest-first, each
                 {'min': float, 'max': float, 'probability_percent': float}
-            The percentages are each range's share of the *entire*
-            distribution (not just the selected HPD set), so for a 95%
-            request they will typically sum to slightly more than 95%
-            (e.g. 95.4%) rather than exactly 95%, because the HPD set is
-            built from whole grid points -- the same convention OxCal uses.
+            The percentages are shares of the ENTIRE distribution, so they
+            typically sum to slightly more than the level asked for: the set
+            is built from whole grid points, as in OxCal.
         """
         return hpd_ranges_from_distribution(cal_ages, probs, confidence)
     
@@ -372,50 +308,26 @@ class CalibrationCurve:
     def get_display_distribution(self, cal_ages: np.ndarray, probs: np.ndarray,
                                   max_points: int = 200, mass_threshold: float = 1e-4):
         """
-        Return a compact (cal_age, probability DENSITY) series suitable for
-        sending to the frontend for plotting.
+        A compact (cal_age, probability DENSITY) series for the frontend to
+        plot.
 
-        The full curve has thousands of grid points (e.g. ~9,500 for
-        IntCal20) spanning 0-55,000 cal BP, but any single sample's posterior
-        is concentrated in a narrow window of that range. Just taking the
-        first N points of the array (as this endpoint used to) silently
-        returns whichever slice happens to be first in calendar-age order --
-        for most real samples that's nowhere near where the actual
-        probability mass is, so the frontend would plot a flat near-zero
-        line instead of the sample's actual distribution.
+        The full curve runs to thousands of grid points across 0-55,000 cal
+        BP, but a single sample's posterior occupies a narrow window of it. So
+        this converts the posterior MASSES `calibrate` returns into a density
+        by dividing out each grid point's calendar-year width, finds the
+        contiguous window where that density exceeds `mass_threshold` of the
+        peak, and downsamples only that window to `max_points`.
 
-        This instead:
-        1. Converts the posterior MASSES that `calibrate` returns into a
-           density, by dividing out the calendar-year width each grid point
-           stands for (see _grid_weights).
-        2. Finds the contiguous window where the density exceeds
-           `mass_threshold` of the peak (padded by a few points either side).
-        3. Downsamples that window (not the whole curve) to at most
-           `max_points` points, if needed, for a reasonably sized payload.
+        A DENSITY, not masses, because the curves are not uniformly spaced (1,
+        5, 10 and 20-year steps in different ranges), so a mass array has
+        different units in different parts of the curve while the series is
+        plotted against a calendar axis. It is also what the plot's y-axis is
+        labelled, and what exact_chain._plottable produces for the modelled
+        posterior drawn over it.
 
-        Why step 1 exists. `calibrate` returns per-point masses summing to 1,
-        weighted by grid spacing -- correct for a mass, but the curves are not
-        uniformly spaced (IntCal20 and SHCal20 step 1, 5, 10 and 20 years in
-        different ranges; Marine20 is 10 throughout). A mass array therefore
-        has different units in different parts of the curve, and the series
-        this returns is plotted against a calendar axis where only a density
-        means anything.
-
-        It showed up as a real defect. The stacked plot draws this series as
-        the unmodelled "prior" behind a modelled posterior, which comes from
-        exact_chain._plottable and IS a density. Integrating each over its own
-        grid on one real analysis gave 1.000 for every posterior but 10.000
-        for the marine rows, so the prior was drawn an order of magnitude too
-        tall -- 16 of 22 rows overflowed into the row above. Downsampling made
-        it worse by changing the spacing again without touching the values.
-
-        A density is also what the plot's y-axis has always been labelled
-        ("Probability Density" in PosteriorPlot), so this makes an existing
-        claim true rather than making a new one.
-
-        Note the returned window integrates to slightly less than 1, by
-        whatever the trimmed tails held -- it is a view of a density, not a
-        renormalised distribution in its own right.
+        The returned window integrates to slightly less than 1, by whatever
+        the trimmed tails held: it is a view of a density, not a renormalised
+        distribution.
 
         Args:
             cal_ages: full curve calendar ages for this posterior
@@ -432,8 +344,7 @@ class CalibrationCurve:
         if len(cal_ages) == 0 or len(probs) == 0:
             return []
 
-        # Masses -> density. Guarded against a zero-width cell so a
-        # degenerate curve cannot produce an infinity here.
+        # Masses -> density, guarded against a zero-width cell.
         weights = self._grid_weights()
         if len(weights) == len(probs):
             probs = np.divide(
@@ -598,31 +509,19 @@ def load_shcal20() -> Optional[CalibrationCurve]:
 
 def get_curve(curve_id: str) -> CalibrationCurve:
     """
-    Shared curve lookup used by both the single-sample calibration endpoint
-    and the Bayesian model builder, so the two code paths can never end up
-    calibrating against inconsistent curve data.
+    Shared curve lookup, so the calibration endpoint and the solvers cannot
+    calibrate against inconsistent curve data.
 
-    An unrecognized curve_id raises rather than silently falling back to
-    IntCal20 (the previous behaviour): a typo'd or unsupported curve_id
-    would otherwise produce a real, plausible-looking, but wrong
-    calibration -- e.g. someone asking for "marine20" but mistyping
-    "marine2020" would have silently gotten a terrestrial calibration with
-    no reservoir correction applied, with nothing in the response
-    indicating the requested curve wasn't actually used. The API layer
-    (schemas/sample.py's CalibrateRequest/BayesianMeasurementInput) also
-    validates curve_id against this same set before a request ever reaches
-    here, so this check is defense-in-depth for any other caller of
-    get_curve() directly.
+    An unrecognized curve_id raises rather than falling back to IntCal20: a
+    mistyped "marine2020" would otherwise return a plausible-looking
+    terrestrial calibration with no reservoir correction and nothing to say
+    so. schemas/sample.py validates curve_id before a request reaches here, so
+    this is defence in depth for direct callers.
 
-    Which curves exist is services/curve_registry.py's question, not this
-    module's -- this is now a thin delegation to it, kept because fourteen
-    call sites (several inside solvers) import it by this name. The import is
-    function-level to break the cycle: the registry loads curves through the
-    loaders above, so it imports this module at module level and this module
-    cannot import it back the same way.
-
-    Loaders are lru_cache'd, so the (fairly large) .14c files are parsed
-    once per process rather than on every request.
+    A thin delegation to services/curve_registry, which owns the question of
+    which curves exist; the import is function-level to break the cycle, since
+    the registry imports this module for its loaders. Those loaders are
+    lru_cache'd, so each .14c file is parsed once per process.
     """
     from app.services.curve_registry import resolve
     return resolve(curve_id)

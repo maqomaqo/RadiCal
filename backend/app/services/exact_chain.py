@@ -3,36 +3,13 @@ Exact solver for chain-shaped chronological models -- a Sequence of Phases
 separated by Boundaries, which is the ordinary shape of an archaeological
 model and the one OxCal's documentation recommends.
 
-Why this exists instead of just sampling the model
---------------------------------------------------
-For this shape the posterior can be integrated exactly, so there is no
-sampler to converge and no mode to miss. That matters specifically because
-calibration curves wiggle: a single radiocarbon age routinely calibrates to
-two or more separated calendar ranges, and resolving which one is right is
-much of the reason to build a Bayesian model at all.
-
-pm.sample_smc gets that wrong here, and the reason is structural. PyMC splits
-a model into `varlogp` (free variables) and `datalogp`, and SMC tempers the
-second: it anneals p(x) * L(x)^beta from beta = 0 to 1. But `datalogp` is
-`observedlogp + potentiallogp`, and the PyMC model this replaced expressed the
-entire model structure -- ordering constraints and uniform-scatter priors alike
--- as pm.Potential. So at beta = 0 the particles are drawn from unconstrained
-uniform priors thousands of years wide, with no ordering and no phase prior
-at all, and the constraints only switch on as beta approaches 1.
-
-At intermediate beta each date has settled into one of its own calibration
-lobes more or less independently of the others. Configurations that put
-different groups in different lobes vastly outnumber the correlated one where
-the whole model sits in the same lobe, so by the time the ordering constraint
-is fully on, the correct arrangement has too few surviving particles to be
-weighted properly. Measured against the OxCal 4.4 run in tests/fixtures/oxcal
-(eight bimodal SHCal20 dates in two ordered groups), SMC separated the two
-groups by 57 years where the exact answer is 19 and OxCal reports 13 --
-manufacturing a chronological break at AD 1350 that is an artefact of the
-curve. It reported r_hat 1.01 throughout: all four chains agreed on the same
-wrong answer. Neither a better kernel, more tempering stages nor a narrower
-prior fixed it (57 -> 30 at best), because none of them changes the annealing
-path that causes it.
+Why integrate rather than sample
+-------------------------------
+For this shape the posterior can be integrated exactly, so there is no sampler
+to converge and no mode to miss. That matters because calibration curves
+wiggle: a single radiocarbon age routinely calibrates to two or more separated
+calendar ranges, and resolving which one is right is much of the reason to
+build a Bayesian model at all.
 
 The maths
 ---------
@@ -57,46 +34,33 @@ and exact up to the grid step.
 What it does NOT cover
 ----------------------
 The OUTLIER SCALE is approximated. OxCal's Outlier_Model carries one offset
-scale shared by every date using it, constrained by the data; this solver
-marginalises that scale independently per date over its prior instead, because a
-shared hyperparameter couples the dates and the message passing above needs each
-to enter through its own likelihood alone. Deliberately left that way: the
-approximation is what makes the exact integration possible at all, and
-services/gibbs.py samples the shared scale properly for callers who need it
+scale shared by every date using it and constrained by the data; this solver
+marginalises that scale independently per date over its prior, because a shared
+hyperparameter couples the dates and the message passing above needs each to
+enter through its own likelihood alone. The approximation is what makes the
+exact integration possible; services/gibbs.py samples the shared scale properly
 (bayesian_config.solver = "gibbs").
 
-What it costs, measured: on tests/fixtures/oxcal_outlier the per-date
-marginalisation puts the reported outlier probabilities 0.0166 from OxCal's
-where the sampler gets to 0.0016, and on tests/fixtures/oxcal_charcoal -- three
-dates declared residual outright, the case that exposes it -- the modelled dates
-land 9.9 years rms from OxCal against the sampler's 6.3. So it matters most
-exactly where an outlier prior is large, and hardly at all where it is the usual
-few percent.
+What it costs: on tests/fixtures/oxcal_outlier the per-date marginalisation puts
+the reported outlier probabilities 0.0166 from OxCal's where the sampler gets to
+0.0016, and on tests/fixtures/oxcal_charcoal the modelled dates land 9.9 years
+rms from OxCal against the sampler's 6.3. So it matters where an outlier prior
+is large, and hardly at all at the usual few percent.
 
-PHASE WIDTH used to differ from OxCal by a factor of several, and the cause was a
-first-order error in the interval quadrature -- see _interval_integral, which
-carries the measurements. Correcting it took a single phase of sixteen dates from
-a span of 4.2 years against OxCal's 19.3 to 20.7, and the modelled dates on the
-eight-date fixture from 5.11 years rms of OxCal to 0.20.
+PHASE WIDTH depends on the interval quadrature being right to second order --
+see _interval_integral, which carries the measurements. On models with a date
+declared an outright outlier (tests/fixtures/oxcal_charcoal) the span
+OVERSHOOTS, 54.9 years against OxCal's 29.2; that is the degenerate mode
+described in tests/nenthorn_charcoal_fixture's PHASE WIDTH note, not the phase
+model. services/gibbs.py carries the same rule as Model.endpoint_weight, and the
+two agree to about 0.6 years on the chain fixtures.
 
-What remains is on models with a date declared an outright outlier
-(tests/fixtures/oxcal_charcoal), where the span now OVERSHOOTS -- 54.9 years
-against OxCal's 29.2. That is the separate degenerate mode described in
-tests/nenthorn_charcoal_fixture's PHASE WIDTH note, not the phase model.
-
-services/gibbs.py carries the same rule, as Model.endpoint_weight -- it has no
-interval integrals to correct, but the mismatch between a date's available CELLS
-and the span it is charged for is identical there. The two agree to about 0.6
-years on the chain fixtures; while only this file had the rule they were 5-6 years
-apart, which is what those comparisons are set to catch.
-
-`layout()` returns None for anything that is not a single chain, and the
-caller falls back to the sampler. In particular a Sequence that orders two groups
-with NO boundary between them is not a chain: its dates share one enclosing
-boundary pair while an extra constraint orders them against each other, and
-that constraint does not factorise along the chain. Adding an explicit
-Boundary between such groups makes the model solvable here, and is better
-practice anyway.
+`layout()` returns None for anything that is not a single chain, and the caller
+falls back to the sampler. In particular a Sequence that orders two groups with
+NO boundary between them is not a chain: its dates share one enclosing boundary
+pair while an extra constraint orders them against each other, and that
+constraint does not factorise along the chain. Adding an explicit Boundary
+between such groups makes it solvable here, and is better practice anyway.
 """
 from typing import Dict, List, Optional, Sequence, Tuple
 
@@ -113,10 +77,9 @@ from app.services.stratigraphy import effective_bounds
 # O(M^2) in space as well as time, so this caps one intermediate array at
 # about 30 MB and the whole solve at a few seconds.
 MAX_GRID_POINTS = 2000
-# How many groups fit at that point count before the grid starts coarsening.
-# One M x M array of doubles is 32 MB at M = 2000 and one is held per group,
-# so this is the memory budget in disguise: a long sequence trades calendar
-# resolution for staying inside it rather than being killed.
+# How many groups fit at that point count before the grid coarsens. One M x M
+# array of doubles is 32 MB at M = 2000 and one is held per group, so a long
+# sequence trades calendar resolution for staying inside the memory budget.
 GROUPS_AT_FULL_RESOLUTION = 6
 # Finest calendar step worth using. IntCal20/SHCal20 are themselves tabulated
 # at 1-20 year intervals, so going below a year buys nothing real.
@@ -143,15 +106,12 @@ OUTLIER_KERNEL_HALF_WIDTH_YEARS = 20000.0
 #     Outlier_Model("Charcoal", Exp(1,-10,0), U(0,3), "t")
 #
 # -- an exponential gap truncated at 10 scale lengths, with the SCALE itself
-# drawn as 10^u over three decades, exactly as the General model draws its own
-# scale over four. Integrating that scale is not a refinement: with a single
-# fixed scale instead (this used one 200-year exponential) only 12% of the
-# offset mass lands within 20 years, against 55% for OxCal, so a flagged date
-# stops saying anything about where its context sits and drifts onto its
-# neighbours instead of pulling the group towards itself. Measured on a real
-# OxCal run of eleven Nenthorn dates with three at Outlier("Charcoal", 1.00),
-# integrating the scale moved the modelled dates from 16.1 to 9.9 years rms of
-# OxCal's own answer, and by a similar 6 years on every model structure tried.
+# drawn as 10^u over three decades, as the General model draws its own over
+# four. Integrating that scale is not a refinement: at a single fixed scale
+# only 12% of the offset mass lands within 20 years against OxCal's 55%, so a
+# flagged date drifts onto its neighbours instead of pulling the group towards
+# itself. On the Nenthorn charcoal fixture, integrating it moved the modelled
+# dates from 16.1 to 9.9 years rms of OxCal's answer.
 CHARCOAL_LOG_SCALE_MAX = 3.0
 CHARCOAL_KERNEL_SPAN_TAUS = 10.0
 OUTLIER_MODELS = ('general', 'charcoal')
@@ -184,10 +144,9 @@ def layout(root: Dict, measurements: List[Dict]) -> Optional[Chain]:
     """
     The chain this model reduces to, or None if it does not reduce to one.
 
-    Deliberately semantic rather than syntactic: it works from plan_model's
-    output, so nesting that adds no ordering of its own (a Sequence wrapping a
-    single Phase, a Phase holding two parallel Phases) is still recognised as
-    a chain.
+    Semantic rather than syntactic: it works from plan_model's output, so
+    nesting that adds no ordering of its own -- a Sequence wrapping a single
+    Phase, say -- is still recognised as a chain.
     """
     return layout_with_reason(root, measurements)[0]
 
@@ -196,18 +155,15 @@ def layout_with_reason(
     root: Dict, measurements: List[Dict]
 ) -> Tuple[Optional[Chain], Optional[str]]:
     """
-    layout(), plus a plain-English reason when the model is not a chain.
+    layout(), plus a plain-English reason when the model is not a chain, so
+    the API can say WHY it fell back to sampling.
 
-    The reason exists so the API can tell the user WHY their model fell back
-    to sampling rather than only that it did -- a silent fallback is the whole
-    problem, and "this shape is not exactly solvable" is not actionable on its
-    own. It is produced here, at the point of decision, rather than by a
-    separate diagnostic that inspects the tree afterwards: a second
-    implementation of these rules would drift from this one, and would then
-    confidently explain a fallback that did not happen for that reason.
+    Produced here at the point of decision rather than by a separate diagnostic
+    that inspects the tree afterwards, which would drift from these rules and
+    then confidently explain a fallback that happened for another reason.
 
-    Phrase each reason as what the model does, and where practical what to
-    change -- these strings are shown to an archaeologist, not a developer.
+    Phrase each reason as what the model does and, where practical, what to
+    change: these strings are shown to an archaeologist, not a developer.
     """
     if root is None:
         return None, 'the analysis has no model structure'
@@ -276,12 +232,12 @@ def layout_with_reason(
             'them so they fall inside the chain'
         )
 
-    # Finally: the chain must already imply every ordering constraint the tree
-    # asks for. Rank boundary i at 2i and group i at 2i+1, oldest first; a
+    # The chain must already imply every ordering constraint the tree asks
+    # for. Rank boundary i at 2i and group i at 2i+1, oldest first; a
     # constraint is implied when everything on its older side outranks
-    # everything on its younger side. Anything else -- most importantly two
-    # groups ordered against each other INSIDE one boundary pair -- is extra
-    # structure this solver cannot express.
+    # everything on its younger side. Anything else -- above all two groups
+    # ordered against each other INSIDE one boundary pair -- is structure this
+    # solver cannot express.
     rank_of_boundary = {bid: 2 * i for i, bid in enumerate(boundary_ids)}
 
     def rank(kind: str, tid: str) -> Optional[int]:
@@ -339,34 +295,25 @@ def _outlier_kernel(step: float, half_width: float,
     CALENDAR years. Index order matches the grid, so a lag of +1 cell means
     the material is one step OLDER than the context.
 
-    Two models, because the two ways a date goes wrong are not the same
-    shape:
+    Two models, because the two ways a date goes wrong are not the same shape:
 
-    "general" -- OxCal's `Outlier_Model("General", T(5), U(0,4), "t")`
-        (Bronk Ramsey 2009): a Student-t offset scaled by 10^u with u
-        uniform over four decades. Symmetric and very heavy-tailed, so a
-        flagged date says almost nothing about where it sits. The right
-        model when you do not know WHY a date is wrong -- lab error, a
-        mislabelled bag, contamination in either direction.
+    "general" -- OxCal's `Outlier_Model("General", T(5), U(0,4), "t")` (Bronk
+        Ramsey 2009): a Student-t offset scaled by 10^u over four decades.
+        Symmetric and very heavy-tailed, so a flagged date says almost nothing
+        about where it sits. The model for a date wrong in an unknown way.
 
     "charcoal" -- OxCal's `Outlier_Model("Charcoal", Exp(1,-10,0), U(0,3),
-        "t")`: a ONE-SIDED exponential gap, the dated material having formed
-        some years BEFORE the context and never after, with its scale drawn
-        over three decades the same way the general model draws its own. This
-        is old wood and reworked material, where the error has a known
-        direction, and saying so is worth a lot. Measured on an injected
-        residual date, it recovered the model's Start boundary to AD 1292
-        against the general model's 1201 (clean value 1339) and put the
-        outlier probability at 90% rather than 66%, because a one-sided model
-        does not have to spend prior mass on the direction the material
-        cannot be wrong in.
+        "t")`: a ONE-SIDED exponential gap, the material having formed some
+        years BEFORE the context and never after, its scale drawn over three
+        decades. This is old wood and reworked material, and the known
+        direction is worth a lot: on an injected residual date it recovered the
+        Start boundary to AD 1292 against the general model's 1201 (clean value
+        1339), and put the outlier probability at 90% rather than 66%.
 
-    Both are summed over their scale here, which is an APPROXIMATION to what
-    OxCal does: OxCal treats the scale as one hyperparameter SHARED by every date
-    using that model and lets the data constrain it, where summing marginalises it
-    independently per date over the whole prior. services/gibbs.py samples the
-    shared scale properly; see scale_nodes below, and that module's
-    Model._build_outlier_tables for what the difference is worth.
+    Both are summed over their scale, which APPROXIMATES OxCal: OxCal shares
+    one scale across every date using the model and lets the data constrain it,
+    where summing marginalises it independently per date. services/gibbs.py
+    samples the shared scale properly -- see its Model._build_outlier_tables.
     """
     total = None
     for log_scale in scale_nodes(model):
@@ -379,10 +326,9 @@ def scale_nodes(model: str = DEFAULT_OUTLIER_MODEL) -> np.ndarray:
     """
     The offset scales an outlier model is allowed, as log10(years).
 
-    OxCal writes these as the second argument of Outlier_Model: U(0,4) for
-    General, U(0,3) for Charcoal. Uniform on the LOG scale, so every decade is
-    equally likely a priori -- which is what makes a third of the charcoal prior
-    sit at ten years or less.
+    The second argument of OxCal's Outlier_Model: U(0,4) for General, U(0,3)
+    for Charcoal. Uniform on the LOG scale, so every decade is equally likely a
+    priori, which puts a third of the charcoal prior at ten years or less.
     """
     top = CHARCOAL_LOG_SCALE_MAX if model == 'charcoal' else OUTLIER_LOG_SCALE_MAX
     return np.linspace(0.0, top, OUTLIER_SCALE_NODES)
@@ -398,15 +344,14 @@ def _outlier_kernel_at_scale(step: float, half_width: float, model: str,
     tau = 10.0 ** log_scale
     if model == 'charcoal':
         # One-sided, and the side matters. The MATERIAL is older than the
-        # CONTEXT, so the context's calendar age is YOUNGER -- lower cal BP,
-        # a lower grid index. The kernel therefore carries its mass at
-        # negative lag; putting it at positive lag says the context predates
-        # the wood found in it, which is residuality backwards and made a
-        # residual date look MORE consistent rather than less.
+        # CONTEXT, so the context's calendar age is YOUNGER -- lower cal BP, a
+        # lower grid index -- and the kernel carries its mass at negative lag.
+        # At positive lag it would say the context predates the wood found in
+        # it, making a residual date look MORE consistent rather than less.
         #
         # The lag axis runs to the WIDEST scale's reach so every scale shares
-        # it, but each is truncated at its own 10 scale lengths -- OxCal's
-        # Exp(1,-10,0) -- rather than at the widest one's.
+        # it, but each is truncated at its own 10 scale lengths (OxCal's
+        # Exp(1,-10,0)).
         widest = CHARCOAL_KERNEL_SPAN_TAUS * (10.0 ** CHARCOAL_LOG_SCALE_MAX)
         lags = np.arange(0.0, widest + step, step)
         density = np.where(lags <= CHARCOAL_KERNEL_SPAN_TAUS * tau,
@@ -424,13 +369,13 @@ def convolve_on_grid(values: np.ndarray, kernel: np.ndarray) -> np.ndarray:
     """
     `values` smeared by `kernel`, returned on the same grid.
 
-    The kernel is trimmed to the lags that can actually reach a grid point from
-    a grid point before convolving. That is exact rather than an economy -- a
-    lag longer than the grid contributes to no on-grid output at all -- and it
-    matters because these kernels deliberately run to 10,000-40,000 years while
-    the grid is a few thousand. Trimming happens AFTER normalisation, so the
-    mass the kernel throws off the grid stays thrown off; see
-    _with_outlier_component for why that is the point rather than a defect.
+    The kernel is trimmed before convolving to the lags that can reach a grid
+    point from a grid point. That is exact rather than an economy -- a longer
+    lag contributes to no on-grid output -- and it matters because these
+    kernels run to 10,000-40,000 years while the grid is a few thousand.
+    Trimming happens AFTER normalisation, so mass the kernel throws off the
+    grid stays thrown off; see _with_outlier_component for why that is the
+    point.
     """
     centre = (len(kernel) - 1) // 2
     reach = len(values) - 1
@@ -462,16 +407,15 @@ def _with_outlier_component(
     kernel = _outlier_kernel(step, max(OUTLIER_KERNEL_HALF_WIDTH_YEARS,
                                        float(grid[-1] - grid[0])), model)
     broad = convolve_on_grid(inlier, kernel)
-    # Deliberately NOT renormalised over the grid. The convolution of two
-    # normalised densities is already proper on the real line; most of its
-    # mass lies off this grid, which is exactly the statement that a flagged
-    # date's calendar age could be anywhere. Rescaling what remains back to
-    # one would inflate the component by the reciprocal of the retained mass
-    # and make the outlier probability depend on how wide the grid happens to
-    # be -- measured, it put the fifteen sound Shag River dates at 9-14%
-    # against OxCal's 0.6-1.5%, above their own 5% prior. The mixture is
-    # therefore also sub-unit here, which is correct: the missing mass is the
-    # outlier possibility that the window does not cover.
+    # NOT renormalised over the grid. The convolution of two normalised
+    # densities is already proper on the real line, and most of its mass lies
+    # off this grid -- which is exactly the statement that a flagged date's
+    # calendar age could be anywhere. Rescaling what remains to one would
+    # inflate the component by the reciprocal of the retained mass and make the
+    # outlier probability depend on the grid width: it put the fifteen sound
+    # Shag River dates at 9-14% against OxCal's 0.6-1.5%. The mixture is
+    # therefore sub-unit here, the missing mass being the outlier possibility
+    # the window does not cover.
     return (1.0 - prior) * inlier + prior * broad, broad
 
 
@@ -496,11 +440,10 @@ def date_tables(
     the rest of the inference untouched -- the outlier model is a property of a
     date, not of how the model is solved.
 
-    Shared with services/gibbs.py rather than written out twice. Both solvers
-    need the identical table for their answers to be comparable at all, and a
-    second copy of the normalisation, the TPQ/TAQ truncation and the outlier
-    mixture would drift -- which would show up as the two solvers disagreeing
-    for a reason that has nothing to do with either one's inference.
+    Shared with services/gibbs.py: both solvers need the identical table for
+    their answers to be comparable, and a second copy of the normalisation,
+    truncation and outlier mixture would drift -- which would surface as the
+    two disagreeing for a reason unrelated to either one's inference.
     """
     dt = float(grid[1] - grid[0])
     likelihood: Dict[str, np.ndarray] = {}
@@ -536,13 +479,12 @@ def date_tables(
 def _build_grid(measurements: List[Dict], element_bounds: Dict,
                 num_groups: int = 1) -> np.ndarray:
     """
-    A calendar grid wide enough for both the dates and the boundaries either
-    side of them, at the finest step the memory budget allows.
+    A calendar grid wide enough for the dates and the boundaries either side of
+    them, at the finest step the memory budget allows.
 
-    One M x M array of doubles is 32 MB at M = 2000, and a transfer matrix is
-    held per group, so the point count is scaled down as the model grows to
-    keep the total near that of a single-group solve. A long sequence gets a
-    coarser calendar step rather than an out-of-memory kill.
+    One M x M array of doubles is 32 MB at M = 2000 and a transfer matrix is
+    held per group, so the point count scales down as the model grows: a long
+    sequence gets a coarser calendar step rather than an out-of-memory kill.
     """
     curve_lo, curve_hi = np.inf, -np.inf
     lo, hi = np.inf, -np.inf
@@ -569,8 +511,7 @@ def _build_grid(measurements: List[Dict], element_bounds: Dict,
     lo = max(curve_lo, lo - pad)
     hi = min(curve_hi, hi + pad)
 
-    # Only a long sequence needs coarsening: up to GROUPS_AT_FULL_RESOLUTION
-    # groups the full point count fits comfortably.
+    # Up to GROUPS_AT_FULL_RESOLUTION groups the full point count fits.
     budget = MAX_GRID_POINTS / max(1.0, np.sqrt(num_groups / GROUPS_AT_FULL_RESOLUTION))
     step = max(MIN_GRID_STEP_YEARS, (hi - lo) / budget)
     return np.arange(lo, hi + step, step)
@@ -579,9 +520,9 @@ def _build_grid(measurements: List[Dict], element_bounds: Dict,
 def _rescaled(log_weights: np.ndarray) -> np.ndarray:
     """Shift log weights by their own finite maximum, ready to exponentiate.
 
-    Per-array rather than against one shared constant: dividing a joint weight
-    by one date's interval integral can raise it by hundreds of nats, which
-    overflows against a shared shift.
+    Per-array rather than against a shared constant: dividing a joint weight by
+    one date's interval integral can raise it by hundreds of nats, which
+    overflows a shared shift.
     """
     finite = np.isfinite(log_weights)
     if not np.any(finite):
@@ -595,21 +536,15 @@ def _interval_integral(cumulative: np.ndarray, density: np.ndarray,
     F[y, o] = integral of one date's likelihood over [grid[y], grid[o]],
     TRAPEZOIDALLY -- half weight on each endpoint cell.
 
-    The half-weights are not a refinement, they are the difference between right
-    and wrong here, and the reason is the (span)^(-K) factor this gets multiplied
-    by. A cumulative difference alone, cum[o] - cum[y-1], sums cells y THROUGH o
-    inclusive, so an interval whose span is k*step receives (k+1) cells of mass.
-    The span prior meanwhile uses k*step. At the smallest span the likelihood is
-    therefore too large by a factor of two PER DATE -- 2^K over a group, which is
-    256 for eight dates and 65536 for sixteen -- and that lands squarely on the
-    near-coincident configurations the span prior already favours. The posterior
-    piled up there: on the eight-date Nenthorn fixture 85% of the mass sat below a
-    five-year span, with the median span exactly one grid cell, and a modelled
-    phase came out 5.8 years wide against OxCal's 29.3.
+    The half-weights are the difference between right and wrong here, because
+    of the (span)^(-K) factor this gets multiplied by. A cumulative difference
+    alone sums cells y THROUGH o inclusive, so an interval spanning k*step
+    receives (k+1) cells of mass while the span prior uses k*step -- too large
+    by a factor of two PER DATE at the smallest span, 2^K over a group, landing
+    squarely on the near-coincident configurations the prior already favours.
 
-    Measured against a continuum reference with no quadrature at all (three
-    Gaussian likelihoods, so the interval integrals are exact error functions;
-    truth 181.5 years):
+    Against a continuum reference with no quadrature at all (three Gaussian
+    likelihoods, so the integrals are exact error functions; truth 181.5 years):
 
         grid step      cum[o] - cum[y-1]      trapezoidal
            10.0                   126.4            186.3
@@ -617,15 +552,12 @@ def _interval_integral(cumulative: np.ndarray, density: np.ndarray,
             2.5                   155.2            182.6
             1.0                   167.8            181.9
 
-    So the plain difference is biased low by 30% at a ten-year step and converges
-    only as the step vanishes, while the trapezoidal form is within 3% at ten
-    years. On the fixture that made this visible it takes the modelled dates from
-    5.11 years rms of OxCal to 0.20, and makes the answer grid-independent
-    (34.9/34.7/34.6 across a fourfold refinement, against 5.8/8.1/12.2 before).
+    The plain difference is biased low by 30% at a ten-year step and converges
+    only as the step vanishes; the trapezoidal form is within 3% at ten years
+    and makes the answer grid-independent.
 
-    `density` and `step` are required rather than optional because the uncorrected
-    form is wrong wherever it is used, and an optional argument invites reaching
-    it by accident.
+    `density` and `step` are required rather than optional, because the
+    uncorrected form is wrong wherever it is used.
     """
     padded = np.concatenate([[0.0], cumulative])
     half = 0.5 * step * density
@@ -646,14 +578,14 @@ def log_interior_placements(span_cells: np.ndarray, num_interior: int) -> np.nda
     inside a span of `span_cells` grid cells, i.e. log C(span_cells - 1,
     num_interior). -inf where the span is too narrow to hold them at all.
 
-    This is the exact discrete version of the volume the UniformSpanPrior
-    correction has to divide out, and it is deliberately a COUNT rather than a
-    power -- see _span_prior_correction for why the power is wrong on a grid.
+    The exact discrete version of the volume the UniformSpanPrior correction
+    divides out, and a COUNT rather than a power -- see _span_prior_correction
+    for why a power is wrong on a grid.
 
-    Shared with services/gibbs.py so the two solvers cannot drift apart on it.
-    Only defined up to a constant factor, like the correction itself: the
-    1/num_interior! in the continuum expression is absorbed into the posterior's
-    normalisation either way.
+    Shared with services/gibbs.py so the two solvers cannot drift apart. Defined
+    only up to a constant factor, like the correction itself: the
+    1/num_interior! of the continuum expression is absorbed into the posterior's
+    normalisation.
     """
     j = np.asarray(span_cells, dtype=float)
     k = float(num_interior)
@@ -668,20 +600,18 @@ def boundary_limits(element_bounds: Dict, boundary_id: str) -> Tuple[float, floa
     (oldest, youngest) calendar age a boundary may take, in cal BP, as infinities
     where nothing constrains it.
 
-    These are the llim/ulim of Bronk Ramsey 2008 A.30-A.31. Only REAL constraints
-    count -- a TPQ or TAQ on the Boundary or on an element enclosing it. The
-    solver's grid is deliberately not used, even though it does bound the answer
-    numerically: the grid is padded by six times the dates' own width for the
-    boundaries' benefit (see _build_grid), so treating its edges as model
-    statements would make the limits factor an artefact of that padding. Measured,
-    it does exactly that -- the factor's effect on a single unconstrained phase
-    came out as +1.20 years at a 600-year window, +0.56 at 1,200, +0.27 at 2,400
-    and +0.13 at 4,800, halving with each doubling and heading for nothing.
+    The llim/ulim of Bronk Ramsey 2008 A.30-A.31. Only REAL constraints count --
+    a TPQ or TAQ on the Boundary or on an element enclosing it. The solver's
+    grid is not used even though it bounds the answer numerically: it is padded
+    by six times the dates' own width for the boundaries' benefit, so treating
+    its edges as model statements makes the factor an artefact of that padding.
+    Measured on a single unconstrained phase, the effect halved with each
+    doubling of the window (+1.20 years at 600, +0.13 at 4,800), heading for
+    nothing.
 
-    An unconstrained boundary is unbounded, and in that limit g is infinite, so
-    1/g is constant in the span and drops out of the posterior. That is why an
-    unconstrained model gets no limits factor at all rather than a small arbitrary
-    one.
+    An unconstrained boundary is unbounded, so g is infinite, 1/g is constant in
+    the span, and it drops out of the posterior -- which is why an unconstrained
+    model gets no limits factor rather than a small arbitrary one.
     """
     taq, tpq = element_bounds.get(boundary_id, (None, None))
     oldest = float(tpq) if tpq is not None else np.inf
@@ -694,12 +624,12 @@ def log_limits_factor_of_span(spans: np.ndarray,
                               youngest_limits: Tuple[float, float],
                               ) -> Optional[np.ndarray]:
     """
-    The limits factor as a function of the span alone, for `spans` of any shape --
-    see _log_limits_factor for the derivation and for what the four terms mean.
+    The limits factor as a function of the span alone, for `spans` of any shape;
+    see _log_limits_factor for the derivation and the four terms.
 
-    Split out from it so services/gibbs.py can ask for a 1-D row indexed by span
-    without allocating the M x M matrix the exact solver needs (32 MB at M = 2000),
-    while both still share one definition of the terms and of their sign.
+    Split out so services/gibbs.py can ask for a 1-D row indexed by span without
+    allocating the M x M matrix the exact solver needs, while both share one
+    definition of the terms and their sign.
     """
     hi_old, lo_old = oldest_limits
     hi_yng, lo_yng = youngest_limits
@@ -717,15 +647,13 @@ def log_limits_factor_of_span(spans: np.ndarray,
             terms.append(np.full_like(spans, constant))
 
     g = np.stack(terms).min(axis=0)
-    # g <= 0 means the derived limits contradict each other at this span -- which
-    # happens when the dates' own supports do not overlap, so containment already
+    # g <= 0 means the derived limits contradict each other at this span, which
+    # happens when the dates' supports do not overlap and containment already
     # forbids a span that short. The factor counts configurations to normalise a
-    # prior; a non-positive count is a statement about the LIMITS, not about the
-    # model, so it must not veto the state. Weight 1 there, not zero.
-    #
-    # Learned the hard way: returning -inf let this bookkeeping quantity make the
-    # sampler's starting state infeasible on a model with a stratigraphic inversion,
-    # which is a perfectly ordinary thing for an archaeologist to write down.
+    # prior, so a non-positive count says something about the LIMITS, not the
+    # model, and must not veto the state: weight 1 there, not zero. Returning
+    # -inf instead makes the sampler's starting state infeasible on a model
+    # with a stratigraphic inversion.
     out = np.zeros(g.shape)
     positive = g > 0
     out[positive] = -np.log(g[positive])
@@ -738,30 +666,20 @@ def containment_limits(grid: np.ndarray, inliers: Dict[str, np.ndarray],
     How far the enclosing pair of boundaries is pinned by the dates between them:
     (youngest the OLDER boundary may be, oldest the YOUNGER boundary may be), cal BP.
 
-    These are the llim/ulim that Bronk Ramsey 2008 A.31 wants, and OxCal derives
-    them exactly this way. Its Model Specification report for a single phase of
-    eight dates lists, in AD:
-
-        U1 ulim 669.5   U2 671.5   U3 675.5   U4-U6 (clipped)
-        U7 llim 537.5   U8 540.5
-        Start: ulim 669.5 = min over the dates' ulim
-        End:   llim 540.5 = max over the dates' llim
-
-    -- each date bounded by its own likelihood's extent, and each boundary then
-    bounded by the constraints t_start < t_i < t_end. Which is to say the older
-    boundary cannot be younger than the youngest end of the OLDEST date's support,
-    because it has to be older than that date; and symmetrically for the younger.
+    The llim/ulim of Bronk Ramsey 2008 A.31, derived as OxCal derives them: each
+    date is bounded by its own likelihood's extent, and each boundary then by
+    t_start < t_i < t_end. So the older boundary cannot be younger than the
+    youngest end of the OLDEST date's support, and symmetrically for the younger.
 
     Reproducing OxCal's numbers needs a threshold, and SUPPORT_THRESHOLD gets the
-    DIFFERENCES between dates exactly right with a fixed offset per side (-3.5 years
-    on the young end, +2.5 on the old end, on all five values OxCal reports
-    unclipped). The answer barely depends on it: the quantity that reaches the
-    posterior is the gap between the two bounds, 123 years against OxCal's 129, and
-    feeding OxCal's own value in instead moves the modelled span by 0.11 years.
+    DIFFERENCES between dates exactly right with a fixed offset per side. The
+    answer barely depends on it: what reaches the posterior is the gap between
+    the two bounds, 123 years against OxCal's 129, and using OxCal's own value
+    moves the modelled span by 0.11 years.
 
-    The INLIER likelihood, not the outlier mixture: a flagged date's broad component
-    runs for thousands of years, and that is a statement about where its event might
-    be if the sample is residual, not about the range the parameter is confined to.
+    The INLIER likelihood, not the outlier mixture: a flagged date's broad
+    component runs for thousands of years, which says where its event might be
+    if the sample is residual, not what the parameter is confined to.
     """
     youngest_of_oldest, oldest_of_youngest = -np.inf, np.inf
     for date_id in date_ids:
@@ -808,10 +726,10 @@ def _log_limits_factor(grid: np.ndarray, oldest_limits: Tuple[float, float],
                  hi_old - lo_old,                 <- the oldest's own range
                  hi_yng - lo_yng )                <- the youngest's own range
 
-    WHICH TERM IS SMALLEST is the whole character of this factor, and it is why
-    the sign of it is easy to get backwards. The first term falls with the span, so
-    1/g rises and favours a LONGER span; the second rises with the span, so 1/g
-    favours a SHORTER one. The last two are constants that merely cap it.
+    WHICH TERM IS SMALLEST is the character of this factor and why its sign is
+    easy to get backwards: the first falls with the span, so 1/g rises and
+    favours a LONGER one, while the second rises with it and favours a SHORTER.
+    The last two are constants that only cap it.
 
     Only the first two depend on the span, and each needs both of its limits to be
     real; with either infinite that term cannot be the minimum. If neither
@@ -833,180 +751,98 @@ def _span_prior_correction(grid: np.ndarray, num_boundaries: int, enabled: bool,
         1 / C(span in cells - 1, n - 2)
 
     Placing n boundaries in order across a span leaves the n-2 interior ones
-    uniform within it, so the induced prior on the overall span carries a
-    factor for that freedom -- it favours long sequences purely because a
-    longer one has more room to arrange its interior boundaries in. Dividing
-    that out makes the span prior independent of how finely the sequence is
-    subdivided, which is Nicholls and Jones (2001)'s recommendation and
-    OxCal's default.
+    uniform within it, so the induced prior carries a factor for that freedom
+    and favours long sequences purely for having more room to arrange them in.
+    Dividing it out makes the span prior independent of how finely the sequence
+    is subdivided -- Nicholls and Jones (2001), and OxCal's default.
 
-    WHY A BINOMIAL AND NOT (b_first - b_last)^-(n-2), which is what this
-    computed until it was measured. The continuum factor is span^(n-2), but the
-    model this solver actually integrates is discrete, and on a grid the number
-    of ways to place k ordered interior boundaries strictly inside a span of j
-    cells is C(j-1, k), not (j*step)^k. The two agree only as j grows: at k = 1
-    they are 1/(j-1) against 1/j, a first-order error, and the span prior
-    concentrates mass at SMALL j where it is largest. Same family as the
-    interval-quadrature bug in _interval_integral, and found the same way.
+    WHY A BINOMIAL AND NOT (b_first - b_last)^-(n-2). The continuum factor is
+    span^(n-2), but the model this solver integrates is discrete, and on a grid
+    the number of ways to place k ordered interior boundaries strictly inside a
+    span of j cells is C(j-1, k), not (j*step)^k. The two agree only as j grows:
+    at k = 1 they are 1/(j-1) against 1/j, a first-order error, and the span
+    prior concentrates mass at SMALL j where it is largest.
 
     Measured with the likelihoods switched off, so the reported posterior IS the
-    prior and the answer is known in closed form (uniform over the ordered pair,
-    hence a linear marginal for each outermost boundary). Total-variation
-    distance of the oldest boundary's marginal from that, at a step of 1.33
-    years, before -> after:
+    prior and the answer is known in closed form. Total-variation distance of the
+    oldest boundary's marginal from that, at a step of 1.33 years, power ->
+    binomial: 0.39% -> 0.00% at n = 3, 0.93% -> 0.00% at n = 4, 1.56% -> 0.00%
+    at n = 5. The error was first-order in the step and so shrank under
+    refinement, which is why it looked like a modelling difference from OxCal.
 
-        n = 3   0.39% ->  0.00%      mean shift +2.04y -> +0.00y
-        n = 4   0.93% ->  0.00%                 +4.80y -> +0.00y
-        n = 5   1.56% ->  0.00%                 +7.99y -> +0.00y
+    THE LIMITS FACTOR. OxCal's UniformSpanPrior also carries 1/g of Bronk Ramsey
+    2008 A.31 (2009a eq 29-30), and it is not negligible: running OxCal with the
+    option off on eight overlapping dates in one phase gives a span of 31.83
+    against 26.26 with it on, so the term is worth 18% of the span, and it
+    NARROWS. Its ON/OFF ratio is about the same on every model tried -- 0.825
+    here, 0.847 on the `ordered` fixture, 0.792 on the charcoal one.
 
-    The old error was first-order in the step and so shrank under refinement,
-    which is why it survived every fixture comparison: it looked like a modelling
-    difference against OxCal rather than a bug.
+        g = min( (ulim_m - llim_a) - (t_m - t_a),
+                 (t_m - t_a) - (llim_m - ulim_a),
+                 ulim_a - llim_a,
+                 ulim_m - llim_m )
 
-    Two things this deliberately does NOT do:
+    Which of the four is smallest decides which WAY it biases the span, which is
+    the whole subtlety. Read llim/ulim as the wide computational window and the
+    first term wins, giving 1/(window - span), which WIDENS -- and cannot be
+    what OxCal does. With per-boundary limits tight enough for the second term
+    to win, 1/g goes as 1/(span + c), the right sign and roughly the right size.
+    See _log_limits_factor for the expression and pair_limits for where the
+    limits come from; two things that do NOT work are using the solver's grid
+    edges in place of a missing constraint (which makes the factor an artefact
+    of _build_grid's padding) and treating an unconstrained boundary as
+    unbounded (the DATES bound the boundaries enclosing them, which is how OxCal
+    derives these and what it prints).
 
-    * THE LIMITS FACTOR IS MISSING, AND THAT IS A REAL DEFECT -- this comment
-      used to claim it was negligible, and it is not. OxCal's UniformSpanPrior
-      also carries the factor of Bronk Ramsey 2009a eq 29-30, 1/g(t_a, t_m,
-      llim_a, llim_m, ulim_a, ulim_m). The old argument for dropping it was that
-      a real span of tens of years is nothing against the computational window,
-      supported by identical results at windows of 2,031 / 3,000 / 10,000 /
-      55,000 years -- which tested OUR window sensitivity and not what OxCal
-      does with the term.
+    Against OxCal, rms of the modelled dates and then the span, without the
+    limits factor -> with it:
 
-      Measured by running OxCal with the option off, on eight overlapping dates
-      in one phase (no ordering, no outliers, likelihoods agreeing with ours to
-      0.1% in width):
+        oxcal/unordered         0.20 -> 0.13     34.9 -> 30.4
+        oxcal/ordered           2.42 -> 2.05     36.7 -> 31.5
+        oxcal/shared_boundary   0.76 -> 0.30     36.7 -> 31.5
+        outlier/Shag            0.18 -> 0.16     20.7 -> 18.5
+        charcoal/Nenthorn      10.12 -> 8.37     51.4 -> 40.3
 
-          OxCal, UniformSpanPrior ON     span 26.26   dates spread 3.62
-          OxCal, UniformSpanPrior OFF    span 31.83   dates spread 4.92
-          this solver                    span 32.53   dates spread 5.18
+    WHAT IS STILL OPEN. On one phase of eight overlapping dates the span is 29.2
+    against OxCal's 26.3, and 54.8 against 48.9 on four -- a constant proportion
+    rather than a constant offset, localised to the two BOUNDARIES, whose
+    marginals carry about 45% more mass far from the dates while the dates
+    themselves agree to 0.1-0.2 years in sd.
 
-      So we reproduce OxCal with the refinement switched OFF, and the term is
-      worth 5.6 years of span -- 18% -- on that model. OxCal's ON/OFF ratio is
-      about the same on every model tried: 0.825 here, 0.847 on the `ordered`
-      fixture, 0.792 on the charcoal one.
+    Ruled out by measurement: the limits (feeding OxCal's own llim/ulim in moves
+    the answer 0.11 years), the grid (refining sixfold moves the span 0.38), the
+    interior-boundary factor (exact against a closed form), the likelihoods
+    (within 0.5% of OxCal's in width), and any extra exponent. The difference
+    also CHANGES SIGN with the number of dates -- ours/OxCal 54.76/48.90 at four,
+    29.12/26.26 at eight, 22.39/23.86 at sixteen -- which rules out both a
+    constant prior difference and the depleted-far-tail hypothesis, since a
+    depleted tail predicts wider still at sixteen. OxCal is not under-converged
+    either, reporting C of 97.6-99.8.
 
-      What the term is. Bronk Ramsey 2008 appendix A.31 gives it in full (2009a
-      eq 29 is the same expression):
+    Left open deliberately: every remaining lead is a guess about OxCal's
+    internals. In practice the dates agree to a year or two on every fixture and
+    a phase's span differs by up to about a tenth.
 
-          g = min( (ulim_m - llim_a) - (t_m - t_a),
-                   (t_m - t_a) - (llim_m - ulim_a),
-                   ulim_a - llim_a,
-                   ulim_m - llim_m )
+    At n = 2 the exponent is zero, so a single Phase between two Boundaries --
+    the app's default shape -- is untouched by the interior-boundary term, and
+    the O(M^2) chain is kept unless the limits factor applies.
 
-      with 1/g added to the prior. Which of the four terms is the smallest decides
-      which WAY it biases the span, and that is the whole subtlety. Take llim/ulim
-      to be the wide computational window and the first term wins, g = window -
-      span, and 1/g flattens a span prior that would otherwise fall off as
-      (window - span) -- worth about 3% here, and in the direction of a WIDER span.
-      That reading cannot be what OxCal does: its effect is 18% and it narrows.
-      With per-boundary limits tight enough for the SECOND term to win instead,
-      1/g goes as 1/(span + c), which penalises long spans and is the right sign
-      and roughly the right size.
+    It is not optional: on the fixture's two-group model the group separation is
+    14.7 years against OxCal's 13.2 with it and 26.7 without, and the dates 0.76
+    years rms against 6.67. It couples the two ends of the chain, so the solve
+    stops factorising and goes from O(M^2) to O(M^3) per group -- worth paying.
 
-      IT IS NOW IMPLEMENTED -- see _log_limits_factor for the expression and
-      pair_limits for where the limits come from. Two dead ends on the way, both
-      worth not repeating:
-
-        * the solver's GRID edges do not stand in for a missing constraint. That
-          made the factor an artefact of _build_grid's padding, contributing +1.20
-          years at a 600-year window and +0.13 at 4,800, halving with each
-          doubling and heading for nothing -- and widening the span where OxCal's
-          narrows it.
-        * an unconstrained boundary is not therefore unbounded either. The DATES
-          bound the boundaries enclosing them, which is how OxCal derives these,
-          and it prints them: its Model Specification report gives llim/ulim per
-          parameter, and for one phase of eight dates the older boundary's ulim is
-          exactly the smallest of the dates' ulim.
-
-      What it bought, against OxCal, rms of the modelled dates and then the span:
-
-          oxcal/unordered         0.20 -> 0.13     34.9 -> 30.4
-          oxcal/ordered           2.42 -> 2.05     36.7 -> 31.5
-          oxcal/shared_boundary   0.76 -> 0.30     36.7 -> 31.5
-          outlier/Shag            0.18 -> 0.16     20.7 -> 18.5
-          charcoal/Nenthorn      10.12 -> 8.37     51.4 -> 40.3
-
-      and the ordered-group separation that this suite chased for a long stretch
-      went from +3.03 and +1.50 years to +1.19 and -0.34.
-
-      What is left, and where it lives. On a single phase of eight overlapping dates
-      we give a span of 29.2 against OxCal's 26.3, and 54.8 against 48.9 on four of
-      them -- +11% and +12%, a constant PROPORTION rather than a constant offset.
-      It is localised to the two BOUNDARIES: their marginals carry about 45% more
-      mass far from the dates than OxCal's, while the dates themselves agree to
-      0.1-0.2 years in sd, and the date most affected is the one adjacent to a
-      boundary.
-
-      Ruled out by measurement, each separately:
-
-        * the limits. Feeding OxCal's own reported llim/ulim in instead of ours
-          moves the answer 0.11 years. SUPPORT_THRESHOLD reproduces the differences
-          between its values exactly, with a fixed offset per side (-3.5 years
-          young, +2.5 old), and the gap that reaches the posterior is 123 years
-          against its 129.
-        * our grid. Refining the step sixfold on a window holding just this model
-          moves the span 0.38 years, from 30.81 to 30.43.
-        * the interior-boundary factor, which is exact against a closed form.
-        * the likelihoods, within 0.5% in width of OxCal's own.
-        * an extra exponent. One value fits both cases (0.15 at eight dates, 0.13 at
-          four), but a fractional power is a symptom rather than a term, and the
-          tail shape below rules the family out anyway.
-
-      It also CHANGES SIGN with the number of dates, which is what rules out the
-      explanations that otherwise fit. One phase, unbracketed, same eight ages
-      throughout (sixteen being each age twice):
-
-          dates    ours    OxCal
-            4     54.76    48.90    +12%
-            8     29.12    26.26    +11%
-           16     22.39    23.86     -6%
-
-      So it is not a constant prior difference and not an exponent -- the exponent
-      that would reproduce OxCal is +0.13, +0.15, -0.13 across those three. It is
-      not a one-directional sampler artefact either. A depleted far tail was the
-      hypothesis this fixture set was built to test, on the evidence that the ratio
-      of our density to OxCal's down the start boundary's old tail runs 1.04, 1.03,
-      1.07, 1.15, 1.18, 1.47, 1.63, 2.18 at 5 to 60 years below the mode -- and the
-      sixteen-date run falsified it, ours coming out NARROWER where a depleted tail
-      predicts wider still.
-
-      The dates move with the boundaries, so it is not specific to boundaries: our
-      date spread is 4.29 against OxCal's 3.62 at eight dates and 1.90 against 2.15
-      at sixteen. And OxCal is not under-converged, reporting C of 97.6-99.8 on both
-      runs. Measured against the dates' own precision the difference is the same
-      story rather than a new one -- span over mean date sd is 1.41/1.27, 2.24/2.04,
-      1.90/2.01 for ours/OxCal at four, eight and sixteen dates -- because the two
-      agree on the date sds to a fraction of a year throughout.
-
-      Left open deliberately. Every remaining lead is a guess about OxCal's
-      internals, and the one change made here on a story rather than a mechanism --
-      the minimum-span floor -- had to be reverted. The practical size of it: dates
-      agree with OxCal to a year or two on every fixture, and a phase's span differs
-      by up to about a tenth.
-    * At n = 2 the exponent is zero, so a single Phase between two
-      Boundaries -- the app's default shape -- is untouched. Nothing to
-      apply, and the O(M^2) chain is kept.
-
-    What it is worth, on the fixture's two-group model: it is not optional. With it
-    the group separation is 14.7 years against OxCal's 13.2 and the dates 0.76
-    years rms; without it, 26.7 and 6.67. It also couples the two ends of the
-    chain, so the solve stops factorising and goes from O(M^2) to O(M^3) per group
-    -- worth paying.
-
-    About 1.5 years of extra separation remains, and it is not this factor's
-    doing: it survives refining the grid fourfold (2.01 -> 1.50 -> 1.44 as the step
-    halves twice), appears whenever two groups are ORDERED whether the middle
-    Boundary is written or implied, and is absent when nothing orders them (the
-    unordered run agrees to 0.06 years). See tests/nenthorn_charcoal_fixture's
-    WHAT IS LEFT note.
+    About 1.5 years of extra separation remains, and is not this factor's doing:
+    it survives refining the grid fourfold, appears whenever two groups are
+    ORDERED whether the middle Boundary is written or implied, and is absent
+    when nothing orders them. See tests/nenthorn_charcoal_fixture's WHAT IS LEFT
+    note.
     """
     if not enabled:
         return None
     exponent = num_boundaries - 2
-    # The LOG OF THE FACTOR, so both parts enter with the same sign and -inf
-    # means "this pair of boundaries is impossible".
+    # The LOG of the factor, so both parts enter with one sign and -inf means
+    # this pair of boundaries is impossible.
     total = np.zeros((len(grid), len(grid)))       # [youngest, oldest]
     has_limits = False
 
@@ -1018,9 +854,9 @@ def _span_prior_correction(grid: np.ndarray, num_boundaries: int, enabled: bool,
         total = np.where(np.isfinite(log_count), total - log_count, -np.inf)
 
     if oldest_limits is not None and youngest_limits is not None:
-        # 1 / g -- A.31, 2001 eq 7. Applies at ANY number of boundaries, which is
-        # why this function can return something at two of them; it is None when
-        # nothing constrains the boundaries, which is the usual case.
+        # 1 / g -- A.31, 2001 eq 7. Applies at ANY number of boundaries, which
+        # is why this can return something at two; None when nothing constrains
+        # them, the usual case.
         limits = _log_limits_factor(grid, oldest_limits, youngest_limits)
         if limits is not None:
             total = np.where(np.isfinite(limits) & np.isfinite(total),
@@ -1086,17 +922,16 @@ def _messages(chain: Chain, allowed: Dict, transfer):
         `count` INDEPENDENT draws of every boundary at once, as grid indices,
         shaped (count, number of boundaries) with the oldest boundary first.
 
-        Forward-filter/backward-sample: the messages above already are the
-        forward filter, and the chain is Markov in the boundaries, so drawing
-        the youngest boundary from its own marginal and then each earlier one
-        from alpha_i(b_i) T_i(b_i, b_(i+1)) given the boundary after it is an
-        exact draw from the joint. No MCMC and no burn-in -- these are as
-        independent as the marginals are exact.
+        Forward-filter/backward-sample: the messages above are the forward
+        filter and the chain is Markov in the boundaries, so drawing the
+        youngest from its own marginal and each earlier one from
+        alpha_i(b_i) T_i(b_i, b_(i+1)) given the one after it is an exact draw
+        from the joint. No MCMC and no burn-in.
 
-        This is the piece services/intervals.py needs and the marginals cannot
-        supply: two boundaries either side of a phase are strongly correlated
-        (the same dates hold them apart), so a duration built by subtracting
-        their marginals would be far too wide.
+        This is what services/intervals.py needs and the marginals cannot
+        supply: the two boundaries either side of a phase are strongly
+        correlated, so a duration built by subtracting their marginals would be
+        far too wide.
         """
         num_groups = len(chain.groups)
         indices = np.empty((count, num_groups + 1), dtype=np.int64)
@@ -1116,9 +951,9 @@ def _messages(chain: Chain, allowed: Dict, transfer):
 
 
 def _normalised(matrix: np.ndarray) -> np.ndarray:
-    """Scale a matrix by its own peak. Every quantity built from these is
-    normalised per-distribution at the end, so the discarded factors are
-    irrelevant -- but without this a chain of matrix products underflows."""
+    """Scale a matrix by its own peak, so a chain of matrix products does not
+    underflow. Everything built from these is normalised per-distribution at
+    the end, so the discarded factors do not matter."""
     peak = matrix.max()
     return matrix / peak if peak > 0 else matrix
 
@@ -1126,11 +961,10 @@ def _normalised(matrix: np.ndarray) -> np.ndarray:
 def _messages_with_span_prior(chain: Chain, allowed: Dict, transfer,
                               correction: np.ndarray):
     """
-    The same, once the span correction couples the first boundary to the
-    last. That breaks the forward/backward recursion -- a message can no
-    longer be a vector, because everything downstream still depends on where
-    b_first was -- so each message becomes a MATRIX carrying that dependence
-    and each step becomes a matrix product.
+    The same, once the span correction couples the first boundary to the last.
+    That breaks the forward/backward recursion -- a message can no longer be a
+    vector, because everything downstream still depends on where b_first was --
+    so each message becomes a MATRIX and each step a matrix product.
 
     With S_i[older, younger] = T_i:
         A_k[b_first, b_k]  = (S_0 ... S_(k-1))     everything before group k
@@ -1168,16 +1002,15 @@ def _messages_with_span_prior(chain: Chain, allowed: Dict, transfer,
 
     def draw_boundaries(rng, count: int) -> np.ndarray:
         """
-        Joint draws, as in the plain case -- but the correction makes the chain
-        non-Markov, so the sampling order changes with it.
+        Joint draws, as in the plain case, but the correction makes the chain
+        non-Markov so the sampling order changes.
 
-        C couples b_first to b_last, so no backward pass over single boundaries
-        exists. What does still hold is that CONDITIONAL on both ends the rest
-        is an ordinary chain again, because C is then a constant. So the two
-        ends are drawn together from their own joint C * A[n] -- a plain 2-D
-        distribution over an M x M grid -- and the interior is then filled in
-        forwards, each boundary from T_i(b_i, b_(i+1)) D_(i+1)(b_(i+1), b_last)
-        given the one before it and the far end.
+        C couples b_first to b_last, so there is no backward pass over single
+        boundaries. CONDITIONAL on both ends, though, C is a constant and the
+        rest is an ordinary chain again: the two ends are drawn together from
+        their joint C * A[n], and the interior filled in forwards, each boundary
+        from T_i(b_i, b_(i+1)) D_(i+1)(b_(i+1), b_last) given the one before it
+        and the far end.
 
         The last step needs no special case: D[n] is diagonal on the allowed
         last boundary, so the final draw can only land on the b_last already
@@ -1209,15 +1042,15 @@ def _draw_dates(rng, chain: Chain, cumulative: Dict[str, np.ndarray],
     """
     A calendar index for every date, one per joint boundary draw.
 
-    Conditional on the pair of boundaries enclosing it, a date is simply its
-    own likelihood truncated to that interval -- that IS the phase model -- and
-    the dates in a group are then conditionally independent, so each can be
-    drawn by inverse CDF on the interval without reference to the others.
+    Conditional on its enclosing boundaries a date is its own likelihood
+    truncated to that interval -- that IS the phase model -- and a group's dates
+    are then conditionally independent, so each is an inverse-CDF draw on the
+    interval.
 
     The truncation uses the plain cumulative rather than the trapezoidal
-    _interval_integral the solver's own weights use. The two differ by half a
-    grid cell at each end of the interval, which moves a drawn date by at most
-    one cell and is far below the five-year step these draws are reported at.
+    _interval_integral the solver's weights use. The two differ by half a grid
+    cell at each end, which moves a drawn date by at most one cell, far below
+    the five-year step these draws are reported at.
     """
     draws: Dict[str, np.ndarray] = {}
     for index, date_ids in enumerate(chain.groups):
@@ -1250,28 +1083,22 @@ def solve(measurements: List[Dict], root: Dict, chain: Chain,
     """
     Exact marginal posteriors for every date and every boundary in `chain`.
 
-    Returns the same shape services/gibbs.py's solve does, so callers
-    do not need to know which produced it -- including `posterior_samples`,
-    drawn from each exact marginal by inverse-CDF so that plotting and export
-    code is unchanged.
+    Returns the same shape services/gibbs.py's solve does, so callers need not
+    know which produced it -- including `posterior_samples`, drawn from each
+    exact marginal by inverse CDF so plotting and export code is unchanged.
 
-    Those draws are from the MARGINALS, so unlike MCMC output they carry no
-    joint correlation between dates. Nothing reads the joint structure off
-    them: `estimate_durations` below is the one caller that needs it, and it
-    gets its own draws from the joint posterior rather than these.
+    Those draws are from the MARGINALS and carry no joint correlation between
+    dates. Nothing reads joint structure off them: `estimate_durations` is the
+    one caller that needs it and takes its own draws from the joint posterior.
 
-    `uniform_span_prior` applies OxCal's correction of the same name (on by
-    default there too); see _span_prior_correction for what it does and what
-    it measurably costs.
+    `uniform_span_prior` applies OxCal's correction of the same name, on by
+    default there too; see _span_prior_correction.
 
-    `estimate_durations` adds `intervals` to the result -- how long each
-    sequence, phase and set of dated events lasted, and how far apart the
-    phases are (see services/intervals.py). Off by default because it costs
-    `interval_draws` joint draws and a second pass over the transfer matrices,
-    and because a duration is a claim about a phase's extent that not every
-    analysis wants to make. It changes nothing else about the answer: the draws
-    are taken with their own generator, so every other number this returns is
-    bit-for-bit what it would be with the flag off.
+    `estimate_durations` adds `intervals` (services/intervals.py). Off by
+    default because it costs `interval_draws` joint draws and a second pass over
+    the transfer matrices, and because a duration is a claim about a phase's
+    extent not every analysis wants to make. Its draws use their own generator,
+    so every other number here is bit-for-bit what it would be with the flag off.
     """
     element_bounds = inherited_bounds(root)
     by_id = {m['id']: m for m in measurements}
@@ -1327,12 +1154,11 @@ def solve(measurements: List[Dict], root: Dict, chain: Chain,
     correction = None
     if log_correction is not None:
         if len(chain.groups) == 1:
-            # One group means the correction's two boundaries ARE this group's
-            # two boundaries, so it folds straight into the transfer matrix and
-            # costs nothing. Worth the special case: it is the app's default
-            # shape, and the limits factor now applies to it where the older
-            # (n-2) factor did not, so without this every single-phase model
-            # would move to the O(M^3) path for a couple of percent.
+            # With one group the correction's boundaries ARE this group's, so
+            # it folds into the transfer matrix and costs nothing. Worth the
+            # special case: it is the app's default shape, and the limits
+            # factor applies to it where the (n-2) factor does not, so without
+            # this every single-phase model would take the O(M^3) path.
             log_T[0] = log_T[0] + np.where(np.isfinite(log_correction),
                                            log_correction, -np.inf)
             pair_weight, boundary_density, draw_boundaries = _messages(
@@ -1385,10 +1211,8 @@ def solve(measurements: List[Dict], root: Dict, chain: Chain,
         }
 
     if estimate_durations:
-        # Its own generator, seeded apart from the one above: every other
-        # number this function returns then stays bit-for-bit identical
-        # whether or not durations were asked for, so turning the option on
-        # cannot look like it moved a date.
+        # Seeded apart from the generator above, so every other number here
+        # stays bit-for-bit identical whether or not durations were asked for.
         joint_rng = np.random.default_rng(seed + 1)
         boundary_draws = draw_boundaries(joint_rng, interval_draws)
         date_draws = _draw_dates(joint_rng, chain, cumulative, boundary_draws)
@@ -1411,14 +1235,13 @@ def _outlier_probability(density: np.ndarray, mixture: np.ndarray,
     """
     P(this date is an outlier | all the data).
 
-    Given the date landed at t, its probability of being an outlier is
-    p*L_out(t)/L_mix(t) -- the responsibility of the outlier component there.
+    Given the date landed at t, its probability of being an outlier is the
+    responsibility of the outlier component there, p*L_out(t)/L_mix(t).
     Averaging that over the date's own posterior marginalises t out:
 
         P(outlier) = integral of posterior(t) * p*L_out(t)/L_mix(t) dt
 
-    Both pieces are already computed, so detection costs two array products
-    and no sampling.
+    Both pieces are already computed, so this costs two array products.
     """
     weight = density.sum()
     if weight <= 0:
@@ -1430,8 +1253,8 @@ def _outlier_probability(density: np.ndarray, mixture: np.ndarray,
 def _edge_mass(densities: List[np.ndarray], grid: np.ndarray) -> float:
     """
     The most probability any single distribution leaves in the outermost 1% of
-    the grid. A boundary's tail is genuinely heavy, so a non-trivial value
-    here means the window clipped something real and should be widened.
+    the grid. A boundary's tail is genuinely heavy, so a non-trivial value means
+    the window clipped something real and should be widened.
     """
     edge = max(1, len(grid) // 100)
     worst = 0.0
@@ -1447,22 +1270,18 @@ def _reported_ranges(grid: np.ndarray, mass: np.ndarray, confidence: float) -> L
     HPD ranges at REPORTING_STEP_YEARS rather than at the solver's internal
     grid step.
 
-    Two reasons, both measured on the OxCal fixture. The internal step is
-    chosen from the date range and the number of groups (1.0 to 7.7 years
-    across the cases here), so reporting at it would make a published range
-    depend on an implementation detail -- the same dates in a longer sequence
-    would come back with different widths. And a modelled posterior on a
-    wiggly curve is genuinely multi-peaked, so a fine grid picks out the tops
-    of the peaks and skips the dips: at 1 year Wk-51189's 68.3% region came
-    back as three fragments totalling 24 years, including two ranges split by
-    a single excluded year, where OxCal reports 35 years. Rebinned to 5 years
-    the same posterior gives 30, and the eight dates' 95.4% widths average
-    51.2 against OxCal's 55.6.
+    Two reasons. The internal step is chosen from the date range and the number
+    of groups, so reporting at it would make a published range depend on an
+    implementation detail -- the same dates in a longer sequence would come back
+    with different widths. And a modelled posterior on a wiggly curve is
+    genuinely multi-peaked, so a fine grid picks out the peak tops and skips the
+    dips: at 1 year Wk-51189's 68.3% region came back as three fragments
+    totalling 24 years where OxCal reports 35, and rebinned to 5 years it gives
+    30.
 
-    Five years is OxCal's own default reporting resolution and is about as
-    fine as a calibrated date is meaningful, so it is the convention this
-    reports in. The full-resolution density is still what gets plotted and
-    what the point estimates come from.
+    Five years is OxCal's own default reporting resolution and about as fine as
+    a calibrated date is meaningful. The full-resolution density is still what
+    gets plotted and what the point estimates come from.
     """
     step = REPORTING_STEP_YEARS
     lo = np.floor(grid[0] / step) * step
@@ -1486,12 +1305,10 @@ def _plottable(grid: np.ndarray, density: np.ndarray) -> List[List[float]]:
     """
     The density trimmed to where it actually has mass.
 
-    The solver's grid deliberately runs far wider than the dates, because the
-    boundaries need room -- on the OxCal fixture it spans 2031 years while
-    the posterior occupies about 100 of them. Handing the whole grid to the
-    plot drew every modelled date as a spike in a mostly-empty axis, which is
-    what this trim fixes. The MCMC path never had the problem because it
-    histogrammed its own draws.
+    The solver's grid runs far wider than the dates because the boundaries need
+    room -- 2031 years on the OxCal fixture against a posterior occupying about
+    100 -- so handing the whole grid to the plot would draw every modelled date
+    as a spike in a mostly-empty axis.
     """
     peak = density.max()
     if peak <= 0:
@@ -1505,10 +1322,10 @@ def _plottable(grid: np.ndarray, density: np.ndarray) -> List[List[float]]:
 
 def _summarize(grid: np.ndarray, density: np.ndarray, rng, num_samples: int) -> Dict:
     """
-    An exact density turned into the summary shape the rest of the app
-    expects. Point estimates come from the density itself rather than from
-    draws, so they carry no Monte Carlo error at all; the draws exist only so
-    downstream code that wants samples still works.
+    An exact density in the summary shape the rest of the app expects. Point
+    estimates come from the density itself rather than from draws, so they carry
+    no Monte Carlo error; the draws exist only for downstream code that wants
+    samples.
     """
     dt = float(grid[1] - grid[0])
     total = density.sum() * dt

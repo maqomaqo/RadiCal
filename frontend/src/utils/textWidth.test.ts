@@ -3,10 +3,10 @@
 // Nenthorn boundary names and their formatted ranges. Those measurements are
 // the numbers in `ROBOTO_10PX` below.
 //
-// What the tests hold it to is not exactness, which a class-based estimate
-// cannot have. It is the tolerance the caller was written around: close
-// enough that a box sized from it fits, and never so far under that the label
-// escapes the stub of rule either side of it.
+// What is held to is not exactness, which a class-based estimate cannot have,
+// but the tolerance the caller was written around: close enough that a box
+// sized from it fits, and never so far under that the label escapes the stub of
+// rule either side.
 import { describe, expect, it } from 'vitest'
 
 import { estimateTextWidth } from './textWidth'

@@ -4,16 +4,15 @@ import { Link as RouterLink } from 'react-router-dom'
 /**
  * The domain vocabulary, defined once.
  *
- * PRODUCT.md is explicit that the terminology is not to be softened or
- * renamed for a general audience -- BP, cal BP, HPD and Delta-R are the
- * words the literature uses, and a student who learns a diluted version
- * here cannot read a paper afterwards. The way to serve both audiences is
- * to define the real terms, which is what this page is for. Nothing else in
- * the app changes its language because this exists.
+ * PRODUCT.md is explicit that the terminology is not softened for a general
+ * audience: BP, cal BP, HPD and Delta-R are the words the literature uses, and
+ * a student who learns a diluted version cannot read a paper afterwards. This
+ * page defines the real terms instead; nothing else in the app changes its
+ * language because it exists.
  *
- * Definitions are taken from the implementation's own comments rather than
- * written fresh (services/agreement.py, schemas/sample.py, models.py,
- * utils/dateFormat.ts), so the reference and the behaviour cannot drift.
+ * Definitions come from the implementation's own comments (services/
+ * agreement.py, schemas/sample.py, models.py, utils/dateFormat.ts) rather than
+ * being written fresh, so the reference and the behaviour cannot drift.
  */
 
 interface Entry {

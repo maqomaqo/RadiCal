@@ -2,15 +2,12 @@ import { formatApiError } from './apiError'
 
 /**
  * Loading the Dashboard's recent analyses, and saying precisely what went
- * wrong when it doesn't work.
+ * wrong when it does not work.
  *
- * This exists as its own function because the failure branches are the point.
- * The page used to swallow every one of them into an empty array, which the
- * Dashboard then rendered as "No analyses yet. Create one to get started." --
- * so a researcher whose backend was unreachable was told, in a friendly
- * voice, that their work did not exist. Distinguishing "we could not ask",
- * "the server refused", and "you have none yet" is the whole job, and it is
- * worth testing rather than eyeballing.
+ * Its own function because the failure branches are the point: swallowing them
+ * into an empty array renders as "No analyses yet", telling a researcher whose
+ * backend is unreachable that their work does not exist. Distinguishing "we
+ * could not ask", "the server refused" and "you have none yet" is the job.
  */
 
 export interface LoadError {
@@ -38,9 +35,8 @@ export async function loadRecentAnalyses<T>(
   try {
     response = await fetchImpl(`/api/analysis?per_page=${perPage}`)
   } catch {
-    // fetch only rejects when the request never got an answer at all:
-    // offline, DNS, TLS, the server down. Nothing the server said is
-    // available, because it did not say anything.
+    // fetch rejects only when the request got no answer at all -- offline,
+    // DNS, TLS, server down -- so there is nothing the server said to report.
     return {
       ok: false,
       error: { message: "Can't reach the server. Check your connection, then try again." },
@@ -51,8 +47,8 @@ export async function loadRecentAnalyses<T>(
   try {
     data = await response.json()
   } catch {
-    // A body that isn't JSON is usually a proxy or a crash page rather than
-    // this API, so the status is the only honest thing to report.
+    // A non-JSON body is usually a proxy or crash page rather than this API,
+    // so the status is the only honest thing to report.
     return {
       ok: false,
       error: {
@@ -85,13 +81,11 @@ export async function loadRecentAnalyses<T>(
 /**
  * The server's explanation, or nothing.
  *
- * formatApiError owns the shape-handling -- FastAPI's `detail` is a string,
- * a structured object, or a list of validation errors depending on what
- * failed -- so this does not reimplement any of it. It only guards the one
- * case that helper cannot know about: with no `detail` at all, formatApiError
- * falls back to JSON.stringify of the whole body, which on this endpoint
- * would print the response envelope back at the reader. A detail line that is
- * really a dump is worse than no detail line.
+ * formatApiError owns the shape-handling -- FastAPI's `detail` may be a
+ * string, an object, or a list of validation errors. This only guards the case
+ * it cannot know about: with no `detail` at all it falls back to
+ * JSON.stringify of the whole body, printing the response envelope back at the
+ * reader.
  */
 function describeFailure(data: unknown): string | undefined {
   const detail = (data as { detail?: unknown } | null | undefined)?.detail

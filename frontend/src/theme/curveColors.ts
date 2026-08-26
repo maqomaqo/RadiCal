@@ -4,27 +4,19 @@ import { PHASE_GREEN } from './diagramColors'
 /**
  * How each calibration curve is drawn, keyed by which curve it is.
  *
- * A curve's appearance used to depend on its POSITION in the figure: whichever
- * one happened to be listed first took the app's blue and a solid line, and
- * anything after it took grey and a dash. So SHCal20 was the blue line in one
- * analysis and the grey dashed one in the next, with nothing about the curve
- * having changed -- only which dates the reader happened to open. That makes
- * the strongest signal on the figure (its colour) mean nothing at all, and
- * quietly implies a ranking between two curves that are simply different.
+ * A curve's style is a property OF THE CURVE, not of its position in the
+ * figure. IntCal20 is the same green everywhere and Marine20 the same dashed
+ * violet, so a reader learns the palette once -- the premise the model diagrams
+ * run on (diagramColors.ts): a hue is a claim about what something IS. Keying
+ * off position instead would make the strongest signal on the figure mean
+ * nothing, and imply a ranking between curves that are simply different.
  *
- * Here a curve's style is a property OF THE CURVE. IntCal20 is the same green
- * in every figure in the app, and Marine20 the same dashed violet, so a reader
- * learns the palette once. That is the same premise the model diagrams run on
- * (see diagramColors.ts): a hue is a claim about what something IS.
+ * Not the app's primary blue: that belongs to the dates, and a curve in the
+ * same blue as the lobes drawn over it is the one collision that makes the
+ * Curve view unreadable.
  *
- * Deliberately not the app's primary blue. That belongs to the dates -- their
- * measurements and their posteriors -- and this palette sits in the same
- * figure as them: a curve in the same blue as the lobes drawn over it is the
- * one collision that makes the Curve view unreadable.
- *
- * Dash is fixed alongside hue rather than left to chance, so the curves are
- * still told apart in a greyscale print, which is where a lot of these figures
- * end up.
+ * Dash is fixed alongside hue, so the curves are still told apart in the
+ * greyscale print a lot of these figures end up in.
  */
 
 /** Plotly's dash vocabulary, narrowed to the patterns this palette uses. */
@@ -43,11 +35,10 @@ export interface CurveStyle {
 /**
  * Envelope strengths.
  *
- * Weaker than a single curve's envelope used to be, because there can now be
- * more than one of them on a figure: at the old 0.72 two overlapping ±1σ bands
- * composited to a flat dark mass with no edge visible between them, which is
- * the one thing a reader comparing two curves is looking for. At these values
- * an overlap reads as a blend of two hues, and each band still reads as a band.
+ * Weak enough that several can share a figure: at 0.72 two overlapping ±1σ
+ * bands composite to a flat dark mass with no edge between them, which is the
+ * one thing a reader comparing two curves is looking for. At these values an
+ * overlap reads as a blend of two hues and each band still reads as a band.
  */
 const BAND_1_ALPHA = 0.55
 const BAND_2_ALPHA = 0.22

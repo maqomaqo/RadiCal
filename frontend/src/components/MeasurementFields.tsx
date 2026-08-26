@@ -18,11 +18,9 @@ import { useCurves } from '@/hooks/useCurves'
 /**
  * The fields that describe one radiocarbon date.
  *
- * Shared between adding a date and editing one already in the list. They
- * were going to be two copies of the same ninety lines of JSX, which is the
- * arrangement that had just cost us two persistence bugs on the backend --
- * a field added to one copy of a form and not the other is invisible until
- * someone notices a column is empty.
+ * Shared between adding a date and editing one already in the list, rather
+ * than two copies of the same ninety lines of JSX: a field added to one copy
+ * and not the other is invisible until someone notices an empty column.
  */
 
 /**
@@ -38,11 +36,10 @@ export const COMMON_MATERIAL_TYPES = [
  * Which curve to switch to when a sample type is selected, and whether the
  * curve already chosen may stay.
  *
- * Marine carbon has to be calibrated against a marine curve -- IntCal20
- * would be wrong by centuries -- while a terrestrial sample picks between
- * hemispheres. Which curves are which used to be a hardcoded map here (and
- * a second one in ProjectSampleTable); it now comes from the backend's curve
- * registry, so a curve added there is offered here without a code change.
+ * Marine carbon must be calibrated against a marine curve -- IntCal20 would be
+ * wrong by centuries -- while a terrestrial sample picks between hemispheres.
+ * Which curves are which comes from the backend's registry, so a curve added
+ * there is offered here without a code change.
  *
  * A deliberate choice that already suits the sample type is left alone;
  * anything else moves to the first curve the registry lists for it.
@@ -66,9 +63,8 @@ interface Props {
   value: MeasurementDraft
   onChange: (next: MeasurementDraft) => void
   /**
-   * Outlier settings are only offered for a Bayesian analysis. A single
-   * calibration has no model for a date to be an outlier FROM, so the
-   * control would be inert.
+   * Outlier settings are Bayesian-only: a single calibration has no model for
+   * a date to be an outlier FROM, so the control would be inert.
    */
   showOutlier?: boolean
 }
@@ -77,12 +73,10 @@ interface Props {
  * Whether this date is marine carbon, and so whether a reservoir offset
  * applies to it.
  *
- * The sample type answers it outright when set. Otherwise the curve does,
+ * The sample type answers it outright when set; otherwise the curve does,
  * looked up in the registry rather than compared against a literal, so an
- * imported marine curve counts the same as the bundled Marine20. With no
- * curve list to hand -- the request failed, or a caller has none -- it falls
- * back to the one marine curve this app ships, which is the right answer
- * whenever no others have been added.
+ * imported marine curve counts the same as Marine20. With no curve list to
+ * hand it falls back to the one marine curve this app ships.
  */
 export function isMarineMeasurement(m: MeasurementDraft, curves: CurveSpec[] = []): boolean {
   if ((m.sample_type || 'terrestrial') === 'marine') return true

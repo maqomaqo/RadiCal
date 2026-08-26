@@ -35,10 +35,9 @@ import { useNotify } from '@/contexts/NotificationContext'
 import { curveLabel, curveOptions } from '@/api/curves'
 import { useCurves } from '@/hooks/useCurves'
 
-// A date held in the PROJECT's collection (backend models.ProjectSample) --
-// entered once here, then deployed into as many analyses as needed. Note
-// deploying COPIES these values, so editing one afterwards never changes an
-// analysis already created from it.
+// A date in the PROJECT's collection (backend models.ProjectSample), entered
+// once and deployed into as many analyses as needed. Deploying COPIES these
+// values, so editing one never changes an analysis already created from it.
 export interface ProjectSample {
   id: string
   sample_name: string
@@ -106,20 +105,17 @@ function formToPayload(form: DraftForm) {
 }
 
 /**
- * Parse the bulk-paste textarea: one date per line, comma or tab separated,
- * as `name, age, error[, material[, context[, curve]]]`. Deliberately
- * forgiving -- this is for pasting a column range out of a spreadsheet or a
- * lab report, so blank lines are skipped and a malformed line is reported by
- * number rather than silently dropped. Curve is optional and defaults to
- * IntCal20 -- most pasted batches are a single terrestrial curve, so it
- * would be noise to require it on every line.
+ * Parse the bulk-paste textarea: one date per line, comma or tab separated, as
+ * `name, age, error[, material[, context[, curve]]]`. Forgiving, since this is
+ * for pasting a column range out of a spreadsheet or lab report -- blank lines
+ * are skipped and a malformed one is reported by number rather than dropped.
+ * Curve is optional and defaults to IntCal20, most batches being a single
+ * terrestrial curve.
  *
- * `validCurveIds` is passed in rather than held here so that this stays the
- * pure, testable function it was while the curves themselves come from the
- * backend registry. An empty set accepts any curve id and leaves the
- * rejection to the backend, which is the right behaviour when the curve list
- * could not be loaded: refusing every line on a list we never received would
- * be blaming the paste for a failed request.
+ * `validCurveIds` is passed in so this stays pure while the curves come from
+ * the backend registry. An empty set accepts any curve id and leaves rejection
+ * to the backend, which is right when the curve list could not be loaded:
+ * refusing every line would blame the paste for a failed request.
  */
 export function parsePastedDates(
   text: string,
@@ -181,17 +177,14 @@ export default function ProjectSampleTable({ projectId }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [form, setForm] = useState<DraftForm>(EMPTY_FORM)
   const [saving, setSaving] = useState(false)
-  // Validation only -- request failures go through the toast queue instead,
-  // same as everywhere else. This one stays inline because it names which
-  // fields are missing right above the fields themselves, which a toast
-  // fired from the corner of the screen can't do as directly.
+  // Validation only; request failures go through the toast queue. This stays
+  // inline because it names the missing fields directly above them.
   const [formError, setFormError] = useState<string | null>(null)
 
   const [pasteOpen, setPasteOpen] = useState(false)
   const [pasteText, setPasteText] = useState('')
-  // Same reasoning as formError, but the content here can run to several
-  // lines (one per unparsed row), which a single-line toast would truncate
-  // or cut off entirely.
+  // As formError, but the content can run to several lines, one per unparsed
+  // row, which a single-line toast would cut off.
   const [pasteError, setPasteError] = useState<{ headline: string; details?: string[] } | null>(null)
 
   const [importOpen, setImportOpen] = useState(false)
@@ -200,8 +193,8 @@ export default function ProjectSampleTable({ projectId }: Props) {
   const [deleteTarget, setDeleteTarget] = useState<ProjectSample | null>(null)
   const [deleting, setDeleting] = useState(false)
 
-  // One flag for every bulk action: they all act on the same selection, so
-  // two of them running at once would be two answers to the same question.
+  // One flag for every bulk action: they act on the same selection, so two at
+  // once would be two answers to one question.
   const [bulkBusy, setBulkBusy] = useState(false)
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false)
 
@@ -321,10 +314,10 @@ export default function ProjectSampleTable({ projectId }: Props) {
   /**
    * Add an uploaded file's dates to the collection.
    *
-   * Goes through POST /projects/:id/samples -- the same endpoint the Add and
-   * Paste paths use -- so an imported date is stored by exactly the code a
-   * typed one is. The phase each date was filed under becomes its default
-   * context, which is what deploying then groups by.
+   * Through POST /projects/:id/samples, the endpoint the Add and Paste paths
+   * use, so an imported date is stored by the code a typed one is. The phase
+   * each date was filed under becomes its default context, which deploying
+   * then groups by.
    */
   const handleImport = async (preview: ImportPreview) => {
     setImporting(true)
@@ -383,11 +376,9 @@ export default function ProjectSampleTable({ projectId }: Props) {
     }
   }
 
-  // The three bulk actions. Each reports what the server actually did rather
-  // than what was asked: a Delta-R applied to a mixed selection lands on the
-  // marine dates only, and assigning a marine curve changes sample types with
-  // it. Saying so afterwards is the difference between an action the reader
-  // can trust and one they have to go and check.
+  // The three bulk actions. Each reports what the server DID rather than what
+  // was asked: a Delta-R on a mixed selection lands on the marine dates only,
+  // and assigning a marine curve changes sample types with it.
   const runBulk = async (
     request: () => Promise<Response>,
     describe: (data: any) => { message: string; severity?: 'success' | 'info' },
@@ -398,12 +389,10 @@ export default function ProjectSampleTable({ projectId }: Props) {
       const response = await request()
       const data = await response.json()
       if (data.success) {
-        // notify() defaults to 'error', which is right for the call sites it
-        // was built for and wrong for these -- a completed bulk edit reported
-        // in red reads as a failure. 'info' rather than 'success' where the
-        // server skipped some of the selection: nothing went wrong, but not
-        // everything the reader ticked changed, and that deserves to look
-        // different at a glance.
+        // notify() defaults to 'error', which would report a completed bulk
+        // edit in red. 'info' rather than 'success' where the server skipped
+        // part of the selection: nothing went wrong, but not everything the
+        // reader ticked changed.
         const { message, severity = 'success' } = describe(data.data)
         notify(message, severity)
         await fetchSamples()
@@ -504,9 +493,9 @@ export default function ProjectSampleTable({ projectId }: Props) {
       if (data.success) {
         setDeployOpen(false)
         setSelected(new Set())
-        // Straight into the editor so contexts/stratigraphy can be set up
-        // before running -- the whole point of deploying the same dates
-        // more than once is modelling them differently each time.
+        // Straight into the editor so contexts and stratigraphy can be set up
+        // before running: deploying the same dates twice is for modelling them
+        // differently each time.
         navigate(`/analysis/${data.data.id}/edit`)
       } else {
         notify('Failed to deploy dates: ' + formatApiError(data))

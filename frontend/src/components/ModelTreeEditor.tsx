@@ -45,36 +45,27 @@ import { newElementId } from '@/utils/modelTreeDefaults'
 
 export { newElementId }
 
-// Editor for the explicit OxCal-style model structure: a nested, ordered
-// tree of Sequences, Phases, Boundaries and Hiatuses. Rendered as an
-// indented outline so it reads like a published OxCal model, oldest first
-// (top of the list = bottom of the stratigraphy), which is the convention
-// both OxCal and the Harris matrix use.
+// Editor for the OxCal-style model structure: a nested, ordered tree of
+// Sequences, Phases, Boundaries and Hiatuses, rendered as an indented outline
+// so it reads like a published OxCal model, oldest first -- top of the list is
+// bottom of the stratigraphy, the convention OxCal and the Harris matrix use.
 //
-// Replaces the old flat "contexts + above/below relationships" editor: a
-// Boundary here is placed deliberately and, when it sits between two
-// Phases, is a SINGLE shared transition rather than two independent
-// per-context boundaries.
+// A Boundary here is placed deliberately and, between two Phases, is a SINGLE
+// shared transition rather than two independent per-context boundaries.
 //
-// Rows are dragged with @dnd-kit rather than the tree being rendered
-// recursively: the whole subtree is flattened into an ordered, depth-tagged
-// list (matching the outline's own DFS order), which turns "move this
-// element to a different nesting level" into an index+depth projection on a
-// flat array -- the same technique dnd-kit's own sortable-tree example uses
-// -- instead of juggling parent pointers by hand.
+// Rows are dragged with @dnd-kit over a FLATTENED, depth-tagged list in the
+// outline's own DFS order, so "move this element to a different nesting level"
+// is an index+depth projection on a flat array rather than juggling parent
+// pointers. Same technique as dnd-kit's sortable-tree example.
 //
-// The rows themselves DO NOT move while a drag is in progress: the sortable
-// strategy is a no-op and no transform is applied, so the outline stays
-// exactly where it was and a DropIndicator line shows where the block will
-// land instead. An earlier version re-flattened and re-ordered the whole
-// list on every pointer move to preview the drop in place, which fought
-// dnd-kit's own shifting animation for control of the same rows -- the
-// visible result was jitter, and rows changing height/order mid-drag
-// invalidated the rects dnd-kit had measured for collision, so a drop could
-// land on a stale target or refuse to register at all. A static list also
-// suits a TREE better than a list: a gap opening between two rows cannot
-// express which of the surrounding levels the block would land at, whereas
-// an indented line can.
+// The rows DO NOT move during a drag: the sortable strategy is a no-op, no
+// transform is applied, and a DropIndicator line shows where the block will
+// land. Re-ordering the list to preview the drop in place fights dnd-kit's own
+// shifting animation for the same rows -- visibly jitter, and rows changing
+// height mid-drag invalidate the rects measured for collision, so a drop can
+// land on a stale target or not register. A static list also suits a TREE
+// better: a gap between two rows cannot express which surrounding level the
+// block would land at, where an indented line can.
 
 const TYPE_LABEL: Record<ElementType, string> = {
   sequence: 'Sequence',
@@ -90,9 +81,8 @@ const TYPE_HINT: Record<ElementType, string> = {
   hiatus: 'A deliberate gap; must sit between two boundaries',
 }
 
-// One MUI spacing unit (8px) times 3, matching the indent step every depth
-// level rendered at before this was flattened -- kept identical so the
-// outline doesn't jump when dragging is introduced.
+// One MUI spacing unit (8px) times 3 -- the indent step every depth level
+// renders at.
 const INDENT_UNITS = 3
 export const INDENT_PX = INDENT_UNITS * 8
 
@@ -130,10 +120,8 @@ function findElement(root: ModelElement, id: string): ModelElement | null {
   return found
 }
 
-/**
- * A phase is only a legal home for dates, so this is what the sample
- * assignment dropdown offers.
- */
+/** A phase is the only legal home for dates, so this is what the sample
+ *  assignment dropdown offers. */
 export function phaseOptions(root: ModelElement): Array<{ id: string; name: string }> {
   const out: Array<{ id: string; name: string }> = []
   walk(root, null, (el) => {
@@ -142,11 +130,8 @@ export function phaseOptions(root: ModelElement): Array<{ id: string; name: stri
   return out
 }
 
-/**
- * Client-side mirror of the backend's validate_tree, so problems surface
- * while editing rather than on submit. Deliberately the same rules --
- * see services/model_tree.py.
- */
+/** Client-side mirror of the backend's validate_tree, so problems surface
+ *  while editing rather than on submit. See services/model_tree.py. */
 export function validateTree(
   root: ModelElement,
   assignments: Record<string, string>,
@@ -241,27 +226,23 @@ export interface Projection {
   /** The row the block would land immediately above, or null for the very
    * end of the outline. This is what the indicator line is drawn against. */
   insertBeforeId: string | null
-  /** The depth STEP that produced this (projected minus original depth),
-   * fed back into the next call so the chosen step is sticky -- see
-   * DEPTH_HYSTERESIS. */
+  /** The depth STEP that produced this, projected minus original, fed back
+   * into the next call so the chosen step is sticky (see DEPTH_HYSTERESIS). */
   depthDelta: number
 }
 
-// How far past the halfway point between two indent steps the pointer has
-// to travel before the projected depth changes. Plain rounding flips at
-// exactly .5, so a hand holding still on that boundary would flicker the
-// indicator between two levels; this makes the step the pointer is already
-// on that much stickier.
+// How far past the halfway point between two indent steps the pointer must
+// travel before the projected depth changes. Plain rounding flips at exactly
+// .5, so a hand held on that boundary would flicker between two levels.
 const DEPTH_HYSTERESIS = 0.6
 
 /**
- * Given the flat outline, the item being dragged, what it's currently
- * hovering over, and how far it's been dragged horizontally, works out
- * where it would land: how deep, and just before which item. Depth is
- * clamped so a drop can never nest inside a non-container (a boundary or
- * hiatus) and never skip past what the surrounding items structurally
- * allow -- so every candidate drop position is a legal tree, and nothing
- * needs to be rejected at drop time.
+ * Where the dragged block would land -- how deep, and just before which item --
+ * from the flat outline, what is being hovered, and the horizontal distance.
+ *
+ * Depth is clamped so a drop can never nest inside a non-container and never
+ * skip past what the surrounding items allow, making every candidate position
+ * a legal tree with nothing to reject at drop time.
  *
  * `previousDepthDelta` is the step this same drag last settled on, if any.
  * Passing it keeps the indicator from flickering between two levels while
@@ -329,13 +310,12 @@ export function getProjection(
 }
 
 /**
- * Reinserts the full dragged subtree (descendants included, shifted by the
- * same depth change) at an already-computed projected position. Returns
- * null if the drop didn't actually move anything.
+ * Reinserts the full dragged subtree, descendants included and shifted by the
+ * same depth change, at an already-computed projected position. Null if the
+ * drop moved nothing.
  *
- * Split out from getProjection so the indicator the user is looking at and
- * the tree the drop produces are built from the SAME projection object,
- * rather than each deriving one and hoping they agree.
+ * Split out from getProjection so the indicator the user is looking at and the
+ * tree the drop produces come from the SAME projection object.
  */
 function applyProjection(
   tree: ModelElement,
@@ -398,10 +378,10 @@ function samePlacement(a: Projection | null, b: Projection | null): boolean {
 }
 
 /**
- * The line showing where the dragged block will land: indented to the depth
- * it would sit at, tagged with the container it would go into. Absolutely
- * positioned in the gap above a row so that showing it costs no layout --
- * the outline must not move while a drag is in progress.
+ * The line showing where the dragged block will land: indented to the depth it
+ * would sit at, tagged with the container it would enter. Absolutely
+ * positioned in the gap above a row, so showing it costs no layout -- the
+ * outline must not move mid-drag.
  */
 function DropIndicator({ depth, label }: { depth: number; label: string }) {
   return (
@@ -587,10 +567,10 @@ function TreeRow({
   onAdd,
   onDelete,
 }: TreeRowProps) {
-  // No transform and no transition: the outline holds still for the whole
-  // drag (see the note at the top of this file) and the indicator does the
-  // talking. useSortable is still what registers this row as a drop target
-  // and gives the drag handle its keyboard support.
+  // No transform and no transition: the outline holds still for the whole drag
+  // (see the note at the top of this file) and the indicator does the talking.
+  // useSortable still registers this row as a drop target and gives the handle
+  // its keyboard support.
   const { attributes, listeners, setNodeRef } = useSortable({ id: node.id })
   const { element, depth } = node
 
@@ -666,23 +646,19 @@ function TreeRow({
 export default function ModelTreeEditor({ tree, measurements, assignments, onChange }: Props) {
   const [addMenu, setAddMenu] = useState<{ anchor: HTMLElement; targetId: string } | null>(null)
   const [activeId, setActiveId] = useState<string | null>(null)
-  // Where the block would land right now, for the indicator. Only replaced
-  // when the LANDING PLACE changes, not on every pointer move -- a drag
-  // across one row is hundreds of move events but only a handful of
-  // distinct placements, and re-rendering the outline for the rest of them
-  // is what a static list is trying to avoid.
+  // Where the block would land right now, for the indicator. Replaced only
+  // when the LANDING PLACE changes: a drag across one row is hundreds of move
+  // events but a handful of distinct placements.
   const [projection, setProjection] = useState<Projection | null>(null)
-  // The same projection, kept where the drop handler can read it without
-  // going through React state. onDragEnd used to read the placement out of
-  // state, which meant a drop landing in the same tick as the last move --
-  // exactly what a quick flick does -- committed the placement from one
-  // event ago, or none at all if the drag had only just started.
+  // The same projection, where the drop handler can read it without going
+  // through React state: a drop landing in the same tick as the last move --
+  // what a quick flick does -- would otherwise commit the placement from one
+  // event ago, or none at all.
   const projectionRef = useRef<Projection | null>(null)
-  // The last row the pointer was actually over. dnd-kit reports no target
-  // for the odd frame -- while it re-measures, or crossing the gap between
-  // two rows -- and treating that as "back where it started" made the line
-  // jump home and back for one frame. Holding the last real answer instead
-  // keeps it still.
+  // The last row the pointer was actually over. dnd-kit reports no target for
+  // the odd frame -- re-measuring, or crossing the gap between two rows -- and
+  // treating that as "back where it started" makes the line jump home for a
+  // frame. Holding the last real answer keeps it still.
   const lastOverIdRef = useRef<string | null>(null)
   const typeColor = useElementTypeColors()
 
@@ -763,9 +739,9 @@ export default function ModelTreeEditor({ tree, measurements, assignments, onCha
     onChange(tree, { ...assignments, [sampleId]: elementId })
   }
 
-  // Convenience for the common case: put a boundary before and after every
-  // phase in a sequence, which is what makes each phase's start and end
-  // reportable. Adjacent phases end up sharing the boundary between them.
+  // The common case: a boundary before and after every phase in a sequence,
+  // which is what makes each phase's start and end reportable. Adjacent phases
+  // share the boundary between them.
   const bracketPhases = () => {
     update((draft) => {
       walk(draft, null, (el) => {
@@ -827,8 +803,8 @@ export default function ModelTreeEditor({ tree, measurements, assignments, onCha
       projectionRef.current?.depthDelta
     )
     projectionRef.current = next
-    // Returning the previous object when the placement is unchanged lets
-    // React bail out of the re-render entirely.
+    // Returning the previous object when the placement is unchanged lets React
+    // bail out of the re-render.
     setProjection((prev) => (samePlacement(prev, next) ? prev : next))
   }
 
@@ -853,16 +829,12 @@ export default function ModelTreeEditor({ tree, measurements, assignments, onCha
 
   const handleDragEnd = (event: DragEndEvent) => {
     const dragged = String(event.active.id)
-    // Deliberately the projection the indicator was LAST SHOWING, not one
-    // recomputed from the drop event. The pointer cannot move between the
-    // final move event and the release, so there is nothing fresher to
-    // learn from recomputing -- but the two can disagree when dnd-kit
-    // resolves a different `over` at release than it reported during the
-    // drag (it measures droppable rects off the main thread, so a release
-    // arriving before that settles resolves against newer rects). Whenever
-    // they disagreed the block landed somewhere other than the line the
-    // user was looking at, which is the whole thing the indicator exists to
-    // promise. Committing what was displayed makes that promise structural.
+    // The projection the indicator was LAST SHOWING, not one recomputed from
+    // the drop event. The pointer cannot move between the final move and the
+    // release, so recomputing learns nothing -- but the two can disagree when
+    // dnd-kit resolves a different `over` at release than during the drag, and
+    // the block would then land somewhere other than the line the user was
+    // looking at. Committing what was displayed makes that promise structural.
     const landing = projectionRef.current
     endDrag()
     if (!landing) return
@@ -1014,11 +986,9 @@ export default function ModelTreeEditor({ tree, measurements, assignments, onCha
           </Typography>
         ) : (
           measurements.map((m) => (
-            // wrap: the label and the select each have their own 220px
-            // minimum, and on their own line that's fine -- but held to one
-            // unbroken row the pair needs ~490px, wider than a phone's
-            // viewport, and forced the page to scroll sideways to reach the
-            // select on the right.
+            // wrap: the label and the select each have a 220px minimum, so
+            // held to one unbroken row the pair needs ~490px -- wider than a
+            // phone viewport, forcing a sideways scroll to reach the select.
             <Box key={m.id} sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 2, mb: 1 }}>
               <Typography variant="body2" sx={{ minWidth: 220, fontFamily: 'monospace' }}>
                 {m.sample_name} — {m.age_bp} ± {m.error_1sigma ?? '?'} BP

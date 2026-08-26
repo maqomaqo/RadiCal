@@ -74,8 +74,8 @@ describe('figure height', () => {
   })
 
   it('accounts for both margins, so the plot area is not silently squeezed', () => {
-    // The margins used to be a separate constant from the total height, so
-    // changing one without the other quietly shrank the drawing area.
+    // The margins and the total height are one derivation, so changing a
+    // margin cannot quietly shrink the drawing area.
     for (const rows of ROW_COUNTS) {
       const g = stackedPlotGeometry(rows)
       expect(g.height).toBe(g.plotAreaHeight + g.marginTop + g.marginBottom)

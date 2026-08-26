@@ -1,39 +1,24 @@
 // Putting two plotted distributions on the same footing.
 //
 // A stacked row draws a date's modelled posterior and, optionally, its
-// unmodelled calibration behind it. The two arrive from different places and
-// -- this is the bug these exist for -- in different units:
-//
-//   posterior  services/exact_chain._plottable: the solver's density on its
-//              own uniform grid, integrating to 1.
-//   prior      services/calibration.get_display_distribution: the curve's
-//              probabilities windowed and then DOWNSAMPLED BY INDEX, which
-//              changes the spacing between points without rescaling their
-//              values. Its integral therefore depends on the curve's grid
-//              where that date happens to fall and on whether downsampling
-//              kicked in at all.
-//
-// Measured on the SRM SM/C Dune analysis, integrating each series over its
-// own grid: every posterior came to 1.000, while the priors came to 1.000 on
-// some rows and 10.000 on others. Scaling the prior by the posterior's peak
-// -- as the plot did -- therefore drew 16 of its 22 rows up to 1.69 row
-// heights tall, painting into the row above.
+// unmodelled calibration behind it. The two come from different places and
+// need not integrate to the same thing: a prior windowed and then downsampled
+// by index has its point spacing changed without its values being rescaled, so
+// its integral depends on where on the curve the date falls.
 //
 // Normalising both to unit area here makes the comparison mean what the plot
-// says it means (equal area, so a shorter curve really is a wider one) and
-// makes it independent of whatever convention the backend used. Doing it at
-// the point of drawing is deliberate: a plot that has to be told the units of
-// its inputs is a plot that will be wrong again the next time one changes.
+// says it means -- equal area, so a shorter curve really is a wider one -- and
+// makes it independent of whatever convention the backend used. Done at the
+// point of drawing, because a plot that has to be told the units of its inputs
+// will be wrong again the next time one changes.
 
 /** A [calendar age, probability] series. */
 export type Distribution = Array<[number, number]>
 
 /**
- * The integral of a series over its own grid, by the trapezium rule.
- *
- * Trapezium rather than sum x step because the grid is not guaranteed
- * uniform: a downsampled series can carry uneven spacing, and cal BP runs
- * descending in places, so the spacing is taken as an absolute value.
+ * The integral of a series over its own grid, by the trapezium rule -- the
+ * grid is not guaranteed uniform, and cal BP runs descending in places, so the
+ * spacing is taken as an absolute value.
  */
 export function integrate(points: Distribution): number {
   if (points.length < 2) return 0
@@ -46,12 +31,10 @@ export function integrate(points: Distribution): number {
 }
 
 /**
- * The same series rescaled to unit area, so it can be compared with another
- * regardless of the grid or normalisation it arrived on.
- *
- * A series that cannot be normalised -- fewer than two points, or no positive
- * area -- is returned unchanged rather than blanked: something visible and
- * unscaled beats a row that silently loses its curve.
+ * The same series rescaled to unit area, so it compares with another whatever
+ * grid or normalisation it arrived on. One that cannot be normalised -- fewer
+ * than two points, or no positive area -- comes back unchanged rather than
+ * blanked, since something unscaled beats a row that loses its curve.
  */
 export function toUnitArea(points: Distribution): Distribution {
   const area = integrate(points)
@@ -75,15 +58,13 @@ export interface TrimmedDistribution {
 
 /**
  * Trims a distribution's outer tails, where the density is indistinguishable
- * from zero at drawing scale -- left in, they draw as a flat rule running the
- * whole width of the figure rather than as a curve. Only the OUTER tails go: a
- * multimodal posterior's flat gap between peaks is a real feature of the
- * calibration, not padding, so the slice stays contiguous.
+ * from zero at drawing scale and would draw as a flat rule across the figure.
+ * Only the OUTER tails: a multimodal posterior's flat gap between peaks is a
+ * real feature of the calibration, so the slice stays contiguous.
  *
- * Lives here rather than in a plot component because both the stacked view and
- * the curve view draw the same lobes and must agree about where a distribution
- * visibly starts and stops -- the curve view sets its calendar axis from
- * exactly the extent the stacked view would draw.
+ * Here rather than in a plot component because the stacked view and the curve
+ * view draw the same lobes and must agree where a distribution visibly starts
+ * and stops.
  */
 export function trimTails(distribution: Distribution): TrimmedDistribution {
   const peak = Math.max(...distribution.map(([, p]) => p))

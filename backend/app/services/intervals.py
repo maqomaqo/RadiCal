@@ -2,24 +2,18 @@
 Durations and differences -- the quantities that are functions of SEVERAL
 modelled ages at once, rather than of one.
 
-What is here and why it is not just more of exact_chain.py
-----------------------------------------------------------
-Every number the solvers report until now is a MARGINAL: this date's calendar
-age, that boundary's calendar age. A duration is not. "How long did Phase 2
-last" is `older boundary - younger boundary`, and the two boundaries are not
-independent -- the model requires one to be older than the other, and the same
-dates hold them apart. Pairing up two marginals answers a different question,
-and the clearest sign of it is that the answer is not even a duration: on a
-single phase of six dates, pairing draws from the two boundary marginals puts
-8.2% of them BELOW ZERO -- a phase that ends before it starts -- where the
-joint posterior gives that no probability at all. (It is not simply "wider",
-either: on that model the two spreads are within 3% of each other, and on a
-two-phase model the joint is the wider of the two. The pairing is wrong in
-shape, not in scale, which is why an eyeball check would not catch it.)
+Why this is not just more of exact_chain.py
+------------------------------------------
+Every other number the solvers report is a MARGINAL: this date's calendar age,
+that boundary's. A duration is not. "How long did Phase 2 last" is
+`older boundary - younger boundary`, and the two boundaries are not independent
+-- the model requires one to be older, and the same dates hold them apart.
 
-exact_chain.solve's own docstring warns about exactly this -- "a future caller
-wanting, say, P(date A older than date B) must not read it off these". This
-module is that future caller, and it is fed joint draws rather than marginals.
+Pairing two marginals answers a different question, and wrongly in SHAPE rather
+than scale, which an eyeball check would not catch: on a single phase of six
+dates it puts 8.2% of the pairs below zero, a phase ending before it starts,
+where the joint posterior gives that no probability at all. So this module is
+fed joint draws rather than marginals.
 
 The four quantities, in the vocabulary the rest of the app uses:
 
@@ -50,36 +44,33 @@ slightly different things because a phase is an interval and a date is a point:
               A pair whose posterior says "A is older" 50/50 scores 1.0; a pair
               the model has fully separated scores 0.
 
-Both are on the same scale and are read the same way -- 1 means "the model
-cannot tell these apart in time", 0 means "the model separates them cleanly" --
-so one severity vocabulary serves both. The bands are the app's own reporting
-confidences rather than round numbers picked to look decisive: the four bands
-are 1 - SIGMA_2, 1 - SIGMA_1, SIGMA_1 and SIGMA_2 -- the same 68.3% and 95.4%
-coverages every HPD in this app is quoted at, and their complements. So "none" means separated at 2 sigma and "extensive" means
-overlapping at 2 sigma, and neither is a new convention the reader has to
-learn.
+Both are on the same scale and read the same way -- 1 means the model cannot
+tell them apart in time, 0 that it separates them cleanly -- so one severity
+vocabulary serves both. The bands are 1 - SIGMA_2, 1 - SIGMA_1, SIGMA_1 and
+SIGMA_2: the same coverages every HPD here is quoted at, and their complements.
+So "none" means separated at 2 sigma and "extensive" overlapping at 2 sigma,
+rather than a new convention the reader has to learn.
 
 Monte Carlo, deliberately
 -------------------------
-These are all computed from draws, including on the exact path, and that is a
-real qualification on numbers this app otherwise reports without any Monte
-Carlo error at all. It is taken knowingly:
+These are computed from draws even on the exact path, which is a real
+qualification on numbers this app otherwise reports with no Monte Carlo error.
+Taken knowingly:
 
-- Only the phase duration of a single bounded group is exactly computable
-  cheaply (the joint of one adjacent boundary pair is already on hand as a
-  matrix). A sequence duration couples the two ends of the chain, and a sample
-  duration is the range of K conditionally-independent dates -- neither
-  factorises, and both would cost an O(M^3) pass to get exactly.
+- Only a single bounded group's phase duration is cheaply exact, the joint of
+  one adjacent boundary pair already being on hand as a matrix. A sequence
+  duration couples the two ends of the chain and a sample duration is the range
+  of K conditionally-independent dates; neither factorises, and both would cost
+  an O(M^3) pass.
 - Mixing an exact phase duration with a sampled sample duration in one table,
-  where the whole point is comparing the two, would put a systematic difference
+  where the point is comparing the two, would put a systematic difference
   between them that has nothing to do with the archaeology.
-- The draws on the exact path are INDEPENDENT draws from the true joint
-  posterior (forward-filter/backward-sample over the same chain the solver
-  already built -- see exact_chain._messages), not an MCMC chain, so the error
-  is plain 1/sqrt(N) with no autocorrelation to reason about.
+- The exact path's draws are INDEPENDENT draws from the true joint posterior
+  (forward-filter/backward-sample over the chain the solver already built), not
+  an MCMC chain, so the error is plain 1/sqrt(N).
 
-`draws` and `independent` are reported alongside the numbers rather than left
-implicit, so the qualification travels with them.
+`draws` and `independent` are reported alongside the numbers, so the
+qualification travels with them.
 """
 from typing import Dict, List, Optional, Sequence, Tuple
 
@@ -93,51 +84,40 @@ from app.services.calibration import SIGMA_1, SIGMA_2, hpd_ranges_from_distribut
 DEFAULT_DRAWS = 20000
 
 # Most bins a reported duration is broken into. A duration posterior can be
-# thousands of years wide, and quoting an HPD for it at the 5-year step a
-# calendar date is quoted at would claim a resolution the draws do not have --
-# at 20,000 draws over 4,000 years that is 25 draws a bin, which is noise
-# masquerading as detail. The step widens instead, and is reported as `step` on
-# every summary so a reader can see what resolution the answer is at.
+# thousands of years wide, and an HPD at the 5-year step a calendar date is
+# quoted at would claim resolution the draws do not have. The step widens
+# instead, and is reported as `step` on every summary.
 #
-# Forty rather than a couple of hundred, because of what an HPD does with a
-# noisy histogram. The region is built by taking bins in order of density until
-# the confidence is met, so bins sitting near the cut go in or out on their own
-# Monte Carlo error and the region comes back in pieces. Measured on a
-# two-phase model's gap at 20,000 draws: a 5-year step reported the 68% region
-# as eight fragments ("85-90 (1.0%); 110-115 (1.0%); ...; 280-485 (60.5%)")
-# where the posterior is one long-tailed hump. At 60 bins it was still in two
-# pieces; at 40 both the 68% and the 95% region come back as one range. More
-# draws do NOT fix it on their own -- the density really is flat where the cut
-# falls, so which bins make it is ambiguous however many draws there are, which
-# is why the answer is coarser bins rather than a longer run.
+# Forty rather than a couple of hundred, because an HPD region is built by
+# taking bins in order of density until the confidence is met, so bins near the
+# cut go in or out on their own Monte Carlo error and the region comes back in
+# pieces. On a two-phase model's gap at 20,000 draws, a 5-year step reported
+# the 68% region as eight fragments where the posterior is one long-tailed
+# hump; at 60 bins it was still in two, at 40 it is one range. More draws do
+# NOT fix it, since the density really is flat where the cut falls.
 #
-# Forty also lands a duration a couple of hundred years wide -- the ordinary
-# case -- back on the five-year step exactly, so only a genuinely wide one is
-# coarsened at all. This is the same failure exact_chain._reported_ranges
-# rebins to fix, one step further along because these bins hold draws rather
-# than an exact density.
+# Forty also lands the ordinary case -- a duration a couple of hundred years
+# wide -- back on the five-year step exactly, so only a genuinely wide one is
+# coarsened. Same failure exact_chain._reported_ranges rebins to fix, one step
+# further along because these bins hold draws rather than an exact density.
 MAX_BINS = 40
 
-# The spread the bin width is taken from, as percentiles rather than the full
-# min-to-max. Two draws in a hundred thousand can sit far out in a boundary's
-# heavy tail, and taking the width from them would make the reported RESOLUTION
-# a function of the most extreme draw -- so asking for more draws would coarsen
-# the answer instead of sharpening it, which is backwards. Measured: from
-# min/max, going from 20,000 to 60,000 draws moved the step from 10 years to 15.
+# The spread the bin width is taken from, as percentiles rather than full
+# min-to-max: a couple of draws far out in a boundary's heavy tail would
+# otherwise make the reported RESOLUTION a function of the most extreme draw,
+# so more draws would coarsen the answer. Measured from min/max, 20,000 to
+# 60,000 draws moved the step from 10 years to 15.
 SPREAD_PERCENTILES = (0.5, 99.5)
 # ...but the bins still have to cover every draw, so the full range is allowed
 # this multiple of MAX_BINS before the step widens to fit it.
 MAX_BINS_WITH_TAILS = 6 * MAX_BINS
 
-# Pairs of phases (or of dates) a difference table will hold before it stops
-# being every pair and becomes only the consecutive ones. 300 is 25 dates,
-# which is already a table nobody reads across; past that the full matrix is
-# neither useful nor small.
+# Pairs a difference table holds before it drops to consecutive pairs only.
+# 300 is 25 dates, already a table nobody reads across.
 MAX_PAIRS = 300
 
 # Overlap probability -> word. Upper bound of each band, ordered; anything
-# above the last is SEVERITY_TOP. See the module docstring for why these four
-# numbers and not four rounder ones.
+# above the last is SEVERITY_TOP. See the module docstring for the numbers.
 SEVERITY_BANDS: Tuple[Tuple[float, str], ...] = (
     (1.0 - SIGMA_2, 'none'),        # separated at 2 sigma
     (1.0 - SIGMA_1, 'slight'),      # separated at 1 sigma
@@ -155,24 +135,18 @@ SEVERITY_TOP = 'extensive'
 SEVERITY_WORDS = tuple(word for _, word in SEVERITY_BANDS) + (SEVERITY_TOP,)
 
 # What a shared-boundary pair says instead of a figure and a severity word.
-# Such a pair has a gap of exactly zero and an overlap probability of exactly
-# zero, and BOTH are constructions rather than findings: one phase's end IS the
-# next one's start, so there is nothing for the model to infer and nothing to
-# measure. Printed as this phrase everywhere -- screen, CSV and PDF -- because
-# a reader who meets `0` and `none` in an export has no way to tell a structure
-# from a result, and `none` elsewhere in this app means "separated at 2 sigma",
-# which is the opposite of what a shared transition says.
+# Its gap and overlap probability are both exactly zero BY CONSTRUCTION -- one
+# phase's end IS the next one's start -- so a reader meeting `0` and `none` in
+# an export could not tell the structure from a result, and `none` elsewhere
+# here means "separated at 2 sigma", the opposite of what it says.
 SHARED_BOUNDARY_TEXT = 'shares a transition'
 
 
 def _reporting_step() -> float:
     """
     The finest step a duration is reported at: the same five years every
-    calendar HPD in this app is reported at.
-
-    Imported here rather than at module scope because exact_chain imports THIS
-    module, and restating the number instead would let the two drift -- which
-    is the failure exact_chain.REPORTING_STEP_YEARS' own docstring is about.
+    calendar HPD here is. Imported inside the function because exact_chain
+    imports THIS module, and restating the number would let the two drift.
     """
     from app.services.exact_chain import REPORTING_STEP_YEARS
     return REPORTING_STEP_YEARS
@@ -206,17 +180,16 @@ def _step_for(values: np.ndarray) -> float:
 
 def _smoothed(counts: np.ndarray) -> np.ndarray:
     """
-    Bin counts under a [1, 2, 1]/4 kernel, with the ends held rather than
-    padded with zeros so no mass leaves the support -- which matters here,
-    since a duration piles up hard against zero.
+    Bin counts under a [1, 2, 1]/4 kernel, ends held rather than zero-padded so
+    no mass leaves the support -- which matters because a duration piles up
+    hard against zero.
 
-    Why smooth at all: an HPD region is assembled bin by bin in order of
-    density, so two adjacent bins straddling the cut are decided by their own
-    sampling noise and the region comes back fragmented. Widening the bins
-    (MAX_BINS) is most of the fix and this is the rest of it. It widens the
-    reported region very slightly, which is the conservative direction for an
-    uncertainty statement, and it touches only the region: the mean, median and
-    standard deviation are all computed from the raw draws.
+    An HPD region is assembled bin by bin in order of density, so two adjacent
+    bins straddling the cut are decided by their own sampling noise and the
+    region fragments. Widening the bins (MAX_BINS) is most of the fix and this
+    is the rest. It widens the reported region slightly, the conservative
+    direction, and touches only the region: mean, median and standard deviation
+    all come from the raw draws.
     """
     if len(counts) < 3:
         return counts.astype(float)
@@ -240,14 +213,12 @@ def _ranges(centres: np.ndarray, weights: np.ndarray, confidence: float,
 
 def summarise(values: Sequence[float]) -> Optional[Dict]:
     """
-    Draws of a quantity measured in YEARS turned into the reported shape.
+    Draws of a quantity measured in YEARS, turned into the reported shape.
 
-    Deliberately NOT the key names a calendar posterior uses
-    (`posterior_mean`, `probability_distribution`, ...). A duration is not a
-    date: converting it to BC/AD would be nonsense, and the app has three
-    export formats and a report that all format calendar-age columns by name.
-    Different names mean a duration cannot be fed to a calendar formatter by
-    accident, which is the only reliable way to stop that happening.
+    Deliberately NOT the key names a calendar posterior uses. A duration is not
+    a date, converting it to BC/AD would be nonsense, and the exports format
+    calendar-age columns BY NAME -- so different names are what stops a
+    duration reaching a calendar formatter by accident.
     """
     values = np.asarray(values, dtype=float)
     values = values[np.isfinite(values)]
@@ -265,11 +236,10 @@ def summarise(values: Sequence[float]) -> Optional[Dict]:
 
     hpd_68 = _ranges(centres, smoothed, SIGMA_1, step)
     hpd_95 = _ranges(centres, smoothed, SIGMA_2, step)
-    # Trimmed to where there is mass, but CONTIGUOUS across it -- an empty bin
-    # in the middle is kept. The page re-derives its own HPD from this series
-    # when the confidence selector moves (utils/hpd.hpdEnvelopeFromHistogram),
-    # and that reads the bin width off the first two points, so a series with
-    # holes punched in it would be measured against the wrong width.
+    # Trimmed to where there is mass but CONTIGUOUS across it, empty bins in
+    # the middle kept: utils/hpd.hpdEnvelopeFromHistogram re-derives its own HPD
+    # from this series and reads the bin width off the first two points, so
+    # holes would be measured against the wrong width.
     occupied = np.nonzero(smoothed > 0)[0]
     span = (slice(int(occupied[0]), int(occupied[-1]) + 1) if occupied.size
             else slice(0, 0))
@@ -291,10 +261,9 @@ def summarise(values: Sequence[float]) -> Optional[Dict]:
 def draws_from_distribution(ages: np.ndarray, weights: np.ndarray,
                             rng: np.random.Generator, count: int) -> np.ndarray:
     """
-    Independent draws from a discretised distribution by inverse CDF.
-
-    Used for a group calibration, where the dates are independent by
-    construction, so drawing each one separately IS drawing from the joint.
+    Independent draws from a discretised distribution by inverse CDF, for a
+    group calibration: its dates are independent by construction, so drawing
+    each separately IS drawing from the joint.
     """
     ages = np.asarray(ages, dtype=float)
     weights = np.asarray(weights, dtype=float)
@@ -322,18 +291,16 @@ def _enclosures(root: Dict) -> Tuple[Dict[str, Tuple[str, str]], List[Dict]]:
     (enclosing, groups).
 
     `enclosing` maps every element id to the INNERMOST pair of Boundary
-    siblings that brackets it, as (older boundary id, younger boundary id) --
-    oldest first, matching the tree's own sibling order. An element with no
-    such pair anywhere above it is absent from the map.
+    siblings bracketing it, as (older, younger). An element with no such pair
+    above it is absent from the map.
 
     `groups` is one entry per consecutive pair of Boundary siblings:
-    {'older', 'younger', 'elements'}, where `elements` are the non-Boundary
-    children lying between them.
+    {'older', 'younger', 'elements'}, `elements` being the non-Boundary
+    children between them.
 
-    This is the same claim rule model_tree._plan_element applies to dates when
-    it builds its SpanGroups -- innermost pair wins -- rederived here rather
-    than threaded through ModelPlan, because what a duration needs is the
-    ELEMENT each pair brackets and a SpanGroup only records the dates.
+    The same innermost-pair-wins rule model_tree._plan_element applies to dates,
+    rederived here rather than threaded through ModelPlan because a duration
+    needs the ELEMENT each pair brackets and a SpanGroup records only dates.
     """
     enclosing: Dict[str, Tuple[str, str]] = {}
     groups: List[Dict] = []
@@ -376,17 +343,15 @@ def plan_durations(root: Dict, measurements: List[Dict]) -> List[Dict]:
 
     Three kinds, in the order they are reported:
 
-      sequence_duration  first to last Boundary CHILD of a Sequence. Suppressed
-                         when the Sequence has exactly those two boundaries and
-                         nothing between them but one phase, because the phase
-                         duration below is then the identical quantity under
-                         another name.
+      sequence_duration  first to last Boundary CHILD of a Sequence.
+                         Suppressed when those are its only two boundaries with
+                         one phase between them, since the phase duration is
+                         then the same quantity under another name.
       phase_duration     each consecutive pair of Boundary siblings, provided
                          something other than a Hiatus sits between them. A
-                         pair with only a Hiatus between them is a GAP, and a
-                         gap is reported as a difference rather than twice.
-      sample_duration    each phase holding two or more dates. One date has no
-                         span and zero dates have nothing to span.
+                         pair with only a Hiatus between them is a GAP, reported
+                         as a difference instead.
+      sample_duration    each phase holding two or more dates.
     """
     if not root:
         return []
@@ -434,10 +399,8 @@ def plan_durations(root: Dict, measurements: List[Dict]) -> List[Dict]:
         substantive = [e for e in group['elements']
                        if e.get('element_type') != 'hiatus']
         if not substantive:
-            # Two boundaries with only a Hiatus (or nothing) between them: the
-            # gap between the phases either side, which the difference table
-            # reports as their separation. Reporting it here as well would
-            # print one quantity twice under two names.
+            # Two boundaries with only a Hiatus between them: the gap the
+            # difference table already reports as the phases' separation.
             continue
         if len(substantive) == 1:
             name, element_id = names[substantive[0]['id']], substantive[0]['id']
@@ -476,17 +439,14 @@ def plan_phase_differences(root: Dict, measurements: List[Dict]) -> Tuple[List[D
     Every pair of phases whose separation the model has something to say
     about, plus a note when the table had to be cut down.
 
-    A phase is comparable only if a pair of Boundaries brackets it: that
-    bracket IS its modelled interval, and without one the model places no
-    interval around it to compare. Two phases sharing BOTH boundaries are
-    skipped -- they are bracketed identically, so the answer would be "they
-    coincide exactly" for a structural reason rather than an inferred one.
+    A phase is comparable only if a pair of Boundaries brackets it, since that
+    bracket IS its modelled interval. Two phases sharing BOTH boundaries are
+    skipped: they are bracketed identically, so "they coincide exactly" would
+    be structural rather than inferred.
 
     A pair sharing ONE boundary is kept and flagged `shared_boundary`. Its gap
-    is exactly zero by construction (adjacent phases share their transition,
-    which is the whole point of a Boundary between them), and saying that
-    plainly is worth more than dropping the row and leaving the reader to
-    wonder.
+    is exactly zero by construction, and saying so plainly beats dropping the
+    row and leaving the reader to wonder.
     """
     if not root:
         return [], None
@@ -497,8 +457,8 @@ def plan_phase_differences(root: Dict, measurements: List[Dict]) -> Tuple[List[D
         if m.get('element_id'):
             dated[m['element_id']] = dated.get(m['element_id'], 0) + 1
 
-    # Reading order: depth first, siblings oldest first -- the order the
-    # results table and every export already put the model in.
+    # Depth first, siblings oldest first -- the order the results table and
+    # every export put the model in.
     phases: List[Dict] = []
 
     def walk(element: Dict) -> None:
@@ -539,8 +499,8 @@ def plan_date_differences(dates: List[Dict]) -> Tuple[List[Dict], Optional[str]]
     """
     Every pair of dates in a group calibration, in the order given.
 
-    `dates` are {'id', 'name'} in the order they should be reported. Cut down
-    to consecutive pairs past MAX_PAIRS, the same way phases are.
+    `dates` are {'id', 'name'} in reporting order. Cut down to consecutive
+    pairs past MAX_PAIRS, as phases are.
     """
     pairs = [(a, b) for i, a in enumerate(dates) for b in dates[i + 1:]]
     note = None
@@ -588,11 +548,9 @@ def evaluate(duration_specs: List[Dict], difference_specs: List[Dict],
     """
     Turn specs plus joint draws into the records the API stores.
 
-    `draws` maps a parameter id (a date id or a boundary id) to an array of
-    calendar ages in cal BP, one entry per joint draw. Every array must be the
-    same length and must come from ONE set of draws -- that is the entire
-    point; per-parameter marginals would give the wrong answer for every
-    quantity here.
+    `draws` maps a parameter id to calendar ages in cal BP, one entry per joint
+    draw. Every array must be the same length and come from ONE set of draws:
+    per-parameter marginals give the wrong answer for every quantity here.
     """
     durations = []
     for spec in duration_specs:
@@ -619,11 +577,10 @@ def evaluate(duration_specs: List[Dict], difference_specs: List[Dict],
             if first is None or second is None:
                 continue
             # Each interval is [younger end, older end] on the cal BP number
-            # line, so their intersection runs from the younger of the two
-            # older ends to the older of the two younger ends. Its length is
-            # positive where they overlap and negative where they are apart --
-            # one quantity covering both, which is why there is no separate
-            # "gap" and "overlap" pair of columns to keep consistent.
+            # line, so the intersection runs from the younger of the older ends
+            # to the older of the younger ends. Its length is positive where
+            # they overlap and negative where they are apart -- one quantity
+            # covering both, so there is no separate gap column to keep in step.
             intersection = (np.minimum(first[0], second[0])
                             - np.maximum(first[1], second[1]))
             signed = -intersection          # positive = gap, negative = overlap
@@ -636,8 +593,8 @@ def evaluate(duration_specs: List[Dict], difference_specs: List[Dict],
                 continue
             signed = first_draws - second_draws
             older = float(np.mean(signed > 0.0))
-            # How far the ordering is from settled: 1 when the posterior is a
-            # coin flip on which came first, 0 when it is certain.
+            # How far the ordering is from settled: 1 at a coin flip on which
+            # came first, 0 when it is certain.
             overlap = float(2.0 * min(older, 1.0 - older))
             older_probability = older
 
@@ -681,15 +638,13 @@ def report_dates(dates: List[Dict], draws: Dict[str, np.ndarray]) -> Dict:
     """
     The same block for a group calibration: differences only.
 
-    Dates laid out with no relationship asserted between them belong to no
-    phase and no sequence, so there is no duration for them to have -- the
-    table is the pairwise differences and nothing else.
+    Dates with no relationship asserted between them belong to no phase and no
+    sequence, so they have no duration: the table is pairwise differences only.
     """
     specs, note = plan_date_differences(dates)
     _durations, differences = evaluate([], specs, draws)
-    # Independent by construction: a group calibration asserts no relationship
-    # between its dates, so drawing each from its own calibrated posterior IS
-    # drawing from the joint.
+    # Independent by construction: a group calibration asserts no relationship,
+    # so drawing each date separately IS drawing from the joint.
     return _block([], differences, draws, True, note)
 
 
@@ -701,8 +656,7 @@ def _block(durations: List[Dict], differences: List[Dict],
         'durations': durations,
         'differences': differences,
         'draws': min(sizes) if sizes else 0,
-        # True when the draws are independent draws from the posterior (the
-        # exact path, or a group calibration) rather than an MCMC chain, where
+        # True when the draws are independent rather than an MCMC chain, where
         # autocorrelation makes the effective count smaller than the count.
         'independent': bool(independent),
         'note': note,

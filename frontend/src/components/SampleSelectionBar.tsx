@@ -1,23 +1,20 @@
 /**
  * What you can do to the dates you have ticked.
  *
- * A band rather than more buttons in the toolbar above. Those three (Add,
- * Paste, Import) act on the collection and are always available; these act on
- * a selection and mean nothing without one. Keeping them in one row would
- * have left five of eight controls disabled whenever nothing was ticked,
- * which reads as a broken toolbar rather than an inapplicable one — the fault
- * Deploy already had, sitting permanently greyed at the end of the row.
+ * A band rather than more buttons in the toolbar above: Add, Paste and Import
+ * act on the collection and are always available, where these act on a
+ * selection and mean nothing without one. One row would leave five of eight
+ * controls disabled whenever nothing is ticked, reading as a broken toolbar
+ * rather than an inapplicable one.
  *
- * So the band appears with the first tick and takes Deploy down with it. It
- * is tinted from the primary, which is the same colour the table already uses
- * to mark a selected row, so the band and the rows it acts on read as one
- * thing.
+ * So the band appears with the first tick and takes Deploy down with it,
+ * tinted from the primary the table already marks a selected row with, so the
+ * band and the rows read as one thing.
  *
- * Neither bulk edit is a dialog. Choosing a curve is a menu; a reservoir
- * offset is two numbers and a note about who it lands on, which fits a
- * popover anchored to its own button. Both keep the table visible, so the
- * selection being edited stays on screen while it is edited — which a modal
- * would cover up at exactly the moment it matters.
+ * Neither bulk edit is a dialog: choosing a curve is a menu, and a reservoir
+ * offset is two numbers and a note about who it lands on, which fits a popover
+ * anchored to its button. Both keep the selection on screen while it is
+ * edited, where a modal would cover it.
  */
 import { useMemo, useState } from 'react'
 import {
@@ -75,22 +72,19 @@ export default function SampleSelectionBar({
 
   const count = selected.length
 
-  // Which of the ticked dates a reservoir offset actually applies to. Δ R
-  // corrects a marine curve's global average, so on a terrestrial date it is
-  // not merely redundant — it would be applied at calibration and move the
-  // result. The backend skips those; this is the same question asked here so
-  // the answer is on screen before the offset is applied rather than reported
-  // afterwards.
+  // Which of the ticked dates a reservoir offset applies to. Δ R corrects a
+  // marine curve's global average, so on a terrestrial date it is not merely
+  // redundant -- it would be applied at calibration and move the result. The
+  // backend skips those; asking here puts the answer on screen first.
   const marineCount = useMemo(
     () => selected.filter((s) => isMarineMeasurement(s, curves)).length,
     [selected, curves],
   )
   const skipped = count - marineCount
 
-  // How many dates would change sample type if a given curve were assigned.
-  // A marine curve makes a date marine, matching what the single-date form
-  // already does in the other direction — worth saying out loud in the menu,
-  // since it is a second edit the reader did not ask for by name.
+  // How many dates would change sample type if a given curve were assigned. A
+  // marine curve makes a date marine, as the single-date form does in the other
+  // direction -- worth saying in the menu, being an edit not asked for by name.
   const typeChangesFor = (curveId: string) => {
     const spec = curves.find((c) => c.id === curveId)
     const next = spec?.sample_type === 'marine' ? 'marine' : 'terrestrial'
@@ -134,8 +128,8 @@ export default function SampleSelectionBar({
         px: 2,
         py: 1.5,
         borderRadius: 1,
-        // The same primary tint the table paints a selected row with, so the
-        // band reads as an extension of the rows rather than a new surface.
+        // The primary tint the table paints a selected row with, so the band
+        // reads as an extension of the rows rather than a new surface.
         backgroundColor: alpha(theme.palette.primary.main, 0.08),
         border: `1px solid ${alpha(theme.palette.primary.main, 0.2)}`,
       })}

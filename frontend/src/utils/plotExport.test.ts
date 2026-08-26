@@ -1,7 +1,7 @@
-// Sample and boundary names come from whatever the analyst typed, and go
-// straight into a saved file's name. These hold the cases that produced an
-// unusable download: characters an OS rejects, and names that sanitise
-// away to nothing.
+// Sample and boundary names come from whatever the analyst typed and go
+// straight into a saved file's name. These hold the cases that produce an
+// unusable download: characters an OS rejects, and names that sanitise away
+// to nothing.
 import { describe, expect, it } from 'vitest'
 
 import { PNG_EXPORT_SCALE, exportFilename } from './plotExport'

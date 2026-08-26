@@ -10,19 +10,10 @@ DATABASE_URL = os.getenv(
     "postgresql://radiocarbon:password@localhost:5432/radiocarbon_db"
 )
 
-# Pool sizing. This used to be left at SQLAlchemy's defaults, filed as
-# REMAINING_WORK item 7 and true enough to say it "only bites under
-# concurrent load" -- but the background worker IS concurrent load: it holds
-# a connection for the whole length of a run (tens of seconds, sometimes
-# minutes) while requests continue to arrive and take their own. The request
-# threadpool and one job worker want more than the default five, and a
-# connection idle for half an hour behind a container network is one the
-# database may already have dropped, which pre_ping catches instead of
-# handing out a dead socket.
-#
-# SQLite takes none of these arguments (it has no connection pool worth the
-# name), and the test suite runs on SQLite, so they are applied only where
-# they mean something.
+# The job worker holds a connection for a whole run (tens of seconds) while
+# requests keep taking their own, so the default pool of five is too small;
+# pre_ping catches connections the database dropped while idle. SQLite takes
+# none of these arguments.
 _POOL_OPTIONS = {} if DATABASE_URL.startswith('sqlite') else {
     'pool_size': 10,
     'max_overflow': 20,
@@ -35,38 +26,16 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 # ---------------------------------------------------------------------------
-# CLOSED. Everything from here to _ensure_schema_migrations is the stopgap
-# Alembic replaced, kept for exactly one job: bringing a database created
-# BEFORE Alembic was adopted up to the baseline revision, once, so it can be
-# stamped and join the ordinary migration history.
-#
-# Do not add to these lists. A schema change now means a migration:
-#
-#     docker compose exec backend alembic revision --autogenerate -m "..."
-#
-# and tests/test_migrations.py fails if the models and the migrations disagree,
-# so a forgotten one does not reach anybody's database.
-#
-# Why it is not simply deleted. These lists are the only record of what an old
-# database is missing. Deleting them would strand anyone upgrading straight
-# from a pre-Alembic version: their tables exist, so the baseline migration
-# cannot run, and the columns it would have created would never appear. That
-# is a silent failure that surfaces as "column does not exist" on every
-# request to the affected endpoint. It costs a few dozen lines to keep, and it
-# runs at most once in a database's life.
+# CLOSED. Everything down to _ensure_schema_migrations exists for one job:
+# topping a pre-Alembic database up to the baseline revision so it can be
+# stamped and join the migration history. Do not add to these lists -- a
+# schema change means a migration (`alembic revision --autogenerate`), and
+# tests/test_migrations.py fails if the models and migrations disagree.
 # ---------------------------------------------------------------------------
 
-# Columns added to existing models after their tables were first created.
-# create_all() only creates tables that don't exist yet -- it never ALTERs an
-# existing table to add a new column. On any database that predates a given
-# column, that column is simply missing, and every query that touches it fails
-# with a real "column does not exist" error.
-#
-# Note: this deliberately does not attempt to add a real FOREIGN KEY
-# constraint for project_id via ALTER TABLE -- that's awkward to do
-# portably across SQLite/Postgres after the fact. The ORM-level
-# relationship still works correctly either way; this just means the
-# database itself won't reject an invalid project_id at the SQL layer.
+# Columns added after their tables were first created. No FOREIGN KEY is added
+# for project_id: that is awkward to do portably across SQLite/Postgres after
+# the fact, and the ORM-level relationship works either way.
 _LEGACY_COLUMN_MIGRATIONS = {
     'analyses': [
         ('project_id', 'VARCHAR'),
@@ -103,17 +72,10 @@ _LEGACY_COLUMN_MIGRATIONS = {
     ],
 }
 
-# stratigraphic_relationships.from_sample_id/to_sample_id are polymorphic --
-# each can hold either a RadiocarbonSample.id or a SampleGroup.id (see
-# from_type/to_type) -- so models.py deliberately declares no FOREIGN KEY on
-# them; a plain FK could only ever point at one table. Databases created
-# before that polymorphism was introduced still have the old FK (pointing
-# only at radiocarbon_samples), left behind because create_all() never
-# drops or alters an existing constraint. That stale constraint silently
-# rejects every relationship whose from_sample_id/to_sample_id is actually
-# a group id -- i.e. every context-to-context relationship, which is the
-# only kind the Stratigraphy UI creates -- with a 400 ForeignKeyViolation.
-# Dropped here, by name, only if present.
+# from_sample_id/to_sample_id are polymorphic (a sample id or a group id, see
+# from_type/to_type), so models.py declares no FOREIGN KEY on them. A stale FK
+# on an old database rejects every context-to-context relationship with a 400
+# ForeignKeyViolation, so it is dropped by name if present.
 _LEGACY_STALE_FK_CONSTRAINTS = {
     'stratigraphic_relationships': [
         'stratigraphic_relationships_from_sample_id_fkey',
@@ -129,8 +91,7 @@ def _ensure_schema_migrations():
     with engine.begin() as conn:
         for table, columns in _LEGACY_COLUMN_MIGRATIONS.items():
             if table not in existing_tables:
-                # Not in this database at all, so there is no old version of
-                # it to top up; the baseline migration creates it in full.
+                # Absent, so the baseline migration creates it in full.
                 continue
             existing_columns = {c['name'] for c in inspector.get_columns(table)}
             for column_name, column_type in columns:
@@ -183,11 +144,9 @@ def _adopt_alembic(connection) -> bool:
     tables but no alembic_version: a new database has neither, and one already
     under Alembic has both.
 
-    The old ALTER list runs one last time -- an old database may be missing
-    columns the baseline revision would have created, and the baseline cannot
-    run because the tables it creates already exist -- and then the database is
-    STAMPED at the baseline rather than upgraded to it. From the next
-    migration onwards it is indistinguishable from a database created today.
+    The ALTER list runs once to supply columns the baseline would have created
+    (the baseline itself cannot run, as its tables already exist), then the
+    database is STAMPED at the baseline rather than upgraded to it.
     """
     from alembic import command
     from alembic.runtime.migration import MigrationContext
@@ -210,19 +169,13 @@ def init_db():
     """
     Bring the database up to the current schema.
 
-    Migrations rather than create_all(): a table is created once and then
-    changed many times, and create_all() only ever does the first of those.
-    Renames, type changes and backfills -- none of which the ALTER list it used
-    to be paired with could express -- are ordinary revisions now.
-
-    Run at startup because this is a single-process app someone runs locally,
-    where "the schema is up to date" should not be a separate step to remember.
-    Set RADICAL_SKIP_MIGRATIONS=1 to take the decision back, for a deployment
-    that would rather run `alembic upgrade head` deliberately.
+    Migrations rather than create_all(), which only ever creates a table and
+    never alters one. Run at startup because this is a single-process app run
+    locally; set RADICAL_SKIP_MIGRATIONS=1 for a deployment that would rather
+    run `alembic upgrade head` deliberately.
     """
-    # Registers every model on Base.metadata -- importing the module is what
-    # does it, so the names here are not the point. env.py depends on this
-    # having happened for autogenerate to see anything.
+    # Importing registers every model on Base.metadata, which autogenerate
+    # needs to see anything.
     import app.models  # noqa: F401
 
     if os.getenv('RADICAL_SKIP_MIGRATIONS') == '1':

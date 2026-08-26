@@ -11,12 +11,10 @@ const NAV_LINKS = [
 ]
 
 export default function Navigation() {
-  // The links at full width don't fit beside the wordmark below `sm` --
-  // the row used to overflow the
-  // viewport rather than wrap, since a sticky AppBar wrapping to a second
-  // line jumps the whole page's content down by a row on every load. Below
-  // `sm` the links move into this menu instead; New Analysis stays visible
-  // as it's the primary action.
+  // The links at full width do not fit beside the wordmark below `sm`, and a
+  // sticky AppBar wrapping to a second line jumps the page's content down a
+  // row on every load. Below `sm` they move into this menu instead; New
+  // Analysis stays visible as the primary action.
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null)
 
   return (

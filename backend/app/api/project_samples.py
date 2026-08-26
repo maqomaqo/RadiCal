@@ -1,19 +1,13 @@
 """
-A project's own date collection, and deploying dates from it into
-analyses.
+A project's own date collection, and deploying dates from it into analyses.
 
-The point of this module: enter a site's radiocarbon dates ONCE against
-the project (models.ProjectSample), then deploy subsets of them into as
-many analyses as you like, each applying different model criteria
-(different contexts, different stratigraphic relationships, different
-TPQ/TAQ limiters). Previously a date could only be typed into a single
-analysis and had to be re-typed to model it any other way.
+Enter a site's dates ONCE against the project (models.ProjectSample), then
+deploy subsets into as many analyses as you like, each with its own contexts,
+relationships and limiters.
 
-Deploying COPIES the values into the analysis's own RadiocarbonSample
-rows rather than referencing the collection -- see ProjectSample's
-docstring for why (an analysis stays a self-contained snapshot of exactly
-what it was run on, so editing the collection can never silently
-invalidate an existing result).
+Deploying COPIES the values into the analysis's own RadiocarbonSample rows
+rather than referencing the collection, so an analysis stays a self-contained
+snapshot of what it was run on. See ProjectSample's docstring.
 """
 from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.orm import Session
@@ -83,16 +77,15 @@ def create_project_samples(
     db: Session = Depends(get_db),
 ):
     """
-    Add one or more dates to this project's collection. Takes a list
-    (rather than a single object) so the UI's bulk-paste path is one
-    request rather than N.
+    Add dates to this project's collection. Takes a list so the UI's
+    bulk-paste path is one request rather than N.
     """
     _require_project(project_id, db)
 
     created = []
     for item in request.samples:
-        # Same smart default as the analysis endpoints: infer 'marine' from
-        # a marine curve when the caller didn't say explicitly.
+        # As on the analysis endpoints: infer 'marine' from a marine curve
+        # when the caller does not say.
         sample_type = item.sample_type or ('marine' if item.curve_id == 'marine20' else 'terrestrial')
         row = ProjectSample(
             project_id=project_id,
@@ -130,9 +123,8 @@ def update_project_sample(
     db: Session = Depends(get_db),
 ):
     """
-    Edit a date in the collection. Note this deliberately does NOT touch
-    any analysis already deployed from it -- those hold their own copies
-    (see ProjectSample's docstring).
+    Edit a date in the collection. Analyses already deployed from it hold
+    their own copies and are untouched (see ProjectSample).
     """
     _require_project(project_id, db)
     sample = (
@@ -149,9 +141,8 @@ def update_project_sample(
             value = value.strip() or None
         setattr(sample, field, value)
 
-    # The TPQ/TAQ ordering check can't live on ProjectSampleUpdate (a
-    # partial update may carry only one of the pair), so apply it here
-    # against the merged result -- same rule as MeasurementInput's.
+    # The ordering check cannot live on ProjectSampleUpdate, which may carry
+    # only one of the pair, so it is applied to the merged result here.
     if sample.tpq_age_bp is not None and sample.taq_age_bp is not None:
         if sample.taq_age_bp > sample.tpq_age_bp:
             db.rollback()
@@ -191,21 +182,18 @@ def delete_project_sample(project_id: str, sample_id: str, db: Session = Depends
 
 def _is_marine(sample: ProjectSample) -> bool:
     """
-    Whether a Delta-R means anything for this date.
-
-    The declared sample type answers it when set; otherwise the curve does,
-    read from the registry so an imported marine curve counts the same as the
-    bundled Marine20. This mirrors isMarineMeasurement in the frontend's
-    MeasurementFields -- the same question, asked in the two places that have
-    to agree about it.
+    Whether a Delta-R means anything for this date. The declared sample type
+    answers it when set, otherwise the curve does, so an imported marine curve
+    counts the same as Marine20. Mirrors isMarineMeasurement in the frontend's
+    MeasurementFields.
     """
     if (sample.sample_type or 'terrestrial') == 'marine':
         return True
     try:
         return curve_registry.get_spec(sample.curve_id).sample_type == 'marine'
     except Exception:
-        # A curve that no longer resolves is not evidence of anything; the
-        # declared type above has already had its say.
+        # An unresolvable curve is no evidence either way, and the declared
+        # type has already had its say.
         return False
 
 
@@ -216,32 +204,25 @@ def bulk_update_project_samples(
     db: Session = Depends(get_db),
 ):
     """
-    Apply one value across a selection of this project's dates.
+    Apply one value across a selection of this project's dates. Neither field
+    is a plain assignment.
 
-    Two fields, with a rule each, because neither is a plain assignment.
-
-    **curve_id** carries the sample type with it. A date calibrated against a
-    marine curve is marine, and the single-date form already keeps the two in
-    step in the other direction (choosing a sample type moves the curve to
-    suit it); doing less here would leave a date whose curve and declared type
-    disagree, which nothing else in the app can produce.
+    **curve_id** carries the sample type with it, since a date calibrated
+    against a marine curve is marine; the single-date form keeps the two in
+    step in the other direction.
 
     **delta_r** is applied only to the marine dates in the selection, and the
-    response says how many it skipped. Delta-R is a correction to a marine
-    curve's global average reservoir effect, so on a terrestrial date it is
+    response says how many were skipped. On a terrestrial date the offset is
     not merely unnecessary but wrong -- it would be applied at calibration and
-    move the result. Skipping rather than refusing means a mixed selection
-    still works, which matters because "everything from this site" is the
-    natural way to select dates that share an offset, and a site rarely
-    yields only marine material.
+    move the result. Skipping rather than refusing lets a mixed selection
+    work, which matters because "everything from this site" is how dates
+    sharing an offset are naturally selected.
 
-    Sending `delta_r: null` clears the offset (and its uncertainty with it);
-    omitting the key leaves both alone. The endpoint reads
-    `model_fields_set` rather than checking for None, so the two cases stay
-    distinguishable.
+    `delta_r: null` clears the offset and its uncertainty; omitting the key
+    leaves both alone. The endpoint reads `model_fields_set` rather than
+    checking for None, so the two stay distinguishable.
 
-    Analyses already deployed from these dates are untouched -- they hold
-    their own copies (see models.ProjectSample).
+    Analyses already deployed from these dates are untouched.
     """
     _require_project(project_id, db)
 
@@ -273,11 +254,9 @@ def bulk_update_project_samples(
 
     if 'delta_r' in sent:
         for sample in samples:
-            # Read AFTER any curve change above, so assigning a marine curve
-            # and an offset in one request applies the offset to the dates
-            # that request just made marine. The alternative -- judging
-            # against the type they had on arrival -- would skip exactly the
-            # dates the caller was correcting.
+            # Read AFTER any curve change above, so one request assigning a
+            # marine curve and an offset applies the offset to the dates it
+            # just made marine.
             if _is_marine(sample):
                 sample.delta_r = request.delta_r
                 sample.delta_r_error = (
@@ -313,19 +292,15 @@ def bulk_delete_project_samples(
     """
     Remove several dates from the collection at once.
 
-    All-or-nothing on the ids: an id that is not in this project fails the
-    whole request rather than deleting the rest, because a partial delete is
-    not something a caller can sensibly recover from -- it cannot tell which
-    of its ids went without diffing the collection afterwards.
+    All-or-nothing on the ids: an id not in this project fails the whole
+    request, because a caller cannot recover from a partial delete without
+    diffing the collection afterwards.
 
-    The request body carries the ids. DELETE with a body is unusual enough to
-    be worth naming: the alternative is a query string, which has a length
-    limit this can exceed (500 uuids is about 18KB) and which reads worse.
-    An intermediary that strips the body produces a 422 naming the missing
-    field, not a silent no-op.
+    The ids travel in the body rather than the query string, which has a
+    length limit 500 uuids (about 18KB) would exceed. An intermediary that
+    strips the body produces a 422, not a silent no-op.
 
-    Analyses already deployed from these dates keep their own copies and are
-    unaffected.
+    Analyses already deployed from these dates are unaffected.
     """
     _require_project(project_id, db)
 
@@ -360,22 +335,18 @@ def deploy_samples_to_analysis(
     db: Session = Depends(get_db),
 ):
     """
-    Create a new analysis in this project from a selection of its collected
-    dates.
+    Create a new analysis in this project from a selection of its dates.
 
-    Each selected date's values are copied into a fresh RadiocarbonSample
-    owned by the new analysis, and dates sharing a default_context_name are
-    grouped into one SampleGroup so they arrive already organised into
-    contexts. Everything is then freely editable on the new analysis
+    Each date's values are copied into a fresh RadiocarbonSample, and dates
+    sharing a default_context_name are grouped into one SampleGroup so they
+    arrive already organised into contexts. Everything is then editable
     without touching the collection.
 
-    The analysis is created with status 'pending': it has inputs but has
-    not been run. Run it with POST /analysis/{id}/rerun (which computes
-    from persisted inputs), typically after adjusting its stratigraphy.
+    Created with status 'pending' -- inputs but no results. Run it with
+    POST /analysis/{id}/rerun, typically after adjusting its stratigraphy.
 
     Deploying more than one date as `calibration` produces a
-    `group_calibration` -- see below. `data.analysis_type` in the response is
-    always the type actually created.
+    `group_calibration`; `data.analysis_type` reports the type created.
     """
     _require_project(project_id, db)
 
@@ -396,13 +367,9 @@ def deploy_samples_to_analysis(
     by_id = {s.id: s for s in samples}
     ordered = [by_id[sid] for sid in request.sample_ids]
 
-    # 'calibration' means ONE date calibrated on its own -- _rerun_analysis's
-    # calibration branch reads samples[0] and nothing else, which is correct
-    # for the single-date analyses that were all this app had when it was
-    # written. Deploying several dates under that type used to reach it and
-    # silently keep only the first. Several independent dates calibrated
-    # without a model is exactly what 'group_calibration' is, so that is what
-    # the caller gets; the response reports the type actually created rather
+    # 'calibration' means ONE date calibrated on its own. Several independent
+    # dates with no model between them is what 'group_calibration' is, so that
+    # is what the caller gets; the response reports the type created rather
     # than echoing the one asked for.
     analysis_type = request.analysis_type
     if analysis_type == 'calibration' and len(ordered) > 1:
@@ -418,10 +385,9 @@ def deploy_samples_to_analysis(
     db.add(analysis)
     db.flush()
 
-    # One SampleGroup per distinct default_context_name. TPQ/TAQ stay on the
-    # individual samples here rather than being hoisted onto the context --
-    # the collection's defaults are per-date, and a context-wide limiter is
-    # something the user sets deliberately in the stratigraphy editor.
+    # One SampleGroup per distinct default_context_name. TPQ/TAQ stay
+    # per-sample, as the collection's defaults are: a context-wide limiter is
+    # set deliberately in the stratigraphy editor.
     groups_by_name = {}
     for src in ordered:
         name = (src.default_context_name or '').strip()
@@ -443,10 +409,8 @@ def deploy_samples_to_analysis(
             sample_type=src.sample_type,
             curve_id=src.curve_id,
             reservoir_age=src.reservoir_age,
-            # Carried into the analysis rather than left behind: a
-            # reservoir offset belongs to where the sample came from, so
-            # a date deployed out of a collection should arrive already
-            # corrected rather than needing it re-entered.
+            # Carried across: a reservoir offset belongs to where the sample
+            # came from, so a deployed date arrives already corrected.
             delta_r=src.delta_r,
             delta_r_error=src.delta_r_error,
             depth_cm=src.depth_cm,

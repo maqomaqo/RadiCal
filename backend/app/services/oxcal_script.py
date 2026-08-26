@@ -3,31 +3,24 @@ Reading OxCal's own model files (.oxcal, the CQL2 language) into the app's
 model tree.
 
 The six files in tests/fixtures are the specification this was written
-against -- real models covering nested Sequences and Phases, explicit and
-implied Boundaries, per-scope Curve selection, reservoir offsets stated under
-a name and cited by it, and both outlier models. tests/test_imports.py checks the parse of each against the
-hand-built trees in tests/oxcal_fixture.py, which are themselves checked
-against OxCal's own published output for those runs. So an imported model is
-verified two steps out: it matches the tree we already know reproduces OxCal.
+against: real models covering nested Sequences and Phases, explicit and implied
+Boundaries, per-scope Curve selection, named reservoir offsets, and both
+outlier models. tests/test_imports.py checks each parse against the hand-built
+trees in tests/oxcal_fixture.py, themselves checked against OxCal's published
+output, so an imported model is verified two steps out.
 
 THE RULE THIS MODULE IS BUILT AROUND: a construct that would change the
-posterior and cannot be honoured is an ERROR, not a warning, and never a
-silent omission. OxCal's language is much larger than what this app models --
-Tau_Boundary is an exponential transition rather than a uniform one, C_Date is
-a calendar likelihood with no curve behind it, R_Combine pools measurements
-before calibrating. Reading any of those as the nearest thing we do implement
-would produce a result that looks right, carries no warning, and is wrong.
-Refusing is the same choice the exact solver makes when asked for an exact
-answer it cannot give.
+posterior and cannot be honoured is an ERROR, never a warning or a silent
+omission. OxCal's language is much larger than what this app models --
+Tau_Boundary is an exponential transition, C_Date a calendar likelihood with no
+curve behind it, R_Combine pools measurements before calibrating -- and reading
+any of those as the nearest thing we do implement would produce a result that
+looks right, carries no warning, and is wrong.
 
-Constructs that only affect what OxCal PLOTS -- Sum, KDE_Plot, Span,
-Difference, Order and friends -- are skipped with a note, because they query a
-posterior rather than shape it. Skipping them changes nothing about the model.
-
-What is deliberately NOT read: Options() values. Resolution and kIterations
-configure OxCal's own grid and run length, and this app has neither -- it
-integrates exactly where it can and extends its own run until it converges.
-Carrying those numbers over would imply they did something.
+Constructs that only affect what OxCal PLOTS are skipped with a note, since
+they query a posterior rather than shape it. Options() values are not read at
+all: Resolution and kIterations configure OxCal's own grid and run length,
+which this app has neither of.
 """
 import re
 import uuid
@@ -99,9 +92,7 @@ def tokenize(text: str) -> List[Token]:
 class Node:
     """
     One CQL2 statement: a command, its arguments, and its block if it has one.
-
-    `Sequence("Nenthorn") { ... };` and `Boundary("Start");` are both this --
-    the second simply has no block.
+    `Sequence("Nenthorn") { ... };` and `Boundary("Start");` are both this.
     """
 
     def __init__(self, command: str, args: List[Any], block: Optional[List['Node']], line: int):
@@ -223,10 +214,8 @@ class _Parser:
             if token.value == ',':
                 self.next()
                 # An argument OxCal left out, written as a bare comma before
-                # the closing bracket: `Delta_R("=LocalMarine", )` names a
-                # definition and supplies no value of its own, because the
-                # value is in the definition. The empty slot says only that
-                # the argument is absent, so there is nothing to record.
+                # the closing bracket: `Delta_R("=LocalMarine", )` cites a
+                # definition and supplies no value of its own.
                 if self.peek() is not None and self.peek().value == ')':
                     self.next()
                     return args
@@ -262,8 +251,8 @@ def parse_script(text: str) -> List[Node]:
 # Command classification
 # --------------------------------------------------------------------------
 
-# Containers whose contents are the model -- they contribute no element of
-# their own, so their children are lifted into the enclosing scope.
+# Containers contributing no element of their own, so their children are
+# lifted into the enclosing scope.
 TRANSPARENT = {'plot', 'page'}
 
 STRUCTURAL = {
@@ -273,8 +262,8 @@ STRUCTURAL = {
     'hiatus': 'hiatus',
 }
 
-# Queries and plots. They read a posterior rather than shape one, so leaving
-# them out changes nothing -- see the module docstring.
+# Queries and plots: they read a posterior rather than shape one, so leaving
+# them out changes nothing.
 IGNORABLE = {
     'sum', 'kde_plot', 'kde_model', 'span', 'interval', 'difference', 'shift',
     'first', 'last', 'order', 'correl_matrix', 'correlation', 'mcmc_sample',
@@ -282,8 +271,8 @@ IGNORABLE = {
     'posterior', 'display', 'plot_axis', 'sample',
 }
 
-# Constructs this app has no equivalent for, each with what it would take to
-# read it as something we DO implement -- which is exactly why it is refused.
+# Constructs this app has no equivalent for, each stating what reading it as
+# something we DO implement would cost -- which is why it is refused.
 UNSUPPORTED = {
     'tau_boundary': (
         'an exponentially-distributed transition. This app models a Boundary '
@@ -338,9 +327,8 @@ UNSUPPORTED = {
 }
 
 def _normalise_curve_name(raw: str) -> str:
-    """A curve name reduced to its comparable core, matching how the registry
-    compares names -- so `Curve("=Mixed Diet")` finds `Mix_Curves("mixed
-    diet", ...)`."""
+    """A curve name reduced to its comparable core, as the registry compares
+    names, so `Curve("=Mixed Diet")` finds `Mix_Curves("mixed diet", ...)`."""
     return re.sub(r'[^a-z0-9]+', '', (raw or '').strip().lstrip('=').lower())
 
 
@@ -372,13 +360,11 @@ class _Scope:
     copied on the way into a block and mutated by statements within it.
 
     A reservoir offset belongs to the CURVE it was stated against, not to the
-    block: OxCal defines Delta_R as "the shift that is to be applied to dates
-    before calibration; applies to the current Curve", and Curve("=Name")
-    selects a curve already defined. So the offset follows its curve --
-    switching to another one leaves it behind, and switching back brings it
-    with it. That is what lets a single phase calibrate marine dates against
+    block: OxCal's Delta_R "applies to the current Curve". So the offset
+    follows its curve -- switching away leaves it behind, switching back brings
+    it with it -- which is what lets one phase calibrate marine dates against
     Marine20 with a local Delta_R and terrestrial ones against SHCal20 with
-    none, which is the ordinary shape of a coastal model.
+    none, the ordinary shape of a coastal model.
     """
 
     def __init__(self, curve_id: str = 'intcal20',
@@ -435,9 +421,9 @@ class _Translator:
 
     def translate(self, nodes: List[Node]) -> None:
         scope = _Scope()
-        # A first pass for the declarations that apply to the whole file
-        # regardless of where they sit -- OxCal's Outlier_Model is referenced
-        # by name from anywhere, including from above its own declaration.
+        # A first pass for declarations that apply file-wide wherever they
+        # sit: OxCal's Outlier_Model is referenced by name from anywhere,
+        # including from above its own declaration.
         self._collect_declarations(nodes)
 
         self._assemble(self._translate_block(nodes, scope))
@@ -538,15 +524,13 @@ class _Translator:
         """
         One block's contents IN FILE ORDER, as ('element'|'date', payload).
 
-        Order is kept because it is the whole meaning of a Sequence:
+        Order is the whole meaning of a Sequence:
         `Sequence(){R_Date(a); Phase(){...}; R_Date(b);}` says a is older than
-        the phase, which is older than b. Returning elements and dates in
-        separate lists would lose that, and the caller could only put the
-        dates back at the ends.
+        the phase, which is older than b. Separate lists would lose that.
 
-        What a loose date means depends on the enclosing element, so that
-        decision belongs to the caller: in a Phase it simply belongs to it, in
-        a Sequence it holds a position and needs a Phase of its own.
+        What a loose date means depends on the enclosing element, so the caller
+        decides: in a Phase it simply belongs to it, in a Sequence it holds a
+        position and needs a Phase of its own.
         """
         items: List[Tuple[str, Dict[str, Any]]] = []
 
@@ -735,12 +719,11 @@ class _Translator:
         """
         Put a reservoir offset in force for the curve currently selected.
 
-        Two forms, both OxCal's. The offset written out --
-        `Delta_R("LocalMarine", -162, 28)` -- states it and, if it carries a
-        name, makes that name citable. The reference --
-        `Delta_R("=LocalMarine", )` -- cites one already stated, which is how
-        a file gives an offset once in its header and applies it at each
-        marine group without repeating the numbers.
+        Two forms, both OxCal's. Written out --
+        `Delta_R("LocalMarine", -162, 28)` -- states the offset and makes its
+        name citable. Cited -- `Delta_R("=LocalMarine", )` -- refers to one
+        already stated, which is how a file gives an offset once in its header
+        and applies it at each marine group.
         """
         numbers = node.numbers
         name = (node.name or '').strip()

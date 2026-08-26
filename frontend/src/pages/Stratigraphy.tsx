@@ -4,15 +4,9 @@
 // The model is authored as an explicit OxCal-style tree -- nested Sequences
 // and Phases with Boundaries placed deliberately (components/
 // ModelTreeEditor.tsx) -- which is the single source of truth for the
-// structure. It replaced an earlier list editor that described stratigraphy
-// as Contexts plus pairwise above/below/equal relationships; that could not
-// express a placed Boundary, a site-wide Sequence, or any nesting, and
-// keeping it alongside the tree would have meant two ways of saying the
-// same thing with no way to reconcile them.
-//
-// The Harris matrix (components/HarrisMatrixDiagram.tsx) is now a READ-ONLY
-// view derived from that tree via utils/harrisLayout.layoutHarrisMatrix, rather
-// than an editable second representation.
+// structure. The Harris matrix (components/HarrisMatrixDiagram.tsx) is a
+// READ-ONLY view derived from it via utils/harrisLayout.layoutHarrisMatrix,
+// not an editable second representation.
 //
 // Two flows share this page: a saved analysis edits its stored tree through
 // PUT /analysis/:id/model-tree, and a new one edits a draft tree held in
@@ -61,24 +55,21 @@ export default function Stratigraphy() {
   // editing UI is identical, only where "Back" returns to differs.
   const { analysisId: editRouteId } = useParams<{ analysisId: string }>()
   const backPath = editRouteId ? `/analysis/${editRouteId}/edit` : '/new-analysis'
-  // /new-analysis is also where the nav bar's own "New Analysis" link lands,
-  // on a bare URL indistinguishable from this one -- so NewAnalysis.tsx resets
-  // its draft on mount unless it sees this marker, which is how a *genuine*
-  // stale draft (abandoned mid-edit, never run) doesn't leak into the next
-  // "New Analysis" click. Going back to a mid-edit analysis doesn't need the
-  // marker: that page reloads by editRouteId regardless of draft state.
+  // The nav bar's "New Analysis" link lands on a bare /new-analysis URL
+  // indistinguishable from this one, so NewAnalysis.tsx resets its draft on
+  // mount unless it sees this marker -- which is what stops a genuinely stale
+  // draft leaking into the next click. Returning to a mid-edit analysis needs
+  // no marker: that page reloads by editRouteId regardless.
   const backState = editRouteId ? undefined : { fromModelStructure: true }
 
-  // The model structure is the authoring surface for stratigraphy in both
-  // flows, so it is the default tab. For a saved analysis it is loaded from
-  // and written back to the API; for a new one it lives in the draft store
-  // and is submitted with the analysis.
+  // The default tab, being the authoring surface in both flows. A saved
+  // analysis loads it from and writes it back to the API; a new one holds it
+  // in the draft store and submits it with the analysis.
   const [tab, setTab] = useState<'diagram' | 'structure'>('structure')
 
-  // The explicit model tree only exists for a SAVED analysis (it is stored
-  // against it and edited via PUT /analysis/:id/model-tree), so this tab is
-  // offered when editing one. A brand-new analysis still uses the
-  // context/relationship editor above and is converted to a tree on save.
+  // The SAVED analysis's stored tree, loaded from the API and written back
+  // through PUT /analysis/:id/model-tree. Null for a new analysis, whose tree
+  // lives in the draft store instead (see draftModelTree below).
   const [modelTree, setModelTree] = useState<ModelElement | null>(null)
   const [savedMeasurements, setSavedMeasurements] = useState<MatrixMeasurement[]>([])
   const [assignments, setAssignments] = useState<Record<string, string>>({})
@@ -88,17 +79,16 @@ export default function Stratigraphy() {
   const [structureError, setStructureError] = useState<string | null>(null)
   const [linearized, setLinearized] = useState(false)
   // What the analysis is saved AS, which is not always what is being edited:
-  // switching a saved group calibration to Bayesian on the New Analysis page
-  // changes the draft, and the conversion only reaches the backend through
-  // Run Analysis. Until it does, this analysis has no structure to write to
-  // (GET returns model_tree only for a Bayesian analysis), so the structure
-  // built here belongs to the unsaved edit -- see the Save block below.
+  // switching a saved group calibration to Bayesian changes the draft, and the
+  // conversion only reaches the backend through Run Analysis. Until then there
+  // is no structure to write to, so what is built here belongs to the unsaved
+  // edit -- see the Save block below.
   const [savedType, setSavedType] = useState<string | null>(null)
 
-  // For a NEW analysis the tree lives in the draft store. Start it off as the
-  // smallest complete model -- a site-wide Sequence bracketed by boundaries
-  // -- with one phase per context the dates already carry, or a single phase
-  // when they carry none. See utils/modelTreeDefaults.
+  // For a NEW analysis the tree lives in the draft store, starting as the
+  // smallest complete model -- a site-wide Sequence bracketed by boundaries --
+  // with one phase per context the dates carry, or a single phase when they
+  // carry none. See utils/modelTreeDefaults.
   useEffect(() => {
     if (editRouteId || draftTree || measurements.length === 0) return
     const { tree, assignments: seeded } = bootstrapModelTree(
@@ -129,13 +119,11 @@ export default function Stratigraphy() {
           else if (m.group_id) initial[m.id] = m.group_id
         }
         if (!tree && saved.length > 0) {
-          // A saved analysis with no structure -- a group calibration being
-          // converted to Bayesian, most often. It has dates, so start it off
-          // the same way a new analysis starts, rather than telling the user
-          // to "add some dates and save it first" about an analysis whose
-          // dates are right there. Contexts come from the SampleGroups it was
-          // deployed with, so a deployed-then-converted analysis keeps the
-          // grouping it arrived with.
+          // A saved analysis with no structure, usually a group calibration
+          // being converted to Bayesian. It has dates, so start it as a new
+          // analysis starts rather than asking for dates that are right there.
+          // Contexts come from the SampleGroups it was deployed with, so the
+          // grouping it arrived with survives.
           const groupNames: Record<string, string> = Object.fromEntries(
             (data.data.groups || []).map((g: { id: string; name: string }) => [g.id, g.name])
           )
@@ -155,12 +143,11 @@ export default function Stratigraphy() {
         }
         setModelTree(tree)
         setAssignments(initial)
-        // Mirror into the draft store as well: NewAnalysis submits the
-        // draft's tree when the analysis is run, and it skips reloading a
-        // draft it already holds -- so a tree only edited here would
-        // otherwise be resubmitted as whatever the store loaded earlier.
-        // This is also the only route a bootstrapped structure takes to the
-        // backend when the analysis is not saved as Bayesian yet.
+        // Mirrored into the draft store too: NewAnalysis submits the draft's
+        // tree on run and skips reloading a draft it already holds, so a tree
+        // edited only here would be resubmitted as whatever the store loaded
+        // earlier. This is also the only route a bootstrapped structure takes
+        // to the backend before the analysis is saved as Bayesian.
         setDraftTree(tree, initial)
       })
       .catch((err) => setStructureError((err as Error).message))
@@ -172,14 +159,13 @@ export default function Stratigraphy() {
   const activeMeasurements = editRouteId ? savedMeasurements : measurements
   const unassignedCount = activeMeasurements.filter((m) => !activeAssignments[m.id]).length
 
-  // The Harris matrix is a derived VIEW of the model tree rather than an
-  // editable source of its own -- whichever tree is in play (the saved
-  // analysis's, or the in-progress draft) is what it draws.
+  // The Harris matrix is a derived VIEW rather than an editable source, and
+  // draws whichever tree is in play: the saved analysis's, or the draft.
   const summary = summariseTree(activeTree)
 
-  // Same rules the backend enforces (services/model_tree.validate_tree), run
-  // here so an invalid structure can't be submitted at all. The editor shows
-  // what's wrong; this is what stops Save.
+  // The rules the backend enforces (services/model_tree.validate_tree), run
+  // here so an invalid structure cannot be submitted. The editor shows what is
+  // wrong; this stops Save.
   const structureProblems = activeTree
     ? validateTree(activeTree, activeAssignments, activeMeasurements)
     : []
@@ -208,10 +194,9 @@ export default function Stratigraphy() {
     }
   }
 
-  // Only meaningful for a brand-new analysis, whose measurements live in the
-  // in-memory draft. When editing a saved analysis the draft may legitimately
-  // be empty (e.g. arriving on a direct link), and the Model Structure tab
-  // loads what it needs from the API itself.
+  // Only meaningful for a new analysis, whose measurements live in the draft.
+  // When editing a saved one the draft may legitimately be empty -- arriving
+  // on a direct link -- and this tab loads what it needs from the API.
   if (measurements.length === 0 && !editRouteId) {
     return (
       <Container maxWidth="md" sx={{ py: 4 }}>
@@ -300,10 +285,10 @@ export default function Stratigraphy() {
                 }}
               />
               {savedType && savedType !== 'bayesian' ? (
-                // Saved as something with no structure -- only a Bayesian
-                // analysis stores one, so there is nothing here to save the
-                // tree INTO until the conversion happens. It goes with the
-                // draft instead, and Run Analysis is what applies both.
+                // Saved as something with no structure: only a Bayesian
+                // analysis stores one, so there is nothing to save the tree
+                // INTO until the conversion happens. It goes with the draft,
+                // and Run Analysis applies both.
                 <Alert severity="info" sx={{ mt: 3 }}>
                   This analysis is still saved as a{' '}
                   {savedType === 'group_calibration' ? 'group calibration' : savedType}, which has

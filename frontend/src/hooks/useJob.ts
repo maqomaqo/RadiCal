@@ -36,13 +36,11 @@ interface UseJob {
  * `onFinished` fires once, when a job STOPS — whatever it stopped as. It is
  * how the page knows to go and fetch the results it has been waiting for.
  *
- * "Stops" is the load-bearing word. Opening a completed analysis finds a
- * terminal job sitting in `latestJobFor`, and treating that as a stop fired
- * onFinished on every cold page load — so Results re-fetched the whole
- * analysis, every posterior distribution included, immediately after loading
- * it. A run that was already over when the page opened was never being waited
- * for. An explicit `jobId` is different: the caller has just started that run
- * and is waiting for it, so a job already terminal on the first poll is still
+ * "Stops" is load-bearing. Opening a completed analysis finds a terminal job
+ * in `latestJobFor`, and treating that as a stop would fire onFinished on every
+ * cold load, re-fetching the whole analysis: a run already over when the page
+ * opened was never being waited for. An explicit `jobId` is different -- the
+ * caller just started that run, so a job terminal on the first poll is still
  * the event they asked about.
  */
 export function useJob(
@@ -57,8 +55,8 @@ export function useJob(
   const finishedCallback = useRef(onFinished)
   finishedCallback.current = onFinished
   const alreadyFinished = useRef(false)
-  // Whether this hook has ever seen the job in a non-terminal state. Only
-  // meaningful in the targetId case; see the note above onFinished.
+  // Whether this hook has ever seen the job non-terminal. Only meaningful in
+  // the targetId case; see the note above onFinished.
   const sawActive = useRef(false)
 
   const stop = useCallback(() => {
@@ -84,14 +82,13 @@ export function useJob(
         }
         sawActive.current = true
       } else {
-        // No job at all for this target: nothing is running, and there is
-        // nothing to wait for.
+        // No job for this target: nothing is running or to wait for.
         stop()
         return
       }
     } catch {
-      // A failed poll is not a failed run — the next tick tries again, and
-      // the give-up window below bounds how long that goes on for.
+      // A failed poll is not a failed run: the next tick tries again, and the
+      // give-up window below bounds how long that goes on.
     }
     if (Date.now() - startedAt.current > GIVE_UP_AFTER_MS) {
       stop()

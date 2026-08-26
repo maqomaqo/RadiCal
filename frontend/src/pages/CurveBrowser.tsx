@@ -60,14 +60,13 @@ import { compactGrid } from '@/utils/curveGrid'
 const Plot = createPlotlyComponent(Plotly)
 
 /**
- * Laboratory uncertainties to offer, as the 1σ on a modern sample -- the
- * method scales it with age from there.
+ * Laboratory uncertainties to offer, as the 1σ on a modern sample; the method
+ * scales it with age from there.
  *
- * 25 by default, which is what a commercial date typically carries. 15 is
- * what res14c uses and roughly the best a good AMS laboratory offers -- the
- * right figure for reproducing the published curves, and the wrong one for
- * answering "can I date this period well enough", since it quotes a precision
- * most samples will not get.
+ * 25 by default, what a commercial date typically carries. 15 is what res14c
+ * uses and roughly the best a good AMS lab offers -- right for reproducing the
+ * published curves, wrong for "can I date this period well enough", where it
+ * quotes a precision most samples will not get.
  */
 const LAB_UNCERTAINTIES = [
   { value: 15, label: '±15 yr (best AMS)' },
@@ -77,32 +76,27 @@ const LAB_UNCERTAINTIES = [
 ]
 
 /**
- * Look at a calibration curve.
+ * Look at a calibration curve. Three things:
  *
- * The three things this page is for, and why each is here:
- *
- * The curve's SHAPE, with its own error bounds. Every calibrated date this
- * app produces is this curve read backwards, so its wiggles are not detail --
- * they are the reason a date splits into two ranges, or spreads over three
- * centuries, and they are invisible in the calibrated output.
+ * Its SHAPE, with its own error bounds. Every calibrated date this app
+ * produces is this curve read backwards, so its wiggles are the reason a date
+ * splits into two ranges or spreads over three centuries -- and they are
+ * invisible in the calibrated output.
  *
  * WHERE you are in 55,000 years. The strip under the plot shows the whole
- * curve with the current view marked; drag it to move. Panning inside a chart
- * alone never answers that question.
+ * curve with the current view marked; panning inside a chart never answers
+ * that.
  *
  * What the curve is DOING at a given moment. The readout reports the local
- * gradient, which is what governs how tightly anything can be dated there: on
- * a slope of about 1 the curve tracks calendar time and a date calibrates
- * roughly as tightly as it was measured; near 0 it is flat and one
- * measurement covers centuries; below 0 the curve runs backwards and a single
- * measurement necessarily splits into disjoint ranges.
+ * gradient, which governs how tightly anything can be dated there: near 1 the
+ * curve tracks calendar time, near 0 one measurement covers centuries, below 0
+ * it runs backwards and a measurement splits into disjoint ranges.
  */
 
 /** Linear interpolation of a loaded series at an arbitrary calendar age. */
 function sampleAt(points: CurvePoint[], cal: number): CurvePoint | null {
   if (points.length === 0) return null
-  // Points come oldest-first or youngest-first depending on nothing in
-  // particular, so search rather than assume.
+  // Points arrive oldest-first or youngest-first, so search rather than assume.
   let nearest = points[0]
   let best = Infinity
   for (const point of points) {
@@ -118,13 +112,10 @@ function sampleAt(points: CurvePoint[], cal: number): CurvePoint | null {
 /**
  * A panel under the curve, framed and titled.
  *
- * The frame is doing real work rather than decoration: these panels share the
- * curve's calendar axis and sit directly beneath it, so without one they read
- * as more of the same chart. The strip along the top says which question this
- * panel answers, and holds whatever settings belong to that question -- which
- * is where the resolution panel's laboratory error and CSV export live, next
- * to the thing they change, instead of in a row of eleven controls at the
- * bottom of the page where nothing said what they applied to.
+ * The frame does real work: these panels share the curve's calendar axis and
+ * sit directly beneath it, so without one they read as more of the same chart.
+ * The strip along the top says which question the panel answers and holds the
+ * settings belonging to it, next to the thing they change.
  */
 function PanelSection({
   title,
@@ -189,23 +180,20 @@ export default function CurveBrowser() {
   const [error, setError] = useState<string | null>(null)
   const [dateFormat, setDateFormat] = useState<DateFormat>(DEFAULT_DATE_FORMAT)
   const [hover, setHover] = useState<number | null>(null)
-  // Set when a windowed refetch fails. The chart keeps showing what it last
-  // loaded rather than blanking mid-drag, which means the plot and the
-  // scrubber can disagree about where you are -- so it has to say so.
+  // Set when a windowed refetch fails. The chart keeps its last load rather
+  // than blanking mid-drag, so the plot and the scrubber can disagree about
+  // where you are -- which has to be said.
   const [stale, setStale] = useState(false)
   // The resolution profile, on the same calendar axis as the curve above it.
-  //
-  // Off to begin with. The page opens on the curve alone -- one chart, full
-  // height, which is what someone arriving here came to see; the second panel
-  // is an answer to a question they have not asked yet. It also means the
-  // first view costs one request rather than two.
+  // Off to begin with: the page opens on the curve alone, one chart at full
+  // height, and the first view costs one request rather than two.
   const [showResolution, setShowResolution] = useState(false)
   const [resolution, setResolution] = useState<ResolutionPoint[]>([])
   const [u0, setU0] = useState(25)
   const [resolutionLoading, setResolutionLoading] = useState(false)
-  // Comparison against a second curve, and the difference between them --
-  // which is the part worth looking at, since two curves drawn over each
-  // other are indistinguishable at any useful zoom.
+  // Comparison against a second curve, and the difference between them, which
+  // is the part worth looking at: two curves drawn over each other are
+  // indistinguishable at any useful zoom.
   const [compareWith, setCompareWith] = useState('')
   const [comparison, setComparison] = useState<ComparePoint[]>([])
   // A hypothetical date from one calendar year, opened by clicking the curve.
@@ -214,11 +202,10 @@ export default function CurveBrowser() {
   /**
    * How wide the plot is, for deciding how many points to ask for.
    *
-   * Floored, because this is read at fetch time and a layout that is
-   * momentarily collapsed -- a hidden tab, a panel mid-resize -- reads back a
-   * few dozen pixels. That silently turns a 450-year window into 33 points: a
-   * staircase where the curve's sharpest features are, drawn from a request
-   * that looked perfectly successful.
+   * Floored, because this is read at fetch time and a momentarily collapsed
+   * layout -- a hidden tab, a panel mid-resize -- reads back a few dozen
+   * pixels, turning a 450-year window into 33 points: a staircase where the
+   * curve's sharpest features are, from a request that looked successful.
    */
   const plotWidth = () => Math.max(plotBoxRef.current?.clientWidth ?? 900, 600)
 
@@ -226,10 +213,8 @@ export default function CurveBrowser() {
     setSpec(curves.find((c) => c.id === curveId) ?? null)
   }, [curves, curveId])
 
-  // The overview strip, fetched once: the whole curve, coarsely. Separate
-  // from the windowed fetch below because it never changes as you move
-  // around, and refetching it on every pan would be the largest cost on the
-  // page for the one thing that is always the same.
+  // The overview strip: the whole curve, coarsely, fetched once. Separate from
+  // the windowed fetch below because it never changes as you move around.
   useEffect(() => {
     let active = true
     setLoading(true)
@@ -239,8 +224,8 @@ export default function CurveBrowser() {
         setOverview(data.points)
         const bounds = { min: data.curve_cal_min, max: data.curve_cal_max }
         setExtent(bounds)
-        // Opening on the whole curve says what there is; the Holocene, where
-        // most archaeology sits, is one drag away and a preset click away.
+        // Opening on the whole curve says what there is; the Holocene is one
+        // drag or one preset click away.
         setWindow({ from: bounds.min, to: bounds.max })
         setError(null)
       })
@@ -255,9 +240,8 @@ export default function CurveBrowser() {
     }
   }, [curveId])
 
-  // The window, refetched as it moves, at the resolution the plot is actually
-  // being drawn at -- so zooming in reveals real detail rather than
-  // stretching what was already loaded.
+  // The window, refetched as it moves at the resolution the plot is drawn at,
+  // so zooming in reveals real detail rather than stretching what was loaded.
   useEffect(() => {
     if (!window) return
     let active = true
@@ -283,10 +267,9 @@ export default function CurveBrowser() {
     }
   }, [curveId, window])
 
-  // Fetched per window like the curve itself. The calculation is exact for a
-  // window rather than an approximation of the whole-curve answer -- it pads
-  // far enough that the two are identical -- so there is no reason to compute
-  // 55,000 years to draw 400 of them.
+  // Fetched per window, like the curve. The windowed calculation pads far
+  // enough to be identical to the whole-curve answer, so there is no reason to
+  // compute 55,000 years to draw 400 of them.
   useEffect(() => {
     if (!window || !showResolution) return
     let active = true
@@ -398,19 +381,17 @@ export default function CurveBrowser() {
       {
         x: cal,
         y: c14,
-        // Just enough to say where the pointer is. The curve's error and its
-        // local gradient are both in the readout under the chart, and a
-        // floating box that repeats them covers the curve to tell you what is
-        // already on screen. Pre-formatted because %{x} is always the cal BP
+        // Just enough to say where the pointer is: the error and gradient are
+        // in the readout under the chart, and a floating box repeating them
+        // covers the curve. Pre-formatted because %{x} is always the cal BP
         // the point is plotted at, where the reader may be in BC/AD.
         customdata: labels,
         mode: 'lines',
         line: { color: colors.posteriorLine, width: 1.5 },
         name: spec?.name ?? curveId,
-        // Named only when there are two lines to tell apart. On its own the
-        // name is the chart's title repeated into a box that covers the
-        // curve; with a comparison overlaid, two unlabelled numbers are a
-        // guess.
+        // Named only when there are two lines to tell apart: alone it repeats
+        // the chart's title into a box covering the curve, but with a
+        // comparison overlaid, two unlabelled numbers are a guess.
         hovertemplate: comparison.length > 0
           ? `<b>%{customdata}</b><br>${spec?.name ?? curveId}: %{y:.0f} ¹⁴C BP<extra></extra>`
           : '<b>%{customdata}</b><br>%{y:.0f} ¹⁴C BP<extra></extra>',
@@ -436,37 +417,31 @@ export default function CurveBrowser() {
    * How tall the curve chart is, giving up exactly what the resolution panel
    * takes so the readout below never moves.
    *
-   * Passed to Plotly's LAYOUT as well as the container's style. Setting only
-   * the style grows the box while Plotly keeps drawing at its old computed
-   * height -- the chart stays 270px inside a 380px container, and turning the
-   * resolution panel off leaves a blank 110px strip where the curve should
-   * have expanded. `useResizeHandler` does not catch it either: it listens
-   * for WINDOW resizes, and nothing about the window changed.
+   * Passed to Plotly's LAYOUT as well as the container's style: style alone
+   * grows the box while Plotly keeps drawing at its old computed height,
+   * leaving a blank strip where the curve should have expanded.
+   * `useResizeHandler` does not catch it -- it listens for WINDOW resizes.
    */
   /**
    * Heights for the stack of panels under the chart.
    *
-   * The curve gives up what the panels take, so the readout below stays where
-   * it is and does not fall below the fold. But it cannot give up everything:
-   * at two panels a straight 110 each left the curve 160px tall, which is too
-   * short to read the thing the page is actually about. So the panels shrink
-   * a little when there are two of them, and the chart will not go below 200.
+   * The curve gives up what the panels take, so the readout below stays put.
+   * It cannot give up everything, though: at two panels a straight 110 each
+   * leaves the curve 160px tall, too short to read. So the panels shrink a
+   * little when there are two, and the chart floors at 200.
    */
   const panelCount = (showResolution ? 1 : 0) + (comparison.length > 0 ? 1 : 0)
   const panelHeight = panelCount > 1 ? 75 : 85
   /**
    * What a framed section costs beyond its chart: the border, the title strip
-   * with its controls, and the margin above it. Measured, not guessed -- a
-   * first estimate of 46 left the readout moving 45px when a panel opened,
-   * which is the whole thing the compensation exists to prevent.
+   * with its controls, and the margin above it. Measured rather than guessed --
+   * an estimate 45px out moves the readout every time a panel opens.
    */
   const SECTION_CHROME = 91
   /**
-   * With one panel this comes out at 380 exactly, so the readout does not
-   * move. With two it cannot: two framed sections are 330px between them, and
-   * the only way to absorb that is a chart too short to read. The chart floors
-   * at 200 and the page grows instead -- which is a fair trade for having
-   * asked to see two extra charts at once.
+   * With one panel this comes to 380 exactly, so the readout does not move.
+   * With two it cannot: 330px between them can only be absorbed by a chart too
+   * short to read, so the chart floors at 200 and the page grows instead.
    */
   const chartHeight = Math.max(380 - panelCount * (panelHeight + SECTION_CHROME), 200)
 
@@ -476,19 +451,16 @@ export default function CurveBrowser() {
       height: chartHeight,
       title: { text: spec ? `${spec.name}` : curveId, font: { size: 16 } },
       xaxis: {
-        // Dropped when panels sit below, where it would be stranded halfway
-        // down a stack of charts sharing one axis; a caption under the last
-        // panel carries it instead.
+        // Dropped when panels sit below, where it strands halfway down a stack
+        // of charts sharing one axis; a caption under the last panel carries it.
         ...(panelCount > 0 ? {} : { title: { text: calendarAxisTitle(dateFormat) } }),
-        // The crosshair that 'x unified' used to draw, kept without it. See
-        // hovermode below.
+        // The crosshair 'x unified' would draw, kept without it. See hovermode.
         showspikes: true,
         spikemode: 'across' as const,
         spikethickness: 1,
         spikedash: 'dot',
         spikecolor: colors.grid,
-        // Older to the left, as in every other plot in this app, so time
-        // reads left to right.
+        // Older to the left, as in every plot here, so time reads left to right.
         autorange: 'reversed' as const,
         gridcolor: colors.grid,
         ...(ticks ? { tickvals: ticks.tickvals, ticktext: ticks.ticktext } : {}),
@@ -498,28 +470,18 @@ export default function CurveBrowser() {
         gridcolor: colors.grid,
       },
       /**
-       * 'closest', not 'x unified'.
-       *
-       * Unified draws a header line above the box holding the raw x value,
-       * and the x value here is always cal BP because that is what the curve
-       * is plotted in -- so in cal BP it printed the date twice, and in BC/AD
-       * it printed a number in a convention the reader had explicitly turned
+       * 'closest', not 'x unified'. Unified draws a header holding the raw x
+       * value, which is always cal BP here -- so it prints the date twice in
+       * cal BP, and in BC/AD prints a number in a convention the reader turned
        * off. It cannot be reformatted: no axis format turns 2502 into 553 BC.
-       * So it goes, and the spike lines above keep the crosshair that made
-       * unified worth having.
+       * The spike lines above keep the crosshair that made unified worth having.
        */
       hovermode: 'closest' as const,
       /**
-       * No distance cutoff, so pointing anywhere in the plot finds the
-       * nearest point on the curve rather than requiring the pointer to track
-       * the line. That is what the readout underneath needs -- it is driven by
-       * this hover, and with the default cutoff it blanked whenever the
-       * pointer drifted thirty pixels off the curve.
-       *
-       * The alternatives both reintroduce the raw cal BP number this replaced:
-       * 'x unified' prints it as a header above the box, and 'x' prints it in
-       * a label on the axis. Neither can be reformatted, because the value
-       * plotted IS cal BP -- no axis format turns 2502 into 553 BC.
+       * No distance cutoff, so pointing anywhere finds the nearest point on
+       * the curve rather than making the pointer track the line. The readout
+       * underneath is driven by this hover, and with the default cutoff it
+       * blanks whenever the pointer drifts thirty pixels off the curve.
        */
       hoverdistance: -1,
       showlegend: true,
@@ -535,18 +497,15 @@ export default function CurveBrowser() {
     () => ({
       responsive: true,
       displaylogo: false,
-      // The bar goes; the CANVAS stays. Plotly's modebar duplicated zoom and
-      // pan controls this page already has as real buttons -- and duplicated
-      // them badly, because it mutates the axis range directly while this
-      // page's `window` state, which the buttons, the presets, the scrubber
-      // and "Export this window" all read, never heard about it. Measured:
-      // Plotly zoom-in twice took the view to 34375-20625, then the app's own
-      // "Zoom in" snapped it back to the full 55000-0. The button zoomed OUT,
-      // four-fold.
+      // The bar goes; the CANVAS stays. Plotly's modebar duplicates zoom and
+      // pan controls this page has as real buttons, and duplicates them badly:
+      // it mutates the axis range directly while this page's `window` state --
+      // which the buttons, presets, scrubber and export all read -- never
+      // hears about it, so the app's own "Zoom in" then snaps back to the full
+      // range and zooms OUT.
       //
-      // Drag-to-zoom is worth keeping -- it is the best way to pick a plateau
-      // out of a calibration curve -- so it stays and reports what it did
-      // through onRelayout below.
+      // Drag-to-zoom is worth keeping, being the best way to pick a plateau out
+      // of a curve, so it stays and reports itself through onRelayout below.
       displayModeBar: false as const,
     }),
     []
@@ -555,14 +514,14 @@ export default function CurveBrowser() {
   /**
    * Feed Plotly's own drag-zoom back into the window this page owns.
    *
-   * Without this the two disagree silently, and not only visually: `Export
-   * this window` builds its CSV URL from window.from/to, so a reader who
-   * box-zoomed to a plateau and hit export got the PREVIOUS window's data in a
-   * file that looks like the one on screen.
+   * Without it the two disagree silently, and not only visually: "Export this
+   * window" builds its URL from window.from/to, so box-zooming to a plateau
+   * and exporting yields the PREVIOUS window's data in a file that looks like
+   * the one on screen.
    *
    * Only acts on an explicit range: Plotly also emits relayout for autorange,
-   * resizes and dragmode changes, and re-applying state on those would fight
-   * the render that caused them.
+   * resizes and dragmode changes, where re-applying state would fight the
+   * render that caused them.
    */
   const handleRelayout = useCallback(
     (event: Record<string, unknown>) => {
@@ -713,10 +672,9 @@ export default function CurveBrowser() {
           onRelayout={handleRelayout}
           onHover={(event: any) => setHover(event?.points?.[0]?.x ?? null)}
           onUnhover={() => setHover(null)}
-          // Clicking a year asks what a date from it would actually look
-          // like. In a plateau the answer is three or four disjoint ranges,
-          // which says what a plateau costs far more plainly than any single
-          // number for it can.
+          // Clicking a year asks what a date from it would look like. In a
+          // plateau the answer is three or four disjoint ranges, which says
+          // what a plateau costs more plainly than any single number.
           onClick={(event: any) => {
             const clicked = event?.points?.[0]?.x
             if (typeof clicked === 'number') setSimulateAt(clicked)
@@ -773,11 +731,9 @@ export default function CurveBrowser() {
                     spikecolor: colors.grid,
                   },
                   yaxis: {
-                    // Units only. A rotated title is limited by the panel's
-                    // HEIGHT, and these panels are 75-85px -- but more to the
-                    // point, the section's own header already says what is
-                    // being plotted, so repeating it sideways in the space
-                    // where it does not fit says nothing twice.
+                    // Units only: a rotated title is limited by the panel's
+                    // HEIGHT, which is 75-85px here, and the section header
+                    // already says what is being plotted.
                     title: { text: 'yr', font: { size: 11 } },
                     gridcolor: colors.grid,
                     zeroline: true,
@@ -862,9 +818,8 @@ export default function CurveBrowser() {
                   height: panelHeight,
                   xaxis: {
                     // Locked to the curve above rather than autoranged: the
-                    // two are read together, and an axis that drifted by a few
-                    // years would line a plateau up against the wrong stretch
-                    // of curve.
+                    // two are read together, and an axis drifting a few years
+                    // would line a plateau up against the wrong stretch.
                     range: [window.to, window.from],
                     matches: 'x',
                     showticklabels: false,
@@ -997,9 +952,8 @@ export default function CurveBrowser() {
           <Button size="small" onClick={() => setPreset(2350, 2800)}>
             Hallstatt plateau
           </Button>
-          {/* Reset belongs with the other view controls now that Plotly's
-              own autoscale is gone -- and it always agreed with `window`
-              anyway, which Plotly's never did. */}
+          {/* Reset sits with the other view controls, and unlike Plotly's own
+              autoscale it agrees with `window`. */}
           <Button size="small" onClick={() => setPreset(extent.min, extent.max)}>
             Reset view
           </Button>

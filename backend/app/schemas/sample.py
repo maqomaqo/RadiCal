@@ -5,27 +5,20 @@ from datetime import datetime
 from app.services import curve_registry
 from app.services.stratigraphy import expand_relationships, find_cycle
 
-# The curves shipped with the app. Kept as a name because several tests and
-# error messages refer to it, but it is no longer the whole answer: a user can
-# import curves of their own, so what a request may name is "any curve the
-# registry can resolve", checked below rather than declared as a Literal here.
+# The curves shipped with the app. Not the whole answer -- a user can import
+# their own -- so what a request may name is "any curve the registry can
+# resolve", checked by validate_curve_id below.
 VALID_CURVE_IDS = curve_registry.BUILTIN_CURVE_IDS
 
 
 def validate_curve_id(curve_id: Optional[str]) -> Optional[str]:
     """
-    Reject a curve this app cannot load, at the edge.
+    Reject a curve this app cannot load, at the edge, so a typo fails clearly
+    rather than reaching get_curve(). Not a Pydantic `Literal`, because the
+    set of curves is something a user can add to.
 
-    Without this an unrecognized curve_id is not rejected anywhere: it flows
-    straight through to get_curve(), which before it started raising silently
-    fell back to IntCal20 -- so a typo'd curve_id produced a real but wrong
-    result instead of a clear failure. This used to be a Pydantic `Literal`
-    over a fixed tuple, which stopped working once the set of curves became
-    something a user can add to.
-
-    Builtin ids are answered without a database query (see
-    curve_registry.exists), so the common case -- forty dates all on IntCal20
-    -- costs nothing.
+    Builtin ids are answered without a database query (curve_registry.exists),
+    so forty dates all on IntCal20 cost nothing.
     """
     if curve_id is None:
         return None
@@ -41,18 +34,12 @@ def validate_curve_id(curve_id: Optional[str]) -> Optional[str]:
 
 class MeasurementInput(BaseModel):
     """
-    A single radiocarbon measurement, with the validation that was
-    previously entirely absent: age_bp/error_1sigma of zero or negative,
-    blank sample names, and unrecognized curve_id/sample_type values all
-    used to pass straight through to calibration and either produce
-    nonsense results or a confusing downstream error (a bare KeyError or
-    numpy exception) instead of a clear, descriptive 422.
+    A single radiocarbon measurement.
 
-    The numeric bounds are deliberately generous sanity checks, not
-    claims about scientific validity -- they're here to catch data-entry
-    mistakes (a typo'd extra digit, a calendar year pasted into the BP
-    field, a sign error) rather than to gatekeep legitimate edge-case
-    measurements.
+    The numeric bounds are generous sanity checks, not claims about
+    scientific validity: they catch data-entry mistakes (an extra digit, a
+    calendar year pasted into the BP field, a sign error) rather than
+    gatekeeping legitimate edge-case measurements.
     """
     sample_name: str = Field(default="Sample", max_length=200)
     age_bp: float = Field(
@@ -68,10 +55,8 @@ class MeasurementInput(BaseModel):
                      "measurement uncertainty."
     )
     material_type: str = Field(default="unknown", max_length=100)
-    # Optional and unset by default (rather than defaulting to
-    # "terrestrial" here) so the API layer can keep its existing
-    # smart-default behavior of inferring "marine" from curve_id when the
-    # caller doesn't specify a sample_type explicitly.
+    # Unset by default rather than "terrestrial", so the API layer can infer
+    # "marine" from curve_id when the caller does not say.
     sample_type: Optional[Literal["terrestrial", "marine"]] = None
     curve_id: str = "intcal20"
 
@@ -79,22 +64,14 @@ class MeasurementInput(BaseModel):
     @classmethod
     def _known_curve(cls, value: str) -> str:
         return validate_curve_id(value)
-    # Local marine reservoir offset (Delta-R) and its 1-sigma uncertainty,
-    # both in radiocarbon years.
+    # Local marine reservoir offset (Delta-R) and its 1-sigma uncertainty, in
+    # radiocarbon years. A marine curve already models the GLOBAL average
+    # reservoir effect, so only the local deviation from it belongs here;
+    # entering a whole reservoir age would count the global effect twice.
     #
-    # A marine curve already models the GLOBAL average reservoir effect, so
-    # what a sample needs on top of it is only the local deviation from that
-    # average -- which is what Delta-R is. Entering a whole reservoir age
-    # here (400-500 years for much of the ocean) would count the global
-    # effect twice and pull the result centuries too young.
-    #
-    # Sign follows the usual convention: a marine sample of calendar age t
-    # has expected radiocarbon age curve(t) + delta_r, so a positive Delta-R
-    # means the local water is more depleted than the global average and the
-    # sample dates YOUNGER than it would uncorrected.
-    #
-    # Supersedes `reservoir_age`, which was recorded but never applied to
-    # anything -- see models.RadiocarbonSample.
+    # Sign convention: a marine sample of calendar age t has expected
+    # radiocarbon age curve(t) + delta_r, so a positive Delta-R dates the
+    # sample YOUNGER than it would uncorrected. Supersedes `reservoir_age`.
     delta_r: Optional[float] = Field(default=None, ge=-5000, le=5000)
     delta_r_error: Optional[float] = Field(default=None, ge=0, le=5000)
     reservoir_age: Optional[float] = Field(default=None, ge=-500, le=2000)
@@ -102,12 +79,9 @@ class MeasurementInput(BaseModel):
     location: Optional[str] = Field(default=None, max_length=500)
     notes: Optional[str] = Field(default=None, max_length=2000)
 
-    # Optional age limiters, both in cal BP like every other age field here.
-    # tpq_age_bp ("terminus post quem") is a MAXIMUM age bound -- the
-    # sample cannot be OLDER than this. taq_age_bp ("terminus ante quem")
-    # is a MINIMUM age bound -- the sample cannot be YOUNGER than this.
-    # Valid range is [taq_age_bp, tpq_age_bp]; see _bounds_not_contradictory
-    # below for the sanity check on that ordering.
+    # Age limiters in cal BP. tpq_age_bp ("terminus post quem") is a MAXIMUM
+    # age bound, taq_age_bp ("terminus ante quem") a MINIMUM, so the valid
+    # range is [taq_age_bp, tpq_age_bp] -- see _bounds_not_contradictory.
     tpq_age_bp: Optional[float] = Field(default=None, ge=0, le=60000)
     taq_age_bp: Optional[float] = Field(default=None, ge=0, le=60000)
 
@@ -134,10 +108,9 @@ class MeasurementInput(BaseModel):
     @model_validator(mode="after")
     def _delta_r_has_an_uncertainty(self):
         """
-        Delta-R is always published as a value with an uncertainty, and it
-        is combined into the measurement's error in quadrature. Accepting
-        one without the other would silently treat the offset as exactly
-        known and report a date more precise than the evidence supports.
+        Delta-R is always published with an uncertainty and combined into
+        the measurement's error in quadrature. Accepting one without the
+        other would report a date more precise than the evidence supports.
         """
         if self.delta_r is not None and self.delta_r_error is None:
             raise ValueError(
@@ -156,19 +129,15 @@ class CalibrateRequest(MeasurementInput):
 
 class ProjectSampleInput(MeasurementInput):
     """
-    A date being added to a PROJECT's date collection (see
-    models.ProjectSample). Inherits every measurement-field check from
-    MeasurementInput -- age/error bounds, known curve_id, non-blank name,
-    and the TPQ/TAQ ordering check -- and adds the deploy-time context
-    default.
+    A date being added to a PROJECT's collection (models.ProjectSample):
+    every MeasurementInput check, plus the deploy-time context default.
     """
     default_context_name: Optional[str] = Field(default=None, max_length=200)
 
     @field_validator("default_context_name")
     @classmethod
     def _blank_context_is_none(cls, v: Optional[str]) -> Optional[str]:
-        # Treat "" / whitespace as "no context" rather than creating a
-        # context literally named "" when this date is deployed.
+        # "" is "no context", not a context literally named "".
         if v is None:
             return None
         v = v.strip()
@@ -177,12 +146,10 @@ class ProjectSampleInput(MeasurementInput):
 
 class ProjectSampleUpdate(BaseModel):
     """
-    PATCH body for a date already in a project's collection -- every field
-    optional so a caller can send just the one they're changing. Field
-    constraints mirror ProjectSampleInput/MeasurementInput; the TPQ/TAQ
-    ordering check can't be repeated here (a partial update may only carry
-    one of the pair) and is instead applied against the merged result in
-    the endpoint.
+    PATCH body for a date in a project's collection -- every field optional.
+    Constraints mirror ProjectSampleInput; the TPQ/TAQ ordering check cannot
+    be repeated here (a partial update may carry only one of the pair) and is
+    applied against the merged result in the endpoint.
     """
     sample_name: Optional[str] = Field(default=None, max_length=200)
     age_bp: Optional[float] = Field(default=None, ge=0, le=60000)
@@ -227,18 +194,14 @@ class ProjectSampleBulkInput(BaseModel):
 class ProjectSampleBulkUpdate(BaseModel):
     """
     PATCH body for applying one value across a selection of a project's
-    collected dates -- the calibration curve, or a Delta-R shared by
-    everything from one site or water body.
-
-    Delta-R is per-provenance rather than per-date, which is what makes a
-    bulk form of this worth having: an analyst has one published local offset
-    for a site and needs it on all forty of its marine dates, not typed forty
-    times.
+    dates -- the calibration curve, or a Delta-R shared by everything from
+    one site or water body, since Delta-R is per-provenance rather than
+    per-date.
 
     Whether a field was SENT matters, not whether it is null: `delta_r: null`
-    clears the offset, while omitting the key leaves it alone. Pydantic
-    records that distinction in `model_fields_set`, so this needs no sentinel
-    value -- see api/project_samples.bulk_update_project_samples.
+    clears the offset, omitting the key leaves it alone. Pydantic records that
+    in `model_fields_set`, so no sentinel is needed -- see
+    api/project_samples.bulk_update_project_samples.
     """
     sample_ids: List[str] = Field(..., min_length=1, max_length=500)
     curve_id: Optional[str] = None
@@ -270,13 +233,9 @@ class ProjectSampleBulkUpdate(BaseModel):
     @model_validator(mode="after")
     def _delta_r_has_an_uncertainty(self):
         """
-        Same rule as MeasurementInput's, and for the same reason: a reservoir
-        offset has its own uncertainty, and accepting one without it would
-        report dates more precise than the evidence supports -- across a whole
-        selection at once, here.
-
-        Clearing is symmetrical. `delta_r: null` clears the error too, so a
-        stray uncertainty cannot be left behind with no offset to belong to.
+        Same rule as MeasurementInput's, applied across a whole selection.
+        Clearing is symmetrical -- `delta_r: null` clears the error too, so no
+        stray uncertainty is left with no offset to belong to.
         """
         sent = self.model_fields_set
         if 'delta_r' in sent and self.delta_r is not None and self.delta_r_error is None:
@@ -296,9 +255,8 @@ class ProjectSampleBulkUpdate(BaseModel):
 
 class ProjectSampleBulkDelete(BaseModel):
     """
-    DELETE body for removing several dates from a project's collection at
-    once. Analyses already deployed from them keep their own copies and are
-    unaffected -- see models.ProjectSample.
+    DELETE body for removing several dates from a project's collection.
+    Analyses deployed from them keep their own copies (models.ProjectSample).
     """
     sample_ids: List[str] = Field(..., min_length=1, max_length=500)
 
@@ -312,9 +270,9 @@ class ProjectSampleBulkDelete(BaseModel):
 
 class DeployRequest(BaseModel):
     """
-    POST body for deploying a selection of a project's dates into a new
-    analysis (see api/project_samples.py). The dates are COPIED, so the
-    resulting analysis is independent of the collection from then on.
+    POST body for deploying a project's dates into a new analysis (see
+    api/project_samples.py). The dates are COPIED, so the analysis is
+    independent of the collection from then on.
     """
     name: str = Field(default="Untitled", max_length=200)
     sample_ids: List[str] = Field(..., min_length=1)
@@ -338,47 +296,35 @@ class BayesianMeasurementInput(MeasurementInput):
     """A measurement within a Bayesian analysis request. Needs a
     client-supplied id so relationships can reference it."""
     id: str = Field(..., min_length=1)
-    # Optional stratigraphic phase/group this measurement belongs to --
-    # must match the id of one of the request's top-level `groups` (see
-    # BayesianRequest._validate_stratigraphy below).
+    # Must match the id of one of the request's top-level `groups`; see
+    # BayesianRequest._validate_stratigraphy.
     group_id: Optional[str] = None
     # The model-tree phase this date belongs to, when the request carries a
     # `model_tree`. Supersedes group_id; see BayesianRequest.
     element_id: Optional[str] = None
-    # Prior probability that this date does not belong to the population
-    # being modelled -- residual charcoal, intrusive material, lab error.
-    # OxCal's `Outlier("General", 0.05)`, and 0.05 is its convention too.
+    # Prior probability this date does not belong to the population being
+    # modelled -- residual charcoal, intrusive material, lab error. OxCal's
+    # `Outlier("General", 0.05)`. When set, the date's likelihood becomes a
+    # mixture of itself and a heavy-tailed alternative, and the result carries
+    # the posterior probability it was the alternative (services/exact_chain).
+    # Off by default because it changes reported dates.
     #
-    # Left at 0 (off) rather than defaulted on: it changes reported dates,
-    # and turning it on should be the analyst's decision. When set, the
-    # date's likelihood becomes a mixture of itself and a heavy-tailed
-    # alternative, and the result carries the posterior probability that it
-    # was the alternative -- see services/exact_chain.
-    #
-    # Up to 1.0, not 0.5. A prior of 1.0 is not a mistake or an over-confident
-    # guess: it is how OxCal declares material residual OUTRIGHT rather than
-    # suspecting it, which is ordinary practice for charcoal known to be old
-    # wood -- `Outlier("Charcoal", 1.00)` appears three times in
-    # tests/fixtures/oxcal_charcoal. Capping at 0.5 made a published model of
-    # that shape impossible to enter at all, which is a worse failure than
-    # allowing a strong prior the analyst meant.
+    # Allowed up to 1.0, which is how OxCal declares material residual
+    # OUTRIGHT rather than suspecting it -- ordinary practice for charcoal
+    # known to be old wood.
     outlier_prior: float = Field(default=0.0, ge=0.0, le=1.0)
-    # Which outlier model, when one is applied. "general" is OxCal's
-    # symmetric heavy-tailed default, for a date wrong in an unknown way.
-    # "charcoal" is one-sided -- the material formed before its context,
-    # never after -- for old wood and reworked material. See
-    # services/exact_chain._outlier_kernel.
+    # "general" is OxCal's symmetric heavy-tailed default, for a date wrong in
+    # an unknown way; "charcoal" is one-sided (the material formed before its
+    # context, never after). See services/exact_chain._outlier_kernel.
     outlier_model: Literal["general", "charcoal"] = "general"
 
 
 class SampleGroupInput(BaseModel):
     """
-    A named stratigraphic phase/group of samples within a Bayesian
-    analysis request. Grouping lets one above/below/equal relationship or
-    one TPQ/TAQ limiter apply to every sample in the group at once,
-    instead of repeating it per sample pair. Needs a client-supplied id
-    (like BayesianMeasurementInput) so relationships and measurements can
-    reference it before anything is persisted.
+    A named stratigraphic phase/group within a Bayesian analysis request, so
+    one relationship or limiter applies to every member at once. Needs a
+    client-supplied id so relationships and measurements can reference it
+    before anything is persisted.
     """
     id: str = Field(..., min_length=1)
     name: str = Field(..., min_length=1, max_length=200)
@@ -406,13 +352,10 @@ class SampleGroupInput(BaseModel):
 
 class RelationshipInput(BaseModel):
     """
-    A stratigraphic constraint between two nodes in a Bayesian analysis --
-    each side (from/to) can be either a single measurement or a group,
-    distinguished by from_type/to_type. Previously an unrecognized
-    `relationship` value wasn't rejected -- the constraint builder's if/elif
-    chain had no else clause, so a typo (e.g. "beneath" instead of "below") was
-    silently dropped with no error and no effect on the model, rather than
-    either applying the constraint or failing loudly.
+    A stratigraphic constraint between two nodes in a Bayesian analysis. Each
+    side is a measurement or a group, per from_type/to_type. The `relationship`
+    Literal is what rejects a typo like "beneath", which the constraint
+    builder would otherwise drop silently.
     """
     from_sample_id: str
     to_sample_id: str
@@ -434,73 +377,55 @@ class BayesianConfigInput(BaseModel):
     #   gibbs  sample with OxCal's MH/Gibbs scheme even where exact
     #          integration was available.
     #
-    # `gibbs` exists because OxCal is the reference implementation, so an
-    # analyst has two reasons to want the same method it uses: reproducing a
-    # published analysis, and cross-checking this app's exact solver against an
-    # independent route to the same posterior. Both are legitimate, and neither
-    # is served by the app insisting it knows better.
+    # `gibbs` exists so an analyst can reproduce a published OxCal analysis,
+    # or cross-check the exact solver against an independent route.
     solver: Literal["auto", "exact", "gibbs"] = "auto"
     # How many samples each date's posterior is REPORTED with, not how long
     # anything runs: a chain-shaped model is integrated exactly and has no run
     # length, and services/gibbs.py extends its own run until it converges
     # rather than taking a figure from here on trust.
     mcmc_samples: int = Field(default=4000, ge=100, le=20000)
-    # Retained, validated and persisted, but no longer used by either solver --
-    # they configured the PyMC/SMC sampler that services/gibbs.py replaced.
-    # Kept so a saved analysis's bayesian_config still round-trips through an
-    # edit rather than being rejected, and so old rows keep their meaning.
+    # Unused by either solver. Retained so a saved analysis's bayesian_config
+    # still round-trips through an edit rather than being rejected.
     mcmc_tune: int = Field(default=1000, ge=100, le=20000)
     mcmc_chains: int = Field(default=4, ge=1, le=16)
     # OxCal's UniformSpanPrior, on by default there and here: it stops a
-    # sequence's overall span prior depending on how many sub-groups it is
-    # divided into (Nicholls and Jones 2001). It is the identity unless the
-    # sequence has three or more boundaries. See
-    # services/exact_chain._span_prior_correction for what it measurably
-    # changes, and services/gibbs.Model._span_priors for how it is grouped
-    # when a model has several sequences.
+    # sequence's span prior depending on how many sub-groups it is divided
+    # into (Nicholls and Jones 2001), and is the identity below three
+    # boundaries. See exact_chain._span_prior_correction and
+    # gibbs.Model._span_priors.
     uniform_span_prior: bool = True
     # Also estimate how long each sequence, phase and set of dated events
-    # lasted, and how far apart the phases sit -- see services/intervals.py.
+    # lasted, and how far apart the phases sit (services/intervals.py).
     #
-    # Opt-in rather than always-on, for two reasons that are not "it is slow"
-    # (it costs one extra pass on the exact path and nothing per sweep on the
-    # sampled one). A phase duration is a claim that the dates are a fair
-    # sample of a bounded episode, which is a modelling assumption the analyst
-    # makes rather than one the app should make on their behalf; and these are
-    # the only figures in the app carrying Monte Carlo error, since they can
-    # only be read off JOINT draws, so they are reported when asked for and not
-    # slipped in beside numbers that carry none.
+    # Opt-in rather than always-on, and not for cost: a phase duration asserts
+    # the dates are a fair sample of a bounded episode, which is the analyst's
+    # modelling assumption to make. These are also the only figures here
+    # carrying Monte Carlo error, since they can only be read off JOINT draws.
     estimate_durations: bool = False
 
 
 class GroupCalibrationRequest(BaseModel):
     """
-    Request body for POST /analysis/calibrate-group: plain (unmodelled)
-    calibration of several independent measurements at once, saved as one
-    analysis so they land on the Results page's shared-axis plot and
-    results table together, in chronological order -- for laying several
-    dates out on one timeline without asserting any stratigraphic
-    relationship between them. See BayesianRequest for that.
+    Request body for POST /analysis/calibrate-group: unmodelled calibration
+    of several independent measurements, saved as one analysis so they share
+    the Results page's plot and table -- one timeline, no stratigraphic
+    relationship asserted. See BayesianRequest for that.
 
-    Reuses BayesianMeasurementInput for its per-measurement fields rather
-    than defining a narrower one: group_id/element_id/outlier_prior/
-    outlier_model are accepted (so the same measurement objects the UI
-    already builds for a Bayesian draft can be sent here unchanged) but
-    not applied to anything -- a group calibration has no phases, no
-    model tree, and no outlier model to be an outlier from.
+    Reuses BayesianMeasurementInput so the UI can send the measurement objects
+    it already builds for a Bayesian draft unchanged. Its
+    group_id/element_id/outlier_* fields are accepted but not applied: a group
+    calibration has no phases and no outlier model to be an outlier from.
     """
     name: str = Field(default="Group Calibration", max_length=200)
     measurements: List[BayesianMeasurementInput] = Field(..., min_length=1)
     project_id: Optional[str] = None
     save: bool = True
-    # Also report the difference between every pair of these dates: how many
-    # years apart they are and how confidently the model can order them. The
-    # same option BayesianConfigInput.estimate_durations offers a model, with
-    # only the differences to report -- dates laid out with no relationship
-    # asserted between them have no phase and so no duration. Cheap and exact
-    # here (the dates are independent, so drawing them separately IS drawing
-    # from the joint), and still opt-in so a group calibration of thirty dates
-    # does not answer with a table of 435 pairs nobody asked for.
+    # Also report how many years apart every pair of these dates is and how
+    # confidently they can be ordered. Only differences, since unrelated dates
+    # have no phase and so no duration. Exact here (independent dates, so
+    # drawing them separately IS drawing from the joint), and opt-in so thirty
+    # dates do not answer with 435 pairs nobody asked for.
     estimate_durations: bool = False
 
     @field_validator("name")
@@ -527,21 +452,15 @@ class BayesianRequest(BaseModel):
     project_id: Optional[str] = None
     save: bool = True
     bayesian_config: BayesianConfigInput = Field(default_factory=BayesianConfigInput)
-    # The explicit OxCal-style model structure (nested sequences, phases,
-    # boundaries, hiatuses -- see services/model_tree.py). When present it is
-    # the authoritative structure and `groups`/`relationships` are ignored;
-    # each measurement's element_id says which phase it sits in. When absent,
-    # groups/relationships are converted into an equivalent tree server-side,
-    # so older clients keep working unchanged.
+    # The OxCal-style model structure (services/model_tree.py). When present
+    # it is authoritative and `groups`/`relationships` are ignored, with each
+    # measurement's element_id naming its phase; when absent,
+    # groups/relationships are converted into an equivalent tree server-side.
     model_tree: Optional[Dict[str, Any]] = None
-    # Only PUT /analysis/{id}/inputs reads this: it is what the analysis
-    # should BECOME, so that editing a saved analysis and changing its type
-    # converts that analysis rather than leaving it behind. None means "leave
-    # the type as it is", which is what every older client sends.
-    #
-    # POST /analysis/bayesian ignores it -- that route creates a Bayesian
-    # analysis by definition, and accepting a type there would let a request
-    # ask one endpoint for another endpoint's job.
+    # What the analysis should BECOME, read only by PUT /analysis/{id}/inputs,
+    # so changing a saved analysis's type converts it rather than leaving it
+    # behind. None leaves the type as it is. POST /analysis/bayesian ignores
+    # it -- that route creates a Bayesian analysis by definition.
     analysis_type: Optional[Literal["calibration", "group_calibration", "bayesian"]] = None
 
     @field_validator("name")
@@ -553,22 +472,18 @@ class BayesianRequest(BaseModel):
     @model_validator(mode="after")
     def _validate_stratigraphy(self):
         """
-        Cross-field checks that need the whole request at once: no
-        duplicate client-supplied ids, every group_id/relationship
-        endpoint actually resolves to something in this request, and the
-        above/below constraints (once groups are expanded to their member
-        samples) don't form a stratigraphic cycle -- which would leave no
-        set of calendar ages able to satisfy every constraint at once, and
-        would otherwise only surface as a confusing MCMC failure/hang
-        several minutes into a run.
+        Cross-field checks needing the whole request: no duplicate ids, every
+        group_id/relationship endpoint resolves, and the above/below
+        constraints form no cycle. A cycle leaves no set of calendar ages able
+        to satisfy every constraint, and would otherwise surface as an MCMC
+        hang minutes into a run.
         """
         measurement_ids = [m.id for m in self.measurements]
         if len(set(measurement_ids)) != len(measurement_ids):
             raise ValueError("measurements contain a duplicate id")
 
-        # An explicit model tree is validated on its own terms -- it has no
-        # pairwise relationships to check for cycles (a tree cannot contain
-        # one) and its own structural rules instead.
+        # A tree cannot contain a cycle, so it is validated on its own
+        # structural rules instead.
         if self.model_tree is not None:
             from app.services.model_tree import validate_tree
             validate_tree(
@@ -618,7 +533,7 @@ class BayesianRequest(BaseModel):
         return self
 
 
-# --- Legacy names, kept for anything importing the old schema directly ---
+# --- Legacy aliases ---
 
 class RadiocarbonMeasurementCreate(MeasurementInput):
     pass

@@ -2,33 +2,15 @@
 OxCal's sampler: a Metropolis-Hastings / Gibbs hybrid over the model's dates
 and boundaries, for models services/exact_chain.py cannot integrate.
 
-Why this replaced SMC
----------------------
-The pm.sample_smc fallback it took over from failed for a structural reason, not
-a tuning one. PyMC tempers `observedlogp + potentiallogp` from beta = 0, and that
-model expressed the whole structure as pm.Potential, so at beta = 0 the particles
-carried no ordering and no phase prior at all. Each date settled into one of its
-own calibration lobes independently, and configurations putting different groups
-in different lobes vastly outnumber the correlated one, so by the time beta
-reached 1 the correct arrangement had too few particles left to be weighted
-properly. Measured against OxCal 4.4 on the Nenthorn fixture it separated two
-ordered groups by 57 years where the answer is 19 and OxCal says 13 -- at r_hat
-1.01, all four chains agreeing on the same wrong answer.
-
-MH/Gibbs has no annealing path. It targets the true posterior from the first
-sweep, so that failure mode does not exist here. Two consequences beyond
-accuracy, both of which delete a hack that only existed to survive tempering:
-
-  * constraints are HARD (an interval truncation), not the softplus penalty the
-    PyMC model needed because -inf * beta is -inf for every beta > 0.
-  * the (older - younger)^(-K) span density needs no floor. That model had to
-    floor it, because SOFT containment breaks the exact cancellation that makes
-    the posterior proper: squeezing a group's boundaries
-    together must shrink its dates' available volume as eps^K, killing the
-    eps^(-K) blow-up, and a soft penalty leaves the dates slack so it does not.
-    Hard containment restores it -- here the cancellation happens by
-    construction, because a date's allowed interval IS the gap between its
-    boundaries.
+No annealing path
+-----------------
+This targets the true posterior from the first sweep, which is what lets
+constraints be HARD (an interval truncation) rather than a soft penalty, and
+lets the (older - younger)^(-K) span density go unfloored. Soft containment
+would break the cancellation that makes the posterior proper: squeezing a
+group's boundaries together must shrink its dates' available volume as eps^K to
+kill the eps^(-K) blow-up, and slack dates do not. Here the cancellation is
+automatic, because a date's allowed interval IS the gap between its boundaries.
 
 Discretisation, and staying in step with exact_chain
 ---------------------------------------------------
@@ -42,16 +24,13 @@ log_posterior alike.
 It is not a refinement. Without it a date confined between boundaries k cells
 apart may occupy k+1 grid CELLS while the (span)^(-K) factor charges only k*step
 of span, so near-coincident configurations -- exactly the ones the span prior
-already favours -- gain ((k+1)/k)^K, which is 2^K at the smallest span and 256 for
-a group of eight. The chain then parks there and every modelled phase comes out
-several times too narrow. This was found and fixed in exact_chain first; for the
-interval that this sampler only had it a commit later, the two disagreed by 5-6
-years on chain fixtures where they otherwise agree to about 0.6, and the sampler
-reported a span of 5.3 years where the corrected solver gives 34.9.
+already favours -- gain ((k+1)/k)^K, which is 2^K at the smallest span and 256
+for a group of eight. The chain parks there and every modelled phase comes out
+several times too narrow.
 
 tests/test_gibbs.py's TestTheEndpointWeighting pins it from both directions: the
-span against exact_chain's, and grid refinement, which is the diagnostic that
-exposed the original bug and which no step-dependent error survives.
+span against exact_chain's, and grid refinement, which no step-dependent error
+survives.
 
 The maths
 ---------
@@ -78,26 +57,23 @@ one-dimensional and exactly samplable:
   * An OUTLIER MODEL's offset scale is one more such conditional. OxCal shares
     that scale across every date using the model and lets the data constrain it,
     which does not factorise along exact_chain's message passing but is nothing
-    to a sampler -- see Model._build_outlier_tables, which is also where the
-    measurements are.
+    to a sampler -- see Model._build_outlier_tables.
 
 Where this deliberately differs from OxCal
 ------------------------------------------
-OxCal draws each conditional by REJECTION: pick t in the interval, pick r in
-[0, max p(t)], accept if p(t) > r, repeat otherwise. That is exact but its cost
-is unbounded -- a conditional that is peaked relative to its interval (a sharp
-calibration lobe inside a wide phase, the normal case) rejects many times per
-draw. This uses inverse-CDF sampling on the cumulative table instead: the same
-target distribution, one searchsorted per draw, no rejection loop. It also
-vectorises, which is what makes the blocked update below worth doing.
+OxCal draws each conditional by REJECTION, which is exact but unbounded in cost:
+a conditional peaked relative to its interval -- a sharp calibration lobe inside
+a wide phase, the normal case -- rejects many times per draw. This uses
+inverse-CDF sampling on the cumulative table: the same target distribution, one
+searchsorted per draw, and it vectorises, which is what makes the blocked update
+below worth doing.
 
 Blocked updates
 ---------------
 Two dates that never appear on opposite sides of an ordering constraint are
-conditionally independent given the boundaries, so they can be drawn
-simultaneously rather than swept one at a time. A phase's dates are unordered
-with respect to each other, so in practice a whole phase updates at once: fewer
-Python-level steps AND better mixing than single-site sweeping, since the block
+conditionally independent given the boundaries, so they can be drawn at once. A
+phase's dates are unordered among themselves, so in practice a whole phase
+updates together: fewer Python-level steps and better mixing, since the block
 moves as a group rather than each member being pinned by the ones already moved.
 Blocks come from a greedy colouring of the "appears on the opposite side of a
 constraint from" graph.
@@ -105,34 +81,29 @@ constraint from" graph.
 Group moves
 -----------
 Single-site Gibbs cannot move a tightly-constrained group between calibration
-lobes: every member would have to cross at once, and each one alone is blocked
-by the others. This is the classic sticky behaviour of constrained order
-statistics, and it is what OxCal's "changes to the duration and timing of whole
-groups" exist for. `shift` proposes translating a whole set of parameters at once
-and accepts on the exact MH ratio from the full log posterior; `move_sets`
-decides which sets are worth offering, and documents what each one is for.
+lobes: every member would have to cross at once, and each alone is blocked by
+the others -- the classic sticky behaviour of constrained order statistics, and
+what OxCal's whole-group moves exist for. `shift` translates a whole set of
+parameters and accepts on the exact MH ratio from the full log posterior;
+`move_sets` decides which sets are worth offering.
 
 Validation status
 -----------------
 Measured against exact_chain on chain-shaped models, where the exact marginals
-are ground truth, and on branching models against the one oracle available for
-those: two INDEPENDENT branches, each separately a chain, so exact_chain can
-solve them one at a time while the sampler has to solve the combined model it
-declines.
+are ground truth, and on branching models against two INDEPENDENT branches that
+exact_chain can solve one at a time.
 
-The outlier model is held to two real OxCal runs, and this is where the sampler
-and the exact solver deliberately part company. On tests/fixtures/oxcal_outlier
-(General model, sixteen dates) sampling the shared scale lands within 0.0016 of
-OxCal's own outlier probabilities where marginalising it per date sits at 0.0166
--- ten times closer. On tests/fixtures/oxcal_charcoal (three dates declared
-residual outright) it recovers the scale OxCal itself inferred, log10 1.82
-against OxCal's 1.79, having been given only the U(0,3) prior; the modelled dates
-land 6.3 years rms from OxCal against the exact solver's 9.9.
+The outlier model is held to two real OxCal runs, and is where the sampler and
+the exact solver deliberately part company. On tests/fixtures/oxcal_outlier
+sampling the shared scale lands within 0.0016 of OxCal's outlier probabilities
+where marginalising it per date sits at 0.0166. On tests/fixtures/oxcal_charcoal
+it recovers the scale OxCal inferred -- log10 1.82 against 1.79 -- from only the
+U(0,3) prior, and the modelled dates land 6.3 years rms from OxCal against the
+exact solver's 9.9.
 
-See tests/test_gibbs.py and tests/test_charcoal_outlier.py for all of it, and
-_span_priors for how the UniformSpanPrior correction is grouped so that it
-reduces exactly to exact_chain's on a chain and to the per-branch corrections on
-independent branches.
+See tests/test_gibbs.py and tests/test_charcoal_outlier.py, and _span_priors for
+how the UniformSpanPrior correction is grouped so it reduces to exact_chain's on
+a chain.
 """
 from typing import Callable, Dict, List, Optional, Tuple
 
@@ -174,19 +145,14 @@ ADAPT_INTERVAL = 50
 # Fraction of translation proposals drawn from a deliberately WIDE kernel
 # instead of the adapted one, and its scale in years.
 #
-# Without this the sampler is correct but nearly useless on the case that
-# matters. Adaptation tunes the scale to ~30% acceptance, which on these targets
-# means a step of a few years -- so moving between two calibration lobes 40 years
-# apart happens only by diffusion, and the LOBE WEIGHTS (exactly what a wiggly
-# curve makes uncertain, and exactly what SMC gets wrong) converge far too
-# slowly. Measured on the Nenthorn fixture at 20,000 sweeps across five seeds,
-# posterior means sat 1.5-32.6 years from the exact answer.
+# Adaptation tunes the scale to ~30% acceptance, which on these targets is a
+# step of a few years, so moving between calibration lobes 40 years apart
+# happens only by diffusion and the lobe weights converge far too slowly.
 #
-# A mixture of two symmetric kernels is still symmetric, so the acceptance ratio
-# is unchanged and no correction is needed. The wide scale is set from the
-# spacing of calibration wiggles rather than tuned: its job is to propose the
-# jump a tuned kernel never will, and a low acceptance rate on those proposals
-# is the expected outcome, not a fault to adapt away.
+# A mixture of two symmetric kernels is still symmetric, so no correction to the
+# acceptance ratio is needed. The wide scale is set from the spacing of
+# calibration wiggles rather than tuned: its job is to propose the jump a tuned
+# kernel never will, so a low acceptance rate on those is expected.
 WIDE_MOVE_FRACTION = 0.3
 WIDE_MOVE_YEARS = 120.0
 # Sweeps the run starts with, and the ceiling it will extend to when the
@@ -264,11 +230,9 @@ class Model:
 
         self.date_ids = [m['id'] for m in measurements]
         self.boundary_ids = list(self.plan.boundary_names)
-        # Every boundary is sampled. exact_chain marginalises the outermost
-        # ones and the SMC model had to, because an outermost boundary's tail
-        # is heavy and SMC collapses on it -- but a Gibbs draw from a truncated
-        # power law is exact however heavy the tail, so there is nothing to
-        # avoid here.
+        # Every boundary is sampled, including the outermost ones exact_chain
+        # marginalises: a Gibbs draw from a truncated power law is exact
+        # however heavy the tail.
         self.params = self.date_ids + self.boundary_ids
 
         self._build_constraints()
@@ -278,35 +242,28 @@ class Model:
 
     def _build_outlier_tables(self):
         """
-        For every flagged date, its likelihood at each candidate offset SCALE --
-        and one shared scale parameter per outlier model, which the sampler draws
-        from its own conditional like anything else.
+        For every flagged date, its likelihood at each candidate offset SCALE,
+        plus one shared scale parameter per outlier model which the sampler
+        draws from its own conditional like anything else.
 
-        Why this is not a refinement. OxCal's Outlier_Model carries one scale for
-        all the dates using it, written as U(0,4) for General and U(0,3) for
-        Charcoal, and lets the DATA constrain it. exact_chain instead marginalises
-        that scale independently per date over the whole prior, which is not the
-        same model: each flagged date is then free to take its own offset,
-        anywhere from one year to a thousand, with no reference to what the others
-        took.
+        OxCal's Outlier_Model carries ONE scale for all the dates using it --
+        U(0,4) for General, U(0,3) for Charcoal -- and lets the data constrain
+        it. exact_chain instead marginalises that scale independently per date,
+        which is a different model: each flagged date is then free to take its
+        own offset with no reference to the others.
 
-        Measured on the OxCal run in tests/fixtures/oxcal_charcoal, where three
-        dates carry Outlier("Charcoal", 1.00): OxCal's exported posterior for that
-        scale is 10^1.49..10^2.06, about 31 to 115 years, pinned well inside its
-        0-to-1000 prior. With the scale marginalised per date instead, the three
-        flagged dates slide independently until they sit on top of the well-dated
-        ones -- which welds all eleven dates into one clump, and a clump has three
-        places it can sit on a wiggly curve, so 20% of the posterior ends up in a
-        late calibration lobe that OxCal gives 1.7%.
+        It matters. On tests/fixtures/oxcal_charcoal, marginalising per date
+        lets the three flagged dates slide until they sit on the well-dated
+        ones, welding all eleven into one clump; a clump has three places to
+        sit on a wiggly curve, so 20% of the posterior lands in a late lobe
+        OxCal gives 1.7%.
 
-        A shared scale does not factorise over dates, which is exactly why
-        exact_chain cannot do it: its message passing needs each date to enter
-        through its own likelihood alone. A sampler has no such difficulty -- the
-        scale is one more parameter with a one-dimensional conditional.
+        A shared scale does not factorise over dates, which is why exact_chain
+        cannot do it -- its message passing needs each date to enter through
+        its own likelihood alone.
         """
-        # Which models are actually in play, and the scales each allows. Only
-        # dates that date_tables gave an outlier component appear here, so a
-        # model nobody uses -- or a zero prior -- costs nothing.
+        # Only dates date_tables gave an outlier component appear here, so an
+        # unused model -- or a zero prior -- costs nothing.
         self.outlier_models = sorted({
             m.get('outlier_model') or DEFAULT_OUTLIER_MODEL
             for m in self.measurements if m['id'] in self.outlier_parts
@@ -320,9 +277,9 @@ class Model:
             if m['id'] in self.outlier_parts:
                 self.scaled_dates[m.get('outlier_model') or DEFAULT_OUTLIER_MODEL].append(m['id'])
 
-        # Per flagged date: the mixture likelihood at each scale, its cumulative
-        # sum for inverse-CDF draws, and the outlier component's responsibility
-        # for reporting P(outlier) later.
+        # Per flagged date: the mixture likelihood at each scale, its
+        # cumulative sum for inverse-CDF draws, and the outlier component's
+        # responsibility, for reporting P(outlier) later.
         self.likelihood_at: Dict[str, np.ndarray] = {}
         self.log_likelihood_at: Dict[str, np.ndarray] = {}
         self.cdf_at: Dict[str, np.ndarray] = {}
@@ -360,10 +317,10 @@ class Model:
 
     def draw_scale(self, model: str, state: _State, u: float) -> int:
         """
-        Exact draw of one outlier model's shared scale from its full conditional:
-        the product of its dates' likelihoods at their current positions, over a
-        uniform prior on the log scale. One-dimensional and tabulated, so this is
-        a discrete inverse-CDF draw rather than anything approximate.
+        Exact draw of one outlier model's shared scale from its full
+        conditional: the product of its dates' likelihoods at their current
+        positions, over a uniform prior on the log scale. One-dimensional and
+        tabulated, so a discrete inverse-CDF draw rather than an approximation.
         """
         dates = self.scaled_dates.get(model) or []
         nodes = self.scale_grid[model]
@@ -418,10 +375,9 @@ class Model:
                 for _kind_y, younger in younger_terms:
                     add(younger, older)
 
-        # Containment: a group's dates sit between its two boundaries. This is
-        # the hard version of what the SMC model had to make soft, and it is
-        # what makes the span density proper without a floor (see module
-        # docstring).
+        # Containment: a group's dates sit between its two boundaries. Hard,
+        # which is what makes the span density proper without a floor (see the
+        # module docstring).
         self.group_dates: List[Tuple[str, str, List[str]]] = []
         # The same relation from the date's side, so endpoint_weight does not
         # have to scan every group on every draw.
@@ -446,10 +402,10 @@ class Model:
         For every parameter, everything the ordering forces to be YOUNGER than
         it, transitively.
 
-        Transitively matters: a sequence's ordering is emitted between adjacent
-        children, so the two boundaries either side of a phase are never
-        directly related to each other -- only through that phase's dates. A
-        direct-edges-only view would see a chain's boundaries as unrelated.
+        Transitively, because a sequence's ordering is emitted between adjacent
+        children: the two boundaries either side of a phase relate only through
+        that phase's dates, so direct edges alone would see a chain's
+        boundaries as unrelated.
         """
         reachable: Dict[str, set] = {}
 
@@ -470,35 +426,27 @@ class Model:
 
     def _span_priors(self) -> List[Tuple[str, str, int]]:
         """
-        The UniformSpanPrior corrections to apply, as (oldest boundary, youngest
-        boundary, exponent) -- one per group of boundaries that share a span.
+        The UniformSpanPrior corrections, as (oldest boundary, youngest
+        boundary, exponent) -- one per group of boundaries sharing a span.
 
-        OxCal applies the correction per Sequence, not once per model. The
-        derivation says why, and says what "per Sequence" has to mean here:
-        placing n ordered boundaries across a span leaves n-2 of them free
-        INSIDE it, so the induced prior on the span carries a factor
-        span^(n-2), which is what makes it depend on how finely the sequence was
-        subdivided (Nicholls and Jones 2001). Dividing it out needs the count of
-        free interior boundaries and the pair spanning them.
+        Placing n ordered boundaries across a span leaves n-2 free INSIDE it, so
+        the induced prior carries a factor span^(n-2) and depends on how finely
+        the sequence was subdivided (Nicholls and Jones 2001). Dividing that out
+        needs the count of free interior boundaries and the pair spanning them.
 
-        So the grouping is by connected component of the boundary ordering, with
-        the component's own outermost pair and its own count -- not by Sequence
-        element in the tree. That is the faithful reading rather than a
-        convenient one: the exponent counts free interior parameters, and an
-        interior boundary is free within the span whether or not it is ordered
-        against the other interior ones. Two parallel branches inside one outer
-        boundary pair therefore take a single correction over that outer pair,
-        while two INDEPENDENT branches take one each.
+        Grouped by connected component of the boundary ordering rather than by
+        Sequence element, because the exponent counts free interior parameters
+        and an interior boundary is free within the span whether or not it is
+        ordered against the other interior ones. Two parallel branches inside
+        one outer pair therefore take a single correction; two INDEPENDENT
+        branches take one each. On a chain this reduces exactly to
+        exact_chain._span_prior_correction.
 
-        It reduces exactly to exact_chain._span_prior_correction on a chain:
-        one component, the ends as the pair, exponent len(boundaries) - 2.
-
-        A component with no unique outermost pair is skipped. There is then no
-        single span for the correction to be about, and inventing one would
-        change the model rather than de-bias it.
+        A component with no unique outermost pair is skipped: there is no single
+        span for the correction to be about.
         """
-        # Two is enough: the interior-boundary factor needs three, but the limits
-        # factor applies to any pair with a span between them.
+        # Two is enough: the interior-boundary factor needs three, but the
+        # limits factor applies to any pair with a span between them.
         if len(self.boundary_ids) < 2:
             return []
 
@@ -527,9 +475,9 @@ class Model:
         priors: List[Tuple[str, str, int]] = []
         for members in components.values():
             exponent = len(members) - 2
-            # exponent 0 is NOT skipped any more: a component of two boundaries
-            # still carries the limits factor, which does not depend on how many
-            # interior boundaries there are. Fewer than two has no span at all.
+            # Exponent 0 is not skipped: a component of two boundaries still
+            # carries the limits factor, which does not depend on the interior
+            # count. Fewer than two has no span at all.
             if exponent < 0:
                 continue
             rest = set(members)
@@ -545,17 +493,14 @@ class Model:
         -log g of Bronk Ramsey 2008 A.31 per span prior, as a lookup over the
         span in CELLS -- one row per (oldest, youngest) pair in self.span_priors.
 
-        Precomputed rather than evaluated per draw because g depends only on the
-        span and on each boundary's limits, both fixed for the run. The limits are
-        each boundary's own TPQ/TAQ where it has one, tightened by the extent of the
-        dates it encloses -- see exact_chain.pair_limits, which is where the evidence
-        for that rule is, and boundary_limits for why the solver's grid must not
-        stand in for a constraint that is simply absent.
+        Precomputed rather than evaluated per draw, since g depends only on the
+        span and each boundary's limits, both fixed for the run. The limits are
+        each boundary's own TPQ/TAQ, tightened by the extent of the dates it
+        encloses -- see exact_chain.pair_limits and boundary_limits.
 
-        The terms and their sign come from exact_chain rather than being written out
-        again: which of them is smallest decides which way the factor pushes the
-        span, and that is exactly the sort of thing that drifts between two
-        implementations of the same prior.
+        The terms and their sign come from exact_chain rather than being written
+        out again, since which is smallest decides which way the factor pushes
+        the span.
         """
         tables = {}
         spans = np.arange(self.M, dtype=float) * self.dt
@@ -563,9 +508,9 @@ class Model:
         inliers = {d: (self.outlier_parts[d][0] if d in self.outlier_parts
                        else self.likelihood[d]) for d in self.date_ids}
         for oldest_id, youngest_id, _exponent in self.span_priors:
-            # The dates this pair actually encloses, which for a model of two
-            # independent branches is not all of them: a date is enclosed when the
-            # older boundary is above it in the ordering and the younger below.
+            # A date is enclosed when the older boundary is above it in the
+            # ordering and the younger below -- not all of them, on a model of
+            # two independent branches.
             enclosed = [d for d in self.date_ids
                         if d in reachable[oldest_id] and youngest_id in reachable[d]]
             oldest_limits, youngest_limits = pair_limits(
@@ -578,11 +523,10 @@ class Model:
 
     def _build_blocks(self):
         """
-        Dates grouped so that no two in a block constrain each other, by greedy
-        colouring of the conflict graph -- highest degree first, which keeps the
-        colour count near the minimum. Every date in one block can be drawn
-        simultaneously because their conditionals are independent given
-        everything outside the block.
+        Dates grouped so no two in a block constrain each other, by greedy
+        colouring of the conflict graph, highest degree first. A block's
+        conditionals are independent given everything outside it, so all its
+        dates can be drawn at once.
         """
         conflicts: Dict[str, set] = {d: set() for d in self.date_ids}
         for date_id in self.date_ids:
@@ -617,18 +561,15 @@ class Model:
         The weight a date carries for sitting exactly ON one of its group's
         boundaries: a half rather than a whole.
 
-        This is the sampler's half of the correction described in
-        exact_chain._interval_integral, and it is needed for exactly the same
-        reason. A date confined between boundaries k cells apart can occupy k+1
-        grid CELLS, while the (span)^(-K) factor charges only k*step of span. Left
-        alone, the volume available to the dates exceeds the span they are charged
-        for by ((k+1)/k)^K -- 2^K at the smallest span, which is 256 for eight
-        dates -- and the posterior piles onto near-coincident configurations.
+        The sampler's half of the correction in exact_chain._interval_integral.
+        A date confined between boundaries k cells apart can occupy k+1 grid
+        CELLS while the (span)^(-K) factor charges only k*step of span, so
+        unhalved the available volume exceeds the span charged for by
+        ((k+1)/k)^K and the posterior piles onto near-coincident configurations.
 
-        Halving the two endpoint cells makes the sum over a date's positions equal
-        the trapezoidal integral the exact solver now uses, so the two solvers
-        discretise the same integrals the same way and agree by construction
-        rather than by coincidence.
+        Halving the endpoint cells makes the sum over a date's positions equal
+        the trapezoidal integral the exact solver uses, so the two agree by
+        construction.
         """
         weight = 1.0
         index = state.index[date_id]
@@ -643,10 +584,10 @@ class Model:
         allowed interval, with the endpoint cells at half weight (see
         endpoint_weight), by inverse CDF.
 
-        The half weights are applied by splitting the draw rather than by
-        rebuilding a cumulative table per sweep: the interior is drawn from the
-        precomputed cumulative in one searchsorted, and the two endpoints are
-        handled as their own outcomes. Same distribution, still O(log M).
+        The half weights are applied by splitting the draw rather than
+        rebuilding a cumulative table per sweep: the interior comes from the
+        precomputed cumulative in one searchsorted and the endpoints are their
+        own outcomes. Same distribution, still O(log M).
         """
         lo, hi = self.allowed(date_id, state)
         if hi <= lo:
@@ -663,9 +604,8 @@ class Model:
         total = interior + low_end + high_end
         if total <= 0:
             # No likelihood anywhere it is allowed to be. Uniform keeps the
-            # chain moving instead of freezing it at an arbitrary index; the
-            # state is improbable either way and the group moves exist to get
-            # out of it.
+            # chain moving rather than freezing at an arbitrary index; the group
+            # moves exist to get out of such a state.
             return int(lo + u * (hi - lo))
 
         target = u * total
@@ -702,11 +642,10 @@ class Model:
             with np.errstate(divide='ignore', invalid='ignore'):
                 log_dens += np.where(span > 0, -K * np.log(np.where(span > 0, span, 1.0)), -np.inf)
 
-            # Any date of this group sitting exactly ON the candidate position is
-            # an endpoint there, so it counts a half (see endpoint_weight). Only
-            # coincidences with THIS boundary vary with the candidate; a date on
-            # the group's other boundary is halved whatever this one does, and
-            # cancels in the normalisation below.
+            # A date sitting exactly ON the candidate is an endpoint there, so
+            # it counts a half (endpoint_weight). Only coincidences with THIS
+            # boundary vary with the candidate; the other boundary's cancel in
+            # the normalisation below.
             on_candidate = np.zeros(hi - lo + 1)
             for date_id in dates:
                 index = state.index[date_id]
@@ -722,12 +661,10 @@ class Model:
                 cells = state.index[oldest_id] - candidate_indices
             else:
                 continue
-            # Counted in CELLS, not years, and as a binomial rather than a power
-            # -- see exact_chain._span_prior_correction for why the power is wrong
-            # on a grid and what it was costing.
-            # log of the factor itself, so both parts enter with one sign:
-            # 1/(ways the interior boundaries fit) times 1/g, the second applying
-            # at any number of boundaries. Both depend only on the span in cells.
+            # Counted in CELLS and as a binomial rather than a power -- see
+            # exact_chain._span_prior_correction for why a power is wrong on a
+            # grid. This is the log of the factor itself, so both parts enter
+            # with one sign: 1/(ways the interior boundaries fit) times 1/g.
             log_count = log_interior_placements(cells, exponent)
             factor = np.where(np.isfinite(log_count), -log_count, -np.inf)
             limits = self.limits_tables.get((oldest_id, youngest_id))
@@ -797,28 +734,22 @@ class Model:
 
     def initial_state(self) -> _State:
         """
-        A state that satisfies every hard constraint, built by walking the
-        ordering from oldest to youngest and giving each parameter the youngest
-        position it prefers that is still strictly older than everything that
-        must be younger than it.
+        A state satisfying every hard constraint, built by walking the ordering
+        from oldest to youngest and giving each parameter the youngest position
+        it prefers that is still strictly older than everything below it.
 
-        Feasibility is not optional here and cannot be reached by local repair.
-        Raw radiocarbon ages routinely contradict the stratigraphy -- resolving
-        that inversion is much of why the model is being built -- so the naive
-        "every date at its own likelihood mode" state is usually infeasible. A
-        sampler with HARD constraints started there does not merely mix badly:
-        every conditional collapses to a single allowed index and the chain
-        cannot move at all. An earlier version of this swept the constraints
-        locally instead, which drove whole groups onto one index and left the
-        log posterior at -inf.
+        Feasibility cannot be reached by local repair. Raw radiocarbon ages
+        routinely contradict the stratigraphy -- resolving that is much of why
+        the model exists -- so the naive "every date at its likelihood mode"
+        state is usually infeasible, and with HARD constraints every conditional
+        then collapses to a single allowed index and the chain cannot move.
 
-        Walking in topological order fixes it by construction: each step leaves
-        at least one grid cell of separation, so every group span is positive
-        and the starting log posterior is finite.
+        Topological order fixes it by construction: each step leaves at least
+        one grid cell of separation, so every span is positive and the starting
+        log posterior finite.
         """
-        # Longest chain of "must be older than" above each parameter. Processing
-        # in this order means every constraint on a parameter is already placed
-        # by the time it is placed itself.
+        # Longest chain of "must be older than" above each parameter, so every
+        # constraint on it is already placed by the time it is.
         depth: Dict[str, int] = {}
 
         def compute_depth(param: str, seen: Tuple[str, ...] = ()) -> int:
@@ -839,8 +770,8 @@ class Model:
         for date_id in self.date_ids:
             preferred[date_id] = int(np.argmax(self.likelihood[date_id]))
         for boundary_id in self.boundary_ids:
-            # Near the dates it bounds, so it starts among the evidence rather
-            # than out in the empty part of the window.
+            # Near the dates it bounds, rather than out in the empty part of
+            # the window.
             neighbours = [preferred[d] for older, younger, dates in self.group_dates
                           if boundary_id in (older, younger) for d in dates]
             preferred[boundary_id] = (int(np.mean(neighbours)) if neighbours
@@ -859,9 +790,8 @@ class Model:
                 )
             index[param] = int(np.clip(preferred[param], lo, hi))
 
-        # Each shared scale starts mid-prior: with u uniform on its range there
-        # is no better guess, and its conditional is drawn exactly on the first
-        # sweep anyway.
+        # Mid-prior: with u uniform on its range there is no better guess, and
+        # its conditional is drawn exactly on the first sweep.
         scale = {model: len(self.scale_grid[model]) // 2
                  for model in self.outlier_models}
         state = _State(index, scale)
@@ -872,26 +802,20 @@ class Model:
     def move_sets(self) -> List[List[str]]:
         """
         The parameter sets a translation proposal is offered over, coarsest
-        first: the whole model, then each span group together with the
-        boundaries enclosing it.
+        first: the whole model, then each span group with its enclosing
+        boundaries.
 
-        The whole-model set is not an optimisation, it is the move the sampler
-        cannot do without. Measured on the Nenthorn fixture with only per-group
-        moves, every date's posterior mean was displaced by the SAME amount
-        (a signed mean equal to the rms error), which is the signature of the
-        entire configuration random-walking along the calendar axis: an
-        absolute translation leaves every span, and therefore the whole phase
-        prior, unchanged, so nothing in the model resists it except the
-        likelihoods. Single-site Gibbs explores that mode one date at a time
-        against the containment of the others, which is far slower than moving
-        it directly. Adding the whole-model shift took the overlap-integral
-        convergence at 20,000 sweeps from 0.62 to over 0.95.
+        The whole-model set is the move the sampler cannot do without. An
+        absolute translation leaves every span, and so the whole phase prior,
+        unchanged, so nothing resists it but the likelihoods -- and single-site
+        Gibbs explores that mode one date at a time against the containment of
+        the others. On the Nenthorn fixture, adding it took convergence at
+        20,000 sweeps from 0.62 to over 0.95.
 
-        A group's set includes its boundaries so the group can move without
-        being stopped by its own containment. Where a boundary is shared with
-        the next group, the neighbouring group's dates come too -- otherwise
-        the proposal always breaks that group's containment and is rejected
-        essentially every time (measured: 1% acceptance).
+        A group's set includes its boundaries so it can move without being
+        stopped by its own containment, and where a boundary is shared, the
+        neighbouring group's dates come too -- otherwise the proposal breaks
+        that group's containment and is rejected 99% of the time.
         """
         sets: List[List[str]] = [list(self.params)]
         for older_id, younger_id, dates in self.group_dates:
@@ -906,30 +830,21 @@ class Model:
 
             # One FLAGGED date with the boundary that pens it in, per side.
             #
-            # This is what an ambiguous outlier needs. Such a date has two
-            # plausible positions hundreds of years apart -- sitting with the
-            # group as a flagged date, or out at its own likelihood as a sound
-            # one -- and the second requires the enclosing boundary to come out
-            # past it. Neither can move alone: the Gibbs draw confines the date
-            # inside the boundaries, and the boundary's own conditional decays
-            # away from the extreme date so it will not lead. Moving the pair
-            # together is the only way across. Measured on a residual date 400
-            # radiocarbon years too old, at 100,000 sweeps over three seeds, this
-            # took the spread of its outlier probability from 0.09 to 0.01
-            # around the exact answer.
+            # An ambiguous outlier has two plausible positions hundreds of years
+            # apart -- with the group as a flagged date, or out at its own
+            # likelihood as a sound one -- and the second needs the enclosing
+            # boundary to come out past it. Neither can move alone, so moving
+            # the pair is the only way across. On a residual date 400 years too
+            # old this took the spread of its outlier probability from 0.09 to
+            # 0.01 around the exact answer.
             #
-            # Only for dates carrying an outlier prior, because that is what
-            # creates the mode: the broad outlier component is the only reason a
-            # date has a second plausible position far outside its own group. It
-            # is also what keeps the cost proportionate -- these sets are one per
-            # flagged date per side, each costing a log-posterior evaluation, so
-            # adding them for every date made a 16-date model 2.8x slower for no
-            # gain on the fifteen sound ones.
+            # Only for flagged dates: the broad outlier component is what
+            # creates the second mode, and offering these sets for every date
+            # made a 16-date model 2.8x slower for no gain.
             #
-            # Deliberately ONE boundary at a time, not both: translating the date
-            # with both drags the far boundary past the group's other dates and
-            # breaks their containment, so the proposal is rejected almost every
-            # time.
+            # ONE boundary at a time, since translating the date with both drags
+            # the far boundary past the group's other dates and breaks their
+            # containment.
             if len(dates) > 1:
                 for date_id in dates:
                     if date_id not in self.outlier_parts:
@@ -948,16 +863,15 @@ class Model:
 
         Returns (state, its log posterior, whether the move was taken, whether
         the WIDE kernel was used). The log posterior comes back so a caller
-        sweeping several moves does not recompute what it already knows; the
-        wide flag so scale adaptation can ignore those proposals, which are
-        expected to be rejected often and would otherwise drag the local scale
-        down to compensate for them.
+        sweeping several moves need not recompute it; the wide flag so scale
+        adaptation can ignore proposals that are expected to be rejected often
+        and would drag the local scale down.
         """
         if current_lp is None:
             current_lp = self.log_posterior(state)
-        # Two-component symmetric proposal: the adapted local kernel most of the
-        # time, a wide one otherwise so lobe-to-lobe jumps are actually proposed
-        # (see WIDE_MOVE_FRACTION).
+        # Two-component symmetric proposal: the adapted local kernel most of
+        # the time, a wide one otherwise so lobe-to-lobe jumps get proposed at
+        # all (see WIDE_MOVE_FRACTION).
         wide = rng.random() < WIDE_MOVE_FRACTION
         if wide:
             scale = WIDE_MOVE_YEARS / self.dt
@@ -999,49 +913,36 @@ def run(model: Model, sweeps: int = DEFAULT_SWEEPS, seed: int = 42,
     and it makes the memory cost independent of how long the chain runs.
 
     The run EXTENDS rather than being a fixed length because how many sweeps a
-    model needs is not something a caller can be expected to know, and does not
-    follow from its size. Measured against exact answers: 9 dates in 3 phases
-    reached 0.65 years at 20,000 sweeps, while 30 dates in 6 phases was still 32
-    years out there and needed 100,000 to reach 1.5 -- and 50 dates in 10 phases
-    did BETTER than the 30-date model at the same length. It depends on how
-    tightly the structure couples the parameters, not on how much of it there is.
-    A fixed default would therefore be either wasteful on small models or
-    quietly wrong on awkward ones, which is the failure this whole exercise is
-    about.
+    model needs does not follow from its size. Measured against exact answers, 9
+    dates in 3 phases reached 0.65 years at 20,000 sweeps while 30 dates in 6
+    phases was still 32 years out and needed 100,000 -- and 50 dates in 10
+    phases did BETTER than the 30-date model at the same length. It depends on
+    how tightly the structure couples the parameters, so a fixed default would
+    be wasteful on small models or quietly wrong on awkward ones.
 
-    Stopping when the convergence measure is met is a data-dependent rule and so
-    is not perfectly unbiased in principle. It is what OxCal itself does, the
-    effect is far below the Monte Carlo error it is there to control, and the
-    alternative -- stopping at an arbitrary length and hoping -- is the thing
-    being replaced. `max_sweeps` bounds the work regardless, and the achieved
-    convergence is always reported rather than assumed.
+    Stopping when the convergence measure is met is data-dependent and so not
+    perfectly unbiased in principle, but it is what OxCal does and the effect is
+    far below the Monte Carlo error it controls. `max_sweeps` bounds the work
+    regardless, and the achieved convergence is always reported.
 
     `on_progress`, when given, is called with
     {'phase', 'sweeps', 'max_sweeps', 'convergence'} after burn-in and after
-    every round, and RETURNING FALSE STOPS THE RUN by raising Cancelled.
-    Between rounds is the honest place to stop: the accumulated histograms
-    are discarded whole, so a cancelled run leaves nothing half-written for
-    a caller to mistake for an answer.
+    every round, and RETURNING FALSE STOPS THE RUN by raising Cancelled. Between
+    rounds is the honest place to stop: the histograms are discarded whole, so
+    nothing half-written survives.
 
-    `convergence` in that report is the WORST parameter's, which is the one
-    the stopping rule uses -- an average would tick along encouragingly while
-    the parameter actually holding the run up sat still.
+    `convergence` there is the WORST parameter's, the one the stopping rule
+    uses; an average would tick along while the parameter holding the run up sat
+    still. Progress against `max_sweeps` is an upper bound rather than a
+    prediction, which is why the achieved convergence is reported alongside.
 
-    Note that progress against `max_sweeps` is an upper bound, not a
-    prediction. A run stops as soon as it converges, so most finish at a
-    fraction of it; that is a success rather than a truncation, which is why
-    the achieved convergence is reported alongside.
-
-    `collect_draws`, when non-zero, additionally keeps roughly that many WHOLE
-    STATES -- every parameter's position at the same sweep -- thinned evenly
-    through the run and returned as `draws`. The histograms above are marginals
-    and a duration is not (see services/intervals.py), so a quantity like "how
-    long did this phase last" can only be read off states kept jointly. They are
-    kept per round and folded exactly as the histograms are, so the burn-in
-    discard applies to both alike and the memory stays flat however long the run
-    extends. Unlike exact_chain's, these draws are an MCMC chain: consecutive
-    ones are correlated, so `collect_draws` of them are worth fewer than that
-    many independent draws.
+    `collect_draws`, when non-zero, also keeps roughly that many WHOLE STATES --
+    every parameter's position at the same sweep -- thinned evenly through the
+    run and returned as `draws`. The histograms are marginals and a duration is
+    not (see services/intervals.py), so "how long did this phase last" can only
+    be read off joint states. They fold exactly as the histograms do, so memory
+    stays flat however long the run extends. Unlike exact_chain's, these draws
+    are an MCMC chain: consecutive ones are correlated.
 
     Returns {'histograms', 'sweeps', 'sweeps_kept', 'convergence', 'acceptance',
     ...} -- convergence being OxCal's own diagnostic, per parameter.
@@ -1055,8 +956,8 @@ def run(model: Model, sweeps: int = DEFAULT_SWEEPS, seed: int = 42,
 
     move_sets = model.move_sets()
     # One proposal scale per move set, in grid steps, adapted during burn-in
-    # only -- after that the kernel is fixed, so the accumulated chain is a
-    # valid MCMC run rather than one whose transition rule kept changing.
+    # only: after that the kernel is fixed, so the accumulated chain is a valid
+    # MCMC run rather than one whose transition rule kept changing.
     scales = [max(1.0, GROUP_SHIFT_YEARS / model.dt) for _ in move_sets]
     proposed = [0] * len(move_sets)
     accepted = [0] * len(move_sets)
@@ -1106,7 +1007,7 @@ def run(model: Model, sweeps: int = DEFAULT_SWEEPS, seed: int = 42,
                 boundary_id, state, float(rng.random()))
 
         # Each outlier model's shared offset scale, from its own exact
-        # conditional. This is the parameter exact_chain cannot have.
+        # conditional -- the parameter exact_chain cannot have.
         for outlier_model in model.outlier_models:
             state.scale[outlier_model] = model.draw_scale(
                 outlier_model, state, float(rng.random()))
@@ -1126,9 +1027,8 @@ def run(model: Model, sweeps: int = DEFAULT_SWEEPS, seed: int = 42,
 
             if swept < burn_in and since_adapt[index] >= ADAPT_INTERVAL:
                 rate = took_since_adapt[index] / since_adapt[index]
-                # Standard random-walk tuning: widen when accepting too often,
-                # narrow when not. Floored at one grid step, since a proposal
-                # rounding to zero steps can never move anything.
+                # Standard random-walk tuning, floored at one grid step since
+                # a proposal rounding to zero can never move anything.
                 scales[index] = max(1.0, scales[index] * (
                     1.3 if rate > TARGET_ACCEPTANCE else 0.75))
                 since_adapt[index] = took_since_adapt[index] = 0
@@ -1142,10 +1042,9 @@ def run(model: Model, sweeps: int = DEFAULT_SWEEPS, seed: int = 42,
             raise Cancelled()
 
     round_length = max(1, (sweeps - burn_in) // ROUNDS)
-    # Burn-in is reported in chunks rather than as one silent block. It is
-    # 20% of the opening length, which on a slow model is several seconds of
-    # a progress bar that would otherwise sit at zero -- and several seconds
-    # in which a cancel would be ignored.
+    # Reported in chunks rather than as one silent block: on a slow model
+    # burn-in is several seconds during which the bar would sit at zero and a
+    # cancel would be ignored.
     burn_chunk = max(1, burn_in // 10)
     for done in range(burn_in):
         sweep_once()
@@ -1154,9 +1053,9 @@ def run(model: Model, sweeps: int = DEFAULT_SWEEPS, seed: int = 42,
 
     while True:
         current = new_round()
-        # Even thinning across the round, recomputed each time because
-        # round_length doubles whenever the rounds are folded -- so a round
-        # keeps about per_round_draws states however long the run gets.
+        # Recomputed each time because round_length doubles whenever rounds
+        # are folded, so a round keeps about per_round_draws states however
+        # long the run gets.
         stride = max(1, round_length // per_round_draws) if per_round_draws else 0
         kept_states: List[List[int]] = []
         for step in range(round_length):
@@ -1189,9 +1088,8 @@ def run(model: Model, sweeps: int = DEFAULT_SWEEPS, seed: int = 42,
                 merged.append(rounds[-1])
             rounds = merged
             if per_round_draws:
-                # The same fold, then thinned back down: two rounds' states
-                # become one round's, so a folded round holds no more of them
-                # than an unfolded one and the total stays bounded.
+                # The same fold, thinned back down so a folded round holds no
+                # more states than an unfolded one.
                 folded = []
                 for i in range(0, len(round_draws) - 1, 2):
                     folded.append(np.concatenate(
@@ -1212,8 +1110,8 @@ def run(model: Model, sweeps: int = DEFAULT_SWEEPS, seed: int = 42,
 
     kept_rounds = _after_burn_in(rounds)
     counts = {p: sum(r[p] for r in kept_rounds) for p in model.params}
-    # The same rounds the histograms come from, so the two views of the run
-    # cannot describe different stretches of it.
+    # The same rounds the histograms come from, so the two views cannot
+    # describe different stretches of the run.
     kept_draws = round_draws[_burn_in_start(len(rounds)):] if round_draws else []
     return {
         'histograms': counts,
@@ -1228,7 +1126,7 @@ def run(model: Model, sweeps: int = DEFAULT_SWEEPS, seed: int = 42,
         'proposed_moves': sum(proposed),
         'accepted_moves': sum(accepted),
         # Per move set, so a set that never gets accepted is visible rather
-        # than averaged away by the ones that do.
+        # than averaged away.
         'acceptance': [a / p if p else 0.0 for a, p in zip(accepted, proposed)],
         'scales': scales,
         'convergence': convergence,
@@ -1239,15 +1137,14 @@ def _after_burn_in(
     rounds: List[Dict[str, np.ndarray]],
 ) -> List[Dict[str, np.ndarray]]:
     """
-    The rounds to actually report from, dropping the earliest as burn-in.
+    The rounds to report from, dropping the earliest as burn-in.
 
-    Discarded as a FRACTION OF ROUNDS rather than a fixed number of sweeps at
-    the start, so that burn-in scales with however long the run turned out to be.
-    The sweeps up front are fixed before the length is known -- they exist to
-    tune the proposal scales -- and on a slowly-mixing model they are nowhere
-    near enough: the 30-date fixture accumulated its whole non-stationary head
-    and came out 6.17 years from the exact answer after 214,000 sweeps, WORSE
-    than 1.46 at a fixed 100,000. Scaling the discard fixed that.
+    A FRACTION OF ROUNDS rather than a fixed number of sweeps, so burn-in
+    scales with however long the run turned out to be. The sweeps up front are
+    fixed before the length is known and exist to tune the proposal scales; on
+    a slowly-mixing model they are nowhere near enough -- the 30-date fixture
+    came out 6.17 years from the exact answer after 214,000 sweeps, worse than
+    1.46 at a fixed 100,000.
     """
     return rounds[_burn_in_start(len(rounds)):]
 
@@ -1255,9 +1152,8 @@ def _after_burn_in(
 def _burn_in_start(count: int) -> int:
     """
     Index of the first round to report from. Split out of _after_burn_in so the
-    joint draws kept alongside the histograms are cut at exactly the same
-    place -- two burn-in rules would let the marginals and the durations
-    describe different stretches of one run.
+    joint draws are cut at exactly the same place; two burn-in rules would let
+    the marginals and the durations describe different stretches of one run.
     """
     return 0 if count < 3 else int(count * BURN_IN_FRACTION)
 
@@ -1269,9 +1165,8 @@ def _convergence(rounds: List[Dict[str, np.ndarray]],
     distribution accumulated over the first half of the run and the second half.
     1.0 is perfect agreement, and OxCal's usual target is 0.95.
 
-    Their version compares each pass against the running total; halves are the
-    same idea with a cleaner interpretation, and are what a run assembled from
-    rounds gives directly.
+    OxCal's version compares each pass against the running total; halves are
+    the same idea and are what a run assembled from rounds gives directly.
     """
     if len(rounds) < 2:
         return {p: 0.0 for p in params}
@@ -1300,21 +1195,18 @@ def solve(measurements: List[Dict], root: Dict, sweeps: int = DEFAULT_SWEEPS,
     produced it.
 
     `sweeps` is where the run starts, not where it ends: it extends until the
-    convergence measure reaches `target_convergence` or `max_sweeps` is reached
-    (see run). The result reports both what was achieved and how long it took to
-    get there, so a run that ran out of budget is visible rather than silently
-    under-converged.
+    convergence measure reaches `target_convergence` or `max_sweeps` (see run).
+    Both the achieved convergence and the length are reported, so a run that ran
+    out of budget is visible rather than silently under-converged.
 
     `grid` is accepted so a caller can force exact_chain's own grid and compare
     the two solvers without a resolution difference confounding the answer.
 
-    `estimate_durations` adds `intervals` to the result, exactly as
-    exact_chain.solve's flag of the same name does, from `interval_draws` whole
-    states kept jointly through the run. Off by default for the same reasons,
-    plus one specific to here: keeping states costs nothing per sweep, but they
-    are an MCMC chain rather than independent draws, so a duration read off them
-    converges more slowly than the marginals beside it and the run is not
-    extended on its account.
+    `estimate_durations` adds `intervals` as exact_chain.solve's flag does, from
+    `interval_draws` whole states kept jointly through the run. Off by default
+    for the same reasons, plus one here: those states are an MCMC chain rather
+    than independent draws, so a duration read off them converges more slowly
+    than the marginals beside it and the run is not extended on its account.
     """
     model = Model(measurements, root, grid=grid,
                   uniform_span_prior=uniform_span_prior)
@@ -1329,9 +1221,9 @@ def solve(measurements: List[Dict], root: Dict, sweeps: int = DEFAULT_SWEEPS,
         density = chain['histograms'][date_id]
         summary = _summarize(model.grid, density, rng, num_samples)
         if date_id in model.outlier_parts:
-            # Taken from the run rather than recomputed from the reported
-            # density: the outlier component's responsibility depends on the
-            # shared scale, so it has to be read while that is known.
+            # Taken from the run rather than recomputed: the responsibility
+            # depends on the shared scale, so it must be read while that is
+            # known.
             summary['outlier_probability'] = chain['outlier_probability'][date_id]
         results['measurements'][date_id] = summary
 
@@ -1347,16 +1239,14 @@ def solve(measurements: List[Dict], root: Dict, sweeps: int = DEFAULT_SWEEPS,
     results['method'] = 'gibbs'
     results['uniform_span_prior'] = bool(model.span_priors)
     results['sweeps'] = chain['sweeps']
-    # The WORST parameter's convergence, not the average: one badly-mixed
-    # boundary is exactly what a mean would hide.
+    # The WORST parameter's, not the average: one badly-mixed boundary is
+    # exactly what a mean would hide.
     results['convergence'] = (min(chain['convergence'].values())
                               if chain['convergence'] else 0.0)
     results['converged'] = results['convergence'] >= target_convergence
     results['acceptance'] = chain['acceptance']
-    # What the data said about each outlier model's shared offset scale, in the
-    # same log10(years) OxCal reports its U(0,n) posterior in -- so the two can
-    # be compared directly, which is how the per-date marginalisation this
-    # replaced was caught.
+    # Each outlier model's shared offset scale, in the log10(years) OxCal
+    # reports its U(0,n) posterior in, so the two compare directly.
     results['outlier_scale'] = {}
     for outlier_model, visits in chain['scale_histograms'].items():
         total = visits.sum()

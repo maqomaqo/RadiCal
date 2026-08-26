@@ -49,13 +49,11 @@ import { useNotify } from '@/contexts/NotificationContext'
 /**
  * The calibration curve library.
  *
- * Two kinds of row, and the difference is not cosmetic: the three curves
- * shipped with the app are files this app owns and cannot be edited or
- * removed, while an imported curve belongs to the user. What the two have in
- * common is that everything countable about them -- point count, range, grid
- * spacing -- is measured from the curve that actually loads, not asserted in
- * a table somewhere. That is worth showing, because it is the only way to see
- * at a glance that an imported curve is the curve you meant to import.
+ * Two kinds of row: the three shipped curves are files this app owns and
+ * cannot be edited or removed, while an imported curve belongs to the user.
+ * Everything countable about either -- point count, range, grid spacing -- is
+ * measured from the curve that actually loads rather than asserted, which is
+ * the only way to see at a glance that an import is the curve you meant.
  */
 
 // 'builtin' reads oddly in a row of curves; the others are already the word
@@ -138,8 +136,8 @@ export default function Curves() {
    * Ask what is using a curve before offering to delete it.
    *
    * The backend refuses a delete that would strand a stored analysis, so this
-   * is not the check -- it is what turns that refusal into something the user
-   * can act on before they click, rather than a 409 after.
+   * is not the check: it turns that refusal into something actionable before
+   * the click rather than a 409 after.
    */
   const askDelete = async (spec: CurveSpec) => {
     setDeleteTarget(spec)

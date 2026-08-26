@@ -39,10 +39,9 @@ export default function Projects() {
   const [projects, setProjects] = useState<ProjectSummary[]>([])
   const [unassignedCount, setUnassignedCount] = useState(0)
   const [loading, setLoading] = useState(true)
-  // ?new=1 opens the create dialog on arrival, so a link that says "New
-  // project" lands on one instead of on a list with the real control still a
-  // click away. Read once as the initial value rather than watched: this is
-  // where the dialog starts, not a lock on whether it stays open.
+  // ?new=1 opens the create dialog on arrival, so a "New project" link lands
+  // on one rather than a list. Read once as the initial value rather than
+  // watched: this is where the dialog starts, not a lock on it staying open.
   const [searchParams] = useSearchParams()
   const [dialogOpen, setDialogOpen] = useState(searchParams.get('new') === '1')
   const [newName, setNewName] = useState('')
@@ -201,18 +200,12 @@ export default function Projects() {
                     Created {new Date(project.created_at).toLocaleDateString()}
                   </Typography>
                 </Box>
-                {/* Always visible, not hover-revealed: this used to fade
-                    in only on :hover, which a keyboard user tabbing to it
-                    and a touch user (no hover state to reveal it at all)
-                    could never trigger -- delete was reachable by mouse
-                    only. Grey by default and red only on :hover/:focus,
-                    though -- a whole grid of always-red icons competed with
-                    the content for attention regardless of intent to use
-                    them. Every other destructive icon button in the app
-                    follows the same rule: always visible, small, default
-                    colour that turns error on hover, labelled with a
-                    Tooltip in addition to the aria-label a screen reader
-                    already gets from it. */}
+                {/* Always visible, not hover-revealed: a keyboard user
+                    tabbing to it and a touch user have no hover state to
+                    trigger. Grey by default and red only on :hover/:focus,
+                    though -- a grid of always-red icons competes with the
+                    content. Every destructive icon button in the app follows
+                    this rule. */}
                 <Tooltip title={`Delete ${project.name}`}>
                   <IconButton
                     size="small"

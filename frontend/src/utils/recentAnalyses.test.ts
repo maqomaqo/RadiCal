@@ -1,15 +1,12 @@
 // Loading the Dashboard's recent analyses.
 //
-// The bug this guards against is a specific one, and it shipped: every
-// failure branch fell through to an empty array, which the page rendered as
-// "No analyses yet. Create one to get started." A returning researcher whose
-// backend was down was told in a reassuring voice that their work did not
-// exist -- the exact inverse of the product's own "fail loud and specific"
-// principle, which the backend follows.
+// The bug guarded against is specific: every failure branch falling through to
+// an empty array, which the page renders as "No analyses yet" -- telling a
+// researcher whose backend is down that their work does not exist.
 //
-// So what is pinned here is that the three outcomes stay three: an
-// unreachable server, a server that refused, and a genuinely empty account
-// must never produce the same result.
+// So what is pinned is that the three outcomes stay three: an unreachable
+// server, a server that refused, and a genuinely empty account must never
+// produce the same result.
 import { describe, expect, it } from 'vitest'
 
 import { loadRecentAnalyses } from './recentAnalyses'

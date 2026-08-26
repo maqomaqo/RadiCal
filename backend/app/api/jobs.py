@@ -5,10 +5,9 @@ A run is queued rather than held open in the request that asked for it (see
 services/jobs.py and docs/ASYNC_JOBS_PLAN.md); this is how a client finds out
 what happened to it.
 
-Polling rather than a WebSocket or an event stream. A Bayesian run takes tens
-of seconds, occasionally minutes, and a poll a second is finer than anyone
-reads a progress bar. A push channel would add a connection to hold open, a
-reconnect to get right, and a second code path for the same three facts.
+Polling rather than a push channel: a poll a second is finer than anyone reads
+a progress bar, and a WebSocket would add a connection to hold open and a
+reconnect to get right for the same three facts.
 """
 from typing import Optional
 
@@ -30,11 +29,10 @@ def get_job(job_id: str, db: Session = Depends(get_db)):
     `state` is 'queued', 'running', 'completed', 'failed' or 'cancelled'.
     Stop polling on the last three.
 
-    `progress` is a fraction, and for a sampled model an UPPER BOUND rather
-    than a prediction: the sampler stops as soon as it converges, so most
-    runs finish well short of 1.0 having succeeded. `detail.convergence` is
-    what says how well, and is the figure to show beside a bar that is about
-    to jump from 0.3 to done.
+    `progress` is a fraction, and for a sampled model an UPPER BOUND: the
+    sampler stops as soon as it converges, so most runs succeed well short of
+    1.0. `detail.convergence` says how well, and is the figure to show beside
+    a bar about to jump from 0.3 to done.
     """
     row = db.query(Job).filter(Job.id == job_id).first()
     if row is None:
@@ -51,9 +49,8 @@ def list_jobs(
     """
     Recent jobs, newest first, optionally about one analysis or project.
 
-    `target_id` is what a page loaded from a bookmark uses: it arrives
-    holding an analysis id and no job id, and still needs to know whether
-    something is running before it decides to show results or a progress bar.
+    `target_id` is what a bookmarked page uses: it has an analysis id and no
+    job id, and still needs to know whether something is running.
     """
     query = db.query(Job)
     if target_id:
@@ -67,14 +64,11 @@ def cancel_job(job_id: str, db: Session = Depends(get_db)):
     """
     Ask a job to stop.
 
-    Cooperative and therefore not instant: a queued job is dropped before it
-    starts, and a running one stops at its next checkpoint -- the end of the
-    current sampling round, or the gap between two analyses of a project
-    rerun. The response says the request was accepted, not that the job has
-    stopped; poll for `state` to become 'cancelled'.
-
-    A cancelled analysis run writes nothing, so the analysis keeps whatever
-    results it had before. It is a stop, not an undo.
+    Cooperative and so not instant: a queued job is dropped before it starts,
+    a running one stops at its next checkpoint. The response says the request
+    was accepted, not that the job stopped -- poll for `state` to become
+    'cancelled'. A cancelled run writes nothing, so the analysis keeps the
+    results it had: a stop, not an undo.
     """
     row = db.query(Job).filter(Job.id == job_id).first()
     if row is None:

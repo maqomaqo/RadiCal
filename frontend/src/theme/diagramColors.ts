@@ -3,23 +3,21 @@ import { decomposeColor, recomposeColor, useTheme } from '@mui/material/styles'
 import type { ElementType } from '@/types'
 
 /**
- * Diagram colours are their own small palette rather than borrowings from
- * the theme's semantic slots. Phase and Boundary used to be `success.main`
- * and `warning.main`, which meant the model editor read as a status
- * display -- a green "everything's fine" phase next to an orange "careful"
- * boundary -- when neither carries any such judgement. They're categories,
- * not states. Naming them here also frees `warning` to stay amber for the
- * Results page's genuine warnings, which would otherwise have had to move
- * in step with the diagrams.
+ * Diagram colours are their own palette rather than borrowings from the
+ * theme's semantic slots. Drawn from `success.main` and `warning.main`, the
+ * model editor would read as a status display -- a green "fine" phase beside
+ * an orange "careful" boundary -- where these are categories, not states.
+ * Naming them here also frees `warning` to stay amber for the Results page's
+ * genuine warnings.
  *
- * Hues are chosen as a set: the coral is the app's own logo coral, the
- * green sits at its complement (and part-way to the primary blue), and the
- * violet is desaturated to match -- Material's stock purple[500] was the
- * loudest thing on screen next to these.
+ * Hues are chosen as a set: the coral is the app's logo coral, the green sits
+ * at its complement and part-way to the primary blue, and the violet is
+ * desaturated to match -- Material's stock purple[500] is the loudest thing on
+ * screen beside these.
  */
-// Exported because the plots colour the same objects the diagrams do -- a
-// Boundary is a Boundary whether it is a rule in the matrix or a curve in
-// the stacked plot. See theme/plotColors.ts.
+// Exported because the plots colour the same objects the diagrams do: a
+// Boundary is a Boundary whether it is a rule in the matrix or a curve in the
+// stacked plot. See theme/plotColors.ts.
 export const BOUNDARY_CORAL = '#f15d5f'
 export const BOUNDARY_CORAL_INK = '#d23f4a'
 export const PHASE_GREEN = '#1f7a62'
@@ -28,15 +26,13 @@ export const HIATUS_VIOLET = '#7a5c99'
 /**
  * The app's warm ink -- the tint behind every recoloured MUI shadow.
  *
- * Not an element colour and deliberately not a hue: it is what the app draws
- * with when the mark is ABOUT the data rather than being a category of it.
- * The point estimates on a posterior plot are ink because they annotate the
- * curve; the ordering matrix is ink because overlap measures what the model
- * could not resolve, which is fog over a reading rather than another kind of
- * thing beside it.
+ * Not an element colour and not a hue: it is what the app draws with when a
+ * mark is ABOUT the data rather than a category of it. Point estimates are ink
+ * because they annotate the curve; the ordering matrix is ink because overlap
+ * measures what the model could not resolve, which is fog over a reading
+ * rather than another kind of thing beside it.
  *
- * Lives here rather than in plotColors.ts, which held the only copy while two
- * other surfaces needed the same value.
+ * Here rather than in plotColors.ts, since three surfaces need the value.
  */
 export const WARM_INK = '#2b2320'
 
@@ -55,12 +51,10 @@ const solid = (main: string): ElementTypeColor => ({ main, ink: main })
 
 /**
  * Colour for each model-tree element type, shared by the read-only Harris
- * matrix diagram and the tree editor so the two can't silently drift apart
- * -- previously each defined its own copy of the same four hex values.
+ * matrix and the tree editor so the two cannot drift apart.
  *
- * Sequence is the one entry still taken from the theme: it IS the app's
- * primary structural container, so it should follow the brand colour
- * wherever that goes.
+ * Sequence is the one entry taken from the theme: it IS the app's primary
+ * structural container, so it follows the brand colour wherever that goes.
  */
 export function useElementTypeColors(): Record<ElementType, ElementTypeColor> {
   const primary = useTheme().palette.primary.main

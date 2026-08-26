@@ -1,6 +1,6 @@
-// The bulk-paste parser. Its curve column used to be checked against a
-// hardcoded set living in this same file; it now takes the ids the backend
-// registry actually offers, which is what makes the two agree.
+// The bulk-paste parser. Its curve column is checked against the ids the
+// backend registry offers, passed in rather than hardcoded, which is what
+// makes the two agree.
 import { describe, expect, it } from 'vitest'
 
 import { parsePastedDates } from './ProjectSampleTable'

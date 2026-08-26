@@ -1,45 +1,28 @@
 // Laying a model tree out as a Harris matrix.
 //
-// This replaces the previous approach, which projected the tree onto a flat
-// (nodes, edges) graph and then tried to recover a layout from the edges
-// alone. That lost the one thing the source actually has -- its nesting --
-// and all three of the diagram's problems followed from it:
-//
-//   * A Sequence connected every phase in one child to every phase in the
-//     next, so an eight-group model with four sub-phases each drew 175 edges
-//     where 39 carry the same information. Harris's own drawing rules require
-//     redundant relationships to be left out, so that was not a matter of
-//     taste.
-//   * A parent Phase and the Phases nested inside it came out as unrelated
-//     sibling nodes, because containment was expressed by no edge at all. On
-//     the Nenthorn model "Fires" was drawn beside "Fire_Feature_K" and
-//     "Fire_Feature_A" -- the two phases it contains.
-//   * Horizontal position was the node's index within its layer, so nothing
-//     lined up with anything.
-//
-// The way out is that the source is a TREE, not an arbitrary DAG, so this
-// needs recursive box-packing rather than graph layout -- no crossing
-// minimisation, no layering heuristics, nothing to converge. A Sequence
-// stacks its children; a Phase places its children side by side; containment
-// is a box rather than an edge; and a Sequence's ordering is a total order,
-// whose transitive reduction is just the consecutive chain. Connecting only
-// adjacent children is therefore the reduction, not an approximation of it.
+// The source is a TREE, not an arbitrary DAG, so this is recursive
+// box-packing rather than graph layout: no crossing minimisation, no layering
+// heuristics, nothing to converge. A Sequence stacks its children, a Phase
+// places them side by side, containment is a box rather than an edge, and a
+// Sequence's ordering is total -- so its transitive reduction is exactly the
+// consecutive chain, and connecting only adjacent children IS the reduction.
+// (Harris's own drawing rules require redundant relationships to be left out.)
 //
 // Everything here is pure: a tree in, geometry out, no React and no reactflow
-// types. That is deliberate. reactflow draws into a measured viewport, so
-// "the boxes line up" cannot be checked by looking at the DOM -- it has to be
-// asserted on the numbers, which is what utils/harrisLayout.test.ts does.
+// types. reactflow draws into a measured viewport, so "the boxes line up"
+// cannot be checked in the DOM -- it has to be asserted on the numbers, which
+// is what utils/harrisLayout.test.ts does.
 import type { ElementType, MatrixMeasurement, ModelElement, PosteriorSummary } from '@/types'
 import { estimateTextWidth } from '@/utils/textWidth'
 
-// Box metrics. Chosen so a context node fits a lab code, a date count and a
-// TPQ/TAQ badge line without wrapping at the diagram's default zoom.
+// Box metrics: a context node fits a lab code, a date count and a TPQ/TAQ
+// badge line without wrapping at the default zoom.
 export const CONTEXT_WIDTH = 172
 export const CONTEXT_HEIGHT = 62
 // Gap between siblings placed side by side inside a Phase.
 export const SIBLING_GAP = 24
-// Gap between the stacked children of a Sequence. Wide enough for an arrow
-// plus its head to read as a connector rather than a seam.
+// Gap between a Sequence's stacked children, wide enough for an arrow and its
+// head to read as a connector rather than a seam.
 export const STACK_GAP = 52
 // Inset from a container's edge to its contents.
 export const PADDING = 16
@@ -48,13 +31,10 @@ export const HEADER = 26
 // A Boundary is drawn as a rule spanning its parent, not as a box.
 export const RULE_HEIGHT = 30
 // The shortest piece of rule either side of a boundary's label that still
-// reads as a rule, and the gap the node leaves between rule and text.
-//
-// These are what make the label part of the geometry rather than something
-// painted over it. The label rides ON the rule, and the rule spans its
-// parent, so a container narrower than its own boundary label pushed the text
-// out past the box -- on the Nenthorn J > A > K model, a 172px box carrying a
-// 219px label, with the red overhanging the container on every rule.
+// reads as a rule, and the gap between rule and text. These make the label
+// part of the geometry rather than something painted over it: the label rides
+// ON the rule, which spans its parent, so a container narrower than its own
+// boundary label would push the text out past the box.
 export const RULE_STUB = 24
 export const RULE_LABEL_GAP = 8
 // The size BoundaryNode draws the label at. Declared here, and imported by
@@ -96,9 +76,9 @@ export interface LaidOutNode {
    * the page's date format and confidence -- see `boundaryRanges` below. Null
    * on everything else, and on a boundary whose analysis has not run.
    *
-   * It is carried here rather than formatted in the node because its WIDTH is
-   * what sizes the box that holds it. Formatting it in both places would let
-   * the string the layout measured and the string the node drew drift apart.
+   * Carried here rather than formatted in the node because its WIDTH sizes
+   * the box that holds it, and formatting it in both places would let the
+   * measured string and the drawn one drift apart.
    */
   rangeLabel: string | null
 }
@@ -145,12 +125,9 @@ interface Measured {
 }
 
 /**
- * Does this subtree contain anything worth drawing?
- *
- * An empty Phase, or a Sequence holding only empty Phases, would otherwise
- * occupy space and pull ordering edges towards nothing. Boundaries count as
- * drawable in their own right -- they are modelled transitions with their own
- * posteriors, not decoration.
+ * Does this subtree contain anything worth drawing? An empty Phase would
+ * otherwise occupy space and pull ordering edges towards nothing. Boundaries
+ * count as drawable: they are modelled transitions with their own posteriors.
  */
 function isDrawable(measured: Measured): boolean {
   if (measured.kind === 'boundary') return true
@@ -161,12 +138,10 @@ function isDrawable(measured: Measured): boolean {
 /**
  * How wide the box holding this boundary has to be, label included.
  *
- * The label sits on the rule with a piece of rule either side of it, and the
- * node stacks the name over the range when the two do not fit on one line
- * (see BoundaryNode) -- so what has to fit is the wider LINE, not the whole
- * label laid end to end. Measuring the whole label instead would widen a
- * three-phase sequence by half again to buy a line break the drawing does
- * not need.
+ * The label sits on the rule with a piece of rule either side, and
+ * BoundaryNode stacks the name over the range when they do not fit on one
+ * line -- so what has to fit is the wider LINE, not the whole label end to
+ * end. Measuring the whole would widen a three-phase sequence by half again.
  */
 function boundarySpan(name: string, rangeLabel: string | null): number {
   const widestLine = Math.max(
@@ -187,9 +162,8 @@ function measure(
   if (type === 'boundary') {
     // Width is 0 here and resolved during placement: a rule spans whatever
     // its parent turns out to be, so it cannot contribute to that width
-    // without defining itself circularly. `minSpan` is the part that CAN be
-    // stated up front -- the floor the parent has to clear for the label to
-    // fit on the rule.
+    // without defining itself circularly. `minSpan` is the part statable up
+    // front -- the floor the parent must clear for the label to fit.
     const rangeLabel = boundaryRanges[element.id] ?? null
     return {
       element,
@@ -203,10 +177,9 @@ function measure(
     }
   }
   if (type === 'hiatus') {
-    // A hiatus carries no parameter of its own -- it marks that the two
-    // Boundaries around it are a gap rather than one shared transition. The
-    // gap between them is already visible, so drawing a third thing between
-    // them would only add clutter.
+    // A hiatus carries no parameter of its own: it marks the two Boundaries
+    // around it as a gap rather than one shared transition, which the gap
+    // between them already shows.
     return {
       element, kind: 'skip', width: 0, height: 0, children: [], dateCount: 0,
       minSpan: 0, rangeLabel: null,
@@ -216,16 +189,15 @@ function measure(
   const children = (element.children || []).map((child) =>
     measure(child, datesByElement, boundaryRanges))
   const drawable = children.filter(isDrawable)
-  // A container is at least as wide as the widest rule it has to carry. Only
-  // its OWN children are consulted: a boundary further down is already inside
-  // a container that widened for it, and that container's width is counted
-  // here as an ordinary child width.
+  // A container is at least as wide as the widest rule it carries. Only its
+  // OWN children are consulted: a boundary further down is already inside a
+  // container that widened for it.
   const ruleFloor = Math.max(0, ...drawable.map((c) => c.minSpan))
 
-  // A Phase holding dates and no drawable children is a context: the thing a
-  // Harris matrix is actually made of. A Phase holding other Phases is a
-  // grouping -- "Fires" contains the fire features, it is not one -- and is
-  // drawn as a box around them.
+  // A Phase holding dates and no drawable children is a context, the thing a
+  // Harris matrix is made of. One holding other Phases is a grouping --
+  // "Fires" contains the fire features rather than being one -- and is drawn
+  // as a box around them.
   if (type === 'phase' && drawable.length === 0) {
     return {
       element, kind: 'context', width: CONTEXT_WIDTH, height: CONTEXT_HEIGHT, children: [],
@@ -274,9 +246,9 @@ function measure(
 /**
  * Walk the measured tree assigning positions, and emit the ordering edges.
  *
- * Positions are relative to the containing element, matching how reactflow
- * treats a node with a `parentNode`. Absolute coordinates are never needed:
- * every containment relationship in the output is a real parent/child pair.
+ * Positions are relative to the containing element, as reactflow treats a
+ * node with a `parentNode`. Absolute coordinates are never needed: every
+ * containment in the output is a real parent/child pair.
  */
 function place(
   measured: Measured,
@@ -331,11 +303,10 @@ function place(
     return
   }
 
-  // A Sequence's children run oldest first, and a Harris matrix reads oldest
-  // at the BOTTOM -- so the first child gets the largest y and the stack is
-  // built upwards. Each child is centred on the parent's content width, which
-  // is what puts a nested group directly beneath the one it follows instead
-  // of wherever its index happened to fall.
+  // A Sequence's children run oldest first and a Harris matrix reads oldest
+  // at the BOTTOM, so the first child gets the largest y and the stack builds
+  // upwards. Centring each on the parent's content width puts a nested group
+  // directly beneath the one it follows.
   const placements: { child: Measured; y: number }[] = []
   let cursor = measured.height - PADDING
   for (const child of measured.children) {
@@ -352,18 +323,15 @@ function place(
     place(child, element.id, childX, childY, depth + 1, childWidth, nodes, edges)
   }
 
-  // The ordering. A Sequence is a total order, so its transitive reduction is
-  // exactly the chain between adjacent children -- connecting only these is
-  // the reduction rather than a simplification of it. The edge joins the two
-  // CONTAINERS; expanding it to the phases nested inside them is what
-  // produced 175 edges for a model that has 39.
+  // A Sequence is a total order, so its transitive reduction is exactly the
+  // chain between adjacent children: connecting only these IS the reduction.
+  // The edge joins the two CONTAINERS -- expanding it to the phases nested
+  // inside them turns 39 orderings into 175 edges.
   //
-  // A pair separated by a Boundary gets no arrow. The Boundary is already
-  // drawn as a labelled rule spanning the full width between them, so it says
-  // everything the arrow would and says it with the transition's own date on
-  // it. Adding the arrow as well is the same redundant ink this rewrite is
-  // about. Where there is no Boundary, the arrow is the only thing carrying
-  // the order, so it has to be there.
+  // A pair separated by a Boundary gets no arrow: the Boundary is already a
+  // labelled rule spanning the width between them, and says everything the
+  // arrow would with the transition's own date on it. Without a Boundary the
+  // arrow is the only thing carrying the order.
   for (let i = 0; i < measured.children.length - 1; i++) {
     const older = measured.children[i]
     const younger = measured.children[i + 1]
@@ -388,8 +356,8 @@ function place(
  * uses, so the diagram and the results table place a date identically.
  *
  * `boundaryRanges` maps a boundary's element id to the modelled range printed
- * beside its name, already formatted. It is supplied rather than derived
- * because the formatting depends on the page's date format and confidence,
+ * beside its name, already formatted. Supplied rather than derived because
+ * the formatting depends on the page's date format and confidence,
  * neither of which is geometry -- and it is supplied HERE, rather than left
  * to the node that draws it, because the label's width decides how wide its
  * container has to be. Leave it out and the boxes are sized for the names
@@ -430,13 +398,9 @@ export function layoutHarrisMatrix(
 /**
  * Counts for the "N phases / N ordering relationships" summary chips.
  *
- * Replaces treeToMatrix in that role, and reports something different because
- * what treeToMatrix reported was wrong: it counted the cross-product edges, so
- * a model asserting 39 orderings displayed 175 -- the chip was quoting the
- * drawing bug back at the user.
- *
- * `orderingCount` counts what the MODEL asserts: one per adjacent pair of
- * drawable children in every Sequence, Boundaries included. That is
+ * `orderingCount` counts what the MODEL asserts -- one per adjacent pair of
+ * drawable children in every Sequence, Boundaries included -- rather than the
+ * cross-product edges, which would report 175 for a model asserting 39. That is
  * deliberately not the same as the number of arrows the diagram draws, which
  * omits pairs a Boundary rule already separates -- the model constrains those
  * pairs whether or not an arrow is the thing showing it.

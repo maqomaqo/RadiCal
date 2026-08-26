@@ -2,21 +2,18 @@
 // 55-row table made the reader answer by scanning: WHICH of these dates can
 // the model actually put in order, and which can it not separate?
 //
-// A list of every pair is the wrong shape for that. Pairs grow as n(n-1)/2 --
-// 11 dates make 55 rows, 24 make 276 -- while the matrix grows as one cell per
-// pair in a grid the eye reads in one pass. What a list structurally cannot
-// show is the finding that matters: a CLUSTER of dates none of which can be
-// ordered against each other appears here as a dark block, and in a table it
-// is thirty rows scattered across four screens.
+// A list of every pair is the wrong shape: pairs grow as n(n-1)/2 -- 11 dates
+// make 55 rows, 24 make 276 -- where a grid reads in one pass. And a list
+// structurally cannot show the finding that matters: a CLUSTER of dates none
+// of which can be ordered against each other is a dark block here, and thirty
+// rows scattered across four screens in a table.
 //
-// The cell encodes `overlap` -- the probability the model cannot say which of
-// the two came first, 1 being a coin flip. Strong means unsettled, which is
-// the same direction OverlapMeter's bar runs in the table below, deliberately:
-// two marks on one page encoding one quantity in opposite directions would be
-// worse than either alone. So the eye is drawn to the trouble, not away from
-// it. Direction -- WHICH one is older, when the model can tell -- is not in
-// the colour; it is in the cell's label and in the detail line, because it is
-// only meaningful once the ordering is settled enough to have a direction.
+// The cell encodes `overlap`: the probability the model cannot say which came
+// first, 1 being a coin flip. Strong means unsettled -- the direction
+// OverlapMeter's bar runs in the table below, so the eye is drawn to the
+// trouble. Direction, WHICH one is older, is not in the colour but in the
+// cell's label and the detail line, being meaningful only once the ordering is
+// settled enough to have one.
 //
 // Beyond MAX_PAIRS the backend reports consecutive pairs only, which is a
 // chain rather than a matrix, so this never renders for that case -- see
@@ -45,48 +42,38 @@ interface Props {
   /**
    * How much horizontal room the grid may take, in px, measured by the parent.
    *
-   * Passed in rather than measured here, and that is the whole point. This
-   * component used to observe its own wrapper -- but the wrapper is a
-   * `flex-shrink: 0` item with `width: auto`, so it shrink-to-fits its widest
-   * child, and its widest child is this component's own legend. Measured:
-   * wrapper 441.078px, legend 441px. The grid was therefore sized by its own
-   * key rather than by the 1104px row it sits in, which capped an 11-date
-   * matrix at 34px cells and 436px -- the exact defect the observer was added
-   * to fix, reintroduced by the layout that was supposed to showcase it.
-   *
-   * A budget handed down cannot close that loop: nothing this component
-   * renders can change the number it is given.
+   * Handed down rather than measured here, which is the point. Observing its
+   * own wrapper closes a loop: the wrapper is a `flex-shrink: 0` item with
+   * `width: auto`, so it shrink-to-fits its widest child -- this component's
+   * own legend -- and the grid ends up sized by its own key rather than by the
+   * row it sits in. A budget handed down cannot close that loop, since nothing
+   * rendered here can change the number given.
    */
   availableWidth: number
 }
 
-/** How much room the rotated column labels get. Sample codes are short
- *  ("NZA-38894", "WK50104"); anything longer is clipped rather than allowed to
- *  push the grid taller than the matrix it labels. */
+/** How much room the rotated column labels get. Sample codes are short, and
+ *  anything longer is clipped rather than allowed to push the grid taller than
+ *  the matrix it labels. */
 const LABEL_GUTTER = 96
 
 /**
  * The five overlap bands, as the five strengths they are drawn at.
  *
- * WARM INK, not a hue. Every hue in this app is already a claim about what
- * something IS -- primary blue is a Sequence, green a Phase, coral a Boundary,
- * violet a Hiatus -- and success/warning/error are barred here for the reason
- * OverlapMeter states: an overlap is a measurement, not a status. But overlap
- * is not an object type at all. It is the ABSENCE of information: how much the
- * model cannot say about which of two dates came first. Ink reads as fog over
- * the reading rather than as another category beside it, it cannot collide
- * with an element colour, and it survives a colour-vision deficiency that
- * would flatten a hue ramp.
- *
- * It also frees the primary blue to mean one thing on this grid -- selection
- * and focus -- instead of competing with the data it is drawn on top of.
+ * WARM INK, not a hue. Every hue here already claims what something IS -- blue
+ * a Sequence, green a Phase, coral a Boundary, violet a Hiatus -- and
+ * success/warning/error are barred because an overlap is a measurement, not a
+ * status. Overlap is not an object type at all but the ABSENCE of information,
+ * so ink reads as fog over the reading rather than another category beside it.
+ * It also cannot collide with an element colour, survives a colour-vision
+ * deficiency that would flatten a hue ramp, and frees the primary blue to mean
+ * selection and focus alone on this grid.
  *
  * DISCRETE, not a continuous ramp. services/intervals.py bins overlap into
- * exactly these five named bands, and a continuous alpha put 24 of 55 cells
- * inside two decades of each other: 0.66, 0.718 and 0.72 for overlaps of 83%,
- * 91% and 92%, indistinguishable by eye. Five steps mean a reader who has been
- * told "substantial" can actually find one, and the legend becomes a real key
- * rather than an unlabelled gradient.
+ * exactly these five named bands, and a continuous alpha puts 24 of 55 cells
+ * within two decades of each other -- 0.66, 0.718 and 0.72 for overlaps of
+ * 83%, 91% and 92%, indistinguishable by eye. Five steps let a reader told
+ * "substantial" find one, and make the legend a real key.
  */
 const SEVERITY_STEPS: ReadonlyArray<{
   severity: DifferenceRecord['severity']
@@ -103,8 +90,8 @@ const SEVERITY_STEPS: ReadonlyArray<{
 const STRENGTH_BY_SEVERITY = new Map(SEVERITY_STEPS.map((s) => [s.severity, s.strength]))
 
 /** Last resort for a severity word this build does not know: pick the step by
- *  the overlap it was derived from. Monotonic in overlap, which is the only
- *  property that has to hold for the cell not to lie about its direction. */
+ *  the overlap it came from. Monotonic in overlap, which is the only property
+ *  that must hold for the cell not to lie about its direction. */
 function strengthFromOverlap(overlap: number): number {
   const clamped = Math.max(0, Math.min(1, overlap))
   const index = Math.min(SEVERITY_STEPS.length - 1, Math.floor(clamped * SEVERITY_STEPS.length))
@@ -115,10 +102,9 @@ function strengthFromOverlap(overlap: number): number {
  * Cells never go below this or above it, whatever the container allows.
  *
  * The floor is WCAG 2.5.8's 24px target minimum plus a little, not a
- * space-filling minimum. At 375px a 10-date grid shrank to 20x20 to avoid
- * scrolling -- but clicking a square is the only way to read a pair, so a grid
- * that fits and cannot be tapped is worse than one that scrolls and can. Past
- * this floor the container scrolls, which is what its scroll hint is for.
+ * space-filling one: clicking a square is the only way to read a pair, so a
+ * grid that fits and cannot be tapped is worse than one that scrolls and can.
+ * Past this floor the container scrolls.
  */
 const CELL_MIN = 28
 const CELL_MAX = 56
@@ -151,8 +137,8 @@ export default function OrderingMatrix({
   availableWidth,
 }: Props) {
   const theme = useTheme()
-  // One tab stop for the whole grid, then arrow keys within it. A cell per
-  // tab stop would put 276 of them between the matrix and whatever follows.
+  // One tab stop for the whole grid, then arrow keys within it: a cell per tab
+  // stop would put 276 of them between the matrix and whatever follows.
   const [focusCell, setFocusCell] = useState<[number, number]>([0, 1])
   const gridRef = useRef<HTMLTableElement | null>(null)
 
@@ -175,11 +161,9 @@ export default function OrderingMatrix({
 
   /**
    * Move focus within the triangle. A cell exists only where `col > row`, so
-   * each direction has its own boundary rather than one shared bounds check:
-   * the old version scanned forward past the diagonal looking for a landing
-   * cell, which meant ArrowLeft and ArrowDown silently did nothing at the
-   * diagonal instead of stopping at it, and carried a branch that could not
-   * be reached.
+   * each direction has its own boundary rather than one shared bounds check --
+   * scanning past the diagonal for a landing cell makes ArrowLeft and ArrowDown
+   * silently do nothing there instead of stopping at it.
    */
   const move = (dRow: number, dCol: number) => {
     const [row, col] = focusCell
@@ -295,11 +279,9 @@ export default function OrderingMatrix({
                   }
                   const record = recordAt(row, col)
                   // Falls back on the overlap itself, not on the first step:
-                  // an unrecognised band -- a payload cached from before the
-                  // top band was renamed, say -- would otherwise paint a
-                  // coin-flip pair at 0.06 ink, which is the shade that means
-                  // "separates cleanly". Getting the shade approximately right
-                  // is recoverable; stating the opposite of the truth is not.
+                  // an unrecognised band would otherwise paint a coin-flip
+                  // pair at 0.06 ink, the shade meaning "separates cleanly".
+                  // An approximate shade is recoverable; the opposite is not.
                   const strength = record
                     ? STRENGTH_BY_SEVERITY.get(record.severity) ?? strengthFromOverlap(record.overlap)
                     : null
@@ -314,14 +296,12 @@ export default function OrderingMatrix({
                         tabIndex={isFocus ? 0 : -1}
                         disabled={!record}
                         // Selection follows focus, and click selects rather
-                        // than toggles. Arrow-key traversal used to move focus
-                        // through all 55 cells while the readout beside them
-                        // never changed -- so the roving-tabindex accelerator
-                        // let a keyboard user cross the whole grid without ever
-                        // reading a value, and the aria-live region announced
-                        // only on click. Toggling-off went with it: with
-                        // follow-focus, a click that deselected the cell the
-                        // pointer had just focused was incoherent.
+                        // than toggles. Without it, arrow-key traversal moves
+                        // focus through all 55 cells while the readout never
+                        // changes -- a keyboard user crosses the grid without
+                        // reading a value. Toggling-off goes with it: under
+                        // follow-focus, deselecting the cell the pointer just
+                        // focused is incoherent.
                         onClick={() => record && onSelect(record)}
                         onFocus={() => {
                           setFocusCell([row, col])
@@ -354,18 +334,16 @@ export default function OrderingMatrix({
                           borderRadius: '2px',
                           cursor: record ? 'pointer' : 'default',
                           // One of five ink strengths, matching the five bands
-                          // the backend classified this pair into -- so the
-                          // legend below is a key a reader can actually use to
-                          // find a "substantial" square. Same direction as the
-                          // table's OverlapMeter: stronger means less separable.
+                          // the backend classified this pair into, so the
+                          // legend below is a usable key. Same direction as the
+                          // table's OverlapMeter: stronger is less separable.
                           backgroundColor:
                             strength == null ? 'transparent' : alpha(WARM_INK, strength),
                           // A ring drawn OUTSIDE the cell, over the paper, so
-                          // it reads identically on the palest and the darkest
-                          // fill. A 2px border inside a cell filled at 0.8 ink
-                          // was invisible on exactly the squares the copy tells
-                          // you to look at. The white halo separates the blue
-                          // from the ink beneath it.
+                          // it reads the same on the palest and darkest fill:
+                          // a 2px border inside a cell at 0.8 ink is invisible
+                          // on exactly the squares the copy points at. The
+                          // white halo separates the blue from the ink beneath.
                           boxShadow: isSelected
                             ? `0 0 0 2px ${theme.palette.background.paper}, 0 0 0 4px ${theme.palette.primary.main}`
                             : 'none',
@@ -413,7 +391,7 @@ export default function OrderingMatrix({
                 borderRadius: '2px',
                 flexShrink: 0,
                 backgroundColor: alpha(WARM_INK, step.strength),
-                // The palest step is nearly paper; a hairline keeps it a
+                // The palest step is nearly paper, so a hairline keeps it a
                 // swatch rather than a gap in the row.
                 border: `1px solid ${alpha(WARM_INK, 0.12)}`,
               }}

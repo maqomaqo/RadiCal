@@ -3,17 +3,15 @@
  * draws every date where it actually meets the calibration curve, rather than
  * on a calendar axis with the curve left implicit.
  *
- * That figure has two axes in different units and three things to fit inside
- * them at once: the curve with its error envelope, each date's laboratory
- * measurement (a normal distribution in radiocarbon years, running UP the y
- * axis), and each date's calibrated posterior (a density in calendar years,
- * running ALONG the x axis from a baseline at its own radiocarbon age). Get
- * the ranges wrong and the figure still renders -- a lobe clipped at the top
- * of the frame, or a measurement whose Gaussian runs off the left edge, look
- * like data rather than like a bug.
+ * Two axes in different units, with three things to fit inside them at once:
+ * the curve and its error envelope, each date's laboratory measurement (a
+ * normal distribution in radiocarbon years, running UP the y axis), and each
+ * date's calibrated posterior (a density in calendar years, running ALONG the
+ * x axis from a baseline at its own radiocarbon age). Get the ranges wrong and
+ * the figure still renders -- a clipped lobe looks like data, not a bug.
  *
- * Kept out of the component for the same reason stackedPlotGeometry is: it
- * can then be asserted without loading plotly.js, which needs a DOM.
+ * Out of the component for the same reason stackedPlotGeometry is: it can then
+ * be asserted without loading plotly.js, which needs a DOM.
  *
  * Coordinates throughout:
  *
@@ -30,17 +28,14 @@ export const NORMAL_SPAN_SIGMA = 4
 /**
  * A normal density sampled over ±`span` σ, peak-normalised to 1.
  *
- * Peak-normalised rather than a true density because every use of it here is
- * a shape drawn to a fixed size on screen: the caller multiplies by however
- * many axis units it has decided to give the lobe. Returning the analytic
- * density instead would make that scale depend on σ, so a ±15 yr date would
- * be drawn four times taller than a ±60 yr one for no reason the reader could
- * act on.
+ * Peak-normalised rather than a true density because every use of it here is a
+ * shape drawn to a fixed size, the caller multiplying by the axis units it
+ * gives the lobe. The analytic density would make that scale depend on σ, so a
+ * ±15 yr date would draw four times taller than a ±60 yr one.
  *
- * An unusable σ (absent, zero, negative, not finite) returns no points rather
- * than a spike of infinite height -- a date with no stated error is a date
- * this figure cannot say anything about, and drawing it as an infinitely
- * precise one would be the worst available lie.
+ * An unusable σ returns no points rather than a spike of infinite height: a
+ * date with no stated error is one this figure cannot speak about, and drawing
+ * it as infinitely precise would be the worst available lie.
  */
 export function normalDensity(
   mean: number,

@@ -2,18 +2,15 @@
 // authored one, and the id generator the tree editor shares with it.
 //
 // The starting shape is the smallest complete model: a site-wide Sequence
-// bracketed by boundaries, with every date inside it. What this adds is that
-// dates often arrive already carrying a context -- a project collection's
-// default_context_name, the phase named in an imported CSV, or the
-// SampleGroup a deployed analysis was created with. That grouping is
-// information the user already recorded, so it becomes the starting phases
-// rather than being flattened into one phase and re-typed.
+// bracketed by boundaries, with every date inside. Dates often arrive already
+// carrying a context -- a collection's default_context_name, the phase named
+// in an imported CSV, the SampleGroup a deployed analysis was created with --
+// and that grouping is information the user already recorded, so it becomes
+// the starting phases rather than being flattened and re-typed.
 //
-// Those context phases are nested inside ONE unordered Phase rather than
-// dropped straight into the Sequence: a Sequence puts its children in ORDER,
-// and a set of contexts asserts no order between them. Putting them in a
-// sequence here would be inventing stratigraphy the user never claimed --
-// ordering them is the deliberate act the Model Structure editor is for.
+// Those phases nest inside ONE unordered Phase rather than going straight into
+// the Sequence, which puts its children in ORDER where a set of contexts
+// asserts none. Ordering them is the deliberate act the editor is for.
 import type { ModelElement } from '@/types'
 
 export function newElementId(): string {
@@ -32,9 +29,9 @@ export interface BootstrappedTree {
   assignments: Record<string, string>
 }
 
-// Matches the name the backend gives the same pile when it has to build a
-// tree itself (see _tree_from_request), so the two paths don't disagree
-// about what an uncontexted date is filed under.
+// Matches the name the backend gives the same pile when it builds a tree
+// itself (_tree_from_request), so the two paths agree on what an uncontexted
+// date is filed under.
 const NO_CONTEXT_PHASE = 'Unassigned dates'
 
 function element(type: ModelElement['element_type'], name: string): ModelElement {
@@ -42,8 +39,8 @@ function element(type: ModelElement['element_type'], name: string): ModelElement
 }
 
 export function bootstrapModelTree(dates: DateToPlace[]): BootstrappedTree {
-  // Distinct contexts in the order the dates introduce them -- the order they
-  // were entered in, which is the only ordering information there is here.
+  // Distinct contexts in the order the dates introduce them, which is the only
+  // ordering information available.
   const contextOrder: string[] = []
   const datesByContext = new Map<string, string[]>()
   const uncontexted: string[] = []
@@ -71,8 +68,8 @@ export function bootstrapModelTree(dates: DateToPlace[]): BootstrappedTree {
   }
 
   if (uncontexted.length > 0) {
-    // On its own it is simply the one starting phase; alongside real
-    // contexts it is the pile that has none, and saying so is the point.
+    // On its own it is the one starting phase; beside real contexts it is the
+    // pile that has none, and saying so is the point.
     const phase = element('phase', phases.length > 0 ? NO_CONTEXT_PHASE : 'Phase 1')
     phases.push(phase)
     for (const id of uncontexted) assignments[id] = phase.id

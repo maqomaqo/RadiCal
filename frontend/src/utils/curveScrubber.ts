@@ -1,26 +1,18 @@
 /**
  * The geometry behind the curve browser's time scrubber: the strip under the
- * main plot that shows the whole 55,000-year curve with the current window
- * highlighted, and that is dragged to move it.
+ * main plot showing the whole curve with the current window highlighted.
  *
- * Kept out of the component and made pure for the same reason
- * `harrisLayout.ts` is: this is arithmetic whose failures are invisible in the
- * DOM. A window that drifts by a few years each time it is dragged, or that
- * can be dragged past the end of the curve, or that inverts when its handles
- * cross, all render perfectly happily. Only asserting the numbers catches them.
+ * Pure and out of the component for the same reason `harrisLayout.ts` is --
+ * arithmetic whose failures are invisible in the DOM. A window that drifts a
+ * few years per drag, or can be dragged past the end of the curve, or inverts
+ * when its handles cross, all render perfectly happily.
  *
- * Everything here works in two coordinate systems and converts between them:
- *
- *   cal BP   what the curve is in, increasing into the past
- *   pixels   left to right across the strip, OLDEST on the left
- *
- * so the two run in OPPOSITE directions. That is not a preference: both
- * existing plots in this app set `autorange: 'reversed'` on the calendar
- * axis, which puts older on the left and lets time read left to right, and a
- * scrubber running the other way would move the view backwards from the
- * direction it was dragged. It is also the source of every
- * off-by-a-reflection mistake these functions exist to prevent, which is why
- * the direction is stated here and asserted in the tests.
+ * Two coordinate systems, running in OPPOSITE directions: cal BP increases
+ * into the past, while pixels run left to right with OLDEST on the left. Both
+ * plots in this app set `autorange: 'reversed'` on the calendar axis so time
+ * reads left to right, and a scrubber running the other way would move the
+ * view backwards from the drag. That reflection is the source of every
+ * mistake these functions exist to prevent.
  */
 
 export interface Extent {
@@ -35,8 +27,7 @@ export interface Window {
 }
 
 /** The narrowest window the browser will zoom to, in calendar years. Below
- * this a calibration curve has nothing left to show -- even the 1-year part
- * of IntCal20 is scatter at this scale -- and the axis labels collide. */
+ * this a curve has nothing left to show and the axis labels collide. */
 export const MIN_WINDOW_YEARS = 20
 
 /** Where a cal BP value sits across a strip of the given width, oldest left. */
@@ -54,12 +45,9 @@ export function pixelToCal(pixel: number, extent: Extent, width: number): number
 }
 
 /**
- * Force a window to be a usable one: inside the curve, at least
- * MIN_WINDOW_YEARS wide, and the right way round.
- *
- * Ordering is normalised rather than rejected because dragging a handle past
- * its partner is a thing people do, and the sensible reading of it is that
- * the two swapped, not that the gesture was invalid.
+ * Force a window to be usable: inside the curve, at least MIN_WINDOW_YEARS
+ * wide, and the right way round. Ordering is normalised rather than rejected,
+ * since dragging a handle past its partner reads as the two swapping.
  */
 export function clampWindow(window: Window, extent: Extent): Window {
   let from = Math.min(window.from, window.to)
@@ -70,7 +58,7 @@ export function clampWindow(window: Window, extent: Extent): Window {
 
   if (to - from < narrowest) {
     // Grow around the middle, so a window collapsed by dragging one handle
-    // does not also jump to where the other one is.
+    // does not also jump to where the other is.
     const middle = (from + to) / 2
     from = middle - narrowest / 2
     to = middle + narrowest / 2
@@ -89,11 +77,9 @@ export function clampWindow(window: Window, extent: Extent): Window {
 }
 
 /**
- * Move a window by a pixel drag across the strip, keeping its width.
- *
- * Sliding into the end of the curve stops rather than squashing: a pan is a
- * pan, and silently narrowing the view because it hit the edge would change
- * the zoom level without being asked to.
+ * Move a window by a pixel drag across the strip, keeping its width. Sliding
+ * into the end of the curve stops rather than squashing: narrowing the view
+ * because it hit the edge would change the zoom level unasked.
  */
 export function panByPixels(
   window: Window,
@@ -112,10 +98,8 @@ export function panByPixels(
 
 /**
  * Zoom about a fixed calendar age -- the point under the cursor stays put.
- *
- * `factor` below 1 zooms in. Anchoring on the cursor rather than the centre
- * is what makes wheel-zoom feel like it is examining the thing being pointed
- * at instead of the middle of the screen.
+ * `factor` below 1 zooms in. Anchoring on the cursor rather than the centre is
+ * what makes wheel-zoom examine the thing being pointed at.
  */
 export function zoomAbout(
   window: Window,
@@ -142,13 +126,10 @@ export function windowRect(
 }
 
 /**
- * How many points to ask the backend for, given how wide the plot is on
- * screen.
- *
- * Two per horizontal pixel, because the decimation returns a minimum and a
- * maximum per bucket: one bucket per pixel is exactly enough to draw every
- * pixel column's true extent, and asking for more only makes the payload
- * bigger than the screen can show.
+ * How many points to ask the backend for, given the plot's width on screen.
+ * Two per horizontal pixel, because decimation returns a minimum and a maximum
+ * per bucket: one bucket per pixel draws every column's true extent, and more
+ * only makes the payload bigger than the screen can show.
  */
 export function pointsForWidth(pixelWidth: number): number {
   return Math.max(100, Math.min(5000, Math.round(pixelWidth * 2)))

@@ -1,24 +1,19 @@
-// Shared types for the "New Analysis" -> "Stratigraphy" draft flow. A
-// Bayesian analysis is built up client-side (measurements, then optional
-// groups/relationships/TPQ-TAQ limiters) across two pages -- NewAnalysis.tsx
-// and Stratigraphy.tsx -- before a single POST /api/analysis/bayesian
-// submits everything at once. These mirror the backend's
-// schemas/sample.py field names/semantics directly so the payload sent to
-// that endpoint doesn't need any reshaping.
+// Shared types for the "New Analysis" -> "Stratigraphy" draft flow: a Bayesian
+// analysis is built client-side across two pages before one POST
+// /api/analysis/bayesian submits everything. These mirror the backend's
+// schemas/sample.py field names and semantics, so the payload needs no
+// reshaping.
 
 export type SampleType = 'terrestrial' | 'marine'
 
 export type RelationshipType = 'above' | 'below' | 'equal'
 
-// A relationship endpoint (from/to) can point at either a single sample
-// or a named group of samples -- the schema stays generic, but the
-// Stratigraphy UI (see pages/Stratigraphy.tsx) only ever creates 'group'
-// endpoints on both sides: the workflow is "assign each sample to a
-// Context, then relate Contexts to each other," not sample-to-sample.
-// "Context" is the label shown to the user for what this codebase calls
-// a "group" everywhere else (DraftGroup, group_id, SampleGroup on the
-// backend) -- the archaeological term for a stratigraphic layer/cut/fill
-// that a set of dated samples come from.
+// A relationship endpoint can point at a sample or a named group. The schema
+// stays generic, but the Stratigraphy UI only ever creates 'group' endpoints on
+// both sides: the workflow is "assign each sample to a Context, then relate
+// Contexts", not sample-to-sample. "Context" is what the user is shown for what
+// this codebase calls a "group" -- the archaeological term for a stratigraphic
+// layer, cut or fill a set of dated samples come from.
 export type NodeType = 'sample' | 'group'
 
 // --- Explicit model structure (OxCal-style Sequence/Phase/Boundary) ---
@@ -43,14 +38,11 @@ export interface ModelElement {
   children?: ModelElement[]
 }
 
-// The subset of a measurement's fields the Harris matrix diagram and the
-// client-side cycle check actually need. DraftMeasurement (the full
-// in-progress form used on NewAnalysis/Stratigraphy) satisfies this
-// structurally, but so does the much smaller object GET /api/analysis/:id
-// returns for each already-saved sample -- letting Results.tsx pass real
-// persisted measurements straight into the same diagram component (in
-// read-only mode) without fabricating fields like material_type/curve_id
-// that view doesn't have and doesn't need.
+// The subset of a measurement's fields the Harris matrix and the client-side
+// cycle check need. DraftMeasurement satisfies it structurally, and so does the
+// much smaller object GET /api/analysis/:id returns per saved sample -- so
+// Results.tsx can pass persisted measurements into the same diagram without
+// fabricating fields that view neither has nor needs.
 export interface MatrixMeasurement {
   id: string
   sample_name: string
@@ -61,14 +53,13 @@ export interface MatrixMeasurement {
   element_id?: string | null
   tpq_age_bp?: number | null
   taq_age_bp?: number | null
-  // Prior probability that this date does not belong to the population
-  // being modelled -- residual charcoal, intrusive material, lab error.
-  // Zero or absent means no outlier model is applied to it. `outlier_model`
-  // picks which one: "general" is symmetric, "charcoal" is one-sided
-  // (the material predates its context). Declared here rather than only on
-  // DraftMeasurement below because a saved analysis's results also need it,
-  // to tell a posterior outlier probability the data actually found from
-  // one that just reports back a prior the analyst already set.
+  // Prior probability this date does not belong to the population being
+  // modelled -- residual charcoal, intrusive material, lab error. Zero or
+  // absent means no outlier model applies. `outlier_model` picks which:
+  // "general" is symmetric, "charcoal" one-sided (the material predates its
+  // context). Declared here rather than only on DraftMeasurement because a
+  // saved analysis's results need it too, to tell a posterior outlier
+  // probability the data found from one reporting back the analyst's prior.
   outlier_prior?: number | null
   outlier_model?: 'general' | 'charcoal' | null
 }

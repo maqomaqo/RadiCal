@@ -2,11 +2,10 @@
 Curves made by mixing two others, for samples whose carbon came from more
 than one reservoir.
 
-The case that matters archaeologically is a human or animal with a partly
-marine diet. Their bone is neither terrestrial nor marine carbon: calibrating
-it against IntCal20 ignores a reservoir offset of several hundred years, and
-against Marine20 applies all of one they only partly experienced. Both are
-wrong by centuries, in opposite directions, and neither says so.
+The archaeological case is a human or animal with a partly marine diet. Their
+bone is neither terrestrial nor marine carbon: IntCal20 ignores a reservoir
+offset of several hundred years, Marine20 applies all of one they only partly
+experienced, and both are wrong by centuries in opposite directions.
 
 OxCal's answer is Mix_Curves(name, A, B, percent, error), and this is the same
 construction:
@@ -16,14 +15,12 @@ construction:
                        + (1-p)^2 sigma_B(t)^2
                        + ((A(t) - B(t)) * sigma_p)^2 )
 
-The third term under the root is the one that earns its keep. A dietary
-fraction is estimated -- from stable isotopes, with real uncertainty -- and
-that uncertainty matters most exactly where the two curves are furthest apart,
-because that is where being wrong about the proportion moves the answer
-furthest. Without it a mixed curve would state a confident age from an
-admittedly uncertain diet. It is the same argument MeasurementInput.delta_r
-already makes for a reservoir offset: an offset that is poorly known should
-widen a calibrated range, not just move it.
+The third term under the root earns its keep: a dietary fraction is estimated
+from stable isotopes with real uncertainty, and that uncertainty matters most
+where the two curves are furthest apart, because that is where being wrong
+about the proportion moves the answer furthest. Without it a mixed curve would
+state a confident age from an admittedly uncertain diet -- the same argument
+MeasurementInput.delta_r makes for a reservoir offset.
 
 A mixed curve is stored as its recipe rather than as data (see
 models.StoredCalibrationCurve), so it stays honest about its parents and they
@@ -53,11 +50,10 @@ def mix(
         percent_a_error: 1-sigma uncertainty on that percentage.
         name: for the resulting curve's own label.
 
-    The result is defined on the union of the two grids, restricted to where
-    they overlap. Union rather than either one alone because the curves are
-    not sampled alike -- IntCal20 steps 1 year where Marine20 steps 10 -- and
-    resampling onto the coarser of the two would throw away detail from the
-    finer that the mix is perfectly able to carry.
+    The result is defined on the union of the two grids, restricted to their
+    overlap. Union rather than either alone because the curves are not sampled
+    alike -- IntCal20 steps 1 year where Marine20 steps 10 -- and the coarser
+    grid would throw away detail the mix can carry.
     """
     if not (0.0 <= percent_a <= 100.0):
         raise ValueError("The proportion must be between 0 and 100 percent")
@@ -96,9 +92,8 @@ def mix(
 
 
 def describe(name_a: str, name_b: str, percent_a: float, percent_a_error: float) -> str:
-    """A one-line account of what a mixed curve is, for its stored description
-    -- so a curve in the library says what it is made of without anyone having
-    to open its recipe."""
+    """A one-line account of a mixed curve, for its stored description, so a
+    curve in the library says what it is made of without opening its recipe."""
     error = f" ± {percent_a_error:g}%" if percent_a_error else ""
     return (
         f"{percent_a:g}%{error} {name_a}, "

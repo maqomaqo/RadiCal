@@ -2,9 +2,9 @@
 // phase and set of dated events lasted, and how far apart the phases sit.
 //
 // Everything here is a LENGTH OF TIME in years, never a calendar age, so
-// nothing on this panel goes through formatCalendarAge or the BC/AD
-// conversion the rest of the page applies -- see DurationSummary in
-// types/index.ts for why the backend gives these their own field names.
+// nothing goes through formatCalendarAge or the BC/AD conversion the rest of
+// the page applies -- see DurationSummary in types/index.ts for why the backend
+// gives these their own field names.
 //
 // Two tables rather than one: a duration has a name and a length, a
 // difference has two names and a sign, and forcing them through shared
@@ -39,13 +39,10 @@ const NUMERIC_CELL_SX = { whiteSpace: 'nowrap' } as const
 /**
  * What a shared-boundary pair says in place of a figure.
  *
- * Its gap is exactly zero and its overlap probability is exactly zero, and
- * both are constructions rather than findings — one phase's end IS the next
- * one's start. `none` is the wrong word for the second of them: everywhere
- * else in this app `none` means "separated at 2 sigma", which is the opposite
- * of what a shared transition says. The same phrase is printed by the CSV and
- * the PDF (see intervals.SHARED_BOUNDARY_TEXT), so one pair reads the same way
- * wherever the reader meets it.
+ * Its gap and overlap probability are both exactly zero BY CONSTRUCTION — one
+ * phase's end IS the next one's start — and `none` is the wrong word for the
+ * second, meaning "separated at 2 sigma" everywhere else here. The CSV and PDF
+ * print the same phrase (intervals.SHARED_BOUNDARY_TEXT).
  */
 const SHARED_BOUNDARY_TEXT = 'shares a transition'
 const SHARED_BOUNDARY_HELP =
@@ -54,7 +51,7 @@ const SHARED_BOUNDARY_HELP =
 
 /** The readout beside the matrix never shrinks below this; the grid gets the
  *  rest. A pair's figures wrapping to five lines to buy the grid 40px is a bad
- *  trade in both directions. */
+ *  trade both ways. */
 const READOUT_MIN_WIDTH = 300
 
 // What each duration is of, in the same words the model tree uses for the
@@ -67,11 +64,9 @@ const DURATION_LABELS: Record<DurationRecord['kind'], string> = {
 
 /**
  * The element-type ink for a duration's kind, matching the results table's
- * type label and the Harris matrix.
- *
- * `sample_duration` gets none: "Dated events" is not an element type — it is
- * the span the dates themselves cover — so colouring it as one would make it
- * look like a fourth kind of model element.
+ * type label and the Harris matrix. `sample_duration` gets none: "Dated
+ * events" is the span the dates cover, not an element type, and colouring it
+ * as one would make it look like a fourth kind of model element.
  */
 function useDurationKindColor() {
   const colors = useElementTypeColors()
@@ -92,21 +87,20 @@ const DURATION_HELP: Record<DurationRecord['kind'], string> = {
     'From the oldest to the youngest dated event in this phase — what the dates themselves cover, with nothing inferred beyond them.',
 }
 
-/** A length of time. Rounded to the year: the reported step is coarser than
- *  that anyway, and a decimal would claim precision the draws do not have. */
+/** A length of time, rounded to the year: the reported step is coarser anyway,
+ *  and a decimal would claim precision the draws do not have. */
 function years(value: number | null | undefined): string {
   if (value == null || !Number.isFinite(value)) return 'N/A'
   return `${Math.round(value).toLocaleString()} yr`
 }
 
-/** An envelope as "0 to 540 yr", recomputed at whatever confidence the page
- *  is showing — the same client-side re-selection the results table uses, so
- *  moving the selector moves every figure on the page together.
+/** An envelope as "0 to 540 yr", recomputed at whatever confidence the page is
+ *  showing, through the same re-selection the results table uses.
  *
- *  When there is no distribution to re-select from, the stored figure is
- *  reported WITH ITS OWN LEVEL attached rather than bare: the column heading
- *  names the selected confidence, and a 95.4% figure sitting silently under a
- *  "Duration (99.7%)" heading is the one thing this panel must not do. */
+ *  With no distribution to re-select from, the stored figure is reported WITH
+ *  ITS OWN LEVEL attached rather than bare: the column heading names the
+ *  selected confidence, and a 95.4% figure sitting silently under a "Duration
+ *  (99.7%)" heading is what this panel must not do. */
 function envelope(summary: DurationSummary, confidence: number): string {
   const found = hpdEnvelopeFromHistogram(summary.distribution, confidence)
   if (found) {
@@ -122,13 +116,10 @@ function envelope(summary: DurationSummary, confidence: number): string {
 /**
  * How far two things are from being separable in time, as a word and a bar.
  *
- * Deliberately not a success/warning/error chip. Those are reserved for
- * genuine state — a solver that ran, a run that did not converge — and an
- * overlap is a measurement, not a status; colouring it like one would make a
- * perfectly sound model look as though something had gone wrong with it. One
- * hue at a strength that tracks the number is the same treatment the HPD
- * bands get, for the same reason: this is one quantity at five strengths, not
- * five categories.
+ * Not a success/warning/error chip: those are for genuine state, and an overlap
+ * is a measurement, so colouring it as one would make a sound model look
+ * broken. One hue at a strength tracking the number, as the HPD bands are —
+ * one quantity at five strengths, not five categories.
  */
 function OverlapMeter({ record }: { record: DifferenceRecord }) {
   const theme = useTheme()
@@ -178,9 +169,8 @@ interface Props {
   confidenceLabel: string
   showMean: boolean
   showMedian: boolean
-  /** The analysis's dated events, oldest first — the same order the results
-   *  table and the plots use. Used only to lay out the ordering matrix; the
-   *  panel still renders without it. */
+  /** The analysis's dated events, oldest first, as the results table and plots
+   *  order them. Only the ordering matrix uses it; the panel renders without. */
   dateAxis?: OrderingAxisEntry[]
 }
 
@@ -194,9 +184,8 @@ export default function DurationsPanel({
 }: Props) {
   const theme = useTheme()
   const durationKindColor = useDurationKindColor()
-  // Not a pixel breakpoint picked by hand: the same `sm` the rest of the app
-  // collapses at, so the differences view changes shape where everything else
-  // already does.
+  // The same `sm` the rest of the app collapses at, so this view changes shape
+  // where everything else already does.
   const narrow = useMediaQuery(theme.breakpoints.down('sm'))
   // Matches the Stack's own md breakpoint below: above it the matrix and its
   // readout share a row, so the grid's budget is the row minus the readout.
@@ -204,11 +193,10 @@ export default function DurationsPanel({
   /**
    * How wide the matrix may draw.
    *
-   * Measured on the flex ROW, not on the matrix's own wrapper. The wrapper is
-   * a `flex-shrink: 0` item, so its width IS its content's width -- observing
-   * it made the grid size itself from its own legend (wrapper 441.078px,
-   * legend 441px, cells capped at 34px). The row is fixed by the card, so
-   * nothing the grid renders can move it.
+   * Measured on the flex ROW, not the matrix's own wrapper: the wrapper is a
+   * `flex-shrink: 0` item, so its width IS its content's width and observing it
+   * would have the grid size itself from its own legend. The row is fixed by
+   * the card, so nothing the grid renders can move it.
    */
   const rowRef = useRef<HTMLDivElement | null>(null)
   const [rowWidth, setRowWidth] = useState(0)
@@ -227,27 +215,23 @@ export default function DurationsPanel({
   // The two kinds never appear together: phases come from a model, dates from
   // a group calibration, and an analysis is one or the other.
   const comparingDates = differences[0]?.kind === 'date_difference'
-  // "Separation", not "Gap or overlap": the column beside it is headed
-  // "Overlap" and holds a probability, so the word stood for a span of YEARS
-  // in one column and a probability in the next. The neighbour keeps the word,
-  // because the five grades under it (none ... extensive) are degrees of
-  // overlap and read as nothing else -- so this column is the one that gives
-  // it up. Sign still carries the distinction, and the line above the table
-  // says so: positive is a gap, negative an overlap.
+  // "Separation", not "Gap or overlap": the neighbouring column is headed
+  // "Overlap" and holds a probability, so the word would mean YEARS in one
+  // column and a probability in the next. The neighbour keeps it, its five
+  // grades being degrees of overlap. Sign carries the distinction here, as the
+  // line above the table says: positive is a gap, negative an overlap.
   const differenceHeading = comparingDates ? 'Difference' : 'Separation'
 
-  // The matrix is only meaningful over a COMPLETE set of pairs. Past
-  // MAX_PAIRS the backend reports consecutive pairs instead, which is a chain
-  // -- a list by nature, and a matrix of it would be a diagonal line of
-  // squares in an otherwise empty grid.
+  // The matrix is only meaningful over a COMPLETE set of pairs. Past MAX_PAIRS
+  // the backend reports consecutive pairs, which is a chain -- a list by
+  // nature, and a diagonal line of squares in an otherwise empty grid.
   const axis = comparingDates ? dateAxis.filter((e) => e.id) : []
   const isAllPairs = axis.length >= 2 && differences.length === (axis.length * (axis.length - 1)) / 2
-  // Below five dates the table is already one screen and reads faster than a
-  // grid; the matrix earns its space once scanning starts to cost something.
+  // Below five dates the table is one screen and reads faster than a grid.
   const showMatrix = comparingDates && isAllPairs && axis.length >= 5
 
-  // The pairs the model genuinely cannot put in order -- the finding the
-  // 55-row table buried among its near-identical neighbours.
+  // The pairs the model cannot put in order -- the finding a 55-row table
+  // buries among its near-identical neighbours.
   const unorderable = useMemo(
     () => differences.filter((d) => d.severity === 'substantial' || d.severity === 'extensive'),
     [differences]
@@ -285,8 +269,8 @@ export default function DurationsPanel({
             <Table stickyHeader size="small" sx={{
                 fontVariantNumeric: 'tabular-nums',
                 // Banded on the CELLS, not the row: a sticky <tr> does not
-                // work, and a header that scrolls away over 33 rows of pairs
-                // is the same defect the results table had.
+                // work, and a header scrolling away over 33 rows of pairs is
+                // the defect the results table fixed.
                 '& thead th': { backgroundColor: 'background.muted', top: { xs: 'auto', md: 0 } },
               }}>
                 <caption style={visuallyHidden}>
@@ -554,8 +538,8 @@ export default function DurationsPanel({
               <Table stickyHeader size="small" sx={{
                 fontVariantNumeric: 'tabular-nums',
                 // Banded on the CELLS, not the row: a sticky <tr> does not
-                // work, and a header that scrolls away over 33 rows of pairs
-                // is the same defect the results table had.
+                // work, and a header scrolling away over 33 rows of pairs is
+                // the defect the results table fixed.
                 '& thead th': { backgroundColor: 'background.muted', top: { xs: 'auto', md: 0 } },
               }}>
                   <caption style={visuallyHidden}>

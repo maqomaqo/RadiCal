@@ -1,23 +1,18 @@
 """
 Reading a calibration curve out of an uploaded file.
 
-Same contract as services/date_import.py, and for the same reason: parsing and
-storing are separate steps, so a file upload adds no second route into the
-database with its own validation to drift out of step. This module only reads.
-A file that cannot be read comes back as a list of what is wrong with it, not
-as an exception -- the request succeeded, its answer is that row 412 has a
-negative sigma.
+Same contract as services/date_import.py: parsing and storing are separate
+steps, and this module only reads. A file that cannot be read comes back as a
+list of what is wrong with it rather than an exception -- the request
+succeeded, and its answer is that row 412 has a negative sigma.
 
-What makes a curve file different from a list of dates is that almost nothing
-about it is checkable by eye afterwards. A date list is short enough to read;
-a curve is 9,500 rows that will silently produce plausible, wrong calendar
-ages for every sample calibrated against it. So this refuses more than it
-repairs. Descending calendar order is normalised (the IntCal files themselves
-are written oldest-first) and blank lines and comments are skipped, because
-those are format conventions rather than mistakes. Everything else -- a
-duplicate calendar age, a non-positive sigma, a column that looks like F14C
-rather than a conventional age -- is an error naming the row, because each of
-those has a plausible innocent reading that would be wrong.
+Unlike a date list, almost nothing about a curve file is checkable by eye
+afterwards: 9,500 rows will silently produce plausible, wrong calendar ages for
+every sample calibrated against them. So this refuses more than it repairs.
+Descending calendar order is normalised and comments skipped, those being
+format conventions; everything else -- a duplicate calendar age, a non-positive
+sigma, a column that looks like F14C -- is an error naming the row, because
+each has a plausible innocent reading that would be wrong.
 """
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
@@ -27,9 +22,9 @@ import re
 
 import numpy as np
 
-# A curve file is bigger than a date list but not unboundedly so: IntCal20 is
-# 220 KB. The cap is on the decoded text and exists so a mis-picked file fails
-# at once rather than being parsed row by row into an enormous error report.
+# A curve file is bigger than a date list but bounded -- IntCal20 is 220 KB.
+# The cap is on the decoded text, so a mis-picked file fails at once rather
+# than being parsed row by row into an enormous error report.
 MAX_CONTENT_BYTES = 8 * 1024 * 1024
 
 # The most rows worth reporting individually. Past this the file is wrong in a
@@ -59,13 +54,13 @@ class CurveImportResult:
     """
     What a curve file turned out to contain.
 
-    Three channels, used exactly as ImportResult uses them: `errors` means
-    nothing was read, `warnings` means it was read but something could not be
-    honoured, `notes` means it was read and here is what was assumed.
+    Three channels, as ImportResult uses them: `errors` means nothing was
+    read, `warnings` that it was read but something could not be honoured,
+    `notes` that it was read and here is what was assumed.
 
     `points` is the normalised curve -- ascending calendar age, three columns
-    -- and `preview` is a short downsampled series for drawing the curve in
-    the import dialog before anything is stored.
+    -- and `preview` a downsampled series for drawing it in the import dialog
+    before anything is stored.
     """
     points: List[Tuple[float, float, float]] = field(default_factory=list)
     errors: List[str] = field(default_factory=list)
@@ -137,10 +132,10 @@ class CurveImportResult:
 
 def decode(content: bytes) -> str:
     """
-    The IntCal-family files are latin-1 (their headers carry author names with
-    diacritics); spreadsheet exports are usually UTF-8, sometimes with a BOM.
-    Try in that order and fall back rather than failing on an encoding, since
-    only the numbers matter for correctness.
+    The IntCal-family files are latin-1, their headers carrying author names
+    with diacritics; spreadsheet exports are usually UTF-8, sometimes with a
+    BOM. Tried in that order, falling back rather than failing, since only the
+    numbers matter for correctness.
     """
     for encoding in ('utf-8-sig', 'utf-8', 'latin-1'):
         try:
@@ -159,10 +154,10 @@ def _suggestions(text: str) -> Tuple[Optional[str], Optional[str]]:
     """
     A name and citation guessed from the file's leading comments.
 
-    The IntCal-family files open with a title line and an author list, which
-    is where a curve's citation actually lives -- offering them as defaults is
-    the difference between a stored curve that cites its source and one
-    labelled 'intcal13.14c'. Only ever a suggestion: the import form shows
+    The IntCal-family files open with a title line and an author list, where a
+    curve's citation actually lives -- the difference between a stored curve
+    that cites its source and one labelled 'intcal13.14c'. Only a suggestion:
+    the import form shows
     them for editing before anything is stored.
     """
     headers = _header_lines(text)
@@ -203,7 +198,7 @@ def _rows_from_delimited(text: str) -> Tuple[List[List[str]], Optional[List[str]
     sample = '\n'.join(body[:5])
     delimiter = '\t' if sample.count('\t') > sample.count(',') else ','
     if delimiter == ',' and ',' not in sample and re.search(r'\s{1,}', sample):
-        # Whitespace-separated, which some older curve files are.
+        # Whitespace-separated, as some curve files are.
         rows = [re.split(r'[\s]+', line.strip()) for line in body]
         return rows, None, 'whitespace'
 
@@ -225,8 +220,8 @@ def _is_number(text: str) -> bool:
 
 def _column_indices(header: List[str], errors: List[str]) -> Optional[Dict[str, int]]:
     """
-    Match a header row to the three columns needed. Order is irrelevant --
-    a file whose columns are in a different order is not a broken file.
+    Match a header row to the three columns needed. Order is irrelevant: a
+    file whose columns are ordered differently is not a broken file.
     """
     found: Dict[str, int] = {}
     for field_name, aliases in COLUMN_ALIASES.items():
@@ -411,9 +406,8 @@ def parse_curve(
 
 
 def parse_upload(filename: str, content: bytes, calendar: str = 'cal_bp') -> CurveImportResult:
-    """Decode an uploaded curve file and read it. Format is decided by
-    content rather than by extension -- a .csv holding .14c rows reads
-    correctly either way."""
+    """Decode an uploaded curve file and read it. Format is decided by content
+    rather than extension, so a .csv holding .14c rows reads correctly."""
     result = parse_curve(decode(content), calendar=calendar)
     if result.suggested_name is None and filename:
         stem = re.split(r'[\\/]', filename)[-1].rsplit('.', 1)[0]

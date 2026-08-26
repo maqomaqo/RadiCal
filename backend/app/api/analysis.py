@@ -32,22 +32,16 @@ import uuid
 
 router = APIRouter()
 
-# The confidence levels the Results page offers (its CONFIDENCE_OPTIONS) come
-# from services/calibration, which is where the exact 1/2/3-sigma coverages are
-# defined for the whole app. Unmodelled HPD ranges are precomputed at all three
-# so switching the selector doesn't need a refetch -- and so the page never has
-# to derive them from a downsampled plot series, which is what used to make it
-# disagree with the CSV in the last digit.
-#
-# This used to be its own tuple, (0.682, 0.954, 0.997), which is where one of
-# the app's several near-copies of "1 sigma" lived.
+# REPORTING_CONFIDENCE_LEVELS comes from services/calibration, the one place
+# the exact 1/2/3-sigma coverages are defined. Unmodelled HPD ranges are
+# precomputed at all three so the Results page selector needs no refetch and
+# never derives them from a downsampled plot series.
 
 
 def _validate_project_id(project_id: Optional[str], db: Session) -> Optional[str]:
-    """Look up a project_id supplied on an analysis request. Returns it
-    unchanged if valid/absent, raises 404 if it doesn't correspond to a
-    real project (a typo'd or stale project_id would otherwise silently
-    leave the analysis unassigned instead of surfacing the mistake)."""
+    """Return a request's project_id unchanged if valid or absent, raising 404
+    if it names no real project -- which would otherwise leave the analysis
+    silently unassigned."""
     if not project_id:
         return None
     if not db.query(Project.id).filter(Project.id == project_id).first():
@@ -63,23 +57,17 @@ def _compute_calibration_stats(
     delta_r_error: Optional[float] = None,
 ) -> Dict:
     """
-    Calibrate one measurement against `curve` and return every derived
-    stat the calibration-analysis path needs: point estimates, the overall
-    HPD envelope, the full multi-range HPD breakdown, and a plottable
-    distribution. Shared between calibrate_single (a fresh calibration)
-    and the analysis rerun path (re-calibrating an already-saved sample
-    with its current age_bp/error_1sigma/curve), so the two can't drift
-    out of sync with each other.
+    Calibrate one measurement and return every stat the calibration path
+    needs: point estimates, the HPD envelope, the multi-range HPD breakdown,
+    and a plottable distribution. Shared by calibrate_single and the rerun
+    path so the two cannot drift apart.
     """
     cal_ages, probs = curve.calibrate(age_bp, error_1sigma, delta_r, delta_r_error)
 
-    # Full multi-range HPD breakdown (calibration curves are non-monotonic,
-    # so the posterior for a single measurement can be genuinely multimodal
-    # -- e.g. plateaus/wiggles splitting it into several disjoint
-    # calendar-age ranges). hpd_68/hpd_95 below stay as the overall min/max
-    # envelope for simple display; hpd_68_ranges/hpd_95_ranges carry the
-    # actual per-range breakdown with each range's own probability share,
-    # standard OxCal/CALIB-style.
+    # Calibration curves are non-monotonic, so a single measurement's
+    # posterior can be genuinely multimodal. The _ranges lists carry each
+    # disjoint range with its own probability share; hpd_68/hpd_95 below are
+    # just the overall envelope.
     hpd_68_ranges = curve.get_hpd_ranges(cal_ages, probs, SIGMA_1)
     hpd_95_ranges = curve.get_hpd_ranges(cal_ages, probs, SIGMA_2)
     hpd_68 = (
@@ -110,19 +98,13 @@ def _compute_calibration_stats(
 def _date_difference_block(samples: List, seed: int = 42) -> Dict:
     """
     How far apart every pair of dates in a group calibration is, and how
-    confidently the model can order them -- Analysis.intervals for an analysis
-    that has no model.
+    confidently they can be ordered -- Analysis.intervals for an analysis with
+    no model.
 
-    No solver involved, because none is needed: a group calibration asserts no
-    relationship between its dates, so they are independent and drawing each
-    from its own calibrated posterior IS a draw from the joint. That is the one
-    case where the joint distribution these quantities need comes for free;
-    everywhere else it takes services/exact_chain's backward sampling or the
-    states services/gibbs keeps as it sweeps.
-
-    Pairs read oldest-first, matching the order the results page and every
-    export already put the dates in, so a positive difference always means the
-    first of the pair is the older.
+    No solver is needed: a group calibration asserts no relationship, so the
+    dates are independent and drawing each from its own posterior IS a draw
+    from the joint. Pairs read oldest-first, matching the results page and
+    every export, so a positive difference means the first is the older.
     """
     rng = np.random.default_rng(seed)
     draws: Dict[str, np.ndarray] = {}
@@ -147,16 +129,13 @@ def _calibration_result_row(
     existing: Optional[AnalysisResult] = None,
 ) -> AnalysisResult:
     """
-    One plain-calibration result (calibrated_age_bp/posterior stats/HPD/
-    distribution -- no MCMC-only fields like agreement_index or
-    posterior_samples) as a database row, from an already-computed stats
-    dict (see _compute_calibration_stats). Updates `existing` in place if
-    given, otherwise returns a new, not-yet-added row.
+    One plain-calibration result as a database row, built from a
+    _compute_calibration_stats dict -- no MCMC-only fields like
+    agreement_index. Updates `existing` in place if given, otherwise returns a
+    new, not-yet-added row.
 
-    Shared by the group-calibration endpoint below and both the
-    'calibration' and 'group_calibration' branches of _rerun_analysis, so
-    a field added to one can't silently go missing from another the way
-    _sample_row's docstring says has already happened here before.
+    Shared by the group-calibration endpoint and both calibration branches of
+    _rerun_analysis, so a field added to one cannot go missing from another.
     """
     result = existing or AnalysisResult(analysis_id=analysis_id, sample_id=sample_id)
     result.calibrated_age_bp = stats['calibrated_age_bp']
@@ -180,10 +159,8 @@ def _iter_tree(element: Dict):
 
 def _relabel_tree(root: Dict, id_map: Dict[str, str]) -> None:
     """
-    Rewrite element ids through `id_map` in place. Used when persisting a
-    tree built from a request's client-side ids: the phases carry the
-    request's context ids, which have to become the ids the contexts were
-    actually saved under.
+    Rewrite element ids through `id_map` in place, turning a request's
+    client-side context ids into the ids the contexts were saved under.
     """
     for element in _iter_tree(root):
         if element['id'] in id_map:
@@ -192,16 +169,13 @@ def _relabel_tree(root: Dict, id_map: Dict[str, str]) -> None:
 
 def _relabel_intervals(block: Optional[Dict], id_map: Dict[str, str]) -> Optional[Dict]:
     """
-    The same client-id -> persisted-id rewrite _relabel_tree does to the model
-    tree, applied to a durations-and-differences block.
+    _relabel_tree's client-id -> persisted-id rewrite, applied to a
+    durations-and-differences block.
 
-    Every record names the model elements it is about -- a phase's duration,
-    the gap between two phases -- and its `id` is those element ids joined with
-    colons so the record has a stable identity across a rerun. Mapping each
-    colon-separated part covers both without the record shapes having to be
-    enumerated here: a part that is not a client id (the 'phase' / 'sequence'
-    prefix, a boundary id, which _persist_tree keeps as-is) is simply not in
-    the map and passes through.
+    Each record names the elements it is about, and its `id` is those element
+    ids joined with colons. Mapping every colon-separated part covers both
+    without enumerating record shapes: a part that is not a client id passes
+    through untouched.
     """
     if not block or not id_map:
         return block
@@ -236,16 +210,13 @@ def _persist_tree(analysis_id: str, root: Dict, db: Session) -> None:
 
 def _get_or_migrate_tree(analysis: Analysis, db: Session) -> Tuple[Optional[Dict], bool]:
     """
-    The analysis's model tree, migrating it from the old contexts + pairwise
-    relationships representation on first access if it doesn't have one yet.
+    The analysis's model tree, migrated from the contexts + pairwise
+    relationships representation on first access if it has none.
 
-    Returns (root, linearized). `linearized` flags that the old relationship
-    graph couldn't be expressed as a tree and was flattened into one order,
-    which is strictly MORE constrained than what it came from and worth
-    telling the user about.
-
-    Migrating here (lazily, on read) rather than in a batch job means an old
-    analysis keeps working untouched until something actually looks at it.
+    Returns (root, linearized). `linearized` flags that the relationship graph
+    could not be expressed as a tree and was flattened into one order, which
+    is strictly MORE constrained than what it came from -- worth telling the
+    user. Migrating lazily on read leaves an untouched analysis alone.
     """
     rows = db.query(ModelElement).filter(ModelElement.analysis_id == analysis.id).all()
     existing = rows_to_tree(rows)
@@ -297,18 +268,13 @@ def _sample_row(
     element_id: Optional[str] = None,
 ) -> RadiocarbonSample:
     """
-    One measurement as a database row.
+    One measurement as a database row, shared by the two endpoints that write
+    measurements -- creating a Bayesian analysis and replacing a saved one's
+    inputs -- so a field cannot be added to one and missed on the other.
 
-    Shared by the two endpoints that write measurements -- creating a
-    Bayesian analysis and replacing a saved one's inputs. They used to build
-    this separately and drifted twice: first the reservoir offset, then the
-    outlier settings, each added to one and not the other. The second time
-    it meant editing an analysis silently switched its outlier model off,
-    and the only symptom was an empty column in the export.
-
-    sample_type falls back to whatever the curve implies, because a marine
-    curve with a terrestrial label is a contradiction the calibration would
-    resolve the wrong way.
+    sample_type falls back to what the curve implies, because a marine curve
+    with a terrestrial label is a contradiction calibration would resolve the
+    wrong way.
     """
     return RadiocarbonSample(
         analysis_id=analysis_id,
@@ -337,12 +303,8 @@ def _sample_row(
 
 def _analysis_result_row(analysis_id: str, sample_id: str, result: Dict) -> AnalysisResult:
     """
-    One per-date result as a database row.
-
-    Shared by the fresh run and the rerun deliberately. The two used to build
-    this independently and drifted: agreement_index and outlier_probability
-    were added to one and not the other, so a rerun silently blanked both
-    columns in every export.
+    One per-date result as a database row, shared by the fresh run and the
+    rerun so a field cannot be added to one and missed on the other.
     """
     return AnalysisResult(
         analysis_id=analysis_id,
@@ -372,56 +334,34 @@ def _run_bayesian(
     """
     Solve the model against an explicit model tree, returning (per-sample
     results, per-boundary results, solver record, durations and differences).
-    Shared between a fresh run and a rerun so the two can't drift apart.
+    Shared between a fresh run and a rerun so the two cannot drift apart.
 
-    The last of those is None unless bayesian_config.estimate_durations asked
-    for it; see services/intervals.py for what it holds and why it is a
-    separate return rather than more fields on the per-sample results (it is
-    not per-sample -- every quantity in it is a function of several modelled
-    ages at once).
+    The last is None unless bayesian_config.estimate_durations asked for it;
+    it is a separate return rather than more per-sample fields because every
+    quantity in it is a function of several modelled ages at once (see
+    services/intervals.py).
 
     A chain-shaped model -- a Sequence of Phases separated by Boundaries, the
     ordinary archaeological shape -- is integrated EXACTLY by
-    services/exact_chain.py rather than sampled. There is no sampler to
-    converge and no calibration lobe to miss, so that stays the default
-    wherever it applies.
+    services/exact_chain.py: there is no sampler to converge and no
+    calibration lobe to miss. Everything else goes to services/gibbs.py,
+    OxCal's own MH/Gibbs scheme, which reproduces the exact solver to under a
+    year wherever the exact solver can be asked.
 
-    Everything else goes to services/gibbs.py, OxCal's own MH/Gibbs scheme.
-    That replaces pm.sample_smc, which was wrong here for a structural reason
-    rather than a tuning one: PyMC tempers pm.Potential along with the
-    likelihood, and the model it sampled expressed the entire structure as
-    pm.Potential, so the ordering and phase priors were simply absent at the
-    start of the annealing path. On the Nenthorn fixture it separated two
-    ordered groups by 57 years where the answer is 19 and OxCal reports 13 --
-    at r_hat 1.01, every chain agreeing on the same wrong answer. The Gibbs
-    sampler targets the true posterior from the first sweep and reproduces the
-    exact solver to under a year wherever the exact solver can be asked.
+    A model that is not a chain AS AUTHORED is sampled even when supplying the
+    transitions its ordering implies would make it exactly solvable, because
+    that insertion changes the model: it splits one span term over K dates
+    into two over K1 + K2, and K is the exponent in (span)^(-K) that resists a
+    date wandering from its group. Measured against OxCal (rms of the modelled
+    dates), the oxcal `ordered` fixture gives 1.49 sampled as written against
+    2.51 exact on the patched tree, and the charcoal fixture 4.53 against
+    10.63. The cost, which the results page states: choosing `exact` on such a
+    model cross-checks a different model as well as a different method.
 
-    A model that is not a chain AS AUTHORED goes to the sampler, even when
-    supplying the transitions its ordering implies would make it exactly solvable.
-    Both remain available -- `exact` supplies them and runs -- but that insertion
-    is a real change to the model rather than a reformulation, and it is the wrong
-    default: it splits one span term over K dates into two over K1 + K2, and K is
-    the exponent in (span)^(-K) that resists a date wandering away from its group.
-    Measured against OxCal, rms of the modelled dates: on tests/fixtures/oxcal's
-    `ordered` run 1.49 sampled on the model as written against 2.51 exact on the
-    patched one, and on the charcoal fixture, where a declared residual date needs
-    that resistance most, 4.53 against 10.63.
+    bayesian_config.solver overrides the choice per analysis. `exact` on a
+    model that cannot be integrated raises rather than quietly sampling.
 
-    The cost, which the results page states rather than hides: the two solvers are
-    then no longer given the same tree, so choosing `exact` on such a model
-    cross-checks a different model as well as a different method.
-
-    Either choice can be overridden per analysis via bayesian_config.solver --
-    see BayesianConfigInput.solver for what each value means and why the
-    override exists. `exact` on a model that cannot be integrated raises rather
-    than sampling instead: asking for an exact answer and quietly getting a
-    sampled one is the silent-fallback problem this all exists to remove.
-
-    The returned solver record is what makes the choice visible; the fallback
-    used to be silent, and the shapes that trigger it are not exotic -- a
-    sequence of phases with no Boundary anywhere, or two parallel excavation
-    areas. Shape:
+    The returned solver record makes the choice visible. Shape:
 
         {'method': 'exact' | 'gibbs',
          'requested': what the config asked for ('auto' unless overridden),
@@ -440,18 +380,11 @@ def _run_bayesian(
     requested = bayesian_config.get('solver') or 'auto'
     estimate_durations = bool(bayesian_config.get('estimate_durations'))
 
-    # Each solver gets the tree it can actually take: the sampler the model as
-    # AUTHORED, the exact solver a copy with the transitions the ordering implies
-    # supplied, because it cannot integrate anything else.
-    #
-    # The two are therefore not always the same tree, which is deliberate and is a
-    # reversal -- they used to share the patched one so that the override was a
-    # pure method-vs-method cross-check. That property is worth less than the
-    # accuracy it cost. Supplying a transition is not a reformulation: it splits
-    # one span term over K dates into two over K1 + K2, weakening the exponent that
-    # holds a group together, and it is measurably the worse answer (see this
-    # function's docstring for the numbers). The results page says when the two
-    # solvers would be comparing different models.
+    # Each solver gets the tree it can take: the sampler the model as
+    # AUTHORED, the exact solver a copy with the implied transitions supplied,
+    # since it cannot integrate anything else. The two are therefore not
+    # always the same tree -- see the docstring for why that is preferred to
+    # the accuracy it would cost, and the results page says when it happens.
     chain, reason = exact_chain.layout_with_reason(model_tree, measurements)
     authored_is_chain = chain is not None
     exact_tree = model_tree
@@ -467,11 +400,10 @@ def _run_bayesian(
                 chain, exact_tree = patched, candidate
                 exact_needs_boundaries = len(inserted)
             else:
-                # Report why the model is still not a chain AFTER the
-                # transitions were supplied -- the original reason was
-                # "groups ordered with no Boundary between them", which
-                # inserting them has already dealt with, so repeating it
-                # would send the user to fix something that is now fixed.
+                # Why it is still not a chain AFTER the transitions were
+                # supplied; the original reason has been dealt with, and
+                # repeating it would send the user to fix something already
+                # fixed.
                 reason = patched_reason
 
     if requested == 'exact' and chain is None:
@@ -515,25 +447,22 @@ def _run_bayesian(
     return sampled['measurements'], sampled['boundaries'], {
         'method': 'gibbs',
         'requested': requested,
-        # Why the model is not a chain AS AUTHORED. None when it is one and the
-        # sampler ran by choice: reporting a "why it could not be solved exactly"
-        # against a model that could would be simply false, and would make the
-        # results page warn about a deliberate, valid decision.
+        # Why the model is not a chain AS AUTHORED, and None when it is one
+        # and the sampler ran by choice -- so the results page does not warn
+        # about a deliberate, valid decision.
         'reason': reason,
         # Nothing was supplied -- the sampler took the model as written.
         'implicit_boundaries': 0,
-        # ...but this is how many the exact solver would have needed, which is a
-        # different statement from `reason` and has to stay distinguishable from
-        # it: here the model COULD have been integrated exactly, and was not,
-        # because doing so would have changed it.
+        # ...but this is how many the exact solver would have needed: the
+        # model COULD have been integrated exactly and was not, because doing
+        # so would have changed it. A different statement from `reason`.
         'exact_needs_boundaries': exact_needs_boundaries,
         'sweeps': sampled['sweeps'],
         'convergence': sampled['convergence'],
         'converged': sampled['converged'],
-        # What the data said about each outlier model's shared offset scale, in
-        # the log10(years) OxCal reports its own U(0,n) posterior in -- so an
-        # analyst reproducing a published run can compare the inferred
-        # hyperparameter, not just the dates it fed into.
+        # Each outlier model's shared offset scale, in the log10(years) OxCal
+        # reports its own U(0,n) posterior in, so a published run's inferred
+        # hyperparameter can be compared directly.
         'outlier_scale': sampled['outlier_scale'],
     }, sampled.get('intervals')
 
@@ -542,14 +471,10 @@ def _job_progress(handle: jobs.JobHandle):
     """
     Adapt a JobHandle to the sampler's on_progress protocol.
 
-    The sampler's contract is that returning False stops the run (raising
-    gibbs.Cancelled), so cancellation is a return value here rather than an
-    exception thrown through the middle of a sweep loop.
-
-    Progress is sweeps against the cap, which is an upper bound: most runs
-    converge long before it and finish at a fraction. The bar is therefore
-    accompanied by the achieved convergence rather than left to imply that a
-    run stopping at 30% was cut short.
+    Returning False stops the run (raising gibbs.Cancelled), so cancellation
+    is a return value rather than an exception thrown mid-sweep. Progress is
+    sweeps against the cap, an upper bound most runs converge well short of,
+    which is why the UI shows convergence beside the bar.
     """
     def report(info: Dict) -> bool:
         cap = info.get('max_sweeps') or 0
@@ -566,19 +491,18 @@ def _job_progress(handle: jobs.JobHandle):
 
 def _tree_from_request(request: BayesianRequest) -> Tuple[Dict, Dict, List[Dict]]:
     """
-    Build a model tree for an incoming /analysis/bayesian request, which
-    still describes stratigraphy as contexts plus above/below relationships.
+    Build a model tree for an /analysis/bayesian request that describes
+    stratigraphy as contexts plus above/below relationships.
 
-    Returns (root, group_boundaries, tree_measurements) -- group_boundaries
-    maps each context to the pair of boundaries now bracketing it, so results
-    can still be reported per context.
+    Returns (root, group_boundaries, tree_measurements), where
+    group_boundaries maps each context to the pair of boundaries bracketing
+    it so results can still be reported per context.
     """
     measurements = [m.model_dump() for m in request.measurements]
 
     if request.model_tree is not None:
-        # The client authored the structure directly -- use it as given.
-        # There are no contexts to bracket, so nothing maps to the old
-        # per-context start/end shape; results are reported per boundary.
+        # The client authored the structure directly, so there are no
+        # contexts to bracket: results are reported per boundary.
         root = request.model_tree
         tree_measurements = [
             {**m, 'element_id': m.get('element_id')} for m in measurements
@@ -609,39 +533,23 @@ def _tree_from_request(request: BayesianRequest) -> Tuple[Dict, Dict, List[Dict]
 @router.post("/analysis/calibrate")
 def calibrate_single(measurement: CalibrateRequest, db: Session = Depends(get_db)):
     """
-    Calibrate a single radiocarbon measurement.
+    Calibrate a single radiocarbon measurement. The body is validated by
+    CalibrateRequest (schemas/sample.py).
 
-    The request body is validated by CalibrateRequest (schemas/sample.py):
-    age_bp/error_1sigma must be positive and within a sane range,
-    sample_type and curve_id must be one of the recognized values, and
-    sample_name can't be blank. Previously none of this was enforced --
-    a raw Dict body meant negative ages, zero error, or a typo'd curve_id
-    all passed straight through to calibration and either produced a
-    nonsense result or a bare KeyError instead of a clear 422.
-
-    Accepts two fields beyond the measurement itself:
-    - project_id: file the (saved) analysis under an existing project.
-      Leaving it out files the analysis as unassigned; it still shows up
-      in the analysis list and can be assigned to a project later.
-    - save (default True): set to False for a quick test run that
-      shouldn't clutter the project/analysis list at all -- when False,
-      nothing is written to the database (no Analysis, sample, or result
-      rows), and the response's "id" is null since there's no persisted
-      record to link to.
+    Beyond the measurement it accepts project_id, which files the saved
+    analysis under a project (omitting it leaves the analysis unassigned but
+    still listed), and save, which when False writes nothing to the database
+    for a quick test run and returns a null "id".
     """
     try:
         save = measurement.save
         project_id = _validate_project_id(measurement.project_id, db) if save else None
 
-        # Load appropriate curve (raises ValueError if unavailable/empty
-        # or, now, if curve_id somehow isn't one of the recognized ones --
-        # though CalibrateRequest already rejects that before we get here).
+        # Raises ValueError if the curve is unavailable or empty.
         curve_id = measurement.curve_id
         curve = get_curve(curve_id)
 
-        # Point estimates, HPD ranges, and a plottable distribution -- see
-        # _compute_calibration_stats for the full breakdown (shared with
-        # the analysis rerun path so the two can't drift out of sync).
+        # Point estimates, HPD ranges, and a plottable distribution.
         stats = _compute_calibration_stats(
             curve, measurement.age_bp, measurement.error_1sigma,
             measurement.delta_r, measurement.delta_r_error,
@@ -673,8 +581,7 @@ def calibrate_single(measurement: CalibrateRequest, db: Session = Depends(get_db
         }
 
         if not save:
-            # Quick test run -- nothing touches the database, so it never
-            # appears in a project or in the analysis list.
+            # Quick test run: nothing touches the database.
             return {"success": True, "data": response_data}
 
         # Create analysis record in database
@@ -689,16 +596,9 @@ def calibrate_single(measurement: CalibrateRequest, db: Session = Depends(get_db
         db.commit()
         db.refresh(analysis)
 
-        # Persist the sample itself too -- previously calibrate_single never
-        # created a RadiocarbonSample row at all, so this analysis had a
-        # result with no underlying measurement on record, and
-        # measurements_count in every response was a hardcoded `1` rather
-        # than reflecting anything actually stored.
-        #
-        # sample_type defaults to None in the schema (rather than always
-        # "terrestrial") specifically so this smart default -- infer
-        # "marine" from a marine curve when the caller doesn't say
-        # otherwise -- still applies.
+        # sample_type is None by default in the schema so this fallback --
+        # infer "marine" from a marine curve when the caller does not say --
+        # still applies.
         sample_type = measurement.sample_type or ('marine' if curve_id == 'marine20' else 'terrestrial')
         sample = RadiocarbonSample(
             analysis_id=analysis.id,
@@ -709,8 +609,8 @@ def calibrate_single(measurement: CalibrateRequest, db: Session = Depends(get_db
             sample_type=sample_type,
             curve_id=curve_id,
             # Persisted, not just applied above: a rerun recalibrates from
-            # the stored row, so an offset left off it would quietly undo
-            # the correction the first run made.
+            # the stored row, so an offset left off it would undo the
+            # correction the first run made.
             delta_r=measurement.delta_r,
             delta_r_error=measurement.delta_r_error,
             reservoir_age=measurement.reservoir_age,
@@ -722,10 +622,8 @@ def calibrate_single(measurement: CalibrateRequest, db: Session = Depends(get_db
         db.commit()
         db.refresh(sample)
 
-        # Persist the result too -- previously only the Analysis row was
-        # saved, so re-fetching this analysis later via GET
-        # /api/analysis/{id} (which is what the Results page actually uses)
-        # would always come back with an empty `results` list.
+        # Persisted so GET /api/analysis/{id}, which the Results page uses,
+        # comes back with a populated `results` list.
         analysis_result = AnalysisResult(
             analysis_id=analysis.id,
             sample_id=sample.id,
@@ -760,18 +658,14 @@ def calibrate_single(measurement: CalibrateRequest, db: Session = Depends(get_db
 @router.post("/analysis/calibrate-group")
 def calibrate_group(request: GroupCalibrationRequest, db: Session = Depends(get_db)):
     """
-    Calibrate several radiocarbon measurements independently -- each
-    exactly as /analysis/calibrate would calibrate it alone -- and save
-    them as one analysis, so they land on the Results page's shared-axis
-    plot and results table together, in chronological order.
+    Calibrate several measurements independently -- each exactly as
+    /analysis/calibrate would alone -- and save them as one analysis so they
+    share the Results page's plot and table in chronological order.
 
-    Where a Bayesian analysis asks "what do these dates imply together,
-    given how they relate stratigraphically", this is the plainer
-    question: lay several independent dates out on one timeline, with no
-    relationship asserted between them. Always saved -- unlike single
-    calibration there is no quick-preview mode here, on the same
-    reasoning the Bayesian endpoint doesn't have one either: a set of
-    dates worth calibrating together is normally worth keeping.
+    Where a Bayesian analysis asks what the dates imply together given their
+    stratigraphy, this lays independent dates out on one timeline with no
+    relationship asserted. Always saved: a set of dates worth calibrating
+    together is normally worth keeping.
     """
     try:
         project_id = _validate_project_id(request.project_id, db)
@@ -780,17 +674,15 @@ def calibrate_group(request: GroupCalibrationRequest, db: Session = Depends(get_
             name=request.name,
             analysis_type='group_calibration',
             status='completed',
-            # A group calibration has no solver to configure, but the one
-            # option it does take is recorded here so a rerun and an edit
-            # round-trip it the same way a Bayesian analysis's config does.
+            # No solver to configure, but the one option it takes is recorded
+            # so a rerun and an edit round-trip it.
             bayesian_config={'estimate_durations': request.estimate_durations},
             project_id=project_id,
         )
         db.add(analysis)
         db.flush()
 
-        # No group_id/element_id passed through -- a group calibration has
-        # no phases or model tree for a measurement to belong to.
+        # No group_id/element_id: a group calibration has no phases.
         saved_samples = []
         for measurement in request.measurements:
             sample = _sample_row(analysis.id, measurement)
@@ -806,7 +698,7 @@ def calibrate_group(request: GroupCalibrationRequest, db: Session = Depends(get_
             db.add(_calibration_result_row(analysis.id, sample.id, stats))
 
         # Pairwise differences, when asked for. One date has nothing to differ
-        # from, so the option is simply inert there rather than an error.
+        # from, so the option is inert rather than an error.
         if request.estimate_durations and len(saved_samples) > 1:
             analysis.intervals = _date_difference_block(saved_samples)
 
@@ -847,22 +739,12 @@ def bayesian_analysis(request: BayesianRequest, wait: bool = False,
     there is no analysis for a later poll to fetch results from and no row to
     hang a job on. A quick test run is answered in full, as before.
 
-    The request body is validated by BayesianRequest (schemas/sample.py):
-    every measurement goes through the same checks as /analysis/calibrate
-    (age_bp/error_1sigma bounds, known curve_id, non-blank sample_name),
-    at least one measurement is required, relationship values are
-    restricted to the three the solvers actually implement
-    (above/below/equal -- previously an unrecognized value like a typo'd
-    "beneath" was silently dropped with no error and no effect on the
-    model, since the if/elif chain that applies constraints has no else
-    branch), and mcmc_samples/tune/chains are bounded to a sane range
-    instead of accepting e.g. 0 or a negative chain count.
+    The request body is validated by BayesianRequest (schemas/sample.py).
 
-    Accepts the same project_id / save options as /analysis/calibrate.
-    Note that with save=False the MCMC run still happens in full (there's
-    no way to preview a Bayesian sequence result without actually running
-    it) -- only the database writes are skipped, so nothing is left
-    behind once the response is returned.
+    Accepts the same project_id / save options as /analysis/calibrate. With
+    save=False the run still happens in full -- there is no way to preview a
+    Bayesian result without running it -- and only the database writes are
+    skipped.
     """
     import traceback
     try:
@@ -881,13 +763,12 @@ def bayesian_analysis(request: BayesianRequest, wait: bool = False,
             db.add(analysis)
             db.commit()
             db.refresh(analysis)
-        # Captured now, as a plain string. The solve may run in another
-        # thread against another session, where the `analysis` object above
-        # is not usable but its id still is. None when nothing was saved.
+        # A plain string, because the solve may run in another thread against
+        # another session where the `analysis` object above is unusable.
         analysis_id = analysis.id if save else None
 
-        # Create group (phase) records first, so samples can reference their
-        # real DB group id via groups_map (client id -> persisted id).
+        # Groups first, so samples can reference their persisted group id via
+        # groups_map (client id -> persisted id).
         groups_map = {}
         if save:
             for group in request.groups:
@@ -916,13 +797,9 @@ def bayesian_analysis(request: BayesianRequest, wait: bool = False,
         if save:
             db.commit()
 
-        # Persist the stratigraphic relationships themselves too --
-        # previously these were only ever used transiently to build the
-        # MCMC model and never written to stratigraphic_relationships at
-        # all, so there was no way to review or re-display which
-        # constraints a saved analysis actually used. from_sample_id/
-        # to_sample_id are translated from the request's client-side ids
-        # to their real persisted sample/group ids.
+        # Persisted so a saved analysis can show which constraints it used.
+        # from_sample_id/to_sample_id are translated from the request's
+        # client-side ids to the persisted sample/group ids.
         if save:
             def _resolve_id(client_id: str, node_type: str) -> str:
                 return groups_map[client_id] if node_type == 'group' else samples_map[client_id]
@@ -940,37 +817,29 @@ def bayesian_analysis(request: BayesianRequest, wait: bool = False,
 
         def _solve_and_store(db: Session, handle) -> Tuple[Dict, Dict, Dict, Optional[Dict]]:
             """
-            Solve the model and write what it produced.
+            Solve the model and write what it produced. Serves both paths:
+            called directly for a synchronous run, or handed to the job queue.
 
-            Split out of the handler body so the same code serves both
-            paths: called directly for a synchronous run, or handed to the
-            job queue for the usual one. It closes over the request and
-            over groups_map/samples_map -- plain data and dicts of ids, all
-            of it safe to read from another thread -- but NOT over the
-            `analysis` row, which belongs to the request's session and is
-            re-fetched here from whichever session is running.
+            Closes over the request and groups_map/samples_map -- plain data,
+            safe to read from another thread -- but NOT over the `analysis`
+            row, which is re-fetched from whichever session is running.
             """
             analysis = (db.query(Analysis).filter(Analysis.id == analysis_id).first()
                         if analysis_id else None)
             if save and analysis is None:
                 raise ValueError(f"Analysis '{analysis_id}' no longer exists")
 
-            # _run_bayesian works with plain dicts (measurements keyed by
-            # 'id'/'age_bp'/etc, relationships keyed by 'from_sample_id' etc)
-            # -- converting the validated Pydantic models to dicts here keeps
-            # the solvers' existing dict-based interface untouched. This uses
-            # the request's own client-side ids throughout (not the persisted
-            # DB ids), since build_model() needs to match against the internal
-            # `ages` dict, which is also keyed by the client-side measurement id.
+            # The solvers take plain dicts, keyed by the request's own
+            # client-side ids rather than the persisted ones, because
+            # build_model() matches against an `ages` dict keyed the same way.
             root, group_boundaries, tree_measurements = _tree_from_request(request)
             results, boundary_results, solver, interval_block = _run_bayesian(
                 tree_measurements, root, request.bayesian_config.model_dump(),
                 on_progress=_job_progress(handle),
             )
-            # Report per-context start/end from the boundaries now bracketing each
-            # context, preserving the existing response shape. Note that adjacent
-            # contexts share a boundary, so one context's end and the next one's
-            # start are now the SAME parameter rather than two independent ones.
+            # Per-context start/end read off the boundaries bracketing each
+            # context. Adjacent contexts share a boundary, so one context's end
+            # and the next one's start are the SAME parameter.
             context_results = {}
             for group_id, (start_bid, end_bid) in group_boundaries.items():
                 start, end = boundary_results.get(start_bid), boundary_results.get(end_bid)
@@ -988,8 +857,7 @@ def bayesian_analysis(request: BayesianRequest, wait: bool = False,
                     sample_id = samples_map.get(measurement_id, measurement_id)
                     db.add(_analysis_result_row(analysis.id, sample_id, result))
 
-                # Persist each context's modelled start/end onto its SampleGroup
-                # row (client-side group id -> persisted DB id via groups_map).
+                # Each context's modelled start/end onto its SampleGroup row.
                 for client_group_id, ctx in context_results.items():
                     db_group_id = groups_map.get(client_group_id)
                     if not db_group_id:
@@ -999,36 +867,33 @@ def bayesian_analysis(request: BayesianRequest, wait: bool = False,
                         group_row.modeled_start = ctx['start']
                         group_row.modeled_end = ctx['end']
 
-                # Persist the model tree itself, with each boundary's posterior on
-                # it, translating the request's client-side ids to the persisted
-                # ones so the stored tree lines up with the stored samples.
+                # The tree itself, with each boundary's posterior on it and
+                # ids translated so it lines up with the stored samples.
                 _relabel_tree(root, groups_map)
                 for element in _iter_tree(root):
                     if element['element_type'] == 'boundary':
                         found = boundary_results.get(element['id'])
                         element['posterior'] = found['posterior'] if found else None
                 _persist_tree(analysis.id, root, db)
-                # Which phase each date ended up in, as decided when the tree was
-                # built. Recomputing it from groups_map instead would lose the
-                # dates that belong to no context: _tree_from_request gives those
-                # a phase of their own ("Unassigned dates"), and that phase's id
-                # is not a context id, so a groups_map lookup yields nothing and
-                # the date is stored pointing at no element at all -- which the
-                # next edit rejects as "not assigned to any model element".
+                # Which phase each date ended up in, as decided when the tree
+                # was built. Recomputing from groups_map would lose the dates
+                # in no context: _tree_from_request gives those an
+                # "Unassigned dates" phase whose id is not a context id, so
+                # the lookup would yield nothing and the date would be stored
+                # pointing at no element at all.
                 element_by_measurement = {
                     m['id']: m.get('element_id') for m in tree_measurements
                 }
                 for measurement in request.measurements:
                     sample_id = samples_map.get(measurement.id)
                     if request.model_tree is not None:
-                        # Client-authored tree: its phase ids are used as-is, so
-                        # the measurement's own element_id already points at one.
+                        # A client-authored tree keeps its phase ids, so the
+                        # measurement's element_id already points at one.
                         element_id = measurement.element_id
                     else:
-                        # The tree carries client-side context ids, which
-                        # _relabel_tree has just rewritten to the ids the contexts
-                        # were saved under; a generated phase id isn't in that map
-                        # and passes through unchanged.
+                        # _relabel_tree has just rewritten the tree's context
+                        # ids to the persisted ones; a generated phase id is
+                        # not in that map and passes through unchanged.
                         assigned = element_by_measurement.get(measurement.id)
                         element_id = groups_map.get(assigned, assigned)
                     if sample_id:
@@ -1037,20 +902,17 @@ def bayesian_analysis(request: BayesianRequest, wait: bool = False,
                         ).update({'element_id': element_id}, synchronize_session=False)
 
                 analysis.solver = solver
-                # Relabelled alongside the tree above: these records name
-                # phases by element id, and the tree's client-side ids have
-                # just been rewritten to the ones the contexts were saved
-                # under, so leaving them would file every duration against an
-                # element that no longer exists.
+                # Relabelled alongside the tree: these records name phases by
+                # element id, so leaving the client-side ids would file every
+                # duration against an element that does not exist.
                 analysis.intervals = _relabel_intervals(interval_block, groups_map)
                 analysis.status = 'completed'
                 db.commit()
             return results, context_results, solver, interval_block
 
         if save and not wait:
-            # Queued. The inputs are already persisted and the analysis is
-            # readable at its own URL, which is where the client is sent;
-            # the results arrive there when the job finishes.
+            # Queued. The inputs are persisted and the analysis is readable at
+            # its own URL, where the results arrive when the job finishes.
             analysis.status = 'pending'
             db.commit()
 
@@ -1068,7 +930,7 @@ def bayesian_analysis(request: BayesianRequest, wait: bool = False,
                         Analysis.id == analysis_id).first()
                     if worker_analysis is not None:
                         # Nothing was written, so it is back to never having
-                        # been run rather than to some earlier answer.
+                        # been run rather than to an earlier answer.
                         worker_analysis.status = 'pending'
                         db.commit()
                     raise jobs.Cancelled()
@@ -1102,10 +964,9 @@ def bayesian_analysis(request: BayesianRequest, wait: bool = False,
         results, context_results, solver, interval_block = _solve_and_store(
             db, jobs.NullHandle())
 
-        # Prepare response with summary stats + the compact plottable
-        # distribution (exclude the huge raw posterior_samples array, which
-        # can be tens of thousands of floats per sample -- the frontend only
-        # ever needs the binned distribution to render the plot)
+        # Summary stats plus the binned distribution. The raw
+        # posterior_samples array runs to tens of thousands of floats per
+        # sample and the frontend never needs it.
         def _without_raw_samples(stats: Dict) -> Dict:
             return {k: v for k, v in stats.items() if k != 'posterior_samples'}
 
@@ -1134,8 +995,8 @@ def bayesian_analysis(request: BayesianRequest, wait: bool = False,
                 "results": results_summary,
                 "contexts": context_summary,
                 "solver": solver,
-                # Durations and differences, when the run was asked for them.
-                # Null otherwise -- see Analysis.intervals.
+                # Null unless the run was asked for them; see
+                # Analysis.intervals.
                 "intervals": interval_block,
                 "measurements_count": len(request.measurements)
             }
@@ -1162,8 +1023,7 @@ def get_analysis(analysis_id: str, db: Session = Depends(get_db)):
     ).all()
     groups = db.query(SampleGroup).filter(SampleGroup.analysis_id == analysis_id).all()
 
-    # Only bayesian analyses have a stratigraphic model; a single calibration
-    # has nothing to structure.
+    # Only a bayesian analysis has a stratigraphic model to report.
     if analysis.analysis_type == 'bayesian':
         model_tree, tree_linearized = _get_or_migrate_tree(analysis, db)
     else:
@@ -1175,9 +1035,8 @@ def get_analysis(analysis_id: str, db: Session = Depends(get_db)):
             "name": g.name,
             "tpq_age_bp": g.tpq_age_bp,
             "taq_age_bp": g.taq_age_bp,
-            # Modelled start/end of this context's own span -- superseded by
-            # per-boundary posteriors on the tree, kept for analyses run
-            # before those existed.
+            # Superseded by per-boundary posteriors on the tree; kept for
+            # analyses run before those existed.
             "modeled_start": g.modeled_start,
             "modeled_end": g.modeled_end,
         }
@@ -1197,22 +1056,17 @@ def get_analysis(analysis_id: str, db: Session = Depends(get_db)):
             if element.get('element_type') == 'phase'
         ]
 
-    # For a Bayesian analysis, also compute each sample's plain/unmodelled
-    # calibration (i.e. what calibrating it alone, with no stratigraphic
-    # constraints, would give) -- lets the Results page show "unmodelled
-    # vs modelled" side by side, the standard way to see what effect the
-    # Bayesian model actually had. Computed fresh here rather than
-    # persisted: it's a cheap analytic calibration (no MCMC), and doing it
-    # at read time means it's always consistent with the sample's current
-    # age_bp/error_1sigma/curve_id with nothing to keep in sync. Not
-    # meaningful for a calibration-only analysis, where the single stored
-    # `probability_distribution` already *is* the unmodelled result.
+    # Each sample's unmodelled calibration -- what calibrating it alone would
+    # give -- so the Results page can show unmodelled against modelled.
+    # Computed fresh rather than persisted: it is a cheap analytic
+    # calibration, and doing it at read time keeps it consistent with the
+    # sample's current age_bp/error_1sigma/curve_id. Meaningless for a
+    # calibration-only analysis, where the stored distribution already IS the
+    # unmodelled result.
     #
-    # The HPD ranges themselves are returned, computed over the curve's full
-    # grid (see the resolution note below). A plottable series is ALSO kept
-    # here -- capped the same way `probability_distribution` already is --
-    # for the "prior" shadow the Results page can optionally overlay behind
-    # the modelled posterior; the HPD ranges alone can't draw that.
+    # HPD ranges are computed over the curve's full grid. A plottable series
+    # is kept alongside them for the optional "prior" shadow behind the
+    # modelled posterior, which the ranges alone cannot draw.
     unmodelled_by_sample_id: Dict[str, dict] = {}
     if analysis.analysis_type == 'bayesian':
         for r in results:
@@ -1233,11 +1087,9 @@ def get_analysis(analysis_id: str, db: Session = Depends(get_db)):
                     'distribution': curve.get_display_distribution(cal_ages, probs),
                 }
             except Exception:
-                # A sample whose curve_id can't be resolved (e.g. an old
-                # analysis predating a curve rename) shouldn't break the
-                # whole results page -- the modelled result is unaffected
-                # either way, this just leaves that one row's unmodelled
-                # column empty.
+                # A sample whose curve_id no longer resolves should not break
+                # the results page; the modelled result is unaffected, and
+                # only that row's unmodelled column is left empty.
                 continue
 
     return {
@@ -1247,66 +1099,53 @@ def get_analysis(analysis_id: str, db: Session = Depends(get_db)):
             "name": analysis.name,
             "analysis_type": analysis.analysis_type,
             "status": analysis.status,
-            # Why a failed run failed. Stored on the row since reruns existed,
-            # but never returned until now, so a 'failed' analysis gave the page
-            # nothing to show beyond the word "failed" -- and one of the ways to
-            # fail is now a deliberate choice (requiring the exact solver on a
-            # model that cannot support it), where the reason is the whole point.
+            # Why a failed run failed. One way to fail is a deliberate choice
+            # -- requiring the exact solver on a model that cannot support it
+            # -- where the reason is the whole point.
             "error_message": analysis.error_message,
             "created_at": analysis.created_at.isoformat(),
             "measurements_count": len(analysis.measurements),
             "project_id": analysis.project_id,
             "project_name": analysis.project.name if analysis.project else None,
-            # The MCMC settings this analysis was configured with -- returned
-            # so duplicating or editing it round-trips them instead of
-            # silently resetting to the schema defaults.
+            # Returned so duplicating or editing the analysis round-trips its
+            # settings instead of resetting to the schema defaults.
             "bayesian_config": analysis.bayesian_config or {},
-            # How these results were actually computed: the exact solver, or
-            # the SMC fallback and why the model needed it. NULL for an
+            # How these results were computed: the exact solver, or the
+            # MH/Gibbs sampler and why the model needed it. NULL for an
             # analysis run before this was recorded, which the Results page
             # renders as "not recorded" rather than claiming either method.
             "solver": analysis.solver,
-            # How long each sequence, phase and set of dated events lasted, and
-            # how far apart the phases sit -- present only when the run was
-            # asked for them. Null both for a run that was not and for one
-            # predating the option, which the Results page treats the same way:
-            # it offers to re-run rather than showing an empty table.
+            # Durations and separations, present only when the run was asked
+            # for them. Null otherwise, which the Results page answers by
+            # offering to re-run rather than showing an empty table.
             "intervals": analysis.intervals,
-            # The explicit model structure (nested sequences/phases/
-            # boundaries/hiatuses), migrated from the old contexts +
-            # relationships on first access. Boundary elements carry their
-            # own posterior once the analysis has been run.
+            # The model structure, migrated from contexts + relationships on
+            # first access. Boundary elements carry their own posterior once
+            # the analysis has been run.
             "model_tree": model_tree,
-            # True when the old relationship graph couldn't be expressed as a
+            # True when the relationship graph could not be expressed as a
             # tree and was flattened into one order -- strictly MORE
             # constrained than what it came from, so worth checking.
             "model_tree_linearized": tree_linearized,
-            # Real per-sample data, plus the stratigraphy (groups/
-            # relationships/TPQ-TAQ) actually used for this analysis, if
-            # any -- lets the Results page render a real (not "Sample N"
-            # placeholder) results table and, for a bayesian analysis, a
-            # read-only Harris matrix diagram of the constraints that went
-            # into the model.
+            # Per-sample data and the stratigraphy this analysis used, so the
+            # Results page can render a real results table and a read-only
+            # Harris matrix of the constraints that went into the model.
             "measurements": [
                 {
                     "id": s.id,
                     "sample_name": s.sample_name,
                     "age_bp": s.age_bp,
                     "error_1sigma": s.error_1sigma,
-                    # What the date was measured on and against. Returned
-                    # because the edit page rebuilds its draft from this
-                    # payload and resubmits it: omitting them made
-                    # loadFromAnalysis fall back to its defaults, so editing
-                    # an analysis rewrote every material as "unknown" and --
-                    # worse, since it changes the result -- recalibrated
-                    # marine samples against the terrestrial curve.
+                    # What the date was measured on and against. The edit page
+                    # rebuilds its draft from this payload and resubmits it,
+                    # so anything omitted here falls back to a default and is
+                    # silently rewritten by an edit.
                     "material_type": s.material_type,
                     "sample_type": s.sample_type,
                     "curve_id": s.curve_id,
                     "delta_r": s.delta_r,
                     "delta_r_error": s.delta_r_error,
-                    # Same reason: the edit page resubmits this payload, so
-                    # an outlier setting left out here would be silently
+                    # Same reason: omitted here, an outlier setting would be
                     # switched off by editing the analysis.
                     "outlier_prior": s.outlier_prior,
                     "outlier_model": s.outlier_model,
@@ -1321,11 +1160,9 @@ def get_analysis(analysis_id: str, db: Session = Depends(get_db)):
                 }
                 for s in analysis.measurements
             ],
-            # The contexts a date can belong to. For an analysis whose
-            # structure was authored as a tree there are no SampleGroup rows,
-            # so these are derived from the tree's phases -- keeping the
-            # "which context is this date in" displays working off one
-            # representation rather than requiring duplicate storage.
+            # The contexts a date can belong to. An analysis authored as a
+            # tree has no SampleGroup rows, so these come from the tree's
+            # phases rather than being stored twice.
             "groups": groups_payload,
             "relationships": [
                 {
@@ -1350,19 +1187,15 @@ def get_analysis(analysis_id: str, db: Session = Depends(get_db)):
                     "hpd_68_ranges": r.hpd_68_ranges,
                     "hpd_95_ranges": r.hpd_95_ranges,
                     "probability_distribution": r.probability_distribution,
-                    # [{confidence, ranges}] at each level the page offers,
-                    # computed over the curve's full grid -- see above.
+                    # [{confidence, ranges}] at each level the page offers.
                     "unmodelled_hpd_ranges": unmodelled_by_sample_id.get(r.sample_id, {}).get('hpd_ranges'),
-                    # The same unmodelled calibration as a plottable series,
-                    # for the optional "prior" shadow behind the modelled
-                    # posterior on the Results page's plots.
+                    # The same calibration as a plottable series, for the
+                    # optional "prior" shadow behind the modelled posterior.
                     "unmodelled_distribution": unmodelled_by_sample_id.get(r.sample_id, {}).get('distribution'),
-                    # Diagnostics, so the results page can flag a suspect
-                    # date in place rather than making someone download the
-                    # CSV to find out. Null means not computed -- for
-                    # agreement, an analysis that predates it; for the
-                    # outlier probability, a date with no outlier model --
-                    # which is not the same as a clean result.
+                    # Diagnostics, so the results page can flag a suspect date
+                    # in place. Null means not computed -- for the outlier
+                    # probability, a date with no outlier model -- which is
+                    # not the same as a clean result.
                     "agreement_index": r.agreement_index,
                     "outlier_probability": r.outlier_probability,
                 }
@@ -1375,11 +1208,9 @@ def _hpd_segments(ranges) -> List[List[float]]:
     """
     A stored HPD region as bare [min, max] pairs, oldest range first.
 
-    Kept as disjoint segments rather than collapsed to one min/max: a
-    calibrated HPD is genuinely multi-modal wherever the curve plateaus, and
-    a single span would silently claim the probability sitting in the gap
-    between two peaks (the same reason utils/dateFormat.formatHPDRanges
-    reports every range separately).
+    Kept disjoint rather than collapsed to one min/max: a calibrated HPD is
+    genuinely multi-modal wherever the curve plateaus, and a single span would
+    claim the probability sitting in the gap between two peaks.
     """
     if not ranges:
         return []
@@ -1394,15 +1225,12 @@ def _hpd_segments(ranges) -> List[List[float]]:
 
 def _analysis_intervals(results) -> List[Dict]:
     """
-    Per-sample HPD geometry for a list row, small enough to ship for several
-    analyses at once: two sets of segments and the point estimate, and none
-    of the posterior arrays the detail endpoint carries. No sample name --
-    at list size the bars carry no labels, and the detail page is where a
-    reader asks which sample is which.
+    Per-sample HPD geometry for a list row: two sets of segments and the
+    point estimate, and none of the posterior arrays the detail endpoint
+    carries. No sample name, since bars at list size carry no labels.
 
-    Results with no stored ranges are omitted rather than sent as nulls --
-    a sample the solver never produced an interval for has nothing to draw,
-    and an empty list is what "nothing to draw" already means downstream.
+    Results with no stored ranges are omitted rather than sent as nulls: an
+    empty list is already what "nothing to draw" means downstream.
     """
     out = []
     for r in results:
@@ -1419,12 +1247,9 @@ def _analysis_intervals(results) -> List[Dict]:
 
 def _analysis_span(results) -> Optional[List[float]]:
     """
-    [min, max] cal BP across every sample's 95% HPD, or None when nothing in
-    the analysis has been solved yet.
-
-    This is the envelope of the intervals above, not an interval itself:
-    it says where the analysis sits on a calendar axis, which is what lets
-    several analyses share one axis without each one measuring its own.
+    [min, max] cal BP across every sample's 95% HPD, or None when nothing has
+    been solved yet. The envelope of the intervals above rather than an
+    interval itself, so several analyses can share one calendar axis.
     """
     edges = [v for r in results for seg in _hpd_segments(r.hpd_95_ranges) for v in seg]
     return [min(edges), max(edges)] if edges else None
@@ -1439,12 +1264,8 @@ def list_analyses(
     db: Session = Depends(get_db),
 ):
     """
-    List analyses, most recent first.
-
-    By default returns analyses across all projects (used for the
-    dashboard's short "recent activity" list). Pass project_id to scope
-    to one project (used by the project detail page), or unassigned=true
-    to list only analyses that aren't filed under any project.
+    List analyses, most recent first, across all projects by default. Pass
+    project_id to scope to one, or unassigned=true for those filed under none.
     """
     query = db.query(Analysis)
     if unassigned:
@@ -1453,9 +1274,8 @@ def list_analyses(
         query = query.filter(Analysis.project_id == project_id)
 
     total = query.count()
-    # Eager-load the results: the serializer below reads every result's HPD
-    # ranges to build each analysis's calendar span, and lazy-loading those
-    # is one SELECT per analysis on a list endpoint.
+    # Eager-loaded: the serializer reads every result's HPD ranges to build
+    # each analysis's calendar span, which would be one SELECT per analysis.
     analyses = query.order_by(Analysis.created_at.desc()).options(
         selectinload(Analysis.results)
     ).offset(
@@ -1475,11 +1295,10 @@ def list_analyses(
                     "measurements_count": len(a.measurements),
                     "project_id": a.project_id,
                     "project_name": a.project.name if a.project else None,
-                    # The calendar answer, so a list of analyses can show what
-                    # each one FOUND rather than only that it finished. Both
-                    # fields are derived from the same result rows by
-                    # _analysis_intervals below, so the span can never
-                    # disagree with the intervals drawn inside it.
+                    # The calendar answer, so a list shows what each analysis
+                    # FOUND rather than only that it finished. Both come from
+                    # the same result rows, so the span cannot disagree with
+                    # the intervals drawn inside it.
                     "calendar_span": _analysis_span(a.results),
                     "intervals": _analysis_intervals(a.results),
                 }
@@ -1496,18 +1315,14 @@ def list_analyses(
 @router.delete("/analysis/{analysis_id}")
 def delete_analysis(analysis_id: str, db: Session = Depends(get_db)):
     """
-    Permanently delete an analysis and everything tied to it (samples,
-    results, stratigraphic relationships, groups). Unlike project deletion,
-    there's no "unassign and keep" option -- a calibration/Bayesian result
-    has no meaning outside the analysis it belongs to.
+    Permanently delete an analysis and everything tied to it. Unlike project
+    deletion there is no "unassign and keep": a result has no meaning outside
+    its analysis.
 
-    Analysis.measurements/results cascade via the ORM relationship, but
-    SampleGroup and StratigraphicRelationship reference analysis_id
-    directly with no cascade configured (see models.py), and neither has
-    an ON DELETE CASCADE at the DB level -- so they're deleted explicitly
-    here, in dependency order: results and relationships first (nothing
-    references them), then samples (referenced by results and by group_id),
-    then groups (referenced by samples), then the analysis itself.
+    SampleGroup, StratigraphicRelationship and ModelElement have no cascade at
+    either the ORM or the DB level, so everything is deleted explicitly in
+    dependency order: results and relationships, then samples, then groups,
+    then the analysis.
     """
     analysis = db.query(Analysis).filter(Analysis.id == analysis_id).first()
     if not analysis:
@@ -1527,9 +1342,8 @@ def delete_analysis(analysis_id: str, db: Session = Depends(get_db)):
 @router.patch("/analysis/{analysis_id}")
 def update_analysis(analysis_id: str, updates: Dict, db: Session = Depends(get_db)):
     """
-    Update an analysis's project assignment (and/or name). Used to file an
-    existing analysis into a project after the fact, or move it between
-    projects -- pass project_id: null to unassign it.
+    Update an analysis's project assignment and/or name. Pass
+    project_id: null to unassign it.
     """
     analysis = db.query(Analysis).filter(Analysis.id == analysis_id).first()
     if not analysis:
@@ -1557,38 +1371,27 @@ def update_analysis(analysis_id: str, updates: Dict, db: Session = Depends(get_d
 def _rerun_analysis(analysis: Analysis, db: Session,
                     on_progress: Optional[Callable[[Dict], bool]] = None) -> None:
     """
-    Recompute an already-saved analysis's results from its own persisted
-    inputs -- no new Analysis/RadiocarbonSample/SampleGroup rows, since
-    the inputs aren't changing, only the computed results. Used by both
-    the single-analysis and project-level rerun endpoints below.
+    Recompute a saved analysis's results from its own persisted inputs. No
+    new input rows are written, only the results. Used by both the
+    single-analysis and project-level rerun endpoints.
 
-    Raises on failure (curve/MCMC error, no samples, etc); callers are
-    responsible for catching it, marking the analysis 'failed', and
-    rolling back -- this function itself only commits on success.
+    Raises on failure and commits only on success, so callers are responsible
+    for catching, marking the analysis 'failed', and rolling back.
     """
     samples = list(analysis.measurements)
     if not samples:
         raise ValueError("Analysis has no measurements to rerun")
 
     if analysis.analysis_type in ('calibration', 'group_calibration'):
-        # Every sample, for both types. A 'calibration' analysis holds exactly
-        # one date and a 'group_calibration' holds several, but the work is
-        # identical either way -- each date is calibrated against its own curve
-        # with no model relating them -- so the difference belongs in what the
-        # results page calls it, not in what gets computed.
-        #
-        # This used to read samples[0] for 'calibration', which was true when a
-        # single-date analysis was the only way to reach it. Deploying several
-        # dates under that type then dropped all but the first, without saying
-        # so. The deploy endpoint no longer creates that state
-        # (api/project_samples.deploy_samples routes it to group_calibration),
-        # and looping here means an analysis already stored in it is repaired
-        # by a rerun rather than truncated again.
+        # Every sample, for both types: the work is identical -- each date
+        # calibrated against its own curve with no model relating them -- so
+        # the difference is only what the results page calls it. Looping
+        # rather than reading samples[0] also repairs an analysis stored as
+        # 'calibration' with several dates.
         #
         # Results are matched to samples by id, so a rerun updates each date's
-        # existing row rather than accumulating duplicates. The member set does
-        # not change between a save and a rerun -- that goes through duplicate
-        # or a fresh calibrate-group instead.
+        # row rather than accumulating duplicates. The member set never
+        # changes between a save and a rerun.
         existing_by_sample = {
             r.sample_id: r
             for r in db.query(AnalysisResult).filter(AnalysisResult.analysis_id == analysis.id).all()
@@ -1603,9 +1406,8 @@ def _rerun_analysis(analysis: Analysis, db: Session,
             result = _calibration_result_row(analysis.id, sample.id, stats, existing)
             if not existing:
                 db.add(result)
-        # Recomputed on a rerun rather than left as it was: a rerun exists to
-        # pick up an edited date, and a difference between two dates is not
-        # still true once one of them has moved.
+        # Recomputed rather than left as it was: a rerun exists to pick up an
+        # edited date, and a difference is not still true once one has moved.
         analysis.intervals = (
             _date_difference_block(samples)
             if (analysis.bayesian_config or {}).get('estimate_durations')
@@ -1618,8 +1420,8 @@ def _rerun_analysis(analysis: Analysis, db: Session,
             StratigraphicRelationship.analysis_id == analysis.id
         ).all()
 
-        # The model structure comes from the analysis's own persisted tree,
-        # migrated from the old contexts + relationships on first access.
+        # From the analysis's own persisted tree, migrated from contexts +
+        # relationships on first access.
         root, _linearized = _get_or_migrate_tree(analysis, db)
         if root is None:
             raise ValueError("Analysis has no model structure to run")
@@ -1647,12 +1449,12 @@ def _rerun_analysis(analysis: Analysis, db: Session,
             on_progress=on_progress,
         )
         analysis.solver = solver
-        # No relabelling here, unlike a fresh run: the tree came out of the
-        # database, so every id in these records is already the persisted one.
+        # No relabelling, unlike a fresh run: the tree came out of the
+        # database, so every id is already the persisted one.
         analysis.intervals = interval_block
 
-        # Store each boundary's posterior on its element, and mirror it onto
-        # the old per-context start/end for anything still reading that.
+        # Each boundary's posterior on its element, mirrored onto the
+        # per-context start/end for anything still reading that.
         for element_row in db.query(ModelElement).filter(
             ModelElement.analysis_id == analysis.id
         ).all():
@@ -1680,10 +1482,8 @@ def _rerun_analysis(analysis: Analysis, db: Session,
         for sample_id, result in results.items():
             db.add(_analysis_result_row(analysis.id, sample_id, result))
 
-        # Refresh every group's modelled start/end -- explicitly cleared
-        # for a group no longer in context_results (shouldn't happen since
-        # the member set is unchanged between reruns, but keeps stale data
-        # from lingering if it ever did).
+        # Explicitly cleared for a group not in context_results, so stale
+        # data cannot linger.
         for group_row in groups:
             ctx = context_results.get(group_row.id)
             group_row.modeled_start = ctx['start'] if ctx else None
@@ -1700,11 +1500,8 @@ def _rerun_analysis(analysis: Analysis, db: Session,
 def _run_analysis_job(analysis_id: str):
     """
     The work function for an 'analysis_run' job: solve one saved analysis
-    from its own persisted inputs.
-
-    Takes an id rather than an Analysis, because the row has to be loaded in
-    the worker's own session -- the request's was closed when its response
-    was sent.
+    from its own persisted inputs. Takes an id rather than an Analysis
+    because the row must be loaded in the worker's own session.
     """
     def work(db: Session, handle: jobs.JobHandle) -> Dict:
         analysis = db.query(Analysis).filter(Analysis.id == analysis_id).first()
@@ -1716,9 +1513,8 @@ def _run_analysis_job(analysis_id: str):
         try:
             _rerun_analysis(analysis, db, on_progress=_job_progress(handle))
         except gibbs.Cancelled:
-            # A cancelled run wrote nothing -- _rerun_analysis commits only
-            # on success -- so the analysis keeps the results it already had
-            # and goes back to saying so.
+            # _rerun_analysis commits only on success, so a cancelled run
+            # leaves the analysis with the results it already had.
             db.rollback()
             analysis = db.query(Analysis).filter(Analysis.id == analysis_id).first()
             if analysis is not None:
@@ -1737,27 +1533,23 @@ def _run_analysis_job(analysis_id: str):
     return work
 
 
-# Not `status_code=202` on the decorator: that would be the route's default
-# for BOTH branches, and the wait=true branch answers 200 with a finished
-# result. The queued branch sets 202 on its own response instead.
+# No `status_code=202` on the decorator: that would apply to BOTH branches,
+# and wait=true answers 200 with a finished result. The queued branch sets 202
+# on its own response.
 @router.post("/analysis/{analysis_id}/rerun")
 def rerun_analysis(analysis_id: str, wait: bool = False,
                    db: Session = Depends(get_db)):
     """
-    Recompute an already-saved analysis's results in place, from its own
-    persisted inputs -- same analysis id/URL, old results replaced. Useful
-    e.g. after a change to the underlying model (like the Boundary
-    parameter change for context Modelled Start/End) to refresh stale
-    results without re-entering every input from scratch.
+    Recompute a saved analysis's results in place from its own persisted
+    inputs -- same id and URL, old results replaced.
 
-    Queued rather than run here: a Bayesian model takes tens of seconds and
-    can take minutes (see docs/ASYNC_JOBS_PLAN.md). Answers 202 with a
-    job_id to poll at GET /api/jobs/{job_id}.
+    Queued rather than run here, since a Bayesian model takes tens of seconds
+    and can take minutes (docs/ASYNC_JOBS_PLAN.md): answers 202 with a job_id
+    to poll at GET /api/jobs/{job_id}.
 
-    `wait=true` runs it in the request and answers 200 when it is finished,
-    which is the old behaviour. Kept permanently, not as a migration aid:
-    this app has no client library, so anything scripting it from outside a
-    browser has no event loop to poll from.
+    `wait=true` runs it in the request and answers 200 when finished. Kept
+    permanently, because this app has no client library and anything
+    scripting it from outside a browser has no event loop to poll from.
     """
     analysis = db.query(Analysis).filter(Analysis.id == analysis_id).first()
     if not analysis:
@@ -1787,21 +1579,17 @@ def rerun_analysis(analysis_id: str, wait: bool = False,
 @router.put("/analysis/{analysis_id}/model-tree")
 def replace_model_tree(analysis_id: str, payload: Dict, db: Session = Depends(get_db)):
     """
-    Replace an analysis's model structure -- the nested tree of Sequences,
-    Phases, Boundaries and Hiatuses (see services/model_tree.py).
+    Replace an analysis's model structure (services/model_tree.py).
 
     Body: {"model_tree": {...}, "sample_elements": {sample_id: element_id}}.
     `sample_elements` reassigns which phase each date belongs to; dates left
     out keep their current assignment.
 
     Validated by model_tree.validate_tree before anything is written, so a
-    structurally impossible model (a hiatus not between boundaries, a date
-    attached to a boundary, a duplicated element id) is rejected with a 422
-    rather than surfacing much later as a confusing MCMC failure.
-
-    Any existing results are cleared and status returns to 'pending': they
-    were computed under the previous structure and would otherwise be shown
-    alongside a model that no longer produced them.
+    structurally impossible model is rejected with a 422 rather than
+    surfacing later as a confusing MCMC failure. Existing results are cleared
+    and status returns to 'pending', since they were computed under the
+    previous structure.
     """
     analysis = db.query(Analysis).filter(Analysis.id == analysis_id).first()
     if not analysis:
@@ -1860,16 +1648,12 @@ def replace_model_tree(analysis_id: str, payload: Dict, db: Session = Depends(ge
 @router.post("/analysis/{analysis_id}/duplicate")
 def duplicate_analysis(analysis_id: str, db: Session = Depends(get_db)):
     """
-    Deep-copy an analysis's INPUTS into a brand-new analysis, so a variant
-    can be built from an existing one instead of re-entering every date by
-    hand ("the same dates, but grouped differently").
+    Deep-copy an analysis's INPUTS into a new analysis, so a variant can be
+    built from an existing one -- "the same dates, but grouped differently".
 
-    Copies the samples, contexts (SampleGroups) and stratigraphic
-    relationships, remapping old ids to the new rows' ids -- the same
-    groups_map/samples_map translation bayesian_analysis does when first
-    persisting a request. Results are deliberately NOT copied and status is
-    'pending': the copy has inputs but has not been run, so it can be
-    edited first (PUT /analysis/{id}/inputs) and then run
+    Copies the samples, contexts and stratigraphic relationships, remapping
+    ids to the new rows'. Results are NOT copied and status is 'pending', so
+    the copy can be edited (PUT /analysis/{id}/inputs) and then run
     (POST /analysis/{id}/rerun).
     """
     source = db.query(Analysis).filter(Analysis.id == analysis_id).first()
@@ -1893,8 +1677,8 @@ def duplicate_analysis(analysis_id: str, db: Session = Depends(get_db)):
             name=group.name,
             tpq_age_bp=group.tpq_age_bp,
             taq_age_bp=group.taq_age_bp,
-            # modeled_start/end deliberately left null -- they're results,
-            # and this copy hasn't been run.
+            # modeled_start/end left null: they are results, and this copy
+            # has not been run.
         )
         db.add(new_group)
         db.flush()
@@ -1903,8 +1687,7 @@ def duplicate_analysis(analysis_id: str, db: Session = Depends(get_db)):
     samples_map: Dict[str, str] = {}
     for sample in source.measurements:
         # A stored row carries the same attribute names a request
-        # measurement does, so duplicating goes through the one builder too
-        # -- this copy had already fallen behind on the outlier settings.
+        # measurement does, so duplicating uses the one builder too.
         new_sample = _sample_row(
             copy.id, sample,
             group_id=groups_map.get(sample.group_id) if sample.group_id else None,
@@ -1923,9 +1706,8 @@ def duplicate_analysis(analysis_id: str, db: Session = Depends(get_db)):
         from_id = lookup.get(rel.from_sample_id)
         to_id = to_lookup.get(rel.to_sample_id)
         if not from_id or not to_id:
-            # A relationship whose endpoint no longer resolves (shouldn't
-            # happen, but the columns are polymorphic with no FK to enforce
-            # it) is dropped rather than copied dangling.
+            # Dropped rather than copied dangling. The columns are
+            # polymorphic, so no FK enforces this.
             continue
         db.add(StratigraphicRelationship(
             analysis_id=copy.id,
@@ -1936,9 +1718,8 @@ def duplicate_analysis(analysis_id: str, db: Session = Depends(get_db)):
             relationship=rel.relationship,
         ))
 
-    # Copy the model structure too, remapping element ids so the copy's
-    # phases are its own rows and its dates point at them. Boundary
-    # posteriors are dropped -- they're results, and the copy hasn't run.
+    # Element ids are remapped so the copy's phases are its own rows and its
+    # dates point at them. Boundary posteriors are dropped as results.
     source_tree = rows_to_tree(
         db.query(ModelElement).filter(ModelElement.analysis_id == source.id).all()
     )
@@ -1982,42 +1763,29 @@ def replace_analysis_inputs(
     db: Session = Depends(get_db),
 ):
     """
-    Replace a saved analysis's inputs (measurements, contexts,
-    stratigraphic relationships, MCMC config) wholesale -- the "modify"
-    half of duplicate-and-modify. Until this existed an analysis's inputs
-    were fixed at creation, so varying a model meant rebuilding it from
-    scratch.
+    Replace a saved analysis's inputs -- measurements, contexts,
+    relationships, config -- wholesale: the "modify" half of
+    duplicate-and-modify.
 
-    Reuses BayesianRequest for validation, so an edit gets exactly the same
-    checks a fresh analysis does: cycle detection, dangling group/
-    relationship references, and TPQ/TAQ contradictions are all rejected
-    with a 422 before anything is written.
+    Reuses BayesianRequest for validation, so an edit gets the same checks a
+    fresh analysis does: cycle detection, dangling references and TPQ/TAQ
+    contradictions are rejected with a 422 before anything is written.
 
-    Any existing results are DELETED and each context's modelled start/end
-    cleared, since they were computed from the old inputs and would
-    otherwise be silently mismatched against what's now displayed
-    alongside them; status goes back to 'pending' until the analysis is
-    re-run.
+    Existing results are DELETED and each context's modelled start/end
+    cleared, since they came from the old inputs; status returns to 'pending'
+    until the analysis is re-run.
 
-    `analysis_type` in the body CONVERTS the analysis, and that is the point:
-    an edit that changes the type has to change THIS analysis. Before it was
-    read, only a Bayesian edit came through here at all -- switching a saved
-    analysis to a group calibration created a second one instead, so the
-    analysis being edited was left behind as a pending duplicate under the
-    same name. Deploying a project's dates hit that every time, since
-    deploying always creates a pending Bayesian analysis to edit.
-
-    Omitting it leaves the type alone, which is what an older client sends
-    and what an ordinary same-type edit means.
+    `analysis_type` in the body CONVERTS this analysis rather than creating a
+    second one. Omitting it leaves the type alone, which is what an ordinary
+    same-type edit means.
     """
     analysis = db.query(Analysis).filter(Analysis.id == analysis_id).first()
     if not analysis:
         raise HTTPException(status_code=404, detail="Analysis not found")
 
     try:
-        # Drop the old inputs and results. Order matters (see
-        # delete_analysis): results and relationships first, then samples,
-        # then the groups the samples referenced.
+        # Order matters (see delete_analysis): results and relationships
+        # first, then samples, then the groups the samples referenced.
         db.query(AnalysisResult).filter(
             AnalysisResult.analysis_id == analysis_id
         ).delete(synchronize_session=False)
@@ -2030,11 +1798,10 @@ def replace_analysis_inputs(
         db.query(SampleGroup).filter(
             SampleGroup.analysis_id == analysis_id
         ).delete(synchronize_session=False)
-        # The model tree describes the structure being replaced, so it goes
-        # too -- it is rebuilt from the new contexts/relationships on the
-        # next read or run (_get_or_migrate_tree). Leaving it would point
-        # phases at deleted contexts and dates at elements that no longer
-        # exist.
+        # The tree describes the structure being replaced, and is rebuilt
+        # from the new contexts/relationships on the next read or run
+        # (_get_or_migrate_tree). Leaving it would point phases at deleted
+        # contexts and dates at elements that no longer exist.
         db.query(ModelElement).filter(
             ModelElement.analysis_id == analysis_id
         ).delete(synchronize_session=False)
@@ -2055,10 +1822,9 @@ def replace_analysis_inputs(
         samples_map: Dict[str, str] = {}
         for measurement in request.measurements:
             if request.model_tree is not None:
-                # Client-authored tree: its phase ids are stored as-is, so the
-                # measurement's own element_id already names the phase it sits
-                # in. Falling back to group_id here would silently unassign
-                # every date, since a tree-authored analysis has no contexts.
+                # A client-authored tree keeps its phase ids, so element_id
+                # already names the phase. Falling back to group_id would
+                # unassign every date, as such an analysis has no contexts.
                 element_id = measurement.element_id
             else:
                 element_id = groups_map.get(measurement.group_id) if measurement.group_id else None
@@ -2084,12 +1850,10 @@ def replace_analysis_inputs(
                 relationship=rel.relationship,
             ))
 
-        # An explicitly authored tree is the authoritative structure (see
-        # BayesianRequest.model_tree), so store it instead of letting the
-        # deletion above stand. Without this the next read/run rebuilds a
-        # tree from the contexts and an empty relationship set, which does
-        # not merely lose the ordering -- it invents a new one, and every
-        # date lands in a synthetic "Unassigned dates" phase.
+        # An authored tree is the authoritative structure, so it is stored
+        # rather than left deleted. Otherwise the next read rebuilds a tree
+        # from the contexts and an empty relationship set, inventing an
+        # ordering and dropping every date into "Unassigned dates".
         if request.model_tree is not None:
             root = request.model_tree
             _relabel_tree(root, groups_map)
@@ -2098,12 +1862,10 @@ def replace_analysis_inputs(
         if request.name:
             analysis.name = request.name
         if request.analysis_type:
-            # 'calibration' means ONE date calibrated on its own. Several
-            # independent dates with no model between them IS a group
-            # calibration, so that is what several of them become -- the same
-            # promotion api/project_samples.deploy_samples_to_analysis makes,
-            # for the same reason, rather than storing a label the analysis
-            # does not fit. The response reports the type actually stored.
+            # 'calibration' means ONE date on its own, so several
+            # independent dates are promoted to a group calibration rather
+            # than stored under a label they do not fit. The response reports
+            # the type actually stored.
             analysis.analysis_type = (
                 'group_calibration'
                 if request.analysis_type == 'calibration' and len(request.measurements) > 1
@@ -2112,14 +1874,11 @@ def replace_analysis_inputs(
         analysis.bayesian_config = request.bayesian_config.model_dump()
         analysis.status = 'pending'
         analysis.error_message = None
-        # The recorded solver describes the structure just replaced, and
-        # editing the structure is exactly what changes which solver applies
-        # -- keeping it would label the pending analysis "exact" on the
-        # strength of a model that no longer exists. The rerun sets it again.
+        # Both describe the structure just replaced: the solver would label
+        # a pending analysis "exact" for a model that no longer exists, and
+        # every duration names a phase the new model may not have. The rerun
+        # sets the solver again.
         analysis.solver = None
-        # Same reasoning, more sharply: every duration and difference names a
-        # phase of the structure just replaced, so keeping them would report
-        # how long a phase lasted against a model that no longer has it.
         analysis.intervals = None
         db.commit()
     except HTTPException:
@@ -2134,9 +1893,7 @@ def replace_analysis_inputs(
             "id": analysis.id,
             "name": analysis.name,
             "status": analysis.status,
-            # The type actually stored, which is not always the one asked for
-            # -- see the promotion above. The client says so rather than
-            # showing the user a label the analysis does not carry.
+            # Not always the type asked for -- see the promotion above.
             "analysis_type": analysis.analysis_type,
             "measurements_count": len(request.measurements),
         },

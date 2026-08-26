@@ -1,43 +1,25 @@
-// Client-side HPD (highest posterior density) computation at an
-// arbitrary, user-selected confidence level (68.3% / 95.4% / 99.7%),
-// applied to a distribution the backend already sent in full -- so
-// switching confidence in the Results table UI is instant, with no
-// re-run or network round trip. Mirrors the selection logic in
-// backend/app/services/calibration.py's hpd_ranges_from_distribution
-// (rank points by density, take the highest-density ones first until
-// their cumulative share reaches the target confidence), applied to
-// whichever binned/gridded distribution the caller passes in.
+// Client-side HPD (highest posterior density) computation at the reader's
+// selected confidence level, applied to a distribution the backend already
+// sent in full -- so switching confidence in the Results table is instant.
+// Mirrors the selection in calibration.py's hpd_ranges_from_distribution.
 //
-// Every series passed in here is a probability DENSITY -- the solver's
-// posterior from exact_chain._plottable, and a plain calibration's series
-// from CalibrationCurve.get_display_distribution. That second one used to be
-// per-point masses, which is why the helpers below originally just summed the
-// values: on a uniform grid, and with masses, that was right.
+// Every series passed in is a probability DENSITY. The curves are not
+// uniformly spaced and a downsampled window can be uneven too, so these rank
+// by density -- the region wanted is the highest-DENSITY one -- while
+// accumulating MASS, which is density times the calendar width each point
+// stands for. The two coincide only on a uniform grid.
 //
-// Neither assumption holds in general. The curves are not uniformly spaced
-// (IntCal20 and SHCal20 step 1, 5, 10 and 20 years in different ranges), and
-// a downsampled window can be uneven too. So these rank by density -- the
-// region wanted is the highest-DENSITY one -- while accumulating mass, which
-// is density times the calendar width each point stands for. On a uniform
-// grid the two coincide, which is what kept it invisible.
-//
-// Two variants:
-//  - hpdRangesFromCurve: the full multi-range breakdown, since a calibration
-//    curve is non-monotonic and one measurement can map to several disjoint
-//    calendar peaks. A selected run's first/last point is the boundary.
-//  - hpdEnvelopeFromHistogram: a single overall envelope, widened by half a
-//    bin at each end because a point is the centre of the width it stands
-//    for, not its edge. This is the "as a single range" report used for
-//    modelled results.
+// Two variants: hpdRangesFromCurve gives the full multi-range breakdown, a
+// non-monotonic curve mapping one measurement to several disjoint peaks, and
+// hpdEnvelopeFromHistogram a single envelope widened by half a bin at each end
+// because a point is the centre of the width it stands for, not its edge.
 import type { HPDRange } from '@/types'
 
 /**
- * The calendar width each point stands for: half the gap to each neighbour.
- * An edge point is given its one neighbouring half twice rather than half a
- * cell, so it is not systematically under-weighted out of the region.
- *
- * Multiplying a density by this gives the point's probability mass, which is
- * what a confidence level is a share of.
+ * The calendar width each point stands for: half the gap to each neighbour, an
+ * edge point taking its one neighbouring half twice so it is not
+ * systematically under-weighted out of the region. Density times this is the
+ * point's probability mass, which is what a confidence level is a share of.
  */
 function cellWidths(ages: number[]): number[] {
   return ages.map((_, i) => {
@@ -53,15 +35,13 @@ function normalizedWeights(weights: number[]): number[] | null {
   return weights.map((w) => w / total)
 }
 
-/** Indices of `weights`, highest-density first, kept until their
- * cumulative share reaches `confidence` (at least one index is always
- * included, even if its own weight alone already exceeds the target). */
+/** Indices of `weights`, highest-density first, kept until their cumulative
+ * share reaches `confidence`. At least one is always included. */
 function selectHighestDensity(
   weights: number[],
   confidence: number,
-  /** Rank by this instead of by `weights`, when the two differ -- the region
-   *  wanted is the HIGHEST-DENSITY one, but what accumulates to the
-   *  confidence target is MASS. They coincide only on a uniform grid. */
+  /** Rank by this instead of `weights` when the two differ: the region wanted
+   *  is the highest-DENSITY one, but what accumulates to the target is MASS. */
   rankBy?: number[]
 ): number[] {
   const order = rankBy ?? weights
@@ -114,21 +94,16 @@ export function hpdRangesFromCurve(
 }
 
 /**
- * The three coverages this app reports HPD regions at, and the labels it
- * quotes them under.
- *
+ * The three coverages this app reports HPD regions at, and their labels.
  * "1 sigma" is the two-sided normal coverage of one standard deviation,
- * erf(1/sqrt(2)) = 0.6826894921, which rounds to 68.3% -- not the 68.2% this
- * app used to print, which was a truncation. Likewise 95.4% and 99.7%.
+ * erf(1/sqrt(2)) = 0.6826894921, which ROUNDS to 68.3%. Likewise 95.4%, 99.7%.
  *
- * These are not labels over a nominal level: `confidence` is the threshold the
- * HPD set is accumulated to, so the digits change the reported range. This
- * mirrors SIGMA_1/SIGMA_2/SIGMA_3 in backend/app/services/calibration.py,
- * which is where they are derived; JavaScript has no erf, so the digits are
- * written out here and pinned by a test. Both sides must agree, because the
- * page re-selects a region client-side from a distribution the backend
- * computed -- the two arriving at different levels is exactly the drift this
- * removes.
+ * `confidence` is the threshold the HPD set is accumulated to, so the digits
+ * change the reported range. Mirrors SIGMA_1/2/3 in
+ * backend/app/services/calibration.py, where they are derived; JavaScript has
+ * no erf, so they are written out here and pinned by a test. Both sides must
+ * agree, since the page re-selects a region from a backend-computed
+ * distribution.
  */
 export const SIGMA_1 = 0.6826894921370859
 export const SIGMA_2 = 0.9544997361036416
@@ -141,19 +116,17 @@ export const CONFIDENCE_LEVELS = [
 ] as const
 
 /**
- * The tighter of the two intervals a posterior plot draws: 1 sigma, fixed.
- * The outer band follows the reader's confidence selector; this one stays put
- * so there is a constant reference to read the selected level against.
+ * The tighter of the two intervals a posterior plot draws: 1 sigma, fixed. The
+ * outer band follows the reader's selector; this stays put as a constant
+ * reference to read the selected level against.
  */
 export const INNER_CONFIDENCE = SIGMA_1
 export const INNER_CONFIDENCE_LABEL = '68.3%'
 
 /**
- * One HPD band on a plot: the ranges to draw, and the level to call them.
- * The label travels WITH the ranges rather than being written into the plot
- * components, which is what used to let a figure say "95% HPD" while the
- * reader had selected 99.7% -- the legend can no longer name a level the
- * geometry was not computed at.
+ * One HPD band on a plot: the ranges to draw, and the level to call them. The
+ * label travels WITH the ranges rather than living in the plot components, so
+ * a legend cannot name a level the geometry was not computed at.
  */
 export interface HPDBand {
   /** The disjoint calendar ranges holding this share of the posterior. */
@@ -166,13 +139,12 @@ export interface HPDBand {
 }
 
 /**
- * The bands to draw for one posterior at the page's selected confidence,
- * outer first. Derived from the same distribution and the same selection
- * logic the results table reads, so a figure and the row above it cannot
- * report different numbers for the same quantity.
+ * The bands to draw for one posterior at the page's selected confidence, outer
+ * first. Same distribution and selection logic the results table reads, so a
+ * figure and the row above it cannot report different numbers.
  *
- * Selecting 68.3% collapses to a single band rather than drawing 1 sigma
- * twice at two strengths, which would claim a nesting that isn't there.
+ * Selecting 68.3% collapses to a single band rather than drawing 1 sigma twice
+ * at two strengths, which would claim a nesting that is not there.
  */
 export function hpdBands(
   distribution: Array<[number, number]> | undefined | null,
@@ -192,16 +164,10 @@ export function hpdBands(
 }
 
 /**
- * Bands from the backend's stored fixed-level ranges, for the preview
- * surfaces that have no confidence selector to follow.
- *
- * Labelled 68.3%/95.4%, which is what the backend now computes them at. They
- * used to be labelled a bare 68%/95% because that really was the level behind
- * them -- the stored ranges were accumulated to 0.68 and 0.95 while the
- * Results page re-selected at the sigma coverages, so the same posterior was
- * reported at two different levels depending on which surface showed it. Both
- * sides are on the sigma coverages now, so the distinction is gone and the
- * label can say what a reader expects to compare against.
+ * Bands from the backend's stored fixed-level ranges, for preview surfaces
+ * with no confidence selector to follow. Labelled 68.3%/95.4%, which is what
+ * the backend computes them at, so they compare directly with a Results page
+ * that re-selects at the same coverages.
  */
 export function storedHpdBands(
   hpd68Ranges: HPDRange[] | undefined | null,

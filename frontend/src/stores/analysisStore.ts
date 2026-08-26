@@ -1,11 +1,8 @@
 // Shared draft state for building a Bayesian analysis across two pages:
-// NewAnalysis.tsx (measurements) and Stratigraphy.tsx (the model tree +
-// TPQ/TAQ). Neither page persists anything to the backend until "Run
-// Analysis" is pressed back on NewAnalysis.tsx -- this store
-// just holds the in-progress draft in memory so navigating between the
-// two pages doesn't lose it. Cleared via reset() after a successful run
-// (or when starting a fresh calibration-only analysis, where none of this
-// applies).
+// NewAnalysis.tsx (measurements) and Stratigraphy.tsx (the model tree and
+// TPQ/TAQ). Neither persists anything until "Run Analysis", so this holds the
+// draft in memory across the navigation between them. Cleared via reset()
+// after a successful run.
 import { create } from 'zustand'
 import type { DraftMeasurement, DraftGroup, DraftRelationship, ModelElement } from '@/types'
 import { DateFormat, DEFAULT_DATE_FORMAT } from '@/utils/dateFormat'
@@ -23,17 +20,15 @@ export interface McmcConfig {
   // BayesianConfigInput.uniform_span_prior on the backend for what it does.
   // On by default there and here.
   uniform_span_prior: boolean
-  // Also estimate how long each sequence, phase and set of dated events
-  // lasted, and how far apart the phases sit. Off by default, matching
-  // BayesianConfigInput.estimate_durations on the backend -- a duration is a
-  // claim about a phase's extent that the analyst makes rather than one the
-  // app makes for them.
+  // Also estimate durations and separations. Off by default, matching
+  // BayesianConfigInput.estimate_durations: a duration is a claim about a
+  // phase's extent the analyst makes, not one the app makes for them.
   estimate_durations: boolean
 }
 
-// 4000 draws is how many posterior samples a result carries, not how long the
-// sampler runs: services/gibbs.py on the backend extends its own run until it
-// converges, and the exact solver has no run length at all.
+// How many posterior samples a result CARRIES, not how long the sampler runs:
+// services/gibbs.py extends its own run until it converges, and the exact
+// solver has no run length at all.
 export const DEFAULT_MCMC: McmcConfig = {
   solver: 'auto',
   mcmc_samples: 4000,

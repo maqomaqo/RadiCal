@@ -97,17 +97,10 @@ interface AnalysisResult {
   measurements_count: number
   project_id?: string | null
   project_name?: string | null
-  // The samples, groups, and stratigraphic relationships actually used --
-  // present for analyses saved after the stratigraphy feature was added;
-  // older stored analyses will have empty groups/relationships (there
-  // were none to persist) but still have measurements.
-  // Widened past what the Harris matrix needs: the citation strings name the
-  // curve each date was calibrated against, and curve_id is on the response
-  // even though MatrixMeasurement -- which exists for the diagram -- has no
-  // reason to carry it. The marine reservoir offset is here for the same
-  // reason: the Curve view draws each measurement against the curve, and for
-  // a marine date the value that can be read against a drawn curve is the
-  // measured age minus Delta-R.
+  // The samples, groups and relationships this analysis used. Wider than the
+  // Harris matrix needs: the citation strings name the curve each date was
+  // calibrated against, and the Curve view draws each measurement against the
+  // curve, where for a marine date the readable value is the age minus Delta-R.
   measurements?: Array<
     MatrixMeasurement & { curve_id?: string; delta_r?: number | null; delta_r_error?: number | null }
   >
@@ -115,35 +108,33 @@ interface AnalysisResult {
   // Explicit model structure; boundary elements carry their own posterior.
   model_tree?: ModelElement | null
   relationships?: DraftRelationship[]
-  // How the results were actually computed. Null for an analysis run before
-  // this was recorded, which is reported as unknown rather than assumed to be
-  // either method -- see the solver notice below.
+  // How the results were computed. Null for an analysis run before this was
+  // recorded, reported as unknown rather than assumed to be either method.
   solver?: {
     method: 'exact' | 'gibbs' | 'smc'
-    // What the analysis asked for. 'gibbs' here means the analyst chose OxCal's
-    // method deliberately, so a sampled result is not a fallback and must not be
+    // What the analysis asked for. 'gibbs' means the analyst chose OxCal's
+    // method deliberately, so the result is not a fallback and must not be
     // labelled as one.
     requested?: 'auto' | 'exact' | 'gibbs'
     reason?: string | null
-    // How many implied transitions were supplied to the solver that ran. Always
-    // 0 on the sampled path.
+    // Implied transitions supplied to the solver that ran; always 0 when
+    // sampled.
     implicit_boundaries?: number
-    // How many WOULD be needed for the exact solver to apply. Set only when that
-    // is why this was sampled -- a different statement from `reason`, which says
-    // the model cannot be integrated exactly at all.
+    // How many WOULD be needed for the exact solver to apply, set only when
+    // that is why this was sampled. Distinct from `reason`, which says the
+    // model cannot be integrated exactly at all.
     exact_needs_boundaries?: number
-    // Sampled path only. `converged` is against OxCal's own 0.95 target for the
+    // Sampled path only. `converged` is against OxCal's 0.95 target for the
     // overlap-integral convergence measure.
     sweeps?: number
     convergence?: number
     converged?: boolean
-    // Only ever set on analyses run before the SMC fallback was replaced.
+    // Legacy: set only on analyses run before the current sampler.
     draws?: number
     chains?: number
   } | null
-  // How long things lasted and how far apart they sit. Null when the run was
-  // not asked for them, which is not the same as "there are none" -- the page
-  // says so and points at the option rather than showing an empty table.
+  // Durations and separations. Null when the run was not asked for them, which
+  // is not "there are none" -- the page says so and points at the option.
   intervals?: IntervalsBlock | null
   results: SampleResult[]
 }
@@ -156,32 +147,27 @@ interface SampleResult {
   posterior_std?: number
   hpd_68?: [number, number]
   hpd_95?: [number, number]
-  // Full HPD breakdown, one or more disjoint ranges with their own
-  // probability share -- present for analyses computed after this
-  // reporting was added; older stored results may only have hpd_68/95.
+  // Full HPD breakdown: disjoint ranges each with their own probability
+  // share. An older stored result may only have hpd_68/95.
   hpd_68_ranges?: HPDRange[]
   hpd_95_ranges?: HPDRange[]
   probability_distribution?: Array<[number, number]>
   // How well the modelled posterior still fits this date's own unmodelled
-  // likelihood, as a percentage (Bronk Ramsey 1995). Null for an analysis
-  // computed before this existed.
+  // likelihood, as a percentage (Bronk Ramsey 1995).
   agreement_index?: number | null
   // Posterior probability (0-1) that the date does not belong to the
-  // population being modelled. Null when no outlier model was applied to
-  // it, which is not the same as a zero.
+  // population being modelled. Null when no outlier model was applied, which
+  // is not the same as a zero.
   outlier_probability?: number | null
-  // The plain/unmodelled calibration for this sample (no stratigraphic
-  // constraints applied) -- present only for a Bayesian analysis (see
-  // GET /api/analysis/:id), so "unmodelled vs modelled" can be
-  // compared side by side. For a calibration-only analysis,
-  // probability_distribution above already *is* the unmodelled result.
+  // This sample's unmodelled calibration, for the side-by-side comparison.
+  // Bayesian analyses only: for a plain calibration, probability_distribution
+  // above already IS the unmodelled result.
   //
-  // Served as finished HPD ranges, one entry per confidence level this
-  // page offers, rather than a series to derive them from: the server
-  // computes them over the calibration curve's full grid, where deriving
-  // them here would only have the plottable series, capped at 200 points.
-  // That difference showed up as the screen and the CSV disagreeing in
-  // their last digits about the same calibration.
+  // Served as finished HPD ranges, one per confidence level this page offers,
+  // rather than a series to derive them from: the server computes them over
+  // the curve's full grid, where deriving them here would have only the
+  // plottable series capped at 200 points -- which had the screen and the CSV
+  // disagreeing in their last digits.
   unmodelled_hpd_ranges?: Array<{ confidence: number; ranges: HPDRange[] }> | null
   // The same unmodelled calibration as a plottable series, for the optional
   // "prior" shadow behind the modelled posterior -- see showPrior below.
@@ -190,9 +176,8 @@ interface SampleResult {
 
 /**
  * One posterior to plot. Dates and boundaries are both modelled parameters
- * with a distribution, so they are normalised to a single shape and drawn by
- * the same component -- the sequence of plots then reads as the model does,
- * rather than as two separate lists.
+ * with a distribution, so they normalise to one shape drawn by one component,
+ * and the sequence of plots reads as the model does rather than as two lists.
  */
 interface PlottableSeries {
   key: string
@@ -202,11 +187,12 @@ interface PlottableSeries {
   /** Where it sits in the structure; null for a date the structure omits. */
   path: string | null
   distribution?: Array<[number, number]>
-  /** HPD bands at the page's selected confidence, outer first -- computed
-   *  from the same distribution the results table reads, so a figure and the
-   *  row above it can never report different numbers for one quantity. */
+  /** HPD bands at the page's selected confidence, outer first, from the same
+   *  distribution the results table reads -- so a figure and the row above it
+   *  cannot report different numbers for one quantity. */
   bands?: HPDBand[]
-  /** A date's plain calibration with no stratigraphic constraints applied; absent for a boundary, which has no such counterpart. */
+  /** A date's plain calibration, with no stratigraphic constraints. Absent
+   *  for a boundary, which has no such counterpart. */
   priorDistribution?: Array<[number, number]>
   pointEstimates: { mean?: number; median?: number; std?: number }
   /** The radiocarbon measurement this date came from -- only the Curve view
@@ -215,14 +201,10 @@ interface PlottableSeries {
 }
 
 /**
- * Copy the headline reading as it would be cited.
- *
- * One per page, beside the number the analysis was run to produce. There was
- * briefly one of these on every table row too; it was removed. Nobody
- * reassembles a results table a line at a time when CSV, JSON and PDF exports
- * carry the whole thing -- and sixty-odd buttons kept permanently in the DOM
- * at `opacity: 0` bought that non-feature a spacing shift on every numeric
- * cell and sixty-seven stops in the tab order.
+ * Copy the headline reading as it would be cited. One per page, beside the
+ * number the analysis was run to produce -- not one per table row, which the
+ * CSV, JSON and PDF exports already cover and which would cost a spacing shift
+ * on every numeric cell and sixty-odd extra tab stops.
  */
 function CopyCitation({ text }: { text: string }) {
   const [copied, setCopied] = useState(false)
@@ -244,8 +226,8 @@ function CopyCitation({ text }: { text: string }) {
           ml: 0.5,
           p: 0.25,
           verticalAlign: 'baseline',
-          // 24x24 is WCAG 2.5.8's floor; the negative margin keeps the target
-          // from pushing the line box taller than the text it sits in.
+          // 24x24 is WCAG 2.5.8's floor; the negative margin stops the target
+          // pushing the line box taller than the text it sits in.
           minWidth: 24,
           minHeight: 24,
           my: '-3px',
@@ -263,14 +245,10 @@ function CopyCitation({ text }: { text: string }) {
 
 /**
  * The outer bounds of a set of HPD ranges — the same "span" the posterior
- * column reports, derived for a column that arrives as ranges rather than as a
- * distribution.
- *
- * Both range columns now default to this and expand to the full breakdown on
- * request, so they state the same KIND of thing by default and can be compared
- * down the row. Before, one column showed a span and the one beside it showed
- * three ranges with percentages, which is why the unmodelled column took 48%
- * of the table and the answer took 16%.
+ * column reports, for a column that arrives as ranges rather than a
+ * distribution. Both range columns default to this and expand to the full
+ * breakdown on request, so by default they state the same KIND of thing and
+ * can be compared down the row.
  */
 function spanOfRanges(ranges: HPDRange[]): [number, number] | null {
   if (!ranges || ranges.length === 0) return null
@@ -309,12 +287,9 @@ function RangeCell({
 }
 
 /**
- * A column header that can unfold its own column.
- *
- * The control sits on the thing it changes rather than in the control band
- * above the table, which is what makes the table explorable rather than a
- * fixed choice someone else made: each range column is asked separately, in
- * place, and the reader can hold one open against the other closed.
+ * A column header that can unfold its own column. The control sits on the
+ * thing it changes rather than in the band above the table, so each range
+ * column is asked separately and one can be held open against the other.
  */
 function RangeColumnHeader({
   label,
@@ -370,14 +345,12 @@ function unmodelledRangesFor(
 }
 
 /**
- * A reading in the form it would be written into a manuscript. Built here
- * rather than at each call site so the string a reader copies is assembled
- * once, from the same envelope the cell beside it prints.
+ * A reading in the form it would be written into a manuscript, assembled once
+ * from the same envelope the cell beside it prints.
  *
- * Everything in it is a fact the page already holds -- the range at the
- * selected level, which curve produced it, which solver ran. Nothing is
- * inferred, and a part the page does not know is simply left out rather than
- * guessed at.
+ * Everything in it is a fact the page already holds: the range at the selected
+ * level, the curve, the solver. Nothing is inferred, and anything the page
+ * does not know is left out rather than guessed at.
  */
 export function citationLine(
   name: string,
@@ -386,15 +359,13 @@ export function citationLine(
   provenance: string[]
 ): string {
   // "span", matching the column it is copied from. A citation is the last
-  // place to call outer bounds an HPD: it is the one string that leaves the
-  // app and gets defended in review.
+  // place to call outer bounds an HPD -- it is the string defended in review.
   const qualifiers = [`${confidenceLabel} span`, ...provenance].filter(Boolean).join(', ')
   return `${name}: ${range} (${qualifiers})`
 }
 
-// Said in one place because it is said in two: the header's help control and
-// the persistent key under the table. Two copies of this drifting apart would
-// be the same defect the page had elsewhere, in prose instead of numbers.
+// Declared once because it appears twice: the header's help control and the
+// persistent key under the table.
 const DIAGNOSTICS_HELP =
   'A = agreement index: how well the modelled date still fits its own unmodelled ' +
   'calibration. 100 means the model left it where it was; above 100 means the model ' +
@@ -404,66 +375,49 @@ const DIAGNOSTICS_HELP =
   'an outlier probability greater than the prior it was given; "Assigned" means the ' +
   'data stayed close to the assigned prior.'
 
-// The three standard Gaussian-equivalent confidence levels radiocarbon
-// results are conventionally reported at (1/2/3-sigma) -- OxCal's own
-// convention, offered here as a single user choice rather than always
-// showing the fixed 68%/95% pair. Values and labels come from utils/hpd, which
-// mirrors the backend's own definition of them; they used to be written out
-// here, and the 1-sigma one was written out wrong (68.2%, a truncation of
-// 68.27% rather than a rounding).
+// The 1/2/3-sigma levels radiocarbon results are conventionally reported at,
+// offered as a single user choice rather than a fixed 68%/95% pair. Values and
+// labels come from utils/hpd, which mirrors the backend's own definition.
 const CONFIDENCE_OPTIONS = CONFIDENCE_LEVELS
 
 // Indentation and marker for one row of the model structure. Sequences and
-// phases are headings; boundaries and dates are the rows carrying numbers.
-// No entries for 'sequence'/'phase' -- those now have a real disclosure
-// chevron doing that job (see StructureTableRow), so a second, static
-// glyph next to it would just be redundant.
+// phases are headings; boundaries and dates carry the numbers. No entries for
+// 'sequence'/'phase': StructureTableRow's disclosure chevron does that job.
 const STRUCTURE_MARKER: Record<string, string> = {
-  // Only the warning. ◆ for a boundary and ⋯ for a hiatus said what the row
-  // WAS -- a job the coloured type label beside the name now does, in the
-  // hue that element already has in the tree editor, the Harris matrix and
-  // every plot. Two marks for one fact, one of them a glyph with no legend
-  // anywhere on the page, was one too many.
-  //
-  // "Unassigned" stays a glyph because it is not an element type: it is a
-  // warning that a date belongs to nothing, and it has no colour of its own.
+  // Only the warning: the coloured type label beside the name says what the
+  // row IS, in the hue that element carries in the tree editor, the Harris
+  // matrix and every plot. "Unassigned" stays a glyph because it is not an
+  // element type -- it warns that a date belongs to nothing, and has no
+  // colour of its own.
   unassigned: '⚠',
 }
 
 // What each glyph above says, for readers who get no glyph. Only the ones
-// that carry information: the date bullet is decoration and the boundary/
-// hiatus kind is already printed beside the name, so the one that genuinely
-// needs a voice is the unassigned warning.
+// carrying information: the date bullet is decoration and the element kind is
+// already printed beside the name, so only the unassigned warning needs a
+// voice.
 const STRUCTURE_MARKER_LABEL: Record<string, string> = {
   unassigned: 'Not assigned to any element',
 }
 
-// Every numeric column in the results table (ages, HPD ranges, percentages,
-// agreement/outlier diagnostics) gets this -- a multi-range HPD string is
-// long enough to wrap on an ordinary tablet width, and wrapping mid-value
-// splits a single dash-joined calendar range across two lines, which reads
-// as two numbers rather than one range. Forcing it onto one line instead
-// lets the table grow wider than its container, which TableContainer
-// already scrolls horizontally for -- nothing here ever silently clips.
+// Every numeric column gets this: a multi-range HPD string wraps at tablet
+// width, and wrapping mid-value splits a dash-joined range across two lines,
+// reading as two numbers. One line instead lets the table outgrow its
+// container, which TableContainer already scrolls for.
 const NUMERIC_CELL_SX = { whiteSpace: 'nowrap' } as const
 
 /**
- * The name column stays put while the numbers scroll under it.
+ * The name column stays put while the numbers scroll under it. At 375px this
+ * table is 894px wide inside a 295px box, so scrolling to the HPD range would
+ * take the sample's NAME off screen with it, leaving a reader looking at
+ * "633-557 cal BP · A 109 · O 3%" with nothing saying whose it is.
  *
- * The comment above NUMERIC_CELL_SX is right that TableContainer scrolls
- * rather than clipping -- but at 375px this table is 894px wide inside a
- * 295px box, so scrolling to reach the HPD range takes the sample's NAME off
- * screen with it. A reader ends up looking at "633-557 cal BP · A 109 · O 3%"
- * with nothing saying whose it is, which is worse than not showing the number.
- *
- * Needs its own opaque background: a sticky cell is painted over by whatever
- * scrolls beneath it otherwise. Callers pass the row's own tint so a flagged
- * row keeps its colour under the sticky column too.
+ * Needs its own opaque background, or whatever scrolls beneath paints over it.
+ * Callers pass the row's own tint so a flagged row keeps its colour here too.
  */
-/** The two surfaces a sticky cell composites against, named once. These were
- *  '#f4ede7' and '#ffffff' literals at three call sites -- the same values the
- *  theme already carries as background.muted and background.paper, restated by
- *  hand because sx colour tokens do not resolve inside a plain style object. */
+/** The two surfaces a sticky cell composites against, named once. They repeat
+ *  the theme's background.muted and background.paper by hand, because sx
+ *  colour tokens do not resolve inside a plain style object. */
 const MUTED = '#f4ede7'
 const PAPER = '#ffffff'
 
@@ -473,10 +427,9 @@ function stickyNameCell(background: string) {
     left: 0,
     zIndex: 2,
     backgroundColor: background,
-    // Capped on phones only. Pinning the name fixed "a number with no name",
-    // but at 375px an uncapped column took 170px of a 295px container and
-    // occluded 88% of the span column at full scroll -- you could read the
-    // name or the answer, not both. Desktop has room and keeps the full name.
+    // Capped on phones only: at 375px an uncapped column takes 170px of a
+    // 295px container and occludes 88% of the span column at full scroll.
+    // Desktop has room and keeps the full name.
     maxWidth: { xs: 116, sm: 'none' },
     overflow: { xs: 'hidden', sm: 'visible' },
     textOverflow: 'ellipsis',
@@ -485,17 +438,16 @@ function stickyNameCell(background: string) {
 }
 
 /**
- * A shadow at the right edge that appears only while there is more table to
- * scroll to, and fades out at the end. Otherwise the overflow is silent: the
- * Overlap column simply is not there, and nothing on screen suggests it
- * could be. `background-attachment: local` is what ties it to the scroll
- * position rather than the viewport.
+ * A shadow at the right edge, present only while there is more table to
+ * scroll to. Without it the overflow is silent: the Overlap column simply is
+ * not there, and nothing on screen suggests it could be.
+ * `background-attachment: local` ties it to the scroll position.
  */
 const SCROLL_HINT_SX = {
   backgroundImage:
-    // PAPER, not var(--mui-paper): that custom property is never defined
-    // anywhere in this app, so the gradient always fell back to pure white --
-    // including where it fades across the table's warm #f4ede7 header band.
+    // PAPER, not var(--mui-paper): that custom property is defined nowhere in
+    // this app, so the gradient would fall back to pure white -- including
+    // where it fades across the table's warm header band.
     `linear-gradient(to left, ${PAPER} 40%, ${alpha(PAPER, 0)}),` +
     'radial-gradient(farthest-side at 100% 50%, rgba(43,35,32,0.16), rgba(43,35,32,0))',
   backgroundPosition: 'right center, right center',
@@ -507,25 +459,20 @@ const SCROLL_HINT_SX = {
 // Below this, OxCal's convention is that a date is worth re-examining
 // (Bronk Ramsey 1995).
 const POOR_AGREEMENT = 60
-// How far above the PRIOR the posterior outlier probability has to rise to
-// count as the model having found something. Not an absolute posterior
-// threshold: a date given prior 1 (forced to be treated as an outlier)
-// always comes back with posterior 1 by construction, so judging the
-// posterior on its own would flag every forced-outlier date as "suspect"
-// for the setting the analyst gave it, not for anything the data said. At
-// prior 0 (the common case) this is equivalent to the old absolute
-// threshold, since lift and posterior are the same number.
+// How far above the PRIOR the posterior outlier probability must rise to
+// count as the model having found something. Not an absolute threshold: a
+// date at prior 1 comes back at posterior 1 by construction, so judging the
+// posterior alone would flag it for the analyst's own setting rather than for
+// anything the data said. At prior 0 the two are the same number.
 const OUTLIER_LIFT_SUSPECT = 0.5
-// ...and a rise it is unsure about. Reported separately rather than folded
-// in, because "probably wrong" and "worth a look" are different messages
-// and a single threshold would have to pick one.
+// ...and a rise it is unsure about. Separate rather than folded in, because
+// "probably wrong" and "worth a look" are different messages.
 const OUTLIER_LIFT_CHECK = 0.2
-// A prior at or above this is a deliberate, elevated suspicion -- worth
-// saying even when the posterior didn't move past it (see "Assigned" below)
-// -- rather than OxCal's routine 5% default, which an analyst commonly
-// turns on for every date in a phase and which would otherwise put a chip
-// on every clean row. Also the line below which agreement_index is still
-// treated as independent evidence -- see concernFor.
+// A prior at or above this is a deliberate, elevated suspicion, worth saying
+// even when the posterior did not move past it, rather than OxCal's routine 5%
+// default -- which an analyst commonly turns on across a whole phase and which
+// would put a chip on every clean row. Also the line below which
+// agreement_index is still independent evidence; see concernFor.
 const NOTABLE_OUTLIER_PRIOR = 0.2
 
 type Concern = { level: 'suspect' | 'check'; reasons: string[] }
@@ -533,26 +480,17 @@ type Concern = { level: 'suspect' | 'check'; reasons: string[] }
 /**
  * Whether a date's own diagnostics say something is wrong with it, and what.
  *
- * The outlier check compares the posterior probability to the PRIOR the
- * analyst assigned this date, not the raw posterior on its own -- see
- * OUTLIER_LIFT_SUSPECT above for why. A date whose posterior sits close to
- * its own prior isn't flagged here at all; StructureTableRow shows that as
- * a separate, non-alarming "Assigned" chip instead, since it is a fact
- * about how the date was configured, not a diagnostic finding.
+ * The outlier check compares the posterior to the PRIOR the analyst assigned
+ * (see OUTLIER_LIFT_SUSPECT), so a date sitting close to its own prior is not
+ * flagged here; StructureTableRow shows that as a non-alarming "Assigned" chip,
+ * being a fact about configuration rather than a finding.
  *
- * Colour alone would not do: the reasons are shown as text beside it, since
- * a red row tells a reader something is wrong without telling them what, and
- * the two diagnostics mean genuinely different things. Agreement says the
- * model had to move the date; the outlier probability says the model thinks
- * it does not belong. A date can trip either without the other -- except
- * that for a date given a notable outlier prior, "the model had to move
- * it" is no longer independent information: agreement.py compares the
- * posterior to the date's plain, un-modelled calibration, and a date
- * pulled toward its broad/outlier kernel is expected to drift from that on
- * its own (agreement.py's own docstring: this "detects a date the model
- * had to move, which is not the same as a date that does not belong").
- * Below NOTABLE_OUTLIER_PRIOR, where no such treatment is doing that
- * pulling, poor agreement is still real, independent evidence.
+ * The reasons appear as text beside the colour, since a red row says something
+ * is wrong without saying what, and the two diagnostics differ: agreement says
+ * the model had to MOVE the date, the outlier probability that it does not
+ * BELONG. Above NOTABLE_OUTLIER_PRIOR the two stop being independent -- a date
+ * pulled toward its own outlier kernel is expected to drift from its
+ * unmodelled calibration -- so agreement counts as evidence only below it.
  */
 function concernFor(result?: SampleResult, outlierPrior?: number | null): Concern | null {
   if (!result) return null
@@ -584,10 +522,10 @@ function concernFor(result?: SampleResult, outlierPrior?: number | null): Concer
 }
 
 /**
- * One row of the structure-ordered results table. A boundary reports
- * through the same columns as a date deliberately: both are modelled
- * parameters with a posterior, and reading them in one table is what makes
- * the transitions legible against the dates they bracket.
+ * One row of the structure-ordered results table. A boundary reports through
+ * the same columns as a date: both are modelled parameters with a posterior,
+ * and one table is what makes the transitions legible against the dates they
+ * bracket.
  */
 function StructureTableRow({
   row, result, isBayesian, showMean, showMedian, confidence, dateFormat,
@@ -604,7 +542,8 @@ function StructureTableRow({
   /** Whether each range column is showing every range or just its span. */
   unmodelledExpanded: boolean
   posteriorExpanded: boolean
-  /** Whether this row is a Sequence/Phase with something nested under it -- only those get a disclosure control. */
+  /** A Sequence/Phase with something nested under it; only those get a
+   *  disclosure control. */
   isCollapsible: boolean
   isCollapsed: boolean
   onToggleCollapse?: () => void
@@ -619,8 +558,8 @@ function StructureTableRow({
       : undefined
   const isDate = row.kind === 'date'
   const posterior = row.posterior
-  // A heading (sequence/phase/hiatus) has no posterior of its own -- its
-  // numbers are the boundaries around it and the dates inside it.
+  // A heading has no posterior of its own: its numbers are the boundaries
+  // around it and the dates inside it.
   const isHeading = !isDate && !posterior
 
   const mean = isDate ? result?.posterior_mean : posterior?.posterior_mean
@@ -628,10 +567,9 @@ function StructureTableRow({
   const std = isDate ? result?.posterior_std : posterior?.posterior_std
   const distribution = isDate ? result?.probability_distribution : posterior?.probability_distribution
   const envelope = distribution ? hpdEnvelopeFromHistogram(distribution, confidence) : null
-  // The disjoint ranges behind that envelope, for when the column is unfolded.
-  // The envelope is half a bin wider at each end by design (a point is the
-  // centre of the width it stands for), so the span is not exactly the min and
-  // max of these -- that is correct, not a rounding slip.
+  // The disjoint ranges behind that envelope, for when the column unfolds. The
+  // envelope is half a bin wider at each end by design -- a point is the centre
+  // of the width it stands for -- so the span is not exactly their min and max.
   const posteriorRanges = useMemo(
     () => (posteriorExpanded && distribution ? hpdRangesFromCurve(distribution, confidence) : []),
     [posteriorExpanded, distribution, confidence]
@@ -647,21 +585,17 @@ function StructureTableRow({
 
   const cell = (value: string) => (isHeading ? '' : value)
   const concern = isDate ? concernFor(result, row.outlierPrior) : null
-  // A date given a NOTABLE outlier prior whose posterior didn't rise
-  // meaningfully above it (see concernFor) still had special treatment --
-  // worth saying, just not as a warning. Shown as a plain chip rather than
-  // folded into the reasons text above, so it never inherits the red/amber
-  // styling a real concern gets. Below NOTABLE_OUTLIER_PRIOR this stays
-  // quiet: OxCal's routine 5% default, turned on across a whole phase, is
-  // not itself worth a chip on every clean row -- the "O 4%" text already
-  // says it was checked.
+  // A date given a NOTABLE outlier prior whose posterior did not rise above it
+  // still had special treatment -- worth saying, but not as a warning, so it
+  // is a plain chip rather than folded into the reasons text. Below
+  // NOTABLE_OUTLIER_PRIOR it stays quiet: OxCal's routine 5% default across a
+  // phase is not worth a chip on every clean row.
   const assignedOutlier =
     isDate && !concern && (row.outlierPrior ?? 0) >= NOTABLE_OUTLIER_PRIOR
       ? { prior: row.outlierPrior ?? 0, model: row.outlierModel }
       : null
-  // A tint carries the flag across the whole row so it is findable when
-  // scanning a long table; the chip in the diagnostics column says what it
-  // actually is, since colour on its own is not a message.
+  // A tint carries the flag across the row so it is findable when scanning;
+  // the chip says what it is, since colour alone is not a message.
   const tint = concern
     ? alpha(
         concern.level === 'suspect' ? theme.palette.error.main : theme.palette.warning.main,
@@ -672,12 +606,10 @@ function StructureTableRow({
   return (
     <TableRow
       sx={{
-        // No fill on headings. A Sequence or Phase row carries a name and
-        // nothing else, so tinting the whole row painted a warm band across
-        // three empty columns -- and a deeply nested model stacks seven of
-        // them in the first twenty rows, which reads as a broken table rather
-        // than as grouping. Weight and indentation already say "heading"; the
-        // hairline above gives the group a top edge without a slab of colour.
+        // No fill on headings: a Sequence or Phase row carries only a name,
+        // so a tint paints a warm band across empty columns, and a nested
+        // model stacks seven of them in twenty rows. Weight and indentation
+        // already say "heading"; the hairline gives the group a top edge.
         backgroundColor: tint ?? undefined,
         ...(isHeading && row.depth === 0
           ? { '& > td': { borderTop: 1, borderColor: 'divider' } }
@@ -694,22 +626,19 @@ function StructureTableRow({
           ...stickyNameCell(tint ?? PAPER),
         }}
       >
-        {/* The disclosure control replaces the old static ▸/▪ glyph for
-            Sequence/Phase rows entirely, rather than sitting beside it --
-            two symbols both saying "this is a heading" would be redundant
-            now that one of them is real. Non-collapsible headings (empty
-            Sequences/Phases with nothing nested under them) get neither: no
-            button, since there's nothing to toggle, and no glyph, since
-            STRUCTURE_MARKER no longer has an entry for those kinds. */}
+        {/* The disclosure control is the only marker a Sequence/Phase row
+            gets -- a static glyph beside it would be a second symbol saying
+            "this is a heading". A non-collapsible heading gets neither: no
+            button, having nothing to toggle, and no glyph, STRUCTURE_MARKER
+            carrying no entry for those kinds. */}
         {isCollapsible && (
           <IconButton
             size="small"
             onClick={onToggleCollapse}
             aria-label={`${isCollapsed ? 'Expand' : 'Collapse'} ${row.name}`}
-            // The visible chevron stays small -- it sits inline in a dense
-            // table row -- but the thing a finger or a stylus has to hit does
-            // not: a negative margin lets the 44px target overlap the row's
-            // own padding rather than setting the row height.
+            // The chevron stays small, sitting inline in a dense row, but its
+            // hit target does not: a negative margin lets the 44px target
+            // overlap the row's padding rather than setting the row height.
             sx={{
               p: 0.25,
               mr: 0.25,
@@ -878,9 +807,8 @@ export default function Results() {
   const navigate = useNavigate()
   const notify = useNotify()
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null)
-  // Whether the failure was a 404 specifically. "Gone" and "unreachable" get
-  // different copy and different offers -- a Try again button on a deleted
-  // analysis just fetches the same 404 back.
+  // "Gone" and "unreachable" get different copy and different offers: a Try
+  // again button on a deleted analysis just fetches the same 404 back.
   const [missing, setMissing] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -891,64 +819,54 @@ export default function Results() {
   const [deleting, setDeleting] = useState(false)
   const [rerunOpen, setRerunOpen] = useState(false)
   const [rerunning, setRerunning] = useState(false)
-  // The run this page started, if it started one. Null on a page reached by
-  // any other route -- a bookmark, a reload, a link from the dashboard --
-  // where the analysis id is all there is, and useJob falls back to asking
-  // what the most recent job for it was.
+  // The run this page started, if it started one. Null when reached by any
+  // other route -- a bookmark, a reload, a dashboard link -- where the
+  // analysis id is all there is and useJob asks for its most recent job.
   const [jobId, setJobId] = useState<string | null>(null)
   const [cancelling, setCancelling] = useState(false)
   const [duplicating, setDuplicating] = useState(false)
   const [exportingPdf, setExportingPdf] = useState(false)
-  // Posterior mean/median are opt-in reporting choices, not shown by
-  // default -- HPD ranges are the primary convention for reporting a
-  // (possibly multimodal) calibrated/Bayesian result; a single point
-  // estimate can be misleading on its own (a "mean" can fall in a
-  // low-probability gap between two peaks).
+  // Opt-in: HPD ranges are the primary convention for reporting a possibly
+  // multimodal result, and a single point estimate can be misleading -- a mean
+  // can fall in the low-probability gap between two peaks.
   const [showMean, setShowMean] = useState(false)
   const [showMedian, setShowMedian] = useState(false)
-  // Boundary plots are on by default -- the transitions are usually the
-  // point of the model. But a real sequence has a boundary between every
-  // pair of phases, so on a large one they can outnumber the dates and make
-  // the page long to scroll; this hides them without hiding the dates.
+  // On by default, the transitions usually being the point of the model. A
+  // real sequence has a boundary between every pair of phases, though, so on a
+  // large one they outnumber the dates -- this hides them without the dates.
   const [showBoundaryPlots, setShowBoundaryPlots] = useState(true)
-  // Off by default -- the modelled posterior is the primary reading of the
-  // plot, and overlaying the unconstrained calibration behind every date at
-  // once is a comparison a reader opts into, not something to show unasked.
+  // Off by default: the modelled posterior is the primary reading, and
+  // overlaying the unconstrained calibration behind every date is a comparison
+  // a reader opts into.
   const [showPrior, setShowPrior] = useState(false)
-  // How the posteriors are drawn. Stacked is the default: one figure, one row
-  // per date, all on a single calendar axis, which is the only way to see
-  // whether two dates overlap -- the question a sequence is built to answer.
-  // The per-date charts remain available because the stacked view trades
-  // detail for comparison: they carry the full-height curve, the point
-  // estimates panel and their own zoom.
+  // How the posteriors are drawn. Stacked is the default -- one figure, one
+  // row per date, one calendar axis -- which is the only way to see whether two
+  // dates overlap, the question a sequence is built to answer. The per-date
+  // charts stay available because stacking trades detail for comparison: they
+  // carry the full-height curve, the point estimates and their own zoom.
   //
-  // Curve is the third: the same posteriors drawn against the calibration
-  // curve that produced them. Both of the others answer "what came out"; that
-  // one answers "why it came out that shape", which is a question the ranges
-  // alone routinely provoke and neither of the others can address.
+  // Curve draws the same posteriors against the calibration curve that produced
+  // them. The other two answer "what came out"; this one answers "why it came
+  // out that shape".
   const [plotView, setPlotView] = useState<'stacked' | 'individual' | 'curve'>('stacked')
-  // Confidence level for the HPD columns below -- default 95.4% (2-sigma),
-  // the most commonly cited "95% confidence" convention in archaeological
-  // reporting; switchable to 68.3% or 99.7% without a network round trip
-  // (see utils/hpd.ts).
-  // Only to turn a stored curve_id into the curve's own name in the citation
-  // strings. The request is shared across the app (see api/curves.ts), and a
+  // Confidence level for the HPD columns, defaulting to 95.4% (2-sigma) and
+  // switchable without a round trip (see utils/hpd.ts).
+  // Only to turn a stored curve_id into the curve's name in the citation
+  // strings. The request is shared across the app (api/curves.ts), and a
   // failure degrades to the id rather than dropping the curve from the line.
   const { curves } = useCurves()
   const [confidence, setConfidence] = useState<number>(SIGMA_2)
-  // Each range column unfolds on its own, from its own header. Off by default:
-  // a span per column is the scannable form, and the breakdown is a question a
-  // reader asks about one column at a time.
+  // Each range column unfolds from its own header. Off by default: a span per
+  // column is the scannable form, and the breakdown is asked one column at a
+  // time.
   const [unmodelledExpanded, setUnmodelledExpanded] = useState(false)
   const [posteriorExpanded, setPosteriorExpanded] = useState(false)
-  // How that level is written wherever the page names it -- one string, so a
-  // column heading, a plot legend and a diagram label cannot disagree about
-  // which confidence the figures beside them were computed at.
+  // One string for that level wherever the page names it, so a column
+  // heading, a plot legend and a diagram label cannot disagree about which
+  // confidence the figures beside them were computed at.
   const CONFIDENCE_LABEL = CONFIDENCE_OPTIONS.find((o) => o.value === confidence)?.label ?? ''
-  // Which Sequence/Phase headings in the results table are collapsed, keyed
-  // by element id. Nothing collapsed by default -- matches the table's
-  // previous always-expanded behaviour, so this is additive rather than a
-  // new default state to learn.
+  // Which Sequence/Phase headings are collapsed, by element id. Nothing
+  // collapsed by default.
   const [collapsedElements, setCollapsedElements] = useState<Set<string>>(new Set())
   const toggleCollapsed = (elementId: string) =>
     setCollapsedElements((prev) => {
@@ -976,12 +894,10 @@ export default function Results() {
    * Load the analysis, distinguishing "this one is gone" from "the server is
    * unreachable" -- they need different words and different offers.
    *
-   * The 404 branch is why this checks `response.ok`. Without it a deleted or
-   * mistyped analysis fell through to a generic "Failed to load analysis",
-   * which reads as a transient fault and invites a pointless reload, while
-   * the backend's own accurate "Analysis not found" was parsed and thrown
-   * away. Every other request on this page already routes its failure through
-   * formatApiError; the page's own load was the one that did not.
+   * The `response.ok` check is what separates them: without it a deleted or
+   * mistyped analysis falls through to a generic "Failed to load analysis",
+   * which reads as transient and invites a pointless reload, while the
+   * backend's accurate "Analysis not found" is parsed and discarded.
    */
   const fetchAnalysis = async (id: string) => {
     setLoading(true)
@@ -1001,19 +917,18 @@ export default function Results() {
       }
       setError(formatApiError(data) || `The server returned ${response.status}.`)
     } catch {
-      // Network-level: fetch itself rejected, so there is no response to read
-      // and nothing to quote. The browser's own wording here is "Failed to
-      // fetch", which names an API rather than a problem -- the reader needs
-      // to know it is the connection and not their data.
+      // fetch itself rejected, so there is no response to quote. The
+      // browser's own "Failed to fetch" names an API rather than a problem;
+      // the reader needs to know it is the connection, not their data.
       setError('Could not reach the server. It may be down, or your connection may have dropped.')
     } finally {
       setLoading(false)
     }
   }
 
-  // Follow whatever is running against this analysis, and reload the page's
-  // data when it stops -- however it stopped. A failed or cancelled run
-  // changes what the page should show just as much as a successful one does.
+  // Follow whatever is running against this analysis and reload when it
+  // stops, however it stopped: a failed or cancelled run changes what the page
+  // should show as much as a successful one.
   const { job, active: jobActive } = useJob({
     jobId,
     targetId: jobId ? null : analysisId,
@@ -1037,16 +952,14 @@ export default function Results() {
   const handleExportCSV = async () => {
     if (!analysisId) return
     try {
-      // Carry the reporting format being displayed, so the download reads
-      // in the same convention as the screen. The cal BP columns come
-      // regardless; the format only adds a counterpart beside each of them.
+      // Carry the displayed reporting format, so the download reads in the
+      // same convention as the screen. The cal BP columns come regardless.
       const response = await fetch(
         `/api/results/${analysisId}/export/csv?date_format=${encodeURIComponent(dateFormat)}`
       )
-      // An error response is JSON, and a spreadsheet will open that
-      // perfectly happily as a one-cell file -- so without this check a
-      // failed export is saved as a .csv and only noticed later, by
-      // whoever opens it looking for their results.
+      // An error response is JSON, which a spreadsheet opens happily as a
+      // one-cell file -- so unchecked, a failed export saves as a .csv and is
+      // only noticed by whoever opens it looking for their results.
       if (!response.ok) {
         throw new Error(formatApiError(await response.json().catch(() => null)))
       }
@@ -1064,11 +977,9 @@ export default function Results() {
     }
   }
 
-  // The PDF is rendered server-side and costs a plot per modelled
-  // parameter, so a large model takes a few seconds. That is long enough
-  // that a button which just sits there reads as broken -- hence the
-  // explicit pending state, which the CSV (returned in milliseconds) has
-  // never needed.
+  // The PDF is rendered server-side at a plot per modelled parameter, so a
+  // large model takes seconds -- long enough that a button just sitting there
+  // reads as broken. The CSV, returned in milliseconds, needs no such state.
   const handleExportPDF = async () => {
     if (!analysisId) return
     setExportingPdf(true)
@@ -1077,8 +988,7 @@ export default function Results() {
         `/api/results/${analysisId}/pdf?date_format=${encodeURIComponent(dateFormat)}`
       )
       // Checked before reading the body: an error response is JSON, and
-      // saving it under a .pdf name would hand the user a file that only
-      // fails when they try to open it.
+      // saving it as a .pdf hands the user a file that fails only on opening.
       if (!response.ok) {
         throw new Error(formatApiError(await response.json().catch(() => null)))
       }
@@ -1116,9 +1026,8 @@ export default function Results() {
     }
   }
 
-  // Copy this analysis's inputs into a new one and open it for editing --
-  // the "try the same dates under a different model" path, which leaves
-  // this analysis and its results untouched.
+  // Copy this analysis's inputs into a new one and open it for editing: the
+  // "same dates, different model" path, leaving this one untouched.
   const handleDuplicate = async () => {
     if (!analysisId) return
     setDuplicating(true)
@@ -1137,8 +1046,8 @@ export default function Results() {
     }
   }
 
-  // Queued, not awaited: the endpoint answers 202 with a job id as soon as
-  // it has accepted the work, and the progress display takes it from there.
+  // Queued, not awaited: the endpoint answers 202 with a job id as soon as it
+  // accepts the work, and the progress display takes it from there.
   const handleRerun = async () => {
     if (!analysisId) return
     setRerunning(true)
@@ -1159,17 +1068,14 @@ export default function Results() {
     }
   }
 
-  // Which phase each date sits in, for the Harris matrix further down.
+  // Which phase each date sits in, for the Harris matrix below.
   //
-  // There is no fallback to the stored contexts here any more: GET
-  // /analysis/:id runs _get_or_migrate_tree for every Bayesian analysis, so
-  // one predating model trees is migrated on read and comes back WITH a tree.
-  // model_tree is null only for a plain or group calibration, which has no
-  // stratigraphy to draw.
+  // No fallback to the stored contexts: GET /analysis/:id runs
+  // _get_or_migrate_tree for every Bayesian analysis, so model_tree is null
+  // only for a plain or group calibration, which has no stratigraphy to draw.
   //
-  // Memoised on `analysis` so the object identity handed to the diagram is
-  // stable across renders; the layout is recomputed only when the analysis
-  // itself changes.
+  // Memoised on `analysis` so the identity handed to the diagram is stable and
+  // the layout recomputes only when the analysis changes.
   const structureAssignments = useMemo(
     () =>
       Object.fromEntries(
@@ -1180,13 +1086,11 @@ export default function Results() {
     [analysis]
   )
 
-  // Declared here, above the loading/error early returns below: a hook after
-  // a conditional return is only called on some renders, which is what "Rendered
-  // more hooks than during the previous render" means.
-  // What produced every figure on the page, for the citation strings: the
-  // curves actually used and the solver that actually ran. Both are facts the
-  // page already displays; a citation that omits them is the reason a reviewer
-  // asks where a number came from.
+  // Declared above the loading/error early returns: a hook after a conditional
+  // return is only called on some renders.
+  //
+  // What produced every figure on the page, for the citation strings -- the
+  // curves used and the solver that ran, both already displayed elsewhere.
   const solverName =
     analysis?.solver?.method === 'exact'
       ? 'exact solver'
@@ -1194,17 +1098,13 @@ export default function Results() {
       ? 'MH/Gibbs solver'
       : null
 
-  // Provenance for ONE row, not one string for the page.
+  // Provenance for ONE row, not one string for the page: a date is calibrated
+  // against exactly one curve, and that is the one its citation names. Joining
+  // every curve in the analysis would have each line of a mixed model -- 59
+  // dates on SHCal20 and 4 on Marine20 -- claiming both.
   //
-  // This used to join every distinct curve in the analysis with " / " and
-  // attach that to every citation, which is wrong on precisely the analyses
-  // RadiCal exists for: the Wairau model runs 59 dates on SHCal20 and 4 on
-  // Marine20, and every copied line claimed both. A date is calibrated
-  // against exactly one curve, and that is the one its citation has to name.
-  //
-  // A Boundary has no curve at all -- it is a modelled transition, not a
-  // measurement -- so it names the solver alone rather than borrowing a curve
-  // from the dates around it.
+  // A Boundary has no curve at all, being a modelled transition rather than a
+  // measurement, so it names the solver alone.
   const curveNameFor = useMemo(() => {
     const byId = new Map(curves.map((c) => [c.id, c.name]))
     return (curveId?: string | null) => (curveId ? byId.get(curveId) ?? curveId : null)
@@ -1223,19 +1123,15 @@ export default function Results() {
   /**
    * The plot bands for one series, computed once per confidence level.
    *
-   * `plotOrder` below is rebuilt on every render, and each series called
-   * `hpdBands`, which runs two `hpdRangesFromCurve` passes -- each sorting a
-   * ~1000-point distribution. On the 63-date model that is ~126 sorts, and it
-   * was happening on every keystroke of every unrelated control: ticking Show
-   * Mean, switching plot view, collapsing a phase. Measured at 127ms median
-   * to paint for a single checkbox.
+   * `plotOrder` is rebuilt on every render, and `hpdBands` runs two
+   * `hpdRangesFromCurve` passes, each sorting a ~1000-point distribution --
+   * ~126 sorts on a 63-date model, on every keystroke of every unrelated
+   * control, measured at 127ms median to paint for one checkbox.
    *
-   * The bands depend on exactly two things -- the distribution and the
-   * selected confidence -- so they are cached against the series key and the
-   * cache is thrown away when the confidence changes, which is the only time
-   * the answers actually differ. Declared here, above the loading/error early
-   * returns, because a hook after a conditional return is only called on some
-   * renders.
+   * The bands depend on the distribution and the selected confidence alone, so
+   * they are cached against the series key and the cache is dropped when the
+   * confidence changes. Declared above the loading/error early returns,
+   * because a hook after a conditional return runs only on some renders.
    */
   const bandsFor = useMemo(() => {
     const cache = new Map<string, HPDBand[]>()
@@ -1249,8 +1145,8 @@ export default function Results() {
     }
   }, [confidence, CONFIDENCE_LABEL])
 
-  // For the page-level qualifier under the headline only, where naming every
-  // curve the analysis used IS the honest statement.
+  // For the page-level qualifier under the headline, where naming every curve
+  // the analysis used IS the honest statement.
   const analysisProvenance = useMemo(() => {
     const curveIds = [
       ...new Set((analysis?.measurements || []).map((m) => m.curve_id).filter(Boolean)),
@@ -1268,9 +1164,8 @@ export default function Results() {
   }
 
   if (error || !analysis) {
-    // component="main" and role="alert": the success branch got the landmark
-    // and this one did not, so the route a stale bookmark actually lands on
-    // was the one with no way past the AppBar and no announcement at all.
+    // component="main" and role="alert", so the route a stale bookmark lands
+    // on has a landmark and an announcement, as the success branch does.
     return (
       <Container component="main" maxWidth="lg" sx={{ py: 4 }}>
         <Paper sx={{ p: 3, maxWidth: 560 }} role="alert">
@@ -1308,18 +1203,16 @@ export default function Results() {
     )
   }
 
-  // Where each date sits in the structure now comes from the structure walk
-  // itself (see plotOrder below and the results table), rather than from a
-  // separate sample -> context lookup. That lookup had to special-case
-  // element_id against group_id to work for both tree-authored and migrated
-  // analyses; flattenStructure already resolves that in one place.
+  // Where each date sits comes from the structure walk itself (see plotOrder
+  // and the results table) rather than a separate sample -> context lookup,
+  // which would have to special-case element_id against group_id.
+  // flattenStructure resolves that in one place.
   const contextsWithModeledSpan = (analysis.groups || []).filter((g) => g.modeled_start && g.modeled_end)
 
-  // Every named Boundary in the model structure, in the order it appears
-  // (oldest first). Preferred over the per-context table below when the
-  // analysis has an explicit model tree, since adjacent contexts SHARE a
-  // boundary -- listing them per context would print the same transition
-  // twice, once as one context's end and again as the next one's start.
+  // Every named Boundary in the structure, oldest first. Preferred over the
+  // per-context table below when there is a model tree, since adjacent
+  // contexts SHARE a boundary and listing them per context would print the
+  // same transition twice.
   const boundaryRows: Array<{ id: string; name: string; posterior: PosteriorSummary }> = []
   const collectBoundaries = (element?: ModelElement | null) => {
     if (!element) return
@@ -1335,16 +1228,13 @@ export default function Results() {
   collectBoundaries(analysis.model_tree)
   const isBayesian = analysis.analysis_type === 'bayesian'
 
-  // The results table, read in the model's own order. Mirrors the CSV
-  // export row for row (backend model_tree.flatten_structure), so what's
-  // on screen and what's downloaded describe the same model. Empty for a
-  // calibration or an analysis with no stored structure, which falls back
-  // to the flat date list below.
+  // The results table in the model's own order, mirroring the CSV export row
+  // for row (backend model_tree.flatten_structure). Empty for an analysis with
+  // no stored structure, which falls back to the flat date list below.
   const structureRows = flattenStructure(analysis.model_tree, analysis.measurements || [])
 
-  // Sequence/Phase headings that actually have something nested under them
-  // -- an empty one (no dates, no children) gets no collapse control, since
-  // there is nothing for it to hide.
+  // Sequence/Phase headings with something nested under them. An empty one
+  // gets no collapse control, having nothing to hide.
   const collapsibleElementIds = new Set(
     structureRows
       .filter((row, idx) => {
@@ -1355,14 +1245,11 @@ export default function Results() {
       .map((row) => row.elementId!)
   )
 
-  // What the table actually renders: structureRows with any collapsed
-  // Sequence/Phase's subtree hidden. Boundaries stay visible even inside a
-  // collapsed subtree -- a Boundary is a modelled transition's own result,
-  // not detail to fold away, and collapsing a large structure down to just
-  // its Boundaries is often exactly the point (the dates were the noise;
-  // the transitions were the answer). Single pass: at most one collapsed
-  // ancestor is ever relevant at a time, since a collapse nested inside an
-  // already-hidden subtree changes nothing about what's hidden.
+  // structureRows with any collapsed subtree hidden. Boundaries stay visible
+  // even inside one: a Boundary is a modelled transition's own result rather
+  // than detail to fold away, and collapsing a large structure down to its
+  // Boundaries is often the point. One pass suffices, since a collapse nested
+  // inside an already-hidden subtree changes nothing.
   const visibleStructureRows: StructureRow[] = []
   let hiddenBelowDepth: number | null = null
   for (const row of structureRows) {
@@ -1385,25 +1272,20 @@ export default function Results() {
   }
 
   const resultBySampleId = new Map((analysis.results || []).map((r) => [r.sample_id, r]))
-  // Same reason concernFor needs it in StructureTableRow: a posterior close
-  // to the prior it was given isn't a finding, so the banner below has to
-  // know each result's prior too, not just its posterior.
+  // As concernFor needs it in StructureTableRow: a posterior close to the
+  // prior it was given is not a finding, so the banner needs both.
   const measurementBySampleId = new Map((analysis.measurements || []).map((m) => [m.id, m]))
 
-  // analysis.results as returned isn't in any particular order -- it's DB
-  // insertion order. When there's no model structure to walk instead (a
-  // calibration or group calibration), sort oldest first by posterior mean
-  // (larger cal BP = older), matching the "oldest first" convention
-  // structureRows already gives the structured case. Ties/missing means
-  // (shouldn't happen, but not worth crashing over) fall back to the
-  // original order.
+  // analysis.results arrives in DB insertion order. With no model structure to
+  // walk, sort oldest first by posterior mean (larger cal BP is older), which
+  // is the convention structureRows gives the structured case. Ties and
+  // missing means fall back to the original order.
   const chronologicalResults = [...(analysis.results || [])].sort((a, b) => {
     if (a.posterior_mean == null || b.posterior_mean == null) return 0
     return b.posterior_mean - a.posterior_mean
   })
 
-  // Dates whose own diagnostics object to them, worst first so the banner
-  // leads with the one most worth looking at.
+  // Dates whose diagnostics object to them, worst first.
   const flaggedDates = (analysis.results || [])
     .map((r, idx) => ({
       name: r.sample_name || `Sample ${idx + 1}`,
@@ -1413,20 +1295,18 @@ export default function Results() {
     .sort((a, b) => (a.concern.level === b.concern.level ? 0 : a.concern.level === 'suspect' ? -1 : 1))
 
   /**
-   * A date's laboratory measurement in the form the Curve view plots it: the
+   * A date's laboratory measurement as the Curve view plots it: the
    * radiocarbon age it can be read against a DRAWN curve at.
    *
    * For a marine date that is not the number on the lab report. The curve
    * models only the global average reservoir effect, so a marine sample of
-   * calendar age t is expected to measure curve(t) + Delta-R; subtracting the
-   * local offset from the measurement is the same statement, and is exactly
-   * what the calibration itself does (see services/calibration.py). Its
-   * uncertainty joins in quadrature, so a poorly known offset widens the
-   * measurement rather than only moving it -- which is what the figure should
-   * show, since it is also what widened the posterior.
+   * calendar age t is expected to measure curve(t) + Delta-R -- subtracting the
+   * local offset is the same statement, and is what the calibration itself
+   * does. Its uncertainty joins in quadrature, so a poorly known offset widens
+   * the measurement rather than only moving it, as it widened the posterior.
    *
-   * Returns undefined rather than a guess for a date with no usable age; the
-   * plot counts those out and says so instead of placing them at zero.
+   * undefined rather than a guess for a date with no usable age; the plot
+   * counts those out and says so instead of placing them at zero.
    */
   const seriesMeasurement = (sampleId: string): SeriesMeasurement | undefined => {
     const m = measurementBySampleId.get(sampleId)
@@ -1443,16 +1323,14 @@ export default function Results() {
     }
   }
 
-  // The plots, in the same order. Walking structureRows means the sequence
-  // on screen is the sequence in the model -- oldest first -- and each plot
-  // can say where it sits.
+  // The plots, in the same order: walking structureRows puts the sequence on
+  // screen in the model's own order, oldest first, and lets each plot say
+  // where it sits.
   //
   // Boundaries are plotted alongside the dates, in their place between the
-  // phases they separate. A boundary is a modelled parameter with a
-  // posterior of its own, and it is usually the thing an analysis was built
-  // to estimate; reading its distribution against the dates on either side
-  // is the point of the sequence. Any date the structure doesn't mention is
-  // appended rather than dropped, so a plot never silently disappears.
+  // phases they separate -- a boundary is usually the thing the analysis was
+  // built to estimate, and reading it against the dates either side is the
+  // point. A date the structure omits is appended rather than dropped.
   const plotOrder: PlottableSeries[] = []
   const plotted = new Set<string>()
   for (const row of structureRows) {
@@ -1512,15 +1390,11 @@ export default function Results() {
   }
   const boundaryPlotCount = plotOrder.filter((s) => s.kind === 'boundary').length
   // The page's primary reading: the transitions this model was built to
-  // estimate. A sequence's outermost Boundaries ARE the answer -- the same
-  // reasoning the collapse behaviour already encodes, where collapsing a
-  // Phase keeps its Boundaries because "the dates were the noise; the
-  // transitions were the answer".
+  // estimate, a sequence's outermost Boundaries being the answer.
   //
-  // Deliberately empty for a calibration: dates laid out with no relationship
-  // asserted between them have no modelled transition, and inventing a
-  // headline span for them would be a claim the analysis does not make. There
-  // the table is the answer, and this block simply does not appear.
+  // Empty for a calibration, where dates with no relationship asserted between
+  // them have no modelled transition and a headline span would be a claim the
+  // analysis does not make. There the table is the answer.
   const headlineBoundaries = structureRows.filter(
     (row) => row.kind === 'boundary' && row.posterior
   )
@@ -1533,13 +1407,10 @@ export default function Results() {
     ? plotOrder
     : plotOrder.filter((s) => s.kind !== 'boundary')
 
-  // Which solver produced every number on the page -- qualifies all of them
-  // rather than any one, so it sits with the other summary chips rather than
-  // buried near the table. Split into a chip (the two good outcomes: quiet,
-  // since they're the normal cases) and an alert (a warning worth its own
-  // paragraph -- sampled-and-not-converged, or the retired SMC path with its
-  // known failure on wiggly curves; see services/gibbs.py's module
-  // docstring). Only one of the two is ever set.
+  // Which solver produced every number on the page. It qualifies all of them
+  // rather than any one, so it sits with the summary chips. Split into a quiet
+  // chip for the two good outcomes and an alert for the one worth a paragraph,
+  // sampled-and-not-converged. Only one of the two is ever set.
   let solverChip: JSX.Element | null = null
   let solverAlert: JSX.Element | null = null
   if (isBayesian && analysis.status !== 'failed') {
@@ -1552,9 +1423,8 @@ export default function Results() {
     } else if (analysis.solver.method === 'exact') {
       solverChip = (
         // describeChild: without it MUI makes the tooltip the chip's NAME, so
-        // the visible "MH/Gibbs (chosen) — 95% converged" was never announced
-        // and voice control had nothing to target. As a description it is
-        // additive, which is what a tooltip is for.
+        // the visible label is never announced and voice control has nothing
+        // to target. As a description it is additive.
         <Tooltip
           describeChild
           title={
@@ -1611,8 +1481,7 @@ export default function Results() {
           <Typography variant="body2">
             The sampler reached{' '}
             {/* One decimal place, not none: a run stopping at 0.945 rounds
-                to "95%", which reads as a contradiction against the 95%
-                target it just missed. */}
+                to "95%", contradicting the 95% target it just missed. */}
             {analysis.solver.convergence !== undefined
               ? `${(analysis.solver.convergence * 100).toFixed(1)}%`
               : 'less than 95%'}{' '}
@@ -1626,15 +1495,13 @@ export default function Results() {
         </Alert>
       )
     } else {
-      // A run the analyst asked for is labelled as their choice, not as a
-      // fallback -- they may have picked OxCal's method to reproduce a
-      // published analysis or to cross-check the exact solver, and calling
-      // that "sampled because we had to" would be false.
+      // A run the analyst asked for is labelled as their choice, not a
+      // fallback: they may have picked OxCal's method to reproduce a published
+      // analysis or to cross-check the exact solver.
       solverChip = (
         // describeChild: without it MUI makes the tooltip the chip's NAME, so
-        // the visible "MH/Gibbs (chosen) — 95% converged" was never announced
-        // and voice control had nothing to target. As a description it is
-        // additive, which is what a tooltip is for.
+        // the visible label is never announced and voice control has nothing
+        // to target. As a description it is additive.
         <Tooltip
           describeChild
           title={
@@ -1671,8 +1538,8 @@ export default function Results() {
   }
 
   return (
-    // component="main": the page had no main landmark at all, so there was no
-    // way past the AppBar for anyone navigating by landmark.
+    // component="main": otherwise there is no way past the AppBar for anyone
+    // navigating by landmark.
     <Container component="main" maxWidth="lg" sx={{ py: 4 }}>
       <Paper sx={{ p: 3, mb: 3 }}>
         <Box>
@@ -1720,9 +1587,7 @@ export default function Results() {
                   <Box key={row.elementId ?? row.name}>
                     {/* The page says what these two ARE; the analyst's own name
                         for them is in the table. `primaryReading` is the first
-                        and last Boundary of the model by construction, so this
-                        is a fact about the pair, not a guess.
-                         */}
+                        and last Boundary of the model by construction. */}
                     <Typography variant="body2" color="textSecondary">
                       {idx === 0 ? 'Sequence begins' : 'Sequence ends'}
                     </Typography>
@@ -1840,10 +1705,9 @@ export default function Results() {
         </Box>
       </Paper>
 
-      {/* A failed run, with the reason. Before this the page showed only the word
-          "failed" in the status card, leaving the user to guess -- and one way to
-          fail is now a deliberate choice (requiring the exact solver on a model
-          that cannot support it), where the reason names exactly what to change. */}
+      {/* A failed run, with the reason -- one way to fail is a deliberate
+          choice (requiring the exact solver on a model that cannot support
+          it), where the reason names exactly what to change. */}
       {/* A run in progress, with what it is doing and a way to stop it. Sits
           above the failure alert because a re-run of a failed analysis should
           lead with what is happening now, not with why the last one didn't. */}
@@ -1867,11 +1731,9 @@ export default function Results() {
           lands here. */}
       {solverAlert && <Box sx={{ mb: 3 }}>{solverAlert}</Box>}
 
-      {/* Boundaries used to be listed in a table of their own here. They now
-          sit in the results table in their place in the structure, between
-          the phases they separate, which is where they are meaningful --
-          a boundary between two phases is one shared transition, the end of
-          one and the start of the next. */}
+      {/* Boundaries are not listed separately: they sit in the results table
+          in their place in the structure, between the phases they separate,
+          which is where a shared transition is meaningful. */}
 
       {boundaryRows.length === 0 && contextsWithModeledSpan.length > 0 && (
         <Paper sx={{ p: 3, mb: 3 }}>
@@ -2064,13 +1926,13 @@ export default function Results() {
             sx={{
               fontVariantNumeric: 'tabular-nums',
               // Vertical stick is a desktop affordance: it needs a scroll
-              // container, and a nested vertical scroller on touch fights the
-              // page scroll. `top: auto` below md leaves the header in flow
-              // while KEEPING position:sticky, so the results table's
-              // horizontal pin on the name column still works.
+              // container, and a nested vertical scroller fights the page
+              // scroll on touch. `top: auto` below md leaves the header in
+              // flow while KEEPING position:sticky, so the table's horizontal
+              // pin on the name column still works.
               '& thead th': { backgroundColor: MUTED, top: { xs: 'auto', md: 0 } },
               // The name column takes what it needs and no more; the numeric
-              // columns are nowrap already, so nothing else can claim slack.
+              // columns are nowrap, so nothing else can claim the slack.
               '& tbody td:first-of-type, & thead th:first-of-type': { whiteSpace: 'nowrap' },
             }}
           >
@@ -2123,15 +1985,12 @@ export default function Results() {
                   />
                 </TableCell>
                 {isBayesian && (
-                  /* The explanation used to be a Tooltip wrapping this cell,
-                     which set the whole paragraph as the header's accessible
-                     name -- so a screen reader announced sixty words in place
-                     of "Diagnostics" against every data cell in the column,
-                     while a keyboard or touch user got nothing at all (the
-                     <th> was not focusable, and there is no hover on a
-                     tablet). A focusable button beside the label reaches all
-                     three and the column keeps its own name. The persistent
-                     key under the table is what a first-time reader needs. */
+                  /* A focusable button beside the label rather than a Tooltip
+                     wrapping the cell: that would make the whole paragraph the
+                     header's accessible name, announcing sixty words in place
+                     of "Diagnostics" against every cell in the column, while a
+                     keyboard or touch user got nothing (the <th> is not
+                     focusable, and a tablet has no hover). */
                   <TableCell align="right">
                     Diagnostics
                     <Tooltip title={DIAGNOSTICS_HELP} describeChild>
@@ -2158,14 +2017,11 @@ export default function Results() {
               {structureRows.length > 0
                 ? visibleStructureRows.map((row, idx) => (
                     <StructureTableRow
-                      // sampleId first, elementId only as the fallback. A
-                      // date row's elementId is the PHASE it sits in, which
-                      // every date in that phase shares -- so preferring it
-                      // gave all of them one key. React's warning about that
-                      // says duplicate keys may leave children "duplicated
-                      // and/or omitted", meaning this table could silently
-                      // drop or repeat a date. Element rows carry
-                      // sampleId: null, so they still key on elementId.
+                      // sampleId first, elementId only as a fallback: a date
+                      // row's elementId is the PHASE it sits in, which every
+                      // date there shares, so preferring it would give them
+                      // one key and let React drop or repeat a date. Element
+                      // rows carry sampleId: null and still key on elementId.
                       key={`${row.kind}-${row.sampleId ?? row.elementId ?? idx}`}
                       row={row}
                       result={row.sampleId ? resultBySampleId.get(row.sampleId) : undefined}
@@ -2176,11 +2032,10 @@ export default function Results() {
                       dateFormat={dateFormat}
                       unmodelledExpanded={unmodelledExpanded}
                       posteriorExpanded={posteriorExpanded}
-                      // A date row's elementId is its PARENT phase's id (see
-                      // the comment on the key above), so these must also
-                      // check row.kind -- otherwise every date would inherit
-                      // its own phase's collapsibility and grow a disclosure
-                      // control that actually toggles its parent.
+                      // A date row's elementId is its PARENT phase's id, so
+                      // these must also check row.kind -- otherwise every date
+                      // would inherit its phase's collapsibility and grow a
+                      // control that toggles its parent.
                       isCollapsible={
                         (row.kind === 'sequence' || row.kind === 'phase') &&
                         !!row.elementId &&
@@ -2491,9 +2346,8 @@ export default function Results() {
           confidenceLabel={CONFIDENCE_LABEL}
           showMean={showMean}
           showMedian={showMedian}
-          // Oldest first, the same order the table and the plots use -- so a
-          // well-ordered chronology reads down the ordering matrix's diagonal
-          // rather than being scattered across it.
+          // Oldest first, as the table and plots are, so a well-ordered
+          // chronology reads down the matrix diagonal rather than scattered.
           dateAxis={chronologicalResults.map((r) => ({
             id: r.sample_id,
             name: r.sample_name || 'Date',

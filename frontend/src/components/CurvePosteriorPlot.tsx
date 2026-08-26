@@ -36,11 +36,10 @@ const Plot = createPlotlyComponent(Plotly)
 /**
  * Every date drawn where it actually meets the calibration curve.
  *
- * The stacked and per-date views both answer "what came out". This one answers
- * "why": the curve is the mechanism every calibrated date in this app is
- * produced by, and a posterior that is bimodal, or three centuries wide, or
- * unexpectedly tight, is almost always explained by the shape of the curve at
- * that radiocarbon age -- which neither of the other views shows at all.
+ * The stacked and per-date views answer "what came out"; this one answers
+ * "why". A posterior that is bimodal, three centuries wide, or unexpectedly
+ * tight is almost always explained by the shape of the curve at that
+ * radiocarbon age, which neither of the others shows.
  *
  * The figure is the classic calibration diagram, extended to a whole model:
  *
@@ -56,22 +55,19 @@ const Plot = createPlotlyComponent(Plotly)
  * crosses it over a long stretch and the lobe is wide; where it doubles back
  * the rule crosses it two or three times and the lobe has two or three peaks.
  *
- * Each curve carries its own fixed colour and dash, and its own σ envelope in
- * that same hue -- see theme/curveColors.ts. Nothing else on the figure takes
- * one of those hues, so a coloured line is always a calibration curve.
+ * Each curve has its own fixed colour and dash, and its σ envelope in the same
+ * hue (theme/curveColors.ts). Nothing else takes one of those hues, so a
+ * coloured line is always a calibration curve.
  *
- * The dates are all one blue, and what separates the stages is the EDGE. A
- * measurement is a bare wash: a number off a lab report, not resolved against
- * anything. A posterior has a drawn outline, because it has been read through
- * the curve and is now a claim about calendar years. The unmodelled prior, if
- * shown, keeps its own grey -- it is a different date's worth of information
- * (this one, unconstrained), not a different stage of this one.
+ * The dates are all one blue and what separates the stages is the EDGE: a
+ * measurement is a bare wash, a number off a lab report resolved against
+ * nothing, while a posterior has a drawn outline because it has been read
+ * through the curve and is now a claim about calendar years. The unmodelled
+ * prior keeps its own grey, being a different date's worth of information.
  *
- * Boundaries are not drawn. A modelled transition has no radiocarbon
- * measurement and no place on this axis -- there is nothing to project through
- * the curve -- and inventing a position for it would be the one claim this
- * figure must not make. The caller is told how many were left out so it can say
- * so.
+ * Boundaries are not drawn: a modelled transition has no radiocarbon
+ * measurement and no place on this axis, and inventing one would be the one
+ * claim this figure must not make. The caller is told how many were left out.
  */
 
 interface CurvePosteriorPlotProps {
@@ -98,27 +94,22 @@ const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFin
 
 /**
  * A lobe: a filled polygon with no stroke, plus -- for anything that has been
- * through the calibration -- the outline of the density drawn on its own.
+ * through the calibration -- the density's outline drawn on its own.
  *
- * Why the shape is split across two traces at all. One closed, stroked polygon
- * would be simpler and is what the stacked view uses, but a closed polygon's
- * stroke also traces the straight run along its foot, and on this figure that
- * foot is a horizontal rule at the date's radiocarbon age. With a dozen dates
- * the figure filled with heavy horizontal rules that read as data and buried
- * the calibration curve underneath them. Stroking only the density leaves the
- * shape of each date visible and the curve legible through the fills.
+ * Split across two traces because a closed, stroked polygon strokes the
+ * straight run along its foot too, and here that foot is a horizontal rule at
+ * the date's radiocarbon age: a dozen dates fill the figure with heavy rules
+ * that read as data and bury the curve. Stroking only the density keeps each
+ * date's shape visible and the curve legible through the fills.
  *
- * The fill still has to be a closed polygon, so the closing back to the
- * baseline happens here: `base` pins whichever coordinate the foot is constant
- * in (y for a posterior sitting on the curve, x for a measurement standing at
- * the frame's edge) and NaN leaves the other to follow the outline's own ends.
+ * The fill still has to be a closed polygon, so the close back to the baseline
+ * happens here: `base` pins whichever coordinate the foot is constant in -- y
+ * for a posterior on the curve, x for a measurement at the frame's edge -- and
+ * NaN leaves the other to follow the outline's own ends.
  *
- * `line` is OPTIONAL, and its absence is a statement rather than a saving. A
- * raw measurement is drawn as a bare wash with no edge; a calibrated
- * distribution gets a drawn outline. Same blue for both, because they are the
- * same date -- what the outline says is that the shape has been resolved
- * against the curve and is now a claim about calendar years, where the wash
- * behind it is only a number off a lab report.
+ * `line` is OPTIONAL, and its absence is a statement: a raw measurement is a
+ * bare wash, a calibrated distribution gets an outline. Same blue for both,
+ * being the same date.
  */
 function lobeTraces(
   outline: { x: number[]; y: number[] },
@@ -162,8 +153,8 @@ function lobeTraces(
       line: { width: 0, color: 'rgba(0,0,0,0)' },
       mode: 'lines',
       showlegend: false,
-      // With no outline trace to carry it, the fill answers the pointer --
-      // on its own vertices, not on the area it encloses, since a fill hover
+      // With no outline trace to carry it, the fill answers the pointer, on
+      // its own vertices rather than the area it encloses: a fill hover
       // ignores hovertemplate and prints the trace name in the fill colour.
       ...(options.line
         ? { hoverinfo: 'skip' }
@@ -177,8 +168,8 @@ function lobeTraces(
     traces.push({
       ...shared,
       x: outline.x,
-      // Nulls are gaps to Plotly, which is exactly what is wanted: the fill
-      // above stays whole while the stroke lifts off the baseline.
+      // Nulls are gaps to Plotly, which is what is wanted: the fill above
+      // stays whole while the stroke lifts off the baseline.
       y: options.stroke ? outline.y.map((v, i) => (options.stroke![i] ? v : null)) : outline.y,
       mode: 'lines',
       line: { color: options.line, width: options.width ?? 1.1, dash: options.dash ?? 'solid' },
@@ -194,13 +185,10 @@ function lobeTraces(
 /**
  * A data-less trace that exists only to put one entry in the legend.
  *
- * Needed because a legend swatch is drawn from its trace's OWN style, and
- * neither of the traces above can carry the right one. The fill trace is
- * strokeless by necessity -- give it a stroke and the horizontal baseline
- * rules come back -- so its swatch is a plain block whatever the lobe
- * actually looks like, which is how "Measurement" and "Posterior" came to
- * print two identical squares. The outline trace has no fill, so its swatch
- * is a bare line.
+ * A legend swatch is drawn from its trace's OWN style, and neither trace above
+ * can carry the right one: the fill trace is strokeless by necessity, so its
+ * swatch is a plain block whatever the lobe looks like, and the outline trace
+ * has no fill, so its swatch is a bare line.
  *
  * A trace with no points draws nothing and still gets its legend entry, so
  * this carries fill and stroke together and the key ends up showing what the
@@ -234,19 +222,14 @@ function legendSwatch(options: {
 }
 
 /**
- * Legend order, fixed independently of drawing order.
- *
- * The two do not agree here and should not: the calibration curve is drawn
- * LAST so that a dozen translucent lobes cannot bury the thing they are being
- * read against, but it belongs at the head of the legend with the envelope
- * that goes with it.
+ * Legend order, fixed independently of drawing order. The two disagree here
+ * deliberately: the curve is drawn LAST so a dozen translucent lobes cannot
+ * bury the thing they are read against, but belongs at the head of the legend.
  */
 const RANK = {
   // Each curve takes a block of three -- its line, then its own ±1σ and ±2σ --
-  // so a mixed-curve figure prints "IntCal20, IntCal20 ±1σ, IntCal20 ±2σ,
-  // Marine20, Marine20 ±1σ, Marine20 ±2σ" rather than interleaving one curve's
-  // envelope with another's line. Ties are what produced the interleaving:
-  // a tie is not an ordering.
+  // so a mixed-curve figure keeps each curve's envelope with its line rather
+  // than interleaving them. Ties are what interleave: a tie is not an ordering.
   curve: 10,
   band1: 11,
   band2: 12,
@@ -264,13 +247,10 @@ const RANK = {
  * Above this many dates the projection rules are dropped.
  *
  * Each rule runs from a date's measurement to the far side of its posterior,
- * which on a plateau is most of the width of the figure. Up to about a dozen
- * that is the line a reader follows to see why a date came out where it did;
- * past it they cross each other into a hatched band that hides the curve, and
- * the mark that was doing the explaining becomes the thing needing explained.
- * Nothing is lost that cannot be read another way -- a measurement and its
- * posterior still sit at the same height, which is what the rule was drawing
- * attention to.
+ * which on a plateau is most of the figure's width. Up to about a dozen that
+ * is the line a reader follows; past it they cross into a hatched band that
+ * hides the curve. Nothing is lost that cannot be read another way -- a
+ * measurement and its posterior still sit at the same height.
  */
 const GUIDE_LIMIT = 12
 
@@ -287,8 +267,8 @@ export default function CurvePosteriorPlot({
   const { curves } = useCurves()
   const plotBox = useRef<HTMLDivElement | null>(null)
 
-  // Same signature trick the stacked plot uses: the caller rebuilds `series`
-  // on every render, so memoising on the array itself never hits.
+  // As the stacked plot does: the caller rebuilds `series` on every render, so
+  // memoising on the array itself never hits.
   const seriesSignature = series
     .map(
       (s) =>
@@ -299,15 +279,14 @@ export default function CurvePosteriorPlot({
     .join('|')
 
   /**
-   * The dates this figure can actually place: a distribution to draw, and a
-   * radiocarbon age to draw it at. Anything else -- a boundary, a date whose
-   * measurement did not come back with the analysis -- is counted and reported
-   * rather than drawn at a position it does not have.
+   * The dates this figure can place: a distribution to draw and a radiocarbon
+   * age to draw it at. Anything else -- a boundary, a date whose measurement
+   * did not come back -- is counted and reported rather than drawn at a
+   * position it does not have.
    *
    * A stated error is NOT required. Without one there is no measurement lobe
-   * to draw (see normalDensity, which refuses to fake one), but the date's
-   * posterior still belongs on the curve at its own radiocarbon age, and that
-   * is most of what this view is for.
+   * (normalDensity refuses to fake one), but the posterior still belongs on
+   * the curve at its own radiocarbon age.
    */
   const drawable = useMemo(
     () =>
@@ -323,13 +302,10 @@ export default function CurvePosteriorPlot({
     [seriesSignature]
   )
   /**
-   * What was left out, split by why -- the two have different explanations and
-   * one of them is not the reader's problem.
-   *
-   * A boundary being absent is expected and is worth one calm sentence. A DATE
-   * being absent is not: it means the analysis came back without that
-   * measurement, and lumping it in with "boundaries have no measurement" would
-   * report a gap in the data as a property of the view.
+   * What was left out, split by why. A boundary being absent is expected and
+   * worth one calm sentence; a DATE being absent means the analysis came back
+   * without that measurement, and lumping the two together would report a gap
+   * in the data as a property of the view.
    */
   const omitted = useMemo(() => {
     const drawn = new Set(drawable.map((s) => s.key))
@@ -358,13 +334,12 @@ export default function CurvePosteriorPlot({
   /**
    * The calendar window to draw, and to fetch curve for.
    *
-   * Taken from the posteriors themselves rather than from the curve: the curve
-   * runs 55,000 years and the dates occupy a few centuries of it. Includes the
-   * priors when they are shown, since an outlier's unmodelled calibration is
-   * routinely much wider than the posterior the model pulled it into and is
-   * exactly what the reader turned them on to see.
+   * Taken from the posteriors rather than the curve, which runs 55,000 years
+   * where the dates occupy a few centuries. Includes the priors when shown,
+   * since an outlier's unmodelled calibration is routinely much wider than the
+   * posterior the model pulled it into.
    *
-   * Rounded to 10 years so that a change too small to see does not refetch.
+   * Rounded to 10 years so a change too small to see does not refetch.
    */
   const window = useMemo(() => {
     const bounds: number[] = []
@@ -386,10 +361,9 @@ export default function CurvePosteriorPlot({
   }, [lobes, showPrior])
 
   /**
-   * Which curves to draw. One analysis can mix them -- the Wairau model runs
-   * dates on SHCal20 and Marine20 together -- and a date's posterior is only
-   * explained by the curve it was actually calibrated against, so each one
-   * used gets drawn rather than one standing in for all of them.
+   * Which curves to draw. One analysis can mix them, and a date's posterior is
+   * only explained by the curve it was calibrated against, so every curve used
+   * is drawn rather than one standing in for all of them.
    */
   const curveIds = useMemo(
     () => [...new Set(drawable.map((s) => s.measurement!.curveId).filter((id): id is string => !!id))],
@@ -422,8 +396,7 @@ export default function CurvePosteriorPlot({
       .catch((err) => {
         if (!active) return
         // Named, not swallowed: without the curve this figure is a scatter of
-        // lobes with nothing to read them against, so the reader has to know
-        // that is what they are looking at.
+        // lobes with nothing to read them against.
         setLoadError((err as Error).message || 'Could not load the calibration curve.')
       })
       .finally(() => {
@@ -436,8 +409,8 @@ export default function CurvePosteriorPlot({
   }, [curveKey])
 
   /**
-   * How each curve on this figure is drawn -- fixed by which curve it is, not
-   * by the order it came in. See theme/curveColors.ts.
+   * How each curve is drawn -- fixed by which curve it is, not by the order it
+   * arrived in. See theme/curveColors.ts.
    */
   const curveStyle = useMemo(() => curveStyles(curveIds), [curveIds])
 
@@ -447,14 +420,14 @@ export default function CurvePosteriorPlot({
   }, [curves])
 
   /**
-   * Both axis ranges, computed before any trace is built because the lobes are
-   * sized as a fraction of them.
+   * Both axis ranges, computed before any trace is built, because the lobes
+   * are sized as a fraction of them.
    *
-   * The radiocarbon axis has to hold the curve's 2σ envelope over the window
-   * being drawn AND every measurement out to NORMAL_SPAN_SIGMA -- the curve
-   * because a curve that leaves the frame is the one thing this figure cannot
-   * do without, the measurements because a Gaussian clipped at the frame edge
-   * reads as a truncated distribution rather than as a cropped picture.
+   * The radiocarbon axis must hold the curve's 2σ envelope over the drawn
+   * window AND every measurement out to NORMAL_SPAN_SIGMA: a curve that leaves
+   * the frame is the one thing this figure cannot do without, and a Gaussian
+   * clipped at the edge reads as a truncated distribution rather than a
+   * cropped picture.
    */
   const ranges = useMemo(() => {
     const calendar: number[] = []
@@ -466,9 +439,8 @@ export default function CurvePosteriorPlot({
       const sigma = isNum(m.error1Sigma) && m.error1Sigma > 0 ? m.error1Sigma : 0
       radiocarbon.push(m.ageBp - NORMAL_SPAN_SIGMA * sigma, m.ageBp + NORMAL_SPAN_SIGMA * sigma)
     })
-    // Only the curves currently in play. `curveData` is replaced wholesale
-    // when the set of curves changes, but a render between the change and the
-    // response still holds the previous analysis's curve -- and a curve two
+    // Only the curves currently in play: a render between a change of curve
+    // set and the response still holds the previous curve, and one two
     // thousand radiocarbon years away would set the axis for a figure that no
     // longer draws it.
     curveIds.forEach((id) => {
@@ -494,24 +466,19 @@ export default function CurvePosteriorPlot({
 
     const xSpan = ranges.x.max - ranges.x.min
     const ySpan = ranges.y.max - ranges.y.min
-    // Not a flat fraction: a large model shrinks its lobes rather than
-    // filling the figure with them -- see lobeFraction.
+    // Not a flat fraction: a large model shrinks its lobes rather than filling
+    // the figure with them (see lobeFraction).
     const lobeHeight = ySpan * lobeFraction(lobes.length)
     const measurementWidth = xSpan * MEASUREMENT_LOBE_FRACTION
-    // The frame's OLDER edge, which the reversed axis draws on the left. The
-    // measurement lobes grow inward from it, so they grow towards SMALLER cal
-    // BP -- the sign below is the whole reason this is named rather than
-    // inlined.
+    // The frame's OLDER edge, drawn on the left by the reversed axis. The
+    // measurement lobes grow inward from it, towards SMALLER cal BP -- that
+    // sign is why this is named rather than inlined.
     const leftEdge = ranges.x.max
 
     // --- every curve's error envelope, under everything --------------------
-    // Each in its OWN curve's hue, so an envelope is read back to the line it
-    // belongs to by colour rather than by guessing. This used to be drawn for
-    // the first curve only, because both were in the same green and two
-    // overlapping green envelopes are not two readable envelopes -- which was
-    // a limitation of the palette, not of the figure, and a marine curve
-    // without its envelope was missing exactly the uncertainty that makes a
-    // marine date wide.
+    // Each in its OWN curve's hue, so an envelope reads back to its line by
+    // colour rather than by guessing -- and a marine curve keeps the envelope
+    // carrying exactly the uncertainty that makes a marine date wide.
     curveIds.forEach((id, index) => {
       const points = curveData[id]
       if (!points || points.length === 0) return
@@ -529,9 +496,8 @@ export default function CurvePosteriorPlot({
         fillcolor: color,
         line: { width: 0, color: 'rgba(0,0,0,0)' },
         mode: 'lines',
-        // Named for its curve only when there is more than one to tell apart.
-        // On a single-curve figure "IntCal20 ±1σ" beneath "IntCal20" says the
-        // name twice for no gain.
+        // Named for its curve only when there is more than one to tell apart:
+        // "IntCal20 ±1σ" beneath "IntCal20" says the name twice for no gain.
         name: `${curveIds.length > 1 ? curveNameFor(id) : 'Curve'} ${suffix}`,
         legendgroup: `curve-${id}-${suffix}`,
         legendrank: rank,
@@ -549,12 +515,11 @@ export default function CurvePosteriorPlot({
       const base = m.ageBp
       const sigma = isNum(m.error1Sigma) && m.error1Sigma > 0 ? m.error1Sigma : 0
 
-      // The projection rule, at this date's radiocarbon age: follow it right
-      // from the measurement and it crosses the curve wherever this date could
-      // sit, with the posterior directly beneath the crossing. It stops at the
-      // younger end of that posterior rather than running to the frame, so it
-      // ends where the date does. See GUIDE_LIMIT for why a crowded figure
-      // goes without.
+      // The projection rule at this date's radiocarbon age: followed right
+      // from the measurement it crosses the curve wherever this date could
+      // sit, with the posterior directly beneath. It stops at the younger end
+      // of that posterior rather than running to the frame. See GUIDE_LIMIT
+      // for why a crowded figure goes without.
       if (lobes.length <= GUIDE_LIMIT) {
         const youngest = Math.min(
           posterior.ages[0],
@@ -575,13 +540,10 @@ export default function CurvePosteriorPlot({
       }
 
       // The laboratory measurement, up the radiocarbon axis at the left edge.
-      //
-      // The same blue as this date's posterior, because it IS the same date --
-      // the figure's whole argument is that the wash on the left becomes the
-      // lobe on the curve. What separates them is the edge: this one is a bare
-      // fill, and the posterior below gets a drawn outline. Raw against
-      // resolved, in one channel, without spending a second colour on a
-      // distinction that is really a stage of the same thing.
+      // The same blue as this date's posterior because it IS the same date --
+      // the figure's argument is that the wash on the left becomes the lobe on
+      // the curve. What separates them is the edge: a bare fill here, a drawn
+      // outline below. Raw against resolved, in one channel.
       const normal = normalDensity(base, sigma)
       if (normal.length > 0) {
         data.push(
@@ -593,8 +555,8 @@ export default function CurvePosteriorPlot({
             { x: leftEdge, y: NaN },
             {
               fillcolor: plot.posteriorFill,
-              // No `line`: a measurement has not been resolved against
-              // anything yet, so it is drawn without an edge. See lobeTraces.
+              // No `line`: a measurement has been resolved against nothing
+              // yet, so it is drawn without an edge. See lobeTraces.
               name: 'Measurement (¹⁴C)',
               legendgroup: 'measurement',
               legendrank: RANK.measurement,
@@ -611,11 +573,10 @@ export default function CurvePosteriorPlot({
         )
       }
 
-      // One scale for this date, taken from whichever of posterior and prior
-      // is taller -- the same rule the stacked view uses, and for the same
-      // reason: equal area plus a shared scale is what makes "shorter and
-      // wider" mean the model narrowed this date rather than meaning the two
-      // were normalised differently.
+      // One scale for this date, from whichever of posterior and prior is
+      // taller -- the stacked view's rule. Equal area plus a shared scale is
+      // what makes "shorter and wider" mean the model narrowed this date
+      // rather than that the two were normalised differently.
       const peak = Math.max(posterior.peak, showPrior && prior ? prior.peak : 0)
       const scale = peak > 0 ? lobeHeight / peak : 0
 
@@ -632,11 +593,10 @@ export default function CurvePosteriorPlot({
               legendgroup: 'prior',
               legendrank: RANK.prior,
               showlegend: claimLegend('prior'),
-              // Masked against the ROW's peak, not its own. Both lobes are
-              // drawn at `scale`, so a prior the model has flattened is
-              // genuinely a low lobe here, and thresholding it against its own
-              // peak would stroke a line half a pixel off the baseline -- the
-              // exact mark the mask exists to remove.
+              // Masked against the ROW's peak, not its own: both lobes draw
+              // at `scale`, so a prior the model flattened is genuinely low
+              // here, and thresholding against its own peak would stroke a
+              // line half a pixel off the baseline.
               stroke: strokeMask(prior.probs, peak),
             }
           )
@@ -665,8 +625,8 @@ export default function CurvePosteriorPlot({
       )
 
       // Point estimates as a tick inside the date's own lobe, not a rule
-      // across the figure -- at this density a full-height line per date
-      // would be the only thing anyone could see.
+      // across the figure: at this density a full-height line per date would
+      // be the only thing visible.
       const marker = (value: number, color: string, dash: string, name: string, key: 'mean' | 'median') =>
         data.push({
           x: [value, value],
@@ -688,11 +648,10 @@ export default function CurvePosteriorPlot({
     })
 
     // --- the curve line, ON TOP of the dates --------------------------------
-    // Drawing order and legend order deliberately disagree (see RANK). A dozen
+    // Drawing order and legend order disagree deliberately (see RANK): a dozen
     // translucent lobes over a 1.5px line leave the curve visible only in the
-    // gaps between dates -- and the curve is the one thing this view exists to
-    // show. It goes last so it is never buried, and first in the legend where
-    // it belongs beside its own envelope.
+    // gaps between dates. It goes last so it is never buried, and first in the
+    // legend beside its own envelope.
     curveIds.forEach((id, index) => {
       const points = curveData[id]
       if (!points || points.length === 0) return
@@ -704,13 +663,13 @@ export default function CurvePosteriorPlot({
         customdata: cal.map((c) => formatCalendarAge(c, dateFormat)),
         mode: 'lines',
         line: {
-          // The curve's own colour and pattern, fixed by which curve it is
-          // rather than by where it landed in the list -- see curveColors.ts.
+          // Fixed by which curve it is rather than where it landed in the
+          // list -- see curveColors.ts.
           color: style.line,
           dash: style.dash,
-          // Heavier than a lobe's outline, deliberately. Drawing it last is
-          // not enough on a crowded figure: at the same weight it reads as one
-          // more lobe edge among sixty.
+          // Heavier than a lobe's outline: drawing it last is not enough on a
+          // crowded figure, where at equal weight it reads as one more lobe
+          // edge among sixty.
           width: 2,
         },
         name: curveNameFor(id),
@@ -748,17 +707,15 @@ export default function CurvePosteriorPlot({
   const layout = useMemo(
     () => ({
       // As on the other two plots: hiding the modebar does not disable
-      // drag-to-box-zoom, which would leave a reader zoomed in with no visible
-      // way back out.
+      // drag-to-box-zoom, which would leave a reader zoomed in with no way out.
       dragmode: false as const,
       height,
       xaxis: {
-        // An explicit standoff pins the title just under the tick labels;
-        // left to itself Plotly drops it against the bottom of the margin,
-        // where the legend is.
+        // An explicit standoff pins the title under the tick labels; left to
+        // itself Plotly drops it against the bottom margin, where the legend is.
         title: { text: calendarAxisTitle(dateFormat), standoff: geometry.titleStandoff },
-        // Oldest on the left, as everywhere else in this app -- which for an
-        // axis plotted in cal BP means giving the range largest-first.
+        // Oldest on the left, as everywhere else in this app, which on a cal
+        // BP axis means giving the range largest-first.
         range: [ranges.x.max, ranges.x.min],
         autorange: false as const,
         zeroline: false,

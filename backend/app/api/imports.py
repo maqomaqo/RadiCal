@@ -1,25 +1,15 @@
 """
-Reading dates in from an uploaded file.
+Reading dates in from an uploaded file. Nothing here writes anything.
 
-Two endpoints, and neither of them writes anything:
+Parsing and storing are separate steps: after the preview, the dates go
+through POST /projects/{id}/samples or the ordinary analysis endpoints --
+exactly the paths hand-entered dates take -- so an upload adds no new way for
+data to reach the database.
 
-  POST /api/import/dates      parse an uploaded .csv or .oxcal and return what
-                              it contained, for the user to look at before any
-                              of it is kept
-  GET  /api/import/csv-template  the column layout, as a file to fill in
-
-Parsing and storing are deliberately separate steps. Once the user has seen
-the preview, the dates go into a project's collection through
-POST /projects/{id}/samples, or into an analysis through the ordinary
-Bayesian/group-calibration endpoints -- exactly the paths hand-entered dates
-take. A file upload therefore adds no new way for data to reach the database,
-and cannot drift out of step with the validation on the paths that do.
-
-A file that fails to parse still comes back 200. The request succeeded; its
-answer is a list of what is wrong with the file, which the UI shows in full so
-one round trip fixes it. Reserving the error status for actual request
-failures keeps 'the upload broke' distinguishable from 'row 12 has a letter in
-the age column'. `data.ok` and `data.errors` carry the verdict.
+A file that fails to parse still comes back 200: the request succeeded, and
+its answer is what is wrong with the file, in `data.ok` and `data.errors`.
+That keeps "the upload broke" distinguishable from "row 12 has a letter in the
+age column".
 """
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
@@ -45,13 +35,13 @@ async def import_dates(file: UploadFile = File(...)):
     The format is chosen by extension, falling back on the content itself --
     see services/date_import.parse_upload.
 
-    The response carries three separate channels the caller should show
-    differently: `errors` (nothing was imported), `warnings` (imported, but
-    something could not be honoured) and `notes` (imported, and here is what
-    was assumed). See services/date_import.ImportResult.
+    The response carries three channels to show differently: `errors`
+    (nothing was imported), `warnings` (imported, but something could not be
+    honoured) and `notes` (imported, and here is what was assumed). See
+    services/date_import.ImportResult.
 
-    `async def` for the upload read only -- parsing an .oxcal model is
-    ordinary blocking work and goes to the threadpool with everything else.
+    `async def` for the upload read only; parsing is blocking work and goes to
+    the threadpool.
     """
     content = await file.read()
     return await run_in_threadpool(_import_dates, file.filename or "", content)
@@ -80,9 +70,9 @@ def csv_template():
     """
     The CSV template, as a download.
 
-    Includes worked example rows rather than a bare header: the column names
-    say what goes in them, but not that delta_r requires its uncertainty, or
-    that a date declared residual is outlier_model 'charcoal' at prior 1.0.
+    Includes worked example rows rather than a bare header, since the column
+    names cannot say that delta_r requires its uncertainty, or that a residual
+    date is outlier_model 'charcoal' at prior 1.0.
     """
     return StreamingResponse(
         iter([template_csv()]),
@@ -94,12 +84,9 @@ def csv_template():
 @router.get("/import/csv-columns")
 def csv_columns():
     """
-    The columns the CSV importer reads, for the format help shown in the
-    upload dialog.
-
+    The columns the CSV importer reads, for the upload dialog's format help.
     Served rather than duplicated in the frontend so the help and the parser
-    cannot disagree -- a documented column the importer does not actually
-    read is worse than no documentation.
+    cannot disagree.
     """
     from app.services.date_import import COLUMN_ALIASES, REQUIRED_COLUMNS
 

@@ -30,12 +30,10 @@ try:
 except Exception as e:
     print(f"⚠ Warning: Database initialization failed: {e}")
 
-# Nothing survives the process that was running it: the job queue is an
-# in-process thread pool, not a broker (see services/jobs.py for why). A row
-# still reading 'queued' or 'running' at startup therefore describes work
-# that will never finish, and left alone it would be polled forever by a page
-# with no way to tell the difference. This is what stands in for durability
-# -- it does not save the work, it stops the app lying about it.
+# The job queue is an in-process thread pool, not a broker (services/jobs.py),
+# so a row still reading 'queued' or 'running' at startup describes work that
+# will never finish and would be polled forever. This does not save the work,
+# it stops the app lying about it.
 try:
     from app.services.jobs import reconcile_orphans
     _orphans = reconcile_orphans()

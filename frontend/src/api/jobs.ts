@@ -15,11 +15,10 @@ export interface Job {
   target_id: string | null
   state: JobState
   /**
-   * 0..1, and for a sampled model an UPPER BOUND rather than a prediction:
-   * the sampler stops as soon as it converges, so most runs finish well short
-   * of 1. `detail.convergence` is what says how well it did, which is why the
-   * progress display shows the two together — a bar that reaches 0.15 and
-   * then says "done" reads as a bug on its own.
+   * 0..1, and for a sampled model an UPPER BOUND rather than a prediction: the
+   * sampler stops as soon as it converges, so most runs finish well short of 1.
+   * `detail.convergence` says how well, which is why the progress display shows
+   * the two together -- a bar reaching 0.15 and saying "done" reads as a bug.
    */
   progress: number | null
   detail: JobDetail | null
@@ -59,10 +58,9 @@ export async function getJob(jobId: string): Promise<Job> {
 /**
  * The most recent job about one analysis or project, or null.
  *
- * What a page opened from a bookmark or a reload needs: it arrives holding an
+ * What a page opened from a bookmark or reload needs: it arrives with an
  * analysis id and no job id, and still has to know whether something is
- * running before it decides between showing results and showing a progress
- * bar.
+ * running before choosing between results and a progress bar.
  */
 export async function latestJobFor(targetId: string): Promise<Job | null> {
   const response = await fetch(`/api/jobs?target_id=${encodeURIComponent(targetId)}&limit=1`)
@@ -74,10 +72,10 @@ export async function latestJobFor(targetId: string): Promise<Job | null> {
 /**
  * Ask a job to stop.
  *
- * Cooperative, so it is not instant — a running solve stops at the end of its
- * current sampling round. Resolves when the request was accepted, not when
- * the job has stopped; keep polling for that. A 409 means it had already
- * finished, which is not worth showing anyone as an error.
+ * Cooperative, so not instant: a running solve stops at the end of its current
+ * sampling round. Resolves when the request was accepted, not when the job
+ * stopped -- keep polling for that. A 409 means it had already finished, which
+ * is not worth showing as an error.
  */
 export async function cancelJob(jobId: string): Promise<void> {
   const response = await fetch(`/api/jobs/${jobId}`, { method: 'DELETE' })
@@ -89,10 +87,8 @@ export async function cancelJob(jobId: string): Promise<void> {
 /**
  * How a run in progress should be described in one line.
  *
- * Burn-in is called "settling" rather than by its name: it is a term of art
- * for the sweeps discarded before anything is accumulated, and the person
- * watching wants to know the run has started, not what the sampler calls its
- * first phase.
+ * Burn-in is called "settling": the person watching wants to know the run has
+ * started, not what the sampler calls its first phase.
  */
 export function describeJob(job: Job): string {
   if (job.state === 'queued') return 'Waiting for the queue'

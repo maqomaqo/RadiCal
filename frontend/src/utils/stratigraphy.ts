@@ -1,10 +1,7 @@
-// Client-side mirror of backend/app/services/stratigraphy.py's
-// expand_relationships/find_cycle. The backend is the authoritative check
-// (it rejects a cyclic request with a 422 before any MCMC run), but
-// running the same check here gives instant feedback in the Stratigraphy
-// UI -- exactly the "use the diagram as a check that relationships are
-// specified correctly" workflow -- without a network round trip on every
-// edit.
+// Client-side mirror of backend stratigraphy.py's
+// expand_relationships/find_cycle. The backend is the authoritative check,
+// rejecting a cyclic request with a 422 before any run; this gives the
+// Stratigraphy UI instant feedback without a round trip on every edit.
 import type {
   DraftGroup, MatrixMeasurement, DraftRelationship, ModelElement, ElementType, PosteriorSummary,
 } from '@/types'
@@ -31,14 +28,11 @@ export function groupMembers(measurements: MatrixMeasurement[], groups: DraftGro
  * Expand every relationship (which may reference a sample OR a group on
  * either side) into plain sample-to-sample pairs.
  *
- * Returns { olderYounger, equal }:
- *   - olderYounger: deduplicated edges meaning `from` is older than `to`.
- *   - equal: deduplicated pairs (order-independent) from 'equal' relationships.
+ * Returns { olderYounger, equal }, both deduplicated: edges meaning `from` is
+ * older than `to`, and order-independent pairs from 'equal' relationships.
  *
- * Direction follows the law of superposition: a sample stratigraphically
- * ABOVE another was deposited later and is therefore YOUNGER; a sample
- * BELOW another is OLDER. So "from above to" means from is younger (to is
- * older), and "from below to" means from is older.
+ * Direction follows the law of superposition: a sample ABOVE another was
+ * deposited later and is YOUNGER, one BELOW is OLDER.
  */
 export function expandRelationships(
   measurements: MatrixMeasurement[],
@@ -121,10 +115,9 @@ export interface StructureRow {
   tpqAgeBp?: number | null
   taqAgeBp?: number | null
   sampleId?: string | null
-  // A date row's own outlier configuration, carried through so a results
-  // table can tell a posterior outlier probability the data actually found
-  // apart from one that just reports back a prior the analyst assigned it.
-  // Always null for an element row.
+  // A date row's outlier configuration, so a results table can tell a
+  // posterior outlier probability the data found from one that reports back
+  // the prior the analyst assigned. Null for an element row.
   outlierPrior?: number | null
   outlierModel?: 'general' | 'charcoal' | null
 }
@@ -134,24 +127,22 @@ export interface StructureRow {
  * siblings oldest first, each phase's own dates before any branch nested
  * inside it.
  *
- * Mirrors the backend's model_tree.flatten_structure so the results table
- * and the CSV agree row for row. Both derive from the same stored tree
- * rather than keeping separate state, so the only thing that has to stay
- * in step is this ordering rule.
+ * Mirrors the backend's model_tree.flatten_structure so the results table and
+ * the CSV agree row for row. Both derive from the same stored tree, so this
+ * ordering rule is the only thing that has to stay in step.
  *
- * A date is placed by element_id, falling back to group_id for a tree
- * migrated from the old contexts, where each phase reuses its context's
- * id. Anything matching neither lands under a trailing "Unassigned"
- * heading rather than being dropped.
+ * A date is placed by element_id, falling back to group_id for a tree migrated
+ * from contexts, where each phase reuses its context's id. Anything matching
+ * neither lands under a trailing "Unassigned" heading rather than being
+ * dropped.
  */
 export function flattenStructure(
   tree: ModelElement | null | undefined,
   measurements: MatrixMeasurement[]
 ): StructureRow[] {
   const rows: StructureRow[] = []
-  // No structure at all (a plain calibration) is not the same as dates
-  // missing from a structure: there is nothing to read in model order, so
-  // callers fall back to a flat list rather than showing every date under a
+  // No structure at all is not the same as dates missing from a structure:
+  // callers fall back to a flat list rather than filing every date under a
   // misleading "Unassigned" heading.
   if (!tree) return rows
 

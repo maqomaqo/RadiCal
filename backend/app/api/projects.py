@@ -39,10 +39,8 @@ def create_project(project: ProjectCreate, db: Session = Depends(get_db)):
 @router.get("/projects")
 def list_projects(db: Session = Depends(get_db)):
     """
-    List all projects, each with its analysis count, plus a synthetic
-    'Unassigned' bucket for analyses that aren't filed under any project
-    (id: null) so the frontend can offer it as a filter/destination
-    alongside real projects.
+    List all projects with their analysis counts, plus an 'Unassigned' count
+    so the frontend can offer that bucket alongside real projects.
     """
     projects = db.query(Project).order_by(Project.created_at.desc()).all()
 
@@ -144,14 +142,10 @@ def _rerun_project_job(project_id: str):
     The work function for a 'project_rerun' job: every analysis in one
     project, in turn.
 
-    One analysis failing does not abort the rest -- a project is a filing
-    cabinet, not a transaction, and a single bad curve reference should not
-    stop the other nine analyses being refreshed. Failures are collected and
-    reported in the job's detail.
-
-    Progress is analyses finished over analyses to do, not sweeps: across a
-    mixed project the sampler's own fraction would jump about meaninglessly
-    as each model converged at its own length.
+    One failure does not abort the rest -- a project is a filing cabinet, not
+    a transaction -- and failures are collected in the job's detail. Progress
+    counts analyses rather than sweeps, since each model converges at its own
+    length.
     """
     def work(db: Session, handle: jobs.JobHandle) -> Dict:
         analyses = db.query(Analysis).filter(Analysis.project_id == project_id).all()
@@ -161,10 +155,8 @@ def _rerun_project_job(project_id: str):
 
         handle.update(progress=0.0, force=True, completed=0, total=total, failed=[])
         for analysis in analyses:
-            # Between analyses, not within one: stopping mid-solve would
-            # leave the job's own count honest but is checked by the sampler
-            # anyway, and this is the boundary where a partial project rerun
-            # is a coherent state to stop at.
+            # Between analyses, not within one: the sampler checks
+            # mid-solve, and this is where a partial rerun is coherent.
             handle.check_cancelled()
             try:
                 _rerun_analysis(analysis, db)
@@ -193,19 +185,14 @@ def _rerun_project_job(project_id: str):
 @router.post("/projects/{project_id}/rerun")
 def rerun_project(project_id: str, wait: bool = False, db: Session = Depends(get_db)):
     """
-    Recompute every analysis in this project in place, from each one's own
-    persisted inputs (see analysis.py's _rerun_analysis) -- one analysis
-    failing (e.g. a curve/MCMC error) doesn't abort the rest; failures are
-    collected and reported back instead.
+    Recompute every analysis in this project in place from its own persisted
+    inputs (analysis._rerun_analysis). One failure does not abort the rest;
+    failures are collected and reported back.
 
-    Queued rather than run here. This is the endpoint that made a job queue
-    necessary: it is a Bayesian run per analysis, back to back, in one
-    request -- minutes for a project of any size, well past the point a
-    reverse proxy or a browser gives up. Answers 202 with a job_id to poll,
-    whose detail carries {completed, total, failed}.
-
-    `wait=true` runs it in the request, as it used to. See
-    analysis.rerun_analysis for why that stays.
+    Queued rather than run here: a Bayesian run per analysis back to back
+    takes minutes, well past what a reverse proxy or browser will hold.
+    Answers 202 with a job_id whose detail carries {completed, total, failed}.
+    `wait=true` runs it in the request -- see analysis.rerun_analysis.
     """
     project = db.query(Project.id).filter(Project.id == project_id).first()
     if not project:
@@ -240,15 +227,12 @@ def rerun_project(project_id: str, wait: bool = False, db: Session = Depends(get
 @router.delete("/projects/{project_id}")
 def delete_project(project_id: str, db: Session = Depends(get_db)):
     """
-    Delete a project. Analyses filed under it are NOT deleted -- they're
-    unassigned (project_id set to NULL) so calibration results are never
-    lost just because a project got cleaned up or renamed away.
+    Delete a project. Its analyses are NOT deleted, only unassigned, so
+    results are never lost to a project being cleaned up.
 
-    The project's date COLLECTION (ProjectSample rows) is deleted with it,
-    via the cascade on Project.samples -- unlike an analysis, a collected
-    date has no meaning outside the project it was entered under, and any
-    analysis already deployed from it holds its own independent copy of
-    the values, so nothing an analysis depends on is lost here.
+    The project's date COLLECTION is deleted with it via the cascade on
+    Project.samples: a collected date has no meaning outside its project, and
+    any analysis deployed from it holds its own copy of the values.
     """
     project = db.query(Project).filter(Project.id == project_id).first()
     if not project:

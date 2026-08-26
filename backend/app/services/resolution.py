@@ -18,20 +18,17 @@ is to yield it. That gives a mean, and a 5th-95th percentile band for how
 lucky or unlucky a single date can be.
 
 Written from the published method and this app's own calibration code, not
-translated from res14c, which is GPL-3.0 where this project is CC0. What it
-reproduces is the method's *output*: over 1,000-4,000 cal BP this
-implementation agrees with res14c's published figures to about 0.3%,
-including the sharp 33-year trough at 2,750 cal BP that a subtly wrong
-implementation would smear away.
+translated from res14c, which is GPL-3.0 where this project is CC0. It
+reproduces the method's OUTPUT: over 1,000-4,000 cal BP it agrees with res14c's
+published figures to about 0.3%, including the sharp 33-year trough at 2,750
+cal BP that a subtly wrong implementation would smear away.
 
-Why this is affordable at request time. The obvious formulation is a dense
-50,000 x 55,000 problem, which is why the reference implementation uses
-multiprocessing and ships its answer as a precomputed CSV. Two things avoid
-that here: every calendar age more than 5 sigma from a measurement
-contributes nothing and is masked out, and the calculation runs over a
-uniform 1-year grid, where the trapezoidal weights `calibrate` applies are a
-constant and so cannot change which points the HPD selects. Full range, one
-core: about ten seconds. A browser window: a twentieth of a second.
+Affordable at request time despite the obvious formulation being a dense
+50,000 x 55,000 problem: every calendar age more than 5 sigma from a
+measurement contributes nothing and is masked out, and the calculation runs on
+a uniform 1-year grid, where `calibrate`'s trapezoidal weights are constant and
+so cannot change which points the HPD selects. Full range on one core takes
+about ten seconds; a browser window, a twentieth of a second.
 """
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
@@ -40,25 +37,22 @@ import numpy as np
 from app.services.calibration import SIGMA_2, CalibrationCurve, hpd_ranges_from_distribution
 
 # Twice the mean life of 14C, in years -- the constant in the uncertainty
-# scaling law. (Libby's 5568-year half-life corresponds to a mean life of
-# 8033 years, which is the convention conventional radiocarbon ages are
-# reported on.)
+# scaling law. Libby's 5568-year half-life gives a mean life of 8033 years,
+# the convention conventional radiocarbon ages are reported on.
 MEAN_LIFE_DOUBLED = 2 * 8033.0
 
 # The laboratory uncertainty assumed when none is given: 25 years on a modern
-# sample, which is what a commercial date typically carries.
+# sample, what a commercial date typically carries.
 #
-# The reference implementation defaults to 15, which is about the best a good
-# AMS laboratory offers and is why the method is titled "the best possible
-# time resolution". That is the right default for reproducing its published
-# figures and the wrong one for answering "can I date this period well
-# enough", which is what anyone here is actually asking: it would quote a
-# precision most samples will not get. 15 remains one click away, and the
-# parity test against res14c asks for it explicitly.
+# The reference implementation defaults to 15, about the best a good AMS lab
+# offers, which is right for reproducing its published figures and wrong for
+# "can I date this period well enough" -- it would quote a precision most
+# samples will not get. 15 stays one click away, and the res14c parity test
+# asks for it explicitly.
 DEFAULT_U0 = 25.0
 
-# 2 sigma -- the same level every other HPD region in this app is reported
-# at, which it now is by construction rather than by a matching literal.
+# 2 sigma, the level every other HPD region here is reported at, shared by
+# construction rather than by a matching literal.
 CONFIDENCE = SIGMA_2
 
 # Beyond this many combined sigma a measurement contributes nothing to a
@@ -185,10 +179,9 @@ def profile(
         np.ceil(in_window.max() + reach) + 1,
     )
 
-    # Collected sparsely: for each (measurement, reported calendar year) pair
-    # that matters at all, the width that measurement achieved and how likely
-    # that year is to have produced it. Dense storage would be a
-    # 50,000 x 11,000 matrix; almost all of it is zero.
+    # Sparse: for each (measurement, reported year) pair that matters, the
+    # width that measurement achieved and how likely the year is to have
+    # produced it. Dense would be a 50,000 x 11,000 matrix, almost all zero.
     year_ids: List[np.ndarray] = []
     weights: List[np.ndarray] = []
     widths: List[np.ndarray] = []
@@ -209,9 +202,9 @@ def profile(
         if not np.isfinite(total) or total <= 0:
             continue
 
-        # The width of the 95.45% HPD set, gaps included. The same HPD
-        # construction the rest of the app reports with -- on this uniform
-        # grid, selecting by density and by mass are the same selection.
+        # Width of the 95.45% HPD set, gaps included -- the app's own HPD
+        # construction, and on a uniform grid selecting by density and by mass
+        # are the same selection.
         ranges = hpd_ranges_from_distribution(cal[near], likelihood, CONFIDENCE)
         width = max(r['max'] for r in ranges) - min(r['min'] for r in ranges)
 
@@ -242,9 +235,9 @@ def profile(
     p95 = np.full(len(out_cal), np.nan)
     mean_u = np.full(len(out_cal), np.nan)
 
-    # Group by reported year, then read the weighted mean and the weighted
-    # percentiles off the sorted widths. Exact rather than binned: a histogram
-    # would put a floor on the precision of the very numbers being reported.
+    # Grouped by reported year, then the weighted mean and percentiles read
+    # off the sorted widths. Exact rather than binned, since a histogram would
+    # floor the precision of the numbers being reported.
     order = np.lexsort((width, year_id))
     year_id, weight, width = year_id[order], weight[order], width[order]
     boundaries = np.searchsorted(year_id, np.arange(len(out_cal) + 1))
@@ -274,16 +267,15 @@ def profile(
 # The whole-curve profile, which is the only slow case
 # --------------------------------------------------------------------------
 #
-# A browser window computes in a twentieth of a second, so it is simply
-# computed. The whole 55,000 years takes about twelve, which is too long to do
-# twice -- so it is kept, keyed by the curve's CONTENT hash rather than its id,
-# because the three builtin curve files are all overridable by environment
-# variable and a swapped file must not be served a previous file's answer.
+# A browser window computes in a twentieth of a second, so it is just computed.
+# The whole 55,000 years takes about twelve, too long to do twice, so it is
+# cached -- keyed by the curve's CONTENT hash rather than its id, because the
+# builtin curve files are overridable by environment variable and a swapped
+# file must not be served a previous file's answer.
 #
-# Slicing this for a window is exact rather than approximate: a windowed
-# calculation pads far enough that it returns the identical numbers (asserted
-# in tests/test_resolution.py), so the cache and the direct path cannot
-# disagree.
+# Slicing it for a window is exact, not approximate: a windowed calculation
+# pads far enough to return identical numbers (asserted in
+# tests/test_resolution.py), so cache and direct path cannot disagree.
 
 _FULL_CACHE: Dict[Tuple[str, float, int], ResolutionProfile] = {}
 _FULL_CACHE_LIMIT = 6

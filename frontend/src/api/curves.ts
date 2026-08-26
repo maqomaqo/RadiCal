@@ -1,19 +1,13 @@
 /**
  * The calibration curves the backend can actually calibrate against.
  *
- * There used to be two separate hardcoded curve lists in this frontend --
- * one in MeasurementFields, one in ProjectSampleTable -- plus three more on
- * the backend, none of which knew about the others. `GET /api/curves` has
- * always existed but nothing called it, and its metadata had drifted so far
- * that it reported IntCal20 as having 5,141 points when the curve being
- * calibrated against has 9,501. The backend's services/curve_registry.py is
- * now the single source of truth and measures that metadata from the loaded
- * curve; this module is how the frontend asks it.
+ * services/curve_registry.py is the single source of truth and measures every
+ * countable field from the loaded curve; this module is how the frontend asks
+ * it, rather than holding a list of its own.
  *
- * Deliberately no local fallback list. If the request fails, the pickers say
- * so and keep whatever curve the date already had, rather than quietly
- * offering a list that might not match what the backend will accept -- which
- * is the failure mode this whole change exists to remove.
+ * Deliberately no local fallback. If the request fails the pickers say so and
+ * keep whatever curve the date already had, rather than offering a list that
+ * might not match what the backend will accept.
  */
 
 import { formatApiError } from '@/utils/apiError'
@@ -41,8 +35,7 @@ export interface CurveSpec {
   content_sha256: string
   /**
    * Archived curves are hidden from the pickers but still resolve, so an
-   * analysis that used one still reruns. They appear in a listing only when
-   * it was asked for them.
+   * analysis that used one still reruns. Listed only when asked for.
    */
   archived: boolean
   /** The file an imported curve came from. Null for the bundled curves. */
@@ -135,10 +128,9 @@ let pending: Promise<CurveSpec[]> | null = null
 /**
  * Fetch the curve list, once per page load.
  *
- * Curves do not change while the app is open (adding one is a backend
- * operation that does not exist yet), so every caller shares one request
- * rather than each mounting component issuing its own. A failed request is
- * not cached -- the next caller retries.
+ * Every caller shares one request rather than each mounting component issuing
+ * its own. A failed request is not cached, so the next caller retries; see
+ * invalidateCurves below for what drops the cache after a write.
  */
 export function fetchCurves(): Promise<CurveSpec[]> {
   if (!pending) {
@@ -159,9 +151,9 @@ export function fetchCurves(): Promise<CurveSpec[]> {
 /**
  * Drop the cached curve list, so the next reader refetches.
  *
- * Called after importing, renaming, archiving or deleting a curve: the list
- * is shared by every picker on the page, and a stale one would offer a curve
- * that no longer exists or omit one just added.
+ * Called after importing, renaming, archiving or deleting a curve: the list is
+ * shared by every picker on the page, and a stale one would offer a curve that
+ * no longer exists or omit one just added.
  */
 export function resetCurveCache(): void {
   pending = null
@@ -170,10 +162,9 @@ export function resetCurveCache(): void {
 /**
  * Every curve including archived ones, uncached.
  *
- * The manager page wants both -- an archived curve is still listed there, so
- * it can be restored -- and wants what is true now rather than what was true
- * when some picker first asked. The pickers keep using the cached
- * `fetchCurves`, which leaves archived curves out.
+ * The manager page lists archived curves so they can be restored, and wants
+ * what is true now rather than when a picker first asked. The pickers keep the
+ * cached `fetchCurves`, which leaves archived curves out.
  */
 export async function fetchAllCurves(): Promise<CurveSpec[]> {
   const response = await fetch('/api/curves?include_archived=true')

@@ -5,21 +5,16 @@ formats come through.
 The .oxcal path lives in services/oxcal_script.py -- parsing OxCal's own model
 language is a job of its own -- and is dispatched to from parse_upload below.
 
-Nothing here writes to the database. An import PARSES, and hands back what it
-read for the caller to review; adding the dates to a project collection or
-running them as an analysis goes through the same endpoints hand-entered dates
-already use. That is deliberate: a file upload should not be a second way for
-data to reach storage, with its own set of checks to drift out of sync with the
-first. For the same reason every parsed date is validated through
-schemas.sample.BayesianMeasurementInput before being returned, so an uploaded
-date is held to exactly the bounds a typed one is -- age within the range the
-curves cover, a curve_id the calibration engine actually knows, a delta_r that
-carries its uncertainty -- and reports them in the same words.
+Nothing here writes to the database. An import PARSES and hands back what it
+read; storing the dates goes through the same endpoints hand-entered ones use,
+so a file upload is not a second route into storage with its own checks to
+drift out of step. For the same reason every parsed date is validated through
+schemas.sample.BayesianMeasurementInput, so an uploaded date is held to the
+bounds a typed one is and reports them in the same words.
 
 An import is ALL-OR-NOTHING. One bad row fails the file, listing every problem
-found rather than the first. Importing the good rows and quietly skipping the
-rest is how a date goes missing from an analysis without anyone noticing, and a
-partially-imported file leaves the user no way to tell which state they are in.
+found rather than the first: importing the good rows and skipping the rest is
+how a date goes missing without anyone noticing.
 """
 import csv
 import io
@@ -30,8 +25,8 @@ from typing import Any, Dict, List, Optional
 from app.services import curve_registry
 
 # A file bigger than this is not a date list. The cap is on the DECODED text,
-# and exists so a mis-picked file fails immediately with a clear message
-# rather than being parsed line by line into an enormous error report.
+# so a mis-picked file fails immediately rather than being parsed line by line
+# into an enormous error report.
 MAX_CONTENT_BYTES = 4 * 1024 * 1024
 
 # Matches schemas.sample.ProjectSampleBulkInput's own ceiling, so a file that
@@ -42,33 +37,32 @@ MAX_DATES = 500
 @dataclass
 class ImportResult:
     """
-    What a file turned out to contain. Note the three separate channels --
-    they are not interchangeable and the UI shows them differently:
+    What a file turned out to contain. The three channels are not
+    interchangeable and the UI shows them differently:
 
     errors    the file was NOT imported. Every problem found, not just the
               first, so one round trip fixes the file.
-    warnings  imported, but something in the file could not be honoured, or
-              was honoured in a way that changes the model. Must be read.
+    warnings  imported, but something could not be honoured, or was honoured in
+              a way that changes the model. Must be read.
     notes     imported, and here is what was assumed or rearranged on the way
-              in. Informational -- but recorded rather than left implicit,
-              because a structure the importer chose is not one the user wrote.
+              in -- recorded rather than left implicit, because a structure the
+              importer chose is not one the user wrote.
     """
     dates: List[Dict[str, Any]] = field(default_factory=list)
-    # The model structure, when the file carried one (.oxcal always does; a CSV
-    # does when it names phases). None means there is nothing to model with --
-    # the dates are independent and belong in a group calibration.
+    # The model structure, when the file carried one -- .oxcal always does, a
+    # CSV when it names phases. None means the dates are independent and belong
+    # in a group calibration.
     model_tree: Optional[Dict[str, Any]] = None
     # date id -> model element id. Redundant with each date's element_id, and
     # returned separately because the frontend draft store keeps assignments in
-    # exactly this shape.
+    # this shape.
     element_assignments: Dict[str, str] = field(default_factory=dict)
     errors: List[str] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
     notes: List[str] = field(default_factory=list)
     source_format: str = 'csv'
-    # A name for the analysis, taken from the file where it says one (an
-    # .oxcal model names its own outermost element) and from the filename
-    # otherwise.
+    # A name for the analysis, from the file where it says one (an .oxcal model
+    # names its outermost element) and from the filename otherwise.
     analysis_name: Optional[str] = None
 
     @property
@@ -124,22 +118,18 @@ class ImportResult:
 # --------------------------------------------------------------------------
 
 # Canonical field -> the header spellings that mean it. Order-independent and
-# case-insensitive: a lab report's column order is nobody's business but the
-# lab's, and requiring a fixed order would make the template mandatory rather
-# than a convenience.
+# case-insensitive, so a lab report need not be rearranged and the template
+# stays a convenience rather than a requirement.
 #
-# The app's OWN results export is deliberately among the accepted spellings
-# ('Age BP', '1-Sigma Error', 'Material', 'Sample Type', 'Curve', 'Name',
-# 'TPQ BP', 'TAQ BP' -- see api/results.CSV_HEADER), so exporting a table,
-# correcting it in a spreadsheet and importing it back is a path that works
-# rather than one that nearly works.
+# The app's OWN results export is among the accepted spellings (see
+# api/results.CSV_HEADER), so exporting a table, correcting it in a spreadsheet
+# and importing it back is a path that works.
 COLUMN_ALIASES: Dict[str, tuple] = {
     'sample_name': (
         'sample_name', 'name', 'sample', 'sample_id', 'lab_code', 'labcode',
         'lab_no', 'lab_number', 'lab_id', 'code', 'laboratory_code',
-        # OxCal's own convention for the lab-code column, as used by this
-        # repo's tests/fixtures/oxcal/Nenthorn_c14.csv -- a table written to
-        # be fed to OxCal names the column after the command it becomes.
+        # OxCal's convention for the lab-code column: a table written to be
+        # fed to OxCal names the column after the command it becomes.
         'r_date',
     ),
     'age_bp': (
@@ -171,28 +161,26 @@ COLUMN_ALIASES: Dict[str, tuple] = {
     'depth_cm': ('depth_cm', 'depth'),
     'location': ('location', 'site', 'site_name'),
     'notes': ('notes', 'note', 'comment', 'comments', 'remarks'),
-    # Not imported -- recognised so that re-importing the app's own results
-    # export can tell a date row from a structural one. See parse_csv.
+    # Not imported, only recognised, so re-importing the app's results export
+    # can tell a date row from a structural one. See parse_csv.
     'row_type': ('row_type',),
 }
 
 REQUIRED_COLUMNS = ('sample_name', 'age_bp', 'error_1sigma')
 
-# Columns of the app's results export that are OUTPUT, not input -- so that
-# re-importing a corrected results table neither reads a posterior back in as
-# data nor warns about a dozen columns the user did not add.
+# Columns of the app's results export that are OUTPUT, so re-importing a
+# corrected results table neither reads a posterior back in as data nor warns
+# about a dozen columns the user did not add.
 _RESULT_ONLY_PREFIXES = ('posterior_', 'unmodelled_', 'agreement', 'outlier_percent')
 
-# '95.4% HPD' normalises to '95_4percent_hpd'; a file exported before the
-# reporting levels were corrected says '95% HPD' -> '95percent_hpd', and both
-# have to be recognised or re-importing an older results table would read its
-# posterior columns back in as data.
+# '95.4% HPD' normalises to '95_4percent_hpd' and an older export's '95% HPD'
+# to '95percent_hpd'. Both must be recognised, or re-importing an older results
+# table would read its posterior columns back in as data.
 _HPD_COLUMN = re.compile(r'^\d+(?:_\d+)?percent_hpd')
 
 # Every calendar column is exported a second time in the chosen era, e.g.
-# 'TPQ BP (BC/AD)' -> 'tpq_bp_bc_ad'. Those are renderings of a column that is
-# already present, so reading them would double-count -- and 'tpq_bp_bc_ad' is
-# in AD, where tpq_age_bp is in cal BP, so it would also be wrong by 1950.
+# 'TPQ BP (BC/AD)' -> 'tpq_bp_bc_ad'. Reading those would double-count a column
+# already present, and be wrong by 1950 into the bargain.
 _ERA_SUFFIXES = ('_bc_ad', '_bce_ce')
 
 
@@ -203,11 +191,9 @@ def _is_result_only(key: str, has_row_type: bool) -> bool:
         return True
     if key.endswith(_ERA_SUFFIXES):
         return True
-    # 'Depth' in the results export is a model element's nesting depth, an
-    # integer with no units. In a lab report the same header means depth_cm.
-    # A Row Type column is only ever written by our own export, so it is what
-    # tells the two apart -- without it, reading a nesting depth as
-    # centimetres would put silent nonsense in the record.
+    # 'Depth' in the results export is a model element's nesting depth; in a
+    # lab report the same header means depth_cm. A Row Type column is only ever
+    # written by our own export, so it is what tells the two apart.
     return key == 'depth' and has_row_type
 
 
@@ -468,7 +454,7 @@ def parse_csv(text: str, filename: Optional[str] = None) -> ImportResult:
     rows: List[Dict[str, Any]] = []
 
     for offset, raw_row in enumerate(reader):
-        # +2: the header is line 1, and enumerate starts at 0.
+        # +2: the header is line 1 and enumerate starts at 0.
         line = offset + 2
         row = {
             mapping[header]: value
@@ -479,10 +465,9 @@ def parse_csv(text: str, filename: Optional[str] = None) -> ImportResult:
         if not any(_clean(v) for v in row.values()):
             continue
 
-        # Re-importing the app's own results export: that file has a row per
-        # model ELEMENT as well as per date, and a sequence has no age to
-        # calibrate. Recognised and skipped rather than reported as fourteen
-        # rows with a missing age.
+        # The app's results export has a row per model ELEMENT as well as per
+        # date, and a sequence has no age to calibrate. Skipped rather than
+        # reported as fourteen rows with a missing age.
         if has_row_type and _clean(row.get('row_type')).lower() not in ('date', ''):
             skipped_structural += 1
             continue
@@ -596,10 +581,9 @@ def _finish(result: ImportResult) -> None:
 def _validate_dates(result: ImportResult) -> None:
     """
     Every parsed date through schemas.sample.BayesianMeasurementInput, so an
-    uploaded date meets exactly the bounds a typed one does and is refused in
-    the same words. Doing this here rather than leaving it to the endpoint the
-    dates are eventually posted to means a bad value is reported against its
-    own row, while the user still has the file open.
+    uploaded date meets the bounds a typed one does and is refused in the same
+    words. Done here rather than at the endpoint the dates are posted to, so a
+    bad value is reported against its own row while the file is still open.
     """
     from pydantic import ValidationError
     from app.schemas.sample import BayesianMeasurementInput
@@ -619,8 +603,8 @@ def _validate_dates(result: ImportResult) -> None:
 
     repeated = sorted(n for n, count in duplicate_names.items() if count > 1 and n)
     if repeated:
-        # Not an error: a site really can have two dates from one sample, and
-        # OxCal allows repeated labels too. But it is the shape of a
+        # Not an error -- a site really can have two dates from one sample,
+        # and OxCal allows repeated labels -- but it is also the shape of a
         # copy-paste accident, and the two are indistinguishable from here.
         result.warnings.append(
             'These sample names appear more than once: '
@@ -632,21 +616,16 @@ def _validate_dates(result: ImportResult) -> None:
 
 def _tree_from_phases(result: ImportResult) -> None:
     """
-    Build a starting model structure from a CSV's phase names.
+    Build a starting model structure from a CSV's phase names: one Sequence
+    holding a Start Boundary, every phase, and an End Boundary, with the phases
+    nested inside one unordered Phase.
 
-    What it builds, and why this shape: one Sequence holding a Start
-    Boundary, every phase, and an End Boundary -- with the phases nested
-    inside one unordered Phase, because a CSV says which dates go together
-    and says NOTHING about which group came first. A Sequence of the phases
-    would read an ordering out of the row order, which is not information the
-    file contains.
-
-    So the model is: all the dates fall between one pair of transitions, and
-    the contexts are unordered with respect to each other. That is OxCal's
-    ordinary single-phase model, and it is the weakest structure that still
-    uses the grouping the file gives. Ordering the phases is then a decision
-    the user makes in the Model Structure editor -- which is where a
-    modelling decision belongs.
+    Unordered because a CSV says which dates go together and NOTHING about
+    which group came first -- a Sequence of the phases would read an ordering
+    out of the row order. So all the dates fall between one pair of transitions
+    and the contexts are unordered: OxCal's ordinary single-phase model, and
+    the weakest structure that still uses the grouping the file gives. Ordering
+    them is then the user's decision in the Model Structure editor.
     """
     import uuid
 
@@ -673,8 +652,8 @@ def _tree_from_phases(result: ImportResult) -> None:
             'children': children or [],
         }
 
-    # Phases in first-appearance order, which is at least stable and matches
-    # how the file reads, without being claimed as chronological.
+    # First-appearance order: stable and matching how the file reads, without
+    # being claimed as chronological.
     order: List[str] = []
     for date in result.dates:
         phase = date.get('phase_name')
@@ -683,10 +662,9 @@ def _tree_from_phases(result: ImportResult) -> None:
 
     phases = {name: element('phase', name) for name in order}
 
-    # Dates with a blank phase cell get a phase of their own rather than being
-    # dropped into one of the named ones. Held separately rather than under a
-    # reserved key, so it cannot collide with a file that really does call a
-    # context "Unassigned dates".
+    # A blank phase cell gets a phase of its own rather than being dropped
+    # into a named one. Held separately rather than under a reserved key, so it
+    # cannot collide with a file that really calls a context "Unassigned dates".
     catch_all = None
     if unnamed:
         catch_all = element('phase', 'Unassigned dates')
@@ -745,10 +723,9 @@ def template_csv() -> str:
     """
     The blank-with-examples template offered for download.
 
-    The three example rows are not filler: each shows something the column
-    list alone does not explain -- a plain terrestrial date, a date DECLARED
-    residual with the charcoal outlier model at prior 1.0, and a marine date
-    whose delta_r carries the uncertainty the app requires with it.
+    The three example rows each show something the column list alone cannot: a
+    plain terrestrial date, a date DECLARED residual at charcoal prior 1.0, and
+    a marine date whose delta_r carries its required uncertainty.
     """
     output = io.StringIO()
     writer = csv.writer(output)
@@ -767,9 +744,9 @@ def parse_upload(filename: str, content: bytes) -> ImportResult:
     Parse an uploaded file, choosing the reader by extension and falling back
     on the content itself.
 
-    Extension is only a hint: `.txt` is a perfectly ordinary name for both an
-    exported table and a saved OxCal model, so a file whose first meaningful
-    line looks like CQL2 is read as a model whatever it is called.
+    Extension is only a hint: `.txt` names both exported tables and saved
+    OxCal models, so a file whose first meaningful line looks like CQL2 is read
+    as a model whatever it is called.
     """
     if len(content) > MAX_CONTENT_BYTES:
         result = ImportResult()

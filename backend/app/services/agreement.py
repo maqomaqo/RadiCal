@@ -2,14 +2,12 @@
 Agreement indices -- how well each modelled date still fits the measurement
 it came from, and how well the model as a whole does.
 
-A Bayesian chronological model moves every date. That is the point of it, but
-it also means a date that simply does not belong -- residual charcoal, an
-intrusive fragment, a lab error -- gets dragged into line with its neighbours
-and reported with a confident range, with nothing in the output to say the
-data ever objected. The agreement index is the standard warning
-(Bronk Ramsey 1995): it compares each date's MODELLED posterior against its
-own UNMODELLED likelihood, so a date the model had to move a long way scores
-low regardless of how tidy its final range looks.
+A Bayesian model moves every date, which means one that does not belong --
+residual charcoal, an intrusive fragment, a lab error -- gets dragged into line
+with its neighbours and reported with a confident range. The agreement index is
+the standard warning (Bronk Ramsey 1995): it compares each date's MODELLED
+posterior against its own UNMODELLED likelihood, so a date the model had to
+move a long way scores low however tidy its final range looks.
 
     A_i = 100 * sum(modelled * unmodelled) / sum(unmodelled^2)
 
@@ -19,34 +17,27 @@ a date the model SHARPENS onto the peak of its own likelihood scores above
 100, which is why values over 100 are normal and not a bug. Below about 60 is
 the conventional threshold for taking a second look.
 
-What it does NOT do, which matters if you are reaching for it to find
-outliers: it detects a date the MODEL HAD TO MOVE, which is not the same as
-a date that does not belong. Measured on a single unconstrained phase, a
-date 600 radiocarbon years away from its four neighbours scores 100.5 --
-because a lone phase simply widens to accommodate it and nothing is forced
-anywhere. Put the same outlier where a constraint bites, in the younger half
-of an ordered sequence, and it collapses to zero along with everything it
-contradicts. So this is a diagnostic for conflict between the data and the
-model's structure. Finding a date that is merely wrong, in a model with
-enough freedom to swallow it, needs an outlier model instead.
+What it does NOT do: it detects a date the MODEL HAD TO MOVE, which is not the
+same as a date that does not belong. On a single unconstrained phase, a date
+600 radiocarbon years from its four neighbours scores 100.5, because the phase
+simply widens and nothing is forced anywhere; put the same date where a
+constraint bites and it collapses to zero. This is a diagnostic for conflict
+between the data and the model's STRUCTURE -- finding a date that is merely
+wrong needs an outlier model instead.
 
 The overall index combines them:
 
     A_overall = 100 * (product of A_i/100) ^ (1/sqrt(n))
 
-Both formulas were identified from the OxCal 4.4 runs in
-tests/fixtures/oxcal rather than taken on trust: the fixture holds each
-date's likelihood, its posterior and the agreement index OxCal reported, for
-three separate models, so 24 known answers were available to check against.
-Reproduced to rms 0.81 and worst 1.4 on the individual indices, and to 0.1 on
-all three overall indices. See tests/test_agreement.py, which asserts exactly
-that against the fixture.
+Both formulas were identified against the OxCal 4.4 runs in
+tests/fixtures/oxcal, which hold 24 known answers across three models. The
+individual indices are reproduced to rms 0.81 and worst 1.4, the overall ones
+to 0.1; tests/test_agreement.py asserts that.
 
-NOT implemented: OxCal's `Amodel`. It is a different quantity that cannot be
-derived from the per-date indices -- on the fixture's `ordered` run the
-product of those indices is greater than one, so no exponent of it can reach
-the 96.0 OxCal reports, meaning Amodel carries a term for the model structure
-itself. Reporting a guess for the headline number archaeologists screen on
+NOT implemented: OxCal's `Amodel`. It cannot be derived from the per-date
+indices -- on the `ordered` fixture their product exceeds one, so no exponent
+of it reaches the 96.0 OxCal reports, meaning Amodel carries a term for the
+model structure itself. A guess at the headline number archaeologists screen on
 would be worse than reporting nothing.
 """
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
@@ -55,19 +46,17 @@ import numpy as np
 
 from app.services.calibration import get_curve
 
-# Calendar step the comparison is made on. OxCal's own exports are at 5
-# years and its reported indices are reproduced most closely at that step
-# (rms 0.81 against 1.15 at one year), which is unsurprising -- a finer grid
-# is measuring something slightly different from what OxCal measured.
+# Calendar step the comparison is made on. OxCal's exports are at 5 years and
+# its indices are reproduced most closely there (rms 0.81 against 1.15 at one
+# year), a finer grid measuring something slightly different.
 COMPARISON_STEP_YEARS = 5.0
 # Likelihood below this fraction of its peak is outside the compared window.
 SUPPORT_THRESHOLD = 1e-6
 # Conventional threshold for a date worth re-examining (Bronk Ramsey 1995).
 POOR_AGREEMENT_BELOW = 60.0
-# Floor applied before taking logs in the overall index. A date the model
-# pushed clean off its likelihood scores a true zero, and dropping those as
-# unusable would remove precisely the worst dates and make a broken model
-# report a healthy overall -- so they are floored rather than skipped.
+# Floor applied before taking logs in the overall index. A date pushed clean
+# off its likelihood scores a true zero, and dropping those would remove
+# precisely the worst dates and let a broken model report a healthy overall.
 MINIMUM_FOR_OVERALL = 0.01
 
 
@@ -107,22 +96,20 @@ def agreement_index(
     -- the `probability_distribution` both solver paths already return.
 
     `unmodelled` is the likelihood to judge it against, in the same form.
-    It is normally left out and computed from the measurement; passing one
-    is for holding the comparison against a likelihood from elsewhere, which
-    is how the formula itself is checked against OxCal's exports without our
-    own calibration differences muddying the test.
+    Normally left out and computed from the measurement; passing one holds the
+    comparison against a likelihood from elsewhere, which is how the formula is
+    checked against OxCal's exports without our own calibration differences
+    muddying the test.
 
     Returns None rather than a number when there is nothing meaningful to
-    compare, so a caller can leave the field empty instead of publishing a
+    compare, so a caller can leave the field empty rather than publish a
     fabricated score.
 
-    The comparison window spans BOTH distributions, and each is normalised
-    over the whole of it. Normalising the likelihood over only the posterior's
-    own support would be the tempting shortcut and is actively wrong: a date
-    the model has pushed right off its likelihood would then have that
-    likelihood renormalised over precisely the sliver where the two still
-    overlap, and would score well for it -- hiding exactly the disagreement
-    this exists to surface.
+    The comparison window spans BOTH distributions and each is normalised over
+    the whole of it. Normalising the likelihood over only the posterior's
+    support is the tempting shortcut and is wrong: a date pushed right off its
+    likelihood would have it renormalised over the sliver where the two still
+    overlap and score well for it, hiding the disagreement this exists to show.
     """
     modelled = np.asarray(modelled, dtype=float)
     if modelled.ndim != 2 or len(modelled) < 2:
@@ -162,14 +149,13 @@ def overall_agreement(indices: Iterable[Optional[float]]) -> Optional[float]:
     """
     The whole model's agreement, combining the per-date indices.
 
-    Computed in log space: the product runs over every date and underflows
-    for a large model otherwise.
+    Computed in log space, since the product runs over every date and would
+    otherwise underflow on a large model.
 
-    Note the 1/sqrt(n) exponent multiplies any systematic per-date bias by
-    sqrt(n) -- on the eight-date fixture our average per-date offset of about
-    +0.7 against OxCal arrives here as roughly +2. Fed OxCal's own published
-    indices the rule reproduces its overall to 0.1, so that is the per-date
-    difference being amplified rather than error in the combination.
+    The 1/sqrt(n) exponent multiplies any systematic per-date bias by sqrt(n):
+    on the eight-date fixture a per-date offset of about +0.7 arrives here as
+    roughly +2. Fed OxCal's own indices the rule reproduces its overall to 0.1,
+    so that is amplification rather than error in the combination.
     """
     usable = [a for a in indices if a is not None]
     if not usable:
@@ -182,8 +168,8 @@ def overall_agreement(indices: Iterable[Optional[float]]) -> Optional[float]:
 def attach(results: Dict[str, Dict], measurements: List[Dict]) -> Optional[float]:
     """
     Add `agreement_index` to each per-date result in place and return the
-    overall index. Works off `probability_distribution`, which both the exact
-    solver and the MCMC path produce, so the two report the same diagnostic.
+    overall index. Works off `probability_distribution`, which both solvers
+    produce, so the two report the same diagnostic.
     """
     indices = []
     for m in measurements:

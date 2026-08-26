@@ -6,12 +6,10 @@ import uuid
 
 class Project(Base):
     """
-    Groups analyses together (e.g. by site, dig season, or research
-    question) so the dashboard doesn't have to list every analysis ever
-    run. An analysis with project_id = NULL is "unassigned" -- still
-    valid and listable, just not filed under any project (this is also
-    where a project's analyses land if the project itself is deleted,
-    rather than deleting the analyses along with it).
+    Groups analyses together (by site, dig season, or research question).
+    An analysis with project_id = NULL is "unassigned" -- still valid and
+    listable, which is also where a deleted project's analyses land rather
+    than being deleted with it.
     """
     __tablename__ = "projects"
 
@@ -27,29 +25,22 @@ class Project(Base):
 
 class ProjectSample(Base):
     """
-    A radiocarbon date held in a PROJECT's own date collection, independent
-    of any analysis -- enter a site's dates once here, then deploy subsets
-    of them into as many analyses as you like, each modelling them
-    differently (different contexts, different stratigraphy).
+    A radiocarbon date in a PROJECT's own collection, independent of any
+    analysis: enter a site's dates once, then deploy subsets into as many
+    analyses as you like.
 
-    Deliberately a separate table from RadiocarbonSample rather than
-    RadiocarbonSample gaining a nullable analysis_id: deploying COPIES
-    these values into an analysis's own RadiocarbonSample rows, so an
-    analysis is always a self-contained snapshot of exactly what it was
-    run on. Editing an entry here therefore never mutates an already-run
-    analysis or silently invalidates its stored results -- important for
-    reproducibility, since a saved result must keep matching the inputs
-    displayed alongside it. The cost is that picking up a corrected date
-    in an existing analysis is an explicit action (re-deploy, or edit that
-    analysis), which is the intended trade.
+    A separate table from RadiocarbonSample because deploying COPIES these
+    values, keeping each analysis a self-contained snapshot of what it was
+    run on. Editing here never invalidates an already-run analysis; the
+    trade is that picking up a corrected date means an explicit re-deploy.
     """
     __tablename__ = "project_samples"
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     project_id = Column(String, ForeignKey('projects.id'), nullable=False)
 
-    # Measurement fields -- same names/semantics as RadiocarbonSample, so
-    # deploying is a straight field-for-field copy.
+    # Same names/semantics as RadiocarbonSample, so deploying is a straight
+    # field-for-field copy.
     sample_name = Column(String, nullable=False)
     age_bp = Column(Float, nullable=False)
     error_1sigma = Column(Float, nullable=False)
@@ -58,17 +49,11 @@ class ProjectSample(Base):
     curve_id = Column(String, default='intcal20')
     reservoir_age = Column(Float, nullable=True)
 
-    # Local marine reservoir offset and its uncertainty, same meaning as on
+    # Local marine reservoir offset and its uncertainty, as on
     # RadiocarbonSample: the deviation from the global average the marine
-    # curve already models, not a whole reservoir age.
-    #
-    # These arrived late (2026-08-20). Until then a collection could not hold
-    # a Delta-R at all, so a marine date deployed out of one lost its
-    # reservoir correction silently and had to have it re-entered on every
-    # analysis it was deployed into -- which is exactly backwards, since
-    # Delta-R is a property of where the sample came from and therefore of
-    # the collection, not of any one analysis. Dates from one site share one
-    # value, which is why they can be set across a selection in bulk.
+    # curve already models, not a whole reservoir age. It belongs to the
+    # collection because it is a property of where the sample came from, and
+    # dates from one site share a value -- hence the bulk edit in the UI.
     delta_r = Column(Float, nullable=True)
     delta_r_error = Column(Float, nullable=True)
 
@@ -76,11 +61,9 @@ class ProjectSample(Base):
     location = Column(String, nullable=True)
     notes = Column(String, nullable=True)
 
-    # Archaeological defaults, pre-filled when this date is deployed into an
-    # analysis and freely overridable there. default_context_name is matched
-    # by name at deploy time to build that analysis's SampleGroups, so dates
-    # sharing a context name land in the same context without re-grouping
-    # them by hand every time.
+    # Defaults pre-filled at deploy time and overridable there.
+    # default_context_name is matched by name to build the analysis's
+    # SampleGroups, so dates sharing a context name land in the same context.
     default_context_name = Column(String, nullable=True)
     tpq_age_bp = Column(Float, nullable=True)
     taq_age_bp = Column(Float, nullable=True)
@@ -93,36 +76,23 @@ class ProjectSample(Base):
 
 class StoredCalibrationCurve(Base):
     """
-    A calibration curve the user added, as opposed to the three shipped with
-    the app (those stay files on disk -- see services/curve_registry.py, which
-    serves both kinds behind one interface).
+    A user-added calibration curve. The three shipped curves stay files on
+    disk; services/curve_registry.py serves both kinds behind one interface.
 
-    Two rules shape this table, both about not invalidating results that have
-    already been published:
-
-    A stored curve's NUMBERS never change. `source_text` holds the uploaded
-    file verbatim -- for provenance, for re-download, and because its header
-    comments carry the citation -- and `parse_options` records how it was read
-    (which columns, which calendar convention), so re-parsing it is
-    deterministic. `content_sha256` is checked against the re-parsed rows on
-    every load, so a parser change years from now cannot silently move a
-    curve underneath an analysis that was run against it. Correcting a curve
-    means adding a new one, not editing this row; only the editorial fields
-    (name, description, reference, doi) are mutable, and those are read fresh
-    rather than cached.
-
-    A curve in use cannot be deleted. `archived` hides it from the pickers
-    while leaving it resolvable, which is what a rerun of an older analysis
-    needs -- see api/curves.py for where that is enforced. This is the same
-    trade ProjectSample's docstring describes for dates: a saved result must
-    keep matching the inputs displayed alongside it.
+    Two rules keep already-published results valid. A stored curve's NUMBERS
+    never change: `source_text` holds the file verbatim and `parse_options`
+    records how to read it, and `content_sha256` is checked against the
+    re-parsed rows on every load so a later parser change cannot move a curve
+    underneath an analysis. Correcting a curve means adding a new one; only
+    the editorial fields are mutable. And a curve in use cannot be deleted --
+    `archived` hides it from the pickers while leaving it resolvable for a
+    rerun (enforced in api/curves.py).
     """
     __tablename__ = "calibration_curves"
 
-    # The slug a date's curve_id points at, chosen at import time. A primary
-    # key rather than a surrogate id with a separate slug, because the slug is
-    # what every RadiocarbonSample row already stores and what an .oxcal file
-    # names.
+    # The slug a date's curve_id points at, chosen at import time. It is the
+    # primary key because it is what RadiocarbonSample rows store and what an
+    # .oxcal file names.
     id = Column(String, primary_key=True)
 
     # 'imported' (a file) or 'mixed' (a recipe over two other curves). Builtin
@@ -144,19 +114,17 @@ class StoredCalibrationCurve(Base):
     # has no file behind it.
     source_text = Column(String, nullable=True)
     source_filename = Column(String, nullable=True)
-    # How source_text is to be read: column mapping and calendar convention.
-    # Stored so the parse is reproducible rather than dependent on whatever
-    # the importer would guess today.
+    # Column mapping and calendar convention, stored so the parse is
+    # reproducible rather than dependent on what the importer would guess.
     parse_options = Column(JSON, nullable=True)
-    # For kind='mixed': {a, b, percent_a, percent_a_error}. The curve is
-    # stored as this recipe rather than as data, so it stays honest about its
-    # parents (and they count as in-use while it exists).
+    # For kind='mixed': {a, b, percent_a, percent_a_error}. Stored as a recipe
+    # rather than data, so its parents count as in-use while it exists.
     recipe = Column(JSON, nullable=True)
     # sha256 over the normalised numeric rows; see the class docstring.
     content_sha256 = Column(String, nullable=False)
 
-    # Other spellings this curve answers to when read out of a file -- so an
-    # .oxcal written against 'IntCal13' finds an IntCal13 imported here.
+    # Other spellings this curve answers to, so an .oxcal written against
+    # 'IntCal13' finds an IntCal13 imported here.
     aliases = Column(JSON, nullable=True)
 
     archived = Column(Boolean, default=False, nullable=False)
@@ -177,35 +145,27 @@ class Analysis(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    # Optional project grouping -- NULL means "unassigned". Analyses run
-    # with save=False (quick test runs) are never persisted at all, so
-    # they never reach this table in the first place.
+    # NULL means "unassigned". Runs with save=False are never persisted, so
+    # they never reach this table at all.
     project_id = Column(String, ForeignKey('projects.id'), nullable=True)
 
     # Configuration
     bayesian_config = Column(JSON, nullable=True)  # MCMC parameters if bayesian
 
-    # How this analysis's results were actually computed -- the exact solver
-    # or the MH/Gibbs sampler -- and, when it was sampled, why the model was
-    # not exactly solvable, plus the convergence it reached. Written on every bayesian run and rerun; see
-    # api/analysis._run_bayesian for the shape. NULL on a calibration-only
-    # analysis, and on any bayesian analysis run before this was recorded.
+    # Which solver produced these results -- exact or MH/Gibbs -- and, when
+    # sampled, why the model was not exactly solvable plus the convergence it
+    # reached. See api/analysis._run_bayesian for the shape. NULL on a
+    # calibration-only analysis.
     solver = Column(JSON, nullable=True)
 
-    # How long things lasted and how far apart they sit -- the quantities that
-    # are functions of SEVERAL modelled ages at once rather than of one, so
-    # they have nowhere to live on an AnalysisResult row beside a single date's
-    # posterior the way every other result here does. Shape and vocabulary in
-    # services/intervals.py. Written only when the run was asked for them
-    # (bayesian_config.estimate_durations), so NULL means "not asked for" --
-    # which is not the same as "nothing to report", and is why the results page
-    # offers to re-run rather than showing an empty table.
-    #
-    # One JSON column rather than a table of its own: nothing queries across
-    # these, they are written once per run and read whole, and a duration's
-    # identity is the model structure that produced it -- which is itself
-    # rewritten wholesale on every rerun, so rows keyed to it would be deleted
-    # and rebuilt every time anyway.
+    # Durations and separations -- functions of SEVERAL modelled ages at once,
+    # so they have nowhere to live on a per-date AnalysisResult row. Shape and
+    # vocabulary in services/intervals.py. Written only when the run was asked
+    # for them (bayesian_config.estimate_durations), so NULL means "not asked
+    # for" rather than "nothing to report", which is why the results page
+    # offers to re-run instead of showing an empty table. One JSON column
+    # rather than a table because nothing queries across these: they are
+    # written once per run and read whole.
     intervals = Column(JSON, nullable=True)
 
     # Relations
@@ -231,47 +191,37 @@ class RadiocarbonSample(Base):
     # see schemas.MeasurementInput.delta_r for the sign convention.
     delta_r = Column(Float, nullable=True)
     delta_r_error = Column(Float, nullable=True)
-    # Superseded by delta_r. Kept because existing rows may hold a value,
-    # but never applied to a calibration -- it was ambiguous whether it
-    # meant a whole reservoir age or a local offset, and starting to apply
-    # it would have silently changed already-published results.
     # Prior probability this date does not belong to the population being
     # modelled (OxCal's Outlier()). Persisted, not just applied: a rerun
     # rebuilds the model from these rows, so leaving it off would silently
-    # drop the outlier model on every rerun -- the same trap delta_r above
-    # is commented against.
+    # drop the outlier model.
     outlier_prior = Column(Float, nullable=True)
     # Which outlier model applies when outlier_prior is set: 'general' or
     # 'charcoal'. Persisted for the same reason as the prior beside it.
     outlier_model = Column(String, nullable=True)
-    reservoir_age = Column(Float, nullable=True)  # For marine samples
+    # Superseded by delta_r and never applied to a calibration: it was
+    # ambiguous whether it meant a whole reservoir age or a local offset.
+    # Kept because existing rows may hold a value.
+    reservoir_age = Column(Float, nullable=True)
     depth_cm = Column(Float, nullable=True)
     location = Column(String, nullable=True)
     notes = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
-    # Optional stratigraphic phase/group membership -- NULL means this
-    # sample stands alone (not part of any group) in the Harris matrix.
-    # SUPERSEDED by element_id below; retained so analyses saved before the
-    # model tree existed can still be migrated.
+    # Stratigraphic phase/group membership; NULL means this sample stands
+    # alone in the Harris matrix. Superseded by element_id below, and retained
+    # only so pre-tree analyses can be migrated.
     group_id = Column(String, ForeignKey('sample_groups.id'), nullable=True)
 
-    # The model element (a 'phase') this date belongs to -- the replacement
-    # for group_id. No FOREIGN KEY: an analysis's elements are rewritten
-    # wholesale when its tree is replaced, and a DB-level constraint would
-    # force a specific delete/insert ordering for no real benefit, the same
-    # reasoning StratigraphicRelationship's polymorphic columns use.
+    # The model element (a 'phase') this date belongs to. No FOREIGN KEY: an
+    # analysis's elements are rewritten wholesale when its tree is replaced,
+    # and a constraint would force a delete/insert ordering for no benefit.
     element_id = Column(String, nullable=True)
 
-    # Optional age limiters (both expressed directly in cal BP, matching
-    # every other age field in this app): tpq_age_bp is a *maximum* age
-    # bound -- "terminus post quem", the sample cannot be OLDER than this
-    # (it postdates the terminus) -- and taq_age_bp is a *minimum* age
-    # bound -- "terminus ante quem", the sample cannot be YOUNGER than this
-    # (it predates the terminus). Valid range is [taq_age_bp, tpq_age_bp];
-    # see schemas/sample.py's cross-field validator for the sanity check on
-    # that ordering, and services/exact_chain.py for how these tighten each
-    # sample's calendar-age prior.
+    # Age limiters in cal BP. tpq_age_bp ("terminus post quem") is a MAXIMUM
+    # age -- the sample cannot be older than it -- and taq_age_bp ("terminus
+    # ante quem") a MINIMUM, so the valid range is [taq_age_bp, tpq_age_bp].
+    # See services/exact_chain.py for how these tighten the calendar prior.
     tpq_age_bp = Column(Float, nullable=True)
     taq_age_bp = Column(Float, nullable=True)
 
@@ -282,21 +232,17 @@ class RadiocarbonSample(Base):
 
 class ModelElement(Base):
     """
-    One node of an analysis's explicit model structure -- the OxCal-style
-    tree of Sequences, Phases, Boundaries and Hiatuses that
-    services/model_tree.py interprets.
+    One node of an analysis's model structure -- the OxCal-style tree of
+    Sequences, Phases, Boundaries and Hiatuses that services/model_tree.py
+    interprets.
 
-    Stored flat (parent_id + position) rather than as nested JSON so a
-    single element can be addressed, and so the dates that live in a phase
-    can reference it by foreign key. The nesting is reconstructed on read;
-    `position` orders siblings OLDEST FIRST, matching OxCal's reading order
-    and the Harris matrix convention of oldest at the bottom.
+    Stored flat (parent_id + position) rather than as nested JSON so a single
+    element can be addressed and dates can reference their phase. The nesting
+    is reconstructed on read; `position` orders siblings OLDEST FIRST,
+    matching OxCal and the Harris matrix convention.
 
-    This supersedes SampleGroup + StratigraphicRelationship as the source of
-    stratigraphic structure. Those tables are still present so analyses
-    saved before this existed can be migrated on read (see
-    model_tree.migrate_from_relationships); nothing writes new structure to
-    them.
+    Supersedes SampleGroup + StratigraphicRelationship, which survive only so
+    older analyses can be migrated on read (model_tree.migrate_from_relationships).
     """
     __tablename__ = "model_elements"
 
@@ -315,8 +261,7 @@ class ModelElement(Base):
     taq_age_bp = Column(Float, nullable=True)
 
     # For a boundary: its posterior after a run, same shape as a per-sample
-    # result (see exact_chain._summarize). Null for every
-    # other element type, and until the analysis has been run.
+    # result (see exact_chain._summarize). Null otherwise.
     posterior = Column(JSON, nullable=True)
 
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -327,12 +272,8 @@ class ModelElement(Base):
 class SampleGroup(Base):
     """
     A named stratigraphic phase/group of samples (e.g. "Phase 2 hearth
-    fill"). Grouping lets a user define a single above/below/equal
-    relationship or a single TPQ/TAQ limiter that applies to every sample
-    in the group at once, instead of repeating it per sample pair --
-    the same "boundary/phase" idea OxCal uses, simplified to apply
-    directly to each member sample's age prior rather than a separate
-    phase-boundary latent variable.
+    fill"), so one above/below/equal relationship or one TPQ/TAQ limiter
+    applies to every member at once instead of being repeated per pair.
     """
     __tablename__ = "sample_groups"
 
@@ -340,25 +281,17 @@ class SampleGroup(Base):
     analysis_id = Column(String, ForeignKey('analyses.id'), nullable=False)
     name = Column(String, nullable=False)
 
-    # Same semantics as RadiocarbonSample.tpq_age_bp/taq_age_bp above, just
-    # applied to every sample in the group. If a sample has its own limiter
-    # AND belongs to a group with one, the tighter of the two bounds wins
-    # (see services/stratigraphy.effective_bounds).
+    # As on RadiocarbonSample, applied to every member. Where a sample has
+    # its own limiter too, the tighter bound wins (stratigraphy.effective_bounds).
     tpq_age_bp = Column(Float, nullable=True)
     taq_age_bp = Column(Float, nullable=True)
 
-    # The MODELLED start/end of this context's own span, filled in after a
-    # Bayesian run that includes this group -- Boundary parameters in the
-    # same sense as OxCal's Boundary command: the context's dates are
-    # modelled as a random uniform scatter between these two, so they may
-    # extend beyond the oldest/youngest dated member rather than just
-    # reproducing it -- see services/exact_chain.py for the generative model
-    # and how a Boundary is solved. Each is a JSON dict with the same shape as a per-sample result
-    # (posterior_mean/median/std/hpd_68/hpd_95/hpd_68_ranges/hpd_95_ranges/
-    # probability_distribution), so the frontend can render it with the
-    # exact same component used for a sample's age. Left null for
-    # calibration-only analyses, and for a group with fewer than 2 dated
-    # members (a span isn't a meaningful concept for 0 or 1 dates).
+    # The MODELLED start/end of this context's span, in OxCal's Boundary
+    # sense: its dates are a uniform scatter between the two, so the span may
+    # extend beyond the oldest/youngest dated member. Each is a JSON dict with
+    # the same shape as a per-sample result, so the frontend renders it with
+    # the same component. Null for calibration-only analyses and for a group
+    # with fewer than 2 dated members.
     modeled_start = Column(JSON, nullable=True)
     modeled_end = Column(JSON, nullable=True)
 
@@ -385,13 +318,11 @@ class AnalysisResult(Base):
     hpd_95_min = Column(Float, nullable=True)
     hpd_95_max = Column(Float, nullable=True)
 
-    # How well this date's MODELLED posterior still fits its own UNMODELLED
+    # How well this date's MODELLED posterior still fits its UNMODELLED
     # likelihood, as a percentage (Bronk Ramsey 1995; see
     # services/agreement.py). 100 means the model left it alone, above 100
-    # that the model sharpened it onto its own peak, and below about 60 that
-    # the model had to move it far enough to be worth re-examining. Null for
-    # results computed before this existed, and for a plain calibration,
-    # where there is no model to disagree with.
+    # that it sharpened it, below about 60 that it is worth re-examining.
+    # Null for a plain calibration, where there is no model to disagree with.
     agreement_index = Column(Float, nullable=True)
 
     # Posterior probability (0-1) that this date does not belong to the
@@ -399,13 +330,10 @@ class AnalysisResult(Base):
     # when no outlier model was applied, which is not the same as zero.
     outlier_probability = Column(Float, nullable=True)
 
-    # Full HPD breakdown as one or more disjoint calendar-age ranges, each
-    # with its own probability share -- e.g.
-    # [{"min": 3300, "max": 3360, "probability_percent": 13.5}, ...].
-    # hpd_68_min/max and hpd_95_min/max above remain the overall envelope
-    # across all such ranges (kept for simple/legacy consumers); these
-    # columns hold the full multi-range detail for callers that need it,
-    # per standard OxCal/CALIB-style calibration reporting.
+    # Full HPD breakdown as disjoint calendar-age ranges, each with its own
+    # probability share -- [{"min": 3300, "max": 3360,
+    # "probability_percent": 13.5}, ...]. The hpd_*_min/max columns above are
+    # the overall envelope across all of them.
     hpd_68_ranges = Column(JSON, nullable=True)
     hpd_95_ranges = Column(JSON, nullable=True)
 
@@ -422,17 +350,13 @@ class StratigraphicRelationship(Base):
     """
     Stores stratigraphic relationships for Bayesian constraints.
 
-    from_sample_id/to_sample_id are polymorphic: each one holds either a
-    RadiocarbonSample.id or a SampleGroup.id, distinguished by from_type/
-    to_type ('sample' or 'group'). A group-to-group or group-to-sample
-    relationship is expanded into the full set of pairwise sample
-    constraints at model-build time (see services/stratigraphy.py) rather
-    than stored expanded, so editing a group's membership doesn't require
-    rewriting every relationship that touches it. Because of this
-    polymorphism there's no database-level FOREIGN KEY on these two
-    columns (a plain FK could only ever point at one table); referential
-    validity is instead checked by BayesianRequest's validator before an
-    analysis is ever run or persisted.
+    from_sample_id/to_sample_id are polymorphic: each holds a
+    RadiocarbonSample.id or a SampleGroup.id, per from_type/to_type. A
+    relationship touching a group is expanded into pairwise sample
+    constraints at model-build time (services/stratigraphy.py), so editing a
+    group's membership does not rewrite every relationship. The polymorphism
+    rules out a FOREIGN KEY, so BayesianRequest's validator checks
+    referential validity before a run is persisted.
     """
     __tablename__ = "stratigraphic_relationships"
 
@@ -450,21 +374,17 @@ class Job(Base):
     """
     One unit of work running outside the request that asked for it.
 
-    Why a table of its own rather than columns on Analysis. A project rerun
-    spans many analyses and a run started with save=False belongs to none,
-    so there is no single Analysis row to hang the state on. Keeping them
-    apart also keeps their meanings apart: `Analysis.status` answers "does
-    this analysis have results", and a Job answers "is something happening
-    right now, how far has it got, and can I stop it". An analysis whose
-    rerun fails keeps its previous results and its 'completed' status while
-    the JOB reads 'failed' -- which is the truth, and would be
-    unrepresentable if the two shared a column.
+    A table of its own rather than columns on Analysis: a project rerun spans
+    many analyses and a save=False run belongs to none. It also keeps the two
+    meanings apart -- `Analysis.status` answers "does this have results", a
+    Job answers "is something happening now, how far has it got, can I stop
+    it". An analysis whose rerun fails keeps its results and 'completed'
+    status while the JOB reads 'failed'.
 
-    Rows are kept after they finish. They are the only record of how long a
-    run took and what convergence it reached, they are what the UI polls
-    immediately after a redirect, and they are small.
+    Rows are kept after they finish: they are the only record of how long a
+    run took and what convergence it reached, and the UI polls them.
 
-    See docs/ASYNC_JOBS_PLAN.md for the design this implements.
+    See docs/ASYNC_JOBS_PLAN.md.
     """
     __tablename__ = "jobs"
 
@@ -475,9 +395,8 @@ class Job(Base):
     kind = Column(String, nullable=False)
 
     # The analysis or project this is about. Not a ForeignKey: it points at
-    # two different tables depending on `kind`, the same polymorphism
-    # StratigraphicRelationship's docstring explains. Indexed because the
-    # results page looks a job up by the analysis it belongs to.
+    # a different table depending on `kind`. Indexed because the results page
+    # looks a job up by its analysis.
     target_id = Column(String, nullable=True, index=True)
 
     # 'queued' -> 'running' -> 'completed' | 'failed' | 'cancelled'.
@@ -485,18 +404,15 @@ class Job(Base):
     # cancelled without ever running.
     state = Column(String, nullable=False, default='queued')
 
-    # 0..1, and an UPPER BOUND on the work rather than a prediction: the
-    # sampler stops as soon as it converges, so a run that finishes at 0.3
-    # succeeded early rather than being cut short. The UI shows the achieved
-    # convergence beside the bar for exactly that reason. Null for work with
-    # no meaningful fraction to report.
+    # 0..1, an UPPER BOUND rather than a prediction: the sampler stops as soon
+    # as it converges, so a run finishing at 0.3 succeeded early rather than
+    # being cut short -- which is why the UI shows convergence beside the bar.
     progress = Column(Float, nullable=True)
 
     # Whatever the running job wants to say about itself, by kind:
     #   analysis_run   {'phase', 'sweeps', 'max_sweeps', 'convergence'}
     #   project_rerun  {'completed', 'total', 'failed': [{id, name, error}]}
-    # Free-form on purpose -- it is read by the progress display and by
-    # nothing that depends on its shape.
+    # Free-form: read by the progress display and nothing that depends on it.
     detail = Column(JSON, nullable=True)
 
     error_message = Column(String, nullable=True)

@@ -1,36 +1,26 @@
 """
 A completed analysis rendered as a printable report.
 
-This is the citable, shareable form of a run: the same rows the results
-page and the CSV export show, in the model's own reading order, with each
-date's posterior drawn beside them and a method note saying which curves
-and which solver actually produced the numbers.
+The citable form of a run: the same rows the results page and the CSV show, in
+the model's own reading order, with each date's posterior drawn beside them and
+a method note naming the curves and solver that produced the numbers.
 
-It renders from data the caller has already assembled -- nothing here
-touches the database. `api/results.py` owns the assembly (_gather_export_rows
-and _structure_rows), and hands the same structures to the CSV, the JSON and
-this, so the three cannot disagree about what a run says. The one thing this
-module derives for itself is the unmodelled calibration series behind each
-Bayesian date, which is a plot input rather than a table value and is
-computed the same way `api/analysis.py` computes it for the screen.
+Nothing here touches the database. `api/results.py` owns the assembly and hands
+the same structures to the CSV, the JSON and this, so the three cannot
+disagree. The one thing this module derives for itself is the unmodelled
+calibration series behind each Bayesian date -- a plot input rather than a
+table value, computed as `api/analysis.py` computes it for the screen.
 
-Two deliberate duplications, both of the same kind the date_format module
-already carries and for the same reason -- the alternative is shipping the
-report's assembly to the browser:
+Two deliberate duplications, the alternative being to ship the report's
+assembly to the browser. The plot palette and HPD-bar geometry are mirrored
+from frontend/src/theme/plotColors.ts and components/PosteriorPlot.tsx, so a
+figure in the PDF is the figure on screen; and the calendar tick selection is
+mirrored from frontend/src/utils/dateFormat.ts, because ticks at round cal BP
+values labelled in BC/AD read "1051 BC" where a reader expects "1000 BC".
 
-  * The plot palette and the HPD-bar geometry are mirrored from
-    frontend/src/theme/plotColors.ts and components/PosteriorPlot.tsx, so a
-    figure in the PDF is the figure on screen. Both are small sets of
-    constants that only move when someone deliberately restyles the plots.
-
-  * The calendar tick selection is mirrored from
-    frontend/src/utils/dateFormat.ts, because ticks at round cal BP values
-    labelled in BC/AD read "1051 BC" where a reader expects "1000 BC".
-
-Figures are drawn through matplotlib's object API rather than pyplot: pyplot
-keeps every figure it makes in a global registry, which in a long-lived
-server process is a memory leak waiting for someone to forget a close(), and
-it carries GUI backend selection this has no use for.
+Figures use matplotlib's object API rather than pyplot, which keeps every
+figure in a global registry -- a memory leak in a long-lived server process --
+and carries GUI backend selection this has no use for.
 """
 from __future__ import annotations
 
@@ -60,10 +50,8 @@ from app.services.intervals import SHARED_BOUNDARY_TEXT
 
 # --- page geometry -------------------------------------------------------
 
-# Landscape, because the results table is the point of the document and it
-# carries up to twelve columns, several of them holding a multimodal HPD
-# like "3329-3294 cal BP (9.4%); 3253-3103 cal BP (77.6%)". Portrait fits
-# that only by wrapping every one of them onto three lines.
+# Landscape: the results table carries up to twelve columns, several holding a
+# multimodal HPD, which portrait fits only by wrapping each onto three lines.
 PAGE_SIZE = landscape(A4)
 MARGIN = 14 * mm
 CONTENT_WIDTH = PAGE_SIZE[0] - 2 * MARGIN
@@ -86,28 +74,24 @@ GRID_ALPHA = 0.09
 
 # --- figure geometry, mirrored from components/PosteriorPlot.tsx ---------
 
-# The HPD bars sit in their own strip BELOW the curve's zero baseline, as
-# fractions of the posterior's peak: curve, gap, 95% bar, gap, 68% bar,
-# then clear space before the axis. Stacking translucent fills under the
-# curve instead goes muddy three deep, which is what this avoids.
+# The HPD bars sit in a strip BELOW the curve's zero baseline, as fractions of
+# the posterior's peak: curve, gap, 95% bar, gap, 68% bar, then clear space
+# before the axis. Translucent fills under the curve go muddy three deep.
 HPD95_BAR = (-0.11, -0.04)
 HPD68_BAR = (-0.22, -0.15)
 AXIS_BOTTOM_MARGIN = 0.07
 
-# Sized to the printable width in landscape. 200 dpi over ten inches is
-# about 210 effective dpi at the size it lands on the page -- a real figure
-# rather than the screenshot a 1x export would give.
+# Sized to the printable width in landscape. 200 dpi over ten inches is about
+# 210 effective dpi on the page -- a real figure rather than a screenshot.
 FIGURE_SIZE_IN = (10.0, 2.8)
 FIGURE_DPI = 200
 
 
 def _styles() -> Dict[str, ParagraphStyle]:
     """
-    The document's text styles.
-
-    Built from ReportLab's sample sheet so the metrics stay sane, but
-    recoloured onto the app's warm ink: the report should look like the app
-    it came from rather than like a library's defaults.
+    The document's text styles: ReportLab's sample sheet for sane metrics,
+    recoloured onto the app's warm ink so the report looks like the app it came
+    from rather than a library's defaults.
     """
     base = getSampleStyleSheet()
     ink = colors.HexColor(INK)
@@ -159,12 +143,10 @@ def _hpd_text(
     """
     An HPD region as text, in the reader's chosen convention.
 
-    Prefers the per-range breakdown, which is what makes a multimodal
-    posterior honest: collapsing "two peaks 200 years apart" to one span
-    claims the gap between them as part of the region. The min/max envelope
-    is only a fallback for rows written before the breakdown existed --
-    the same fallback the CSV export makes, so an old analysis reports the
-    same figure in both.
+    Prefers the per-range breakdown: collapsing "two peaks 200 years apart" to
+    one span claims the gap between them as part of the region. The min/max
+    envelope is a fallback for rows predating the breakdown, the same one the
+    CSV export makes.
     """
     if ranges:
         return date_format_service.format_hpd_ranges(ranges, date_format)
@@ -187,11 +169,8 @@ def _number(value: Optional[float], places: int = 0) -> str:
 
 def _measurement(result: Optional[Dict]) -> str:
     """
-    What was measured, as "389 ± 21".
-
-    Blank for a structural row and for a Boundary: a Boundary is a modelled
-    parameter with no measurement behind it, and an empty cell says that
-    better than a zero would.
+    What was measured, as "389 ± 21". Blank for a structural row and for a
+    Boundary, which is a modelled parameter with no measurement behind it.
     """
     if not result or result.get('age_bp') is None:
         return ''
@@ -283,12 +262,10 @@ def _series(distribution: Optional[Sequence]) -> Tuple[List[float], List[float]]
 def _draw_hpd_bars(ax, ranges: Optional[List[Dict]], envelope, peak: float,
                    band: Tuple[float, float], alpha: float, label: str) -> None:
     """
-    One HPD level as solid bars in the strip below the curve.
-
-    Each disjoint range gets its own bar rather than one bar spanning the
-    whole envelope, for the same reason the text breakdown keeps them
-    separate. Only the first carries the legend label, so a posterior in
-    four pieces still produces one legend row.
+    One HPD level as solid bars in the strip below the curve, each disjoint
+    range getting its own rather than one spanning the whole envelope. Only the
+    first carries the legend label, so a posterior in four pieces still
+    produces one legend row.
     """
     spans: List[Tuple[float, float]] = []
     if ranges:
@@ -316,13 +293,12 @@ def _posterior_figure(
     date_format: str,
 ) -> Optional[bytes]:
     """
-    One posterior drawn the way the results page draws it: time running
-    left to right (which means a reversed cal BP axis), the unmodelled
-    calibration as a grey shadow behind a modelled date, and the HPD levels
-    as nested bars beneath.
+    One posterior drawn as the results page draws it: time left to right, so a
+    reversed cal BP axis, the unmodelled calibration as a grey shadow behind a
+    modelled date, and the HPD levels as nested bars beneath.
 
-    Returns None where there is nothing to draw, so a run with a missing or
-    empty distribution loses its figure rather than the whole report.
+    None where there is nothing to draw, so a missing distribution loses its
+    figure rather than the whole report.
     """
     ages, probs = _series(distribution)
     if not ages or not probs:
@@ -431,14 +407,11 @@ def _scaled_widths(weights: List[float]) -> List[float]:
 
 
 def _has_any(rows: List[Dict], key: str) -> bool:
-    """Whether any exported row actually carries a value for `key`.
+    """Whether any exported row carries a value for `key`.
 
-    Columns are chosen by what a run produced rather than by its declared
-    type: agreement and outlier probabilities exist only where a model was
-    fitted, the unmodelled comparison only for a Bayesian run, and an
-    analysis old enough to predate a field has none of it either. Deciding
-    per-field means the report never prints a column of blanks, and never
-    silently drops one that has content.
+    Columns are chosen by what a run produced rather than by its declared type,
+    so the report never prints a column of blanks and never drops one that has
+    content.
     """
     return any(row.get(key) is not None for row in rows if row)
 
@@ -449,13 +422,12 @@ def _results_table(
     styles: Dict[str, ParagraphStyle],
 ) -> Table:
     """
-    The results table: one row per modelled entity, in the model's own
-    reading order, dates and Boundaries reporting through the same columns.
+    The results table: one row per modelled entity in the model's own reading
+    order, dates and Boundaries reporting through the same columns.
 
-    Structure rows are indented by depth and set in bold, which is what
-    carries the model's shape in a document that has no expandable tree --
-    the reading order alone is not enough to see that three dates sit
-    inside a phase inside a sequence.
+    Structure rows are indented by depth and set in bold, which is what carries
+    the model's shape in a document with no expandable tree -- reading order
+    alone does not show that three dates sit inside a phase inside a sequence.
     """
     header = [Paragraph(label, styles['th']) for _, label, _ in columns]
     data: List[List[Any]] = [header]
@@ -667,12 +639,9 @@ def _curve_sentences(curve_ids: Sequence[str]) -> List[str]:
 
 def _solver_sentence(solver: Optional[Dict]) -> Optional[str]:
     """
-    How the posteriors were actually computed.
-
-    Worth stating in a report for the same reason the results page states
-    it: the two solvers answer the same question by different means, and
-    which one ran is a property of the model's shape rather than of what
-    was asked for.
+    How the posteriors were computed. Worth stating because the two solvers
+    answer the same question by different means, and which one ran is a
+    property of the model's shape rather than of what was asked for.
     """
     if not solver:
         return None
@@ -689,12 +658,8 @@ def _solver_sentence(solver: Optional[Dict]) -> Optional[str]:
 
 
 def _page_furniture(canvas, doc) -> None:
-    """A footer on every page: what this is, and where you are in it.
-
-    A results table that runs to eight pages is quoted from, photocopied and
-    emailed page by page, so each page has to say which analysis it belongs
-    to on its own.
-    """
+    """A footer on every page: which analysis this is, and where you are in it.
+    An eight-page results table gets quoted from and emailed page by page."""
     canvas.saveState()
     canvas.setFont('Helvetica', 7)
     canvas.setFillColor(colors.HexColor('#6b625d'))
@@ -707,11 +672,9 @@ def _page_furniture(canvas, doc) -> None:
 
 def _display_row(row: Dict, date_format: str) -> Dict:
     """
-    One structure row reduced to the strings the table prints.
-
-    Every column is derived here, so the table builder only has to choose
-    which of them to show -- and a date and a Boundary come out of this
-    with the same keys, which is what lets them share a row shape.
+    One structure row reduced to the strings the table prints. Every column is
+    derived here, so the table builder only chooses which to show, and a date
+    and a Boundary come out with the same keys.
     """
     result = row.get('result') or {}
     return {
@@ -785,12 +748,9 @@ def _columns(
 
 def _ordered_rows(structure: List[Dict], rows: List[Dict]) -> List[Dict]:
     """
-    The rows to report, in reading order, numbered.
-
-    Falls back to the flat list of dates when an analysis has no stored
-    structure -- a plain calibration, or one old enough to predate model
-    trees -- for the same reason the CSV does: an export with no structure
-    should still carry the results.
+    The rows to report, in reading order, numbered. Falls back to the flat
+    list of dates when an analysis has no stored structure, as the CSV does:
+    an export with no structure should still carry the results.
     """
     if structure:
         ordered = []
@@ -850,11 +810,10 @@ def render_report(
     """
     A completed analysis as a PDF, returned as bytes.
 
-    `structure` and `rows` are what api/results.py already assembles for
-    the CSV and JSON exports (_structure_rows and _gather_export_rows), and
-    `context_spans` the modelled start/end stored on each SampleGroup.
-    Nothing is re-derived from the database here, so the PDF cannot report
-    a different run from the CSV downloaded beside it.
+    `structure` and `rows` are what api/results.py assembles for the CSV and
+    JSON exports, and `context_spans` the modelled start/end on each
+    SampleGroup. Nothing is re-derived from the database, so the PDF cannot
+    report a different run from the CSV downloaded beside it.
 
     `intervals` is the durations-and-differences block stored on the analysis
     (services/intervals.py), passed in rather than read here for the same

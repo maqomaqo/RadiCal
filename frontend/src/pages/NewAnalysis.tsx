@@ -83,10 +83,9 @@ interface ProjectOption {
   name: string
 }
 
-// Result of a "quick test" calibration run (save = false): computed and
-// returned in full by the backend, but never written to the database, so
-// there's no analysis id to navigate to a Results page for -- it's shown
-// inline instead, right here on the form.
+// A "quick test" calibration run (save = false): computed in full but never
+// written to the database, so there is no analysis id to navigate to. Shown
+// inline on the form instead.
 interface PreviewResult {
   calibrated_age_bp: number
   posterior_mean: number
@@ -100,11 +99,10 @@ interface PreviewResult {
 }
 
 /**
- * A comparable fingerprint of everything a run actually consumes: the dates
- * and the model, but not the label on them. Comparing the fingerprint taken
- * when an analysis was loaded against the current draft is what tells a
- * rename apart from an edit to the inputs -- the first can be saved on its
- * own, the second only takes effect through a re-run.
+ * A fingerprint of everything a run consumes -- the dates and the model, not
+ * the label on them. Comparing the one taken when an analysis loaded against
+ * the current draft tells a rename apart from an edit to the inputs: the first
+ * can be saved on its own, the second only takes effect through a re-run.
  */
 function inputsSignature(parts: {
   analysisType: string
@@ -123,14 +121,10 @@ export default function NewAnalysis() {
   const location = useLocation()
   const notify = useNotify()
   const [searchParams] = useSearchParams()
-  // Name, type, project, date format, measurements, and (for Bayesian
-  // analyses) groups/relationships/TPQ-TAQ defined on the Model Structure
-  // page all live in a shared store rather than local state, so navigating
-  // to /new-analysis/model-structure and back doesn't lose anything that
-  // was already entered -- local useState here would reset to its initial
-  // value on every remount, silently reverting analysisType to
-  // "calibration" and losing whatever name, project, or date format had
-  // been chosen.
+  // The whole draft lives in a shared store rather than local state, so
+  // navigating to /new-analysis/model-structure and back loses nothing: local
+  // useState would reset on every remount, reverting analysisType to
+  // "calibration" and dropping the name, project and date format.
   const {
     name: analysisName,
     setName: setAnalysisName,
@@ -156,42 +150,38 @@ export default function NewAnalysis() {
     loadFromAnalysis,
     reset: resetDraft,
   } = useAnalysisDraftStore()
-  // Which curve a date is on decides whether a reservoir offset applies to
-  // it (see isMarineMeasurement). The request is shared with the one
-  // MeasurementFields makes, so reading it here costs nothing extra.
+  // Which curve a date is on decides whether a reservoir offset applies (see
+  // isMarineMeasurement). The request is shared with MeasurementFields', so
+  // reading it here costs nothing.
   const { curves } = useCurves()
-  // Set when this page is reached via /analysis/:analysisId/edit -- the
-  // same form, but saving replaces an existing analysis's inputs (PUT
-  // .../inputs then rerun) instead of creating a new one.
+  // Set when reached via /analysis/:analysisId/edit: the same form, but saving
+  // replaces an existing analysis's inputs rather than creating one.
   const { analysisId: editRouteId } = useParams<{ analysisId: string }>()
   const isEditing = !!editRouteId
   const [loadingExisting, setLoadingExisting] = useState(isEditing)
   const [savingDetails, setSavingDetails] = useState(false)
-  // The inputs as they arrived from the backend, for telling a rename-only
-  // edit apart from one that changed the dates or the model (see
-  // handleSaveDetails). Null whenever the draft was hydrated by something
-  // other than the load effect below -- coming back from the Model
-  // Structure page, say -- which counts as "may well have changed".
+  // The inputs as they arrived, for telling a rename-only edit apart from one
+  // that changed the dates or the model (see handleSaveDetails). Null when the
+  // draft was hydrated by anything but the load effect below -- returning from
+  // the Model Structure page, say -- which counts as "may have changed".
   const loadedInputsRef = useRef<string | null>(null)
   const [currentMeasurement, setCurrentMeasurement] = useState<Partial<Measurement>>({
     sample_type: 'terrestrial',
     curve_id: 'intcal20',
   })
   const [loading, setLoading] = useState(false)
-  // Validation for the Add Measurement card specifically -- shown right
-  // there rather than through the toast queue, since it's telling the user
-  // which fields on THIS card need attention before the click does anything.
+  // Validation for the Add Measurement card, shown in place rather than
+  // through the toast queue: it names fields on THIS card.
   const [addMeasurementError, setAddMeasurementError] = useState<string | null>(null)
   // Same reasoning, for whatever kept Run Analysis from doing anything.
   const [runError, setRunError] = useState<string | null>(null)
-  // The date currently open in the edit dialog, held as a working copy so
-  // Cancel really discards. Committed to the store only on Save.
+  // The date open in the edit dialog, a working copy so Cancel really
+  // discards. Committed to the store on Save only.
   const [editing, setEditing] = useState<
     { id: string; draft: Measurement; applyToPhase: boolean } | null
   >(null)
-  // The other dates the outlier setting would be copied to: everything in
-  // the same phase, or -- before a model structure exists, when there are no
-  // phases to speak of -- every other date.
+  // The other dates the outlier setting would copy to: everything in the same
+  // phase, or every other date when there is no structure yet.
   const editPhaseId = editing
     ? elementAssignments[editing.id] || editing.draft.group_id || null
     : null
@@ -215,23 +205,20 @@ export default function NewAnalysis() {
   const [importOpen, setImportOpen] = useState(false)
 
   const [projects, setProjects] = useState<ProjectOption[]>([])
-  // Only offered for single calibration -- a quick way to try a
-  // measurement without it showing up in a project or the analysis list.
+  // Single calibration only: a way to try a measurement without it showing up
+  // in a project or the analysis list.
   const [saveResult, setSaveResult] = useState(true)
   const [previewResult, setPreviewResult] = useState<PreviewResult | null>(null)
 
-  // The selected project's own date collection (see ProjectSampleTable),
-  // offered here as an alternative to retyping dates that are already on
-  // file -- picking one copies it into this draft's measurements, same as
-  // the "Deploy" action on the project page itself.
+  // The selected project's date collection (see ProjectSampleTable), so dates
+  // already on file need not be retyped. Picking one copies it into this
+  // draft, as the project page's "Deploy" action does.
   const [projectSamples, setProjectSamples] = useState<ProjectSample[]>([])
   const [pickerOpen, setPickerOpen] = useState(false)
   const [pickerSelected, setPickerSelected] = useState<Set<string>>(new Set())
 
-  // The Project field below is a fixed dropdown of *existing* projects --
-  // there's nowhere in it to type a new name. This small dialog is the
-  // "type a name to create one" path, reachable via the + button next to
-  // the dropdown, so creating a project doesn't require leaving this page.
+  // The Project dropdown lists EXISTING projects only, so this dialog is the
+  // "type a name to create one" path, reached by the + beside it.
   const [newProjectDialogOpen, setNewProjectDialogOpen] = useState(false)
   const [newProjectName, setNewProjectName] = useState('')
   const [creatingProject, setCreatingProject] = useState(false)
@@ -249,9 +236,8 @@ export default function NewAnalysis() {
     fetchProjects()
   }, [])
 
-  // Whichever project is currently assigned -- picked from the dropdown or
-  // preselected via ?project=<id> -- its date collection becomes available
-  // to add from below. Cleared when unassigned rather than left stale.
+  // The assigned project's date collection, from the dropdown or ?project=<id>.
+  // Cleared when unassigned rather than left stale.
   useEffect(() => {
     if (!projectId) {
       setProjectSamples([])
@@ -269,16 +255,12 @@ export default function NewAnalysis() {
     }
   }, [projectId])
 
-  // /new-analysis is reached two ways that land on the exact same bare URL:
-  // a genuine fresh start (nav bar, Dashboard, a project's own "New
-  // Analysis" link) and Stratigraphy's "Back to New Analysis", which remounts
-  // this component too since they're separate top-level routes. Only the
-  // latter should keep whatever is already in the shared draft store --
-  // Stratigraphy marks that case via location.state (see backState there),
-  // so anything else wipes a stale draft rather than silently carrying an
-  // earlier, unrelated analysis's measurements and project into this one.
-  // Editing an existing analysis is unaffected: it has its own load effect
-  // below, keyed on editRouteId rather than this.
+  // /new-analysis is reached two ways at the same bare URL: a fresh start, and
+  // Stratigraphy's "Back to New Analysis", which remounts this component since
+  // they are separate routes. Only the second should keep the shared draft, and
+  // Stratigraphy marks that case via location.state (see backState there) --
+  // anything else wipes a stale draft rather than carrying an unrelated
+  // analysis's dates into this one. Editing has its own load effect below.
   useEffect(() => {
     if (editRouteId) return
     const fromModelStructure = (location.state as { fromModelStructure?: boolean } | null)
@@ -289,13 +271,11 @@ export default function NewAnalysis() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Editing an existing analysis: pull its saved inputs into the shared
-  // draft store, so this page and the Model Structure page edit them with
-  // exactly the same UI used to create them. GET /api/analysis/:id already
-  // returns measurements/groups/relationships/bayesian_config, so nothing
-  // extra is needed to reconstruct the draft. Skipped if the store is
-  // already holding this analysis (e.g. returning from the Model Structure
-  // page), which would otherwise discard edits made over there.
+  // Editing: pull the saved inputs into the shared draft store, so this page
+  // and the Model Structure page edit them through the same UI that created
+  // them. GET /api/analysis/:id returns everything the draft needs. Skipped
+  // when the store already holds this analysis -- returning from the Model
+  // Structure page -- which would otherwise discard edits made there.
   useEffect(() => {
     if (!editRouteId || editingAnalysisId === editRouteId) {
       setLoadingExisting(false)
@@ -325,9 +305,9 @@ export default function NewAnalysis() {
           material_type: m.material_type || 'unknown',
           sample_type: m.sample_type || 'terrestrial',
           curve_id: m.curve_id || 'intcal20',
-          // Carried straight through: the form doesn't surface these, but
-          // a date deployed from a project collection arrives with them
-          // set, and running the edit resubmits whatever the draft holds.
+          // Carried through: the form does not surface these, but a date
+          // deployed from a collection arrives with them set and the edit
+          // resubmits whatever the draft holds.
           delta_r: m.delta_r ?? null,
           delta_r_error: m.delta_r_error ?? null,
           // Loaded so editing an analysis does not silently switch the
@@ -365,10 +345,9 @@ export default function NewAnalysis() {
         // no tree, the submit falls back to groups/relationships, and the
         // backend rebuilds a different structure from those.
         //
-        // group_id is the fallback because a tree migrated from the old
-        // contexts reuses each context's id as its phase id, and those
-        // analyses have the id on group_id rather than element_id. Every
-        // date must resolve to a phase or the run is rejected outright.
+        // group_id is the fallback because a migrated tree reuses each
+        // context's id as its phase id, and those analyses carry it on
+        // group_id. Every date must resolve to a phase or the run is rejected.
         const loadedTree: ModelElement | null = a.model_tree || null
         const loadedAssignments: Record<string, string> = Object.fromEntries(
           (a.measurements || [])
@@ -397,8 +376,8 @@ export default function NewAnalysis() {
           mcmc: loadedMcmc,
         })
         // The reporting format is a client-side preference keyed by analysis
-        // id, so it has to be read back here: otherwise saving an edit would
-        // write the default over whatever format the analysis was set to.
+        // id, so it must be read back: otherwise saving an edit writes the
+        // default over whatever the analysis was set to.
         setDateFormat(loadDateFormatPreference(editRouteId))
       } catch (err) {
         if (!cancelled) notify('Error loading analysis: ' + (err as Error).message)
@@ -451,18 +430,13 @@ export default function NewAnalysis() {
     return g ? g.name : id
   })
 
-  // Summary shown on the Model Structure card below: for a model authored
-  // as a tree, phase/ordering counts and validity are derived from it
-  // (same derivation the diagram uses) rather than from the legacy
-  // groups/relationships arrays, which stay empty for a tree-authored
-  // draft and only get backfilled with a phase list (never relationships)
-  // once an existing analysis is loaded for editing.
+  // Summary for the Model Structure card. For a tree-authored model the
+  // counts and validity come from the tree, as the diagram's do, rather than
+  // from the groups/relationships arrays, which stay empty for such a draft.
   //
-  // The ordering count comes from summariseTree, which counts what the MODEL
-  // asserts -- one per adjacent pair of children in each Sequence. The old
-  // treeToMatrix counted the cross-product edges the diagram used to draw, so
-  // a model asserting 39 orderings displayed 175: the chip was quoting a
-  // drawing bug back at the user.
+  // summariseTree counts what the MODEL asserts -- one per adjacent pair of
+  // children in each Sequence -- not the cross-product edges, which would
+  // report 175 for a model asserting 39.
   const structureSummary = modelTree ? summariseTree(modelTree) : null
   const structurePhaseCount = structureSummary ? structureSummary.phaseCount : groups.length
   const structureRelationshipCount = structureSummary
@@ -471,25 +445,21 @@ export default function NewAnalysis() {
   const structureDefined = modelTree ? true : groups.length > 0 || relationships.length > 0
   const structureInvalid = modelTree ? treeProblems.length > 0 : !!cycle
 
-  // The reservoir offset only applies to marine carbon, and only means
-  // anything against a marine curve -- so that is the only time it's asked
-  // for. An offset is useless without its uncertainty, since the two are
-  // combined in quadrature; the backend rejects one without the other, so
-  // catch it here rather than on submit.
+  // The reservoir offset applies only to marine carbon against a marine
+  // curve, so that is the only time it is asked for. It is useless without its
+  // uncertainty, the two combining in quadrature, and the backend rejects one
+  // without the other -- so catch it here rather than on submit.
   const isMarine = isMarineMeasurement(currentMeasurement, curves)
   const missingDeltaRError = deltaRErrorMissing(currentMeasurement)
 
-  // Matches a draft measurement to a project-collection date by value --
-  // there's no id linking them, since a deployed/added date is deliberately
-  // an independent copy (see ProjectSample's docstring). Good enough to
-  // grey out dates already pulled in without needing to track provenance.
+  // Matched by value: no id links them, a deployed date being an independent
+  // copy (see ProjectSample). Enough to grey out dates already pulled in
+  // without tracking provenance.
   const measurementKey = (m: { sample_name: string; age_bp: number; error_1sigma: number }) =>
     `${m.sample_name}|${m.age_bp}|${m.error_1sigma}`
   const addedProjectSampleKeys = new Set(measurements.map(measurementKey))
-  // What "add all" would actually add: everything not already on the form.
-  // A collection is usually deployed wholesale into an analysis and only
-  // then whittled down, so ticking every row by hand was the common case,
-  // not the exception.
+  // What "add all" adds: everything not already on the form. A collection is
+  // usually deployed wholesale and then whittled down.
   const addableProjectSamples = projectSamples.filter(
     (s) => !addedProjectSampleKeys.has(measurementKey(s))
   )
@@ -505,22 +475,18 @@ export default function NewAnalysis() {
       material_type: s.material_type || 'unknown',
       sample_type: s.sample_type,
       curve_id: s.curve_id || 'intcal20',
-      // Carried rather than blanked. A reservoir offset belongs to where the
-      // sample came from -- the collection's own bulk "apply ΔR" action is
-      // how it usually gets set -- so dropping it here silently recalibrated
-      // a marine date without its local correction, which moves the answer
-      // rather than merely losing a label. Deploying the same date from the
-      // project page has always carried it.
+      // Carried rather than blanked: a reservoir offset belongs to where the
+      // sample came from, so dropping it recalibrates a marine date without
+      // its local correction -- which moves the answer, not just a label.
       delta_r: s.delta_r ?? null,
       delta_r_error: s.delta_r_error ?? null,
       outlier_prior: 0,
       outlier_model: 'general',
       notes: s.notes ?? null,
-      // The context the collection already files this date under. Deploying
-      // turns these into the analysis's contexts, and adding a date this way
-      // is meant to be the same thing done one at a time -- so it is carried
-      // and the Model Structure page starts from it (bootstrapModelTree)
-      // rather than dropping every date into one undifferentiated phase.
+      // The context the collection files this date under. Deploying turns
+      // these into the analysis's contexts, and adding one at a time means the
+      // same thing -- so it is carried, and bootstrapModelTree starts from it
+      // rather than dropping every date into one phase.
       default_context_name: s.default_context_name ?? null,
       tpq_age_bp: s.tpq_age_bp ?? null,
       taq_age_bp: s.taq_age_bp ?? null,
@@ -528,14 +494,13 @@ export default function NewAnalysis() {
   }
 
   /**
-   * Load an uploaded file's dates -- and, when it carried one, its model
-   * structure -- into this draft.
+   * Load an uploaded file's dates, and its model structure when it carried
+   * one, into this draft.
    *
-   * REPLACES the draft's measurements rather than appending to them. An
-   * .oxcal file's structure refers to its own dates by id, so merging it with
-   * dates already on the form would leave those dates in no phase and the
-   * model refusing to run. Replacing is also what the confirm button says it
-   * does, and the dialog shows the full list first.
+   * REPLACES the draft's measurements rather than appending. An .oxcal file's
+   * structure refers to its own dates by id, so merging would leave the dates
+   * already on the form in no phase and the model refusing to run. Replacing
+   * is also what the confirm button says it does.
    */
   const handleImport = (preview: ImportPreview) => {
     setMeasurements(
@@ -545,8 +510,8 @@ export default function NewAnalysis() {
         age_bp: d.age_bp,
         error_1sigma: d.error_1sigma,
         material_type: d.material_type || 'unknown',
-        // A CSV may leave this to the curve, the same way the backend does
-        // when a hand-entered date omits it.
+        // A CSV may leave this to the curve, as the backend does for a
+        // hand-entered date that omits it.
         sample_type: d.sample_type || (d.curve_id === 'marine20' ? 'marine' : 'terrestrial'),
         curve_id: d.curve_id,
         delta_r: d.delta_r,
@@ -559,11 +524,10 @@ export default function NewAnalysis() {
         tpq_age_bp: d.tpq_age_bp,
         taq_age_bp: d.taq_age_bp,
         element_id: d.element_id ?? null,
-        // A CSV names a phase per date without carrying a model tree to put
-        // it in. Kept as the date's context so the Model Structure page can
-        // start from that grouping, the same way a date added from a project
-        // collection does. Ignored when the file DID bring a tree -- the
-        // assignments above are then the real thing.
+        // A CSV names a phase per date without carrying a tree to put it in,
+        // so it is kept as the date's context and the Model Structure page
+        // starts from that grouping. Ignored when the file DID bring a tree,
+        // where the assignments above are the real thing.
         default_context_name: d.phase_name ?? null,
       }))
     )
@@ -606,8 +570,8 @@ export default function NewAnalysis() {
       // Only carried for marine carbon -- see isMarine above.
       delta_r: isMarine ? currentMeasurement.delta_r ?? null : null,
       delta_r_error: isMarine ? currentMeasurement.delta_r_error ?? null : null,
-      // Only meaningful for a Bayesian run; a single calibration has no
-      // model for the date to be an outlier from.
+      // Bayesian only: a single calibration has no model for the date to be
+      // an outlier from.
       outlier_prior:
         analysisType === 'bayesian' ? currentMeasurement.outlier_prior ?? 0 : 0,
       outlier_model: currentMeasurement.outlier_model ?? 'general',
@@ -619,12 +583,9 @@ export default function NewAnalysis() {
   }
 
   /**
-   * Save the analysis's name and project without re-running it. Renaming
-   * used to mean going through Run Analysis, which recomputes the results
-   * and (for a calibration or group calibration) saves a second analysis
-   * rather than replacing the one being edited -- a heavy, lossy price for
-   * fixing a label. Nothing here touches the dates or the model, so the
-   * stored results stay exactly as valid as they were.
+ * Save the analysis's name and project without re-running it. Nothing here
+   * touches the dates or the model, so the stored results stay as valid as
+   * they were -- where going through Run Analysis would recompute them.
    */
   const handleSaveDetails = async () => {
     if (!editRouteId) return
@@ -648,11 +609,10 @@ export default function NewAnalysis() {
       }
       saveDateFormatPreference(editRouteId, dateFormat)
 
-      // Anything else the form is holding is an input change, which only
-      // reaches the backend through Run Analysis -- so leaving the page now
-      // would quietly throw it away. Stay put and say why. When the inputs
-      // are untouched this really was just a rename, and there is nothing
-      // left on the page to lose.
+      // Anything else the form holds is an input change, which reaches the
+      // backend only through Run Analysis -- so leaving now would throw it
+      // away. Stay put and say why. With the inputs untouched this really was
+      // a rename, and there is nothing left to lose.
       const inputsChanged =
         loadedInputsRef.current === null ||
         loadedInputsRef.current !==
@@ -682,36 +642,31 @@ export default function NewAnalysis() {
   }
 
   /**
-   * Why the run must not go ahead, or null. Only the Bayesian type has a
-   * structure to be wrong: a calibration has none to check.
+   * Why the run must not go ahead, or null. Only a Bayesian analysis has a
+   * structure to be wrong about.
    */
   const structureProblem = (): string | null => {
     if (analysisType !== 'bayesian') return null
-    // An invalid model structure would only be rejected with a 422 after
-    // submitting, so stop here and point back at the editor instead. The
-    // detail lives in the persistent "Model structure problems: ..." banner
-    // further down the page (see structureInvalid below) -- this toast is
-    // only the acknowledgment that clicking Run didn't do anything, and why
-    // to look down there.
+    // An invalid structure would be rejected with a 422 after submitting, so
+    // stop here and point back at the editor. The detail is in the persistent
+    // "Model structure problems" banner below (see structureInvalid); this
+    // toast only says why clicking Run did nothing.
     if (modelTree && treeProblems.length > 0) {
       return 'Cannot run: the model structure has problems shown below. Fix them on the Model Structure page first.'
     }
-    // The backend rejects a circular relationship set with a 422 before
-    // running anything, but checking here avoids sending a request already
-    // known to be invalid. Only relevant to the legacy relationship path --
-    // a model tree cannot contain a cycle, which is one of the things
-    // authoring one directly buys.
+    // The backend rejects a circular relationship set with a 422 anyway;
+    // checking here avoids sending a request known to be invalid. Only the
+    // relationship path needs it -- a model tree cannot contain a cycle.
     if (!modelTree && cycle) {
       return 'Cannot run: the stratigraphic relationships are circular. Fix this on the Model Structure page first.'
     }
     return null
   }
 
-  // Stratigraphy is authored as an explicit model tree (see Stratigraphy.tsx's
-  // Editor tab) and submitted as-is; the groups/relationships fields are still
-  // sent for a draft that predates a tree being built, in which case the
-  // backend converts them into one. See utils/analysisPayload.ts for what a
-  // non-Bayesian type has to clear.
+  // Stratigraphy is authored as a model tree (Stratigraphy.tsx's Editor tab)
+  // and submitted as-is. groups/relationships are still sent for a draft with
+  // no tree yet, which the backend converts into one. See
+  // utils/analysisPayload.ts for what a non-Bayesian type has to clear.
   const inputsPayload = () =>
     buildInputsPayload({
       name: analysisName,
@@ -743,13 +698,8 @@ export default function NewAnalysis() {
       }
 
       // Editing replaces THIS analysis's inputs whatever type it is being
-      // changed to, so switching a saved analysis to another type CONVERTS
-      // it. Only the Bayesian branch below used to take this path: the other
-      // two always posted a fresh analysis, leaving the one being edited
-      // behind as a pending duplicate under the same name. Deploying a
-      // project's dates and then choosing Group Calibration hit that every
-      // time, since deploying always creates a pending Bayesian analysis and
-      // drops you into its editor.
+      // changed to, so switching a saved analysis to another type CONVERTS it
+      // rather than leaving the original behind as a pending duplicate.
       if (isEditing) {
         const response = await fetch(`/api/analysis/${editRouteId}/inputs`, {
           method: 'PUT',
@@ -761,9 +711,9 @@ export default function NewAnalysis() {
           setRunError('Analysis failed: ' + formatApiError(data))
           return
         }
-        // Several dates with no model between them are stored as a group
-        // calibration however the form labelled them -- say so rather than
-        // leaving the results page contradicting what was just chosen.
+        // Several dates with no model between them store as a group
+        // calibration however the form labelled them, so say so rather than
+        // let the results page contradict what was just chosen.
         if (data.data.analysis_type && data.data.analysis_type !== analysisType) {
           notify(
             `Saved as a group calibration: a single calibration is one date, and this has ${measurements.length}.`
@@ -780,11 +730,9 @@ export default function NewAnalysis() {
         resetDraft()
         navigate(`/results/${editRouteId}`)
       } else if (analysisType === 'calibration') {
-        // For single calibration, send just the first measurement -- but all
-        // of it. Sending only age/error/curve dropped everything else the
-        // form had collected: the sample's own name (so it saved as the
-        // schema default), its material, and its reservoir offset, which
-        // changes the date rather than just labelling it.
+        // Single calibration sends just the first measurement, but ALL of it:
+        // age/error/curve alone would drop the name, the material, and the
+        // reservoir offset, which changes the date rather than labelling it.
         const measurement = measurements[0]
         const response = await fetch('/api/analysis/calibrate', {
           method: 'POST',
@@ -809,22 +757,20 @@ export default function NewAnalysis() {
             resetDraft()
             navigate(`/results/${data.data.id}`)
           } else {
-            // Quick test run -- nothing was saved, so show the result
-            // right here instead of navigating to a Results page that
-            // doesn't exist.
+            // Quick test run: nothing was saved, so show the result here
+            // rather than navigating to a Results page that does not exist.
             setPreviewResult(data.data)
           }
         } else {
           setRunError('Analysis failed: ' + formatApiError(data))
         }
       } else if (analysisType === 'group_calibration') {
-        // Standard direct calibration of every measurement, independently --
-        // no stratigraphy, no model. Sent as the same measurement objects
-        // the Bayesian draft builds (see GroupCalibrationRequest's
-        // docstring), so group_id/outlier fields ride along unused.
+        // Every measurement calibrated independently: no stratigraphy, no
+        // model. Sent as the same measurement objects the Bayesian draft
+        // builds (see GroupCalibrationRequest), so the group_id and outlier
+        // fields ride along unused.
         //
-        // Creating only: an edit went through PUT /inputs above, whatever
-        // type it is being changed to.
+        // Creating only: an edit went through PUT /inputs above.
         const response = await fetch('/api/analysis/calibrate-group', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -833,8 +779,8 @@ export default function NewAnalysis() {
             measurements,
             project_id: projectId || null,
             // The one model setting that means anything without a model: how
-            // far apart these dates are, and whether they can be told apart
-            // at all. There are no phases here to have durations.
+            // far apart these dates are and whether they can be told apart.
+            // There are no phases here to have durations.
             estimate_durations: mcmc.estimate_durations,
           }),
         })
@@ -847,10 +793,9 @@ export default function NewAnalysis() {
           setRunError('Analysis failed: ' + formatApiError(data))
         }
       } else {
-        // Creating a Bayesian analysis: /analysis/bayesian validates,
-        // persists and runs it in one go. The full stratigraphy defined on
-        // the Model Structure page goes with it -- contexts, relationships,
-        // and any TPQ/TAQ limiters set there or inline on a measurement.
+        // /analysis/bayesian validates, persists and runs in one go. The full
+        // stratigraphy from the Model Structure page goes with it: contexts,
+        // relationships, and any TPQ/TAQ limiters set there or inline.
         const response = await fetch('/api/analysis/bayesian', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -987,14 +932,11 @@ export default function NewAnalysis() {
               </FormControl>
             </Box>
 
-            {/* Tune and Chains used to sit beside Draws here, from when the
-                fallback was PyMC's SMC sampler. Neither means anything now:
-                a chain-shaped model is integrated exactly, with no run at
-                all, and anything else goes to a Gibbs sampler that extends
-                its own run until it converges rather than taking a length on
-                trust. They are still accepted in the payload so saved
-                analyses round-trip, but presenting spinners that change
-                nothing would just be misleading. */}
+            {/* No Tune or Chains control beside Draws: neither means anything
+                to either solver -- a chain-shaped model is integrated exactly
+                with no run at all, and anything else goes to a Gibbs sampler
+                that extends its own run until it converges. They are still
+                accepted in the payload so saved analyses round-trip. */}
             {analysisType === 'bayesian' && (
               <Box sx={{ mb: 2 }}>
                 <Typography variant="subtitle2" gutterBottom>
@@ -1213,8 +1155,8 @@ export default function NewAnalysis() {
               updateMeasurement(editing.id, {
                 ...draft,
                 // A reservoir offset means nothing off a marine curve, so
-                // switching a date back to terrestrial has to clear it
-                // rather than leave it applied invisibly.
+                // switching back to terrestrial clears it rather than leaving
+                // it applied invisibly.
                 delta_r: isMarineMeasurement(draft, curves) ? draft.delta_r ?? null : null,
                 delta_r_error: isMarineMeasurement(draft, curves)
                   ? draft.delta_r_error ?? null

@@ -1,14 +1,12 @@
 // Geometry tests for the Harris matrix layout.
 //
-// These carry more weight than a normal unit test, because they are the ONLY
-// way this diagram gets checked. reactflow draws into a measured viewport, so
-// there is no DOM assertion that says "the boxes line up" -- the nodes are
-// present at coordinates whether or not those coordinates are sensible. The
-// layout was therefore written as pure data in, geometry out, so the three
-// things that were wrong with the old diagram can each be stated as a
-// property and held to it:
+// These carry more weight than a normal unit test, being the ONLY way this
+// diagram gets checked: reactflow draws into a measured viewport, so no DOM
+// assertion says "the boxes line up" -- the nodes are present at coordinates
+// whether or not those coordinates are sensible. The layout is pure data in,
+// geometry out, so three properties can be stated and held to:
 //
-//   no implied edges  -- the cross-product that drew 175 edges for 39 orderings
+//   no implied edges  -- a cross-product would draw 175 edges for 39 orderings
 //   containment       -- a nested phase is INSIDE its parent, not beside it
 //   alignment         -- children are centred on the parent they belong to
 //
@@ -92,13 +90,13 @@ function absolute(layout: HarrisLayout, id: string): { x: number; y: number } {
 const centreX = (layout: HarrisLayout, id: string) =>
   absolute(layout, id).x + byId(layout).get(id)!.width / 2
 
-describe('the edges that used to be implied', () => {
+describe('implied edges', () => {
   it('draws one arrow between adjacent blocks, not one per contained phase', () => {
     const layout = layoutHarrisMatrix(nenthorn(), [])
 
     // Quarry and Rockshelter are adjacent with no Boundary between them, so
-    // exactly one arrow carries that order. The old code drew three:
-    // Fire_Feature_J to each of Fires, Fire_Feature_K and Fire_Feature_A.
+    // exactly one arrow carries that order -- not one per contained phase,
+    // which would be three.
     expect(layout.edges).toHaveLength(1)
     expect(layout.edges[0]).toMatchObject({ source: 'rock', target: 'quarry' })
   })
@@ -113,7 +111,7 @@ describe('the edges that used to be implied', () => {
   })
 
   it('stays linear in the number of nodes instead of quadratic', () => {
-    // The measured behaviour of the old projection, for reference:
+    // A cross-product projection grows quadratically instead:
     //   2x2 -> 9 edges, 3x3 -> 32, 5x4 -> 100, 8x4 -> 175.
     for (const [groups, subphases] of [[2, 2], [3, 3], [5, 4], [8, 4]] as const) {
       const layout = layoutHarrisMatrix(siteModel(groups, subphases), [])
@@ -475,8 +473,8 @@ describe('summariseTree', () => {
     })
   })
 
-  it('no longer reports the cross-product', () => {
-    // The old treeToMatrix reported 175 relationships for this model.
+  it('counts what the model asserts, not the cross-product', () => {
+    // A cross-product count would report 175 relationships for this model.
     const summary = summariseTree(siteModel(8, 4))
 
     expect(summary.phaseCount).toBe(8 + 8 * 4)

@@ -1,13 +1,9 @@
 /**
- * Shared utilities for presenting calendar ages in the user's chosen
- * reporting format: cal BP, BC/AD, or BCE/CE.
+ * Presenting calendar ages in the user's chosen reporting format: cal BP,
+ * BC/AD, or BCE/CE.
  *
- * All calibration results are computed and stored internally as cal BP
- * (calendar years Before Present, where "present" is fixed at 1950 by
- * convention -- this is what the calibration curves and the Bayesian model
- * both operate in). This module only affects *display*: it converts a cal
- * BP value into the requested format for showing to the user, without
- * changing anything about how ages are calculated.
+ * Everything is computed and stored as cal BP, which is what the curves and
+ * the model work in, so this module affects DISPLAY only.
  */
 
 export type DateFormat = 'calBP' | 'bcad' | 'bce_ce'
@@ -20,16 +16,14 @@ export const DATE_FORMAT_OPTIONS: { value: DateFormat; label: string }[] = [
 
 export const DEFAULT_DATE_FORMAT: DateFormat = 'calBP'
 
-// Radiocarbon "Present" is fixed at 1950 by international convention,
-// regardless of when the measurement or analysis actually took place.
+// Radiocarbon "Present" is fixed at 1950 by convention, whenever the
+// measurement was actually taken.
 const RADIOCARBON_PRESENT = 1950
 
 /**
- * Convert a cal BP value to a proleptic Gregorian calendar year, using the
- * conventional historical BC/AD numbering with no year zero (1 BC is
- * immediately followed by AD 1). BCE/CE use the same year numbers as
- * BC/AD -- only the era labels differ -- so this single conversion backs
- * both formats.
+ * cal BP to a proleptic Gregorian year in the conventional BC/AD numbering,
+ * with no year zero: 1 BC is followed by AD 1. BCE/CE use the same numbers and
+ * differ only in era label, so one conversion backs both formats.
  */
 function calBPToYear(calBP: number): { year: number; isCurrentEra: boolean } {
   const signedYear = RADIOCARBON_PRESENT - calBP
@@ -40,10 +34,7 @@ function calBPToYear(calBP: number): { year: number; isCurrentEra: boolean } {
   return { year: Math.round(1 - signedYear), isCurrentEra: false }
 }
 
-/**
- * Format a single calendar age (in cal BP) according to the chosen
- * reporting format.
- */
+/** One calendar age, in the chosen reporting format. */
 export function formatCalendarAge(calBP: number, format: DateFormat): string {
   if (!Number.isFinite(calBP)) return 'N/A'
 
@@ -62,18 +53,13 @@ export function formatCalendarAge(calBP: number, format: DateFormat): string {
 }
 
 /**
- * Format a calendar age range (e.g. an HPD interval) according to the
- * chosen reporting format, always presented in chronological order
- * (older date first) regardless of the numeric order of the inputs.
+ * A calendar age range in the chosen format, always older date first
+ * whatever the numeric order of the inputs. A larger cal BP is further in the
+ * past, so "older first" is descending cal BP.
  *
- * `compact` names the era once instead of twice ("AD 1189–1408" rather
- * than "AD 1189 – AD 1408"), for places that repeat a range down a list
- * and would otherwise spend half their width restating the era. It applies
- * only when both ends share one; see compactEraRange.
- *
- * Note: a larger cal BP value is further in the past (an earlier calendar
- * year), so "older first" means descending cal BP / ascending calendar
- * year.
+ * `compact` names the era once rather than twice ("AD 1189–1408" rather than
+ * "AD 1189 – AD 1408"), for places that repeat a range down a list. It applies
+ * only when both ends share an era; see compactEraRange.
  */
 export function formatCalendarRange(
   calBPA: number,
@@ -100,14 +86,12 @@ export function formatCalendarRange(
 }
 
 /**
- * "AD 1189–1408" / "1250–850 BC" -- the era named once, where convention
- * puts it: before the number for AD/CE, after it for BC/BCE.
+ * "AD 1189–1408" / "1250–850 BC" -- the era named once, where convention puts
+ * it: before the number for AD/CE, after it for BC/BCE.
  *
- * Only defined when both ends share an era. A range that straddles the era
- * boundary has no single label to hoist ("AD 50–150" would be a different
- * range from "50 BC – AD 150"), so this returns null and the caller falls
- * back to spelling both ends out. Compactness is never worth a date that
- * reads as the wrong century.
+ * Only defined when both ends share an era. A range straddling the boundary
+ * has no single label to hoist, so this returns null and the caller spells
+ * both ends out: compactness is never worth the wrong century.
  */
 function compactEraRange(
   olderCalBP: number,
@@ -135,16 +119,13 @@ export interface HPDRange {
 }
 
 /**
- * Format a (possibly multimodal) HPD region as one or more calendar-age
- * ranges, each annotated with its own share of the total probability --
- * the standard OxCal/CALIB reporting style, e.g.:
+ * A possibly multimodal HPD region as calendar-age ranges, each with its own
+ * share of the probability, in OxCal/CALIB style:
  *   "3360–3300 BC (13.5%), 3270–3100 BC (81.9%)"
  *
- * Calibration curves are non-monotonic (plateaus, wiggles), so a sample's
- * HPD region often isn't one contiguous span; collapsing it to a single
- * min–max range would silently claim probability in the gap between
- * separate peaks. Falls back to 'N/A' if no ranges are available (e.g.
- * results computed before this reporting was added).
+ * Curves are non-monotonic, so an HPD region is often not one contiguous span,
+ * and collapsing it to a single min–max range would claim probability in the
+ * gap between peaks. 'N/A' when no ranges are available.
  */
 export function formatHPDRanges(ranges: HPDRange[] | undefined | null, format: DateFormat): string {
   if (!ranges || ranges.length === 0) return 'N/A'
@@ -162,12 +143,10 @@ export function totalHPDPercent(ranges: HPDRange[] | undefined | null): number |
 
 // --- Per-analysis persistence -----------------------------------------
 //
-// The reporting format is a display preference, not analytical data, so
-// rather than adding a backend/schema change just to store it, it's kept
-// client-side in localStorage keyed by analysis ID. This is set on the
-// "New Analysis" page and read back on the Results page (including after
-// a full page reload or a direct link, when React Router navigation state
-// wouldn't otherwise survive).
+// The reporting format is a display preference rather than analytical data,
+// so it is kept in localStorage keyed by analysis id rather than in the
+// schema. Set on the New Analysis page and read back on Results, including
+// after a reload or a direct link where router state would not survive.
 
 const STORAGE_PREFIX = 'radiocarbon:dateFormat:'
 
@@ -175,8 +154,8 @@ export function saveDateFormatPreference(analysisId: string, format: DateFormat)
   try {
     window.localStorage.setItem(`${STORAGE_PREFIX}${analysisId}`, format)
   } catch {
-    // localStorage can be unavailable (private browsing, storage full,
-    // etc.) -- the preference just won't persist across reloads.
+    // localStorage can be unavailable (private browsing, storage full); the
+    // preference simply will not persist.
   }
 }
 
@@ -194,10 +173,9 @@ export function loadDateFormatPreference(analysisId: string): DateFormat {
 
 // --- Plot axis ---------------------------------------------------------
 //
-// Posterior distributions are plotted against cal BP, because that is what
-// the calibration curve and the model work in. Presenting them in another
-// convention is a labelling job: the points stay where they are and only
-// the ticks change, so switching format never moves a curve.
+// Posteriors are plotted against cal BP, which is what the curve and the model
+// work in, so another convention is a labelling job: the points stay put and
+// only the ticks change.
 
 /** Axis title for the chosen reporting format. */
 export function calendarAxisTitle(format: DateFormat): string {
@@ -207,10 +185,9 @@ export function calendarAxisTitle(format: DateFormat): string {
 }
 
 /**
- * A signed year in *display* numbering -- positive for AD/CE, negative for
- * BC/BCE, and never zero, because the conventional calendar has no year
- * zero. This is not the astronomical year: astronomical -1000 is 1001 BC,
- * so labelling round astronomical years would produce ticks like "1001 BC".
+ * A signed year in DISPLAY numbering: positive for AD/CE, negative for BC/BCE,
+ * never zero. Not the astronomical year -- astronomical -1000 is 1001 BC, so
+ * round astronomical years would produce ticks like "1001 BC".
  */
 function displayYearFromCalBP(calBP: number): number {
   const signedYear = RADIOCARBON_PRESENT - calBP
@@ -235,13 +212,10 @@ function niceStep(span: number, target: number): number {
 }
 
 /**
- * Tick positions (in cal BP, where the data is plotted) and their labels in
- * the chosen format.
- *
- * Returns null for cal BP: the values already are cal BP, so Plotly's own
- * tick selection is better than anything imposed here. For BC/AD and BCE/CE
- * the ticks are chosen as round years in that convention -- "1000 BC", not
- * the "1051 BC" that rounding in cal BP would give -- and mapped back to the
+ * Tick positions in cal BP, where the data is plotted, with labels in the
+ * chosen format. Null for cal BP, where Plotly's own tick selection is better.
+ * For BC/AD and BCE/CE the ticks are round years in that convention -- "1000
+ * BC", not the "1051 BC" rounding in cal BP would give -- mapped back to the
  * cal BP positions they sit at.
  */
 export function calendarAxisTicks(

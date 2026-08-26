@@ -1,12 +1,11 @@
 // The Harris matrix: a read-only rendering of the model tree, oldest at the
 // bottom.
 //
-// This component is deliberately thin. Everything about WHERE things go lives
-// in utils/harrisLayout.ts as pure geometry, because reactflow draws into a
-// measured viewport and there is no DOM assertion that says "the boxes line
-// up" -- the nodes are present at whatever coordinates they were given,
-// sensible or not. Keeping the layout separate is what lets
-// utils/harrisLayout.test.ts hold it to the properties that matter.
+// Deliberately thin: everything about WHERE things go lives in
+// utils/harrisLayout.ts as pure geometry, because reactflow draws into a
+// measured viewport and no DOM assertion says "the boxes line up" -- the nodes
+// are present at whatever coordinates they were given. Keeping the layout
+// separate is what lets utils/harrisLayout.test.ts hold it to its properties.
 //
 // What the drawing means:
 //
@@ -22,10 +21,10 @@
 //             Boundary rule already separates them, and never expanded to the
 //             phases nested inside -- the containing box carries that.
 //
-// Nodes are not draggable. The layout now means something (a child sits
-// centred beneath its parent, siblings share a row because the model says
-// they are unordered), and dragging would let that be pulled apart while
-// still looking authoritative. Pan, zoom and fit remain.
+// Nodes are not draggable: the layout means something -- a child sits centred
+// beneath its parent, siblings share a row because the model says they are
+// unordered -- and dragging would pull that apart while still looking
+// authoritative. Pan, zoom and fit remain.
 import { useMemo } from 'react'
 import ReactFlow, {
   Background,
@@ -112,9 +111,9 @@ function GroupNode({ data }: NodeProps<NodeData>) {
         border: `1px dashed ${tint(color, 0.6, surface)}`,
         borderRadius: 2,
         // Each level of nesting is a touch darker, so depth reads at a glance
-        // without needing to trace the borders. Composited rather than
-        // translucent so this is the ONLY thing setting the shade -- stacked
-        // tints used to add a container's ancestors to its own on top.
+        // without tracing borders. Composited rather than translucent, so this
+        // is the ONLY thing setting the shade -- stacked tints would add a
+        // container's ancestors on top of its own.
         backgroundColor: tint(color, 0.04 + Math.min(node.depth, 4) * 0.02, surface),
         boxSizing: 'border-box',
       }}
@@ -138,11 +137,10 @@ function GroupNode({ data }: NodeProps<NodeData>) {
   )
 }
 
-// The rule either side of the label: it grows to fill a wide box, and it never
-// shrinks below RULE_STUB. The refusal to shrink is the point. The layout has
-// already found room for both stubs (see harrisLayout's boundarySpan), and a
-// stub that shrinks in proportion with the label spends that room a second
-// time -- 24px of measured rule came out as 15px of drawn rule.
+// The rule either side of the label: it grows to fill a wide box and never
+// shrinks below RULE_STUB. The layout has already found room for both stubs
+// (harrisLayout's boundarySpan), so a stub shrinking in proportion with the
+// label would spend that room twice.
 const stubSx = (color: string) => ({
   flex: `1 0 ${RULE_STUB}px`,
   borderTop: `2px solid ${color}`,
@@ -227,9 +225,9 @@ function BoundaryNode({ data }: NodeProps<NodeData>) {
 
 const NODE_TYPES = { context: ContextNode, group: GroupNode, boundary: BoundaryNode }
 
-// Module-level so the default prop is referentially stable. A fresh `{}` per
-// render would change the layout memo's dependency every time and rebuild the
-// whole geometry on each paint.
+// Module-level so the default prop is referentially stable: a fresh `{}` per
+// render would change the layout memo's dependency and rebuild the whole
+// geometry on each paint.
 const NO_ASSIGNMENTS: Record<string, string> = {}
 
 interface Props {
@@ -260,18 +258,15 @@ export default function HarrisMatrixDiagram({
 
   /**
    * The modelled range each boundary carries, once the analysis has run.
-   * Formatted here, before the layout runs, because the layout has to size
-   * each container around the label it will hold -- see harrisLayout's
-   * `boundaryRanges`. BoundaryNode then draws this same string rather than
-   * deriving its own.
+   * Formatted here, before the layout runs, because the layout sizes each
+   * container around the label it will hold (harrisLayout's `boundaryRanges`);
+   * BoundaryNode then draws this same string rather than deriving its own.
    *
    * Re-selected from the boundary's own distribution at the page's current
-   * confidence, through the SAME helper the results table calls -- not read
-   * off the stored hpd_95, which is what used to make the diagram and the
-   * table state the same boundary as two different ranges four years apart,
-   * with the diagram silently frozen at 95% while the selector said 99.7%.
-   * The level is printed beside the figure so the number carries its own
-   * qualifier when someone screenshots the diagram into a paper.
+   * confidence, through the SAME helper the results table calls, rather than
+   * read off the stored hpd_95 -- which would freeze the diagram at 95% while
+   * the selector said 99.7%. The level is printed beside the figure so the
+   * number carries its qualifier into a screenshot.
    */
   const boundaryRanges = useMemo(() => {
     const ranges: Record<string, string> = {}
@@ -298,10 +293,10 @@ export default function HarrisMatrixDiagram({
   )
 
   const nodes = useMemo<Node<NodeData>[]>(() => {
-    // Contexts share the Phase hue and differ only in strength -- see
-    // contextShades. The shades are chosen from the COUNT first, so a
-    // three-context model gets three widely spaced steps rather than the three
-    // most similar ones at the head of the ramp.
+    // Contexts share the Phase hue and differ only in strength (see
+    // contextShades). The shades come from the COUNT first, so a three-context
+    // model gets three widely spaced steps rather than the three most similar
+    // ones at the head of the ramp.
     const shades = contextShades(layout.nodes.filter((n) => n.kind === 'context').length)
     let contextIndex = 0
     return layout.nodes.map((node) => {
@@ -309,14 +304,13 @@ export default function HarrisMatrixDiagram({
       if (node.kind === 'context') {
         color = shades[contextIndex++] ?? CONTEXT_PALETTE[0]
       } else if (node.kind === 'boundary') {
-        // The deeper coral, not the flat one: a boundary here is a rule AND
-        // its own label, so this colour has to carry 10px text as well.
+        // The deeper coral: a boundary here is a rule AND its label, so the
+        // colour has to carry 10px text too.
         color = elementTypeColors.boundary.ink
       } else {
         // Keyed off elementType rather than kind, so a Phase drawn as a box
         // around other elements is the same green as that Phase in the tree
-        // editor. Every container used to be the Sequence blue, which made
-        // the two views disagree about what colour a Phase is.
+        // editor.
         color = elementTypeColors[node.elementType].main
       }
 

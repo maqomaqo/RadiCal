@@ -12,11 +12,10 @@ interface UseCurves {
  * The available calibration curves, for any component that offers a choice
  * of one.
  *
- * The underlying request is shared across components (see api/curves.ts), so
+ * The underlying request is shared across components (api/curves.ts), so
  * mounting this in several forms at once costs one request. An unmount
- * mid-flight is guarded: setting state on an unmounted component is harmless
- * in React 18 but the warning it used to produce sent people looking for a
- * bug that was not there.
+ * mid-flight is guarded, since setting state on an unmounted component is
+ * harmless but noisy.
  */
 export function useCurves(): UseCurves {
   const [curves, setCurves] = useState<CurveSpec[]>([])

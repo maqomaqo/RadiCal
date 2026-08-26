@@ -38,9 +38,8 @@ interface AnalysisSummary {
   intervals: SampleIntervals[]
 }
 
-// Analyses are organized into projects (see the Projects page) -- the
-// dashboard only needs to show a handful of the most recent ones as a
-// quick-glance list, not every analysis ever run.
+// Analyses are organised into projects (see the Projects page); the dashboard
+// shows a handful of the most recent, not every analysis ever run.
 const RECENT_LIMIT = 5
 
 // Room either side of a cluster's own span, so the outermost interval is a
@@ -59,10 +58,9 @@ export default function Dashboard() {
   const notify = useNotify()
   const [analyses, setAnalyses] = useState<AnalysisSummary[]>([])
   const [total, setTotal] = useState(0)
-  // Starts true: the request is fired on mount, so there has never been a
-  // moment on this page when nothing was loading. Starting false rendered
-  // the empty state first and the spinner after it -- a returning user was
-  // told "No analyses yet" before their own analyses arrived.
+  // Starts true: the request fires on mount, so there is no moment when
+  // nothing is loading. Starting false renders the empty state first and the
+  // spinner after -- telling a returning user "No analyses yet".
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<LoadError | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<AnalysisSummary | null>(null)
@@ -108,10 +106,9 @@ export default function Dashboard() {
 
   return (
     <Container component="main" maxWidth="lg" sx={{ py: 4 }}>
-      {/* Persistent, not conditional. Orientation used to live in the empty
-          state, which meant it existed until the user's first analysis and
-          then vanished for good -- the wrong shape for an audience that
-          PRODUCT.md says includes someone calibrating for the first time. */}
+      {/* Persistent, not conditional: orientation shown only in the empty
+          state would vanish after the first analysis, which is the wrong shape
+          for an audience PRODUCT.md says includes first-time calibrators. */}
       <WaysIn />
 
       <Box
@@ -226,8 +223,7 @@ export default function Dashboard() {
  * A period and the analyses inside it, under one ruler.
  *
  * The heading is weight and a hairline rather than a tinted band, following
- * the same rule the data tables follow: a filled row paints colour across
- * columns that carry nothing.
+ * the data tables' rule: a filled row paints colour across empty columns.
  */
 function PeriodSection({
   heading,
@@ -293,13 +289,12 @@ function PeriodSection({
 }
 
 /**
- * The key for the two bands. A mark a reader cannot decode is decoration,
- * and the two nested strengths are the only thing distinguishing a 68% band
- * from a 95% one.
+ * The key for the two bands: a mark a reader cannot decode is decoration, and
+ * the nested strengths are all that distinguish a 68% band from a 95% one.
  */
 function HpdKey() {
-  // The swatches come from the same hook the marks do, so a key can never
-  // end up naming a fill the plot is not actually using.
+  // The swatches come from the same hook the marks do, so the key cannot name
+  // a fill the plot is not using.
   const colors = usePlotColors()
   const bands = [
     { label: '68%', fill: colors.hpd68 },
@@ -375,9 +370,9 @@ function AnalysisRow({
         alignItems: 'start',
         p: 2,
         pr: { xs: 2, md: '52px' },
-        // Keyboard focus gets the same affordance as the mouse. The link
-        // covering the card is invisible, so its own ring would be drawn
-        // around nothing; :focus-within moves it onto the card instead.
+        // Keyboard focus gets the mouse's affordance: the link covering the
+        // card is invisible, so its own ring would be drawn around nothing.
+        // :focus-within moves it onto the card.
         '&:hover, &:focus-within': { boxShadow: 3 },
         '&:focus-within': { outline: 2, outlineColor: 'primary.main', outlineOffset: 2 },
         '& a:focus-visible': { outline: 'none' },
@@ -437,9 +432,9 @@ function AnalysisRow({
                 fontWeight: 600,
                 fontSize: '0.9375rem',
                 whiteSpace: 'nowrap',
-                // Sits under its own data rather than flush left, so the
-                // words and the marks read as one statement. Clamped so a
-                // range at the young end cannot run off the card.
+                // Under its own data rather than flush left, so the words and
+                // the marks read as one statement. Clamped so a range at the
+                // young end cannot run off the card.
                 ml: {
                   xs: 0,
                   md: `${Math.min(
@@ -470,8 +465,8 @@ function AnalysisRow({
             top: 8,
             right: 8,
             zIndex: 1,
-            // 30x30 was under every touch-target guideline going, and it is
-            // the only control on the row.
+            // The only control on the row, so it clears the touch-target
+            // minimum.
             width: 44,
             height: 44,
             '&:hover, &:focus-visible': { color: 'error.main' },
@@ -488,10 +483,9 @@ function AnalysisRow({
 /**
  * The ways into the product, above the list and always present.
  *
- * It carries real information rather than restating the app bar -- three
- * distinct routes in, one of which (the curve browser) is the only surface
- * that shows what calibration DOES before asking anyone to commit a
- * measurement to it.
+ * Carries real information rather than restating the app bar: three routes
+ * in, one of which (the curve browser) is the only surface showing what
+ * calibration DOES before anyone commits a measurement to it.
  *
  * A worked example belongs in this set and is deliberately absent: there is
  * no seeded dataset to open, and inventing archaeological data to teach with
@@ -507,11 +501,9 @@ const WAYS_IN = [
     primary: true,
   },
   {
-    // Was 'Import dates', pointing at /new-analysis -- the same destination as
-    // the door above it. Two of three ways in led to one page, which made the
-    // set look wider than it was. A project is a genuinely different starting
-    // point, and ?new=1 opens the create dialog so the label is not a promise
-    // the landing page then asks the reader to repeat.
+    // A genuinely different starting point from the door above, which also
+    // goes to /new-analysis. ?new=1 opens the create dialog, so the label is
+    // not a promise the landing page then asks the reader to repeat.
     to: '/projects?new=1',
     title: 'Start a project',
     action: 'New project',
@@ -526,18 +518,14 @@ const WAYS_IN = [
 ]
 
 function WaysIn() {
-  // Stacked, the three descriptions run to 672px on a 375px screen -- more
-  // than a phone viewport, so the analyses would start below the fold and
-  // orientation would cost a returning user their own data. The doors stay;
-  // the prose that explains them does not fit and is dropped, with each
+  // Stacked, the three descriptions run to 672px on a 375px screen, putting
+  // the analyses below the fold. The doors stay and the prose goes, each
   // button taking the fuller label it no longer has room to sit beneath.
   const compact = useMediaQuery((theme: Theme) => theme.breakpoints.down('sm'))
 
   return (
     // Labelled as a region rather than headed: the page's h1 belongs to the
-    // analyses below, and a heading here would either sit above the h1 or
-    // skip a level. The label is what lets a screen reader find this block
-    // without one.
+    // analyses below, so a heading here would sit above it or skip a level.
     <Paper component="section" aria-label="Ways to start" sx={{ p: { xs: 2, sm: 3 } }}>
       <Typography color="text.secondary" sx={{ maxWidth: '64ch' }}>
         RadiCal turns radiocarbon measurements into calendar dates you can cite, and lets you model them
@@ -592,8 +580,8 @@ function WaysIn() {
 /**
  * The empty list, once the ways in are already on the page above it.
  *
- * A sentence rather than a panel: with orientation now permanent, a second
- * full-width card here would say "you have nothing" more loudly than the
+ * A sentence rather than a panel: with the ways in already permanent, a
+ * second full-width card would say "you have nothing" more loudly than the
  * page says what to do about it.
  */
 function NothingYet() {

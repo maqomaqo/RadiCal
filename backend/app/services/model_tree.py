@@ -3,12 +3,10 @@ The explicit model structure -- OxCal's Sequence / Phase / Boundary / Hiatus
 as a nested, ordered tree -- and the translation of that tree into the
 pieces the solvers in services/ need to turn it into a posterior.
 
-This replaces the previous flat arrangement (a list of Contexts plus
-pairwise above/below relationships, with a start/end Boundary pair silently
-auto-inserted around every Context). That arrangement could not express a
-deliberately-placed Boundary, a site-wide Sequence bracketing every context,
-or any nesting -- and it made every context's boundaries independent of its
-neighbours', where OxCal's are a single shared transition.
+Supersedes the flat arrangement of Contexts plus pairwise above/below
+relationships, which could not express a deliberately-placed Boundary, a
+site-wide Sequence, or any nesting, and made every context's boundaries
+independent of its neighbours' where OxCal's are one shared transition.
 
 Semantics, following the OxCal documentation
 (https://c14.arch.ox.ac.uk/oxcalhelp/hlp_analysis_oper.html):
@@ -78,14 +76,13 @@ class ModelPlan:
         boundary_names: Dict[str, str],
     ):
         # Each entry is (older_terms, younger_terms): every term on the left
-        # must be older (larger cal BP) than every term on the right. Emitted
-        # as one constraint per adjacent pair of sequence children rather than
-        # the full pairwise cross-product -- min(older) >= max(younger) is
-        # equivalent and far cheaper.
+        # must be older (larger cal BP) than every term on the right. One
+        # constraint per adjacent pair of sequence children rather than the
+        # full cross-product, which min(older) >= max(younger) makes equivalent.
         self.ordering = ordering
         self.span_groups = span_groups
         # Boundaries integrated out analytically rather than sampled; see
-        # classify_boundaries below for why this matters so much here.
+        # classify_boundaries.
         self.marginalized_boundaries = marginalized_boundaries
         self.sampled_boundaries = sampled_boundaries
         self.boundary_names = boundary_names
@@ -111,12 +108,9 @@ def _children(element: Dict) -> List[Dict]:
 
 def validate_tree(root: Optional[Dict], measurements: List[Dict]) -> None:
     """
-    Reject a structurally impossible model before any MCMC run, in the same
-    spirit as BayesianRequest's existing validators. Raises ValueError.
-
-    Note there is no cycle check here: a tree cannot contain one, which
-    removes a whole class of error the pairwise-relationship model had to
-    guard against.
+    Reject a structurally impossible model before any run, as
+    BayesianRequest's validators do. Raises ValueError. No cycle check: a tree
+    cannot contain one.
     """
     if root is None:
         raise ValueError("model tree is empty")
@@ -215,11 +209,10 @@ def _plan_element(
     span_groups: List[SpanGroup],
 ) -> List[str]:
     """
-    Recursively plan one element. Returns the ids of dates in this subtree
-    that are NOT yet enclosed by any boundary pair, so they can bubble up to
-    be claimed by an enclosing group (or, if nothing claims them, simply get
-    no uniform-scatter term -- matching OxCal, where boundaries are explicit
-    and dates outside them are unconstrained by a phase prior).
+    Plan one element. Returns the ids of dates in this subtree not yet
+    enclosed by any boundary pair, so they bubble up to an enclosing group --
+    or, unclaimed, get no uniform-scatter term, matching OxCal, where a date
+    outside every boundary is unconstrained by a phase prior.
     """
     etype = element.get('element_type')
     children = _children(element)
@@ -275,24 +268,17 @@ def with_implicit_boundaries(root: Dict, new_id=None) -> Tuple[Dict, List[str]]:
     A copy of `root` with a Boundary inserted between any two adjacent
     non-Boundary children of a Sequence, plus the ids of what was inserted.
 
-    Why this is not just a convenience. A Sequence that orders two groups
-    with no Boundary between them puts all their dates in ONE bounded group
-    and bolts an ordering constraint on top, which does not factorise along
-    a chain -- so exact_chain declines it and the model falls to MCMC, where
-    it is measurably wrong (on the OxCal fixture SMC separated two ordered
-    groups by 57 years against OxCal's 13, and could not tell an outlier
-    from a sound date at all).
+    A Sequence that orders two groups with no Boundary between them puts all
+    their dates in ONE bounded group and bolts an ordering constraint on top,
+    which does not factorise along a chain, so exact_chain declines it.
+    Inserting the transition makes it a chain, and the evidence says OxCal
+    reads it the same way: on the fixture its `ordered` and `shared_boundary`
+    runs agree to 0.948 posterior overlap.
 
-    Inserting the transition makes it a chain, and the evidence says that is
-    also what OxCal does with it: on the fixture, OxCal's `ordered` run and
-    its `shared_boundary` run agree to 0.948 posterior overlap, and solving
-    the ordered model this way lands 6.4 years rms from OxCal's own answer
-    for it, against 12.6 for MCMC.
-
-    It is a real change to the model rather than a rewriting of it into an
-    equal form -- the uniform-scatter prior becomes one term per group
-    instead of one across both -- which is why the inserted ids are returned
-    rather than hidden: the caller can say what it did.
+    It is a real change to the model rather than a rewriting into an equal form
+    -- the uniform-scatter prior becomes one term per group instead of one
+    across both -- which is why the inserted ids are returned rather than
+    hidden, so the caller can say what it did.
     """
     counter = itertools.count(1)
     if new_id is None:
@@ -330,30 +316,18 @@ def classify_boundaries(
 ) -> Tuple[Set[str], List[str]]:
     """
     Split boundaries into those that can be integrated out analytically and
-    those that must be sampled. This is the crux of making explicit
-    boundaries work at all, so it is worth spelling out.
+    those that must be sampled.
 
-    The SMC sampler this predates could not sample a
-    boundary parameter: its posterior is heavy-tailed and SMC's IMH kernel
-    collapses it onto the extreme dates (measured E[a+b] = 2.0 against a true
-    150.9, silently, at r_hat 1.00). That is why the previous implementation
-    marginalized boundaries out entirely. NUTS handles that case but was
-    rejected for the multimodality that calibration-curve wiggles produce,
-    which is intrinsic to radiocarbon.
-
-    The way out is that only the OUTERMOST boundaries are heavy-tailed. An
-    interior boundary is squeezed between the youngest date of the group
-    before it and the oldest date of the group after it -- a bounded interval
-    SMC handles perfectly well. An outermost boundary extends outward into a
-    region containing no data at all, which is exactly where the heavy tail
-    comes from -- and, appearing in only ONE span term, it also integrates
+    Only the OUTERMOST boundaries are heavy-tailed: an interior one is squeezed
+    between the youngest date of the group before it and the oldest of the
+    group after, while an outermost one extends into a region with no data at
+    all. Appearing in only ONE span term, an outermost boundary also integrates
     out in closed form.
 
-    "Outermost" is determined structurally, not positionally: a boundary is
-    outermost-old if nothing in the model is constrained to be older than it,
-    and outermost-young if nothing is constrained to be younger. That covers
-    nested and branching models, where the extreme boundaries need not be the
-    root sequence's first and last children.
+    "Outermost" is structural, not positional: a boundary is outermost-old if
+    nothing in the model must be older than it, outermost-young if nothing must
+    be younger. That covers nested and branching models, where the extreme
+    boundaries need not be the root sequence's first and last children.
     """
     has_something_older: Set[str] = set()
     has_something_younger: Set[str] = set()
@@ -365,9 +339,8 @@ def classify_boundaries(
             if kind == 'boundary':
                 has_something_younger.add(tid)
 
-    # A boundary can only be integrated out if it appears in exactly one span
-    # term -- otherwise it couples two groups and the integral no longer
-    # factorizes.
+    # Only integrable out when it appears in exactly one span term; otherwise
+    # it couples two groups and the integral stops factorising.
     appearances: Dict[str, int] = defaultdict(int)
     for group in span_groups:
         appearances[group.older_boundary_id] += 1
@@ -386,11 +359,9 @@ def classify_boundaries(
 
 def inherited_bounds(root: Dict) -> Dict[str, Tuple[Optional[float], Optional[float]]]:
     """
-    The effective (taq, tpq) age limiters for every element, combining its own
-    with every ancestor's -- tightest wins, the same rule
-    stratigraphy.effective_bounds applies to a sample and its group, extended
-    to an arbitrary depth of nesting. Returns (min bound, max bound) per
-    element id; either may be None, meaning unbounded on that side.
+    The effective (taq, tpq) limiters for every element, combining its own with
+    every ancestor's, tightest winning -- stratigraphy.effective_bounds's rule
+    at arbitrary nesting depth. Either bound may be None, meaning unbounded.
     """
     out: Dict[str, Tuple[Optional[float], Optional[float]]] = {}
 
@@ -447,32 +418,28 @@ def plan_model(root: Dict, measurements: List[Dict]) -> ModelPlan:
 
 def flatten_structure(root: Optional[Dict], measurements: List[Dict]) -> List[Dict]:
     """
-    Flatten a model tree into the order it should be *read* in: depth
-    first, siblings oldest first, each phase's own dates before any branch
-    nested inside it.
+    Flatten a model tree into the order it should be READ in: depth first,
+    siblings oldest first, each phase's own dates before any branch nested
+    inside it. rows_to_tree already sorts siblings by position, so this walk is
+    the chronological reading of the model.
 
-    This is the single definition of "model order" behind the results
-    table and every export, so a date can't be filed under one phase on
-    screen and another in the CSV. Sibling order is already chronological
-    -- rows_to_tree sorts children by position -- so a plain depth-first
-    walk is the chronological reading of the model.
+    The single definition of "model order" behind the results table and every
+    export, so a date cannot be filed under one phase on screen and another in
+    the CSV.
 
-    `measurements` are dicts with at least id/sample_name; a date is
-    placed by element_id, falling back to group_id for a tree migrated
-    from the old contexts, where each phase reuses its context's id.
-    Anything that resolves to neither is collected under a trailing
-    "Unassigned" heading rather than dropped, so a date can never
-    disappear from an export just because its structure is incomplete.
+    `measurements` are dicts with at least id/sample_name. A date is placed by
+    element_id, falling back to group_id for a migrated tree where each phase
+    reuses its context's id; anything resolving to neither is collected under a
+    trailing "Unassigned" heading rather than dropped.
 
-    Each row is {kind, element_id, name, depth, path, posterior,
-    tpq_age_bp, taq_age_bp, sample}: `kind` is an element_type or 'date',
-    `sample` is the measurement dict on a date row and None otherwise.
+    Each row is {kind, element_id, name, depth, path, posterior, tpq_age_bp,
+    taq_age_bp, sample}: `kind` is an element_type or 'date', and `sample` is
+    the measurement dict on a date row and None otherwise.
     """
     rows: List[Dict] = []
-    # No structure at all (a plain calibration) is not the same as dates
-    # missing from a structure: there is nothing to read in model order, so
-    # callers fall back to a flat list rather than showing every date under
-    # a misleading "Unassigned" heading.
+    # No structure at all is not the same as dates missing from a structure:
+    # callers fall back to a flat list rather than filing every date under a
+    # misleading "Unassigned" heading.
     if root is None:
         return rows
 
@@ -540,12 +507,11 @@ def flatten_structure(root: Optional[Dict], measurements: List[Dict]) -> List[Di
 def rows_to_tree(rows: List) -> Optional[Dict]:
     """
     Rebuild the nested tree from flat ModelElement rows (parent_id +
-    position). Returns None if there are no rows. Siblings come back in
-    `position` order, i.e. oldest first.
+    position), siblings in `position` order, oldest first. None if there are no
+    rows.
 
-    Any row whose parent_id doesn't resolve is attached to the root rather
-    than dropped, so a partially-corrupt tree still round-trips visibly
-    instead of silently losing elements.
+    A row whose parent_id does not resolve is attached to the root rather than
+    dropped, so a partially-corrupt tree round-trips visibly.
     """
     if not rows:
         return None
@@ -588,9 +554,9 @@ def rows_to_tree(rows: List) -> Optional[Dict]:
 
 def tree_to_rows(root: Dict, analysis_id: str, model_element_cls) -> List:
     """
-    Flatten a nested tree into ModelElement rows ready to persist. Ids in the
-    incoming tree are preserved, so a date's element_id keeps pointing at the
-    right phase across an edit.
+    Flatten a nested tree into ModelElement rows ready to persist. Incoming ids
+    are preserved, so a date's element_id keeps pointing at the right phase
+    across an edit.
     """
     rows = []
 
@@ -616,7 +582,7 @@ def tree_to_rows(root: Dict, analysis_id: str, model_element_cls) -> List:
 
 
 # --------------------------------------------------------------------------
-# Migration from the old contexts + pairwise-relationships model
+# Migration from contexts + pairwise relationships
 # --------------------------------------------------------------------------
 
 def migrate_from_relationships(
@@ -624,29 +590,24 @@ def migrate_from_relationships(
     groups: List[Dict],
     relationships: List[Dict],
     new_id,
-) -> Tuple[Dict, bool]:
+) -> Tuple[Dict, bool, Dict[str, Tuple[str, str]]]:
     """
-    Build an equivalent model tree from the previous representation, so
-    existing saved analyses keep working.
+    Build an equivalent model tree from the contexts + relationships
+    representation, so saved analyses keep working.
 
-    Returns (root, linearized, group_boundaries). `linearized` is True when
-    the old relationship graph could not be expressed as a tree and had to
-    be flattened into a single order -- callers should surface that, because
-    a linearization is strictly MORE constrained than the graph it came from
-    and the user should check it. `group_boundaries` maps each old context id
-    to the (start_boundary_id, end_boundary_id) now bracketing it, so results
-    can still be reported against the old per-context start/end shape.
-
-    The result reproduces the old behaviour (each context bracketed by
-    boundaries) and adds the site-level start/end boundaries that were the
-    point of this work.
+    Returns (root, linearized, group_boundaries). `linearized` is True when the
+    relationship graph could not be expressed as a tree and had to be flattened
+    into one order; callers should surface that, since a linearization is
+    strictly MORE constrained than the graph it came from. `group_boundaries`
+    maps each context id to the (start, end) boundaries now bracketing it, so
+    results can still be reported per context.
     """
     from app.services.stratigraphy import expand_relationships, group_members
 
     members = group_members(measurements, groups)
     group_ids = [g['id'] for g in groups]
 
-    # Old edges are between individual samples; lift them to their contexts.
+    # Edges are between individual samples; lift them to their contexts.
     older_younger, _equal = expand_relationships(measurements, groups, relationships)
     context_of = {}
     for gid, member_ids in members.items():
@@ -679,9 +640,9 @@ def migrate_from_relationships(
     leftover = [g for g in group_ids if g not in ordered]
     ordered.extend(leftover)
 
-    # Was the ordering forced, or is it an arbitrary linearization of an
-    # unordered/branching set? If consecutive contexts aren't actually related
-    # by an edge, we've added constraints that weren't in the original.
+    # Was the ordering forced, or an arbitrary linearization of a branching
+    # set? Consecutive contexts not related by an edge mean constraints were
+    # added that the original did not have.
     linearized = bool(leftover) or any(
         (ordered[i], ordered[i + 1]) not in context_edges for i in range(len(ordered) - 1)
     )

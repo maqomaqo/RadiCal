@@ -32,36 +32,33 @@ export interface StackedSeries {
   /** Where it sits in the structure ("Site > Phase J"); null if unplaced. */
   path: string | null
   distribution?: Array<[number, number]>
-  /** The HPD bands to draw, outer first, already computed at the page's
-   *  selected confidence -- see utils/hpd.hpdBands. The level's name travels
-   *  with its ranges so the legend cannot outlive the selection it describes. */
+  /** The HPD bands to draw, outer first, computed at the page's selected
+   *  confidence (utils/hpd.hpdBands). The level's name travels with its ranges,
+   *  so the legend cannot outlive the selection it describes. */
   bands?: HPDBand[]
-  /** Same date's plain calibration with no stratigraphic constraints -- see showPrior below. */
+  /** The same date's plain calibration, unconstrained. See showPrior below. */
   priorDistribution?: Array<[number, number]>
   pointEstimates: { mean?: number; median?: number; std?: number }
   /**
-   * The laboratory measurement this date was calibrated FROM, and the curve it
-   * was calibrated against. Absent for a boundary, which is a modelled
-   * transition rather than a dated thing, and absent for any date whose
+   * The measurement this date was calibrated FROM, and the curve it was
+   * calibrated against. Absent for a boundary, and for any date whose
    * measurement the page could not match to its result.
    *
-   * Only the Curve view reads it -- the stacked and per-date views work in
-   * calendar years throughout and have no radiocarbon axis to put it on -- but
-   * it is declared here so one array of series feeds all three.
+   * Only the Curve view reads it -- the other two work in calendar years and
+   * have no radiocarbon axis -- but it is declared here so one array of series
+   * feeds all three.
    */
   measurement?: SeriesMeasurement
 }
 
 /**
- * A date's radiocarbon measurement, already reduced to what a plot needs.
+ * A date's radiocarbon measurement, reduced to what a plot needs.
  *
- * `ageBp` and `error1Sigma` are the reservoir-CORRECTED figures where a marine
- * offset applies: a marine sample of calendar age t is expected to measure
- * curve(t) + Delta-R, so the value that can be read against the drawn curve is
- * the measured age minus Delta-R, with the offset's own uncertainty joining in
- * quadrature (see services/calibration.py). Correcting at the point the series
- * is built keeps the plot free of the convention -- it draws whatever it is
- * given against the curve it is given.
+ * `ageBp` and `error1Sigma` are reservoir-CORRECTED where a marine offset
+ * applies: a marine sample of calendar age t is expected to measure
+ * curve(t) + Delta-R, so what reads against the drawn curve is the measured
+ * age minus Delta-R, with the offset's uncertainty joining in quadrature.
+ * Correcting where the series is built keeps the plot free of the convention.
  */
 export interface SeriesMeasurement {
   ageBp: number
@@ -73,19 +70,18 @@ export interface SeriesMeasurement {
 }
 
 interface StackedPosteriorPlotProps {
-  /** Oldest first -- drawn top to bottom in that order, as OxCal lists a model. */
+  /** Oldest first, drawn top to bottom, as OxCal lists a model. */
   series: StackedSeries[]
   showMean?: boolean
   showMedian?: boolean
   /**
-   * Overlay each date's unconstrained calibration as a light grey shadow
-   * behind its modelled posterior, scaled into the same row so the two are
-   * directly comparable. Off by default -- a comparison aid, not something
-   * every reading of the stack needs.
+   * Overlay each date's unconstrained calibration as a grey shadow behind its
+   * modelled posterior, scaled into the same row so the two compare directly.
+   * Off by default: a comparison aid, not part of every reading.
    */
   showPrior?: boolean
-  /** Whether a model actually ran. Drives one word in the legend; a plain
-   *  calibration has a calibrated distribution, not a modelled posterior. */
+  /** Whether a model ran, for one word in the legend: a plain calibration has
+   *  a calibrated distribution, not a modelled posterior. */
   isModelled?: boolean
   dateFormat?: DateFormat
 }
@@ -94,15 +90,13 @@ interface StackedPosteriorPlotProps {
 // The curve occupies the upper part of its row and the two HPD bars sit in
 // the gap beneath it, so no row can ever paint into its neighbour.
 const CURVE_HEIGHT = 0.78
-// Named by position, not by level: which confidence each strip carries is
-// the caller's decision now, not this component's.
+// Named by position, not by level: which confidence each strip carries is the
+// caller's decision.
 const OUTER_BAR: [number, number] = [-0.09, -0.03]
 const INNER_BAR: [number, number] = [-0.19, -0.13]
-// Room for the row names, and the offset the phase labels are placed at
-// within it. On a phone the wide version took half the available width and
-// left the curves squeezed into the rest, so it shrinks with the viewport --
-// sample codes are short, and a truncated name still identifies its row
-// against the table above.
+// Room for the row names, and where the phase labels sit within it. Shrinks
+// with the viewport, since on a phone the wide version takes half the width;
+// a truncated name still identifies its row against the table above.
 const MARGIN_LEFT = 150
 const MARGIN_LEFT_NARROW = 84
 
@@ -137,17 +131,16 @@ function bar(
 }
 
 /**
- * Every posterior in one figure, one row each, sharing a single calendar
- * axis -- the OxCal multiplot idiom.
+ * Every posterior in one figure, one row each, on a single calendar axis --
+ * the OxCal multiplot idiom.
  *
- * The point of the shared axis is comparison: whether two dates overlap, and
- * by how much, is the question a sequence is built to answer, and it cannot
- * be read off a stack of separate charts each auto-ranged to its own data.
+ * The shared axis is what makes comparison possible: whether two dates overlap
+ * cannot be read off separate charts each auto-ranged to its own data.
  *
  * Each row is scaled to its OWN peak, so heights are not comparable between
- * rows -- a tall narrow curve is a precise date, not a more probable one.
- * That is what OxCal does too, and the alternative (a shared density scale)
- * would flatten every precise date into an unreadable spike.
+ * rows -- a tall narrow curve is a precise date, not a more probable one. OxCal
+ * does the same; a shared density scale would flatten every precise date into
+ * an unreadable spike.
  */
 export default function StackedPosteriorPlot({
   series,
@@ -162,8 +155,8 @@ export default function StackedPosteriorPlot({
   const narrow = useMediaQuery(theme.breakpoints.down('sm'))
   const marginLeft = narrow ? MARGIN_LEFT_NARROW : MARGIN_LEFT
 
-  // Off by default: the cropped range is the better read almost always -- see
-  // the note on xRange for the one case it is not.
+  // Off by default: the cropped range is almost always the better read -- see
+  // the note on xRange for the exception.
   const [fitWidth, setFitWidth] = useState(false)
 
   const seriesSignature = series
@@ -176,20 +169,16 @@ export default function StackedPosteriorPlot({
     .join('|')
 
   /**
-   * A content signature for the rows being drawn, used as the memo key below
-   * instead of the `series` array itself.
+   * A content signature for the rows being drawn, used as the memo key instead
+   * of the `series` array itself.
    *
    * The caller rebuilds that array on every render, so every memo downstream
-   * of it missed and Plotly re-diffed all 65 traces on interactions that do
-   * not touch this figure at all. Collapsing a phase in the results table --
-   * documented there as deliberately leaving the plot alone -- measured
-   * 116ms, the same as toggling the plot's own contents.
+   * missed and Plotly re-diffed all 65 traces on interactions that do not touch
+   * this figure -- collapsing a phase in the results table measured 116ms.
    *
-   * The pieces below are exactly what the traces are built from: which rows,
-   * in which order, and the band objects (referentially stable per confidence
-   * level, see Results' bandsFor cache) that carry the HPD geometry and its
-   * label. A rerun changes the distributions and the band objects with them,
-   * so a stale signature is not reachable from real data.
+   * The pieces below are exactly what the traces are built from: which rows, in
+   * which order, and the band objects carrying the HPD geometry and its label
+   * (referentially stable per confidence level; see Results' bandsFor cache).
    */
   const drawable = useMemo(
     () => series.filter((s) => s.distribution && s.distribution.length > 0),
@@ -199,9 +188,8 @@ export default function StackedPosteriorPlot({
 
   const plotData = useMemo(() => {
     const data: any[] = []
-    // One legend entry per kind of mark, taken from whichever row happens to
-    // carry it first -- otherwise a 15-date model prints 15 identical
-    // "95.4% HPD" rows down the side of the figure.
+    // One legend entry per kind of mark, from whichever row carries it first;
+    // otherwise a 15-date model prints 15 identical "95.4% HPD" rows.
     const legendUsed = new Set<string>()
     const claimLegend = (key: string) => {
       if (legendUsed.has(key)) return false
@@ -211,10 +199,8 @@ export default function StackedPosteriorPlot({
 
     drawable.forEach((s, index) => {
       const yBase = baselineFor(index)
-      // Both series are put on unit area before anything is measured off
-      // them. They arrive in different units -- the posterior is the solver's
-      // density, the prior is the curve's probabilities downsampled by index
-      // without rescaling -- so comparing their raw peaks was comparing two
+      // Both series go on unit area before anything is measured off them: they
+      // arrive in different units, so comparing raw peaks compares two
       // different quantities. See utils/distribution.ts.
       const { ages, probs, peak } = trimTails(toUnitArea(s.distribution!))
       const priorPoints =
@@ -222,26 +208,22 @@ export default function StackedPosteriorPlot({
           ? trimTails(toUnitArea(s.priorDistribution))
           : null
 
-      // One scale for the row, taken from whichever of the two is taller, so
-      // neither can paint outside its own band. Scaling by the posterior
-      // alone let a prior that is sharper than its posterior -- an outlier
-      // the model has spread out, or a date on a steep part of the curve --
-      // overflow into the row above.
+      // One scale for the row, from whichever of the two is taller, so neither
+      // paints outside its band: scaling by the posterior alone lets a sharper
+      // prior overflow into the row above.
       //
-      // Equal area plus a shared scale is what makes the overlay readable:
-      // shorter and wider genuinely means the model narrowed this date,
-      // rather than meaning the two were normalised differently.
+      // Equal area plus a shared scale is what makes the overlay readable --
+      // shorter and wider means the model narrowed this date, not that the two
+      // were normalised differently.
       const rowPeak = Math.max(peak, priorPoints ? priorPoints.peak : 0)
       const scale = rowPeak > 0 ? CURVE_HEIGHT / rowPeak : 0
       const isBoundary = s.kind === 'boundary'
 
-      // HPD bars first, so the curve draws over them rather than under.
-      // Each disjoint range gets its own bar: a multimodal posterior's HPD
-      // is not the span between its outermost peaks, and drawing it as one
-      // bar would claim the gap between them.
-      // A lone band is the tightest interval in the row with nothing nested
-      // inside it, so it takes the stronger fill: the two alphas encode
-      // "tighter", not "which slot".
+      // HPD bars first, so the curve draws over them. Each disjoint range gets
+      // its own bar: a multimodal HPD is not the span between its outermost
+      // peaks, and one bar would claim the gap between them. A lone band is the
+      // tightest interval in the row, so it takes the stronger fill -- the two
+      // alphas encode "tighter", not "which slot".
       const bands = s.bands ?? []
       const soleBand = bands.length === 1
       bands.forEach((band) => {
@@ -254,11 +236,9 @@ export default function StackedPosteriorPlot({
         )
       })
 
-      // The prior (unmodelled) shadow, scaled by this row's OWN scale factor
-      // rather than its own peak -- so it reads directly against the
-      // posterior above it: shorter and wider means the model narrowed this
-      // date, not that the prior is somehow smaller. Drawn before the
-      // posterior so the posterior's fill sits on top of it.
+      // The unmodelled shadow, scaled by the ROW's factor rather than its own
+      // peak, so it reads directly against the posterior above it. Drawn first
+      // so the posterior's fill sits on top.
       if (priorPoints) {
         const priorTrimmed = priorPoints
         const priorY = priorTrimmed.probs.map((p) => yBase + p * scale)
@@ -276,12 +256,10 @@ export default function StackedPosteriorPlot({
         })
       }
 
-      // The density as one closed-polygon trace, fill and stroke together --
-      // same treatment as the prior shadow above, so its legend entry shows
-      // the same fill+line swatch instead of a bare line. The stroke does
-      // trace the flat closing edge at the row's baseline along with the
-      // curve itself, but at this width and alongside the HPD bars already
-      // sitting there it doesn't read as a range bar in practice.
+      // One closed-polygon trace, fill and stroke together, as the prior
+      // shadow is, so its legend swatch shows fill+line rather than a bare
+      // line. The stroke traces the flat closing edge at the baseline too, but
+      // at this width and beside the HPD bars it does not read as a range bar.
       const curveY = probs.map((p) => yBase + p * scale)
       const hoverText = ages.map(
         (age, i) => `${formatCalendarAge(age, dateFormat)}<br>Probability: ${probs[i].toFixed(4)}`
@@ -298,9 +276,8 @@ export default function StackedPosteriorPlot({
           dash: isBoundary ? 'dot' : 'solid',
         },
         mode: 'lines',
-        // "Modelled" is the word separating a Bayesian posterior from a raw
-        // calibration, and it was printed on both -- so a group calibration's
-        // legend claimed a model under a column headed "Calibrated 95.4% span".
+        // "Modelled" is what separates a Bayesian posterior from a raw
+        // calibration, so a group calibration must not print it.
         name: isBoundary
           ? 'Boundary (modelled transition)'
           : isModelled
@@ -308,18 +285,16 @@ export default function StackedPosteriorPlot({
           : 'Calibrated',
         legendgroup: isBoundary ? 'boundary' : 'posterior',
         showlegend: claimLegend(isBoundary ? 'boundary' : 'posterior'),
-        // Hover on the curve's own points, not on the area it encloses. A
-        // filled trace defaults to 'points+fills', and the fill hover is a
-        // separate mechanism that ignores hovertemplate: it prints the
-        // trace name, in the fill colour, alongside the real label -- which
-        // read as the row's name escaping the tooltip box.
+        // Hover on the curve's own points, not the area it encloses: a filled
+        // trace defaults to 'points+fills', and the fill hover ignores
+        // hovertemplate, printing the trace name in the fill colour beside the
+        // real label -- which reads as the row's name escaping the tooltip.
         hoveron: 'points',
         hovertemplate: `<b>${s.title}</b><br>%{customdata}<extra></extra>`,
       })
 
       // Point estimates as a tick within the row, not a line across the
-      // figure: at this density a full-height rule per date would be the
-      // only thing anyone could see.
+      // figure: at this density a full-height rule per date is all you see.
       const marker = (value: number, color: string, dash: string, name: string, key: string) =>
         data.push({
           x: [value, value],
@@ -342,15 +317,13 @@ export default function StackedPosteriorPlot({
     return data
   }, [drawable, plot, showMean, showMedian, showPrior, dateFormat, isModelled])
 
-  // Phase groupings: a light rule where the dates change phase, with the
-  // phase named once beside its first date. The table above says the same
-  // thing in words; the point here is that a reader scanning the figure can
-  // see where one phase ends without counting rows against it.
+  // Phase groupings: a light rule where the dates change phase, the phase
+  // named once beside its first date, so a reader scanning the figure sees
+  // where one ends without counting rows.
   //
-  // Driven by the DATE rows only. Every boundary has a path of its own (it
-  // is the transition between two phases, not a member of either), so
-  // grouping on all rows alike would break the run at every boundary and
-  // print a label against nearly every row -- the noise it exists to remove.
+  // Driven by the DATE rows only. A boundary has a path of its own, being the
+  // transition between two phases rather than a member of either, so grouping
+  // on all rows alike would break the run at every boundary.
   const { shapes, annotations } = useMemo(() => {
     const shapes: any[] = []
     const annotations: any[] = []
@@ -375,9 +348,8 @@ export default function StackedPosteriorPlot({
           line: { color: 'rgba(0,0,0,0.12)', width: 1 },
         })
       }
-      // In the left margin with the row names, not inside the plot: at the
-      // left edge of the axis it landed on whatever curve happened to reach
-      // that far and read as a stray character.
+      // In the left margin with the row names, not inside the plot, where it
+      // would land on whatever curve reached that far.
       annotations.push({
         xref: 'paper',
         x: 0,
@@ -388,7 +360,7 @@ export default function StackedPosteriorPlot({
         yanchor: 'middle',
         text: phase,
         showarrow: false,
-        // Same weight the results table gives a Sequence/Phase heading, so a
+        // The weight the results table gives a Sequence/Phase heading, so a
         // phase name reads as the same kind of thing in both places.
         font: { size: 11, color: 'rgba(0,0,0,0.75)', weight: 600 },
       })
@@ -397,18 +369,15 @@ export default function StackedPosteriorPlot({
   }, [drawable, marginLeft])
 
   /**
-   * The axis is set from the HPD regions, not from the full extent of every
-   * curve. A posterior's tails run far wider than anything it says: on a real
-   * sequence they stretched the shared axis to three times the span the dates
-   * actually occupy, squeezing every curve into the middle third.
+   * The axis is set from the HPD regions, not the full extent of every curve:
+   * a posterior's tails run far wider than anything it says, and on a real
+   * sequence stretch the shared axis to three times the span the dates occupy.
    *
-   * That default clips one case, which is what Fit width exists for: with the
-   * prior shadow shown, an OUTLIER's unmodelled calibration is much wider than
-   * the posterior the model pulled it into, so the thing the comparison is
-   * being made against runs off both ends of the axis. The escape hatch used
-   * to be Autoscale on Plotly's modebar; that bar is gone, so the app draws
-   * the control itself -- and fits to what is actually DRAWN rather than to
-   * the raw data, which would re-admit the tails this range exists to crop.
+   * That clips one case, which is what Fit width exists for: with the prior
+   * shadow shown, an OUTLIER's unmodelled calibration is much wider than the
+   * posterior the model pulled it into and runs off both ends. Fit width fits
+   * to what is DRAWN rather than to the raw data, which would re-admit the
+   * tails this range crops.
    */
   const xRange = useMemo(() => {
     const bounds: number[] = []
@@ -427,8 +396,8 @@ export default function StackedPosteriorPlot({
       })
     } else {
       drawable.forEach((s) => {
-        // The widest band in the row -- the outer one when there are two,
-        // the only one when the reader has selected 1 sigma.
+        // The widest band in the row: the outer one when there are two, the
+        // only one at 1 sigma.
         const widest = s.bands?.[0]
         if (widest) widest.ranges.forEach((r) => bounds.push(r.min, r.max))
       })
@@ -436,17 +405,16 @@ export default function StackedPosteriorPlot({
     if (bounds.length === 0) return null
     const min = Math.min(...bounds)
     const max = Math.max(...bounds)
-    // Fit width has already included everything on screen, so it needs only
-    // enough room not to clip a stroke; the HPD-based range needs enough to
-    // keep the tails either side of the interval legible.
+    // Fit width already includes everything on screen and needs only enough
+    // room not to clip a stroke; the HPD-based range needs enough to keep the
+    // tails either side of the interval legible.
     const pad = fitWidth ? Math.max((max - min) * 0.02, 5) : Math.max((max - min) * 0.35, 25)
-    // Reversed axis: Plotly takes the range in axis order, so the older
-    // (larger cal BP) end comes first.
+    // Reversed axis: Plotly takes the range in axis order, older end first.
     return [max + pad, min - pad]
   }, [drawable, fitWidth, showPrior])
 
-  // Ticks span whatever the axis actually shows, so a clipped view doesn't
-  // label years that were left off it.
+  // Ticks span whatever the axis shows, so a clipped view does not label years
+  // left off it.
   const ticks = useMemo(() => {
     if (xRange) return calendarAxisTicks(xRange[1], xRange[0], dateFormat)
     const all = drawable.flatMap((s) => s.distribution!.map(([age]) => age))
@@ -462,25 +430,24 @@ export default function StackedPosteriorPlot({
   const layout = useMemo(
     () => ({
       // A layout property, not a config one: hiding the modebar does not stop
-      // Plotly's default drag-to-box-zoom, which would leave a reader able to
-      // zoom in with no visible way back out.
+      // drag-to-box-zoom, which would leave a reader zoomed in with no way out.
       dragmode: false as const,
       xaxis: {
-        // An explicit standoff pins the title just under the tick labels.
-        // Left to itself Plotly places it against the bottom of whatever
-        // margin it is given, so a taller figure left it stranded low.
+        // An explicit standoff pins the title under the tick labels; left to
+        // itself Plotly puts it against the bottom of whatever margin it has,
+        // stranding it low on a taller figure.
         title: { text: calendarAxisTitle(dateFormat), standoff: geometry.titleStandoff },
         zeroline: false,
         gridcolor: plot.grid,
-        // Oldest on the left, as a chronology is read -- see PosteriorPlot
-        // for why plotting cal BP needs the axis reversed to get that. An
-        // explicit range is already given in that (descending) order.
+        // Oldest on the left, as a chronology reads. See PosteriorPlot for why
+        // cal BP needs a reversed axis; the explicit range is already
+        // descending.
         ...(xRange ? { range: xRange, autorange: false } : { autorange: 'reversed' }),
         ...(ticks ? { tickmode: 'array', tickvals: ticks.tickvals, ticktext: ticks.ticktext } : {}),
       },
       yaxis: {
-        // Rows are positions, not quantities: label each one with its date
-        // and fix the range, so adding a date never rescales the figure.
+        // Rows are positions, not quantities: label each with its date and fix
+        // the range, so adding a date never rescales the figure.
         tickmode: 'array',
         tickvals: drawable.map((_, index) => baselineFor(index)),
         ticktext: drawable.map((s) => s.title),
@@ -492,8 +459,8 @@ export default function StackedPosteriorPlot({
       },
       shapes,
       annotations,
-      // Per-row, because two rows at the same calendar age are two different
-      // dates -- a unified readout would merge them into one tooltip.
+      // Per-row: two rows at the same calendar age are two different dates,
+      // which a unified readout would merge into one tooltip.
       hovermode: 'closest',
       plot_bgcolor: plot.surface,
       paper_bgcolor: plot.surface,
@@ -507,13 +474,11 @@ export default function StackedPosteriorPlot({
   const config = useMemo(
     () => ({
       responsive: true,
-      // No modebar, and the canvas is locked. The bar rendered six <a>
-      // elements with no href, no role and no accessible name, none of which
-      // could take focus -- 98 of them on a 12-date Individual view -- and the
-      // PNG export behind it is how a figure reaches a paper. The app draws
-      // that control itself now. dragmode:false because hiding the bar does
-      // NOT disable zooming: Plotly's default is drag-to-box-zoom, which would
-      // leave a plot the reader can zoom into with no visible way back out.
+      // No modebar, and the canvas is locked. The bar renders six <a> elements
+      // with no href, role or accessible name, none focusable -- 98 of them on
+      // a 12-date Individual view -- and the PNG export behind it is how a
+      // figure reaches a paper, so the app draws that control itself.
+      // dragmode:false because hiding the bar does NOT disable zooming.
       displayModeBar: false as const,
       displaylogo: false,
     }),
