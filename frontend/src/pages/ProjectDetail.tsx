@@ -23,6 +23,7 @@ import {
   Tabs,
   Tab,
   Tooltip,
+  Checkbox,
 } from '@mui/material'
 import EditIcon from '@mui/icons-material/Edit'
 import DeleteIcon from '@mui/icons-material/Delete'
@@ -30,6 +31,7 @@ import AddIcon from '@mui/icons-material/Add'
 import DriveFileMoveIcon from '@mui/icons-material/DriveFileMove'
 import ReplayIcon from '@mui/icons-material/Replay'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
+import CompareArrowsIcon from '@mui/icons-material/CompareArrows'
 import { formatApiError } from '@/utils/apiError'
 import { useNotify } from '@/contexts/NotificationContext'
 import ConfirmDialog from '@/components/ConfirmDialog'
@@ -38,6 +40,7 @@ import ProjectSampleTable from '@/components/ProjectSampleTable'
 import JobProgress from '@/components/JobProgress'
 import { cancelJob } from '@/api/jobs'
 import { useJob } from '@/hooks/useJob'
+import { MAX_COMPARED_RUNS } from '@/theme/compareColors'
 
 interface AnalysisSummary {
   id: string
@@ -102,8 +105,15 @@ export default function ProjectDetail() {
   const [jobId, setJobId] = useState<string | null>(null)
   const [cancelling, setCancelling] = useState(false)
 
+  // Analyses picked for a comparison, IN THE ORDER THEY WERE TICKED: the first
+  // is the reference every shift on the compare page is measured against, so
+  // the order is a choice the user makes rather than whatever the table sorts
+  // to. An array, not a Set, to say that out loud.
+  const [selectedForCompare, setSelectedForCompare] = useState<string[]>([])
+
   useEffect(() => {
     if (projectId) fetchProject(projectId)
+    setSelectedForCompare([])
   }, [projectId])
 
   // Only a job this page started. Unlike the results page there is no useful
@@ -139,6 +149,31 @@ export default function ProjectDetail() {
       notify((err as Error).message)
       setCancelling(false)
     }
+  }
+
+  const toggleCompare = (analysisId: string) => {
+    setSelectedForCompare((current) =>
+      current.includes(analysisId)
+        ? current.filter((id) => id !== analysisId)
+        : [...current, analysisId]
+    )
+  }
+
+  // Why a comparison cannot be run yet, or null when it can. Returned as a
+  // sentence rather than a boolean so the disabled button can say what is
+  // missing instead of just being grey.
+  const compareBlockedBecause = (): string | null => {
+    if (selectedForCompare.length < 2) return 'Tick two or more finished analyses to compare them.'
+    if (selectedForCompare.length > MAX_COMPARED_RUNS) {
+      return `A comparison holds at most ${MAX_COMPARED_RUNS} analyses.`
+    }
+    const unfinished = (project?.analyses ?? []).filter(
+      (a) => selectedForCompare.includes(a.id) && a.status !== 'completed'
+    )
+    if (unfinished.length > 0) {
+      return `${unfinished.map((a) => a.name).join(', ')} has not finished, so it has no results to compare.`
+    }
+    return null
   }
 
   const fetchProject = async (id: string) => {
@@ -452,9 +487,40 @@ export default function ProjectDetail() {
         </Paper>
       ) : (
       <Paper sx={{ p: 3 }}>
-        <Typography variant="h5" gutterBottom>
-          Analyses ({project.analyses.length})
-        </Typography>
+        <Box
+          sx={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 2,
+            mb: 1,
+          }}
+        >
+          <Typography variant="h5">Analyses ({project.analyses.length})</Typography>
+          {project.analyses.length > 1 && (
+            <Tooltip
+              title={
+                compareBlockedBecause() ??
+                'Compare these analyses date by date. The first one ticked is the reference.'
+              }
+            >
+              <span>
+                <Button
+                  variant="outlined"
+                  startIcon={<CompareArrowsIcon />}
+                  disabled={compareBlockedBecause() !== null}
+                  onClick={() =>
+                    navigate(
+                      `/projects/${projectId}/compare?runs=${selectedForCompare.join(',')}`
+                    )
+                  }
+                >
+                  Compare{selectedForCompare.length > 0 ? ` (${selectedForCompare.length})` : ''}
+                </Button>
+              </span>
+            </Tooltip>
+          )}
+        </Box>
 
         {project.analyses.length === 0 ? (
           <Alert severity="info">
@@ -465,6 +531,7 @@ export default function ProjectDetail() {
             <Table>
               <TableHead>
                 <TableRow sx={{ backgroundColor: 'grey.100' }}>
+                  <TableCell padding="checkbox" />
                   <TableCell>Name</TableCell>
                   <TableCell>Type</TableCell>
                   <TableCell>Status</TableCell>
@@ -481,6 +548,15 @@ export default function ProjectDetail() {
                     sx={{ cursor: 'pointer' }}
                     onClick={() => navigate(`/results/${a.id}`)}
                   >
+                    <TableCell padding="checkbox">
+                      <Checkbox
+                        size="small"
+                        checked={selectedForCompare.includes(a.id)}
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={() => toggleCompare(a.id)}
+                        inputProps={{ 'aria-label': `Select ${a.name} for comparison` }}
+                      />
+                    </TableCell>
                     <TableCell>{a.name}</TableCell>
                     <TableCell>{a.analysis_type}</TableCell>
                     <TableCell>{a.status}</TableCell>

@@ -10,6 +10,7 @@ import Projects from '@/pages/Projects'
 import Curves from '@/pages/Curves'
 import CurveBrowser from '@/pages/CurveBrowser'
 import ProjectDetail from '@/pages/ProjectDetail'
+import CompareResults from '@/pages/CompareResults'
 import Reference from '@/pages/Reference'
 
 // `background.muted` is ours, not MUI's -- declared so `sx={{ backgroundColor:
@@ -135,6 +136,7 @@ function App() {
             <Route path="/reference" element={<Reference />} />
             <Route path="/curves/:curveId/browse" element={<CurveBrowser />} />
             <Route path="/projects/:projectId" element={<ProjectDetail />} />
+            <Route path="/projects/:projectId/compare" element={<CompareResults />} />
           </Routes>
         </Router>
       </NotificationProvider>
