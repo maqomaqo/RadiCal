@@ -13,9 +13,10 @@
 9. [Durations and Differences](#durations-and-differences)
 10. [Exporting Data](#exporting-data)
 11. [Projects and Date Collections](#projects-and-date-collections)
-12. [Best Practices](#best-practices)
-13. [Appendix A: Mathematical Methods](#appendix-a-mathematical-methods)
-14. [Bibliography](#bibliography)
+12. [Comparing Analyses](#comparing-analyses)
+13. [Best Practices](#best-practices)
+14. [Appendix A: Mathematical Methods](#appendix-a-mathematical-methods)
+15. [Bibliography](#bibliography)
 
 ## Getting Started
 
@@ -390,6 +391,11 @@ five-year precision the draws cannot support.
   differences where there are any, and a plot of every date and Boundary with its HPD ranges marked. Like the CSV it reads in the date format currently
   selected. It is rendered on the server and draws a plot per modelled parameter, so a large model
   takes a few seconds — the button says so while it works.
+- **Export CSV** (on a comparison's **Dates** tab) — every paired date with each run's median,
+  HPD range and agreement index, then the shift and width ratio against the reference run. The
+  dates that could not be paired are written into the same file under their own header, so a
+  spreadsheet of eleven dates from a comparison of fourteen says so itself. The Models tab's
+  figures are not in it yet.
 - **Download PNG** (for each Plot) — provides a print-quality PNG file of the plot window in the view currently shown on screen.
 
 ## Projects and Date Collections
@@ -399,17 +405,96 @@ time, pasted in bulk (`name, age, error[, material[, context[, curve]]]` per lin
 from a file (see [Importing Dates from a File](#importing-dates-from-a-file)) — independent
 of any particular analysis. A collection holds dates rather than models, so importing an OxCal file
 here keeps each date's phase as its default context but not the structure; import it from a new
-analysis to keep that. Deploying a selection of them copies the values into a new analysis, so
-editing the collection afterwards never changes an analysis already created from it, and the same
+analysis to keep that. Deploying a selection of dates copies the values into a new analysis, so
+editing the project's date collection afterwards never changes an analysis already created, and the same
 dates can be deployed more than once to model them differently each time.
 
 From a project page you can also re-run every analysis in it at once, or re-run, duplicate, or edit
 the inputs of a single analysis (editing replaces its saved inputs and re-runs it in place, keeping
-the same result page). Deploying always creates a **Bayesian** analysis and opens its editor, so
-changing the Analysis Type there is the usual way to end up with a group calibration — that
-converts the analysis you are editing rather than creating a second one. Choosing Single
-Calibration for more than one date stores it as a group calibration, since a single calibration is
+the same result page). Ticking two or more finished analyses and pressing **Compare** opens them
+side by side — see [Comparing Analyses](#comparing-analyses). 
+
+Deploying dates from a collection always creates a **Bayesian** analysis and opens its editor, but
+by changing the Analysis Type you can instead do a group calibration. Choosing Single
+Calibration for more than one date automatically stores it as a group calibration, since a single calibration is
 one date on its own.
+
+## Comparing Analyses
+
+The same dates can be run in different analyses with different parameters. **Compare** puts them side by side and
+computes the difference, which is otherwise a handful of numbers buried in two long tables.
+
+Tick two to four finished analyses on a project page and press **Compare**. **The first one you
+tick is the reference**: every shift and every ratio on the page is measured against it, and the
+other runs are what is being held up to it. The comparison is an ordinary URL, so it can be
+bookmarked or sent to a colleague.
+
+**Reporting format** and **HPD Confidence** are set once at the top and apply to every panel . A comparison whose
+runs used **different calibration curves** is allowed but captioned: it is a real question to ask,
+but then the shift measures the curve rather than the model. It is best to keep all other things equal in such a comparison.
+This is also true for comparing things like Delta_R values, or even the choice of solver. The Exact Solver will produce slightly 
+different results from the MH/Gibbs sampler, and you can measure that difference using **Compare**, but only if you isolate it as a parameter.
+
+### Dates
+
+One row per date, one HPD bar per analysis in that row, all on one calendar axis, with a hairline
+dropped down each row at the reference run's median to read the others against. A bar is drawn in
+segments where the region is disjoint.
+
+Rows sort by **largest shift first** by default, so the dates these analyses disagree about come to
+the top and the ones they agree on fall away. **Reference analysis order** and **Name** can be selected as different ordering options.
+
+Three columns beside each row:
+
+- **Δ median** — this run's median minus the reference's, in years, **positive meaning older**.
+  Did the answer change?
+- **Width ratio** — the width of this run's HPD region divided by the reference's. Below 1 is
+  tighter. Did constraining the date buy anything?
+- **Agreement** — each run's agreement index, listed only for runs that compute one (a group
+  calibration has no model for a date to agree with).
+
+The two questions come apart constantly. A model that moves nothing while halving every interval is
+a good result that a plain overlay would render as "no change".
+
+**Click a row** and it expands into the distributions themselves: each run's posterior drawn over
+the others, with the unconstrained calibration behind them in grey where every compared run is
+modelled. This allows you to check whether e.g. a run that appears to have "moved the date 140 years" 
+has really just moved probability *mass* from one lobe to another. This can't be seen in the interval plots.
+Every curve is scaled to unit area, so a tighter posterior is correctly taller.
+
+Dates that could not be paired are listed under **Not compared** rather than dropped. A date is
+matched to its counterpart by **sample name** (case and spacing are ignored), so a date deployed
+from a project collection matches, and one re-typed under a different name does not. A name
+appearing twice inside one analysis is not compared at all: which of the two the other run's date
+corresponds to is not decidable.
+
+### Models
+
+The second tab asks the other question: *I changed the model — was it
+worth it, and what did it cost*.
+
+**Model differences** is read out of what each analysis stored:
+curve, ΔR, outlier models, age limiters, structure, solver, and the draw count behind any durations.
+A field the runs disagree on is marked **±**, one they share **=**. Under it the model trees are
+matched element by element and drawn side by side, with a chip for anything that **moved** to a
+different parent or is **only in** some of the runs. Elements are matched by type and name; an
+unnamed element is counted but not matched, since the only other thing to match it on is position.
+
+**Findings**
+Compares the calendar estimates for each transition, and their durations. Obviously not all models have 
+the same boundaries — so when a boundary in the reference model that is missing in the comparison is drawn
+with a dashed line where the other runs would be, and reads **no counterpart**. Two runs that list the
+same pair of phases in opposite order are left unpaired too: every figure in one is the negative of
+the other, which is a structural difference worth seeing rather than something to be negated into a
+match.
+
+**Date agreement changes** plots each run's agreement index against the reference's, one point per date. The
+diagonal is "this date fits no better and no worse than before"; below it, worse, and dotted rules
+mark the conventional threshold of 60 on both axes. This is the half of a comparison the Dates tab
+cannot show — a date that appears there as a clean 140-year gain in
+precision can sit well below the diagonal here, because the precision was bought by overruling the
+date rather than by learning something about it.
+
 
 ## Best Practices
 
@@ -430,7 +515,12 @@ one date on its own.
    says how tightly a date from your period can be known at best. If your question needs finer
    resolution than the curve can give there, no laboratory precision will supply it, and it is
    better to know that before the samples are sent than after.
-6. **Wide Boundaries on a short phase are expected** — a Phase's Start/End Boundaries genuinely need
+6. **Compare runs on both tabs, not one** — a model that tightens every interval has not
+   necessarily improved anything. Read the Dates tab for what moved and the Models tab's agreement
+   scatter for what it cost; a date that gained precision by being overruled looks like a success on
+   the first and a problem on the second. And do not read a difference between two runs as a
+   probability — see [Comparing Analyses](#comparing-analyses).
+7. **Wide Boundaries on a short phase are expected** — a Phase's Start/End Boundaries genuinely need
    four or more dated members before their span is even mathematically well-constrained; two or
    three dates in a phase can produce a very wide 95% range and that's correct, not a bug.
 
@@ -798,6 +888,41 @@ preserves the envelope at any zoom.
 point-to-point gradient on IntCal20's 1-year grid is dominated by year-to-year scatter and swings
 between +4 and −3 across stretches that are flat at any scale that matters; ±50 separates a plateau
 from ordinary curve threefold without over-smoothing.
+
+### A.12 Comparing two runs
+
+Everything on the comparison page is computed in the browser from the payloads the two analyses
+already return; no solver runs again, and no figure is derived that is not a function of the two
+runs' own published summaries.
+
+**Matching.** Dates are keyed on `sample_name`, normalised for case and internal whitespace. This is
+the strongest key available: a date deployed from a project collection is a *copy*, carrying no
+reference back to the collection entry, so no identifier is shared between two analyses of the same
+dates. Boundaries, durations and separations are keyed on kind and name; separations on the ordered
+pair, since reversing it negates every figure in the record. Nothing anywhere is matched by
+position.
+
+**The two figures reported per date** are
+
+```
+delta_median = median_run - median_reference        years, positive = older
+width_ratio  = |HPD_run| / |HPD_reference|          at the selected confidence
+```
+
+where `|HPD|` is the outer span of the region, computed through the same selection the results
+table uses — so a width quoted here is the width printed there. For a modelled posterior that
+selection rebins to the 5-year reporting step (A.4); for an unmodelled calibration it works on the
+curve's own grid. A duration's region is selected from its own histogram at its own reported step
+(A.9), never rebinned to a calendar step.
+
+**Why no joint statistic is offered.** A statement of the form `P(this date is older under run B
+than under run A)` requires the joint distribution of the two runs' parameters. That distribution
+was never sampled: each run produced draws from its own posterior, independently, and the two sets
+of draws have no correspondence — draw 1 of run A and draw 1 of run B are not the same
+hypothetical past. Pairing them would manufacture a dependence structure out of nothing, in the
+same way that pairing two boundary marginals manufactures phases that end before they start (A.9).
+A difference of medians and a ratio of interval widths are functions of two summaries and need no
+such structure, which is why those are what the page reports.
 
 ## Bibliography
 
