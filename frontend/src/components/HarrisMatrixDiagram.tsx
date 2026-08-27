@@ -50,7 +50,7 @@ import {
   type LaidOutNode,
 } from '@/utils/harrisLayout'
 import { DEFAULT_DATE_FORMAT, formatCalendarRange, type DateFormat } from '@/utils/dateFormat'
-import { SIGMA_2, hpdEnvelopeFromHistogram } from '@/utils/hpd'
+import { SIGMA_2, posteriorEnvelope } from '@/utils/hpd'
 
 interface NodeData {
   node: LaidOutNode
@@ -272,9 +272,10 @@ export default function HarrisMatrixDiagram({
     const ranges: Record<string, string> = {}
     const walk = (element: ModelElement) => {
       if (element.element_type === 'boundary' && element.posterior) {
-        const envelope = hpdEnvelopeFromHistogram(
+        const envelope = posteriorEnvelope(
           element.posterior.probability_distribution,
-          confidence
+          confidence,
+          true
         )
         if (envelope) {
           ranges[element.id] =

@@ -56,6 +56,26 @@ function selectHighestDensity(
   return selected
 }
 
+/** Each contiguous run of selected indices, as [firstIndex, lastIndex] pairs.
+ *  One run is one disjoint range of the HPD set. */
+function runsOf(selected: number[]): Array<[number, number]> {
+  const sorted = [...selected].sort((a, b) => a - b)
+  const runs: Array<[number, number]> = []
+  let start = sorted[0]
+  let prev = sorted[0]
+  for (let k = 1; k < sorted.length; k++) {
+    const i = sorted[k]
+    if (i === prev + 1) {
+      prev = i
+      continue
+    }
+    runs.push([start, prev])
+    start = prev = i
+  }
+  runs.push([start, prev])
+  return runs
+}
+
 export function hpdRangesFromCurve(
   distribution: Array<[number, number]> | undefined | null,
   confidence: number
@@ -68,29 +88,123 @@ export function hpdRangesFromCurve(
   if (!normWeights) return []
 
   const selected = selectHighestDensity(normWeights, confidence, densities)
-  const selectedSorted = [...selected].sort((a, b) => a - b)
 
-  const segments: Array<[number, number]> = []
-  let start = selectedSorted[0]
-  let prev = selectedSorted[0]
-  for (let k = 1; k < selectedSorted.length; k++) {
-    const i = selectedSorted[k]
-    if (i === prev + 1) {
-      prev = i
-      continue
-    }
-    segments.push([start, prev])
-    start = prev = i
-  }
-  segments.push([start, prev])
-
-  const ranges: HPDRange[] = segments.map(([s, e]) => {
+  const ranges: HPDRange[] = runsOf(selected).map(([s, e]) => {
     let segMass = 0
     for (let k = s; k <= e; k++) segMass += normWeights[k]
     return { min: ages[s], max: ages[e], probability_percent: segMass * 100 }
   })
   ranges.sort((a, b) => b.max - a.max)
   return ranges
+}
+
+/**
+ * Calendar step a MODELLED range is reported at.
+ *
+ * Mirrors REPORTING_STEP_YEARS in backend/app/services/exact_chain.py, which
+ * is where the reasoning lives; both sides must agree, because this page
+ * re-selects a region from a distribution the backend computed and the stored
+ * hpd_68_ranges/hpd_95_ranges beside it were built at that step.
+ */
+export const REPORTING_STEP_YEARS = 5
+
+/**
+ * Ranges for a modelled posterior, rebinned to REPORTING_STEP_YEARS first.
+ *
+ * A line-for-line mirror of exact_chain._reported_ranges, and it exists for
+ * the same two reasons. The solver picks its internal grid step from the date
+ * range and the number of groups, so reporting at that step would make a
+ * published range depend on an implementation detail -- the same dates in a
+ * longer sequence come back with different bounds. And a modelled posterior is
+ * sharply multi-peaked, so selecting at that step takes the peak tops and
+ * skips the dips: on the Tikoraki one-phase model, Wk55150's 95.4% region came
+ * back as five pieces including two single grid points holding 0.3% each,
+ * where the rebinned region is three.
+ *
+ * NOT for an unmodelled calibration, whose distribution sits on the curve's own
+ * grid. There is no solver step to hide there, and that spacing is the honest
+ * resolution of the answer -- see posteriorRanges, which makes the choice.
+ */
+function reportedRangesFromPosterior(
+  distribution: Array<[number, number]> | undefined | null,
+  confidence: number
+): HPDRange[] {
+  if (!distribution || distribution.length === 0) return []
+  const ages = distribution.map(([a]) => a)
+  const densities = distribution.map(([, w]) => w)
+  const widths = cellWidths(ages)
+  const mass = densities.map((d, i) => d * widths[i])
+
+  const step = REPORTING_STEP_YEARS
+  const lo = Math.floor(ages[0] / step) * step
+  // Half-open bins [edge, edge + step), matching numpy.histogram on the edges
+  // the backend builds. Bins no point falls in are dropped rather than carried
+  // as zeros, again as the backend does.
+  const binned = new Map<number, number>()
+  ages.forEach((age, i) => {
+    const bin = Math.floor((age - lo) / step)
+    binned.set(bin, (binned.get(bin) ?? 0) + mass[i])
+  })
+  const kept = [...binned.entries()].filter(([, m]) => m > 0).sort((a, b) => a[0] - b[0])
+  if (kept.length === 0) return []
+
+  const centres = kept.map(([bin]) => lo + (bin + 0.5) * step)
+  const normWeights = normalizedWeights(kept.map(([, m]) => m))
+  if (!normWeights) return []
+
+  // No separate density to rank by: the bins are all one step wide, so mass
+  // and density order identically.
+  const selected = selectHighestDensity(normWeights, confidence)
+
+  const ranges: HPDRange[] = runsOf(selected).map(([s, e]) => {
+    let segMass = 0
+    for (let k = s; k <= e; k++) segMass += normWeights[k]
+    // Centres back out to edges: a bin is the width it stands for, not a point.
+    return {
+      min: centres[s] - step / 2,
+      max: centres[e] + step / 2,
+      probability_percent: segMass * 100,
+    }
+  })
+  ranges.sort((a, b) => b.max - a.max)
+  return ranges
+}
+
+/**
+ * The HPD ranges for one result's posterior at the reader's confidence -- the
+ * single place the app decides which resolution a range is reported at.
+ *
+ * `modelled` is whether the distribution came out of a solver. Every surface
+ * that shows a posterior goes through here, so the table, the plots and the
+ * Harris matrix cannot disagree with each other or with the backend.
+ */
+export function posteriorRanges(
+  distribution: Array<[number, number]> | undefined | null,
+  confidence: number,
+  modelled: boolean
+): HPDRange[] {
+  return modelled
+    ? reportedRangesFromPosterior(distribution, confidence)
+    : hpdRangesFromCurve(distribution, confidence)
+}
+
+/**
+ * The outer span of those ranges. For a modelled posterior this is exactly the
+ * backend's stored hpd_68/hpd_95 pair, which is min-of-mins to max-of-maxes
+ * over the same rebinned ranges (see exact_chain._summarize).
+ */
+export function posteriorEnvelope(
+  distribution: Array<[number, number]> | undefined | null,
+  confidence: number,
+  modelled: boolean
+): [number, number] | null {
+  if (!modelled) return hpdEnvelopeFromHistogram(distribution, confidence)
+  const ranges = reportedRangesFromPosterior(distribution, confidence)
+  if (ranges.length === 0) return null
+  return [
+    Math.min(...ranges.map((r) => r.min)),
+    Math.max(...ranges.map((r) => r.max)),
+  ]
 }
 
 /**
@@ -149,13 +263,16 @@ export interface HPDBand {
 export function hpdBands(
   distribution: Array<[number, number]> | undefined | null,
   confidence: number,
-  confidenceLabel: string
+  confidenceLabel: string,
+  /** Whether the distribution came out of a solver, which decides the
+   *  resolution its ranges are reported at -- see posteriorRanges. */
+  modelled = false
 ): HPDBand[] {
-  const outer = hpdRangesFromCurve(distribution, confidence)
+  const outer = posteriorRanges(distribution, confidence, modelled)
   if (outer.length === 0) return []
   const bands: HPDBand[] = [{ ranges: outer, label: confidenceLabel, tone: 'outer' }]
   if (confidence > INNER_CONFIDENCE + 1e-6) {
-    const inner = hpdRangesFromCurve(distribution, INNER_CONFIDENCE)
+    const inner = posteriorRanges(distribution, INNER_CONFIDENCE, modelled)
     if (inner.length > 0) {
       bands.push({ ranges: inner, label: INNER_CONFIDENCE_LABEL, tone: 'inner' })
     }

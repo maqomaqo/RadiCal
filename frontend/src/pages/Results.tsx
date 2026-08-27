@@ -72,8 +72,8 @@ import {
   CONFIDENCE_LEVELS,
   SIGMA_2,
   hpdBands,
-  hpdEnvelopeFromHistogram,
-  hpdRangesFromCurve,
+  posteriorEnvelope,
+  posteriorRanges,
   type HPDBand,
 } from '@/utils/hpd'
 import type {
@@ -496,13 +496,13 @@ function StructureTableRow({
   const median = isDate ? result?.posterior_median : posterior?.posterior_median
   const std = isDate ? result?.posterior_std : posterior?.posterior_std
   const distribution = isDate ? result?.probability_distribution : posterior?.probability_distribution
-  const envelope = distribution ? hpdEnvelopeFromHistogram(distribution, confidence) : null
-  // The disjoint ranges behind that envelope, for when the column unfolds. The
-  // envelope is half a bin wider at each end by design -- a point is the centre
-  // of the width it stands for -- so the span is not exactly their min and max.
-  const posteriorRanges = useMemo(
-    () => (posteriorExpanded && distribution ? hpdRangesFromCurve(distribution, confidence) : []),
-    [posteriorExpanded, distribution, confidence]
+  const envelope = distribution ? posteriorEnvelope(distribution, confidence, isBayesian) : null
+  // The disjoint ranges behind that envelope, for when the column unfolds.
+  const expandedRanges = useMemo(
+    () => (posteriorExpanded && distribution
+      ? posteriorRanges(distribution, confidence, isBayesian)
+      : []),
+    [posteriorExpanded, distribution, confidence, isBayesian]
   )
   const unmodelledRanges = isDate && isBayesian
     ? unmodelledRangesFor(result, confidence)
@@ -682,7 +682,7 @@ function StructureTableRow({
           ''
         ) : (
           <RangeCell
-            ranges={posteriorRanges}
+            ranges={expandedRanges}
             span={envelope}
             expanded={posteriorExpanded}
             dateFormat={dateFormat}
@@ -1078,11 +1078,13 @@ export default function Results() {
       if (!distribution) return []
       const hit = cache.get(key)
       if (hit) return hit
-      const bands = hpdBands(distribution, confidence, CONFIDENCE_LABEL)
+      const bands = hpdBands(
+        distribution, confidence, CONFIDENCE_LABEL,
+        analysis?.analysis_type === 'bayesian')
       cache.set(key, bands)
       return bands
     }
-  }, [confidence, CONFIDENCE_LABEL])
+  }, [confidence, CONFIDENCE_LABEL, analysis?.analysis_type])
 
   // For the page-level qualifier under the headline, where naming every curve
   // the analysis used IS the honest statement.
@@ -1516,9 +1518,10 @@ export default function Results() {
           <Box sx={{ mt: 2 }}>
             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={{ xs: 1.5, sm: 5 }}>
               {primaryReading.map((row, idx) => {
-                const envelope = hpdEnvelopeFromHistogram(
+                const envelope = posteriorEnvelope(
                   row.posterior!.probability_distribution,
-                  confidence
+                  confidence,
+                  true
                 )
                 if (!envelope) return null
                 const range = formatCalendarRange(envelope[0], envelope[1], dateFormat)
@@ -1702,8 +1705,8 @@ export default function Results() {
               </TableHead>
               <TableBody>
                 {contextsWithModeledSpan.map((g) => {
-                  const startEnvelope = hpdEnvelopeFromHistogram(g.modeled_start!.probability_distribution, confidence)
-                  const endEnvelope = hpdEnvelopeFromHistogram(g.modeled_end!.probability_distribution, confidence)
+                  const startEnvelope = posteriorEnvelope(g.modeled_start!.probability_distribution, confidence, true)
+                  const endEnvelope = posteriorEnvelope(g.modeled_end!.probability_distribution, confidence, true)
                   return (
                     <TableRow key={g.id}>
                       <TableCell>{g.name}</TableCell>
@@ -1985,9 +1988,10 @@ export default function Results() {
                     const unmodelledRanges = isBayesian
                       ? unmodelledRangesFor(result, confidence)
                       : []
-                    const modelledEnvelope = hpdEnvelopeFromHistogram(result.probability_distribution, confidence)
+                    const modelledEnvelope = posteriorEnvelope(
+                      result.probability_distribution, confidence, isBayesian)
                     const modelledRanges = posteriorExpanded
-                      ? hpdRangesFromCurve(result.probability_distribution, confidence)
+                      ? posteriorRanges(result.probability_distribution, confidence, isBayesian)
                       : []
                     return (
                       <TableRow key={result.sample_id}>
