@@ -513,7 +513,7 @@ const WAYS_IN = [
     to: '/curves',
     title: 'Browse a calibration curve',
     action: 'Open curve browser',
-    body: 'See IntCal20, Marine20 and SHCal20 directly, and the likely resolution for your period of interest.',
+    body: 'See IntCal20, Marine20 and SHCal20 directly and examine their resolution. Upload or mix your own curve.',
   },
 ]
 
@@ -528,7 +528,7 @@ function WaysIn() {
     // analyses below, so a heading here would sit above it or skip a level.
     <Paper component="section" aria-label="Ways to start" sx={{ p: { xs: 2, sm: 3 } }}>
       <Typography color="text.secondary" sx={{ maxWidth: '64ch' }}>
-        RadiCal turns radiocarbon measurements into calendar dates you can cite, and lets you model them
+        RadiCal turns radiocarbon measurements into calendar dates and lets you model them
         against stratigraphy or other chronological constraint.
       </Typography>
 

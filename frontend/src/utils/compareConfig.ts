@@ -141,7 +141,7 @@ export function configFields(runs: ConfigRunInput[]): ConfigField[] {
     field(
       'Solver',
       runs.map((run) => run.solverLabel),
-      'An exact solve and an MCMC chain are not equally precise. Where one side is sampled, a few years of difference is chain noise rather than a finding.'
+      'Note: different solvers will on their own produce minor differences in result.'
     ),
     field('Durations and differences', runs.map(intervalsSummary)),
   ]

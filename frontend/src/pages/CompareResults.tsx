@@ -648,7 +648,7 @@ export default function CompareResults() {
               Model differences
             </Typography>
             <Typography variant="body2" color="textSecondary" sx={{ mb: 2, maxWidth: '72ch' }}>
-              Read out of stored settings for each analysis. A field
+              The stored settings for each analysis. A field
               marked ± indicates a difference.
             </Typography>
             <ModelDiffPanel
