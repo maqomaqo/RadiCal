@@ -14,6 +14,8 @@
 10. [Exporting Data](#exporting-data)
 11. [Projects and Date Collections](#projects-and-date-collections)
 12. [Best Practices](#best-practices)
+13. [Appendix A: Mathematical Methods](#appendix-a-mathematical-methods)
+14. [Bibliography](#bibliography)
 
 ## Getting Started
 
@@ -430,3 +432,424 @@ one date on its own.
 6. **Wide Boundaries on a short phase are expected** — a Phase's Start/End Boundaries genuinely need
    four or more dated members before their span is even mathematically well-constrained; two or
    three dates in a phase can produce a very wide 95% range and that's correct, not a bug.
+
+## Appendix A: Mathematical Methods
+
+This appendix describes how each number the app reports is computed, and cites the source of every
+method taken from the literature. Symbols follow the code: `t` is a calendar age in cal BP, `b` a
+Boundary parameter, `L` a likelihood, and `K` the number of dates in a group. Full references are in
+the [Bibliography](#bibliography) at the end.
+
+### A.1 Conventions
+
+**Calendar ages** are held internally as cal BP throughout, "present" being AD 1950 by convention
+(Stuiver and Polach 1977). Conversion to BC/AD or BCE/CE is presentation only: `year = 1950 - calBP`,
+with no year zero, so 1 BC is followed by AD 1.
+
+**Confidence levels** are the two-sided normal coverages of one, two and three standard deviations,
+computed rather than rounded:
+
+```
+sigma_1 = erf(1/sqrt(2)) = 0.682689...   reported as 68.3%
+sigma_2 = erf(2/sqrt(2)) = 0.954500...   reported as 95.4%
+sigma_3 = erf(3/sqrt(2)) = 0.997300...   reported as 99.7%
+```
+
+The distinction is not cosmetic. The level is the threshold an HPD set is accumulated to, so a
+truncated 0.95 selects a different set of grid points from the exact 0.954500: over thirty IntCal20
+calibrations between 500 and 10,000 BP, the two differed in 27 cases, by up to 10 years.
+
+**Reporting resolution** is not one number, because the three kinds of range are built from
+different things:
+
+| Range | Reported on | Why |
+| --- | --- | --- |
+| Unmodelled calibration | the curve's own grid | the posterior is exact at every grid point the curve provides |
+| Modelled date or Boundary | a 5-year grid | independent of the solver's internal step, which varies with the model (see [A.4](#a4-summarising-a-posterior)) |
+| Duration or difference | an adaptive step, reported with the figure | computed from draws, so the step is set by what the draws can support (see [A.9](#a9-durations-and-differences)) |
+
+So a single calibration or the unmodelled column of a Bayesian result can and does return ranges
+that are not multiples of five — SHCal20 is tabulated at 1-year steps through the late Holocene, and
+a range there is quoted to the year. Only the *modelled* posterior is rebinned. Point estimates and
+plots always use the full-resolution posterior.
+
+### A.2 Calibrating one date
+
+The probability method of Stuiver and Reimer (1993), in the form OxCal uses (Bronk Ramsey 2001,
+eqs. 1–2). For a measurement `a ± sigma_a` against a curve giving radiocarbon age `mu(t)` with
+1-sigma curve error `sigma_c(t)`:
+
+```
+sigma_combined(t)^2 = sigma_c(t)^2 + sigma_a^2 + sigma_dR^2
+
+p(t) proportional to  exp( -(mu(t) - (a - dR))^2 / (2 sigma_combined(t)^2) )
+                      / sigma_combined(t)
+                      * w(t)
+```
+
+Three details carry weight:
+
+- **The `1/sigma` factor is kept**, not just the exponential. Curve error varies substantially with
+  calendar age, and omitting the normalising term biases the posterior toward stretches of curve
+  where the curve itself is poorly known. This is the correction CALIB made and OxCal inherited.
+- **`w(t)` is the calendar-year width each curve grid point stands for** (half the distance to each
+  neighbour). IntCal20 and its relatives are tabulated at 1, 5, 10 and 20-year steps in different
+  ranges, so summing the likelihood unweighted would concentrate posterior mass wherever the curve
+  file happens to be densely sampled.
+- **`dR` is the local marine reservoir offset**, applied as a shift to the measured age because the
+  marine curve models only the global average. Its uncertainty `sigma_dR` joins the quadrature sum,
+  so a poorly known offset widens the calibrated range rather than only moving it.
+
+Curve values at non-grid calendar ages are linearly interpolated in both `mu` and `sigma_c`, and
+clamped at the curve's ends rather than extrapolated.
+
+The built-in curves are IntCal20 (Reimer et al. 2020), SHCal20 (Hogg et al. 2020) and Marine20
+(Heaton et al. 2020).
+
+### A.3 Mixed curves
+
+For a sample whose carbon came from two reservoirs — the classic case being a partly marine diet —
+the app builds the curve OxCal's `Mix_Curves` builds:
+
+```
+mu_mix(t)    = p mu_A(t) + (1 - p) mu_B(t)
+sigma_mix(t) = sqrt( p^2 sigma_A(t)^2
+                   + (1-p)^2 sigma_B(t)^2
+                   + ((mu_A(t) - mu_B(t)) sigma_p)^2 )
+```
+
+`p` is the proportion from the first curve and `sigma_p` its 1-sigma uncertainty. The third term
+under the root is what makes an uncertain diet widen the date: it is largest where the two curves
+are furthest apart, which is exactly where being wrong about the proportion costs most. The mixed
+curve is defined on the union of the two parent grids, restricted to their overlap.
+
+### A.4 Summarising a posterior
+
+**HPD regions.** Grid points are taken in order of decreasing probability density until the target
+coverage is reached; the selected points are then grouped into maximal runs, each reported as a
+range with its own share of the total probability. Because calibration curves are not monotonic, a
+single date routinely produces several disjoint ranges, and reporting only the outer envelope would
+claim probability in the near-empty gaps between them. The percentages are shares of the entire
+distribution, so they sum to slightly more than the level requested — the set is built from whole
+grid points and the last one taken overshoots. This is standard radiocarbon reporting practice
+(Stuiver and Reimer 1993; Bronk Ramsey 2009a).
+
+**Point estimates** are computed from the density, not from draws, so they carry no Monte Carlo
+error even on the sampled path: mean and standard deviation as probability-weighted moments, median
+by interpolating the CDF at 0.5, mode as the highest-density grid point.
+
+**Rebinning, for modelled posteriors only.** A modelled posterior is multiplied by the model's own
+constraints on top of an already-wiggly likelihood, and comes off a grid whose step the solver
+chooses from the date range and the number of groups. Two problems follow. Reporting at that step
+would make a published range depend on an implementation detail, and the same dates in a longer
+sequence would come back with different widths. At a fine step the HPD picks out peak tops and
+skips the dips between them.
+
+Modelled ranges are therefore rebinned to the 5-year reporting step before the HPD is taken.
+Unmodelled calibration is *not* rebinned — it has no solver grid to hide, and the curve's own
+spacing is the honest resolution of the answer.
+
+The results page re-selects the region in the browser when you change the confidence selector, since
+only 68.3% and 95.4% are stored and 99.7% is offered as well. That re-selection applies the same
+rebinning, so the table, the plots, the Harris matrix, the exports and the stored result all report
+one set of bounds.
+
+### A.5 The Bayesian model
+
+The model is the one introduced by Buck et al. (1991, 1992) and set out at length in Buck, Cavanagh
+and Litton (1996): the calibration likelihoods multiplied by a prior expressing the archaeological
+relationships. In the form the app implements, following OxCal (Bronk Ramsey 1995, 2009a):
+
+```
+p(t, b)  proportional to  prod_dates L_d(t_d)
+                        * prod_groups (b_older,g - b_younger,g)^(-K_g)
+                        * c(t, b)
+```
+
+- `L_d` is date `d`'s own calibration likelihood from A.2.
+- The **span factor** `(older - younger)^(-K)` is the uniform phase model: conditional on the pair of
+  Boundaries enclosing it, each of a group's `K` dates is uniformly distributed between them. Each
+  date belongs to exactly one bounded group — the innermost enclosing pair — so a nested group's
+  dates are not also counted in its parent's span term.
+- `c(t, b)` is the indicator that every ordering constraint holds: sequence order, stratigraphic
+  relationships, and any TPQ/TAQ limits. Constraints are hard truncations, not soft penalties.
+  Stratigraphic relationships are expanded to pairwise sample constraints by the law of
+  superposition — a sample above another was deposited later and is younger — and displayed as a
+  version of the Harris matrix (Harris 1979), oldest at the bottom. Where a sample and its group both carry a
+  TPQ or TAQ, the tighter of the two wins.
+
+**Boundaries** are single shared parameters. A Boundary placed between two Phases is simultaneously
+the end of the earlier and the start of the later, not two independent transitions. This is why
+adjacent phases have no gap to measure (see [Differences](#differences)). A deliberate gap is
+modelled as two Boundaries with a Hiatus between them.
+
+**Uniform span prior.** Placing `n` ordered Boundaries across a span leaves the `n-2` interior ones
+free within it, and the induced prior therefore favours long sequences purely for having more room
+to arrange them in. Dividing that freedom out is the correction of Nicholls and Jones (2001), and is
+OxCal's default. The app divides by the exact discrete count
+
+```
+C(span in grid cells - 1, n - 2)
+```
+
+rather than by the continuum `span^(n-2)`. The two agree only as the span grows large, and the prior
+concentrates mass at small spans where they differ most; with the likelihoods switched off, so the
+reported posterior is the prior and the answer is known in closed form, the binomial reproduces it
+to 0.00% total-variation distance where the power form was in error by 0.4–1.6%.
+
+The same option carries the limits factor `1/g` of Bronk Ramsey (2008, appendix A.31; 2009a
+eqs. 29–30), which accounts for the finite window the outer boundaries may occupy:
+
+```
+g = min( (ulim_m - llim_a) - (t_m - t_a),
+         (t_m - t_a) - (llim_m - ulim_a),
+          ulim_a - llim_a,
+          ulim_m - llim_m )
+```
+
+Which of the four terms is smallest decides which way the term biases the span. It is not
+negligible: on eight overlapping dates in one phase it is worth about 18% of the reported span, and
+it narrows.
+
+### A.6 Solvers
+
+The app chooses between two solvers by model shape. Both target the same posterior, and are checked
+against each other on models both can handle.
+
+**Exact integration** (chain-shaped models: a Sequence of Phases separated by Boundaries). Every
+date other than the one being marginalised enters only through its likelihood integrated over an
+interval, which a cumulative sum supplies for all intervals at once. What remains is a chain over
+the Boundaries, solved by forward/backward message passing:
+
+```
+T_i(b_i, b_i+1) = (b_i - b_i+1)^(-K_i) prod_{j in group i} F_j(b_i+1, b_i)
+alpha_i+1(b)    = sum over b_i > b  of  alpha_i(b_i) T_i(b_i, b)
+beta_i(b)       = sum over b_i+1 < b of  T_i(b, b_i+1) beta_i+1(b_i+1)
+```
+
+This is O(M²) per group on an M-point calendar grid, deterministic, and exact up to the grid step.
+There is no sampler to converge and no mode to miss — which matters because resolving which of
+several calibration lobes is right is much of the reason to build a model at all.
+
+The interval integrals `F` are **trapezoidal**, with half weight on each endpoint cell. This is not a
+refinement: a plain cumulative difference gives an interval spanning `k` cells the mass of `k+1`
+cells, while the span factor charges `k`, so near-coincident configurations gain `2^K` and every
+modelled phase comes out several times too narrow.
+
+**Metropolis-Hastings / Gibbs sampling** (everything else) — the scheme OxCal uses (Metropolis et
+al. 1953; Hastings 1970; Geman and Geman 1984; applied to this problem by Buck et al. 1992 and Bronk
+Ramsey 1995). Each full conditional is one-dimensional and exactly samplable: a date's conditional
+is its own likelihood over the interval its neighbours and boundaries allow (the span factor drops
+out, being independent of where within the interval the date sits); a Boundary's is the product of
+the span factors of the groups it bounds. The app draws these by inverse CDF on a precomputed
+cumulative table rather than by rejection as OxCal does — the same target distribution, at bounded
+cost per draw. Conditionally independent dates are updated in blocks, and whole-group translation
+moves are proposed on the exact MH ratio so a tightly constrained group can cross between
+calibration lobes, which single-site updating cannot do.
+
+**Convergence** is OxCal's own diagnostic: the overlap integral between the distribution accumulated
+over the first half of the run and over the second half, per parameter, targeting 0.95. The run
+extends until the worst parameter meets the target or the sweep ceiling is reached, and the achieved
+value is always reported.
+
+### A.7 Outlier models
+
+A Bernoulli outlier indicator is integrated out per date, which is exact and costs the exact solver
+nothing because the indicator touches only that date's own likelihood:
+
+```
+L_mix(t) = (1 - p) L_inlier(t) + p L_outlier(t)
+```
+
+`p` is the prior outlier probability set on the date. The outlier component is the inlier likelihood
+convolved with an offset kernel, following Bronk Ramsey (2009b), whose treatment builds on Christen
+(1994):
+
+- **General** — a Student-t offset with 5 degrees of freedom, scale `10^u` with `u` uniform on
+  `[0, 4]`. Symmetric: the date may be too old or too young.
+- **Charcoal** — a one-sided exponential gap truncated at 10 scale lengths, scale `10^u` with `u`
+  uniform on `[0, 3]`, i.e. OxCal's `Outlier_Model("Charcoal", Exp(1,-10,0), U(0,3), "t")`. The mass
+  sits on the side that says the dated material formed *before* the context that held it.
+
+The scale is integrated over its prior on a 24-node log grid. On the exact path this is done
+independently per date, which is an approximation: OxCal shares one scale across every date using
+the model and lets the data constrain it, and a shared hyperparameter does not factorise along the
+message passing. The sampler does share it properly. The cost of the approximation is small where
+outlier priors are small — on a real OxCal comparison the exact path's outlier probabilities sit
+0.017 from OxCal's where the sampler reaches 0.002.
+
+**Reported outlier probability** is the posterior probability that the date is an outlier, obtained
+by averaging the outlier component's responsibility over the date's own posterior:
+
+```
+P(outlier) = integral  posterior(t) * p L_out(t) / L_mix(t)  dt
+```
+
+The outlier component is deliberately *not* renormalised over the computational window. Its
+convolution is already proper on the real line, and most of its mass lies off the grid — which is
+precisely the statement that a flagged date's true age could be anywhere. Rescaling the remainder to
+one would make the reported probability a function of the window width.
+
+### A.8 Agreement indices
+
+The standard OxCal diagnostic (Bronk Ramsey 1995), comparing each date's modelled posterior against
+its own unmodelled likelihood over a shared calendar grid:
+
+```
+A_i = 100 * sum(modelled * unmodelled) / sum(unmodelled^2)
+```
+
+A date the model leaves alone scores 100. One the model had to push off its own likelihood scores
+low; one the model *sharpens* onto the peak of its likelihood scores above 100, so values over 100
+are expected. Below about 60 is the conventional threshold for a second look. The overall index
+combines them:
+
+```
+A_overall = 100 * (product of A_i/100)^(1/sqrt(n))
+```
+
+Both are computed on a 5-year grid, matching OxCal's export resolution, and both distributions are
+normalised over a window spanning *both* — normalising the likelihood over only the posterior's
+support would let a badly displaced date score well on the sliver where the two still overlap.
+
+Against 24 known answers from OxCal 4.4 across three models, the individual indices reproduce to
+rms 0.81 and worst 1.4, the overall ones to 0.1.
+
+Note the limits of the diagnostic: it detects a date the *model had to move*, which is not the same
+as a date that does not belong. On an unconstrained phase, a date 600 radiocarbon years from its
+neighbours scores 100.5, because the phase simply widens. Use an outlier model to find a date that
+is merely wrong.
+
+OxCal's `Amodel` is deliberately not implemented: it cannot be derived from the per-date indices,
+and a guess at the headline number people screen on would be worse than reporting nothing.
+
+### A.9 Durations and differences
+
+These are functions of several modelled ages at once, so they are computed from **joint** draws of
+the posterior, never by pairing up marginals. The distinction is not subtle: pairing draws from two
+boundary marginals on a single six-date phase puts 8.2% of them below zero — a phase ending before
+it starts — where the joint posterior gives that no probability at all.
+
+On the exact path the draws are independent draws from the true joint posterior, obtained by
+forward-filtering/backward-sampling over the same chain the solver already built (Frühwirth-Schnatter
+1994; Carter and Kohn 1994), so the Monte Carlo error is a plain `1/sqrt(N)` with no autocorrelation.
+The default is 20,000 draws. These are the only Monte Carlo figures the exact solver reports, which
+is why the draw count and whether the draws were independent are printed alongside them.
+
+**The three durations** are OxCal's quantities under the app's own names: the *Sequence duration*
+(first Boundary minus last), the *Phase duration* (the interval a pair of Boundaries encloses,
+OxCal's `Interval`), and the *dated-events* or sample duration (the range of the dates themselves,
+OxCal's `Span`). The gap between the last two is how much of the phase the dates failed to sample.
+
+**Differences** between two phases are the signed years between their modelled intervals — positive
+for a gap, negative for an overlap — computed as one quantity from the intersection length of the
+two intervals in each draw. Between two dates in a group calibration, the signed difference in
+calendar age.
+
+**Overlap** is a probability, and means two slightly different things because a phase is an interval
+and a date is a point:
+
+```
+two phases   P(their modelled intervals intersect at all)
+two dates    P(the ordering is unresolved) = 2 min( P(A older), P(B older) )
+```
+
+Both run 0 to 1 and are read the same way. The five grades are the app's own reporting confidences
+rather than round numbers: the band edges are `1 - sigma_2`, `1 - sigma_1`, `sigma_1` and `sigma_2`,
+so `none` means separated at 2 sigma and `extensive` means overlapping at 2 sigma.
+
+**Reporting resolution.** A duration posterior can be thousands of years wide, so quoting it at the
+5-year calendar step would claim a resolution the draws do not have. The histogram is capped at 40
+bins, with the bin width taken from the 0.5–99.5 percentile spread rather than the full range (so
+that asking for more draws cannot coarsen the answer by finding a more extreme one). The step
+actually used is reported with every figure.
+
+### A.10 Expected curve resolution
+
+How tightly a date from a given calendar age can be known, before anyone measures anything. The
+method is Svetlik et al. (2019), as implemented in Demjan's `res14c`; this app's version was written
+from the published method and its own calibration code rather than translated, and reproduces the
+reference implementation's published figures to about 0.3% over 1,000–4,000 cal BP, including the
+sharp 33-year trough at 2,750 cal BP.
+
+1. Scale the laboratory uncertainty with age, `u(a) = u0 exp(a / 16066)`, because counting
+   statistics degrade as less ¹⁴C remains. The constant is twice the 8033-year mean life implied by
+   the Libby half-life on which conventional radiocarbon ages are reported (Stuiver and Polach 1977).
+2. Calibrate each radiocarbon age a sample of that period could plausibly return.
+3. Take the width of its 95.4% HPD envelope — first to last point, gaps included — as the resolution
+   that measurement achieved.
+4. For each calendar year, average those widths over the radiocarbon ages a sample of that true age
+   could yield, weighted by how likely each is, giving a mean and a 5th–95th percentile band.
+
+The default assumed laboratory uncertainty is 25 years, what a commercial date typically carries,
+rather than the reference implementation's 15, which is close to the best AMS can offer.
+
+### A.11 Curve display
+
+Two presentation choices in the curve browser are worth stating, since both change what you see.
+
+**Decimation is min/max per bucket**, not every Nth point. Stride sampling removes exactly the
+extremes that make a curve wiggly — plateau reversals, short excursions, the features that split a
+calibrated date into two ranges. Keeping the lowest and highest radiocarbon age in each bucket
+preserves the envelope at any zoom.
+
+**Local slope** is measured over ±50 calendar years on the full grid, before decimation. A
+point-to-point gradient on IntCal20's 1-year grid is dominated by year-to-year scatter and swings
+between +4 and −3 across stretches that are flat at any scale that matters; ±50 separates a plateau
+from ordinary curve threefold without over-smoothing.
+
+## Bibliography
+
+- Bronk Ramsey, C. (1995). Radiocarbon calibration and analysis of stratigraphy: the OxCal program.
+  *Radiocarbon* 37(2), 425–430.
+- Bronk Ramsey, C. (1998). Probability and dating. *Radiocarbon* 40(1), 461–474.
+- Bronk Ramsey, C. (2001). Development of the radiocarbon calibration program. *Radiocarbon* 43(2A),
+  355–363.
+- Bronk Ramsey, C. (2008). Deposition models for chronological records. *Quaternary Science Reviews*
+  27(1–2), 42–60.
+- Bronk Ramsey, C. (2009a). Bayesian analysis of radiocarbon dates. *Radiocarbon* 51(1), 337–360.
+- Bronk Ramsey, C. (2009b). Dealing with outliers and offsets in radiocarbon dating. *Radiocarbon*
+  51(3), 1023–1045.
+- Buck, C. E., Kenworthy, J. B., Litton, C. D., and Smith, A. F. M. (1991). Combining archaeological
+  and radiocarbon information: a Bayesian approach to calibration. *Antiquity* 65(249), 808–821.
+- Buck, C. E., Litton, C. D., and Smith, A. F. M. (1992). Calibration of radiocarbon results
+  pertaining to related archaeological events. *Journal of Archaeological Science* 19(5), 497–512.
+- Buck, C. E., Cavanagh, W. G., and Litton, C. D. (1996). *Bayesian Approach to Interpreting
+  Archaeological Data*. Chichester: Wiley.
+- Carter, C. K., and Kohn, R. (1994). On Gibbs sampling for state space models. *Biometrika* 81(3),
+  541–553.
+- Christen, J. A. (1994). Summarizing a set of radiocarbon determinations: a robust approach.
+  *Journal of the Royal Statistical Society Series C (Applied Statistics)* 43(3), 489–503.
+- Frühwirth-Schnatter, S. (1994). Data augmentation and dynamic linear models. *Journal of Time
+  Series Analysis* 15(2), 183–202.
+- Geman, S., and Geman, D. (1984). Stochastic relaxation, Gibbs distributions, and the Bayesian
+  restoration of images. *IEEE Transactions on Pattern Analysis and Machine Intelligence* 6(6),
+  721–741.
+- Harris, E. C. (1979). *Principles of Archaeological Stratigraphy*. London: Academic Press.
+- Hastings, W. K. (1970). Monte Carlo sampling methods using Markov chains and their applications.
+  *Biometrika* 57(1), 97–109.
+- Heaton, T. J., Köhler, P., Butzin, M., Bard, E., Reimer, R. W., Austin, W. E. N., Bronk Ramsey, C.,
+  et al. (2020). Marine20 — the marine radiocarbon age calibration curve (0–55,000 cal BP).
+  *Radiocarbon* 62(4), 779–820.
+- Hogg, A. G., Heaton, T. J., Hua, Q., Palmer, J. G., Turney, C. S. M., Southon, J., et al. (2020).
+  SHCal20 Southern Hemisphere calibration, 0–55,000 years cal BP. *Radiocarbon* 62(4), 759–778.
+- Metropolis, N., Rosenbluth, A. W., Rosenbluth, M. N., Teller, A. H., and Teller, E. (1953).
+  Equation of state calculations by fast computing machines. *Journal of Chemical Physics* 21(6),
+  1087–1092.
+- Nicholls, G., and Jones, M. (2001). Radiocarbon dating with temporal order constraints. *Journal of
+  the Royal Statistical Society Series C (Applied Statistics)* 50(4), 503–521.
+- Reimer, P. J., Austin, W. E. N., Bard, E., Bayliss, A., Blackwell, P. G., Bronk Ramsey, C., et al.
+  (2020). The IntCal20 Northern Hemisphere radiocarbon age calibration curve (0–55 cal kBP).
+  *Radiocarbon* 62(4), 725–757.
+- Stuiver, M., and Polach, H. A. (1977). Discussion: reporting of ¹⁴C data. *Radiocarbon* 19(3),
+  355–363.
+- Stuiver, M., and Reimer, P. J. (1993). Extended ¹⁴C data base and revised CALIB 3.0 ¹⁴C age
+  calibration program. *Radiocarbon* 35(1), 215–230.
+- Svetlik, I., Jull, A. J. T., Molnár, M., Povinec, P. P., Kolář, T., Demján, P., et al. (2019). The
+  best possible time resolution: how precise could a radiocarbon dating method be? *Radiocarbon*
+  61(6), 1729–1740.
+
+**Software.** Demján, P. `res14c` — reference implementation of the Svetlik et al. resolution
+method, https://github.com/demjanp/res14c_online. OxCal (C. Bronk Ramsey), against whose 4.4 output
+this app's agreement indices, outlier probabilities and modelled ages are validated:
+https://c14.arch.ox.ac.uk/oxcal.html
