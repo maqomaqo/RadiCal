@@ -247,7 +247,7 @@ Reached via **Specify Model Structure** / **Edit Model Structure**, which has an
 building the tree and a **Harris Matrix Diagram** tab showing it drawn. The Results page renders
 the same diagram for a completed analysis, and the Posterior Distributions plots follow its order.
 
-### Reading the Harris matrix
+### Reading the Model diagram
 
 The diagram is a picture of the model tree, not a second place to edit it — build the structure on
 the Editor tab and the diagram follows. **Oldest is at the bottom**, as the convention has it.
@@ -390,6 +390,7 @@ five-year precision the draws cannot support.
   differences where there are any, and a plot of every date and Boundary with its HPD ranges marked. Like the CSV it reads in the date format currently
   selected. It is rendered on the server and draws a plot per modelled parameter, so a large model
   takes a few seconds — the button says so while it works.
+- **Download PNG** (for each Plot) — provides a print-quality PNG file of the plot window in the view currently shown on screen.
 
 ## Projects and Date Collections
 
