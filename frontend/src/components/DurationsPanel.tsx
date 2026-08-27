@@ -255,8 +255,7 @@ export default function DurationsPanel({
             Durations
           </Typography>
           <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
-            How long each sequence, phase and set of dated events lasted, in years — not
-            calendar dates, so these are not converted to the reporting era. Estimated from{' '}
+            How long each sequence, phase and set of dated events lasted, in years. Estimated from{' '}
             {intervals.draws.toLocaleString()}{' '}
             {intervals.independent ? 'independent' : 'sampled'} joint draws.
           </Typography>
