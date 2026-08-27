@@ -1088,13 +1088,18 @@ export default function Results() {
 
   // For the page-level qualifier under the headline, where naming every curve
   // the analysis used IS the honest statement.
+  //
+  // No solver here, though provenanceForSample above does carry one: the solver
+  // chip sits directly beneath this line, and a reader meeting the same fact
+  // twice in two lines reads the second as a different fact. A copied citation
+  // has no chip beside it, so it keeps the solver.
   const analysisProvenance = useMemo(() => {
     const curveIds = [
       ...new Set((analysis?.measurements || []).map((m) => m.curve_id).filter(Boolean)),
     ]
     const curveNames = curveIds.map((id) => curveNameFor(id)).filter(Boolean) as string[]
-    return [curveNames.join(' / '), solverName].filter((v): v is string => Boolean(v))
-  }, [analysis?.measurements, curveNameFor, solverName])
+    return [curveNames.join(' / ')].filter((v): v is string => Boolean(v))
+  }, [analysis?.measurements, curveNameFor])
 
   if (loading) {
     return (
