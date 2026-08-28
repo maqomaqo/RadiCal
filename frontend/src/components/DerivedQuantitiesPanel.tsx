@@ -19,12 +19,14 @@ import {
 } from '@/utils/dateFormat'
 import {
   axisWindow,
+  DERIVED_KIND_LABELS,
   rowsOnAxis,
   yearAxisTicks,
   type DerivedAxis,
   type DerivedRow,
 } from '@/utils/compareDerived'
 import { useCompareMarks, type RunStyle } from '@/theme/compareColors'
+import { SHARED_BOUNDARY_TEXT } from '@/components/DurationsPanel'
 
 /**
  * What each model DERIVED, run against run: boundary ages, durations, and the
@@ -199,7 +201,7 @@ function AxisBlock({
                   <TableCell>
                     <Typography variant="body2">{row.label}</Typography>
                     <Typography variant="caption" color="textSecondary">
-                      {KIND_LABELS[row.kind]}
+                      {DERIVED_KIND_LABELS[row.kind]}
                     </Typography>
                   </TableCell>
                   <TableCell>
@@ -262,6 +264,27 @@ function AxisBlock({
                                 borderTop: `1px dashed ${marks.absent}`,
                               }}
                             />
+                          )
+                        }
+                        if (cell.sharedBoundary) {
+                          // Zero years by construction, so no bar: these two
+                          // phases meet at one Boundary, and drawing a
+                          // zero-width mark at the zero rule would read as a
+                          // measured separation of nothing.
+                          return (
+                            <Typography
+                              key={runs[runIndex].id}
+                              variant="caption"
+                              sx={{
+                                position: 'absolute',
+                                left: 0,
+                                top: top - 3,
+                                color: runStyles[runIndex].line,
+                                lineHeight: 1.2,
+                              }}
+                            >
+                              {SHARED_BOUNDARY_TEXT}
+                            </Typography>
                           )
                         }
                         return (
@@ -371,10 +394,3 @@ function AxisBlock({
   )
 }
 
-const KIND_LABELS: Record<DerivedRow['kind'], string> = {
-  boundary: 'modelled transition',
-  sequence_duration: 'sequence duration',
-  phase_duration: 'phase duration, boundary to boundary',
-  sample_duration: 'span of the dated events in the phase',
-  phase_difference: 'phase separation',
-}

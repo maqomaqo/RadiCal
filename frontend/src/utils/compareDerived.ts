@@ -31,6 +31,21 @@ export type DerivedKind =
   | 'sample_duration'
   | 'phase_difference'
 
+/**
+ * What each kind of derived quantity is, in the app's own words.
+ *
+ * Here rather than in the panel because the CSV export writes the same words:
+ * a "phase duration" cell in a spreadsheet and the row it came from on screen
+ * must not describe the quantity differently.
+ */
+export const DERIVED_KIND_LABELS: Record<DerivedKind, string> = {
+  boundary: 'modelled transition',
+  sequence_duration: 'sequence duration',
+  phase_duration: 'phase duration, boundary to boundary',
+  sample_duration: 'span of the dated events in the phase',
+  phase_difference: 'phase separation',
+}
+
 export const AXIS_FOR_KIND: Record<DerivedKind, DerivedAxis> = {
   boundary: 'calendar',
   sequence_duration: 'duration',
@@ -52,6 +67,14 @@ export interface DerivedValue {
    * care DurationsPanel takes with the same data.
    */
   levelNote?: string
+  /**
+   * Two phases either side of one shared Boundary. Their separation is zero
+   * because the model says so, not because the dates do -- so no figure is
+   * reported for them anywhere: not on screen, not in the CSV, not in the PDF.
+   * A bare zero here would read as a measured separation, which is exactly
+   * the reading the rest of the app refuses to allow.
+   */
+  sharedBoundary?: boolean
 }
 
 export interface DerivedRow {
@@ -170,7 +193,9 @@ export function pairDerived(runs: DerivedRunInput[], confidence: number): Derive
       values.set(`phase_difference::${from}->${to}`, {
         kind: 'phase_difference',
         label: `${record.from_name} → ${record.to_name}`,
-        value: durationValue(record.years, confidence),
+        value: record.shared_boundary
+          ? { ranges: [], point: null, sharedBoundary: true }
+          : durationValue(record.years, confidence),
       })
     }
 

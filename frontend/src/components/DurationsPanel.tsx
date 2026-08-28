@@ -44,7 +44,7 @@ const NUMERIC_CELL_SX = { whiteSpace: 'nowrap' } as const
  * second, meaning "separated at 2 sigma" everywhere else here. The CSV and PDF
  * print the same phrase (intervals.SHARED_BOUNDARY_TEXT).
  */
-const SHARED_BOUNDARY_TEXT = 'shares a transition'
+export const SHARED_BOUNDARY_TEXT = 'shares a transition'
 const SHARED_BOUNDARY_HELP =
   'These two phases share a Boundary, so the model gives them no gap and no overlap to ' +
   'measure \u2014 one phase\u2019s end is the other\u2019s start, by construction rather than by inference.'

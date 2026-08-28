@@ -170,6 +170,38 @@ describe('pairDerived', () => {
     expect(paired.every((row) => row.presentIn.length === 1)).toBe(true)
   })
 
+  it('reports a shared boundary as such, never as a separation of zero', () => {
+    const shared: DerivedRunInput[] = [
+      {
+        intervals: {
+          ...intervals([]),
+          differences: [
+            {
+              kind: 'phase_difference',
+              id: 'jk',
+              from_id: 'J',
+              from_name: 'J',
+              to_id: 'K',
+              to_name: 'K',
+              years: duration(0),
+              overlap: 0,
+              severity: 'none',
+              shared_boundary: true,
+            },
+          ],
+        },
+      },
+      { intervals: intervals([], [['J', 'K', 12]]) },
+    ]
+    const [row] = pairDerived(shared, SIGMA_2)
+    expect(row.cells[0]!.sharedBoundary).toBe(true)
+    expect(row.cells[0]!.ranges).toEqual([])
+    expect(row.cells[0]!.point).toBeNull()
+    // The run that does measure one is unaffected.
+    expect(row.cells[1]!.sharedBoundary).toBeUndefined()
+    expect(row.cells[1]!.point).toBe(12)
+  })
+
   it('skips date-to-date differences, which are about the dates not the model', () => {
     const withDates: DerivedRunInput[] = [
       {

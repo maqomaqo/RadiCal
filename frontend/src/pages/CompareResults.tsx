@@ -342,6 +342,7 @@ export default function CompareResults() {
       })),
       sortedRows,
       comparison.unmatched,
+      derivedRows,
       dateFormat,
       confidence,
       confidenceLabel

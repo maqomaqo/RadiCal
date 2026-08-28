@@ -391,11 +391,17 @@ five-year precision the draws cannot support.
   differences where there are any, and a plot of every date and Boundary with its HPD ranges marked. Like the CSV it reads in the date format currently
   selected. It is rendered on the server and draws a plot per modelled parameter, so a large model
   takes a few seconds — the button says so while it works.
-- **Export CSV** (on a comparison's **Dates** tab) — every paired date with each run's median,
-  HPD range and agreement index, then the shift and width ratio against the reference run. The
-  dates that could not be paired are written into the same file under their own header, so a
-  spreadsheet of eleven dates from a comparison of fourteen says so itself. The Models tab's
-  figures are not in it yet.
+- **Export CSV** (on a comparison page) — every paired date with each run's median, HPD range and
+  agreement index, then the shift and width ratio against the reference run. Below it, the model's
+  derived quantities in three separate blocks — modelled transitions, durations, separations —
+  because a calendar age and a length of time share no column any more than they share an axis on
+  screen, and each block names its own units and what a positive shift means in them (older,
+  longer, a wider gap). A quantity that only some of the runs have carries their names in a
+  **Present in** column rather than being left as a blank that reads like a missing measurement,
+  and two phases either side of one shared Boundary read *shares a transition* here exactly as they
+  do everywhere else. The dates that could not be paired follow under their own header, so a
+  spreadsheet of eleven dates from a comparison of fourteen says so itself. The settings diff and
+  the agreement scatter are not exported.
 - **Download PNG** (for each Plot) — provides a print-quality PNG file of the plot window in the view currently shown on screen.
 
 ## Projects and Date Collections
