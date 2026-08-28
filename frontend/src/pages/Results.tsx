@@ -1842,7 +1842,7 @@ export default function Results() {
                 this banner and said nothing about what to change once it was
                 pressed, which left the reader with a verdict and no move. */}
             <Typography variant="body2" sx={{ mt: 0.5 }}>
-              Each is highlighted in the table below, with the reason on its chip. Edit
+              Suspect dates highlighted in the table below, hover over the chip to see the reason. Edit
               analysis reopens the model, where a date can be given an outlier prior,
               moved to another phase, or dropped from the run.
             </Typography>
@@ -2052,37 +2052,21 @@ export default function Results() {
         </TableContainer>
         {/* What the span column is, and where the rest of it lives.
             Unconditional, because it applies to every analysis type and
-            because it is the page's only expansion of "HPD" -- a term that
-            appears here, in the confidence selector and in every plot legend,
-            and was defined nowhere. The column deliberately shows one pair of
+            because it is the page's only expansion of "HPD". The column deliberately shows one pair of
             bounds rather than every disjoint range: a multimodal posterior
             can produce four, and four per row would make the table unreadable
             for the sake of a case the plot already draws correctly. */}
         <Typography variant="caption" color="textSecondary" component="p" sx={{ mt: 1.5 }}>
           <strong>{CONFIDENCE_LABEL} span</strong> is the earliest and latest calendar age of
-          the {CONFIDENCE_LABEL} HPD (highest posterior density) region — the narrowest set of
-          ages holding that much of the probability. Where a calibration is multimodal that
-          region breaks into several separate ranges, and the span covers the gaps between
-          them — use a column’s <strong>unfold</strong> control to read those ranges in place.
-          The plots below draw each one, and the CSV, JSON and PDF exports list them in full.
+          the {CONFIDENCE_LABEL} HPD (highest posterior density) region. Use a column’s <strong>unfold</strong> control to read the full ranges in place.
         </Typography>
         {/* The key a first-time reader needs, present without a hover: the
             two diagnostics letters, spelled out once under the table they
-            label. Same words as the header's help control, from the one
-            constant, so the two cannot drift. */}
+            label. */}
         {isBayesian && (
           <Typography variant="caption" color="textSecondary" component="p" sx={{ mt: 1.5 }}>
-            {/* Why "above 100" is stated: it is the number a reader is most
-                likely to mistake for a fault. services/agreement.py's own
-                docstring says a date the model sharpens onto its own peak
-                scores above 100 "which is why values over 100 are normal and
-                not a bug" -- and the key said only what LOW meant, so a
-                column showing A 141 read as broken. */}
-            <strong>A</strong> = agreement index — how well the modelled date still fits its
-            own unmodelled calibration. 100 means the model left it where it was, above 100
-            that it sharpened the date onto its own peak, and below 60 that it is worth
-            re-examining.{' '}
-            <strong>O</strong> = the probability the date is an outlier.{' '}
+            <strong>A</strong> = agreement index — how far the model moved a date from the original calibration. 100 is unchanged, above 100 means it sharpened the date onto its own peak. Below 60 is considered a major shift.{' '}
+            <br /><strong>O</strong> = the probability the date is an outlier.{' '}
             {/* The chips read as a verdict with no stated rule, and the rule
                 is not guessable from the two numbers beside them: both chips
                 compare O against the PRIOR the date was given, not against a
