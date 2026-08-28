@@ -351,14 +351,14 @@ export default function DurationsPanel({
                   </>
                 )}
                 {unorderable.length === 0 ? (
-                  <>The model can order all {differences.length} pairs.</>
+                  <>It is possible to order all {differences.length} pairs.</>
                 ) : (
                   <>
-                    The model cannot confidently order{' '}
+                    {' '}
                     <strong>
                       {unorderable.length} of {differences.length}
                     </strong>{' '}
-                    pairs
+                    pairs overlap, and cannot be placed in order
                     {unorderable.length <= 4 ? (
                       <>: {unorderable.map((d) => `${d.from_name} and ${d.to_name}`).join('; ')}.</>
                     ) : (

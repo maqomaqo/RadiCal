@@ -1,12 +1,5 @@
-// All-pairs date differences as a triangular matrix, for the question the
-// 55-row table made the reader answer by scanning: WHICH of these dates can
+// All-pairs date differences as a triangular matrix. WHICH of these dates can
 // the model actually put in order, and which can it not separate?
-//
-// A list of every pair is the wrong shape: pairs grow as n(n-1)/2 -- 11 dates
-// make 55 rows, 24 make 276 -- where a grid reads in one pass. And a list
-// structurally cannot show the finding that matters: a CLUSTER of dates none
-// of which can be ordered against each other is a dark block here, and thirty
-// rows scattered across four screens in a table.
 //
 // The cell encodes `overlap`: the probability the model cannot say which came
 // first, 1 being a coin flip. Strong means unsettled -- the direction
