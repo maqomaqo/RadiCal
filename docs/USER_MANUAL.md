@@ -87,9 +87,9 @@ example rows. The optional columns are `material_type`, `curve_id`, `sample_type
 `delta_r_error`, `phase`, `tpq_age_bp`, `taq_age_bp`, `outlier_model`, `outlier_prior`, `depth_cm`,
 `location` and `notes`.
 
-A `phase` column is what turns a list of dates into a model: dates sharing a phase name are
+The `phase` column can be used to prepare the list of dates for use in a model. Dates sharing a phase name are
 grouped, and a starting structure is built around them: one Start/End pair with the phases
-**unordered** inside it, since a CSV says which dates go together but nothing about which group
+**unordered** inside it, since the CSV can't say which group
 came first. Ordering them is then a decision you make in the Model Structure editor.
 
 The app's own results export is readable back in, so exporting a table, correcting it in a
@@ -102,7 +102,7 @@ An OxCal model file is read directly. Its `Sequence`, `Phase`, `Boundary` and `H
 per-scope `Curve` and `Delta_R`, and per-date `Outlier` settings all come across, keeping the names
 OxCal gave them. Importing one from New Analysis brings the model structure with it.
 
-A reservoir offset can be written either way OxCal allows: in full, `Delta_R("LocalMarine",-162,28)`,
+A reservoir offset can be written int he ways OxCal allows: in full, `Delta_R("LocalMarine",-162,28)`,
 or stated once under a name and cited wherever it applies, `Delta_R("=LocalMarine", )`. The offset
 belongs to the curve it was stated for (OxCal applies `Delta_R` to the current `Curve`), so a phase
 holding marine dates on Marine20 and terrestrial ones on SHCal20 gives the offset to the marine
@@ -140,12 +140,8 @@ a calibration will use.
 and a 1σ error column. Column names are matched however they are spelled and in whatever order they
 appear, and a calendar column in BC/AD (negative for BC) can be converted on the way in.
 
-Nothing is stored until you have seen the file read: the dialog reports the point count, the ranges,
-what it assumed, and draws the curve with its ±1σ band. That drawing is the check worth making: a
-calibration curve rises left to right with wiggles, and anything else means the columns were read
-the wrong way round. A date list is short enough to read after importing it; a curve is thousands of
-rows that nobody will check by eye, and a wrong one produces confident, plausible, wrong calendar
-ages for every sample calibrated against it.
+The dialog reports the point count, the ranges, what it assumed, and draws the curve with its ±1σ band. 
+Check that the curve draws correctly, to confirm the rows and columns were input/read in the right order.
 
 Files are refused rather than repaired, each refusal naming the row and the reason: a non-positive
 error, a duplicated calendar age, a radiocarbon column that looks like F¹⁴C rather than an age, a
@@ -156,7 +152,7 @@ Give a curve **aliases** if files refer to it by other names. An alias of `IntCa
 `.oxcal` model written against IntCal13 import once you have added that curve.
 
 **A stored curve's numbers never change.** You can correct its name, citation, DOI, notes and
-aliases at any time; correcting the *data* means importing the corrected file as a new curve. An
+aliases at any time, but correcting the *data* means importing the corrected file as a new curve. An
 analysis run last month has to keep meaning what it said. For the same reason a curve that something
 has been calibrated against cannot be deleted: the app offers to **archive** it instead, which
 removes it from the curve pickers while leaving it resolvable, so those analyses still re-run.
@@ -175,16 +171,14 @@ where the two curves are furthest apart, which is exactly where being wrong abou
 date furthest. Left at zero, the curve claims the proportion is known exactly.
 
 An `.oxcal` file using `Mix_Curves` will import, matched against a mixture you already have. If you
-have none matching, the import fails naming exactly what to create: opening a file never creates
-curves behind your back.
+have none matching, the import fails and says what you will have to create.
 
 ### Browsing a curve
 
 Clicking a curve's name opens the browser, which answers three questions.
 
 **What shape is the curve, and how well known is it?** The chart draws the curve with its own ±1σ
-and ±2σ bands, oldest on the left. Every calibrated date this app produces is this curve read
-backwards, so its wiggles are not detail: they are why a date splits into two ranges, or spreads
+and ±2σ bands, oldest on the left. The wiggles in a curve are why a date splits into two ranges, or spreads
 over three centuries.
 
 **Where am I?** The strip under the chart is the whole 55,000 years with your current view marked.
@@ -230,19 +224,19 @@ commercial date typically carries; ±15 is about the best a good AMS laboratory 
 figure the method's published curves use, which is why it describes the *best possible*
 resolution.
 
-Read it as a planning tool. On IntCal20 at the default ±25, the Hallstatt plateau sits at about 330
+You could read this as a planning tool. On IntCal20 at the default ±25, the Hallstatt plateau sits at about 330
 years while the drop at its start is 103; at the ±15 of the best AMS work, 312 against 33. The
-gap between those two places is far larger than the gap between a good laboratory and an ordinary
-one, which is the point: where you are on the curve matters more than what you pay for the
-measurement. **Export profile** saves the whole
+gap between those two places is far larger than variation in laboratory accuracy. So, where you are on the curve 
+matters more than what you pay for the measurement. **Export profile** saves the whole
 curve's profile as CSV; **Export this window** saves the visible stretch of the curve itself.
 
 ## Model Structure (Bayesian only)
 
-Optional, but this is what makes a Bayesian analysis different from a Group Calibration: build the
-model as nested Sequences and Phases with Boundaries placed where you want them (the OxCal idiom),
-then assign each date to a Phase. TPQ (terminus post quem, a maximum age) and TAQ (terminus ante
-quem, a minimum age) limiters can be set on a date or on a whole Phase.
+Optional, but this is what makes a Bayesian analysis different from a Group Calibration. Build the
+model as nested Sequences and Phases with Boundaries placed where you want them,
+then assign each date to a Phase. RadiCal uses the same terminology as Oxcal. 
+TPQ (terminus post quem, a maximum age) and TAQ (terminus ante quem, a minimum age) 
+limiters can be set on a date or on a whole Phase.
 
 Reached via **Specify Model Structure** / **Edit Model Structure**, which has an **Editor** tab for
 building the tree and a **Harris Matrix Diagram** tab showing it drawn. The Results page renders
@@ -250,13 +244,13 @@ the same diagram for a completed analysis, and the Posterior Distributions plots
 
 ### Reading the Model diagram
 
-The diagram is a picture of the model tree, not a second place to edit it: build the structure on
-the Editor tab and the diagram follows. **Oldest is at the bottom**, as the convention has it.
+The diagram is a picture of the model tree. Build the structure on
+the Editor tab and the diagram follows. **Oldest is at the bottom** as in a stratigraphic profile.
 
 - A **context** (solid box) is a Phase that dates are attached to, showing how many it holds and
   any TPQ/TAQ limiter.
-- A **box drawn around other boxes** is a Sequence or a grouping Phase. It groups without ordering:
-  a Phase containing two Phases says they belong together and says nothing about which came first,
+- A **box drawn around other boxes** is a Sequence or a grouping Phase. It groups without ordering.
+  A Phase containing two Phases says they belong together and says nothing about which came first,
   so they sit side by side inside it.
 - A **labelled rule** across a group is a Boundary, a modelled transition, with its 95% range
   once the analysis has run.
@@ -287,18 +281,17 @@ Calibration with "Save this analysis" on) navigates straight to its Results page
 
 ### Choosing a solver
 
-Only a Bayesian analysis has a solver to choose: a Single or Group Calibration asserts no
+Only a Bayesian analysis asks you to choose a solver. A Single or Group Calibration asserts no
 relationship between dates, so there is nothing to solve jointly. **Automatic is the right answer
 for almost every run**: it integrates the posterior exactly where the model as written allows it
 and samples otherwise, and the Results page always says which of the two actually ran. The override
 exists for the handful of cases below.
 
-**Exact integration** applies to a *chain-shaped* model: one line of Phases separated by Boundaries,
-with every date inside a bounded group, and no ordering the chain does not already imply. That is
-the ordinary archaeological shape. It computes the posterior on a calendar grid by message passing.
-There is no sampler, so nothing to converge, no run length to choose, and no calibration lobe the
-chain can miss. It is also the faster of the two, usually by a wide margin: a single deterministic
-pass, with no progress bar because there is no iteration to report.
+**Exact integration** applies to a *chain-shaped* model - one line of Phases separated by Boundaries,
+with every date inside a bounded group, and no ordering the chain does not already imply. It computes 
+the posterior on a calendar grid by message passing. There is no sampler, so nothing to converge, no 
+run length to choose, and no calibration lobe the chain can miss. It is also the faster of the two, usually 
+by a wide margin: a single deterministic pass, with no progress bar because there is no iteration to report.
 
 **MH/Gibbs sampling** is OxCal's own scheme (Metropolis-Hastings within Gibbs) and takes any model:
 branching structures, parallel groups, two groups ordered against each other with no Boundary
@@ -337,7 +330,7 @@ every model both can handle.
   in *this* assemblage, and each date is then judged against that learned size. The exact solver
   cannot pool information that way, so it works the offset size out over its prior range separately
   for each date, judging each one on its own. The difference shows up mainly in the **reported
-  outlier probabilities**, and it stays small when the outlier priors are small: on a real OxCal comparison the exact path's outlier
+  outlier probabilities**, and it stays small when the outlier priors are small. On a real OxCal comparison the exact path's outlier
   probabilities sat 0.017 from OxCal's where the sampler reached 0.002.
 
   So: **it matters** if you have put outlier models on a group of dates expecting a shared cause
