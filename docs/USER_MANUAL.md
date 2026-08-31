@@ -23,45 +23,45 @@
 1. Navigate to `http://localhost:5173` (or your deployment URL).
 2. Click **New Analysis** (top navigation bar, or from the Dashboard).
 
-There is no multi-step wizard — New Analysis is a single form: settings on the left, adding
+There is no multi-step wizard. New Analysis is a single form: settings on the left, adding
 measurements on the right, the measurement list and (for a Bayesian analysis) the model structure
 below, and a Run Analysis button at the bottom.
 
 ## Creating an Analysis
 
-- **Analysis Name** — required.
+- **Analysis Name**: required.
 - **Analysis Type**:
-  - **Single Calibration** — one date, calibrated on its own. Has an extra "Save this analysis"
+  - **Single Calibration**: one date, calibrated on its own. Has an extra "Save this analysis"
     toggle: switch it off to run a quick test (the result is shown right there on the page) without
     creating anything in a project or the analysis list.
-  - **Group Calibration** — several dates, each calibrated independently. No stratigraphy is
+  - **Group Calibration**: several dates, each calibrated independently. No stratigraphy is
     applied; this is the direct calibration of every date in the group, not a Bayesian model.
-  - **Bayesian** — one or more dates modelled together with stratigraphic constraints. See
+  - **Bayesian**: one or more dates modelled together with stratigraphic constraints. See
     [Model Structure](#model-structure-bayesian-only) below.
-- **Project** — optional. Assigning a project makes that project's own date collection available to
+- **Project**: optional. Assigning a project makes that project's own date collection available to
   pull from (see [Projects and Date Collections](#projects-and-date-collections)), and adds this
   analysis to the project's list.
-- **Result Date Format** — how calendar ages are displayed (e.g. cal BP, BC/AD). This only changes
+- **Result Date Format**: how calendar ages are displayed (e.g. cal BP, BC/AD). This only changes
   the labelling; the underlying calibration is unaffected.
 
 ## Adding Measurements
 
 Each date needs, at minimum, a **Sample Name**, **Age (BP)** and **1σ Error**. Also available:
 
-- **Material** — free text (charcoal, bone, shell, etc.).
-- **Sample Type** — Terrestrial or Marine. Marine samples get an extra **ΔR** (local reservoir
-  offset) field with its own 1σ error — both are required together, since they're combined in
+- **Material**: free text (charcoal, bone, shell, etc.).
+- **Sample Type**: Terrestrial or Marine. Marine samples get an extra **ΔR** (local reservoir
+  offset) field with its own 1σ error; both are required together, since they're combined in
   quadrature with the measurement's own uncertainty.
-- **Calibration Curve** — IntCal20 (Northern Hemisphere terrestrial), SHCal20 (Southern Hemisphere
+- **Calibration Curve**: IntCal20 (Northern Hemisphere terrestrial), SHCal20 (Southern Hemisphere
   terrestrial), Marine20, and any curve you have imported or mixed yourself. Selecting Marine
   switches to a marine curve, since marine carbon calibrated against a terrestrial curve is wrong
   by centuries. See [Calibration Curves](#calibration-curves).
-- **Outlier settings** (Bayesian analyses only) — an optional prior probability that this date does
+- **Outlier settings** (Bayesian analyses only): an optional prior probability that this date does
   not belong to the modelled population, with a choice of outlier model (general vs. charcoal,
   i.e. one-sided for material likely to predate its context).
 
 If a project is assigned and its date collection already has dates in it, an **Add from Project's
-Date Collection** button appears above the measurement form — pick any subset to copy into this
+Date Collection** button appears above the measurement form. Pick any subset to copy into this
 analysis instead of retyping them.
 
 ## Importing Dates from a File
@@ -78,7 +78,7 @@ found, rather than importing what it could and leaving you to work out which dat
 
 One date per row with a header row naming the columns. Only `sample_name`, `age_bp` and
 `error_1sigma` are required; everything else takes the same default a typed-in date would.
-Column **order does not matter** and common spellings are understood — `Lab Code`, `Age BP`,
+Column **order does not matter** and common spellings are understood: `Lab Code`, `Age BP`,
 `± 1σ`, `sd`, `Material`, `Curve`, `Context` all resolve to the right field. Comma, tab and
 semicolon separators are all read.
 
@@ -88,7 +88,7 @@ example rows. The optional columns are `material_type`, `curve_id`, `sample_type
 `location` and `notes`.
 
 A `phase` column is what turns a list of dates into a model: dates sharing a phase name are
-grouped, and a starting structure is built around them — one Start/End pair with the phases
+grouped, and a starting structure is built around them: one Start/End pair with the phases
 **unordered** inside it, since a CSV says which dates go together but nothing about which group
 came first. Ordering them is then a decision you make in the Model Structure editor.
 
@@ -98,22 +98,22 @@ and skipped rather than read back as input.
 
 ### OxCal (.oxcal)
 
-An OxCal model file is read directly — its `Sequence`, `Phase`, `Boundary` and `Hiatus` structure,
+An OxCal model file is read directly. Its `Sequence`, `Phase`, `Boundary` and `Hiatus` structure,
 per-scope `Curve` and `Delta_R`, and per-date `Outlier` settings all come across, keeping the names
 OxCal gave them. Importing one from New Analysis brings the model structure with it.
 
 A reservoir offset can be written either way OxCal allows: in full, `Delta_R("LocalMarine",-162,28)`,
 or stated once under a name and cited wherever it applies, `Delta_R("=LocalMarine", )`. The offset
-belongs to the curve it was stated for — OxCal applies `Delta_R` to the current `Curve` — so a phase
+belongs to the curve it was stated for (OxCal applies `Delta_R` to the current `Curve`), so a phase
 holding marine dates on Marine20 and terrestrial ones on SHCal20 gives the offset to the marine
 dates only. The preview shows the ΔR carried by each date, and a note says how many dates each named
 offset reached.
 
 OxCal's language is larger than what this app models. Anything that would change the posterior and
-cannot be honoured — `Tau_Boundary`, `Sigma_Boundary` and `Zero_Boundary` (non-uniform
-transitions), `C_Date`, `R_Combine`, the deposition-model sequences (`P_Sequence`, `D_Sequence`,
-`V_Sequence`), a curve the app does not have, or a custom `Outlier_Model` — **fails the import**
-with a message naming it, rather than being read as the nearest thing that is implemented. An
+cannot be honoured **fails the import** with a message naming it, rather than being read as the
+nearest thing that is implemented: `Tau_Boundary`, `Sigma_Boundary` and `Zero_Boundary`
+(non-uniform transitions), `C_Date`, `R_Combine`, the deposition-model sequences (`P_Sequence`,
+`D_Sequence`, `V_Sequence`), a curve the app does not have, or a custom `Outlier_Model`. An
 unrecognised command fails it too. Commands that only affect what OxCal plots (`Sum`, `KDE_Plot`,
 `Span`, `Difference`, `Order`…) are skipped with a note, since they query a posterior rather than
 shape one.
@@ -126,7 +126,7 @@ in one Phase, which asserts no ordering between them.
 ## Calibration Curves
 
 **Curves** in the top navigation lists every curve this app can calibrate against, and is where you
-add your own. Three are shipped with it — IntCal20, SHCal20 and Marine20 — and cannot be edited or
+add your own. Three are shipped with it (IntCal20, SHCal20 and Marine20) and cannot be edited or
 removed.
 
 Everything measured in that table is read from the curve that actually loads: its point count,
@@ -141,7 +141,7 @@ and a 1σ error column. Column names are matched however they are spelled and in
 appear, and a calendar column in BC/AD (negative for BC) can be converted on the way in.
 
 Nothing is stored until you have seen the file read: the dialog reports the point count, the ranges,
-what it assumed, and draws the curve with its ±1σ band. That drawing is the check worth making — a
+what it assumed, and draws the curve with its ±1σ band. That drawing is the check worth making: a
 calibration curve rises left to right with wiggles, and anything else means the columns were read
 the wrong way round. A date list is short enough to read after importing it; a curve is thousands of
 rows that nobody will check by eye, and a wrong one produces confident, plausible, wrong calendar
@@ -152,7 +152,7 @@ error, a duplicated calendar age, a radiocarbon column that looks like F¹⁴C r
 negative cal BP (post-bomb curves need a different likelihood, which this app does not have). Rows
 written oldest-first are simply sorted, as the IntCal files themselves are written that way.
 
-Give a curve **aliases** if files refer to it by other names — an alias of `IntCal13` is what lets an
+Give a curve **aliases** if files refer to it by other names. An alias of `IntCal13` is what lets an
 `.oxcal` model written against IntCal13 import once you have added that curve.
 
 **A stored curve's numbers never change.** You can correct its name, citation, DOI, notes and
@@ -163,7 +163,7 @@ removes it from the curve pickers while leaving it resolvable, so those analyses
 
 ### Mixed curves
 
-**New Mixed Curve** builds a curve from two others in a fixed proportion — OxCal's `Mix_Curves`.
+**New Mixed Curve** builds a curve from two others in a fixed proportion, OxCal's `Mix_Curves`.
 Its use is a sample whose carbon came from more than one reservoir, most often a human or animal
 with a partly marine diet: their bone is neither terrestrial nor marine carbon, and calibrating it
 against either curve alone is wrong by centuries in one direction or the other, with nothing in the
@@ -171,11 +171,11 @@ result to say so.
 
 State the proportion as a percentage of the first curve, and **give its uncertainty**. A dietary
 fraction comes from stable isotopes and has real error, and that error widens the mixed curve most
-where the two curves are furthest apart — which is exactly where being wrong about the diet moves a
+where the two curves are furthest apart, which is exactly where being wrong about the diet moves a
 date furthest. Left at zero, the curve claims the proportion is known exactly.
 
 An `.oxcal` file using `Mix_Curves` will import, matched against a mixture you already have. If you
-have none matching, the import fails naming exactly what to create — opening a file never creates
+have none matching, the import fails naming exactly what to create: opening a file never creates
 curves behind your back.
 
 ### Browsing a curve
@@ -203,7 +203,7 @@ and its **local gradient**, which is what governs how tightly anything can be da
 | above 1.6 | steep | rising faster than calendar time, so dates here calibrate unusually tightly |
 
 Three more controls sit in the header bar. **Compare with** overlays a second curve and adds a panel
-showing their *difference* — worth doing, because two curves drawn over each other look alike at any
+showing their *difference*, worth doing because two curves drawn over each other look alike at any
 zoom that fits a millennium on screen, while IntCal20 − SHCal20 shows the hemispheric offset (about
 40 ¹⁴C years) at a glance. **Dates as** switches the calendar convention. **Expected resolution** is
 described next.
@@ -227,11 +227,11 @@ plausibly return, the laboratory error is scaled with age, the measurement calib
 of its calibrated range recorded; those widths are then averaged over the measurements that period
 could actually yield. **Lab ±1σ** sets the precision assumed. It starts at ±25, which is what a
 commercial date typically carries; ±15 is about the best a good AMS laboratory offers, and is the
-figure the method's published curves use — which is why it describes the *best possible*
+figure the method's published curves use, which is why it describes the *best possible*
 resolution.
 
 Read it as a planning tool. On IntCal20 at the default ±25, the Hallstatt plateau sits at about 330
-years while the drop at its start is 103 — and at the ±15 of the best AMS work, 312 against 33. The
+years while the drop at its start is 103; at the ±15 of the best AMS work, 312 against 33. The
 gap between those two places is far larger than the gap between a good laboratory and an ordinary
 one, which is the point: where you are on the curve matters more than what you pay for the
 measurement. **Export profile** saves the whole
@@ -241,8 +241,8 @@ curve's profile as CSV; **Export this window** saves the visible stretch of the 
 
 Optional, but this is what makes a Bayesian analysis different from a Group Calibration: build the
 model as nested Sequences and Phases with Boundaries placed where you want them (the OxCal idiom),
-then assign each date to a Phase. TPQ (terminus post quem — a maximum age) and TAQ (terminus ante
-quem — a minimum age) limiters can be set on a date or on a whole Phase.
+then assign each date to a Phase. TPQ (terminus post quem, a maximum age) and TAQ (terminus ante
+quem, a minimum age) limiters can be set on a date or on a whole Phase.
 
 Reached via **Specify Model Structure** / **Edit Model Structure**, which has an **Editor** tab for
 building the tree and a **Harris Matrix Diagram** tab showing it drawn. The Results page renders
@@ -250,7 +250,7 @@ the same diagram for a completed analysis, and the Posterior Distributions plots
 
 ### Reading the Model diagram
 
-The diagram is a picture of the model tree, not a second place to edit it — build the structure on
+The diagram is a picture of the model tree, not a second place to edit it: build the structure on
 the Editor tab and the diagram follows. **Oldest is at the bottom**, as the convention has it.
 
 - A **context** (solid box) is a Phase that dates are attached to, showing how many it holds and
@@ -258,24 +258,24 @@ the Editor tab and the diagram follows. **Oldest is at the bottom**, as the conv
 - A **box drawn around other boxes** is a Sequence or a grouping Phase. It groups without ordering:
   a Phase containing two Phases says they belong together and says nothing about which came first,
   so they sit side by side inside it.
-- A **labelled rule** across a group is a Boundary — a modelled transition — with its 95% range
+- A **labelled rule** across a group is a Boundary, a modelled transition, with its 95% range
   once the analysis has run.
 - An **arrow** means the lower block is older. Arrows are drawn only between adjacent blocks, and
   only where no Boundary rule already separates them: a relationship implied by another one is left
   out, which is what keeps a nested model readable.
 
-Nothing in the diagram is draggable. Position carries meaning here — a context sits centred beneath
-the group that contains it — so it is laid out rather than arranged by hand.
+Nothing in the diagram is draggable. Position carries meaning here (a context sits centred beneath
+the group that contains it), so it is laid out rather than arranged by hand.
 
 **Model Settings**, on the New Analysis form itself:
-- **Solver** — Automatic (recommended: exact integration where the model allows it, sampling
+- **Solver**: Automatic (recommended: exact integration where the model allows it, sampling
   otherwise), Exact solver only (fast, but only works on chain-shaped models), or MH/Gibbs (works on all models, uses the same MCMC sampling method as OxCal throughout). See
   [Choosing a solver](#choosing-a-solver) for when to override Automatic and what it costs.
-- **Posterior draws** — how many samples each date's posterior is reported with.
-- **Uniform span prior** — OxCal's `UniformSpanPrior` correction (on by default), which keeps a
+- **Posterior draws**: how many samples each date's posterior is reported with.
+- **Uniform span prior**: OxCal's `UniformSpanPrior` correction (on by default), which keeps a
   sequence's overall span prior independent of how finely it's subdivided. Only affects a sequence
   with three or more Boundaries.
-- **Durations and differences** — off by default; see
+- **Durations and differences**: off by default; see
   [Durations and Differences](#durations-and-differences) below for what it adds and when to want
   it. A Group Calibration has the same option, labelled **Differences between dates**, under
   **Reporting**.
@@ -289,36 +289,36 @@ Calibration with "Save this analysis" on) navigates straight to its Results page
 
 Only a Bayesian analysis has a solver to choose: a Single or Group Calibration asserts no
 relationship between dates, so there is nothing to solve jointly. **Automatic is the right answer
-for almost every run** — it integrates the posterior exactly where the model as written allows it
+for almost every run**: it integrates the posterior exactly where the model as written allows it
 and samples otherwise, and the Results page always says which of the two actually ran. The override
 exists for the handful of cases below.
 
 **Exact integration** applies to a *chain-shaped* model: one line of Phases separated by Boundaries,
 with every date inside a bounded group, and no ordering the chain does not already imply. That is
-the ordinary archaeological shape. It computes the posterior on a calendar grid by message passing —
-there is no sampler, so nothing to converge, no run length to choose, and no calibration lobe the
+the ordinary archaeological shape. It computes the posterior on a calendar grid by message passing.
+There is no sampler, so nothing to converge, no run length to choose, and no calibration lobe the
 chain can miss. It is also the faster of the two, usually by a wide margin: a single deterministic
 pass, with no progress bar because there is no iteration to report.
 
-**MH/Gibbs sampling** is OxCal's own scheme (Metropolis-Hastings within Gibbs) and takes any model —
+**MH/Gibbs sampling** is OxCal's own scheme (Metropolis-Hastings within Gibbs) and takes any model:
 branching structures, parallel groups, two groups ordered against each other with no Boundary
 between them, dates sitting outside every Boundary. It runs a minimum of 20,000 sweeps and extends
 up to 200,000 until the worst parameter reaches 95% on OxCal's own convergence measure; the achieved
 figure is reported with the results, and a run that fell short is flagged rather than quietly
 returned.
 
-Where both can be asked, they agree to under a year — they are checked against each other on every
-model both can handle.
+Where both can be asked, they agree to under a year, and they are checked against each other on
+every model both can handle.
 
 | | Exact solver | MH/Gibbs sampler |
 |---|---|---|
 | Model shapes | chain-shaped only; fails rather than sampling | all |
-| Result | deterministic — the same input gives the same numbers | stochastic; converges to the same posterior |
+| Result | deterministic; the same input gives the same numbers | stochastic; converges to the same posterior |
 | Speed | one pass; typically much faster | 20,000–200,000 sweeps, extended until converged |
-| Convergence | not applicable — nothing iterates | reported per run; can fall short and say so |
+| Convergence | not applicable, since nothing iterates | reported per run; can fall short and say so |
 | Multi-lobe calibration | resolved exactly | handled by whole-group translation moves, but a sampled answer |
 | Duration/difference draws | independent draws from the joint posterior | draws from an MCMC chain, so correlated |
-| Outlier models | how big an outlier's offset is, taken over its prior range date by date — an approximation | one offset size shared across the model and estimated from the data, as OxCal does |
+| Outlier models | how big an outlier's offset is, taken over its prior range date by date (an approximation) | one offset size shared across the model and estimated from the data, as OxCal does |
 | Progress and cancellation | neither: it completes or fails | progress reported, run cancellable |
 
 **Choose MH/Gibbs deliberately when:**
@@ -327,42 +327,42 @@ model both can handle.
   model.
 - You want an **independent cross-check** of an exactly-integrated result: two different routes to
   the same posterior disagreeing by more than a year or two is worth investigating, and **Compare**
-  will measure the difference — provided the solver is the only thing you changed between the two
+  will measure the difference, provided the solver is the only thing you changed between the two
   runs (see [Comparing Analyses](#comparing-analyses)).
 - Several dates carry **outlier models** and the run is about *which* dates are outliers. An outlier
-  model does not only say a date might not belong — it also carries an assumption about **how far
+  model does not only say a date might not belong. It also carries an assumption about **how far
   off an outlier is likely to be**: tens of years, or several centuries. OxCal treats that offset
   size as a single unknown shared by every date using the model and lets the data estimate it, so
   three charcoal dates that all read old together tell the model what an old-wood offset looks like
   in *this* assemblage, and each date is then judged against that learned size. The exact solver
-  cannot pool information that way, so it works the offset size out over its prior range separately for each date, judging each one
-  on its own. The difference shows up mainly in the **reported outlier probabilities**, and it
-  stays small when the outlier priors are small: on a real OxCal comparison the exact path's outlier
+  cannot pool information that way, so it works the offset size out over its prior range separately
+  for each date, judging each one on its own. The difference shows up mainly in the **reported
+  outlier probabilities**, and it stays small when the outlier priors are small: on a real OxCal comparison the exact path's outlier
   probabilities sat 0.017 from OxCal's where the sampler reached 0.002.
 
-  So: **it matters** if you have put outlier models on a group of dates expecting a shared cause —
-  old wood, residuality, a suspect laboratory batch — and the outlier probabilities are the answer
+  So: **it matters** if you have put outlier models on a group of dates expecting a shared cause
+  (old wood, residuality, a suspect laboratory batch) and the outlier probabilities are the answer
   you are after, or you intend to quote them alongside OxCal's. **It does not matter** if one or two
   dates carry a small outlier prior as insurance and what you are reading off the run is the
   modelled date ranges; there the two paths differ by less than the ranges are quoted to.
 
 **Choose Exact solver only when:**
 
-- You need a **reproducible, deterministic** number — the same analysis re-run must give the same
+- You need a **reproducible, deterministic** number: the same analysis re-run must give the same
   figures to the digit, with no convergence caveat attached.
 - You want to **force exact integration on a model Automatic declined to integrate**, and you accept
   that this changes the model. See the warning below.
 
 **The warning about forcing Exact.** Automatic integrates exactly only where the model needs no
-help. A model that is not a chain *as authored* — most often a Sequence that orders two groups with
-no Boundary between them — can be made solvable by supplying the transitions its ordering implies,
+help. A model that is not a chain *as authored*, most often a Sequence that orders two groups with
+no Boundary between them, can be made solvable by supplying the transitions its ordering implies,
 and choosing **Exact solver only** does exactly that. This is not a restatement of your model: it
 splits one span term over K dates into two terms over K₁ + K₂ dates, and K is the exponent that
 holds a date to its group, so the modelled ranges genuinely move. Measured against OxCal on the
 app's own fixtures (rms of the modelled dates, in years), sampling the model as written beat
 integrating the patched model both times: 1.49 against 2.51 on the `ordered` fixture, and 4.53
 against 10.63 on the charcoal fixture. So forcing Exact on such a model cross-checks *a different
-model* as well as a different method — the Results page says how many transitions were supplied
+model* as well as a different method, and the Results page says how many transitions were supplied
 whenever this happens. If the exact solver is what you want, the better fix is usually to write the
 missing Boundary into the model yourself, which makes it exactly solvable and says out loud what the
 patch would have done silently.
@@ -375,35 +375,35 @@ The mathematics behind both solvers is in [A.6 Solvers](#a6-solvers).
 
 ## Viewing Results
 
-- **Results Summary** — one row per date (and, for a Bayesian model, per Boundary), in the model's
+- **Results Summary**: one row per date (and, for a Bayesian model, per Boundary), in the model's
   own structure order. Columns: the date's unconstrained ("unmodelled") calibration, its modelled
   posterior HPD range at the confidence you've selected, and diagnostics.
-- **HPD Confidence** — 68.3%, 95.4%, or 99.7%: the two-sided normal coverages of 1, 2 and 3
+- **HPD Confidence**: 68.3%, 95.4%, or 99.7%, the two-sided normal coverages of 1, 2 and 3
   standard deviations, which is what "1 sigma" means and what OxCal reports against. These are
   the exact coverages (68.269%, 95.450%, 99.730%), not the labels rounded back into the
-  calculation — the level is the threshold an HPD region is accumulated to, so the digits move
+  calculation. The level is the threshold an HPD region is accumulated to, so the digits move
   the reported range.
-- **Show Mean / Show Median** — optional point estimates alongside the HPD ranges.
+- **Show Mean / Show Median**: optional point estimates alongside the HPD ranges.
 - Any date whose diagnostics are worth a second look (poor agreement with its own unconstrained
   calibration, or a high outlier probability) is called out in a banner above the table.
-- **Durations and Differences** — above the results table, when the run was asked for them. See
+- **Durations and Differences**: above the results table, when the run was asked for them. See
   [Durations and Differences](#durations-and-differences); a run that was not asked for them says
   so in one line rather than showing an empty table.
-- **Model Structure** — a summary (phase and ordering-relationship counts) and, for a Bayesian
+- **Model Structure**: a summary (phase and ordering-relationship counts) and, for a Bayesian
   analysis, the read-only Harris matrix diagram of the constraints actually used.
-- **Posterior Distributions** — Plotly charts, oldest first:
-  - **Stacked** (default) — every date (and Boundary) as one row each, sharing a single calendar
+- **Posterior Distributions**: Plotly charts, oldest first:
+  - **Stacked** (default): every date (and Boundary) as one row each, sharing a single calendar
     axis, so overlap between dates is directly visible. Each row is scaled to its own peak, so
     heights compare precision, not probability.
-  - **Individual** — one full-size plot per date/Boundary.
-  - **Show boundary plots** — hide/show Boundary rows separately from dates.
-  - **Show prior (unmodelled) distribution** — off by default; overlays each date's plain
+  - **Individual**: one full-size plot per date/Boundary.
+  - **Show boundary plots**: hide/show Boundary rows separately from dates.
+  - **Show prior (unmodelled) distribution**: off by default; overlays each date's plain
     calibration (no stratigraphic constraints) as a grey shadow behind its modelled posterior, so
     you can see exactly how far the model moved it.
 
 ## Durations and Differences
 
-Off by default, and turned on before the run — under **Model Settings** for a Bayesian analysis
+Off by default, and turned on before the run: under **Model Settings** for a Bayesian analysis
 (**Durations and differences**) or **Reporting** for a Group Calibration (**Differences between
 dates**). To add it to an analysis that has already run, **Edit** it, turn the option on, and run it
 again; **Re-run** on its own reuses the settings the analysis was saved with.
@@ -413,18 +413,18 @@ converted to BC/AD when you change the reporting format.
 
 ### The three durations
 
-- **Sequence** — from a Sequence's first Boundary to its last. How long the whole of it was in use.
-- **Phase** — the interval a Phase's two Boundaries enclose. This is OxCal's `Interval()`, and it is
+- **Sequence**: from a Sequence's first Boundary to its last. How long the whole of it was in use.
+- **Phase**: the interval a Phase's two Boundaries enclose. This is OxCal's `Interval()`, and it is
   the *modelled* duration: it is normally longer than the spread of the dates inside, because those
   dates are treated as a sample of the phase rather than the whole of it.
-- **Dated events** — from the oldest to the youngest dated event in a Phase (OxCal's `Span()`).
+- **Dated events**: from the oldest to the youngest dated event in a Phase (OxCal's `Span()`).
   Nothing is inferred beyond the dates themselves.
 
 Reading the second against the third is the point of having both. A phase whose dated events span 30
 years but whose modelled duration is 250 is a phase your dates have barely sampled.
 
-A Phase with fewer than two dates gets no "dated events" row — one date has no span. A Sequence with
-only one bounded group gets no Sequence row, because its Phase duration is already the same quantity.
+A Phase with fewer than two dates gets no "dated events" row, since one date has no span. A
+Sequence with only one bounded group gets no Sequence row, because its Phase duration is already the same quantity.
 
 ### Differences
 
@@ -443,9 +443,9 @@ The years column beside it is headed **Separation** for phases and **Difference*
 Two phases either side of a single shared Boundary read **shares a transition** in place of both
 figures, and the Overlap column reads **—**: one phase's end *is* the next one's start, so the model
 gives them no gap and no overlap to measure. Neither zero is a finding, which is why neither is
-printed — on screen, in the CSV or in the PDF. Put a **Hiatus** between two Boundaries where you
+printed, on screen or in the CSV or the PDF. Put a **Hiatus** between two Boundaries where you
 want the gap itself modelled. Two phases sitting inside the *same* pair of Boundaries are not
-compared at all — the model brackets them identically, so it has nothing to say about their order.
+compared at all: the model brackets them identically, so it has nothing to say about their order.
 
 In a plain Sequence, where every Phase shares its Boundaries with its neighbours, this table has
 little to add: adjacent pairs share a transition, and the gap between two non-adjacent Phases is
@@ -457,31 +457,33 @@ Phases in different branches of the model.
 
 Every quantity here depends on several modelled ages at once, which means it can only be read off
 *joint* draws of the posterior rather than the per-parameter distributions the rest of the page
-shows. Those draws are the only Monte Carlo in the exact solver's output, so these carry a sampling error — the panel says how many draws they came from, and whether those draws were independent (the exact solver, or a Group Calibration) or an MCMC chain.
+shows. Those draws are the only Monte Carlo in the exact solver's output, so these carry a sampling
+error, and the panel says how many draws they came from and whether those draws were independent
+(the exact solver, or a Group Calibration) or an MCMC chain.
 The reported ranges are quoted at a step that widens for a very long duration, rather than claiming
 five-year precision the draws cannot support.
 
 ## Exporting Data
 
-- **Export CSV** (on the Results page) — the full results table, including the unmodelled
+- **Export CSV** (on the Results page): the full results table, including the unmodelled
   comparison, in the currently-selected date format. Where a run produced durations and differences,
-  they follow as a second block below it, after a blank line and their own header — they share no
+  they follow as a second block below it, after a blank line and their own header. They share no
   column with the results table, since every figure in them is a length rather than a date.
-- **JSON** — available via the API (`GET /api/results/{id}/export/json`) for anyone who wants the
+- **JSON**: available via the API (`GET /api/results/{id}/export/json`) for anyone who wants the
   full result machine-readable; there's no button for it in the UI yet.
-- **Curve data** (on a curve's browser page) — **Export this window** saves the visible stretch of
+- **Curve data** (on a curve's browser page): **Export this window** saves the visible stretch of
   the curve as CSV (calendar age, radiocarbon age, error, local gradient); **Export profile** saves
   its whole expected-resolution profile. A curve itself can be downloaded from the Curves page, and
   an imported one comes back byte-for-byte as it was uploaded.
-- **Export PDF** (on the Results page) — a printable report of the whole analysis: what it is and
+- **Export PDF** (on the Results page): a printable report of the whole analysis: what it is and
   when it was run, the curve(s) it was calibrated against with their references, which solver
   computed the posteriors, the results table in the model's own reading order, the durations and
   differences where there are any, and a plot of every date and Boundary with its HPD ranges marked. Like the CSV it reads in the date format currently
   selected. It is rendered on the server and draws a plot per modelled parameter, so a large model
-  takes a few seconds — the button says so while it works.
-- **Export CSV** (on a comparison page) — every paired date with each run's median, HPD range and
+  takes a few seconds, and the button says so while it works.
+- **Export CSV** (on a comparison page): every paired date with each run's median, HPD range and
   agreement index, then the shift and width ratio against the reference run. Below it, the model's
-  derived quantities in three separate blocks — modelled transitions, durations, separations —
+  derived quantities in three separate blocks (modelled transitions, durations, separations),
   because a calendar age and a length of time share no column any more than they share an axis on
   screen, and each block names its own units and what a positive shift means in them (older,
   longer, a wider gap). A quantity that only some of the runs have carries their names in a
@@ -490,13 +492,13 @@ five-year precision the draws cannot support.
   do everywhere else. The dates that could not be paired follow under their own header, so a
   spreadsheet of eleven dates from a comparison of fourteen says so itself. The settings diff and
   the agreement scatter are not exported.
-- **Download PNG** (for each Plot) — provides a print-quality PNG file of the plot window in the view currently shown on screen.
+- **Download PNG** (for each Plot): provides a print-quality PNG file of the plot window in the view currently shown on screen.
 
 ## Projects and Date Collections
 
-A **Project** groups analyses, and can also hold its own collection of dates — entered one at a
+A **Project** groups analyses, and can also hold its own collection of dates, entered one at a
 time, pasted in bulk (`name, age, error[, material[, context[, curve]]]` per line), or imported
-from a file (see [Importing Dates from a File](#importing-dates-from-a-file)) — independent
+from a file (see [Importing Dates from a File](#importing-dates-from-a-file)), independent
 of any particular analysis. A collection holds dates rather than models, so importing an OxCal file
 here keeps each date's phase as its default context but not the structure; import it from a new
 analysis to keep that. Deploying a selection of dates copies the values into a new analysis, so
@@ -506,7 +508,7 @@ dates can be deployed more than once to model them differently each time.
 From a project page you can also re-run every analysis in it at once, or re-run, duplicate, or edit
 the inputs of a single analysis (editing replaces its saved inputs and re-runs it in place, keeping
 the same result page). Ticking two or more finished analyses and pressing **Compare** opens them
-side by side — see [Comparing Analyses](#comparing-analyses). 
+side by side; see [Comparing Analyses](#comparing-analyses). 
 
 Deploying dates from a collection always creates a **Bayesian** analysis and opens its editor, but
 by changing the Analysis Type you can instead do a group calibration. Choosing Single
@@ -540,11 +542,11 @@ the top and the ones they agree on fall away. **Reference analysis order** and *
 
 Three columns beside each row:
 
-- **Δ median** — this run's median minus the reference's, in years, **positive meaning older**.
+- **Δ median**: this run's median minus the reference's, in years, **positive meaning older**.
   Did the answer change?
-- **Width ratio** — the width of this run's HPD region divided by the reference's. Below 1 is
+- **Width ratio**: the width of this run's HPD region divided by the reference's. Below 1 is
   tighter. Did constraining the date buy anything?
-- **Agreement** — each run's agreement index, listed only for runs that compute one (a group
+- **Agreement**: each run's agreement index, listed only for runs that compute one (a group
   calibration has no model for a date to agree with).
 
 The two questions come apart constantly. A model that moves nothing while halving every interval is
@@ -564,7 +566,7 @@ corresponds to is not decidable.
 
 ### Models
 
-The second tab asks the other question: *I changed the model — was it
+The second tab asks the other question: *I changed the model, was it
 worth it, and what did it cost*.
 
 **Model differences** is read out of what each analysis stored:
@@ -576,7 +578,7 @@ unnamed element is counted but not matched, since the only other thing to match 
 
 **Findings**
 Compares the calendar estimates for each transition, and their durations. Obviously not all models have 
-the same boundaries — so when a boundary in the reference model that is missing in the comparison is drawn
+the same boundaries, so a boundary in the reference model that is missing in the comparison is drawn
 with a dashed line where the other runs would be, and reads **no counterpart**. Two runs that list the
 same pair of phases in opposite order are left unpaired too: every figure in one is the negative of
 the other, which is a structural difference worth seeing rather than something to be negated into a
@@ -585,36 +587,36 @@ match.
 **Date agreement changes** plots each run's agreement index against the reference's, one point per date. The
 diagonal is "this date fits no better and no worse than before"; below it, worse, and dotted rules
 mark the conventional threshold of 60 on both axes. This is the half of a comparison the Dates tab
-cannot show — a date that appears there as a clean 140-year gain in
+cannot show: a date that appears there as a clean 140-year gain in
 precision can sit well below the diagonal here, because the precision was bought by overruling the
 date rather than by learning something about it.
 
 
 ## Best Practices
 
-1. **Sample data** — use consistent units (age always in years BP), and double-check stratigraphic
+1. **Sample data**: use consistent units (age always in years BP), and double-check stratigraphic
    order before building a model structure around it.
-2. **Calibration curves** — IntCal20 for Northern Hemisphere terrestrial samples, SHCal20 for
+2. **Calibration curves**: IntCal20 for Northern Hemisphere terrestrial samples, SHCal20 for
    Southern Hemisphere terrestrial, Marine20 for marine samples. Use the most recent curve version.
    For a sample whose carbon came from more than one reservoir, build a mixed curve rather than
-   choosing the nearer of the two — see [Calibration Curves](#calibration-curves).
-3. **Marine corrections** — consult the literature for an appropriate local ΔR; document its source
+   choosing the nearer of the two; see [Calibration Curves](#calibration-curves).
+3. **Marine corrections**: consult the literature for an appropriate local ΔR; document its source
    in the sample's notes.
-4. **Reading diagnostics** — the agreement index compares a date's modelled posterior against its
+4. **Reading diagnostics**: the agreement index compares a date's modelled posterior against its
    own unconstrained calibration (100 = the model left it alone; below ~60 is conventionally worth a
    second look). It flags a date the model had to move, which is not automatically the same as a
-   date that's simply wrong — see the discussion in `backend/app/services/agreement.py` if you're
+   date that's simply wrong; see the discussion in `backend/app/services/agreement.py` if you're
    using it to hunt for outliers specifically.
-5. **Check the curve before commissioning the dates** — the browser's expected-resolution panel
+5. **Check the curve before commissioning the dates**: the browser's expected-resolution panel
    says how tightly a date from your period can be known at best. If your question needs finer
    resolution than the curve can give there, no laboratory precision will supply it, and it is
    better to know that before the samples are sent than after.
-6. **Compare runs on both tabs, not one** — a model that tightens every interval has not
+6. **Compare runs on both tabs, not one**: a model that tightens every interval has not
    necessarily improved anything. Read the Dates tab for what moved and the Models tab's agreement
    scatter for what it cost; a date that gained precision by being overruled looks like a success on
    the first and a problem on the second. And do not read a difference between two runs as a
-   probability — see [Comparing Analyses](#comparing-analyses).
-7. **Wide Boundaries on a short phase are expected** — a Phase's Start/End Boundaries genuinely need
+   probability; see [Comparing Analyses](#comparing-analyses).
+7. **Wide Boundaries on a short phase are expected**: a Phase's Start/End Boundaries genuinely need
    four or more dated members before their span is even mathematically well-constrained; two or
    three dates in a phase can produce a very wide 95% range and that's correct, not a bug.
 
@@ -654,7 +656,7 @@ different things:
 | Duration or difference | an adaptive step, reported with the figure | computed from draws, so the step is set by what the draws can support (see [A.9](#a9-durations-and-differences)) |
 
 So a single calibration or the unmodelled column of a Bayesian result can and does return ranges
-that are not multiples of five — SHCal20 is tabulated at 1-year steps through the late Holocene, and
+that are not multiples of five: SHCal20 is tabulated at 1-year steps through the late Holocene, and
 a range there is quoted to the year. Only the *modelled* posterior is rebinned. Point estimates and
 plots always use the full-resolution posterior.
 
@@ -693,7 +695,7 @@ The built-in curves are IntCal20 (Reimer et al. 2020), SHCal20 (Hogg et al. 2020
 
 ### A.3 Mixed curves
 
-For a sample whose carbon came from two reservoirs — the classic case being a partly marine diet —
+For a sample whose carbon came from two reservoirs (the classic case being a partly marine diet),
 the app builds the curve OxCal's `Mix_Curves` builds:
 
 ```
@@ -715,7 +717,7 @@ coverage is reached; the selected points are then grouped into maximal runs, eac
 range with its own share of the total probability. Because calibration curves are not monotonic, a
 single date routinely produces several disjoint ranges, and reporting only the outer envelope would
 claim probability in the near-empty gaps between them. The percentages are shares of the entire
-distribution, so they sum to slightly more than the level requested — the set is built from whole
+distribution, so they sum to slightly more than the level requested: the set is built from whole
 grid points and the last one taken overshoots. This is standard radiocarbon reporting practice
 (Stuiver and Reimer 1993; Bronk Ramsey 2009a).
 
@@ -731,7 +733,7 @@ sequence would come back with different widths. At a fine step the HPD picks out
 skips the dips between them.
 
 Modelled ranges are therefore rebinned to the 5-year reporting step before the HPD is taken.
-Unmodelled calibration is *not* rebinned — it has no solver grid to hide, and the curve's own
+Unmodelled calibration is *not* rebinned. It has no solver grid to hide, and the curve's own
 spacing is the honest resolution of the answer.
 
 The results page re-selects the region in the browser when you change the confidence selector, since
@@ -754,12 +756,12 @@ p(t, b)  proportional to  prod_dates L_d(t_d)
 - `L_d` is date `d`'s own calibration likelihood from A.2.
 - The **span factor** `(older - younger)^(-K)` is the uniform phase model: conditional on the pair of
   Boundaries enclosing it, each of a group's `K` dates is uniformly distributed between them. Each
-  date belongs to exactly one bounded group — the innermost enclosing pair — so a nested group's
+  date belongs to exactly one bounded group, the innermost enclosing pair, so a nested group's
   dates are not also counted in its parent's span term.
 - `c(t, b)` is the indicator that every ordering constraint holds: sequence order, stratigraphic
   relationships, and any TPQ/TAQ limits. Constraints are hard truncations, not soft penalties.
   Stratigraphic relationships are expanded to pairwise sample constraints by the law of
-  superposition — a sample above another was deposited later and is younger — and displayed as a
+  superposition (a sample above another was deposited later and is younger) and displayed as a
   version of the Harris matrix (Harris 1979), oldest at the bottom. Where a sample and its group both carry a
   TPQ or TAQ, the tighter of the two wins.
 
@@ -813,7 +815,7 @@ beta_i(b)       = sum over b_i+1 < b of  T_i(b, b_i+1) beta_i+1(b_i+1)
 ```
 
 This is O(M²) per group on an M-point calendar grid, deterministic, and exact up to the grid step.
-There is no sampler to converge and no mode to miss — which matters because resolving which of
+There is no sampler to converge and no mode to miss, which matters because resolving which of
 several calibration lobes is right is much of the reason to build a model at all.
 
 The interval integrals `F` are **trapezoidal**, with half weight on each endpoint cell. This is not a
@@ -821,13 +823,13 @@ refinement: a plain cumulative difference gives an interval spanning `k` cells t
 cells, while the span factor charges `k`, so near-coincident configurations gain `2^K` and every
 modelled phase comes out several times too narrow.
 
-**Metropolis-Hastings / Gibbs sampling** (everything else) — the scheme OxCal uses (Metropolis et
+**Metropolis-Hastings / Gibbs sampling** (everything else) is the scheme OxCal uses (Metropolis et
 al. 1953; Hastings 1970; Geman and Geman 1984; applied to this problem by Buck et al. 1992 and Bronk
 Ramsey 1995). Each full conditional is one-dimensional and exactly samplable: a date's conditional
 is its own likelihood over the interval its neighbours and boundaries allow (the span factor drops
 out, being independent of where within the interval the date sits); a Boundary's is the product of
 the span factors of the groups it bounds. The app draws these by inverse CDF on a precomputed
-cumulative table rather than by rejection as OxCal does — the same target distribution, at bounded
+cumulative table rather than by rejection as OxCal does: the same target distribution, at bounded
 cost per draw. Conditionally independent dates are updated in blocks, and whole-group translation
 moves are proposed on the exact MH ratio so a tightly constrained group can cross between
 calibration lobes, which single-site updating cannot do.
@@ -850,9 +852,9 @@ L_mix(t) = (1 - p) L_inlier(t) + p L_outlier(t)
 convolved with an offset kernel, following Bronk Ramsey (2009b), whose treatment builds on Christen
 (1994):
 
-- **General** — a Student-t offset with 5 degrees of freedom, scale `10^u` with `u` uniform on
+- **General**: a Student-t offset with 5 degrees of freedom, scale `10^u` with `u` uniform on
   `[0, 4]`. Symmetric: the date may be too old or too young.
-- **Charcoal** — a one-sided exponential gap truncated at 10 scale lengths, scale `10^u` with `u`
+- **Charcoal**: a one-sided exponential gap truncated at 10 scale lengths, scale `10^u` with `u`
   uniform on `[0, 3]`, i.e. OxCal's `Outlier_Model("Charcoal", Exp(1,-10,0), U(0,3), "t")`. The mass
   sits on the side that says the dated material formed *before* the context that held it.
 
@@ -860,7 +862,7 @@ The scale is integrated over its prior on a 24-node log grid. On the exact path 
 independently per date, which is an approximation: OxCal shares one scale across every date using
 the model and lets the data constrain it, and a shared hyperparameter does not factorise along the
 message passing. The sampler does share it properly. The cost of the approximation is small where
-outlier priors are small — on a real OxCal comparison the exact path's outlier probabilities sit
+outlier priors are small: on a real OxCal comparison the exact path's outlier probabilities sit
 0.017 from OxCal's where the sampler reaches 0.002.
 
 **Reported outlier probability** is the posterior probability that the date is an outlier, obtained
@@ -871,7 +873,7 @@ P(outlier) = integral  posterior(t) * p L_out(t) / L_mix(t)  dt
 ```
 
 The outlier component is deliberately *not* renormalised over the computational window. Its
-convolution is already proper on the real line, and most of its mass lies off the grid — which is
+convolution is already proper on the real line, and most of its mass lies off the grid, which is
 precisely the statement that a flagged date's true age could be anywhere. Rescaling the remainder to
 one would make the reported probability a function of the window width.
 
@@ -894,7 +896,7 @@ A_overall = 100 * (product of A_i/100)^(1/sqrt(n))
 ```
 
 Both are computed on a 5-year grid, matching OxCal's export resolution, and both distributions are
-normalised over a window spanning *both* — normalising the likelihood over only the posterior's
+normalised over a window spanning *both*; normalising the likelihood over only the posterior's
 support would let a badly displaced date score well on the sliver where the two still overlap.
 
 Against 24 known answers from OxCal 4.4 across three models, the individual indices reproduce to
@@ -912,8 +914,8 @@ and a guess at the headline number people screen on would be worse than reportin
 
 These are functions of several modelled ages at once, so they are computed from **joint** draws of
 the posterior, never by pairing up marginals. The distinction is not subtle: pairing draws from two
-boundary marginals on a single six-date phase puts 8.2% of them below zero — a phase ending before
-it starts — where the joint posterior gives that no probability at all.
+boundary marginals on a single six-date phase puts 8.2% of them below zero, a phase ending before
+it starts, where the joint posterior gives that no probability at all.
 
 On the exact path the draws are independent draws from the true joint posterior, obtained by
 forward-filtering/backward-sampling over the same chain the solver already built (Frühwirth-Schnatter
@@ -926,8 +928,8 @@ is why the draw count and whether the draws were independent are printed alongsi
 OxCal's `Interval`), and the *dated-events* or sample duration (the range of the dates themselves,
 OxCal's `Span`). The gap between the last two is how much of the phase the dates failed to sample.
 
-**Differences** between two phases are the signed years between their modelled intervals — positive
-for a gap, negative for an overlap — computed as one quantity from the intersection length of the
+**Differences** between two phases are the signed years between their modelled intervals, positive
+for a gap and negative for an overlap, computed as one quantity from the intersection length of the
 two intervals in each draw. Between two dates in a group calibration, the signed difference in
 calendar age.
 
@@ -961,7 +963,7 @@ sharp 33-year trough at 2,750 cal BP.
    statistics degrade as less ¹⁴C remains. The constant is twice the 8033-year mean life implied by
    the Libby half-life on which conventional radiocarbon ages are reported (Stuiver and Polach 1977).
 2. Calibrate each radiocarbon age a sample of that period could plausibly return.
-3. Take the width of its 95.4% HPD envelope — first to last point, gaps included — as the resolution
+3. Take the width of its 95.4% HPD envelope (first to last point, gaps included) as the resolution
    that measurement achieved.
 4. For each calendar year, average those widths over the radiocarbon ages a sample of that true age
    could yield, weighted by how likely each is, giving a mean and a 5th–95th percentile band.
@@ -974,7 +976,7 @@ rather than the reference implementation's 15, which is close to the best AMS ca
 Two presentation choices in the curve browser are worth stating, since both change what you see.
 
 **Decimation is min/max per bucket**, not every Nth point. Stride sampling removes exactly the
-extremes that make a curve wiggly — plateau reversals, short excursions, the features that split a
+extremes that make a curve wiggly: plateau reversals, short excursions, the features that split a
 calibrated date into two ranges. Keeping the lowest and highest radiocarbon age in each bucket
 preserves the envelope at any zoom.
 
@@ -1004,7 +1006,7 @@ width_ratio  = |HPD_run| / |HPD_reference|          at the selected confidence
 ```
 
 where `|HPD|` is the outer span of the region, computed through the same selection the results
-table uses — so a width quoted here is the width printed there. For a modelled posterior that
+table uses, so a width quoted here is the width printed there. For a modelled posterior that
 selection rebins to the 5-year reporting step (A.4); for an unmodelled calibration it works on the
 curve's own grid. A duration's region is selected from its own histogram at its own reported step
 (A.9), never rebinned to a calendar step.
@@ -1012,7 +1014,7 @@ curve's own grid. A duration's region is selected from its own histogram at its 
 **Why no joint statistic is offered.** A statement of the form `P(this date is older under run B
 than under run A)` requires the joint distribution of the two runs' parameters. That distribution
 was never sampled: each run produced draws from its own posterior, independently, and the two sets
-of draws have no correspondence — draw 1 of run A and draw 1 of run B are not the same
+of draws have no correspondence: draw 1 of run A and draw 1 of run B are not the same
 hypothetical past. Pairing them would manufacture a dependence structure out of nothing, in the
 same way that pairing two boundary marginals manufactures phases that end before they start (A.9).
 A difference of medians and a ratio of interval widths are functions of two summaries and need no
