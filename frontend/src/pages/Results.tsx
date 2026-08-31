@@ -2152,9 +2152,9 @@ export default function Results() {
           </Box>
           <Typography variant="body2" color="textSecondary" sx={{ mt: 1 }}>
             {plotView === 'stacked'
-              ? `Every ${
-                  isBayesian ? 'date and modelled transition' : 'date'
-                } in one plot. Oldest first, in the same order as the table above. Each row is scaled to its own peak, so heights compare precision, not probability.`
+              ? `All ${
+                  isBayesian ? 'dates and modelled transitions' : 'dates'
+                } shown, oldest first, in the same order as the table above. Each row is scaled to its own peak, so heights compare precision, not probability.`
               : plotView === 'curve'
               ? 'Each date plotted on the curve it was calibrated against. Lab measurement on the left axis, and the calibrated distribution sitting where it intersects the curve.'
               : `One plot per ${

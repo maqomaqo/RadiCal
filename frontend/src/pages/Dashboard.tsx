@@ -497,7 +497,7 @@ const WAYS_IN = [
     to: '/new-analysis',
     title: 'Calibrate a date',
     action: 'New analysis',
-    body: 'Turn a radiocarbon measurement into a calendar date range. The quickest way to a first result.',
+    body: 'Turn a radiocarbon measurement into a calendar date range, or build a chronological model.',
     primary: true,
   },
   {
