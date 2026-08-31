@@ -269,8 +269,8 @@ the group that contains it — so it is laid out rather than arranged by hand.
 
 **Model Settings**, on the New Analysis form itself:
 - **Solver** — Automatic (recommended: exact integration where the model allows it, sampling
-  otherwise), Exact solver only (fails rather than silently sampling), or MH/Gibbs (forces OxCal's
-  own sampling method throughout — for reproducing a published OxCal analysis).
+  otherwise), Exact solver only (fast, but only works on chain-shaped models), or MH/Gibbs (works on all models, uses the same MCMC sampling method as OxCal throughout). See
+  [Choosing a solver](#choosing-a-solver) for when to override Automatic and what it costs.
 - **Posterior draws** — how many samples each date's posterior is reported with.
 - **Uniform span prior** — OxCal's `UniformSpanPrior` correction (on by default), which keeps a
   sequence's overall span prior independent of how finely it's subdivided. Only affects a sequence
@@ -284,6 +284,94 @@ the group that contains it — so it is laid out rather than arranged by hand.
 
 **Run Analysis** submits the form. A saved analysis (Group Calibration, Bayesian, or Single
 Calibration with "Save this analysis" on) navigates straight to its Results page.
+
+### Choosing a solver
+
+Only a Bayesian analysis has a solver to choose: a Single or Group Calibration asserts no
+relationship between dates, so there is nothing to solve jointly. **Automatic is the right answer
+for almost every run** — it integrates the posterior exactly where the model as written allows it
+and samples otherwise, and the Results page always says which of the two actually ran. The override
+exists for the handful of cases below.
+
+**Exact integration** applies to a *chain-shaped* model: one line of Phases separated by Boundaries,
+with every date inside a bounded group, and no ordering the chain does not already imply. That is
+the ordinary archaeological shape. It computes the posterior on a calendar grid by message passing —
+there is no sampler, so nothing to converge, no run length to choose, and no calibration lobe the
+chain can miss. It is also the faster of the two, usually by a wide margin: a single deterministic
+pass, with no progress bar because there is no iteration to report.
+
+**MH/Gibbs sampling** is OxCal's own scheme (Metropolis-Hastings within Gibbs) and takes any model —
+branching structures, parallel groups, two groups ordered against each other with no Boundary
+between them, dates sitting outside every Boundary. It runs a minimum of 20,000 sweeps and extends
+up to 200,000 until the worst parameter reaches 95% on OxCal's own convergence measure; the achieved
+figure is reported with the results, and a run that fell short is flagged rather than quietly
+returned.
+
+Where both can be asked, they agree to under a year — they are checked against each other on every
+model both can handle.
+
+| | Exact solver | MH/Gibbs sampler |
+|---|---|---|
+| Model shapes | chain-shaped only; fails rather than sampling | all |
+| Result | deterministic — the same input gives the same numbers | stochastic; converges to the same posterior |
+| Speed | one pass; typically much faster | 20,000–200,000 sweeps, extended until converged |
+| Convergence | not applicable — nothing iterates | reported per run; can fall short and say so |
+| Multi-lobe calibration | resolved exactly | handled by whole-group translation moves, but a sampled answer |
+| Duration/difference draws | independent draws from the joint posterior | draws from an MCMC chain, so correlated |
+| Outlier models | how big an outlier's offset is, taken over its prior range date by date — an approximation | one offset size shared across the model and estimated from the data, as OxCal does |
+| Progress and cancellation | neither: it completes or fails | progress reported, run cancellable |
+
+**Choose MH/Gibbs deliberately when:**
+
+- You are **reproducing a published OxCal analysis** and want the method to match as well as the
+  model.
+- You want an **independent cross-check** of an exactly-integrated result: two different routes to
+  the same posterior disagreeing by more than a year or two is worth investigating, and **Compare**
+  will measure the difference — provided the solver is the only thing you changed between the two
+  runs (see [Comparing Analyses](#comparing-analyses)).
+- Several dates carry **outlier models** and the run is about *which* dates are outliers. An outlier
+  model does not only say a date might not belong — it also carries an assumption about **how far
+  off an outlier is likely to be**: tens of years, or several centuries. OxCal treats that offset
+  size as a single unknown shared by every date using the model and lets the data estimate it, so
+  three charcoal dates that all read old together tell the model what an old-wood offset looks like
+  in *this* assemblage, and each date is then judged against that learned size. The exact solver
+  cannot pool information that way, so it works the offset size out over its prior range separately for each date, judging each one
+  on its own. The difference shows up mainly in the **reported outlier probabilities**, and it
+  stays small when the outlier priors are small: on a real OxCal comparison the exact path's outlier
+  probabilities sat 0.017 from OxCal's where the sampler reached 0.002.
+
+  So: **it matters** if you have put outlier models on a group of dates expecting a shared cause —
+  old wood, residuality, a suspect laboratory batch — and the outlier probabilities are the answer
+  you are after, or you intend to quote them alongside OxCal's. **It does not matter** if one or two
+  dates carry a small outlier prior as insurance and what you are reading off the run is the
+  modelled date ranges; there the two paths differ by less than the ranges are quoted to.
+
+**Choose Exact solver only when:**
+
+- You need a **reproducible, deterministic** number — the same analysis re-run must give the same
+  figures to the digit, with no convergence caveat attached.
+- You want to **force exact integration on a model Automatic declined to integrate**, and you accept
+  that this changes the model. See the warning below.
+
+**The warning about forcing Exact.** Automatic integrates exactly only where the model needs no
+help. A model that is not a chain *as authored* — most often a Sequence that orders two groups with
+no Boundary between them — can be made solvable by supplying the transitions its ordering implies,
+and choosing **Exact solver only** does exactly that. This is not a restatement of your model: it
+splits one span term over K dates into two terms over K₁ + K₂ dates, and K is the exponent that
+holds a date to its group, so the modelled ranges genuinely move. Measured against OxCal on the
+app's own fixtures (rms of the modelled dates, in years), sampling the model as written beat
+integrating the patched model both times: 1.49 against 2.51 on the `ordered` fixture, and 4.53
+against 10.63 on the charcoal fixture. So forcing Exact on such a model cross-checks *a different
+model* as well as a different method — the Results page says how many transitions were supplied
+whenever this happens. If the exact solver is what you want, the better fix is usually to write the
+missing Boundary into the model yourself, which makes it exactly solvable and says out loud what the
+patch would have done silently.
+
+If a model cannot be integrated exactly even with those transitions supplied, **Exact solver only**
+fails the run and names the reason rather than quietly falling back to sampling. That is the point
+of the setting: Automatic is what you want if you would have been happy with either answer.
+
+The mathematics behind both solvers is in [A.6 Solvers](#a6-solvers).
 
 ## Viewing Results
 

@@ -27,6 +27,9 @@ import {
   Chip,
   Stack,
   Tooltip,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails,
 } from '@mui/material'
 import { useNavigate, useSearchParams, useParams, useLocation } from 'react-router-dom'
 import DeleteIcon from '@mui/icons-material/Delete'
@@ -35,6 +38,7 @@ import AddIcon from '@mui/icons-material/Add'
 import AccountTreeIcon from '@mui/icons-material/AccountTree'
 import UploadFileIcon from '@mui/icons-material/UploadFile'
 import LibraryAddIcon from '@mui/icons-material/LibraryAdd'
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import SortDatesButton from '@/components/SortDatesButton'
 import { sortMeasurements } from '@/utils/sortMeasurements'
 import PosteriorPlot from '@/components/PosteriorPlot'
@@ -1088,44 +1092,21 @@ export default function NewAnalysis() {
                     label="Solver"
                     onChange={(e) => setMcmc({ solver: e.target.value as SolverChoice })}
                   >
-                    <MenuItem value="auto">Automatic (recommended)</MenuItem>
+                    <MenuItem value="auto">Automatic</MenuItem>
                     <MenuItem value="exact">Exact solver only</MenuItem>
                     <MenuItem value="gibbs">MH/Gibbs sampler (as OxCal)</MenuItem>
                   </Select>
                   <FormHelperText>
                     {mcmc.solver === 'auto' &&
-                      'Integrates the posterior exactly where the model as written allows it, and samples otherwise.'}
+                      'Uses an Exact Solver for models where this is possible, and uses the MH/Gibbs method otherwise.'}
                     {mcmc.solver === 'exact' &&
-                      'Fails rather than sampling if this model cannot be integrated exactly. Where a model needs a Boundary its ordering only implies, this supplies it — which changes the model slightly.'}
+                      'Integrates the posterior exactly for chain-shaped models i.e. a Sequence of Phases separated by Boundaries. Faster, but will fail for branching models.'}
                     {mcmc.solver === 'gibbs' &&
-                      'Uses OxCal’s own method throughout — for reproducing a published analysis, or cross-checking the exact solver.'}
+                      'Uses the same MCMC sampling method as Oxcal, works for all models.'}
                   </FormHelperText>
                 </FormControl>
-                <TextField
-                  fullWidth
-                  size="small"
-                  type="number"
-                  label="Posterior draws"
-                  value={mcmc.mcmc_samples}
-                  onChange={(e) => setMcmc({ mcmc_samples: Number(e.target.value) })}
-                  helperText="How many samples each date's posterior is reported with."
-                />
                 <FormControlLabel
-                  sx={{ mt: 1 }}
-                  control={
-                    <Switch
-                      checked={mcmc.uniform_span_prior}
-                      onChange={(e) => setMcmc({ uniform_span_prior: e.target.checked })}
-                    />
-                  }
-                  label={
-                    <Tooltip title="OxCal's UniformSpanPrior correction (Nicholls and Jones 2001), on by default. Only affects a sequence with three or more boundaries.">
-                      <span>Uniform span prior</span>
-                    </Tooltip>
-                  }
-                />
-                <FormControlLabel
-                  sx={{ mt: 0.5, display: 'flex' }}
+                  sx={{ display: 'flex' }}
                   control={
                     <Switch
                       checked={mcmc.estimate_durations}
@@ -1139,6 +1120,48 @@ export default function NewAnalysis() {
                   far apart the phases sit. Off by default: a phase&rsquo;s duration
                   assumes its dates sample a bounded episode.
                 </FormHelperText>
+                {/* Draws and the span prior are correct as they stand for
+                    almost every run, so they sit behind an expander rather
+                    than in front of everyone who opens the page. */}
+                <Accordion
+                  disableGutters
+                  elevation={0}
+                  sx={{
+                    mt: 2,
+                    border: '1px solid',
+                    borderColor: 'divider',
+                    '&::before': { display: 'none' },
+                  }}
+                >
+                  <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                    <Typography variant="subtitle2">Advanced settings</Typography>
+                  </AccordionSummary>
+                  <AccordionDetails>
+                    <TextField
+                      fullWidth
+                      size="small"
+                      type="number"
+                      label="Posterior draws"
+                      value={mcmc.mcmc_samples}
+                      onChange={(e) => setMcmc({ mcmc_samples: Number(e.target.value) })}
+                      helperText="How many samples each date's posterior is reported with."
+                    />
+                    <FormControlLabel
+                      sx={{ mt: 1, display: 'flex' }}
+                      control={
+                        <Switch
+                          checked={mcmc.uniform_span_prior}
+                          onChange={(e) => setMcmc({ uniform_span_prior: e.target.checked })}
+                        />
+                      }
+                      label={<span>Uniform span prior</span>}
+                    />
+                    <FormHelperText sx={{ mt: 0, ml: 0 }}>
+                      OxCal&rsquo;s UniformSpanPrior correction (Nicholls and Jones 2001), on
+                      by default. Only affects a sequence with three or more boundaries.
+                    </FormHelperText>
+                  </AccordionDetails>
+                </Accordion>
               </Box>
             )}
 
