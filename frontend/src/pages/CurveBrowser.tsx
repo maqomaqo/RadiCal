@@ -921,7 +921,7 @@ export default function CurveBrowser() {
               : 'Point at the curve to read what it says there and how steeply it is' +
                 (showResolution
                   ? ' running, and how tightly a date from that year could be known.'
-                  : ' running. Turn on Expected resolution below for how tightly a' +
+                  : ' running. Turn on Expected resolution above for how tightly a' +
                     ' date from that year could be known.')}
           </Typography>
         </Box>
