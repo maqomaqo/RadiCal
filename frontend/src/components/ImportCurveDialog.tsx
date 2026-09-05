@@ -16,7 +16,9 @@ import {
   TextField,
   Typography,
 } from '@mui/material'
+import { alpha } from '@mui/material/styles'
 import UploadFileIcon from '@mui/icons-material/UploadFile'
+import { WARM_INK } from '@/theme/diagramColors'
 import {
   createCurve,
   previewCurve,
@@ -71,6 +73,14 @@ export function slugify(text: string): string {
  * to top-right with wiggles -- not an instrument. The browser page is where a
  * curve is actually examined, and loading a plotting library into a dialog to
  * draw sixty line segments would be the wrong trade.
+ *
+ * Drawn in the app's warm ink, not in a hue. This used to be #4a7dc4, the
+ * pre-AA primary DESIGN.md records as rejected at 4.18:1 -- but the current
+ * primary is not the fix, because the primary belongs to the DATES and
+ * curveColors.ts refuses it for a curve on exactly that ground. The curve
+ * palette is keyed to a curve's id, and this one has no id yet: nothing has
+ * been imported. Ink is what the app draws with when a mark is about the data
+ * rather than a category of it, which is what a preview of an unnamed file is.
  */
 function CurveSketch({ points }: { points: number[][] }) {
   if (points.length < 2) return null
@@ -104,8 +114,8 @@ function CurveSketch({ points }: { points: number[][] }) {
         aria-label="The uploaded curve: radiocarbon age against calendar age"
         sx={{ width: '100%', height: 'auto', display: 'block' }}
       >
-        <path d={band} fill="rgba(74, 125, 196, 0.25)" stroke="none" />
-        <path d={line} fill="none" stroke="#4a7dc4" strokeWidth={1.5} />
+        <path d={band} fill={alpha(WARM_INK, 0.12)} stroke="none" />
+        <path d={line} fill="none" stroke={alpha(WARM_INK, 0.8)} strokeWidth={1.5} />
       </Box>
       <Typography variant="caption" color="textSecondary">
         Radiocarbon age (vertical) against calendar age (horizontal, younger at

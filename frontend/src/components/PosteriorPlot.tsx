@@ -307,6 +307,7 @@ export default function PosteriorPlot({
         ...(yRange ? { range: yRange, autorange: false } : {}),
       },
       hovermode: 'x unified',
+      font: { color: plot.axis },
       plot_bgcolor: plot.surface,
       paper_bgcolor: plot.surface,
       margin: { l: 60, r: 20, t: 50, b: 60 },

@@ -393,7 +393,7 @@ export default function ProjectDetail() {
 
   return (
     <Container maxWidth="lg" sx={{ py: 4 }}>
-      <Paper sx={{ p: 3, mb: 3 }}>
+      <Paper sx={{ p: 3, mb: 3 }}> 
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 4, flexWrap: 'wrap', gap: 2 }}>
         <Box>
           <Typography variant="h1" component="h1" gutterBottom>
@@ -411,6 +411,7 @@ export default function ProjectDetail() {
             startIcon={<AddIcon />}
             component={RouterLink}
             to={isUnassigned ? '/new-analysis' : `/new-analysis?project=${project.id}`}
+            state={{ fresh: true }}
           >
             New Analysis
           </Button>
@@ -441,7 +442,7 @@ export default function ProjectDetail() {
               </Tooltip>
             </>
           )}
-        </Box>
+    </Box> 
       </Box>
 </Paper>
       {jobActive && job && (
@@ -530,7 +531,7 @@ export default function ProjectDetail() {
           <TableContainer>
             <Table>
               <TableHead>
-                <TableRow sx={{ backgroundColor: 'grey.100' }}>
+                <TableRow sx={{ backgroundColor: 'background.muted' }}>
                   <TableCell padding="checkbox" />
                   <TableCell>Name</TableCell>
                   <TableCell>Type</TableCell>

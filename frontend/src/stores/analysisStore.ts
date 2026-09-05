@@ -1,9 +1,22 @@
 // Shared draft state for building a Bayesian analysis across two pages:
 // NewAnalysis.tsx (measurements) and Stratigraphy.tsx (the model tree and
 // TPQ/TAQ). Neither persists anything until "Run Analysis", so this holds the
-// draft in memory across the navigation between them. Cleared via reset()
-// after a successful run.
-import { create } from 'zustand'
+// draft across the navigation between them. Cleared via reset() after a
+// successful run.
+//
+// Mirrored into sessionStorage because in memory alone was not enough: this
+// IS the user's unsaved work, and a reload of either page dropped all of it
+// -- typed dates, the authored model tree, the phase assignments -- with no
+// warning and no way back. A refresh on /new-analysis/model-structure left
+// that page reading "add measurements on the New Analysis page first" for a
+// model the user had just finished building.
+//
+// sessionStorage rather than localStorage on purpose: a draft belongs to the
+// tab it is being built in. localStorage would resurrect it in every other
+// tab and on every future visit, which is a different promise and the wrong
+// one -- reset() after a successful run is what ends a draft's life.
+import { create, type StateCreator } from 'zustand'
+import { persist, createJSONStorage } from 'zustand/middleware'
 import type { DraftMeasurement, DraftGroup, DraftRelationship, ModelElement } from '@/types'
 import type { Concern } from '@/utils/diagnostics'
 import { DateFormat, DEFAULT_DATE_FORMAT } from '@/utils/dateFormat'
@@ -116,7 +129,7 @@ interface AnalysisDraftState {
   reset: () => void
 }
 
-export const useAnalysisDraftStore = create<AnalysisDraftState>((set) => ({
+const createDraftState: StateCreator<AnalysisDraftState> = (set) => ({
   name: '',
   analysisType: 'calibration',
   projectId: '',
@@ -223,4 +236,28 @@ export const useAnalysisDraftStore = create<AnalysisDraftState>((set) => ({
       modelTree: null,
       elementAssignments: {},
     }),
-}))
+})
+
+export const useAnalysisDraftStore = create<AnalysisDraftState>()(
+  persist(createDraftState, {
+    name: 'radical-analysis-draft',
+    storage: createJSONStorage(() => sessionStorage),
+    // Data only. The actions are rebuilt by the creator on every load, so
+    // persisting them would write dead function references into storage and
+    // rehydrate over the live ones.
+    partialize: (state) => ({
+      name: state.name,
+      analysisType: state.analysisType,
+      projectId: state.projectId,
+      dateFormat: state.dateFormat,
+      measurements: state.measurements,
+      groups: state.groups,
+      relationships: state.relationships,
+      mcmc: state.mcmc,
+      editingAnalysisId: state.editingAnalysisId,
+      lastRunConcerns: state.lastRunConcerns,
+      modelTree: state.modelTree,
+      elementAssignments: state.elementAssignments,
+    }),
+  })
+)

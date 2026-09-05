@@ -38,6 +38,27 @@ export interface PlotColors {
    * readable against, and weaker than anything that is data.
    */
   guide: string
+  /**
+   * A rule INSIDE a figure that separates one group of rows from the next --
+   * the stacked plot's phase breaks. A divider, so it is drawn at the theme's
+   * divider strength rather than at the grid's: the grid marks out the plot
+   * area, this states a boundary between two parts of the content.
+   */
+  phaseRule: string
+  /**
+   * Text the app writes onto a figure -- a phase name in the margin. The
+   * app's own text ink, at the alpha `text.primary` uses, so a label on a plot
+   * and a heading in the results table are the same colour.
+   */
+  label: string
+  /**
+   * Every word Plotly writes on a figure it was not given a colour for: tick
+   * labels, axis titles, the legend. Plotly's own default is `#444`, a dead
+   * neutral grey, which put a cool text colour on every axis in the app. This
+   * is the alpha `text.secondary` uses, so a tick label and a caption beneath
+   * the figure are the same ink at the same strength (6.57:1 on paper).
+   */
+  axis: string
   /** The plot area itself. */
   surface: string
   grid: string
@@ -63,16 +84,25 @@ export function usePlotColors(): PlotColors {
       // than a dated thing, so it reads as an outline against the solid dates
       // either side.
       boundaryFill: alpha(BOUNDARY_CORAL_INK, 0.13),
-      // The unmodelled calibration, behind its posterior. Neutral grey: it is
-      // the thing being compared against, so it recedes rather than claiming a
-      // colour of its own.
-      priorLine: 'rgba(100, 100, 100, 0.5)',
-      priorFill: 'rgba(100, 100, 100, 0.15)',
+      // The unmodelled calibration, behind its posterior. It recedes rather
+      // than claiming a colour of its own -- but it recedes in the app's ink,
+      // not in a neutral grey. rgba(100,100,100,·) is a dead R=G=B grey, the
+      // one thing this palette exists to replace, and it was sitting on white
+      // beside warm-ink point estimates. The ink is warmer AND more visible at
+      // these strengths: 0.45 composites to #a09c9b at 2.72:1, against the
+      // grey's #b2b2b2 at 2.12:1.
+      priorLine: alpha(INK, 0.45),
+      priorFill: alpha(INK, 0.14),
       hpd95: alpha(PHASE_GREEN, 0.3),
       hpd68: alpha(PHASE_GREEN, 0.72),
       mean: alpha(INK, 0.85),
       median: alpha(INK, 0.45),
       guide: alpha(INK, 0.3),
+      // Both were pure black at the one call site that drew them, which put a
+      // second, cooler grid inside a figure whose every other mark is warm.
+      phaseRule: alpha(INK, 0.14),
+      label: alpha(INK, 0.92),
+      axis: alpha(INK, 0.74),
       // White. Every fill on these plots is translucent, and has to be -- the
       // prior reads by showing through the posterior over it, and the stacked
       // curves draw over their own HPD bars -- so tinting the surface they

@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Box,
   Paper,
@@ -13,6 +13,9 @@ import {
   Alert,
   Menu,
   Stack,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails,
 } from '@mui/material'
 import AddIcon from '@mui/icons-material/Add'
 import DeleteIcon from '@mui/icons-material/Delete'
@@ -20,6 +23,9 @@ import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward'
 import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward'
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh'
 import DragIndicatorIcon from '@mui/icons-material/DragIndicator'
+import ChevronRightIcon from '@mui/icons-material/ChevronRight'
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
+import UndoIcon from '@mui/icons-material/Undo'
 import {
   DndContext,
   DragOverlay,
@@ -40,6 +46,8 @@ import {
 import { useElementTypeColors, type ElementTypeColor } from '@/theme/diagramColors'
 import type { ModelElement, ElementType, MatrixMeasurement } from '@/types'
 import SortDatesButton from '@/components/SortDatesButton'
+import ConfirmDialog from '@/components/ConfirmDialog'
+import GuideBand from '@/components/GuideBand'
 import type { MeasurementSortKey } from '@/utils/sortMeasurements'
 // Lives in utils because the starting structure built there (see
 // bootstrapModelTree) mints ids too, and both must mint the same kind.
@@ -48,9 +56,36 @@ import { newElementId } from '@/utils/modelTreeDefaults'
 
 export { newElementId }
 
-// Editor for the OxCal-style model structure: a nested, ordered tree of
-// Sequences, Phases, Boundaries and Hiatuses, rendered as an indented outline
-// so it reads like a published OxCal model, oldest first -- top of the list is
+/**
+ * What a deletion costs, in a sentence. Both halves are counted from the tree
+ * rather than estimated, because the number IS the reason this dialog is worth
+ * interrupting for -- a vague warning gets dismissed unread.
+ *
+ * These sentences used to end "It cannot be undone." That was true when written
+ * and stopped being true the moment Undo landed; a dialog that overstates the
+ * stakes to win a click is worse than no dialog, because the next warning gets
+ * believed less. The dialog still earns its place on the COUNT -- a delete can
+ * take a subtree and a dozen date assignments with it, and Undo is only useful
+ * to someone who noticed.
+ */
+function describeRemoval({
+  descendants,
+  orphaned,
+}: {
+  descendants: number
+  orphaned: number
+}): string {
+  const nested = descendants > 0 ? `${descendants} nested element${descendants === 1 ? '' : 's'}` : ''
+  const dates = orphaned > 0 ? `${orphaned} date${orphaned === 1 ? '' : 's'}` : ''
+  if (nested && dates) {
+    return `This also removes ${nested} and leaves ${dates} unassigned. Undo restores it.`
+  }
+  if (nested) return `This also removes ${nested}. Undo restores it.`
+  return `This leaves ${dates} unassigned. Undo restores it.`
+}
+
+// Editor for the model structure: a nested, ordered tree of
+// Sequences, Phases, Boundaries and Hiatuses, rendered as an indented outline, oldest first -- top of the list is
 // bottom of the stratigraphy, the convention OxCal and the Harris matrix use.
 //
 // A Boundary here is placed deliberately and, between two Phases, is a SINGLE
@@ -78,9 +113,9 @@ const TYPE_LABEL: Record<ElementType, string> = {
 }
 
 const TYPE_HINT: Record<ElementType, string> = {
-  sequence: 'Children are in chronological order, oldest first',
-  phase: 'Children are unordered; dates belong here',
-  boundary: 'A transition. Between two phases it is one shared parameter',
+  sequence: 'Children are in chronological order, oldest at the top',
+  phase: 'Children and contents are unordered. Contains dates',
+  boundary: 'A transition; one shared parameter between phases',
   hiatus: 'A deliberate gap; must sit between two boundaries',
 }
 
@@ -88,6 +123,28 @@ const TYPE_HINT: Record<ElementType, string> = {
 // renders at.
 const INDENT_UNITS = 3
 export const INDENT_PX = INDENT_UNITS * 8
+// Where a level's guide sits inside its indent step. Half a step centres the
+// line in the space its children are pushed across, so the guide reads as the
+// container's edge rather than as an underline on the row above.
+const GUTTER_INSET = INDENT_PX / 2
+
+// A 44px target on a 20px glyph, pulled back into the row's own padding with a
+// negative margin so the row does not grow to fit it -- the pattern Results.tsx
+// already uses for its disclosure chevron.
+// flexShrink:0 is load-bearing, not defensive: every one of these sits in a
+// flex row, and a flex child shrinks to its content by default -- which quietly
+// took the drag handle back down to its 20px glyph while still reporting a
+// 44px height.
+const HIT_TARGET = { width: 44, height: 44, minWidth: 44, flexShrink: 0, my: '-10px' } as const
+
+// One shared empty array, so rows with no dates are handed the same reference
+// every render rather than a fresh literal that defeats memoisation downstream.
+const EMPTY_DATES: MatrixMeasurement[] = []
+
+// Width of the type-word column. "Sequence" is the widest of the four at
+// 0.75rem/500 (53px measured); 56 clears it without padding the short ones out
+// to a visible gap.
+const TYPE_SLOT_PX = 56
 
 function isContainerType(type: ElementType): boolean {
   return type === 'sequence' || type === 'phase'
@@ -123,13 +180,27 @@ function findElement(root: ModelElement, id: string): ModelElement | null {
   return found
 }
 
-/** A phase is the only legal home for dates, so this is what the sample
- *  assignment dropdown offers. */
-export function phaseOptions(root: ModelElement): Array<{ id: string; name: string }> {
-  const out: Array<{ id: string; name: string }> = []
-  walk(root, null, (el) => {
-    if (el.element_type === 'phase') out.push({ id: el.id, name: el.name || 'Phase' })
-  })
+/**
+ * A phase is the only legal home for dates, so this is what the sample
+ * assignment dropdown offers.
+ *
+ * Each option carries the containers above it, because phase names are not
+ * unique and nothing stops them colliding -- bootstrapModelTree mints "Phase 1"
+ * from two different paths, and a bare list of names left two of them
+ * indistinguishable at the moment of choosing between them.
+ */
+export function phaseOptions(root: ModelElement): Array<{ id: string; name: string; path: string }> {
+  const out: Array<{ id: string; name: string; path: string }> = []
+  const rec = (el: ModelElement, trail: string[]) => {
+    for (const child of el.children || []) {
+      const name = child.name || TYPE_LABEL[child.element_type]
+      if (child.element_type === 'phase') {
+        out.push({ id: child.id, name, path: trail.join(' › ') })
+      }
+      rec(child, [...trail, name])
+    }
+  }
+  rec(root, [root.name || TYPE_LABEL[root.element_type]])
   return out
 }
 
@@ -188,20 +259,43 @@ export interface FlatNode {
   id: string
   element: ModelElement
   depth: number
+  /**
+   * The containers this row sits inside, outermost first, ending with its
+   * direct parent -- so `ancestors.length === depth` and `ancestors[i]` is the
+   * container whose guide occupies indent level `i`.
+   *
+   * The outline is rendered as a FLAT list, so a row cannot inherit anything
+   * from a parent element in the DOM; if it is to draw a guide for each level
+   * it is nested under, it has to be told what those levels are.
+   */
+  ancestors: ModelElement[]
 }
 
 /** Flattens everything under (not including) the root into DFS order. Root
  * itself is depth 0, so its direct children start at depth 1. */
 export function flattenTree(root: ModelElement): FlatNode[] {
   const out: FlatNode[] = []
-  const rec = (el: ModelElement, depth: number) => {
+  const rec = (el: ModelElement, depth: number, ancestors: ModelElement[]) => {
     for (const child of el.children || []) {
-      out.push({ id: child.id, element: child, depth })
-      rec(child, depth + 1)
+      out.push({ id: child.id, element: child, depth, ancestors })
+      rec(child, depth + 1, [...ancestors, child])
     }
   }
-  rec(root, 1)
+  rec(root, 1, [root])
   return out
+}
+
+/**
+ * Whether this container puts its children in order.
+ *
+ * The distinction the whole model turns on: a Sequence orders what it holds, a
+ * Phase asserts no order between its members. It was carried in the editor by
+ * a word and a hue alone, while the outline drew both as the same indented
+ * stack -- and a vertical stack reads as an ordering claim whether or not one
+ * is being made.
+ */
+function ordersChildren(el: ModelElement): boolean {
+  return el.element_type === 'sequence'
 }
 
 /** Rebuilds a tree from a valid flat sequence (each depth at most one more
@@ -391,8 +485,11 @@ function DropIndicator({ depth, label }: { depth: number; label: string }) {
     <Box
       aria-hidden
       sx={{
+        // Centred in the row's 8px top padding, which is where the gap between
+        // two rows now lives -- it used to be a margin above the row, and the
+        // indicator hung outside the box to reach it.
+        top: 3,
         position: 'absolute',
-        top: -5,
         left: depth * INDENT_PX,
         right: 0,
         height: 0,
@@ -420,7 +517,7 @@ function DropIndicator({ depth, label }: { depth: number; label: string }) {
           right: 0,
           top: -10,
           height: 20,
-          fontSize: '0.7rem',
+          fontSize: '0.75rem',
           bgcolor: 'primary.main',
           color: 'primary.contrastText',
           '& .MuiChip-label': { px: 1 },
@@ -452,18 +549,76 @@ interface ElementFieldsProps {
   typeColor: Record<ElementType, ElementTypeColor>
   onRename: (name: string) => void
   onSetLimit: (field: 'tpq_age_bp' | 'taq_age_bp', value: string) => void
-  dates: MatrixMeasurement[]
+  /**
+   * Whether this row's TPQ/TAQ pair is showing. Owned by the editor rather
+   * than the row, because Undo has to be able to put it away again -- state
+   * that lives inside the row is state the snapshots cannot reach.
+   */
+  limitersOpen: boolean
+  onOpenLimiters: () => void
 }
 
-function ElementFields({ element, typeColor, onRename, onSetLimit, dates }: ElementFieldsProps) {
+function ElementFields({
+  element,
+  typeColor,
+  onRename,
+  onSetLimit,
+  limitersOpen,
+  onOpenLimiters,
+}: ElementFieldsProps) {
+  const limiters = [
+    element.tpq_age_bp != null ? `TPQ ${element.tpq_age_bp}` : null,
+    element.taq_age_bp != null ? `TAQ ${element.taq_age_bp}` : null,
+  ]
+    .filter(Boolean)
+    .join(' · ')
+
   return (
     <>
+      {/* A coloured word, the treatment Results.tsx uses for this exact fact,
+          and the one DESIGN.md prescribes: "Don't mark an element's type twice
+          -- a coloured word or a glyph, not both -- and prefer the word."
+
+          This was a saturated filled pill, which is the visual grammar of a
+          status badge; ten of them stacked read as a column of alerts, the
+          reading the Borrowed-Status Rule exists to prevent. The hue was never
+          the problem and has not changed -- .ink is the variant DESIGN.md
+          assigns to coloured label text. What it buys is that the row's 4px
+          left border is now the only mark carrying type, and saturated primary
+          belongs to the drag chrome alone: the one filled blue on the surface
+          means "you are dropping here" rather than "this is a Sequence".
+
+          Suppressed when the name already says it -- an element called
+          "Boundary" does not need "Boundary" beside it. */}
+      {/* A coloured word, the treatment Results.tsx uses for this exact fact,
+          and the one DESIGN.md prescribes: "Don't mark an element's type twice
+          -- a coloured word or a glyph, not both -- and prefer the word."
+
+          The word is unconditional. It used to be suppressed when the name
+          contained it, which meant naming a row "First Sequence" deleted the
+          only type marker it had -- the type became legible or not depending
+          on wording the user chose for other reasons. */}
       <Tooltip title={TYPE_HINT[element.element_type]}>
-        <Chip
-          size="small"
-          label={TYPE_LABEL[element.element_type]}
-          sx={{ backgroundColor: typeColor[element.element_type].ink, color: 'white' }}
-        />
+        {/* No tabIndex, matching Results.tsx: making each hint keyboard
+            reachable would put a tab stop in front of every row's name
+            field. The word carries the fact, and the add menu teaches all
+            four hints where the choice is actually made. */}
+        <Box
+          component="span"
+          sx={{
+            color: typeColor[element.element_type].ink,
+            fontSize: '0.75rem',
+            fontWeight: 500,
+            whiteSpace: 'nowrap',
+            // One column for the four words, so the name fields beside them
+            // share a left edge instead of stepping 20px between a "Phase"
+            // row and a "Sequence" row at the same depth.
+            minWidth: TYPE_SLOT_PX,
+            flexShrink: 0,
+          }}
+        >
+          {TYPE_LABEL[element.element_type]}
+        </Box>
       </Tooltip>
       {/* No variant prop -- every other field in the app is the outlined
           TextField/Select default; this one used to be the lone exception
@@ -473,40 +628,164 @@ function ElementFields({ element, typeColor, onRename, onSetLimit, dates }: Elem
         size="small"
         value={element.name || ''}
         onChange={(e) => onRename(e.target.value)}
-        sx={{ minWidth: 180 }}
+        // The field had no label, no aria-label and no placeholder, so a
+        // screen reader announced only the current value -- on a thirty-row
+        // outline, thirty anonymous text boxes.
+        inputProps={{ 'aria-label': `Name of ${TYPE_LABEL[element.element_type]}` }}
+        // Everything else in the row is a fixed-size control, so the name is
+        // the only thing that can give. It takes the slack when there is any
+        // and yields it when there is not, which keeps the action cluster on
+        // one line at tablet width and at depth.
+        //
+        // minWidth: 0 on the input itself is the load-bearing part: a flex
+        // item will not shrink below its content's min-content width, and an
+        // <input> carries an intrinsic one of ~170px. Without it the row wraps
+        // instead of the field narrowing, and the field then GROWS into the
+        // space the wrap just freed -- which is what it was doing.
+        sx={{
+          // 0, not 1, for grow: the name should give space up when the row is
+          // tight, never take it when there is slack. Growing to 260px was
+          // itself what pushed the 176px action cluster onto a second line --
+          // the field claimed the room the buttons needed.
+          // Responsive basis, because flexbox WRAPS in preference to shrinking:
+          // with wrap enabled the action cluster moves to a second line rather
+          // than squeezing this field, so the field has to start smaller at
+          // tablet width for the row to stay on one line at depth.
+          flex: { xs: '0 1 108px', md: '0 1 180px' },
+          minWidth: 0,
+          '& .MuiInputBase-root': { minWidth: 0 },
+          '& input': { minWidth: 0 },
+        }}
       />
-      {(element.element_type === 'phase' || element.element_type === 'sequence') && (
-        <>
-          <TextField
-            size="small"
-            type="number"
-            label="TPQ"
-            value={element.tpq_age_bp ?? ''}
-            onChange={(e) => onSetLimit('tpq_age_bp', e.target.value)}
-            sx={{ width: 90 }}
-          />
-          <TextField
-            size="small"
-            type="number"
-            label="TAQ"
-            value={element.taq_age_bp ?? ''}
-            onChange={(e) => onSetLimit('taq_age_bp', e.target.value)}
-            sx={{ width: 90 }}
-          />
-        </>
-      )}
-      <Box sx={{ flexGrow: 1 }} />
-      {element.element_type === 'phase' && dates.length > 0 && (
-        <Typography variant="caption" color="textSecondary">
-          {dates.length} date{dates.length === 1 ? '' : 's'}
-        </Typography>
-      )}
+      {/* Limiters on demand, not two permanently-open number boxes.
+          
+          Every container row carried both fields at all times -- 180px of
+          labelled inputs on every Sequence and Phase, forever, for values the
+          page's own help text says to use "only if you know this information".
+          They were the largest single contributor to the row height, to the
+          scroll length of a thirty-element model, and to the action cluster
+          wrapping to a second line at depth.
+          
+          Set limiters read as the caption Results.tsx already uses for the
+          same pair, so the two views state a TPQ the same way. Unset, they are
+          one text button. */}
+      {isContainerType(element.element_type) &&
+        (limitersOpen ? (
+          <>
+            <TextField
+              size="small"
+              type="number"
+              label="TPQ"
+              value={element.tpq_age_bp ?? ''}
+              onChange={(e) => onSetLimit('tpq_age_bp', e.target.value)}
+              inputProps={{ 'aria-label': `TPQ for ${element.name || TYPE_LABEL[element.element_type]}` }}
+              sx={{ width: 90 }}
+            />
+            <TextField
+              size="small"
+              type="number"
+              label="TAQ"
+              value={element.taq_age_bp ?? ''}
+              onChange={(e) => onSetLimit('taq_age_bp', e.target.value)}
+              inputProps={{ 'aria-label': `TAQ for ${element.name || TYPE_LABEL[element.element_type]}` }}
+              sx={{ width: 90 }}
+            />
+          </>
+        ) : (
+          // Set limiters collapse to the caption too, not just unset ones --
+          // otherwise the rows that carry a TPQ keep the height this change
+          // exists to remove. The caption is the control: clicking it reopens
+          // the fields.
+          <Tooltip
+            title={
+              limiters
+                ? 'Edit the earliest and latest this element could be'
+                : 'Earliest and latest this element could be — only if you know them'
+            }
+          >
+            <Button
+              size="small"
+              onClick={onOpenLimiters}
+              aria-label={
+                limiters
+                  ? `Limiters for ${element.name || TYPE_LABEL[element.element_type]}: ${limiters}`
+                  : `Add TPQ/TAQ to ${element.name || TYPE_LABEL[element.element_type]}`
+              }
+              sx={{
+                flexShrink: 0,
+                minHeight: 44,
+                color: 'text.secondary',
+                fontWeight: 400,
+                textTransform: 'none',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {limiters || 'Add TPQ/TAQ'}
+            </Button>
+          </Tooltip>
+        ))}
+      {/* No flexGrow spacer here. RowActions already right-aligns itself with
+          ml:'auto', so a growing spacer was a second mechanism for the same
+          job -- and a harmful one: it absorbed the line's remaining width,
+          which both denied the 176px action cluster the room to sit on line
+          one and stopped the name field ever being asked to shrink. The row
+          wrapped instead. */}
+      {/* The count is worth its width only when the dates themselves are
+          hidden. Expanded, the row lists every one of them immediately below,
+          so the caption was restating what is already on screen -- and on a
+          tablet it was the last ~50px that pushed the action cluster onto a
+          second line. The collapsed summary already reports the count. */}
     </>
+  )
+}
+
+/**
+ * The one control that moves a date between phases, so the row list and the
+ * unassigned panel cannot drift into two different pickers.
+ *
+ * Options show their path when a name is not unique; showing it on every
+ * option would bury the name most models never need disambiguated.
+ */
+function PhaseSelect({
+  tree,
+  value,
+  onChange,
+  label,
+}: {
+  tree: ModelElement
+  value: string
+  onChange: (next: string) => void
+  label: string
+}) {
+  const options = phaseOptions(tree)
+  const duplicated = new Set(
+    options.map((o) => o.name).filter((name, i, all) => all.indexOf(name) !== i)
+  )
+  return (
+    <Select
+      size="small"
+      displayEmpty
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      inputProps={{ 'aria-label': label }}
+      sx={{ minWidth: 220 }}
+    >
+      <MenuItem value="">
+        <em>Unassigned</em>
+      </MenuItem>
+      {options.map((p) => (
+        <MenuItem key={p.id} value={p.id}>
+          {duplicated.has(p.name) ? `${p.path} › ${p.name}` : p.name}
+        </MenuItem>
+      ))}
+    </Select>
   )
 }
 
 interface RowActionsProps {
   element: ModelElement
+  /** Whether the container this row sits in orders its children. */
+  parentOrders: boolean
   canMoveUp: boolean
   canMoveDown: boolean
   onMoveUp: () => void
@@ -515,32 +794,64 @@ interface RowActionsProps {
   onDelete: () => void
 }
 
-function RowActions({ element, canMoveUp, canMoveDown, onMoveUp, onMoveDown, onAdd, onDelete }: RowActionsProps) {
+function RowActions({
+  element,
+  parentOrders,
+  canMoveUp,
+  canMoveDown,
+  onMoveUp,
+  onMoveDown,
+  onAdd,
+  onDelete,
+}: RowActionsProps) {
   const canContain = isContainerType(element.element_type)
+  // These arrows move THIS element among its siblings, so what they mean
+  // depends on the container it sits in, not on what it is. Inside a Sequence
+  // that is a claim about time and says so; inside a Phase -- which is the
+  // shape a multi-context model starts in, see bootstrapModelTree -- the model
+  // asserts no order, so the same button is only moving a list row and must
+  // not call that "earlier".
+  const up = parentOrders ? 'Move earlier' : 'Move up'
+  const down = parentOrders ? 'Move later' : 'Move down'
+  const orderNote = parentOrders ? '' : ' (this phase does not order its contents)'
   return (
-    <>
-      <IconButton size="small" aria-label="Move earlier" disabled={!canMoveUp} onClick={onMoveUp}>
-        <ArrowUpwardIcon fontSize="small" />
-      </IconButton>
-      <IconButton size="small" aria-label="Move later" disabled={!canMoveDown} onClick={onMoveDown}>
-        <ArrowDownwardIcon fontSize="small" />
-      </IconButton>
+    // One group, so the four controls wrap together instead of breaking apart
+    // and leaving Delete stranded on a line of its own -- which is what a
+    // narrow screen did to them, and it put the destructive control where it
+    // read as unrelated to the row above it.
+    <Box sx={{ display: 'flex', alignItems: 'center', flexShrink: 0, ml: 'auto' }}>
+      <Tooltip title={`${up}${orderNote}`}>
+        <span>
+          <IconButton size="small" aria-label={up} disabled={!canMoveUp} onClick={onMoveUp} sx={HIT_TARGET}>
+            <ArrowUpwardIcon fontSize="small" />
+          </IconButton>
+        </span>
+      </Tooltip>
+      <Tooltip title={`${down}${orderNote}`}>
+        <span>
+          <IconButton size="small" aria-label={down} disabled={!canMoveDown} onClick={onMoveDown} sx={HIT_TARGET}>
+            <ArrowDownwardIcon fontSize="small" />
+          </IconButton>
+        </span>
+      </Tooltip>
       {canContain && (
-        <IconButton size="small" aria-label={`Add inside ${element.name}`} onClick={onAdd}>
-          <AddIcon fontSize="small" />
-        </IconButton>
+        <Tooltip title={`Add inside ${element.name}`}>
+          <IconButton size="small" aria-label={`Add inside ${element.name}`} onClick={onAdd} sx={HIT_TARGET}>
+            <AddIcon fontSize="small" />
+          </IconButton>
+        </Tooltip>
       )}
       <Tooltip title={`Delete ${element.name}`}>
         <IconButton
           size="small"
           aria-label={`Delete ${element.name}`}
           onClick={onDelete}
-          sx={{ '&:hover, &:focus-visible': { color: 'error.main' } }}
+          sx={{ ...HIT_TARGET, '&:hover, &:focus-visible': { color: 'error.main' } }}
         >
           <DeleteIcon fontSize="small" />
         </IconButton>
       </Tooltip>
-    </>
+    </Box>
   )
 }
 
@@ -548,6 +859,16 @@ interface TreeRowProps {
   node: FlatNode
   typeColor: Record<ElementType, ElementTypeColor>
   dates: MatrixMeasurement[]
+  /** The whole tree, for the in-row phase picker's options. */
+  rootTree: ModelElement
+  assignments: Record<string, string>
+  onAssign: (measurementId: string, elementId: string) => void
+  /** Children this row holds, so a collapsed container can say what it hides. */
+  childCount: number
+  /** Everything under this row at any depth, counted for the collapsed summary. */
+  hiddenDescendants: number
+  isCollapsed: boolean
+  onToggleCollapsed: (id: string) => void
   canMoveUp: boolean
   canMoveDown: boolean
   /** Drawn in the gap above this row when the block would land here. */
@@ -558,8 +879,14 @@ interface TreeRowProps {
   isDragged: boolean
   onRename: (id: string, name: string) => void
   onSetLimit: (id: string, field: 'tpq_age_bp' | 'taq_age_bp', value: string) => void
+  limitersOpen: boolean
+  onOpenLimiters: (id: string) => void
   onMoveUp: (id: string) => void
   onMoveDown: (id: string) => void
+  onIndent: (id: string) => boolean
+  onOutdent: (id: string) => boolean
+  /** A dnd-kit keyboard drag is in progress, so the sensor owns the arrow keys. */
+  isDragActive: boolean
   onAdd: (id: string, e: React.MouseEvent<HTMLElement>) => void
   onDelete: (id: string) => void
 }
@@ -568,6 +895,13 @@ function TreeRow({
   node,
   typeColor,
   dates,
+  rootTree,
+  assignments,
+  onAssign,
+  childCount,
+  hiddenDescendants,
+  isCollapsed,
+  onToggleCollapsed,
   canMoveUp,
   canMoveDown,
   indicator,
@@ -575,8 +909,13 @@ function TreeRow({
   isDragged,
   onRename,
   onSetLimit,
+  limitersOpen,
+  onOpenLimiters,
   onMoveUp,
   onMoveDown,
+  onIndent,
+  onOutdent,
+  isDragActive,
   onAdd,
   onDelete,
 }: TreeRowProps) {
@@ -586,15 +925,60 @@ function TreeRow({
   // its keyboard support.
   const { attributes, listeners, setNodeRef } = useSortable({ id: node.id })
   const { element, depth } = node
+  const canContain = isContainerType(element.element_type)
+  // The direct parent is the last ancestor; it decides what this row's move
+  // arrows are actually claiming.
+  const parentOrders = ordersChildren(node.ancestors[node.ancestors.length - 1])
+  // A phase's dates are not child ELEMENTS, but they are what it holds and
+  // what fills the screen -- a thirty-date phase is the row most worth
+  // collapsing, and counting only nested elements would deny it the control.
+  const collapsibleCount = childCount + dates.length
 
   return (
-    <Box ref={setNodeRef} sx={{ position: 'relative', mt: 1 }}>
+    // The row gap lives INSIDE this box as padding, not as a margin above it,
+    // so the ancestor guides drawn down its left edge meet the guides of the
+    // row above and read as continuous lines rather than a dashed ladder.
+    <Box
+      ref={setNodeRef}
+      role="listitem"
+      // The nesting level, which the outline otherwise expresses only as a
+      // left margin -- a purely visual cue that reaches nobody using a screen
+      // reader. aria-level is 1-based and `depth` already starts at 1 for the
+      // root's direct children.
+      aria-level={depth}
+      aria-label={`${TYPE_LABEL[element.element_type]} ${element.name || ''}, level ${depth}, inside ${
+        node.ancestors[node.ancestors.length - 1].name ||
+        TYPE_LABEL[node.ancestors[node.ancestors.length - 1].element_type]
+      }`}
+      sx={{ position: 'relative', pt: 1 }}
+    >
       {indicator && <DropIndicator depth={indicator.depth} label={indicator.label} />}
+      {/* One guide per level this row is nested under, in that container's own
+          hue: solid where the container orders its children, dashed where it
+          does not.
+ */}
+      {node.ancestors.map((ancestor, level) => (
+        <Box
+          key={ancestor.id}
+          aria-hidden
+          sx={{
+            position: 'absolute',
+            top: 0,
+            bottom: 0,
+            left: level * INDENT_PX + GUTTER_INSET,
+            borderLeft: `1px ${ordersChildren(ancestor) ? 'solid' : 'dashed'} ${
+              typeColor[ancestor.element_type].main
+            }`,
+            opacity: 0.45,
+            pointerEvents: 'none',
+          }}
+        />
+      ))}
       <Box sx={{ ml: depth * INDENT_UNITS, opacity: isDragged ? 0.4 : 1 }}>
       <Paper
         variant="outlined"
         sx={{
-          p: 1.5,
+          p: 2,
           borderLeft: `4px solid ${typeColor[element.element_type].main}`,
           ...(isDropTarget
             ? { borderColor: 'primary.main', boxShadow: (theme) => `0 0 0 1px ${theme.palette.primary.main}` }
@@ -602,30 +986,79 @@ function TreeRow({
         }}
       >
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-          <Box
-            {...attributes}
-            {...listeners}
-            aria-label={`Drag ${element.name}`}
-            sx={{
-              display: 'flex',
-              alignItems: 'center',
-              color: 'text.secondary',
-              cursor: 'grab',
-              touchAction: 'none',
-              '&:active': { cursor: 'grabbing' },
-            }}
-          >
-            <DragIndicatorIcon fontSize="small" />
-          </Box>
+          <Tooltip title={`Reorder ${element.name} — drag, or use the arrow keys`}>
+            <Box
+              {...attributes}
+              {...listeners}
+              onKeyDown={(e) => {
+                // Only before a dnd-kit keyboard drag has been activated with
+                // Space/Enter -- once it has, the sensor owns the arrow keys
+                // and this would fight it for the same gesture.
+                if (isDragActive) return
+                const handled: Record<string, () => boolean | void> = {
+                  ArrowLeft: () => onOutdent(node.id),
+                  ArrowRight: () => onIndent(node.id),
+                  ArrowUp: () => canMoveUp && (onMoveUp(node.id), true),
+                  ArrowDown: () => canMoveDown && (onMoveDown(node.id), true),
+                }
+                const action = handled[e.key]
+                if (!action) return
+                e.preventDefault()
+                action()
+              }}
+              aria-label={`Reorder ${element.name}. Arrow up and down move it among its neighbours; arrow left and right change how deeply it is nested.`}
+              sx={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: 'text.secondary',
+                cursor: 'grab',
+                touchAction: 'none',
+                // The affordance the header names as the way to re-nest, and
+                // it was a bare 20px glyph -- the smallest target in the app.
+                ...HIT_TARGET,
+                borderRadius: 1,
+                '&:active': { cursor: 'grabbing' },
+                '&:focus-visible': { outline: (theme) => `2px solid ${theme.palette.primary.main}`, outlineOffset: 2 },
+              }}
+            >
+              <DragIndicatorIcon fontSize="small" />
+            </Box>
+          </Tooltip>
+          {/* Only a container can hide anything, and a leaf reserves nothing
+              for the chevron it will never have: a Boundary or Hiatus row has
+              one fewer control, so it starts one control earlier rather than
+              carrying 44px of empty gutter after the drag handle.
+
+              What the empty slot was buying was a shared left edge for the
+              type words. That is now bought properly, by the fixed-width type
+              slot in ElementFields -- which also fixes the misalignment the
+              spacer never addressed, where "Sequence" and "Phase" differ by
+              20px and pushed every name field to a different x. */}
+          {canContain && collapsibleCount > 0 ? (
+            <Tooltip title={isCollapsed ? `Show ${collapsibleCount} inside ${element.name}` : `Hide what is inside ${element.name}`}>
+              <IconButton
+                size="small"
+                aria-label={isCollapsed ? `Expand ${element.name}` : `Collapse ${element.name}`}
+                aria-expanded={!isCollapsed}
+                onClick={() => onToggleCollapsed(node.id)}
+                sx={HIT_TARGET}
+              >
+                {isCollapsed ? <ChevronRightIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
+              </IconButton>
+            </Tooltip>
+          ) : null}
           <ElementFields
             element={element}
             typeColor={typeColor}
             onRename={(name) => onRename(node.id, name)}
             onSetLimit={(field, value) => onSetLimit(node.id, field, value)}
-            dates={dates}
+            limitersOpen={limitersOpen}
+            onOpenLimiters={() => onOpenLimiters(node.id)}
           />
           <RowActions
             element={element}
+            parentOrders={parentOrders}
             canMoveUp={canMoveUp}
             canMoveDown={canMoveDown}
             onMoveUp={() => onMoveUp(node.id)}
@@ -635,17 +1068,60 @@ function TreeRow({
           />
         </Box>
 
-        {element.element_type === 'phase' && (
+        {/* A collapsed container says what it is holding. Hiding rows without
+            saying how many turns the outline into a place where work can go
+            missing silently. */}
+        {isCollapsed && (hiddenDescendants > 0 || dates.length > 0) && (
+          <Box sx={{ mt: 1, pl: 1 }}>
+            <Typography variant="caption" color="text.secondary">
+              {[
+                hiddenDescendants > 0
+                  ? `${hiddenDescendants} element${hiddenDescendants === 1 ? '' : 's'}`
+                  : null,
+                dates.length > 0 ? `${dates.length} date${dates.length === 1 ? '' : 's'}` : null,
+              ]
+                .filter(Boolean)
+                .join(' · ')}{' '}
+              hidden
+            </Typography>
+          </Box>
+        )}
+
+        {!isCollapsed && element.element_type === 'phase' && !(dates.length === 0 && childCount > 0) && (
           <Box sx={{ mt: 1, pl: 1 }}>
             {dates.length === 0 ? (
-              <Typography variant="caption" color="textSecondary">
-                No dates in this phase yet — assign them below.
-              </Typography>
-            ) : (
-              dates.map((m) => (
-                <Typography key={m.id} variant="body2" sx={{ fontFamily: 'monospace' }}>
-                  {m.sample_name} — {m.age_bp} ± {m.error_1sigma ?? '?'} BP
+              // A phase holding other elements is a structural container, not
+              // somewhere dates were forgotten -- telling the wrapping "Site"
+              // phase to go and fetch dates is an instruction to do the wrong
+              // thing.
+              childCount > 0 ? null : (
+                <Typography variant="caption" color="textSecondary">
+                  No dates in this phase yet — add them from the unassigned list below.
                 </Typography>
+              )
+            ) : (
+              // Membership is edited where it is shown. It used to be readable
+              // here and changeable only in a panel below the whole outline,
+              // which on a large model put the two halves of one task
+              // thousands of pixels apart.
+              dates.map((m) => (
+                <Box
+                  key={m.id}
+                  sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 1, mb: 0.5 }}
+                >
+                  <Typography
+                    variant="body2"
+                    sx={{ fontVariantNumeric: 'tabular-nums', minWidth: 200 }}
+                  >
+                    {m.sample_name} — {m.age_bp} ± {m.error_1sigma ?? '?'} BP
+                  </Typography>
+                  <PhaseSelect
+                    tree={rootTree}
+                    value={m.id in assignments ? assignments[m.id] : ''}
+                    onChange={(next) => onAssign(m.id, next)}
+                    label={`Phase for ${m.sample_name}`}
+                  />
+                </Box>
               ))
             )}
           </Box>
@@ -664,6 +1140,37 @@ export default function ModelTreeEditor({
   onSortDates,
 }: Props) {
   const [addMenu, setAddMenu] = useState<{ anchor: HTMLElement; targetId: string } | null>(null)
+  // The element awaiting a delete confirmation, held by id rather than by node
+  // so it cannot go stale against a tree that changed underneath it.
+  const [pendingRemoval, setPendingRemoval] = useState<string | null>(null)
+  // Containers whose children are hidden. Ids rather than nodes, so a tree
+  // edit cannot leave this pointing at something that no longer exists.
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  // What the last keyboard move did, announced to assistive technology.
+  // Arrow-key moves restructured the tree in silence: dnd-kit's own live
+  // region covers ITS drag, and the arrow-key path is ours, so nothing spoke.
+  const [announcement, setAnnouncement] = useState('')
+  /**
+   * Snapshots to step back through, newest last, capped at 20.
+   *
+   * STRUCTURAL edits only -- add, delete, move, renest, drop, bracket,
+   * reassign. Renaming and the TPQ/TAQ fields are deliberately excluded: they
+   * go through update() on every keystroke, so recording them would fill the
+   * buffer with single characters and push the structural change the user
+   * actually wants back out of reach. Text is already undoable by typing.
+   */
+  // Which rows are showing their TPQ/TAQ pair. Editor state, not row state,
+  // so that revealing the pair can be recorded in the snapshots above and
+  // taken back by Undo like any other change to the row.
+  const [openLimiters, setOpenLimiters] = useState<Set<string>>(new Set())
+  const historyRef = useRef<
+    Array<{ tree: ModelElement; assignments: Record<string, string>; openLimiters: Set<string> }>
+  >([])
+  const [undoDepth, setUndoDepth] = useState(0)
+  // What was collapsed before a drag expanded everything, so it can be put
+  // back afterwards instead of the reader losing every collapse on the first
+  // gesture of a long session.
+  const collapsedBeforeDragRef = useRef<Set<string> | null>(null)
   const [activeId, setActiveId] = useState<string | null>(null)
   // Where the block would land right now, for the indicator. Replaced only
   // when the LANDING PLACE changes: a drag across one row is hundreds of move
@@ -686,7 +1193,52 @@ export default function ModelTreeEditor({
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   )
 
-  const datesIn = (elementId: string) => measurements.filter((m) => assignments[m.id] === elementId)
+  // One pass over the dates, grouped by the element they sit in, instead of a
+  // fresh filter per row. Called inside the row map, it was O(rows x dates) on
+  // every render -- and every keystroke in a name field is a render, so a
+  // 30-element, 30-date model did ~900 comparisons per character typed.
+  const datesByElement = useMemo(() => {
+    const map = new Map<string, MatrixMeasurement[]>()
+    for (const m of measurements) {
+      const target = assignments[m.id]
+      if (!target) continue
+      const bucket = map.get(target)
+      if (bucket) bucket.push(m)
+      else map.set(target, [m])
+    }
+    return map
+  }, [measurements, assignments])
+
+  const NO_DATES: MatrixMeasurement[] = EMPTY_DATES
+  const datesIn = (elementId: string) => datesByElement.get(elementId) ?? NO_DATES
+
+  const remember = () => {
+    historyRef.current.push({ tree, assignments, openLimiters })
+    if (historyRef.current.length > 20) historyRef.current.shift()
+    setUndoDepth(historyRef.current.length)
+  }
+
+  const undo = () => {
+    const previous = historyRef.current.pop()
+    setUndoDepth(historyRef.current.length)
+    if (!previous) return
+    // Whatever was hidden may not exist any more, so show everything rather
+    // than restore a collapse set that could hide the change being undone.
+    setCollapsed(new Set())
+    setOpenLimiters(previous.openLimiters)
+    setAnnouncement('Undid the last structural change')
+    onChange(previous.tree, previous.assignments)
+  }
+
+  /**
+   * Show a row's TPQ/TAQ pair, remembering first so Undo can put it away --
+   * and with it any value typed into the pair since, because the snapshot
+   * taken here predates them both.
+   */
+  const showLimiters = (id: string) => {
+    remember()
+    setOpenLimiters((open) => new Set(open).add(id))
+  }
 
   const update = (mutate: (draft: ModelElement) => void) => {
     const draft = cloneTree(tree)
@@ -695,6 +1247,7 @@ export default function ModelTreeEditor({
   }
 
   const addChild = (parentId: string, type: ElementType) => {
+    remember()
     update((draft) => {
       const parent = findElement(draft, parentId)
       if (!parent) return
@@ -710,16 +1263,26 @@ export default function ModelTreeEditor({
     })
   }
 
-  const remove = (id: string) => {
+  // What deleting this element would actually take with it. Computed once and
+  // used for both the confirmation copy and the deletion itself, so the count
+  // the user agrees to is the count that is removed.
+  const removalImpact = (id: string) => {
+    const subtree = findElement(tree, id)
+    const descendantIds = new Set<string>()
+    if (subtree) walk(subtree, null, (el) => { descendantIds.add(el.id) })
+    const orphaned = measurements.filter((m) => descendantIds.has(assignments[m.id] || ''))
+    return {
+      // The subtree includes the element itself; what is being reported is
+      // what goes with it.
+      descendants: Math.max(0, descendantIds.size - 1),
+      orphaned,
+    }
+  }
+
+  const performRemove = (id: string) => {
     if (id === tree.id) return
-    const orphaned = measurements.filter((m) => {
-      const target = findElement(tree, assignments[m.id] || '')
-      if (!target) return false
-      let inside = false
-      const subtree = findElement(tree, id)
-      if (subtree) walk(subtree, null, (el) => { if (el.id === target.id) inside = true })
-      return inside
-    })
+    remember()
+    const { orphaned } = removalImpact(id)
     const draft = cloneTree(tree)
     const parent = findParent(draft, id)
     if (parent) parent.children = (parent.children || []).filter((c) => c.id !== id)
@@ -728,7 +1291,101 @@ export default function ModelTreeEditor({
     onChange(draft, nextAssignments)
   }
 
+  // Deleting a container takes its whole subtree AND drops the phase assignment
+  // of every date inside it. Undo can put that back, but only for someone who
+  // registered what went -- on a thirty-element model the difference between
+  // removing one Boundary and removing a branch is not visible after the fact,
+  // which is what the count in the dialog is for. The same ConfirmDialog guards
+  // deleting a project, an analysis and a stored date elsewhere in the app.
+  //
+  // Only when there is something to lose. Removing an empty Boundary is the
+  // common case and stays one click; a dialog on it would train the reader to
+  // dismiss the one that matters.
+  const pendingElement = pendingRemoval ? findElement(tree, pendingRemoval) : null
+  const pendingImpact = pendingRemoval
+    ? removalImpact(pendingRemoval)
+    : { descendants: 0, orphaned: [] }
+
+  const requestRemove = (id: string) => {
+    if (id === tree.id) return
+    const { descendants, orphaned } = removalImpact(id)
+    if (descendants === 0 && orphaned.length === 0) {
+      performRemove(id)
+      return
+    }
+    setPendingRemoval(id)
+  }
+
+  /**
+   * Change how deeply an element is nested, from the keyboard.
+   *
+   * Routed through commitDrop with a synthetic horizontal offset of exactly one
+   * indent step, so the keyboard and the pointer share one set of legality
+   * rules: getProjection's clamp decides what is reachable, and a key press can
+   * no more produce an illegal tree than a drag can. Returns false when the
+   * clamp refuses, so the caller can leave the row where it is.
+   *
+   * Without this a keyboard user could add children and reorder siblings but
+   * never move an element to a different parent -- the one operation this
+   * editor exists for. KeyboardSensor was registered, which looked like
+   * support, but depth comes only from a horizontal drag delta and a vertical
+   * list's keyboard sensor produces none.
+   */
+  /** Where an element now sits, in words: its depth and what contains it. */
+  const describePosition = (root: ModelElement, id: string): string => {
+    const node = flattenTree(root).find((n) => n.id === id)
+    if (!node) return ''
+    const parent = node.ancestors[node.ancestors.length - 1]
+    const name = node.element.name || TYPE_LABEL[node.element.element_type]
+    const parentName = parent.name || TYPE_LABEL[parent.element_type]
+    const siblings = (parent.children || []).length
+    const index = (parent.children || []).findIndex((c) => c.id === id) + 1
+    return `${name}, ${index} of ${siblings} in ${parentName}, level ${node.depth}`
+  }
+
+  const renest = (id: string, direction: 1 | -1): boolean => {
+    const next = commitDrop(tree, flat, id, id, direction * INDENT_PX)
+    if (next) remember()
+    if (!next) {
+      setAnnouncement(
+        direction === 1
+          ? 'Cannot nest any deeper here'
+          : 'Cannot move any further out here'
+      )
+      return false
+    }
+    // Indenting makes this element a child of the row above it, and if that row
+    // is collapsed the element would vanish at the moment it moved. Only that
+    // container is opened -- clearing the whole collapse set would throw away
+    // every other one the reader had closed, for a move that touched one
+    // branch.
+    const landedIn = flattenTree(next).find((n) => n.id === id)?.ancestors.slice(-1)[0]
+    if (landedIn) {
+      setCollapsed((prev) => {
+        if (!prev.has(landedIn.id)) return prev
+        const nextSet = new Set(prev)
+        nextSet.delete(landedIn.id)
+        return nextSet
+      })
+    }
+    setAnnouncement(describePosition(next, id))
+    onChange(next, assignments)
+    return true
+  }
+
   const move = (id: string, delta: number) => {
+    remember()
+    const draftAfter = cloneTree(tree)
+    const parentOf = findParent(draftAfter, id)
+    if (parentOf) {
+      const kids = parentOf.children || []
+      const i = kids.findIndex((c) => c.id === id)
+      const j = i + delta
+      if (i >= 0 && j >= 0 && j < kids.length) {
+        ;[kids[i], kids[j]] = [kids[j], kids[i]]
+        setAnnouncement(describePosition(draftAfter, id))
+      }
+    }
     update((draft) => {
       const parent = findParent(draft, id)
       if (!parent) return
@@ -755,6 +1412,7 @@ export default function ModelTreeEditor({
   }
 
   const assign = (sampleId: string, elementId: string) => {
+    remember()
     onChange(tree, { ...assignments, [sampleId]: elementId })
   }
 
@@ -762,6 +1420,7 @@ export default function ModelTreeEditor({
   // which is what makes each phase's start and end reportable. Adjacent phases
   // share the boundary between them.
   const bracketPhases = () => {
+    remember()
     update((draft) => {
       walk(draft, null, (el) => {
         if (el.element_type !== 'sequence') return
@@ -788,6 +1447,40 @@ export default function ModelTreeEditor({
   }
 
   const flat = useMemo(() => flattenTree(tree), [tree])
+
+  // What the outline actually draws. `flat` stays complete because the drag
+  // logic rebuilds the whole tree from it -- handing it a filtered list would
+  // silently delete every hidden element on the next drop.
+  const visible = useMemo(
+    () => (collapsed.size === 0 ? flat : flat.filter((n) => !n.ancestors.some((a) => collapsed.has(a.id)))),
+    [flat, collapsed]
+  )
+
+  // How many elements a collapsed container is holding, so its row can say so
+  // rather than just hiding them.
+  const hiddenCount = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const id of collapsed) {
+      counts.set(id, flat.filter((n) => n.ancestors.some((a) => a.id === id)).length)
+    }
+    return counts
+  }, [flat, collapsed])
+
+  // A date with no phase, or one pointing at an element that has since been
+  // deleted -- both are "not in the model" and both belong in the panel that
+  // exists to clear them.
+  const unassigned = useMemo(() => {
+    const phaseIds = new Set(phaseOptions(tree).map((p) => p.id))
+    return measurements.filter((m) => !phaseIds.has(assignments[m.id] || ''))
+  }, [measurements, assignments, tree])
+
+  const toggleCollapsed = (id: string) =>
+    setCollapsed((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
 
   const parentMap = useMemo(() => {
     const map = new Map<string, ModelElement>()
@@ -832,10 +1525,33 @@ export default function ModelTreeEditor({
     setProjection(null)
     projectionRef.current = null
     lastOverIdRef.current = null
+    // Put back what the drag expanded. Ids that no longer exist are dropped,
+    // and the moved element's own ancestors are left open so the block does
+    // not vanish into a container the moment it lands.
+    const before = collapsedBeforeDragRef.current
+    collapsedBeforeDragRef.current = null
+    if (before && before.size > 0) {
+      setCollapsed((current) => {
+        const live = new Set<string>()
+        walk(tree, null, (el) => {
+          if (before.has(el.id)) live.add(el.id)
+        })
+        return live.size === current.size && [...live].every((id) => current.has(id))
+          ? current
+          : live
+      })
+    }
   }
 
   const handleDragStart = (event: DragStartEvent) => {
     const id = String(event.active.id)
+    // Expand everything for the duration of the drag. The projection and the
+    // drop both work on the complete flat list, so a collapsed container would
+    // put rows in that list with nothing on screen to represent them -- the
+    // indicator would name a landing place the reader cannot see, and offsets
+    // would count rows that are not there.
+    collapsedBeforeDragRef.current = collapsed
+    setCollapsed(new Set())
     setActiveId(id)
     projectionRef.current = null
     lastOverIdRef.current = null
@@ -858,27 +1574,196 @@ export default function ModelTreeEditor({
     endDrag()
     if (!landing) return
     const nextTree = applyProjection(tree, flat, dragged, landing)
-    if (nextTree) onChange(nextTree, assignments)
+    if (nextTree) {
+      remember()
+      onChange(nextTree, assignments)
+    }
   }
 
   const handleDragCancel = () => {
     endDrag()
   }
 
-  const problems = validateTree(tree, assignments, measurements)
+  // The editor's own element, so the shortcut below can tell a key press
+  // aimed at this outline from one aimed at something else on the page.
+  const rootRef = useRef<HTMLDivElement | null>(null)
+  // The shortcut fires from a listener whose identity must not change between
+  // renders, so it reads the current undo through a ref rather than closing
+  // over one and re-subscribing on every keystroke.
+  const undoRef = useRef(undo)
+  undoRef.current = undo
+
+  /**
+   * Ctrl/Cmd+Z, listened for on the window.
+   *
+   * It used to be a React onKeyDown on the row list, which only ever sees
+   * keys pressed while focus is INSIDE that list -- and the moment that
+   * matters most is exactly when focus is not: clicking a row button (Add
+   * TPQ/TAQ, Delete, Bracket phases) either moves focus to a control that
+   * then unmounts or leaves it on a button outside the list, so focus sits on
+   * <body> and the handler never ran.
+   *
+   * Text fields are left alone. Renames and TPQ/TAQ values are deliberately
+   * absent from the history (see historyRef), so inside a field the browser's
+   * own undo is the correct and only useful one; taking the key there would
+   * throw away the character the user meant to take back and step the whole
+   * outline instead.
+   */
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== 'z') return
+      // Shift+Cmd+Z is Redo, which this editor does not have. Claiming the
+      // chord to do nothing is worse than leaving it unhandled.
+      if (e.shiftKey) return
+      const target = e.target as HTMLElement | null
+      if (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target?.isContentEditable
+      ) {
+        return
+      }
+      // Anything focused elsewhere on the page keeps its own Ctrl+Z; only
+      // this editor's own keys, and the unfocused case, belong to us.
+      if (target && target !== document.body && !rootRef.current?.contains(target)) return
+      e.preventDefault()
+      undoRef.current()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
+
+  // Walks the entire tree and every measurement. Called bare in the render
+  // body it ran on each keystroke, alongside the grouping above.
+  const problems = useMemo(
+    () => validateTree(tree, assignments, measurements),
+    [tree, assignments, measurements]
+  )
 
   return (
-    <Box>
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2, flexWrap: 'wrap' }}>
-        <Typography variant="body2" color="textSecondary" sx={{ flexGrow: 1 }}>
-          Oldest first — the top of this list is the bottom of the stratigraphy. Drag
-          the handle on the left to reorder or renest an element — drag sideways to change how
-          deeply it's nested. The blue line shows where it will land, and which container it will
-          land in.
+    <Box ref={rootRef}>
+      {/* Everything this page is READ from, on the band the diagram tab
+          introduces itself with too -- see GuideBand. */}
+      <GuideBand>
+        {/* The one fact worth restating on every visit, because it is the one
+            that is easy to hold backwards -- and the one the diagram tab
+            states the other way round. */}
+        <Typography variant="body2" color="textSecondary" sx={{ mb: 1.5 }}>
+          Build the model using nested containers of the following types, arranged oldest first.
         </Typography>
-        <Button size="small" startIcon={<AutoFixHighIcon />} onClick={bracketPhases}>
-          Bracket phases with boundaries
-        </Button>
+
+        {/* The vocabulary as a KEY.
+          
+            Each entry carries the same 4px coloured bar the rows carry, so the
+            key shows what it is describing instead of naming it: a reader who
+            meets "Phase" here recognises the green edge on every phase row, and
+            the guides those rows hang from.
+           */}
+        <Box
+          component="dl"
+          sx={{
+            display: 'grid',
+            gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' },
+            gap: 1,
+            m: 0,
+            // Half a step, not two: the band spaces its own contents, and
+            // the disclosure below carries 44px of hit target of its own.
+            mb: 0.5,
+          }}
+        >
+          {(['sequence', 'boundary', 'phase', 'hiatus'] as ElementType[]).map((type) => (
+            <Box key={type} sx={{ display: 'flex', gap: 1, alignItems: 'baseline' }}>
+              <Box
+                aria-hidden
+                sx={{
+                  flexShrink: 0,
+                  width: '4px',
+                  alignSelf: 'stretch',
+                  borderRadius: 1,
+                  backgroundColor: typeColor[type].main,
+                }}
+              />
+              <Box>
+                <Box
+                  component="dt"
+                  sx={{
+                    display: 'inline',
+                    color: typeColor[type].ink,
+                    fontSize: '0.75rem',
+                    fontWeight: 500,
+                  }}
+                >
+                  {TYPE_LABEL[type]}
+                </Box>{' '}
+                <Typography component="dd" variant="caption" color="text.secondary" sx={{ display: 'inline', m: 0 }}>
+                  {TYPE_HINT[type]}
+                </Typography>
+              </Box>
+            </Box>
+          ))}
+        </Box>
+
+        <Accordion
+          disableGutters
+          elevation={0}
+          sx={{
+            backgroundColor: 'transparent',
+            '&:before': { display: 'none' },
+          }}
+        >
+          <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ minHeight: 44, px: 0 }}>
+            <Typography variant="body2">Click to expand for instructions</Typography>
+          </AccordionSummary>
+          <AccordionDetails sx={{ px: 0, pt: 0 }}>
+            <Typography variant="body2" color="text.secondary" paragraph>
+              Drag the handle on the left to reorder or renest an element — drag sideways to change
+              how deeply it is nested. The blue line shows where it will land, and which container it
+              will land in. From the keyboard, focus a handle and use the arrow keys: up and down
+              move an element among its neighbours, left and right change how deeply it is nested.
+            </Typography>
+            <Typography variant="body2" color="text.secondary" paragraph>
+              Nest Sequences inside a Phase for parallel branches, and put a Hiatus between two
+              Boundaries for a deliberate gap. A Boundary between two Phases is a single shared
+              parameter, giving one transition date rather than two independent ones.
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 0 }}>
+              TPQ (terminus post quem) is the earliest date an event could have occurred, and TAQ
+              (terminus ante quem) is the latest. Only use these if you know this information, and
+              enter them in years BP.
+            </Typography>
+          </AccordionDetails>
+        </Accordion>
+      </GuideBand>
+
+      {/* Actions, right-aligned on the white working surface -- below the rule
+          with the model they act on, not above it with the material that
+          explains it. */}
+      <Box
+        sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 1, mb: 2, flexWrap: 'wrap' }}
+      >
+        <Tooltip title={undoDepth > 0 ? 'Undo the last structural change (Ctrl+Z / ⌘Z)' : 'Nothing to undo'}>
+          <span>
+            <Button
+              size="small"
+              startIcon={<UndoIcon />}
+              onClick={undo}
+              disabled={undoDepth === 0}
+              sx={{ minHeight: 44, flexShrink: 0 }}
+            >
+              Undo
+            </Button>
+          </span>
+        </Tooltip>
+        <Tooltip title="Adds a Boundary before and after each group inside every Sequence in this model">
+          <Button
+            size="small"
+            startIcon={<AutoFixHighIcon />}
+            onClick={bracketPhases}
+            sx={{ minHeight: 44, flexShrink: 0 }}
+          >
+            Bracket phases with boundaries
+          </Button>
+        </Tooltip>
       </Box>
 
       {problems.length > 0 && (
@@ -893,7 +1778,7 @@ export default function ModelTreeEditor({
         <Paper
           variant="outlined"
           sx={{
-            p: 1.5,
+            p: 2,
             borderLeft: `4px solid ${typeColor[tree.element_type].main}`,
             ...(projection?.parentId === tree.id
               ? { borderColor: 'primary.main', boxShadow: (theme) => `0 0 0 1px ${theme.palette.primary.main}` }
@@ -906,15 +1791,23 @@ export default function ModelTreeEditor({
               typeColor={typeColor}
               onRename={(name) => rename(tree.id, name)}
               onSetLimit={(field, value) => setLimit(tree.id, field, value)}
-              dates={[]}
+              limitersOpen={openLimiters.has(tree.id)}
+              onOpenLimiters={() => showLimiters(tree.id)}
             />
-            <IconButton
-              size="small"
-              aria-label={`Add inside ${tree.name}`}
-              onClick={(e) => setAddMenu({ anchor: e.currentTarget, targetId: tree.id })}
-            >
-              <AddIcon fontSize="small" />
-            </IconButton>
+            <Tooltip title={`Add inside ${tree.name}`}>
+              <IconButton
+                size="small"
+                aria-label={`Add inside ${tree.name}`}
+                onClick={(e) => setAddMenu({ anchor: e.currentTarget, targetId: tree.id })}
+                // Right-aligned, the way RowActions aligns itself on every
+                // other row. Left where it fell, this button sat immediately
+                // after the Add TPQ/TAQ caption and read as part of that
+                // control rather than as the row's own action.
+                sx={{ ...HIT_TARGET, flexShrink: 0, ml: 'auto' }}
+              >
+                <AddIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
           </Box>
         </Paper>
       </Box>
@@ -931,7 +1824,16 @@ export default function ModelTreeEditor({
             over, but applies no transform, so nothing shifts under the
             cursor mid-drag. */}
         <SortableContext items={flat.map((n) => n.id)} strategy={() => null}>
-          {flat.map((node) => {
+          {/* A list, not role="tree". A treeitem is expected to be a single
+              focusable unit named by its own content; these rows each hold a
+              name field, two number fields and up to five buttons, so calling
+              them treeitems would describe a widget that is not what is here.
+              `listitem` carries aria-level just as `treeitem` does, which is
+              the part that was actually missing: nesting was expressed only as
+              a left margin, so assistive technology heard a flat run of text
+              fields with no depth at all. */}
+          <Box role="list" aria-label="Model structure outline">
+          {visible.map((node) => {
             const parent = parentMap.get(node.id)
             const siblings = parent?.children || []
             const index = siblings.findIndex((s) => s.id === node.id)
@@ -939,6 +1841,13 @@ export default function ModelTreeEditor({
               <TreeRow
                 key={node.id}
                 node={node}
+                rootTree={tree}
+                assignments={assignments}
+                onAssign={assign}
+                childCount={(node.element.children || []).length}
+                hiddenDescendants={hiddenCount.get(node.id) ?? 0}
+                isCollapsed={collapsed.has(node.id)}
+                onToggleCollapsed={toggleCollapsed}
                 typeColor={typeColor}
                 dates={datesIn(node.id)}
                 canMoveUp={index > 0}
@@ -952,15 +1861,22 @@ export default function ModelTreeEditor({
                 isDragged={draggedIds.has(node.id)}
                 onRename={rename}
                 onSetLimit={setLimit}
+                limitersOpen={openLimiters.has(node.id)}
+                onOpenLimiters={showLimiters}
                 onMoveUp={(id) => move(id, -1)}
                 onMoveDown={(id) => move(id, 1)}
+                onIndent={(id) => renest(id, 1)}
+                onOutdent={(id) => renest(id, -1)}
+                isDragActive={activeId !== null}
                 onAdd={(id, e) => setAddMenu({ anchor: e.currentTarget, targetId: id })}
-                onDelete={remove}
+                onDelete={requestRemove}
               />
             )
           })}
+          </Box>
           {/* Landing at the very end has no following row to hang the line
-              above, so it gets a zero-height slot of its own. */}
+              above, so it gets a zero-height slot of its own. Outside the list:
+              it is a drop affordance, not an item in the model. */}
           {projection && projection.insertBeforeId === null && (
             <Box sx={{ position: 'relative', mt: 1, height: 0 }}>
               <DropIndicator
@@ -974,7 +1890,7 @@ export default function ModelTreeEditor({
           {activeElement && (
             <Paper
               sx={{
-                p: 1.5,
+                p: 2,
                 borderLeft: `4px solid ${typeColor[activeElement.element_type].main}`,
                 display: 'flex',
                 alignItems: 'center',
@@ -984,18 +1900,27 @@ export default function ModelTreeEditor({
               }}
             >
               <DragIndicatorIcon fontSize="small" sx={{ color: 'text.secondary' }} />
-              <Chip
-                size="small"
-                label={TYPE_LABEL[activeElement.element_type]}
-                sx={{ backgroundColor: typeColor[activeElement.element_type].ink, color: 'white' }}
-              />
+              <Box
+                component="span"
+                sx={{
+                  color: typeColor[activeElement.element_type].ink,
+                  fontSize: '0.75rem',
+                  fontWeight: 500,
+                }}
+              >
+                {TYPE_LABEL[activeElement.element_type]}
+              </Box>
               <Typography variant="body2">{activeElement.name}</Typography>
             </Paper>
           )}
         </DragOverlay>
       </DndContext>
 
-      <Paper sx={{ p: 2, mt: 3 }}>
+      {/* Flat, not elevated: this sits inside Stratigraphy's already-elevated
+          Paper, and DESIGN.md draws that boundary with a line rather than
+          stacking a second shadow inside the first (the ImportDatesDialog
+          precedent). p: 3 is the house padding for a content Paper. */}
+      <Paper variant="outlined" elevation={0} sx={{ p: 3, mt: 3 }}>
         <Stack
           direction={{ xs: 'column', sm: 'row' }}
           spacing={1}
@@ -1003,46 +1928,36 @@ export default function ModelTreeEditor({
           justifyContent="space-between"
           sx={{ mb: 1 }}
         >
-          <Typography variant="subtitle1">Assign dates to phases</Typography>
+          <Typography variant="subtitle1" component="h2">
+            Unassigned dates
+          </Typography>
           {onSortDates && (
             <SortDatesButton measurements={measurements} onSort={onSortDates} />
           )}
         </Stack>
-        {onSortDates && measurements.length > 1 && (
-          <Typography variant="caption" color="textSecondary" sx={{ display: 'block', mb: 1.5 }}>
-            Sorting reorders every phase at once — the dates listed under each phase above are this
-            same list, filtered.
-          </Typography>
-        )}
         {measurements.length === 0 ? (
           <Typography variant="body2" color="textSecondary">
             No dates in this analysis yet.
           </Typography>
+        ) : unassigned.length === 0 ? (
+          <Typography variant="body2" color="textSecondary">
+            Every date is in a phase. Change one from the phase it is listed under above.
+          </Typography>
         ) : (
-          measurements.map((m) => (
+          unassigned.map((m) => (
             // wrap: the label and the select each have a 220px minimum, so
             // held to one unbroken row the pair needs ~490px -- wider than a
             // phone viewport, forcing a sideways scroll to reach the select.
             <Box key={m.id} sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 2, mb: 1 }}>
-              <Typography variant="body2" sx={{ minWidth: 220, fontFamily: 'monospace' }}>
+              <Typography variant="body2" sx={{ minWidth: 220, fontVariantNumeric: 'tabular-nums' }}>
                 {m.sample_name} — {m.age_bp} ± {m.error_1sigma ?? '?'} BP
               </Typography>
-              <Select
-                size="small"
-                displayEmpty
+              <PhaseSelect
+                tree={tree}
                 value={assignments[m.id] || ''}
-                onChange={(e) => assign(m.id, e.target.value)}
-                sx={{ minWidth: 220 }}
-              >
-                <MenuItem value="">
-                  <em>Unassigned</em>
-                </MenuItem>
-                {phaseOptions(tree).map((p) => (
-                  <MenuItem key={p.id} value={p.id}>
-                    {p.name}
-                  </MenuItem>
-                ))}
-              </Select>
+                onChange={(next) => assign(m.id, next)}
+                label={`Phase for ${m.sample_name}`}
+              />
             </Box>
           ))
         )}
@@ -1070,6 +1985,45 @@ export default function ModelTreeEditor({
           </MenuItem>
         ))}
       </Menu>
+
+      {/* Polite, not assertive: a move is a confirmation of something the
+          user just did, not an interruption. Rendered once for the whole
+          outline rather than per row, so successive moves replace one message
+          instead of queueing thirty. */}
+      <Box
+        aria-live="polite"
+        aria-atomic="true"
+        sx={{
+          // '1px' as a STRING, not 1. MUI's sx treats a bare number between 0
+          // and 1 for width/height as a fraction, so `width: 1` compiled to
+          // width:100% -- a 753px visually-hidden box offset 48px from the
+          // left, which pushed the whole page into horizontal scroll.
+          position: 'absolute',
+          width: '1px',
+          height: '1px',
+          overflow: 'hidden',
+          clip: 'rect(0 0 0 0)',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        {announcement}
+      </Box>
+
+      <ConfirmDialog
+        open={!!pendingElement}
+        title={`Delete ${pendingElement?.name ?? 'element'}?`}
+        message={describeRemoval({
+          descendants: pendingImpact.descendants,
+          orphaned: pendingImpact.orphaned.length,
+        })}
+        confirmLabel="Delete"
+        danger
+        onConfirm={() => {
+          if (pendingRemoval) performRemove(pendingRemoval)
+          setPendingRemoval(null)
+        }}
+        onCancel={() => setPendingRemoval(null)}
+      />
     </Box>
   )
 }

@@ -1,10 +1,3 @@
 /* Intentionally near-empty: MUI's CssBaseline (mounted in App.tsx) already
    provides the reset -- box-sizing, margin, background, font smoothing.
-   This used to be Vite's starter stylesheet (a dark #242424 root, purple
-   link colors, and an orange focus-visible ring scoped to bare <button>
-   elements only) which had nothing to do with this app's actual design and
-   fought CssBaseline rather than complementing it -- e.g. the orange ring
-   was visibly live on native <button>-rendering MUI components (tabs,
-   toggle buttons) while every other focusable element used MUI's own blue
-   theme-colored ring, so focus indication looked like two different
-   design systems depending on which component you tabbed to. */
+   This used to be Vite's starter stylesheet */

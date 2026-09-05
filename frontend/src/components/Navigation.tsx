@@ -85,6 +85,10 @@ export default function Navigation() {
             color="inherit"
             component={RouterLink}
             to="/new-analysis"
+            // "New Analysis" means start over, so it is one of the few places
+            // that says so: NewAnalysis.tsx keeps whatever draft is there
+            // unless an arrival is marked fresh.
+            state={{ fresh: true }}
             variant="outlined"
             sx={{
               borderColor: 'rgba(255,255,255,0.5)',

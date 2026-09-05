@@ -108,7 +108,16 @@ function GroupNode({ data }: NodeProps<NodeData>) {
       sx={{
         width: '100%',
         height: '100%',
-        border: `1px dashed ${tint(color, 0.6, surface)}`,
+        // Solid where the container ORDERS its children, dashed where it does
+        // not -- the same pair the tree editor's depth guides use, so the two
+        // views of one model teach one convention. Previously every group box
+        // was dashed regardless, which made "dashed" mean nothing here while
+        // meaning "unordered" next door.
+        border: `1px ${node.elementType === 'sequence' ? 'solid' : 'dashed'} ${tint(
+          color,
+          0.6,
+          surface
+        )}`,
         borderRadius: 2,
         // Each level of nesting is a touch darker, so depth reads at a glance
         // without tracing borders. Composited rather than translucent, so this
@@ -223,7 +232,23 @@ function BoundaryNode({ data }: NodeProps<NodeData>) {
   )
 }
 
-const NODE_TYPES = { context: ContextNode, group: GroupNode, boundary: BoundaryNode }
+/**
+ * Layout `kind` -> reactflow node type.
+ *
+ * A container is registered as 'container', NOT 'group'. 'group' is one of
+ * reactflow's own built-in type names, so registering a custom component under
+ * it still matches the vendor stylesheet's
+ * `.react-flow__node-default, ..., .react-flow__node-group` rule -- which put a
+ * 1px #1a192b border, a 3px radius, 10px of padding, a 150px width and a
+ * background wash around every Sequence and Phase box. That drew a second,
+ * squared-off near-black rectangle outside each container's own rounded
+ * coloured border, and put an unaccounted-for fill underneath the container
+ * tint, which GroupNode's shading math assumes is the only thing setting the
+ * shade. Only containers were affected, because 'context' and 'boundary' are
+ * not names reactflow ships styles for.
+ */
+const CONTAINER_TYPE = 'container'
+const NODE_TYPES = { context: ContextNode, container: GroupNode, boundary: BoundaryNode }
 
 // Module-level so the default prop is referentially stable: a fresh `{}` per
 // render would change the layout memo's dependency and rebuild the whole
@@ -317,7 +342,7 @@ export default function HarrisMatrixDiagram({
 
       return {
         id: node.id,
-        type: node.kind,
+        type: node.kind === 'group' ? CONTAINER_TYPE : node.kind,
         // Relative to parentNode when there is one -- which is what
         // harrisLayout already produces.
         position: { x: node.x, y: node.y },
@@ -401,8 +426,7 @@ export default function HarrisMatrixDiagram({
       </Box>
 
       <Typography variant="caption" color="textSecondary" sx={{ display: 'block', mt: 1 }}>
-        Oldest at the bottom. A box drawn around others groups them without ordering them; an arrow
-        or a labelled rule between two blocks means the lower one is older.
+        The temporal ordering of the model following similar principles to a stratigraphic matrix, oldest events at the bottom.
       </Typography>
     </Box>
   )

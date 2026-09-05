@@ -16,6 +16,7 @@ import useMediaQuery from '@mui/material/useMediaQuery'
 import type { Theme } from '@mui/material/styles'
 import DeleteIcon from '@mui/icons-material/Delete'
 import ConfirmDialog from '@/components/ConfirmDialog'
+import GuideBand from '@/components/GuideBand'
 import IntervalPlot, { SampleIntervals } from '@/components/IntervalPlot'
 import { useNotify } from '@/contexts/NotificationContext'
 import { formatApiError } from '@/utils/apiError'
@@ -114,8 +115,14 @@ export default function Dashboard() {
       <Box
         sx={{ display: 'flex', alignItems: 'baseline', gap: 2, flexWrap: 'wrap', mt: 4, mb: 1 }}
       >
-      
-        <Typography variant="h1" component="h1">
+        {/* The element is the page's h1 -- WaysIn above is deliberately
+            headingless so this can be, and the period clusters below are its
+            h2s. The SIZE is a separate question: this heads a list on a
+            dashboard, not a page about one thing, so it takes h6's 1.25rem
+            rather than the 2.5rem the h1 variant would give it. Weight 600
+            matches the cluster headings it sits above, which set theirs the
+            same way. */}
+        <Typography variant="h6" component="h1" sx={{ fontWeight: 600 }}>
           Recent analyses
         </Typography>
         {total > 0 && (
@@ -243,7 +250,15 @@ function PeriodSection({
       <Box
         sx={{ display: 'flex', alignItems: 'baseline', gap: 1.5, flexWrap: 'wrap', px: 2 }}
       >
-        <Typography variant="subtitle1" component="h2" sx={{ fontWeight: 600 }}>
+        {/* One step under the page's h1 (1.25rem) and one over the analysis
+            names it governs (1rem). The three headings on this page are sized
+            in the order they nest, so the outline and the picture agree --
+            this cluster band used to sit BELOW its own cards' titles. */}
+        <Typography
+          variant="subtitle1"
+          component="h2"
+          sx={{ fontSize: '1.0625rem', fontWeight: 600 }}
+        >
           {heading}
         </Typography>
         <Typography variant="caption" color="text.secondary">
@@ -391,12 +406,21 @@ function AnalysisRow({
         sx={{ position: 'absolute', inset: 0, borderRadius: 'inherit' }}
       />
 
-      <Box sx={{ pointerEvents: 'none', minWidth: 0 }}>
+      {/* The same band the analysis opens into, stood on its side: clicking
+          this row lands on Results, where exactly this material -- project,
+          name, type, sample count -- is the masthead. Saying it here on the
+          band's own surface makes the row a small preview of its destination
+          rather than an unrelated summary of it. */}
+      <GuideBand orientation="side" inset={2} sx={{ pointerEvents: 'none' }}>
+        {/* The bottom of the page's three-step heading ramp -- see the cluster
+            heading above. Still the loudest thing in the card, because the
+            meta line under it is body2 at text.secondary, but no longer larger
+            than the cluster it belongs to. */}
         <Typography
           variant="h6"
           component="h3"
           noWrap
-          sx={{ fontSize: '1.0625rem', pr: { xs: 5, md: 0 } }}
+          sx={{ fontSize: '1rem', pr: { xs: 5, md: 0 } }}
         >
           {analysis.name}
         </Typography>
@@ -415,7 +439,7 @@ function AnalysisRow({
             sx={{ mt: 1 }}
           />
         )}
-      </Box>
+      </GuideBand>
 
       <Box sx={{ pointerEvents: 'none', minWidth: 0 }}>
         {axis && ticks && range ? (
@@ -495,6 +519,9 @@ function AnalysisRow({
 const WAYS_IN = [
   {
     to: '/new-analysis',
+    // Starting over is the promise this door makes, so it marks the arrival
+    // fresh -- NewAnalysis.tsx otherwise keeps whatever draft is in progress.
+    fresh: true,
     title: 'Calibrate a date',
     action: 'New analysis',
     body: 'Turn a radiocarbon measurement into a calendar date range, or build a chronological model.',
@@ -565,6 +592,7 @@ function WaysIn() {
             <Button
               component={RouterLink}
               to={door.to}
+              state={door.fresh ? { fresh: true } : undefined}
               variant={door.primary ? 'contained' : 'outlined'}
               sx={{ minHeight: 44, alignSelf: compact ? 'stretch' : 'flex-start' }}
             >

@@ -3,7 +3,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from app.database import get_db
-from app.models import Project, Analysis
+from app.models import Project, ProjectSample, Analysis
 from app.schemas.project import ProjectCreate, ProjectUpdate
 from app.api.analysis import _rerun_analysis
 from app.services import jobs
@@ -31,7 +31,10 @@ def create_project(project: ProjectCreate, db: Session = Depends(get_db)):
             "description": new_project.description,
             "created_at": new_project.created_at.isoformat(),
             "updated_at": new_project.updated_at.isoformat(),
+            "last_activity": new_project.updated_at.isoformat(),
             "analyses_count": 0,
+            "status_counts": {"completed": 0, "running": 0, "failed": 0, "pending": 0},
+            "samples_count": 0,
         },
     }
 
@@ -39,34 +42,76 @@ def create_project(project: ProjectCreate, db: Session = Depends(get_db)):
 @router.get("/projects")
 def list_projects(db: Session = Depends(get_db)):
     """
-    List all projects with their analysis counts, plus an 'Unassigned' count
-    so the frontend can offer that bucket alongside real projects.
+    List all projects with the numbers the project grid ranks, sorts and draws
+    with, plus an 'Unassigned' count so the frontend can offer that bucket
+    alongside real projects.
+
+    Every number here comes from a grouped query over the whole table rather
+    than a query per project, so the page costs the same at four projects and
+    at four hundred.
     """
     projects = db.query(Project).order_by(Project.created_at.desc()).all()
 
-    counts = dict(
-        db.query(Analysis.project_id, func.count(Analysis.id))
+    # (project_id, status) -> count. Summed per project this IS the analysis
+    # count, so the status breakdown and the total cannot disagree -- they are
+    # the same query. A project_id of None is the Unassigned bucket.
+    status_rows = (
+        db.query(Analysis.project_id, Analysis.status, func.count(Analysis.id))
+        .group_by(Analysis.project_id, Analysis.status)
+        .all()
+    )
+    by_status: Dict[Optional[str], Dict[str, int]] = {}
+    for project_id, status, count in status_rows:
+        by_status.setdefault(project_id, {})[status or "pending"] = count
+
+    # Latest analysis touched in each project. Taken against the project's own
+    # updated_at below rather than instead of it: renaming or re-describing a
+    # project is activity too, and a project with no analyses yet would
+    # otherwise report no activity at all despite having just been created.
+    last_analysis = dict(
+        db.query(Analysis.project_id, func.max(Analysis.updated_at))
         .group_by(Analysis.project_id)
         .all()
     )
 
-    items = [
-        {
-            "id": p.id,
-            "name": p.name,
-            "description": p.description,
-            "created_at": p.created_at.isoformat(),
-            "updated_at": p.updated_at.isoformat(),
-            "analyses_count": counts.get(p.id, 0),
-        }
-        for p in projects
-    ]
+    sample_counts = dict(
+        db.query(ProjectSample.project_id, func.count(ProjectSample.id))
+        .group_by(ProjectSample.project_id)
+        .all()
+    )
+
+    items = []
+    for p in projects:
+        counts = by_status.get(p.id, {})
+        latest = last_analysis.get(p.id)
+        activity = max(latest, p.updated_at) if latest and p.updated_at else (latest or p.updated_at)
+        items.append(
+            {
+                "id": p.id,
+                "name": p.name,
+                "description": p.description,
+                "created_at": p.created_at.isoformat(),
+                "updated_at": p.updated_at.isoformat(),
+                "last_activity": activity.isoformat() if activity else None,
+                "analyses_count": sum(counts.values()),
+                # The four states Analysis.status is constrained to. Reported
+                # in full, zeros included, so the client never has to decide
+                # whether a missing key means none or means unknown.
+                "status_counts": {
+                    "completed": counts.get("completed", 0),
+                    "running": counts.get("running", 0),
+                    "failed": counts.get("failed", 0),
+                    "pending": counts.get("pending", 0),
+                },
+                "samples_count": sample_counts.get(p.id, 0),
+            }
+        )
 
     return {
         "success": True,
         "data": {
             "items": items,
-            "unassigned_count": counts.get(None, 0),
+            "unassigned_count": sum(by_status.get(None, {}).values()),
         },
     }
 

@@ -256,3 +256,72 @@ describe('FlatNode depth invariant', () => {
     }
   })
 })
+
+// The keyboard path into the same machinery. Indent and outdent are a
+// commitDrop against the element's OWN position with a synthetic horizontal
+// offset of exactly one indent step, which is what makes the keyboard and the
+// pointer share one set of legality rules rather than two implementations that
+// can disagree.
+describe('keyboard renesting', () => {
+  const renest = (id: string, direction: 1 | -1, tree = sampleTree()) =>
+    commitDrop(tree, flattenTree(tree), id, id, direction * INDENT_PX)
+
+  it('indents an element into the container immediately above it', () => {
+    // `nested` already sits inside phase1; `end` follows phase1 at depth 1, so
+    // indenting it puts it inside phase1 too.
+    const next = renest('end', 1)
+    expect(next).not.toBeNull()
+    expect(order(next!)).toEqual([
+      ['start', 1],
+      ['phase1', 1],
+      ['nested', 2],
+      ['end', 2],
+    ])
+  })
+
+  it('outdents an element back out of its container', () => {
+    const indented = renest('end', 1)!
+    const next = commitDrop(indented, flattenTree(indented), 'end', 'end', -INDENT_PX)
+    expect(next).not.toBeNull()
+    expect(order(next!)).toEqual(order(sampleTree()))
+  })
+
+  it('refuses a move the clamp does not allow rather than building an illegal tree', () => {
+    // `start` is the first row: there is no container above it to indent into,
+    // and depth 1 is already the shallowest level.
+    expect(renest('start', 1)).toBeNull()
+    expect(renest('start', -1)).toBeNull()
+  })
+
+  it('never nests anything inside a non-container', () => {
+    const tree = sampleTree()
+    for (const id of flattenTree(tree).map((n) => n.id)) {
+      for (const direction of [1, -1] as const) {
+        const next = renest(id, direction, tree)
+        if (!next) continue
+        // A boundary or hiatus must never acquire children.
+        const walkAll = (el: ModelElement): void => {
+          if (el.element_type === 'boundary' || el.element_type === 'hiatus') {
+            expect(el.children ?? []).toHaveLength(0)
+          }
+          for (const child of el.children ?? []) walkAll(child)
+        }
+        walkAll(next)
+      }
+    }
+  })
+
+  it('keeps the result a rebuildable sequence, as a drag does', () => {
+    const tree = sampleTree()
+    for (const id of flattenTree(tree).map((n) => n.id)) {
+      for (const direction of [1, -1] as const) {
+        const next = renest(id, direction, tree)
+        if (!next) continue
+        const flat = flattenTree(next)
+        for (let i = 1; i < flat.length; i++) {
+          expect(flat[i].depth).toBeLessThanOrEqual(flat[i - 1].depth + 1)
+        }
+      }
+    }
+  })
+})

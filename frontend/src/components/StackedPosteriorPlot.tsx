@@ -345,7 +345,7 @@ export default function StackedPosteriorPlot({
           yref: 'y',
           y0: baselineFor(index) + 0.5,
           y1: baselineFor(index) + 0.5,
-          line: { color: 'rgba(0,0,0,0.12)', width: 1 },
+          line: { color: plot.phaseRule, width: 1 },
         })
       }
       // In the left margin with the row names, not inside the plot, where it
@@ -362,11 +362,11 @@ export default function StackedPosteriorPlot({
         showarrow: false,
         // The weight the results table gives a Sequence/Phase heading, so a
         // phase name reads as the same kind of thing in both places.
-        font: { size: 11, color: 'rgba(0,0,0,0.75)', weight: 600 },
+        font: { size: 11, color: plot.label, weight: 600 },
       })
     })
     return { shapes, annotations }
-  }, [drawable, marginLeft])
+  }, [drawable, marginLeft, plot])
 
   /**
    * The axis is set from the HPD regions, not the full extent of every curve:
@@ -462,6 +462,7 @@ export default function StackedPosteriorPlot({
       // Per-row: two rows at the same calendar age are two different dates,
       // which a unified readout would merge into one tooltip.
       hovermode: 'closest',
+      font: { color: plot.axis },
       plot_bgcolor: plot.surface,
       paper_bgcolor: plot.surface,
       margin: { l: marginLeft, r: 20, t: geometry.marginTop, b: geometry.marginBottom },

@@ -24,23 +24,25 @@ import {
   Alert,
   Chip,
   Stack,
+  Skeleton,
 } from '@mui/material'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import { useAnalysisDraftStore } from '@/stores/analysisStore'
 import type { ModelElement, MatrixMeasurement } from '@/types'
 import HarrisMatrixDiagram from '@/components/HarrisMatrixDiagram'
 import ModelTreeEditor, { validateTree } from '@/components/ModelTreeEditor'
+import GuideBand from '@/components/GuideBand'
 import { bootstrapModelTree } from '@/utils/modelTreeDefaults'
 import { formatApiError } from '@/utils/apiError'
 import { summariseTree } from '@/utils/harrisLayout'
 import { sortMeasurements, type MeasurementSortKey } from '@/utils/sortMeasurements'
 
-const STRUCTURE_BLURB =
-  'Define constraints for events here. Use a Sequence to put groups in order, a Phase for dates with no order between ' +
-  'them, and a Boundary to mark a transition — a Boundary between two Phases is a single shared ' +
-  'parameter, giving one transition date rather than two independent ones. Nest Sequences ' +
-  'inside a Phase for parallel branches, and put a Hiatus between two Boundaries for a ' +
-  'deliberate gap. ' + 'TPQ (terminus post quem) is the earliest date an event could have occurred, and TAQ (terminus ante quem) is the latest. Only use these if you know this information. Must be entered in years BP.'
+// The element vocabulary, the drag gestures and the TPQ/TAQ definitions used
+// to be restated here as a ~105-word paragraph, immediately above a component
+// that says the same things better: ModelTreeEditor now carries them as a
+// colour key (each term in its own element-type hue, beside the 4px bar the
+// rows carry) and a disclosure. Two descriptions of one vocabulary is one too
+// many, and the loser was the reader scrolling past both.
 
 export default function Stratigraphy() {
   const navigate = useNavigate()
@@ -57,12 +59,11 @@ export default function Stratigraphy() {
   // editing UI is identical, only where "Back" returns to differs.
   const { analysisId: editRouteId } = useParams<{ analysisId: string }>()
   const backPath = editRouteId ? `/analysis/${editRouteId}/edit` : '/new-analysis'
-  // The nav bar's "New Analysis" link lands on a bare /new-analysis URL
-  // indistinguishable from this one, so NewAnalysis.tsx resets its draft on
-  // mount unless it sees this marker -- which is what stops a genuinely stale
-  // draft leaking into the next click. Returning to a mid-edit analysis needs
-  // no marker: that page reloads by editRouteId regardless.
-  const backState = editRouteId ? undefined : { fromModelStructure: true }
+  // Returning here carries no marker of any kind. NewAnalysis.tsx keeps the
+  // draft by default and empties it only when an entry point asks for a fresh
+  // start, so coming back -- by this button, by browser Back, or by a reload
+  // -- lands on the draft that is already there.
+  const backState = undefined
 
   // The default tab, being the authoring surface in both flows. A saved
   // analysis loads it from and writes it back to the API; a new one holds it
@@ -94,7 +95,13 @@ export default function Stratigraphy() {
   useEffect(() => {
     if (editRouteId || draftTree || measurements.length === 0) return
     const { tree, assignments: seeded } = bootstrapModelTree(
-      measurements.map((m) => ({ id: m.id, context: m.default_context_name }))
+      // depth_cm decides whether the contexts get an ordered Sequence or an
+      // unordered Phase -- see contextOrderFromDepth.
+      measurements.map((m) => ({
+        id: m.id,
+        context: m.default_context_name,
+        depth: m.depth_cm,
+      }))
     )
     setDraftTree(tree, seeded)
   }, [editRouteId, draftTree, measurements, setDraftTree])
@@ -130,6 +137,10 @@ export default function Stratigraphy() {
             (data.data.groups || []).map((g: { id: string; name: string }) => [g.id, g.name])
           )
           const bootstrapped = bootstrapModelTree(
+            // No depth here: MatrixMeasurement does not carry depth_cm, so a
+            // converted analysis always starts unordered. That is the honest
+            // result rather than a gap to paper over -- the ordering evidence
+            // genuinely is not in this payload.
             saved.map((m) => ({
               id: m.id,
               context: groupNames[initial[m.id]] ?? null,
@@ -237,12 +248,13 @@ export default function Stratigraphy() {
     <Container maxWidth="lg" sx={{ py: 4 }}>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 3, flexWrap: 'wrap', gap: 2 }}>
         <Box>
-          <Typography variant="h3" component="h1" gutterBottom>
+          {/* variant="h1", not h3, for the reason Results.tsx documents at its
+              own title: the theme defines h1 as the design system's Headline
+              (2.5rem/600), and this was rendering at MUI's stock h3 -- so two
+              consecutive pages in one flow gave their titles two different
+              sizes. */}
+          <Typography variant="h1" component="h1" gutterBottom>
             Model Structure
-          </Typography>
-          <Typography variant="body1" color="textSecondary">
-            Build the model as nested Sequences and Phases with Boundaries where you want them,
-            then assign each date to a Phase.
           </Typography>
         </Box>
         <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
@@ -253,33 +265,30 @@ export default function Stratigraphy() {
         </Stack>
       </Box>
 
+      {/* Editor first, because it is the default and the reason to be on this
+          page. The strip used to list the diagram first while opening on the
+          second tab, so the page contradicted its own reading order. The
+          diagram is derived from what the editor authors, so it follows it
+          here too. */}
       <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 2 }}>
-        <Tab value="diagram" label="Harris Matrix Diagram" />
         <Tab value="structure" label="Editor" />
+        <Tab value="diagram" label="Matrix Diagram" />
       </Tabs>
 
-      {tab === 'structure' && !editRouteId ? (
-        <Paper sx={{ p: 3 }}>
-          <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
-            {STRUCTURE_BLURB}
-          </Typography>
-          {draftTree ? (
-            <ModelTreeEditor
-              tree={draftTree}
-              measurements={measurements}
-              assignments={draftAssignments}
-              onChange={(nextTree, nextAssignments) => setDraftTree(nextTree, nextAssignments)}
-              onSortDates={canSortDates ? sortDates : undefined}
-            />
-          ) : (
-            <Alert severity="info">Add some dates on the New Analysis page first.</Alert>
-          )}
-        </Paper>
-      ) : tab === 'structure' && editRouteId ? (
-        <Paper sx={{ p: 3 }}>
-          <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
-            {STRUCTURE_BLURB}
-          </Typography>
+      {/* One shell for both flows. The draft and the saved analysis used to
+          repeat the Paper, its padding and the whole instruction blurb in two
+          sibling branches, which is two copies of the same surface free to
+          drift apart the moment either is edited. The alerts below are
+          edit-only by nature -- structureError and linearized are set on the
+          API paths and stay null for a draft -- so hoisting them costs the
+          draft flow nothing and removes the divergence. */}
+      {tab === 'structure' ? (
+        <>
+          {/* Above the card, not inside it. These speak about the model as a
+              whole -- how it was loaded, whether it converted cleanly -- and
+              the editor's guide band is flush to the card's top edge, so an
+              alert placed inside would sit on the band's surface and push it
+              off that edge. */}
           {structureError && (
             <Alert severity="error" sx={{ mb: 2 }}>
               {structureError}
@@ -293,8 +302,28 @@ export default function Stratigraphy() {
               structure below before running.
             </Alert>
           )}
-          {loadingStructure ? (
-            <Typography variant="body2">Loading…</Typography>
+          <Paper sx={{ p: 3 }}>
+          {!editRouteId ? (
+            draftTree ? (
+              <ModelTreeEditor
+                tree={draftTree}
+                measurements={measurements}
+                assignments={draftAssignments}
+                onChange={(nextTree, nextAssignments) => setDraftTree(nextTree, nextAssignments)}
+                onSortDates={canSortDates ? sortDates : undefined}
+              />
+            ) : (
+              <Alert severity="info">Add some dates on the New Analysis page first.</Alert>
+            )
+          ) : loadingStructure ? (
+            // A shape, not the word "Loading" -- the rows that are coming are
+            // a known size, so the page can hold their space instead of
+            // collapsing and then jumping.
+            <Box>
+              {[0, 1, 2, 3].map((i) => (
+                <Skeleton key={i} variant="rounded" height={56} sx={{ mb: 1, ml: i === 0 ? 0 : 3 }} />
+              ))}
+            </Box>
           ) : modelTree ? (
             <>
               <ModelTreeEditor
@@ -358,15 +387,20 @@ export default function Stratigraphy() {
               some on the Edit Analysis page first.
             </Alert>
           )}
-        </Paper>
+          </Paper>
+        </>
       ) : (
         <Paper sx={{ p: 3 }}>
-          <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
-            A read-only view of the model structure, following similar principles to a Harris matrix. Oldest at the bottom. A
-            Phase holding dates is a context; a Phase or Sequence holding others is drawn as a box
-            around them. A Boundary is a labelled rule across the
-            groups it divides. Edit the structure on the Editor tab.
-          </Typography>
+          {/* The same band the editor tab opens with, so the two tabs of one
+              page separate what is read from what is worked in identically. */}
+          <GuideBand>
+            <Typography variant="body2" color="textSecondary">
+              This diagram shows the structure of your model as a stratigraphic matrix. A Phase
+              holding dates is a context - its known temporal relationships are shown via vertical
+              order (younger above older), and unknown relationships by horizontal position. A Boundary is a labelled
+              rule across the groups it divides.
+            </Typography>
+          </GuideBand>
           <HarrisMatrixDiagram
             tree={activeTree}
             measurements={activeMeasurements}

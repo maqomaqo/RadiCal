@@ -25,16 +25,19 @@ cal BP that a subtly wrong implementation would smear away.
 
 Affordable at request time despite the obvious formulation being a dense
 50,000 x 55,000 problem: every calendar age more than 5 sigma from a
-measurement contributes nothing and is masked out, and the calculation runs on
-a uniform 1-year grid, where `calibrate`'s trapezoidal weights are constant and
-so cannot change which points the HPD selects. Full range on one core takes
-about ten seconds; a browser window, a twentieth of a second.
+measurement contributes nothing and is skipped -- found by a banded search
+rather than by testing them all (see _reach_bands) -- and the calculation runs
+on a uniform 1-year grid, where `calibrate`'s trapezoidal weights are constant
+and so cannot change which points the HPD selects. A browser window costs a
+few hundredths of a second; the full 55,000 years about eight, computed once
+and cached.
 """
+import threading
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 
-from app.services.calibration import SIGMA_2, CalibrationCurve, hpd_ranges_from_distribution
+from app.services.calibration import SIGMA_2, CalibrationCurve
 
 # Twice the mean life of 14C, in years -- the constant in the uncertainty
 # scaling law. Libby's 5568-year half-life gives a mean life of 8033 years,
@@ -118,6 +121,84 @@ def _padding(curve_sigma_max: float, u_max: float) -> float:
     return max(500.0, SIGMA_REACH * float(np.hypot(curve_sigma_max, u_max)))
 
 
+# --------------------------------------------------------------------------
+# Finding the stretches of curve a measurement can have come from
+# --------------------------------------------------------------------------
+#
+# The obvious loop tests every calendar year against every radiocarbon age,
+# which is 50,000 x 55,000 comparisons for a whole curve and was most of the
+# time this took. A measurement only reaches SIGMA_REACH combined sigma, so
+# the candidates are the grid points whose curve value is within that of it --
+# a contiguous slice of the grid sorted by radiocarbon age.
+#
+# Sorted in BANDS of curve error rather than as one list, because the reach
+# depends on that error and a single global maximum is set by the late-glacial
+# end of the curve, where it is fifty times the Holocene value. One list would
+# hand every Holocene measurement thousands of candidates it must then reject;
+# banded, it gets hundreds. The bands only have to bracket the reach -- the
+# exact test still runs on what they return -- so their edges are arbitrary.
+_BAND_EDGES = (20.0, 40.0, 80.0, 160.0, 320.0)
+
+
+def _reach_bands(
+    c14: np.ndarray, sigma: np.ndarray
+) -> List[Tuple[np.ndarray, np.ndarray, float]]:
+    """Grid indices grouped by curve error, each sorted by radiocarbon age."""
+    bands: List[Tuple[np.ndarray, np.ndarray, float]] = []
+    lower = -np.inf
+    for upper in (*_BAND_EDGES, np.inf):
+        member = np.flatnonzero((sigma > lower) & (sigma <= upper))
+        lower = upper
+        if member.size == 0:
+            continue
+        member = member[np.argsort(c14[member], kind='stable')]
+        bands.append((member, c14[member], float(sigma[member].max())))
+    return bands
+
+
+def _candidates(
+    bands: List[Tuple[np.ndarray, np.ndarray, float]], age: float, u: float
+) -> np.ndarray:
+    """
+    Grid points a measurement of `age` could plausibly have come from.
+
+    A superset of the answer -- each band is taken at its own worst error --
+    returned in ascending grid order, since the HPD construction downstream
+    reads the calendar ages as a sorted series.
+    """
+    parts: List[np.ndarray] = []
+    for member, band_c14, band_sigma_max in bands:
+        reach = SIGMA_REACH * float(np.hypot(band_sigma_max, u))
+        first = int(np.searchsorted(band_c14, age - reach, side='left'))
+        last = int(np.searchsorted(band_c14, age + reach, side='right'))
+        if last > first:
+            parts.append(member[first:last])
+    if not parts:
+        return np.empty(0, dtype=np.int64)
+    return np.sort(parts[0] if len(parts) == 1 else np.concatenate(parts))
+
+
+def _hpd_width(ages: np.ndarray, weights: np.ndarray, total: float) -> float:
+    """
+    How far the 95.45% HPD set spans, gaps included.
+
+    hpd_ranges_from_distribution's selection without its ranges: this runs
+    once per radiocarbon age -- tens of thousands of times for one profile --
+    and everything that function builds between the first and last point is
+    thrown away here. The selection is identical, normalising before
+    accumulating as it does, so the width is too.
+    """
+    normalised = weights / total
+    order = np.argsort(-normalised)
+    cumulative = np.cumsum(normalised[order])
+    # The first point at which the level is met; if it never is -- which a few
+    # zero weights can cause -- the whole distribution is the set.
+    reached = int(np.searchsorted(cumulative, CONFIDENCE, side='left'))
+    selected = order[:reached + 1] if reached < len(cumulative) else order
+    chosen = ages[selected]
+    return float(chosen.max() - chosen.min())
+
+
 def profile(
     curve: CalibrationCurve,
     cal_from: Optional[float] = None,
@@ -186,18 +267,31 @@ def profile(
     weights: List[np.ndarray] = []
     widths: List[np.ndarray] = []
 
-    # Where each output year sits in the grid, for pulling its likelihood out.
-    out_position = np.searchsorted(np.arange(len(cal)), out_index)
+    # Which reported year each grid point is, or -1 where it is only padding.
+    # A measurement's contribution is then gathered straight from its own
+    # points, rather than scattered across a grid-length array and read back.
+    slot = np.full(len(cal), -1, dtype=np.int64)
+    slot[out_index] = np.arange(len(out_cal))
+
+    bands = _reach_bands(c14, sigma)
+    sigma_sq = sigma * sigma
 
     for age in ages:
         u = u0 * np.exp(age / MEAN_LIFE_DOUBLED)
-        variance = u * u + sigma * sigma
-        delta = age - c14
-        near = np.abs(delta) <= SIGMA_REACH * np.sqrt(variance)
-        if not near.any():
+        candidate = _candidates(bands, age, u)
+        if candidate.size == 0:
             continue
 
-        likelihood = np.exp(-(delta[near] ** 2) / (2 * variance[near])) / np.sqrt(variance[near])
+        variance = u * u + sigma_sq[candidate]
+        delta = age - c14[candidate]
+        keep = np.abs(delta) <= SIGMA_REACH * np.sqrt(variance)
+        near = candidate[keep]
+        if near.size == 0:
+            continue
+        variance = variance[keep]
+        delta = delta[keep]
+
+        likelihood = np.exp(-(delta ** 2) / (2 * variance)) / np.sqrt(variance)
         total = likelihood.sum()
         if not np.isfinite(total) or total <= 0:
             continue
@@ -205,20 +299,17 @@ def profile(
         # Width of the 95.45% HPD set, gaps included -- the app's own HPD
         # construction, and on a uniform grid selecting by density and by mass
         # are the same selection.
-        ranges = hpd_ranges_from_distribution(cal[near], likelihood, CONFIDENCE)
-        width = max(r['max'] for r in ranges) - min(r['min'] for r in ranges)
+        width = _hpd_width(cal[near], likelihood, total)
 
         # Which reported years this measurement says anything about.
-        contributing = np.zeros(len(cal))
-        contributing[near] = likelihood
-        w = contributing[out_index]
-        hit = np.where(w > 0)[0]
-        if len(hit) == 0:
+        out_slot = slot[near]
+        hit = np.flatnonzero((out_slot >= 0) & (likelihood > 0))
+        if hit.size == 0:
             continue
 
-        year_ids.append(hit.astype(np.int32))
-        weights.append(w[hit].astype(np.float64))
-        widths.append(np.full(len(hit), width, dtype=np.float64))
+        year_ids.append(out_slot[hit].astype(np.int32))
+        weights.append(likelihood[hit].astype(np.float64))
+        widths.append(np.full(hit.size, width, dtype=np.float64))
 
     if not year_ids:
         raise ValueError(
@@ -267,8 +358,8 @@ def profile(
 # The whole-curve profile, which is the only slow case
 # --------------------------------------------------------------------------
 #
-# A browser window computes in a twentieth of a second, so it is just computed.
-# The whole 55,000 years takes about twelve, too long to do twice, so it is
+# A browser window computes in a fiftieth of a second, so it is just computed.
+# The whole 55,000 years takes about eight, too long to do twice, so it is
 # cached -- keyed by the curve's CONTENT hash rather than its id, because the
 # builtin curve files are overridable by environment variable and a swapped
 # file must not be served a previous file's answer.
@@ -276,28 +367,86 @@ def profile(
 # Slicing it for a window is exact, not approximate: a windowed calculation
 # pads far enough to return identical numbers (asserted in
 # tests/test_resolution.py), so cache and direct path cannot disagree.
+#
+# The eight seconds buys a `stride` that costs nothing, so the cache is keyed
+# WITHOUT one: the whole curve is computed once on a BASE_STRIDE lattice and
+# thinned from there. `stride` decides how many points come back, and a
+# browser picks it from its own pixel width -- so keying on it meant a window
+# a few pixels wider recomputed all 55,000 years to draw the same picture.
 
+# The lattice a whole-curve profile is computed on. It reports every fifth
+# year: at the spans that reach this path -- twenty thousand years and up,
+# sixty years to a pixel -- nothing finer is visible, and a whole curve at
+# one-year output holds seventy-five million (measurement, year) pairs, which
+# is gigabytes. Windows narrower than that are computed directly, at whatever
+# stride was asked for.
+BASE_STRIDE = 5
+
+_BASE_CACHE: Dict[Tuple[str, float], ResolutionProfile] = {}
 _FULL_CACHE: Dict[Tuple[str, float, int], ResolutionProfile] = {}
 _FULL_CACHE_LIMIT = 6
+
+# Held while a whole curve is computed, so two browsers asking at once wait
+# for one run rather than each starting their own.
+_FULL_LOCK = threading.Lock()
+
+
+def has_full_profile(content_sha: str, u0: float = DEFAULT_U0) -> bool:
+    """Whether a whole-curve profile is already computed and can be sliced."""
+    return (content_sha, float(u0)) in _BASE_CACHE
 
 
 def full_profile(
     curve: CalibrationCurve,
     content_sha: str,
     u0: float = DEFAULT_U0,
-    stride: int = 5,
+    stride: int = BASE_STRIDE,
 ) -> ResolutionProfile:
-    """The profile for a whole curve, computed once per (curve, u0, stride)."""
+    """
+    The profile for a whole curve, computed once per (curve, u0).
+
+    Reported every `stride` years, thinned from the BASE_STRIDE lattice the
+    calculation runs on -- so a stride finer than that, or not a multiple of
+    it, comes back on the nearest multiple rather than exactly as asked.
+    """
     key = (content_sha, float(u0), int(stride))
     hit = _FULL_CACHE.get(key)
     if hit is not None:
         return hit
 
-    computed = profile(curve, None, None, u0=u0, stride=stride)
-    if len(_FULL_CACHE) >= _FULL_CACHE_LIMIT:
-        _FULL_CACHE.pop(next(iter(_FULL_CACHE)))
-    _FULL_CACHE[key] = computed
-    return computed
+    with _FULL_LOCK:
+        # Another request may have finished this one while the lock was held.
+        hit = _FULL_CACHE.get(key)
+        if hit is not None:
+            return hit
+
+        base_key = (content_sha, float(u0))
+        base = _BASE_CACHE.get(base_key)
+        if base is None:
+            base = profile(curve, None, None, u0=u0, stride=BASE_STRIDE)
+            if len(_BASE_CACHE) >= _FULL_CACHE_LIMIT:
+                _BASE_CACHE.pop(next(iter(_BASE_CACHE)))
+            _BASE_CACHE[base_key] = base
+
+        computed = _thinned(base, max(1, round(int(stride) / BASE_STRIDE)))
+        if len(_FULL_CACHE) >= _FULL_CACHE_LIMIT:
+            _FULL_CACHE.pop(next(iter(_FULL_CACHE)))
+        _FULL_CACHE[key] = computed
+        return computed
+
+
+def _thinned(source: ResolutionProfile, every: int) -> ResolutionProfile:
+    """Every `every`-th point of a profile, or the profile itself at 1."""
+    if every <= 1:
+        return source
+    return ResolutionProfile(
+        cal_ages=source.cal_ages[::every],
+        mean=source.mean[::every],
+        p05=source.p05[::every],
+        p95=source.p95[::every],
+        uncertainty=source.uncertainty[::every],
+        u0=source.u0,
+    )
 
 
 def slice_profile(source: ResolutionProfile, cal_from: float, cal_to: float) -> ResolutionProfile:

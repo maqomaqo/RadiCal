@@ -4,16 +4,19 @@ description: A calibrated instrument for radiocarbon dating and OxCal-style Baye
 colors:
   calibration-blue: "#3c70b8"
   burnt-coral: "#e14a56"
-  aged-paper: "#faf6f3"
+  aged-paper: "#faf7f4"
   paper-white: "#ffffff"
   warm-ink: "#2b2320"
   boundary-coral: "#f15d5f"
   boundary-coral-ink: "#d23f4a"
   phase-green: "#1f7a62"
   hiatus-violet: "#7a5c99"
-  muted-surface: "#f4ede7"
+  muted-surface: "#f6f0eb"
   context-shade-lightest: "#35826e"
   context-shade-darkest: "#04372a"
+  state-error: "#a3231d"
+  state-warning: "#a85c11"
+  state-success: "#2e7d32"
 typography:
   headline:
     fontFamily: "Roboto, sans-serif"
@@ -91,7 +94,7 @@ the Results page) precisely because they used to be borrowed for Phase/Boundary 
 editor read as a status display.
 
 **Key Characteristics:**
-- Warm paper-and-ink surface language instead of cold neutral grey or pure white/black.
+- paper-and-ink surface language instead of cold neutral grey or pure white/black.
 - A small, deliberately restrained accent set: interactive chrome runs almost entirely on one
   primary blue; the brand coral is used sparingly, not splashed across every button.
 - Color as encoding, not decoration — in the diagram and plot layer especially, a given hue is a
@@ -115,30 +118,66 @@ meaning in the model-tree diagrams and posterior plots.
   down in lightness: 5.00:1 on white, 4.65:1 on the canvas.
 
 ### Secondary
-- **Burnt Coral** (`#e14a56`): darkened from the logo's raw coral (`#f05460`) for AA contrast as
-  white-on-color text. Used sparingly and almost never for interactive chrome (one confirmed use
+- **Burnt Coral** (`#e14a56`): darkened from the logo's raw coral (`#f05460`). It measures
+  **3.95:1** against white — enough for white-on-coral *large* text, not for body text; an earlier
+  version of this document claimed body-text AA for it, which the value does not support. If the
+  token is ever spent on more than its one current use site it has to be darkened again first. Used sparingly and almost never for interactive chrome (one confirmed use
   site in the codebase) — the logo's exact coral is reserved for illustration, and even this
   darkened version stays mostly out of the way so it doesn't collide with Boundary Coral's distinct
   diagram meaning below.
 
 ### Neutral
-- **Aged Paper** (`#faf6f3`): the app's canvas (`background.default`) — warm-tinted on purpose, so
-  elevated white Cards and Paper actually read as lifted off the page instead of blending into a
-  plain white background.
+- **Aged Paper** (`#faf7f4`): the app's canvas (`background.default`) — warm, at the same
+  luminance as the cool `#f5f8fb` it replaced (0.934 against 0.935), so an elevated white Card lifts
+  off it by exactly as much as before. Lift is a luminance difference; hue was never doing that
+  work. What the cool tint *was* doing was inverting the app's temperature halfway up the stack —
+  cool canvas, white card, warm band inside it — in an app whose ink, shadows and text are all warm.
+  One family now runs the whole way, and the three surfaces are told apart by lightness, which is
+  what was separating them in the first place. Defined in `theme/surfaces.ts` alongside Paper White
+  and Muted Surface, because two of the three are also needed outside the `sx` prop (inside a
+  `linear-gradient()` string, or a plain style object) where a palette token does not resolve; those
+  sites used to hold their own copies of the hex values.
 - **Paper White** (`#ffffff`): elevated surface color (`background.paper`) — Cards, Dialogs, Menus,
   and the plot area itself. Kept a known, uncolored white specifically so every translucent fill
   drawn on top of it (HPD bands, prior/posterior fills) composites against the same base rather than
   drifting muddier depending on what's behind it.
-- **Muted Surface** (`#f4ede7`, `background.muted`): a banded surface *inside* an elevated white
-  one — table header rows, the stat strip under a chart. Every one of these used MUI's `grey.100`
-  (`#f5f5f5`), a perfectly neutral R=G=B sitting on the warmest background in the app, which is the
-  one palette this theme exists to replace. Warmer and a step darker than the canvas so it reads as
+- **Muted Surface** (`#f6f0eb`, `background.muted`): a banded surface *inside* an elevated white
+  one — table header rows, the stat strip under a chart. Warmer and a step darker than the canvas so it reads as
   a band on paper rather than a hole in it.
-- **Warm Ink** (`#2b2320`): not a UI-chrome color. It is what the app draws with when a mark is
-  *about* the data rather than a category of it — every recolored MUI shadow (`rgba(43, 35, 32, *)`
+- **Warm Ink** (`#2b2320`): the app's one neutral. It carries two jobs. First, **every line and
+  wash of UI chrome**: `divider`, `action.hover`, `action.active`, `action.disabled`. These were
+  still pure black long after the shadows and text were warmed, and between them they cover more
+  painted area than the shadows do — `divider` alone reaches every `TableCell`, every
+  `DialogContent dividers`, every Accordion border. The substitution costs nothing:
+  `rgba(0,0,0,0.12)` composites to `#e0e0e0` on white, warm ink at `0.14` to `#e1e0e0`, the same
+  1.32:1. The alphas are *not* MUI's own numbers, because warm ink is lighter than black and copying
+  the number would quietly cost legibility — each is the alpha that matches the **contrast** of the
+  value it replaces (`action.active` at 0.64 measures 4.75:1 against black-at-0.54's 4.61:1).
+  Second, it is what the app draws with when a mark is *about* the data rather than a category of it — every recolored MUI shadow (`rgba(43, 35, 32, *)`
   in place of pure black), the mean/median point-estimate marks on posterior plots, and the ordering
   matrix, where overlap measures what the model could not resolve. Exported from `diagramColors.ts`
   so the plots and the matrix cannot drift to two different inks.
+
+### Semantic state
+`success`/`warning`/`error`/`info` were the last un-replaced Material defaults in the app, and two
+of the three collided with hues RadiCal had already spent.
+
+- **`info` is the primary blue** (`#3c70b8`), not a colour of its own. MUI's stock `#0288d1` sat
+  **14° from the app's primary** — the same near-miss-blue failure this document names `#1976d2`
+  for — and it was repeated on sixteen Alerts including `JobProgress`. No blue is both recognisably
+  blue *and* far enough from the primary to be a different claim; the nearest usable candidate was
+  still only 22° off. So `info` stops trying to be a second blue. An info alert is the app speaking
+  about its own state, and reading as app chrome is correct.
+- **`error` is a deep oxblood** (`#a3231d`, 7.46:1 on white). MUI's `#d32f2f` sat **4° from
+  Boundary Coral Ink** — this document said a destructive action is deliberately *not* the Boundary
+  coral, and at 4° a reader could not act on that distinction. Hue separation is unavailable in the
+  red band, so the two separate by **depth** instead: the oxblood reads clearly darker than either
+  coral token, and the bright red band is left to Boundary.
+- **`warning` is a deep amber** (`#a85c11`, 5.00:1 white / 4.69:1 canvas, 34° from Boundary Coral).
+  MUI's `#ed6c02` measured **2.92:1 on the canvas** — under the 3:1 a graphic mark needs, and it is
+  used directly as one.
+- **`success` stays MUI's `#2e7d32`**: 41° from the Phase green, two use sites, and no reason to
+  spend a change on it.
 
 ### Diagram & Plot Palette (reserved for element-type encoding)
 - **Boundary Coral** (`#f15d5f`, ink variant `#d23f4a`): a Boundary, wherever it is drawn — tree
@@ -171,6 +210,16 @@ the Harris matrix, and the posterior plot — never a per-view palette. Its coro
 way: a categorical palette for things that are *instances of one kind* — contexts, not element types
 — must not be built from hues those element types already own. Distinguish instances by strength or
 position, and leave hue to say what a thing is.
+
+**The No Cool Neutral Rule.** Nothing in this app is drawn in a neutral R=G=B grey or in pure
+black — not a divider, not a hover wash, not a disabled label, not a plot grid, not the greyed-out
+prior behind a posterior. The one neutral is Warm Ink at an alpha. Where a Material default is
+being replaced, match its measured contrast rather than copying its alpha number.
+
+**The Selection-Is-Blue Rule.** `action.selected` and `action.focus` are the primary blue, not the
+ink. The ordering matrix already reserved the primary for selection and focus on its own grid;
+there was no reason that stopped at one component. A selected row reads as chosen rather than as
+smudged.
 
 **The Borrowed-Status Rule.** `success`/`warning`/`error` are reserved for genuine semantic state
 (a solved solver, an actual warning, a destructive confirm action). They are never repurposed as a
@@ -253,7 +302,8 @@ already-elevated Dialog reads as noise, so the boundary is drawn with a line ins
 ### Named Rules
 **The Warm Shadow Rule.** No elevated surface in the app uses a black-tinted shadow. Shadows are
 always the recolored warm-ink scale, applied by the one global substitution in the theme, never
-overridden per component.
+overridden per component. The same holds for every other line and wash the theme owns — see The No
+Cool Neutral Rule under Colors.
 
 ## Shapes
 
@@ -345,6 +395,21 @@ and sticky rules; what follows is what a table *says*.
   page's own state, or the two disagree and every control reading that state is wrong with them.
 - **Controls sit above the figure**, with the toggles that govern it. Below a 3,000px plot they are
   an errand.
+- **Every mark on a figure comes from `plotColors`**, including the ones that are not data. The
+  unmodelled prior recedes in Warm Ink at `0.45` (`#a09c9b`, 2.72:1), not in the neutral
+  `rgba(100,100,100,·)` it used to use — a dead grey sitting on white beside warm-ink point
+  estimates. The stacked plot's phase rules and margin labels come from `phaseRule` and `label` for
+  the same reason: drawn locally they were pure black, which put a second, cooler grid inside a
+  figure whose every other mark is warm.
+
+### Browser surfaces
+
+The parts of the page the app does not draw ship in colours belonging to no design system, and the
+text-selection highlight in particular was a *third* blue on screen beside the primary and the info
+blue now merged into it. All three are set once, in the theme's `MuiCssBaseline` override:
+`::selection` is the primary at `0.24` with the text left as it was, `caret-color` is Warm Ink, and
+`:focus-visible` is a 2px primary ring at 2px offset — MUI v5 gives a focused Button a ripple and
+very little else, so on most controls the visible focus ring was whatever the browser drew.
 
 ### Ordering matrix (signature component)
 
@@ -379,6 +444,12 @@ scattered rows in a table.
   the neutral default chip variant for plain descriptive tags.
 - **Do** keep the plot/diagram surface a known, uncolored white so translucent fills composite
   predictably.
+- **Do** theme the surfaces the browser owns — selection, caret, focus ring — from this palette
+  rather than leaving them at their defaults. The same goes for a MUI component that hardcodes a
+  colour instead of reading a token: `MuiOutlinedInput`'s notched outline is the one known case,
+  and it is overridden in the theme rather than left black.
+- **Do** match the *measured contrast* of a Material default you are replacing, not its alpha
+  number. Warm ink is lighter than black.
 - **Do** let a label column fall to `width: '1%'` so the columns carrying numbers share the surplus
   — see The Sticky-Where-It-Scrolls Rule and the Layout notes on tables.
 - **Do** give a band or a sticky offset to the cells, never the row.
@@ -396,9 +467,15 @@ scattered rows in a table.
 - **Don't** reuse `success`/`warning` as categorical labels for structural model-tree elements — it
   was tried, and it made the editor read as a status display instead of a diagram.
 - **Don't** give Boundary Coral to a "danger"/destructive UI action — that hue is reserved for
-  diagram meaning; destructive confirms use MUI's standard `error` red instead.
+  diagram meaning; destructive confirms use the `error` oxblood instead, which is deliberately far
+  darker than either coral token because hue alone cannot separate them.
 - **Don't** spend the brand coral (Burnt Coral) freely on interactive chrome — it is used almost
   nowhere in the app today, and that scarcity is deliberate, not an oversight to "fix."
+- **Don't** leave a Material default in the palette because it is "just the semantic colour".
+  `info`, `error` and `warning` were stock for a long time, and two of the three were sitting within
+  a few degrees of a hue this app had already spent — see Semantic state.
+- **Don't** write a raw `rgba(43, 35, 32, ·)` or a copied surface hex at a use site. `alpha(WARM_INK, ·)`
+  and `theme/surfaces.ts` exist so a token and its duplicate cannot drift apart.
 - **Don't** reach for MUI's `grey.*` for a banded surface inside a card — `background.muted` exists
   for that, and a neutral R=G=B grey on the warmest canvas in the app is the one palette this theme
   was written to replace.

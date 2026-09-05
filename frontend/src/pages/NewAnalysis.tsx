@@ -10,8 +10,6 @@ import {
   InputLabel,
   Select,
   MenuItem,
-  Card,
-  CardContent,
   Grid,
   IconButton,
   FormControlLabel,
@@ -30,7 +28,14 @@ import {
   Accordion,
   AccordionSummary,
   AccordionDetails,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
 } from '@mui/material'
+import { visuallyHidden } from '@mui/utils'
 import { useNavigate, useSearchParams, useParams, useLocation } from 'react-router-dom'
 import DeleteIcon from '@mui/icons-material/Delete'
 import EditIcon from '@mui/icons-material/Edit'
@@ -52,6 +57,9 @@ import MeasurementFields, {
   isMarineMeasurement,
 } from '@/components/MeasurementFields'
 import { useCurves } from '@/hooks/useCurves'
+// The registry's own name for a curve, so this table and every other curve
+// label in the app say the same thing about the same id.
+import { curveLabel } from '@/api/curves'
 import type { ProjectSample } from '@/components/ProjectSampleTable'
 import {
   DateFormat,
@@ -282,21 +290,41 @@ export default function NewAnalysis() {
     }
   }, [projectId])
 
-  // /new-analysis is reached two ways at the same bare URL: a fresh start, and
-  // Stratigraphy's "Back to New Analysis", which remounts this component since
-  // they are separate routes. Only the second should keep the shared draft, and
-  // Stratigraphy marks that case via location.state (see backState there) --
-  // anything else wipes a stale draft rather than carrying an unrelated
-  // analysis's dates into this one. Editing has its own load effect below.
+  // /new-analysis is reached at the same bare URL by everything: the nav
+  // button, a Back from the model structure page, the browser's own Back and
+  // Forward, and a reload. Starting a NEW analysis is the only one of those
+  // that should empty the draft, so it is the one that has to say so -- every
+  // entry point that means "start over" passes state.fresh (see Navigation,
+  // Dashboard and ProjectDetail), and anything else keeps what is there.
+  //
+  // This was previously inverted: the draft was wiped unless the arrival
+  // proved it came from the model structure page. Only that page's own Back
+  // buttons could prove it, so browser Back destroyed every typed date and the
+  // whole authored model tree, silently and with no way to recover them.
+  //
+  // The one case that still resets without being asked: a draft left over from
+  // EDITING a saved analysis. That draft belongs to an analysis with an id, and
+  // carrying it into a new one would submit someone else's dates.
+  // Keyed on location.key, not [], because "New Analysis" is often clicked
+  // while already on /new-analysis: that pushes a new entry without remounting,
+  // so a mount-only effect would never see it and the button would quietly do
+  // nothing.
+  //
+  // The marker is then consumed by replacing the entry with a stateless one.
+  // It has to be: a history entry that still says "fresh" resets again every
+  // time the user comes Back to it, which is the exact data loss this whole
+  // change removes.
   useEffect(() => {
     if (editRouteId) return
-    const fromModelStructure = (location.state as { fromModelStructure?: boolean } | null)
-      ?.fromModelStructure
-    if (!fromModelStructure) resetDraft()
+    const fresh = (location.state as { fresh?: boolean } | null)?.fresh
+    if (fresh || editingAnalysisId) resetDraft()
     const fromQuery = searchParams.get('project')
     if (fromQuery) setProjectId(fromQuery)
+    if (fresh) {
+      navigate(`${location.pathname}${location.search}`, { replace: true, state: null })
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [location.key])
 
   // Editing: pull the saved inputs into the shared draft store, so this page
   // and the Model Structure page edit them through the same UI that created
@@ -481,6 +509,16 @@ export default function NewAnalysis() {
     : relationships.length
   const structureDefined = modelTree ? true : groups.length > 0 || relationships.length > 0
   const structureInvalid = modelTree ? treeProblems.length > 0 : !!cycle
+
+  // Optional columns appear only when at least one date has something to put
+  // in them. A single terrestrial calibration should not be handed a table
+  // with three columns of em-dashes.
+  const showMaterialColumn = measurements.some(
+    (m) => m.material_type && m.material_type !== 'unknown'
+  )
+  const showContextColumn = measurements.some((m) => !!m.default_context_name)
+  const showDeltaRColumn = measurements.some((m) => m.delta_r != null)
+  const showOutlierColumn = measurements.some((m) => (m.outlier_prior ?? 0) > 0)
 
   // The reservoir offset applies only to marine carbon against a marine
   // curve, so that is the only time it is asked for. It is useless without its
@@ -680,12 +718,21 @@ export default function NewAnalysis() {
   }
 
   const handleAddMeasurement = () => {
-    if (
-      !currentMeasurement.sample_name ||
-      currentMeasurement.age_bp === undefined ||
-      currentMeasurement.error_1sigma === undefined
-    ) {
-      setAddMeasurementError('Please fill in all required fields.')
+    // Named, not counted. "Please fill in all required fields" pointed at
+    // nothing on a card with six inputs, none of which said which three of
+    // them were required -- so the reader had to guess that Material and
+    // Curve were optional and Age was not.
+    const missing = [
+      !currentMeasurement.sample_name && 'Sample Name',
+      currentMeasurement.age_bp === undefined && 'Age (BP)',
+      currentMeasurement.error_1sigma === undefined && '1σ Error',
+    ].filter(Boolean) as string[]
+    if (missing.length > 0) {
+      setAddMeasurementError(
+        missing.length === 1
+          ? `${missing[0]} is needed to add this date.`
+          : `${missing.slice(0, -1).join(', ')} and ${missing[missing.length - 1]} are needed to add this date.`
+      )
       return
     }
     if (missingDeltaRError) {
@@ -782,20 +829,56 @@ export default function NewAnalysis() {
    * Why the run must not go ahead, or null. Only a Bayesian analysis has a
    * structure to be wrong about.
    */
+  /**
+   * Why Run Analysis cannot start, or null when it can.
+   *
+   * One source for both the disabled state and the tooltip, so the button
+   * cannot be dead without saying why -- and cannot be live while the page
+   * shows "Invalid -- fix before running", which is what happened while this
+   * covered a circular relationship set but not a broken model tree.
+   */
+  const runBlockedReason = (): string | null => {
+    if (measurements.length === 0) return 'Add at least one date first.'
+    if (!analysisName.trim()) return 'Give the analysis a name first.'
+    return structureProblem()
+  }
+
   const structureProblem = (): string | null => {
     if (analysisType !== 'bayesian') return null
     // An invalid structure would be rejected with a 422 after submitting, so
     // stop here and point back at the editor. The detail is in the persistent
     // "Model structure problems" banner below (see structureInvalid); this
-    // toast only says why clicking Run did nothing.
+    // says why the run cannot start.
     if (modelTree && treeProblems.length > 0) {
-      return 'Cannot run: the model structure has problems shown below. Fix them on the Model Structure page first.'
+      // No "below": the primary action is pinned to the bottom of the
+      // viewport now, so the banner it refers to is above it as often as not.
+      return 'The model structure has problems. Fix them on the Model Structure page first.'
     }
     // The backend rejects a circular relationship set with a 422 anyway;
     // checking here avoids sending a request known to be invalid. Only the
     // relationship path needs it -- a model tree cannot contain a cycle.
     if (!modelTree && cycle) {
-      return 'Cannot run: the stratigraphic relationships are circular. Fix this on the Model Structure page first.'
+      return 'The stratigraphic relationships are circular. Fix this on the Model Structure page first.'
+    }
+    // No structure at all. The run is NOT harmless: with no model_tree and no
+    // groups, the backend builds one anyway -- _tree_from_request falls to
+    // migrate_from_relationships, which returns a Sequence holding a single
+    // "Start of sequence" Boundary, and every date is then appended as one
+    // "Unassigned dates" Phase. With uniform_span_prior on by default, that
+    // Phase asserts the dates sample one bounded episode, which pulls the
+    // posteriors toward each other.
+    //
+    // Those are not the independent calibrations a Group Calibration would
+    // give, and they are the numbers that get cited. Blocking rather than
+    // warning: the page called this "Optional", so the user has been told the
+    // opposite of what running would do, and PRODUCT.md's rule is to fail loud
+    // and specific rather than silently approximate.
+    if (!modelTree && groups.length === 0) {
+      return (
+        `A Bayesian model needs a structure. Without one, all ${measurements.length} dates would be ` +
+        'modelled as a single phase — treated as one bounded episode, which changes every result. ' +
+        'Build the structure, or switch to Group Calibration to calibrate the dates independently.'
+      )
     }
     return null
   }
@@ -817,9 +900,30 @@ export default function NewAnalysis() {
       mcmc,
     })
 
+  // Computed once per render so the disabled state, the tooltip and the line
+  // beside the button are the same answer rather than three that can disagree.
+  const blockedReason = runBlockedReason()
+
   const handleRunAnalysis = async () => {
-    if (!analysisName || measurements.length === 0) {
-      setRunError('Please provide analysis name and at least one measurement.')
+    // runBlockedReason names the specific one, and is what disabled the button
+    // in the first place -- this is the guard for the case where it is reached
+    // anyway, not a second opinion with different wording.
+    if (blockedReason) {
+      setRunError(blockedReason)
+      return
+    }
+
+    // A single calibration calibrates ONE date -- the request below sends
+    // measurements[0] and nothing else. Without this the other dates were
+    // dropped in silence: no error, no mention on the results page, and gone
+    // from the draft too, since a successful run resets it. The edit path has
+    // warned about this case all along; this is the path a first-timer takes.
+    if (!isEditing && analysisType === 'calibration' && measurements.length > 1) {
+      setRunError(
+        `A single calibration is one date, and this has ${measurements.length}. ` +
+          'Switch Analysis Type to Group Calibration to calibrate them all separately, ' +
+          'or remove the dates you do not want.'
+      )
       return
     }
 
@@ -829,7 +933,11 @@ export default function NewAnalysis() {
     try {
       const blocked = structureProblem()
       if (blocked) {
-        notify(blocked)
+        // The persistent alert directly above the button, not a toast that
+        // slides in at the far corner and takes the reason away with it after
+        // eight seconds. Every other blocking condition on this page already
+        // reports itself here.
+        setRunError(blocked)
         setLoading(false)
         return
       }
@@ -978,13 +1086,14 @@ export default function NewAnalysis() {
       <Grid container spacing={3}>
         <Grid item xs={12} md={6}>
           <Paper sx={{ p: 3 }}>
-            <Typography variant="h5" gutterBottom>
+            <Typography variant="h5" component="h2" gutterBottom>
               Analysis Settings
             </Typography>
 
             <Box sx={{ mb: 2 }}>
               <TextField
                 fullWidth
+                required
                 label="Analysis Name"
                 value={analysisName}
                 onChange={(e) => setAnalysisName(e.target.value)}
@@ -994,8 +1103,9 @@ export default function NewAnalysis() {
 
             <Box sx={{ mb: 3 }}>
               <FormControl fullWidth>
-                <InputLabel>Analysis Type</InputLabel>
+                <InputLabel id="analysis-type-label">Analysis Type</InputLabel>
                 <Select
+            labelId="analysis-type-label"
                   value={analysisType}
                   label="Analysis Type"
                   onChange={(e) => setAnalysisType(e.target.value as 'calibration' | 'group_calibration' | 'bayesian')}
@@ -1028,8 +1138,9 @@ export default function NewAnalysis() {
 
             <Box sx={{ mb: 3, display: 'flex', gap: 1, alignItems: 'flex-start' }}>
               <FormControl fullWidth disabled={analysisType === 'calibration' && !saveResult}>
-                <InputLabel>Project</InputLabel>
+                <InputLabel id="project-label">Project</InputLabel>
                 <Select
+            labelId="project-label"
                   value={projectId}
                   label="Project"
                   onChange={(e) => setProjectId(e.target.value)}
@@ -1054,8 +1165,9 @@ export default function NewAnalysis() {
 
             <Box sx={{ mb: 3 }}>
               <FormControl fullWidth>
-                <InputLabel>Result Date Format</InputLabel>
+                <InputLabel id="date-format-label">Result Date Format</InputLabel>
                 <Select
+            labelId="date-format-label"
                   value={dateFormat}
                   label="Result Date Format"
                   onChange={(e) => setDateFormat(e.target.value as DateFormat)}
@@ -1076,7 +1188,7 @@ export default function NewAnalysis() {
                 accepted in the payload so saved analyses round-trip. */}
             {analysisType === 'bayesian' && (
               <Box sx={{ mb: 2 }}>
-                <Typography variant="subtitle2" gutterBottom>
+                <Typography variant="subtitle2" component="h3" gutterBottom>
                   Model Settings
                 </Typography>
                 {/* Solver override. Automatic is right almost always -- exact
@@ -1086,8 +1198,9 @@ export default function NewAnalysis() {
                     or cross-check the exact solver against an independent route
                     to the same posterior. */}
                 <FormControl fullWidth size="small" sx={{ mb: 2 }}>
-                  <InputLabel>Solver</InputLabel>
+                  <InputLabel id="solver-label">Solver</InputLabel>
                   <Select
+            labelId="solver-label"
                     value={mcmc.solver}
                     label="Solver"
                     onChange={(e) => setMcmc({ solver: e.target.value as SolverChoice })}
@@ -1134,7 +1247,7 @@ export default function NewAnalysis() {
                   }}
                 >
                   <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                    <Typography variant="subtitle2">Advanced settings</Typography>
+                    <Typography variant="subtitle2" component="h3">Advanced settings</Typography>
                   </AccordionSummary>
                   <AccordionDetails>
                     <TextField
@@ -1170,7 +1283,7 @@ export default function NewAnalysis() {
                 other, which is the half of this option that applies. */}
             {analysisType === 'group_calibration' && (
               <Box sx={{ mb: 2 }}>
-                <Typography variant="subtitle2" gutterBottom>
+                <Typography variant="subtitle2" component="h3" gutterBottom>
                   Reporting
                 </Typography>
                 <FormControlLabel
@@ -1193,7 +1306,7 @@ export default function NewAnalysis() {
 
         <Grid item xs={12} md={6}>
           <Paper sx={{ p: 3 }}>
-            <Typography variant="h5" gutterBottom>
+            <Typography variant="h5" component="h2" gutterBottom>
               Add Measurement
             </Typography>
 
@@ -1353,6 +1466,9 @@ export default function NewAnalysis() {
         collectionProjectName={
           projectId ? projects.find((p) => p.id === projectId)?.name ?? 'this project' : null
         }
+        // So the confirm button can say "Replace 4 dates with 12" rather than
+        // "Load 12 dates", which reads as additive for an action that is not.
+        existingCount={measurements.length}
         onConfirm={handleImport}
         confirming={storingDates}
       />
@@ -1460,7 +1576,7 @@ export default function NewAnalysis() {
         </DialogActions>
       </Dialog>
 
-      <Box sx={{ mt: 3 }}>
+     <Paper sx={{ p: 2, mt: 3 }}> <Box sx={{ mt: 3 }}>
         <Stack
           direction={{ xs: 'column', sm: 'row' }}
           spacing={1}
@@ -1468,7 +1584,7 @@ export default function NewAnalysis() {
           justifyContent="space-between"
           sx={{ mb: 1 }}
         >
-          <Typography variant="h5">Measurements ({measurements.length})</Typography>
+          <Typography variant="h5" component="h2">Measurements ({measurements.length})</Typography>
           <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
             {/* Ordering the dates here orders them everywhere downstream --
                 inside each phase of the model, in the results table, and in the
@@ -1506,125 +1622,200 @@ export default function NewAnalysis() {
             )}
           </Stack>
         </Stack>
+        {/* Said here rather than only on submit, because by the time the run
+            is blocked the reader has already typed every one of these dates.
+            The action is offered inline: the fix is a type change, and making
+            them find it back up the page is the actual friction. */}
+        {analysisType === 'calibration' && measurements.length > 1 && (
+          <Alert
+            severity="warning"
+            sx={{
+              mb: 2,
+              // Beside the message, the button leaves it 196px on a 375px
+              // screen -- 22 characters a line over four lines. Below sm the
+              // message takes the full width and the button follows it down.
+              flexWrap: 'wrap',
+              alignItems: { xs: 'flex-start', sm: 'center' },
+              '& .MuiAlert-message': { minWidth: { xs: '100%', sm: 0 } },
+              '& .MuiAlert-action': {
+                ml: { xs: 0, sm: 'auto' },
+                pl: { xs: 0, sm: 2 },
+                pt: { xs: 0, sm: 0 },
+                alignItems: 'center',
+              },
+            }}
+            action={
+              <Button
+                color="inherit"
+                size="small"
+                onClick={() => setAnalysisType('group_calibration')}
+              >
+                Use Group Calibration
+              </Button>
+            }
+          >
+            A single calibration calibrates one date.{' '}
+            {measurements.length === 2
+              ? 'The other date below will not be included.'
+              : `The other ${measurements.length - 1} dates below will not be included.`}
+          </Alert>
+        )}
         {measurements.length === 0 ? (
           <Typography color="textSecondary">No measurements added yet</Typography>
         ) : (
-          <Grid container spacing={2}>
-            {measurements.map((m) => (
-              <Grid item xs={12} sm={6} md={4} key={m.id}>
-                <Card>
-                  <CardContent>
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}>
-                      <Box>
-                        {/* The results table's own verdict, carried onto the
-                            card the reader was sent here to edit. Arriving
-                            from "Edit analysis" they know a date was flagged
-                            and not which one, and the table naming it is a
-                            page behind them. Same rule and same words as the
-                            table, from utils/diagnostics.
-
-                            Left as it was found once the date is changed,
-                            with the tooltip saying which run it came from: a
-                            note that vanished on the first keystroke would
-                            disappear exactly when it was being acted on. */}
-                        <Stack direction="row" spacing={1} alignItems="center">
-                          <Typography variant="h6">{m.sample_name}</Typography>
-                          {lastRunConcerns[m.id] && (
-                            <Tooltip
-                              title={`${concernTitle(lastRunConcerns[m.id])} From the last run of this analysis.`}
-                              describeChild
-                            >
-                              <Chip
-                                size="small"
-                                tabIndex={0}
-                                color={
-                                  lastRunConcerns[m.id].level === 'suspect' ? 'error' : 'warning'
-                                }
-                                variant={
-                                  lastRunConcerns[m.id].level === 'suspect' ? 'filled' : 'outlined'
-                                }
-                                label={
-                                  lastRunConcerns[m.id].level === 'suspect' ? 'Suspect' : 'Check'
-                                }
-                              />
-                            </Tooltip>
-                          )}
-                        </Stack>
-                        <Typography variant="body2" color="textSecondary">
-                          {m.age_bp} ± {m.error_1sigma} BP
-                        </Typography>
-                        <Typography variant="body2" color="textSecondary">
-                          {m.sample_type} ({m.curve_id})
-                        </Typography>
-                        {m.material_type && m.material_type !== 'unknown' && (
-                          <Typography variant="body2" color="textSecondary">
-                            Material: {m.material_type}
-                          </Typography>
-                        )}
-                        {/* Shown because it changes the date -- a reader
-                            should be able to see a correction was applied
-                            without opening the export. */}
-                        {m.delta_r != null && (
-                          <Typography variant="body2" color="textSecondary">
-                            ΔR: {m.delta_r} ± {m.delta_r_error ?? 0} yr
-                          </Typography>
-                        )}
-                        {/* The context the date arrived filed under. Shown
-                            so it is visible that it survived the trip from
-                            the collection -- it is what the Model Structure
-                            page builds its starting phases from, and a
-                            grouping that silently vanished used to have to be
-                            re-created from memory. */}
-                        {m.default_context_name && (
-                          <Typography variant="body2" color="textSecondary">
-                            Context: {m.default_context_name}
-                          </Typography>
-                        )}
-                        {/* Shown for the same reason as ΔR: it changes what
-                            the model does with the date, so it should be
-                            visible without opening anything. */}
-                        {(m.outlier_prior ?? 0) > 0 && (
-                          <Typography variant="body2" color="textSecondary">
-                            Outlier: {m.outlier_model === 'charcoal' ? 'charcoal' : 'general'}
-                            {' '}({Math.round((m.outlier_prior ?? 0) * 1000) / 10}% prior)
-                          </Typography>
-                        )}
-                      </Box>
-                      <Box>
-                        <Tooltip title="Edit this date">
-                          <IconButton
-                            size="small"
-                            onClick={() => setEditing({ id: m.id, draft: { ...m }, applyToPhase: false })}
-                          >
-                            <EditIcon fontSize="small" />
-                          </IconButton>
-                        </Tooltip>
-                        <Tooltip title={`Delete ${m.sample_name}`}>
-                          <IconButton
-                            size="small"
-                            aria-label={`Delete ${m.sample_name}`}
-                            onClick={() => removeMeasurement(m.id)}
-                            sx={{ '&:hover, &:focus-visible': { color: 'error.main' } }}
-                          >
-                            <DeleteIcon fontSize="small" />
-                          </IconButton>
-                        </Tooltip>
-                      </Box>
+          // A table, not the card grid this used to be. These rows are the
+          // rows the results table will show, and the one thing a reader does
+          // with a list of freshly typed dates is scan the ages down a column
+          // for a transposed digit -- which a 3-wide grid of cards makes
+          // impossible. Follows the house pattern from Results.tsx: full
+          // width, numeric columns nowrap and tabular-nums, and the label
+          // column at width 1% so the surplus goes to the columns carrying
+          // numbers instead of pooling behind the names.
+          <TableContainer>
+            <Table
+              size="small"
+              sx={{
+                fontVariantNumeric: 'tabular-nums',
+                '& thead th': { backgroundColor: 'background.muted' },
+                '& tbody td:first-of-type, & thead th:first-of-type': { whiteSpace: 'nowrap' },
+              }}
+            >
+              <caption style={visuallyHidden}>
+                The dates in this analysis, in the order they will be submitted.
+              </caption>
+              <TableHead>
+                <TableRow>
+                  <TableCell sx={{ width: '1%' }}>Sample</TableCell>
+                  <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
+                    Age (BP)
+                  </TableCell>
+                  <TableCell sx={{ whiteSpace: 'nowrap' }}>Curve</TableCell>
+                  {showMaterialColumn && <TableCell>Material</TableCell>}
+                  {showContextColumn && <TableCell>Context</TableCell>}
+                  {showDeltaRColumn && (
+                    <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
+                      ΔR (yr)
+                    </TableCell>
+                  )}
+                  {showOutlierColumn && <TableCell sx={{ whiteSpace: 'nowrap' }}>Outlier</TableCell>}
+                  <TableCell align="right" sx={{ width: '1%' }}>
+                    <Box component="span" sx={visuallyHidden}>
+                      Actions
                     </Box>
-                  </CardContent>
-                </Card>
-              </Grid>
-            ))}
-          </Grid>
+                  </TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {measurements.map((m) => (
+                  <TableRow key={m.id} hover>
+                    <TableCell>
+                      {/* The results table's own verdict, carried onto the row
+                          the reader was sent here to edit. Arriving from "Edit
+                          analysis" they know a date was flagged and not which
+                          one, and the table naming it is a page behind them.
+                          Same rule and same words as that table, from
+                          utils/diagnostics.
+
+                          Left as it was found once the date is changed, with
+                          the tooltip saying which run it came from: a note that
+                          vanished on the first keystroke would disappear
+                          exactly when it was being acted on. */}
+                      <Stack direction="row" spacing={1} alignItems="center">
+                        <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                          {m.sample_name}
+                        </Typography>
+                        {lastRunConcerns[m.id] && (
+                          <Tooltip
+                            title={`${concernTitle(lastRunConcerns[m.id])} From the last run of this analysis.`}
+                            describeChild
+                          >
+                            <Chip
+                              size="small"
+                              tabIndex={0}
+                              color={lastRunConcerns[m.id].level === 'suspect' ? 'error' : 'warning'}
+                              variant={
+                                lastRunConcerns[m.id].level === 'suspect' ? 'filled' : 'outlined'
+                              }
+                              label={lastRunConcerns[m.id].level === 'suspect' ? 'Suspect' : 'Check'}
+                            />
+                          </Tooltip>
+                        )}
+                      </Stack>
+                    </TableCell>
+                    {/* nowrap so a value and its error never break across two
+                        lines and stop reading as one measurement. */}
+                    <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
+                      {m.age_bp} ± {m.error_1sigma}
+                    </TableCell>
+                    <TableCell sx={{ whiteSpace: 'nowrap' }}>
+                      {curveLabel(curves, m.curve_id)}
+                    </TableCell>
+                    {showMaterialColumn && (
+                      <TableCell>
+                        {m.material_type && m.material_type !== 'unknown' ? m.material_type : '—'}
+                      </TableCell>
+                    )}
+                    {/* The context the date arrived filed under. Shown so it is
+                        visible that it survived the trip from the collection --
+                        it is what the Model Structure page builds its starting
+                        phases from, and a grouping that silently vanished used
+                        to have to be re-created from memory. */}
+                    {showContextColumn && (
+                      <TableCell>{m.default_context_name || '—'}</TableCell>
+                    )}
+                    {/* ΔR and the outlier settings both CHANGE the answer, so
+                        they stay visible without opening anything. */}
+                    {showDeltaRColumn && (
+                      <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
+                        {m.delta_r != null ? `${m.delta_r} ± ${m.delta_r_error ?? 0}` : '—'}
+                      </TableCell>
+                    )}
+                    {showOutlierColumn && (
+                      <TableCell sx={{ whiteSpace: 'nowrap' }}>
+                        {(m.outlier_prior ?? 0) > 0
+                          ? `${m.outlier_model === 'charcoal' ? 'charcoal' : 'general'} ${
+                              Math.round((m.outlier_prior ?? 0) * 1000) / 10
+                            }%`
+                          : '—'}
+                      </TableCell>
+                    )}
+                    <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
+                      <Tooltip title={`Edit ${m.sample_name}`}>
+                        <IconButton
+                          size="small"
+                          aria-label={`Edit ${m.sample_name}`}
+                          onClick={() =>
+                            setEditing({ id: m.id, draft: { ...m }, applyToPhase: false })
+                          }
+                        >
+                          <EditIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                      <Tooltip title={`Delete ${m.sample_name}`}>
+                        <IconButton
+                          size="small"
+                          aria-label={`Delete ${m.sample_name}`}
+                          onClick={() => removeMeasurement(m.id)}
+                          sx={{ '&:hover, &:focus-visible': { color: 'error.main' } }}
+                        >
+                          <DeleteIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
         )}
-      </Box>
+      </Box></Paper>
 
       {analysisType === 'bayesian' && (
         <Box sx={{ mt: 3 }}>
           <Paper sx={{ p: 3 }}>
             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ sm: 'center' }} justifyContent="space-between">
               <Box>
-                <Typography variant="h5" gutterBottom>
+                <Typography variant="h5" component="h2" gutterBottom>
                   Model Structure
                 </Typography>
                 <Stack direction="row" spacing={1} sx={{ mb: 1 }}>
@@ -1636,9 +1827,8 @@ export default function NewAnalysis() {
                   {structureInvalid && <Chip size="small" color="error" label="Invalid -- fix before running" />}
                 </Stack>
                 <Typography variant="body2" color="textSecondary">
-                  Optional: build the model as nested Sequences and Phases with Boundaries placed where
-                  you want them, then assign each date to a Phase -- the Harris matrix diagram is derived
-                  from this structure automatically.
+                  Build the model as nested Sequences and Phases with Boundaries placed where you
+                  want them, then assign each date to a Phase. A Bayesian analysis needs this structure to constrain the dates. Calibrating them independently is what Group Calibration does.
                 </Typography>
               </Box>
               <Button
@@ -1670,21 +1860,47 @@ export default function NewAnalysis() {
         </Alert>
       )}
 
-      <Box sx={{ mt: 4, display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap' }}>
-        <Button
-          variant="contained"
-          color="primary"
-          size="large"
-          onClick={handleRunAnalysis}
-          disabled={
-            loading ||
-            savingDetails ||
-            measurements.length === 0 ||
-            (analysisType === 'bayesian' && !!cycle)
-          }
-        >
-          {loading ? 'Running...' : 'Run Analysis'}
-        </Button>
+      {/* Pinned to the bottom of the viewport. Twenty dates put this two
+          viewport-heights below the fold, so every run ended in a scroll hunt
+          for the button the page exists to press -- and DESIGN.md already makes
+          the AppBar sticky for exactly this reason ("analyses and model trees
+          can run long"); the reasoning simply had not been extended to the
+          primary action. Sticky rather than fixed, so it sits in flow and
+          cannot cover the last card. */}
+      <Box
+        sx={{
+          position: 'sticky',
+          bottom: 0,
+          zIndex: (theme) => theme.zIndex.appBar - 1,
+          mt: 4,
+          mx: -3,
+          px: 3,
+          py: 2,
+          bgcolor: 'background.paper',
+          borderTop: 1,
+          borderColor: 'divider',
+          display: 'flex',
+          gap: 2,
+          alignItems: 'center',
+          flexWrap: 'wrap',
+        }}
+      >
+        {/* A disabled button that does not say why is a dead end. The span is
+            required for a tooltip on a disabled control -- the same pattern
+            SortDatesButton already uses on this page. */}
+        <Tooltip title={blockedReason ?? ''}>
+          <span>
+            <Button
+              variant="contained"
+              color="primary"
+              size="large"
+              onClick={handleRunAnalysis}
+              disabled={loading || savingDetails || !!blockedReason}
+            >
+              {loading ? 'Running...' : 'Run Analysis'}
+            </Button>
+          </span>
+        </Tooltip>
         {/* Only when there is something to save onto: a new analysis has no
             row to rename yet, so its name is settled by running it. */}
         {isEditing && (
@@ -1696,6 +1912,11 @@ export default function NewAnalysis() {
           >
             {savingDetails ? 'Saving...' : 'Save Details'}
           </Button>
+        )}
+        {blockedReason && (
+          <Typography variant="body2" color="text.secondary" sx={{ flex: '1 1 auto', minWidth: 0 }}>
+            {blockedReason}
+          </Typography>
         )}
       </Box>
       {isEditing && (

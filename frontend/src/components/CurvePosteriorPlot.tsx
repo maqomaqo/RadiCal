@@ -730,6 +730,7 @@ export default function CurvePosteriorPlot({
         gridcolor: plot.grid,
       },
       hovermode: 'closest' as const,
+      font: { color: plot.axis },
       plot_bgcolor: plot.surface,
       paper_bgcolor: plot.surface,
       margin: { l: 70, r: 20, t: geometry.marginTop, b: geometry.marginBottom },

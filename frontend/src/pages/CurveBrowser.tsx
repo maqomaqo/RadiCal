@@ -9,6 +9,7 @@ import {
   CircularProgress,
   Container,
   FormControlLabel,
+  LinearProgress,
   Link,
   MenuItem,
   Paper,
@@ -121,11 +122,22 @@ function PanelSection({
   title,
   caption,
   controls,
+  busy = false,
+  overlay,
   children,
 }: {
   title: string
   caption?: React.ReactNode
   controls?: React.ReactNode
+  /**
+   * Something is being recomputed for this panel and what is drawn is the
+   * previous answer. Said twice over -- a bar across the top of the chart and
+   * the chart itself faded -- because the two say different things: the bar
+   * says work is happening, the fade says do not read this yet.
+   */
+  busy?: boolean
+  /** Drawn over the chart, undimmed -- for saying why it is empty. */
+  overlay?: React.ReactNode
   children: React.ReactNode
 }) {
   return (
@@ -157,10 +169,39 @@ function PanelSection({
             {caption}
           </Typography>
         )}
+        {busy && (
+          <Typography variant="caption" color="textSecondary">
+            recalculating…
+          </Typography>
+        )}
         <Box sx={{ flexGrow: 1 }} />
         {controls}
       </Box>
-      {children}
+      <Box sx={{ position: 'relative' }}>
+        {busy && (
+          <LinearProgress
+            sx={{ position: 'absolute', top: 0, left: 0, right: 0, height: 2, zIndex: 2 }}
+          />
+        )}
+        <Box sx={{ opacity: busy ? 0.4 : 1, transition: 'opacity 120ms linear' }}>
+          {children}
+        </Box>
+        {overlay && (
+          <Box
+            sx={{
+              position: 'absolute',
+              inset: 0,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 1,
+              pointerEvents: 'none',
+            }}
+          >
+            {overlay}
+          </Box>
+        )}
+      </Box>
     </Box>
   )
 }
@@ -324,6 +365,32 @@ export default function CurveBrowser() {
     }
   }, [curveId, compareWith, window])
 
+  /**
+   * Hover, coalesced to one update per frame.
+   *
+   * Plotly emits a hover event per pointer sample, which on a trackpad is
+   * faster than the screen redraws, and each one re-renders this page: the
+   * readout, the scrubber, and three charts that then have to be diffed.
+   * Dropping the events that a frame would never have shown costs nothing
+   * visible and takes the work down to what the display can use.
+   */
+  const hoverFrame = useRef<number | null>(null)
+  const pendingHover = useRef<number | null>(null)
+  const noteHover = useCallback((value: number | null) => {
+    pendingHover.current = value
+    if (hoverFrame.current !== null) return
+    hoverFrame.current = requestAnimationFrame(() => {
+      hoverFrame.current = null
+      setHover(pendingHover.current)
+    })
+  }, [])
+  useEffect(
+    () => () => {
+      if (hoverFrame.current !== null) cancelAnimationFrame(hoverFrame.current)
+    },
+    []
+  )
+
   const hovered = useMemo(
     () => (hover === null ? null : sampleAt(points, hover)),
     [hover, points]
@@ -486,6 +553,7 @@ export default function CurveBrowser() {
       hoverdistance: -1,
       showlegend: true,
       legend: { orientation: 'h' as const, y: 1.02, yanchor: 'bottom' as const },
+      font: { color: colors.axis },
       plot_bgcolor: colors.surface,
       paper_bgcolor: colors.surface,
       margin: { l: 70, r: 20, t: 50, b: 60 },
@@ -509,6 +577,141 @@ export default function CurveBrowser() {
       displayModeBar: false as const,
     }),
     []
+  )
+
+  /**
+   * The panels' figures, built once per change rather than once per render.
+   *
+   * react-plotly.js compares `data`, `layout` and `config` by IDENTITY, so an
+   * object literal written inside the JSX is a new figure on every render and
+   * re-enters Plotly every time. These panels are under a chart that reports
+   * hover, and this page re-renders on every hover: built inline, moving the
+   * pointer along the curve rebuilt and re-diffed two more charts per frame,
+   * which is what made the page feel heavy to scrub across.
+   */
+  const panelConfig = useMemo(
+    () => ({ responsive: true, displayModeBar: false as const }),
+    []
+  )
+
+  /** The axis and chrome both panels share: the curve's window, no labels. */
+  const panelAxis = useMemo(
+    () => ({
+      // Locked to the curve above rather than autoranged: the two are read
+      // together, and an axis drifting a few years would line a plateau up
+      // against the wrong stretch.
+      range: [window?.to ?? 0, window?.from ?? 0],
+      showticklabels: false,
+      gridcolor: colors.grid,
+      showspikes: true,
+      spikemode: 'across' as const,
+      spikethickness: 1,
+      spikedash: 'dot',
+      spikecolor: colors.grid,
+    }),
+    [window, colors]
+  )
+
+  const comparisonData = useMemo(
+    () =>
+      [
+        {
+          x: [...comparison.map((p) => p[0]), ...comparison.map((p) => p[0]).reverse()],
+          y: [
+            ...comparison.map((p) => p[5] + p[6]),
+            ...comparison.map((p) => p[5] - p[6]).reverse(),
+          ],
+          fill: 'toself',
+          fillcolor: colors.hpd95,
+          line: { width: 0, color: 'rgba(0,0,0,0)' },
+          mode: 'lines',
+          hoverinfo: 'skip',
+        },
+        {
+          x: comparison.map((p) => p[0]),
+          y: comparison.map((p) => p[5]),
+          customdata: comparison.map((p) => formatCalendarAge(p[0], dateFormat)),
+          mode: 'lines',
+          line: { color: colors.posteriorLine, width: 1.5 },
+          hovertemplate: '<b>%{customdata}</b><br>%{y:.0f} ¹⁴C yr apart<extra></extra>',
+        },
+      ] as any,
+    [comparison, colors, dateFormat]
+  )
+
+  const comparisonLayout = useMemo(
+    () =>
+      ({
+        height: panelHeight,
+        xaxis: panelAxis,
+        yaxis: {
+          // Units only: a rotated title is limited by the panel's HEIGHT,
+          // which is 75-85px here, and the section header already says what
+          // is being plotted.
+          title: { text: 'yr', font: { size: 11 } },
+          gridcolor: colors.grid,
+          zeroline: true,
+          zerolinecolor: colors.grid,
+        },
+        showlegend: false,
+        hovermode: 'closest' as const,
+        hoverdistance: -1,
+        font: { color: colors.axis },
+        plot_bgcolor: colors.surface,
+        paper_bgcolor: colors.surface,
+        margin: { l: 52, r: 20, t: 4, b: 4 },
+        autosize: true,
+      }) as any,
+    [panelAxis, panelHeight, colors]
+  )
+
+  const resolutionData = useMemo(
+    () =>
+      [
+        {
+          // The 5th-95th band: how lucky or unlucky one date can be.
+          x: [...resolution.map((p) => p[0]), ...resolution.map((p) => p[0]).reverse()],
+          y: [...resolution.map((p) => p[3]), ...resolution.map((p) => p[2]).reverse()],
+          fill: 'toself',
+          fillcolor: colors.hpd95,
+          line: { width: 0, color: 'rgba(0,0,0,0)' },
+          mode: 'lines',
+          name: '5th–95th percentile',
+          hoverinfo: 'skip',
+        },
+        {
+          x: resolution.map((p) => p[0]),
+          y: resolution.map((p) => p[1]),
+          customdata: resolution.map((p) => formatCalendarAge(p[0], dateFormat)),
+          mode: 'lines',
+          line: { color: colors.hpd68, width: 1.5 },
+          name: 'Mean',
+          hovertemplate: '<b>%{customdata}</b><br>about %{y:.0f} years (95.4%)<extra></extra>',
+        },
+      ] as any,
+    [resolution, colors, dateFormat]
+  )
+
+  const resolutionLayout = useMemo(
+    () =>
+      ({
+        height: panelHeight,
+        xaxis: { ...panelAxis, matches: 'x' },
+        yaxis: {
+          title: { text: 'yr', font: { size: 11 } },
+          gridcolor: colors.grid,
+          rangemode: 'tozero' as const,
+        },
+        showlegend: false,
+        hovermode: 'closest' as const,
+        hoverdistance: -1,
+        font: { color: colors.axis },
+        plot_bgcolor: colors.surface,
+        paper_bgcolor: colors.surface,
+        margin: { l: 52, r: 20, t: 4, b: 4 },
+        autosize: true,
+      }) as any,
+    [panelAxis, panelHeight, colors]
   )
 
   /**
@@ -605,11 +808,7 @@ export default function CurveBrowser() {
                 onChange={(e) => setShowResolution(e.target.checked)}
               />
             }
-            label={
-              <Typography variant="body2">
-                Expected resolution{resolutionLoading ? ' …' : ''}
-              </Typography>
-            }
+            label={<Typography variant="body2">Expected resolution</Typography>}
           />
           <TextField
             select
@@ -670,8 +869,8 @@ export default function CurveBrowser() {
           useResizeHandler
           style={{ width: '100%', height: `${chartHeight}px` }}
           onRelayout={handleRelayout}
-          onHover={(event: any) => setHover(event?.points?.[0]?.x ?? null)}
-          onUnhover={() => setHover(null)}
+          onHover={(event: any) => noteHover(event?.points?.[0]?.x ?? null)}
+          onUnhover={() => noteHover(null)}
           // Clicking a year asks what a date from it would look like. In a
           // plateau the answer is three or four disjoint ranges, which says
           // what a plateau costs more plainly than any single number.
@@ -689,70 +888,13 @@ export default function CurveBrowser() {
             } reads older`}
           >
             <Plot
-              data={
-                [
-                  {
-                    x: [
-                      ...comparison.map((p) => p[0]),
-                      ...comparison.map((p) => p[0]).reverse(),
-                    ],
-                    y: [
-                      ...comparison.map((p) => p[5] + p[6]),
-                      ...comparison.map((p) => p[5] - p[6]).reverse(),
-                    ],
-                    fill: 'toself',
-                    fillcolor: colors.hpd95,
-                    line: { width: 0, color: 'rgba(0,0,0,0)' },
-                    mode: 'lines',
-                    hoverinfo: 'skip',
-                  },
-                  {
-                    x: comparison.map((p) => p[0]),
-                    y: comparison.map((p) => p[5]),
-                    customdata: comparison.map((p) => formatCalendarAge(p[0], dateFormat)),
-                    mode: 'lines',
-                    line: { color: colors.posteriorLine, width: 1.5 },
-                    hovertemplate:
-                      '<b>%{customdata}</b><br>%{y:.0f} ¹⁴C yr apart<extra></extra>',
-                  },
-                ] as any
-              }
-              layout={
-                {
-                  height: panelHeight,
-                  xaxis: {
-                    range: [window.to, window.from],
-                    showticklabels: false,
-                    gridcolor: colors.grid,
-                    showspikes: true,
-                    spikemode: 'across' as const,
-                    spikethickness: 1,
-                    spikedash: 'dot',
-                    spikecolor: colors.grid,
-                  },
-                  yaxis: {
-                    // Units only: a rotated title is limited by the panel's
-                    // HEIGHT, which is 75-85px here, and the section header
-                    // already says what is being plotted.
-                    title: { text: 'yr', font: { size: 11 } },
-                    gridcolor: colors.grid,
-                    zeroline: true,
-                    zerolinecolor: colors.grid,
-                  },
-                  showlegend: false,
-                  hovermode: 'closest' as const,
-                  hoverdistance: -1,
-                  plot_bgcolor: colors.surface,
-                  paper_bgcolor: colors.surface,
-                  margin: { l: 52, r: 20, t: 4, b: 4 },
-                  autosize: true,
-                } as any
-              }
-              config={{ responsive: true, displayModeBar: false }}
+              data={comparisonData}
+              layout={comparisonLayout}
+              config={panelConfig}
               useResizeHandler
               style={{ width: '100%', height: `${panelHeight}px` }}
-              onHover={(event: any) => setHover(event?.points?.[0]?.x ?? null)}
-              onUnhover={() => setHover(null)}
+              onHover={(event: any) => noteHover(event?.points?.[0]?.x ?? null)}
+              onUnhover={() => noteHover(null)}
             />
           </PanelSection>
         )}
@@ -761,6 +903,26 @@ export default function CurveBrowser() {
           <PanelSection
             title="Expected resolution"
             caption="how tightly a date from each year could be known, before measuring"
+            busy={resolutionLoading}
+            overlay={
+              // Nothing drawn yet: either the first answer for this window is
+              // still being worked out -- seconds, for the whole curve, since
+              // every year of it is calibrated against every measurement it
+              // could return -- or it could not be, which otherwise leaves a
+              // pair of empty axes explaining nothing.
+              resolution.length > 0 ? null : resolutionLoading ? (
+                <>
+                  <CircularProgress size={14} />
+                  <Typography variant="caption" color="textSecondary">
+                    Working out how tightly this stretch could be dated…
+                  </Typography>
+                </>
+              ) : (
+                <Typography variant="caption" color="textSecondary">
+                  This window's resolution could not be worked out.
+                </Typography>
+              )
+            }
             controls={
               <>
                 <TextField
@@ -785,70 +947,13 @@ export default function CurveBrowser() {
             }
           >
             <Plot
-              data={
-                [
-                  {
-                    // The 5th-95th band: how lucky or unlucky one date can be.
-                    x: [...resolution.map((p) => p[0]), ...resolution.map((p) => p[0]).reverse()],
-                    y: [
-                      ...resolution.map((p) => p[3]),
-                      ...resolution.map((p) => p[2]).reverse(),
-                    ],
-                    fill: 'toself',
-                    fillcolor: colors.hpd95,
-                    line: { width: 0, color: 'rgba(0,0,0,0)' },
-                    mode: 'lines',
-                    name: '5th–95th percentile',
-                    hoverinfo: 'skip',
-                  },
-                  {
-                    x: resolution.map((p) => p[0]),
-                    y: resolution.map((p) => p[1]),
-                    customdata: resolution.map((p) => formatCalendarAge(p[0], dateFormat)),
-                    mode: 'lines',
-                    line: { color: colors.hpd68, width: 1.5 },
-                    name: 'Mean',
-                    hovertemplate:
-                      '<b>%{customdata}</b><br>about %{y:.0f} years (95.4%)<extra></extra>',
-                  },
-                ] as any
-              }
-              layout={
-                {
-                  height: panelHeight,
-                  xaxis: {
-                    // Locked to the curve above rather than autoranged: the
-                    // two are read together, and an axis drifting a few years
-                    // would line a plateau up against the wrong stretch.
-                    range: [window.to, window.from],
-                    matches: 'x',
-                    showticklabels: false,
-                    gridcolor: colors.grid,
-                    showspikes: true,
-                    spikemode: 'across' as const,
-                    spikethickness: 1,
-                    spikedash: 'dot',
-                    spikecolor: colors.grid,
-                  },
-                  yaxis: {
-                    title: { text: 'yr', font: { size: 11 } },
-                    gridcolor: colors.grid,
-                    rangemode: 'tozero' as const,
-                  },
-                  showlegend: false,
-                  hovermode: 'closest' as const,
-                  hoverdistance: -1,
-                  plot_bgcolor: colors.surface,
-                  paper_bgcolor: colors.surface,
-                  margin: { l: 52, r: 20, t: 4, b: 4 },
-                  autosize: true,
-                } as any
-              }
-              config={{ responsive: true, displayModeBar: false }}
+              data={resolutionData}
+              layout={resolutionLayout}
+              config={panelConfig}
               useResizeHandler
               style={{ width: '100%', height: `${panelHeight}px` }}
-              onHover={(event: any) => setHover(event?.points?.[0]?.x ?? null)}
-              onUnhover={() => setHover(null)}
+              onHover={(event: any) => noteHover(event?.points?.[0]?.x ?? null)}
+              onUnhover={() => noteHover(null)}
             />
           </PanelSection>
         )}
@@ -874,7 +979,7 @@ export default function CurveBrowser() {
             px: 1.5,
             py: 1,
             borderRadius: 1,
-            backgroundColor: 'action.hover',
+            backgroundColor: 'background.muted',
           }}
         >
           <Box sx={{ display: 'flex', columnGap: 3, rowGap: 0.5, flexWrap: 'wrap' }}>

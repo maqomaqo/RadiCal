@@ -12,7 +12,7 @@ import {
   Typography,
 } from '@mui/material'
 import type { DraftMeasurement } from '@/types'
-import { curveOptions, curvesForSampleType, type CurveSpec } from '@/api/curves'
+import { curveLabel, curveOptions, curvesForSampleType, type CurveSpec } from '@/api/curves'
 import { useCurves } from '@/hooks/useCurves'
 
 /**
@@ -96,11 +96,25 @@ export default function MeasurementFields({ value, onChange, showOutlier = false
   const missingError = deltaRErrorMissing(value)
   const outlierOn = (value.outlier_prior ?? 0) > 0
 
+  // The curves this sample type can actually be calibrated against. Falls
+  // back to the whole list when the registry types none of them for this
+  // sample type -- an empty picker would be worse than an unfiltered one, and
+  // an imported curve with an unfamiliar type must stay reachable.
+  const sampleType = value.sample_type || 'terrestrial'
+  const forType = curvesForSampleType(curves, sampleType)
+  const suitableCurves = forType.length > 0 ? forType : curves
+  // Flagged rather than blocked: an expert may have a deliberate reason, and
+  // an imported curve may be typed in a way the registry does not recognise.
+  // What is not acceptable is the mismatch passing without a word.
+  const currentSpec = curves.find((curve) => curve.id === (value.curve_id || 'intcal20'))
+  const curveMismatch = !!currentSpec && currentSpec.sample_type !== sampleType
+
   return (
     <>
       <Box sx={{ mb: 2 }}>
         <TextField
           fullWidth
+          required
           label="Sample Name"
           value={value.sample_name || ''}
           onChange={(e) => set({ sample_name: e.target.value })}
@@ -123,6 +137,7 @@ export default function MeasurementFields({ value, onChange, showOutlier = false
       <Box sx={{ display: 'flex', gap: 1, mb: 2 }}>
         <TextField
           type="number"
+          required
           label="Age (BP)"
           value={value.age_bp ?? ''}
           onChange={(e) =>
@@ -130,23 +145,33 @@ export default function MeasurementFields({ value, onChange, showOutlier = false
           }
           size="small"
           sx={{ flex: 1 }}
+          // The range services/schemas/sample.py already enforces. Stated here
+          // so it is a constraint on the way in rather than a 422 on the way
+          // back -- and so the field gets native spinner and validation
+          // behaviour for free.
+          inputProps={{ min: 0, max: 60000, step: 10 }}
         />
         <TextField
           type="number"
-          label="1σ Error"
+          required
+          // The unit was the one thing this label left implicit, while its own
+          // sibling ΔR field names it. Both are radiocarbon years.
+          label="1σ Error (yr)"
           value={value.error_1sigma ?? ''}
           onChange={(e) =>
             set({ error_1sigma: e.target.value === '' ? undefined : parseFloat(e.target.value) })
           }
           size="small"
           sx={{ flex: 1 }}
+          inputProps={{ min: 1, max: 10000, step: 1 }}
         />
       </Box>
 
       <Box sx={{ display: 'flex', gap: 1, mb: 2 }}>
         <FormControl size="small" sx={{ flex: 1 }}>
-          <InputLabel>Sample Type</InputLabel>
+          <InputLabel id="sample-type-label">Sample Type</InputLabel>
           <Select
+            labelId="sample-type-label"
             value={value.sample_type || 'terrestrial'}
             label="Sample Type"
             onChange={(e) => {
@@ -163,24 +188,41 @@ export default function MeasurementFields({ value, onChange, showOutlier = false
             <MenuItem value="marine">Marine</MenuItem>
           </Select>
         </FormControl>
-        <FormControl size="small" sx={{ flex: 1 }} error={!!curvesError}>
-          <InputLabel>Curve</InputLabel>
+        <FormControl size="small" sx={{ flex: 1 }} error={!!curvesError || curveMismatch}>
+          <InputLabel id="curve-label">Curve</InputLabel>
           <Select
+            labelId="curve-label"
             value={value.curve_id || 'intcal20'}
             label="Curve"
             disabled={curvesLoading}
             onChange={(e) => set({ curve_id: e.target.value })}
           >
-            {/* Always includes whatever this date is already set to, so a
-                slow or failed curve list cannot blank a curve that was
-                chosen -- see api/curves.curveOptions. */}
-            {curveOptions(curves, value.curve_id || 'intcal20').map((option) => (
+            {/* Narrowed to the curves that suit this sample type, because the
+                full list made the app's own worst case reachable in silence:
+                marine carbon left on IntCal20, ΔR still applying, and a
+                clean-looking date wrong by centuries. Following the sample
+                type only guarded the other direction -- changing the sample
+                type moved the curve, changing the curve checked nothing.
+
+                Still built through curveOptions, so it always includes
+                whatever this date is already set to: a slow or failed curve
+                list must not blank a curve that was chosen, and an imported
+                curve the registry types differently stays selectable rather
+                than vanishing from its own date. */}
+            {curveOptions(suitableCurves, value.curve_id || 'intcal20').map((option) => (
               <MenuItem key={option.id} value={option.id}>
                 {option.label}
               </MenuItem>
             ))}
           </Select>
-          {curvesError && <FormHelperText>{curvesError}</FormHelperText>}
+          {curvesError ? (
+            <FormHelperText>{curvesError}</FormHelperText>
+          ) : curveMismatch ? (
+            <FormHelperText>
+              {curveLabel(curves, value.curve_id)} is not a{' '}
+              {value.sample_type === 'marine' ? 'marine' : 'terrestrial'} curve
+            </FormHelperText>
+          ) : null}
         </FormControl>
       </Box>
 
@@ -242,8 +284,9 @@ export default function MeasurementFields({ value, onChange, showOutlier = false
           {outlierOn && (
             <Box sx={{ display: 'flex', gap: 1, mt: 1 }}>
               <FormControl size="small" sx={{ flex: 2 }}>
-                <InputLabel>Outlier model</InputLabel>
+                <InputLabel id="outlier-model-label">Outlier model</InputLabel>
                 <Select
+            labelId="outlier-model-label"
                   value={value.outlier_model || 'general'}
                   label="Outlier model"
                   onChange={(e) =>

@@ -239,7 +239,7 @@ TPQ (terminus post quem, a maximum age) and TAQ (terminus ante quem, a minimum a
 limiters can be set on a date or on a whole Phase.
 
 Reached via **Specify Model Structure** / **Edit Model Structure**, which has an **Editor** tab for
-building the tree and a **Harris Matrix Diagram** tab showing it drawn. The Results page renders
+building the tree and a **Matrix Diagram** tab showing it drawn. The Results page renders
 the same diagram for a completed analysis, and the Posterior Distributions plots follow its order.
 
 ### Reading the Model diagram
@@ -249,7 +249,7 @@ the Editor tab and the diagram follows. **Oldest is at the bottom** as in a stra
 
 - A **context** (solid box) is a Phase that dates are attached to, showing how many it holds and
   any TPQ/TAQ limiter.
-- A **box drawn around other boxes** is a Sequence or a grouping Phase. It groups without ordering.
+- A **box drawn around other boxes** is a Sequence or a grouping Phase. A solid edge means a Sequence, which puts what it holds in order; a dashed edge means a Phase, which groups without ordering.
   A Phase containing two Phases says they belong together and says nothing about which came first,
   so they sit side by side inside it.
 - A **labelled rule** across a group is a Boundary, a modelled transition, with its 95% range

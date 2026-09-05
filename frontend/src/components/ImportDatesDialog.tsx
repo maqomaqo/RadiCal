@@ -95,6 +95,16 @@ interface Props {
    */
   target: 'collection' | 'analysis'
   /**
+   * How many dates the draft already holds, for target 'analysis'.
+   *
+   * An import REPLACES the draft's dates rather than merging (an OxCal file's
+   * structure references its own date ids, so merging would strand the
+   * existing dates in no phase). The confirm button has to say so when there
+   * is something to lose: "Load" reads as additive, and a reader who typed
+   * four dates and imported twelve lost the four with no warning.
+   */
+  existingCount?: number
+  /**
    * The project the draft is assigned to, when there is one. Only meaningful
    * for target 'analysis': a draft analysis holds its own copies of the dates,
    * so without this offer an imported file reaches the analysis and nothing
@@ -134,6 +144,7 @@ export default function ImportDatesDialog({
   onClose,
   target,
   collectionProjectName = null,
+  existingCount = 0,
   onConfirm,
   confirming = false,
 }: Props) {
@@ -320,6 +331,18 @@ export default function ImportDatesDialog({
           </Box>
         )}
 
+        {/* Said before the button is pressed, not discovered afterwards. The
+            replace is deliberate and correct -- an imported model's structure
+            references its own date ids, so merging would leave the dates
+            already in the draft belonging to no phase -- but that reasoning
+            lived only in a source comment while the reader lost work to it. */}
+        {preview?.ok && target === 'analysis' && existingCount > 0 && (
+          <Alert severity="warning" sx={{ mt: 3 }}>
+            This replaces the {existingCount} date{existingCount === 1 ? '' : 's'} already in this
+            analysis. An imported model refers to its own dates, so the two sets cannot be merged.
+          </Alert>
+        )}
+
         {preview && (
           <Box sx={{ mt: 3 }}>
             <Stack direction="row" spacing={1} sx={{ mb: 2, flexWrap: 'wrap', gap: 1 }}>
@@ -476,9 +499,13 @@ export default function ImportDatesDialog({
             ? 'Importing…'
             : target === 'collection'
               ? `Add ${preview?.date_count ?? 0} date${preview?.date_count === 1 ? '' : 's'} to the collection`
-              : `Load ${preview?.date_count ?? 0} date${preview?.date_count === 1 ? '' : 's'}${
-                  structureKept ? ' and model' : ''
-                }`}
+              : existingCount > 0
+                ? `Replace ${existingCount} date${existingCount === 1 ? '' : 's'} with ${
+                    preview?.date_count ?? 0
+                  }${structureKept ? ' and a model' : ''}`
+                : `Load ${preview?.date_count ?? 0} date${preview?.date_count === 1 ? '' : 's'}${
+                    structureKept ? ' and model' : ''
+                  }`}
         </Button>
       </DialogActions>
     </Dialog>

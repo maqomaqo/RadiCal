@@ -237,7 +237,7 @@ def curve_points_csv(
     )
 
 
-# Beyond this span, the calculation takes long enough (about twelve seconds
+# Beyond this span, the calculation takes long enough (about eight seconds
 # for the whole 55,000 years) that it is served from the cached whole-curve
 # profile instead. Slicing that is exact, not an approximation -- a windowed
 # calculation pads far enough to return identical numbers.
@@ -273,7 +273,17 @@ def curve_resolution(
     if hi < lo:
         lo, hi = hi, lo
 
-    if hi - lo > WIDE_SPAN_YEARS:
+    # Once a whole curve has been computed for this laboratory uncertainty --
+    # which opening the page on the full range does -- every later window is a
+    # slice of it, and panning and zooming cost nothing. Windows asking for a
+    # finer lattice than the cached one still compute directly, since that is
+    # the detail they zoomed in for and a narrow window is a few hundredths of
+    # a second.
+    warm = (
+        resolution.has_full_profile(spec.content_sha256, u0)
+        and stride >= resolution.BASE_STRIDE
+    )
+    if warm or hi - lo > WIDE_SPAN_YEARS:
         whole = resolution.full_profile(curve, spec.content_sha256, u0=u0, stride=stride)
         computed = resolution.slice_profile(whole, lo, hi)
     else:

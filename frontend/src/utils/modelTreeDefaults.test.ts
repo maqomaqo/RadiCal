@@ -92,3 +92,96 @@ describe('bootstrapModelTree', () => {
     expect(assignments).toEqual({})
   })
 })
+
+// Depth is the only ordering evidence available at bootstrap, and a Sequence
+// is a claim about time. These tests pin the exact conditions under which that
+// claim is made, because the failure mode is silent: a wrongly-ordered model
+// still runs and still produces citable numbers.
+describe('bootstrapModelTree — ordering contexts by depth', () => {
+  const wrapper = (root: ModelElement) =>
+    (root.children || []).find((c) => c.name === 'Site') ?? null
+
+  it('seeds a Sequence when depths separate the contexts cleanly, deepest first', () => {
+    const { tree } = bootstrapModelTree([
+      { id: 'a', context: 'Upper', depth: 20 },
+      { id: 'b', context: 'Lower', depth: 90 },
+      { id: 'c', context: 'Middle', depth: 55 },
+      { id: 'd', context: 'Lower', depth: 80 },
+    ])
+    const site = wrapper(tree)
+    expect(site?.element_type).toBe('sequence')
+    // Oldest first: deepest context leads.
+    expect((site?.children || []).map((c) => c.name)).toEqual(['Lower', 'Middle', 'Upper'])
+  })
+
+  it('falls back to an unordered Phase when two contexts overlap in depth', () => {
+    const { tree } = bootstrapModelTree([
+      { id: 'a', context: 'Upper', depth: 20 },
+      { id: 'b', context: 'Upper', depth: 60 },
+      { id: 'c', context: 'Lower', depth: 40 },
+      { id: 'd', context: 'Lower', depth: 90 },
+    ])
+    expect(wrapper(tree)?.element_type).toBe('phase')
+  })
+
+  it('allows contexts that touch at a shared boundary depth', () => {
+    const { tree } = bootstrapModelTree([
+      { id: 'a', context: 'Upper', depth: 10 },
+      { id: 'b', context: 'Upper', depth: 50 },
+      { id: 'c', context: 'Lower', depth: 50 },
+      { id: 'd', context: 'Lower', depth: 90 },
+    ])
+    const site = wrapper(tree)
+    expect(site?.element_type).toBe('sequence')
+    expect((site?.children || []).map((c) => c.name)).toEqual(['Lower', 'Upper'])
+  })
+
+  it('falls back to a Phase when any date lacks a depth', () => {
+    const { tree } = bootstrapModelTree([
+      { id: 'a', context: 'Upper', depth: 20 },
+      { id: 'b', context: 'Lower', depth: 90 },
+      { id: 'c', context: 'Lower' },
+    ])
+    expect(wrapper(tree)?.element_type).toBe('phase')
+  })
+
+  it('falls back to a Phase when some dates carry no context at all', () => {
+    const { tree } = bootstrapModelTree([
+      { id: 'a', context: 'Upper', depth: 20 },
+      { id: 'b', context: 'Lower', depth: 90 },
+      { id: 'c', depth: 50 },
+    ])
+    expect(wrapper(tree)?.element_type).toBe('phase')
+  })
+
+  it('keeps the existing unordered behaviour when no depths are supplied at all', () => {
+    const { tree } = bootstrapModelTree([
+      { id: 'a', context: 'Layer 3' },
+      { id: 'b', context: 'Layer 2' },
+    ])
+    expect(wrapper(tree)?.element_type).toBe('phase')
+  })
+
+  it('does not wrap a single context even when it has depths', () => {
+    const { tree } = bootstrapModelTree([
+      { id: 'a', context: 'Only', depth: 20 },
+      { id: 'b', context: 'Only', depth: 40 },
+    ])
+    expect(tree.children?.some((c) => c.name === 'Site')).toBe(false)
+    expect((tree.children || []).map((c) => c.element_type)).toEqual([
+      'boundary',
+      'phase',
+      'boundary',
+    ])
+  })
+
+  it('assigns every date to a phase that exists, in the ordered case too', () => {
+    const { tree, assignments } = bootstrapModelTree([
+      { id: 'a', context: 'Upper', depth: 20 },
+      { id: 'b', context: 'Lower', depth: 90 },
+    ])
+    for (const id of ['a', 'b']) {
+      expect(find(tree, assignments[id])?.element_type).toBe('phase')
+    }
+  })
+})

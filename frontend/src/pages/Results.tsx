@@ -25,6 +25,8 @@ import {
   FormControlLabel,
   Checkbox,
   Chip,
+  Collapse,
+  Divider,
   Stack,
   Tooltip,
   ToggleButton,
@@ -32,6 +34,7 @@ import {
 } from '@mui/material'
 import { alpha, useTheme } from '@mui/material/styles'
 import { useElementTypeColors } from '@/theme/diagramColors'
+import { MUTED, PAPER } from '@/theme/surfaces'
 import { visuallyHidden } from '@mui/utils'
 import UnfoldMoreIcon from '@mui/icons-material/UnfoldMore'
 import UnfoldLessIcon from '@mui/icons-material/UnfoldLess'
@@ -53,9 +56,11 @@ import CurvePosteriorPlot from '@/components/CurvePosteriorPlot'
 import HarrisMatrixDiagram from '@/components/HarrisMatrixDiagram'
 import DurationsPanel from '@/components/DurationsPanel'
 import ConfirmDialog from '@/components/ConfirmDialog'
+import GuideBand from '@/components/GuideBand'
 import { formatApiError } from '@/utils/apiError'
 import { useNotify } from '@/contexts/NotificationContext'
 import { useCurves } from '@/hooks/useCurves'
+import { analysisTypeLabel } from '@/utils/analysisTypes'
 import { flattenStructure } from '@/utils/stratigraphy'
 import type { StructureRow } from '@/utils/stratigraphy'
 import {
@@ -395,6 +400,12 @@ const STRUCTURE_MARKER_LABEL: Record<string, string> = {
   unassigned: 'Not assigned to any element',
 }
 
+// Rows below which the table's 70vh window is not clipping anything worth a
+// control. A dense row is ~37px, so 70vh holds roughly 17 of them on a laptop;
+// under that the "show all rows" button would promise a change the reader
+// cannot see.
+const TABLE_WINDOW_ROWS = 18
+
 // Every numeric column gets this: a multi-range HPD string wraps at tablet
 // width, and wrapping mid-value splits a dash-joined range across two lines,
 // reading as two numbers. One line instead lets the table outgrow its
@@ -410,11 +421,11 @@ const NUMERIC_CELL_SX = { whiteSpace: 'nowrap' } as const
  * Needs its own opaque background, or whatever scrolls beneath paints over it.
  * Callers pass the row's own tint so a flagged row keeps its colour here too.
  */
-/** The two surfaces a sticky cell composites against, named once. They repeat
- *  the theme's background.muted and background.paper by hand, because sx
- *  colour tokens do not resolve inside a plain style object. */
-const MUTED = '#f4ede7'
-const PAPER = '#ffffff'
+/* The two surfaces a sticky cell composites against. Imported rather than
+   restated: sx colour tokens do not resolve inside a plain style object or
+   inside the linear-gradient() below, which is why these were once local
+   copies of the hex values -- and a copy of a token is a token that can drift.
+   theme/surfaces.ts is the one place both these and createTheme read from. */
 
 function stickyNameCell(background: string) {
   return {
@@ -774,6 +785,21 @@ export default function Results() {
   // real sequence has a boundary between every pair of phases, though, so on a
   // large one they outnumber the dates -- this hides them without the dates.
   const [showBoundaryPlots, setShowBoundaryPlots] = useState(true)
+  // The results table's 70vh scroll window, lifted. Off by default -- the cap
+  // is what keeps a 63-date model from putting a page-and-a-half of rows
+  // between the reader and the plots -- but a reader who wants the table as one
+  // block (to read it straight through, or to hand the page to print/Cmd-F
+  // across every row) has no way to get it while the window is fixed.
+  const [tableExpanded, setTableExpanded] = useState(false)
+
+  // Collapsed by default. The diagram is a tall drawing in a landscape frame,
+  // so it leaves wide margins either side -- and a wheel over those margins
+  // zooms the canvas instead of scrolling the page, trapping a reader on their
+  // way down to the plots. Almost every visit is for the table, the plots and
+  // the durations; the structure is a reference the model's author already
+  // knows, so it opens on request rather than sitting in the way.
+  const [structureOpen, setStructureOpen] = useState(false)
+
   // Off by default: the modelled posterior is the primary reading, and
   // overlaying the unconstrained calibration behind every date is a comparison
   // a reader opts into.
@@ -1179,6 +1205,24 @@ export default function Results() {
   // no stored structure, which falls back to the flat date list below.
   const structureRows = flattenStructure(analysis.model_tree, analysis.measurements || [])
 
+  // What the collapsed Model Structure panel says it is hiding, so the button
+  // is a decision rather than a guess. Counted off the same walk the table
+  // uses, so the two never disagree.
+  const structureSummary = (() => {
+    const counts = { phase: 0, boundary: 0, date: 0 }
+    for (const row of structureRows) {
+      if (row.kind === 'phase') counts.phase += 1
+      else if (row.kind === 'boundary') counts.boundary += 1
+      else if (row.kind === 'date') counts.date += 1
+    }
+    const parts: string[] = []
+    if (counts.phase) parts.push(`${counts.phase} phase${counts.phase === 1 ? '' : 's'}`)
+    if (counts.boundary)
+      parts.push(`${counts.boundary} boundar${counts.boundary === 1 ? 'y' : 'ies'}`)
+    if (counts.date) parts.push(`${counts.date} date${counts.date === 1 ? '' : 's'}`)
+    return parts.join(', ')
+  })()
+
   // Sequence/Phase headings with something nested under them. An empty one
   // gets no collapse control, having nothing to hide.
   const collapsibleElementIds = new Set(
@@ -1230,6 +1274,12 @@ export default function Results() {
     if (a.posterior_mean == null || b.posterior_mean == null) return 0
     return b.posterior_mean - a.posterior_mean
   })
+
+  // Rows the table will actually draw, in whichever of the two branches it
+  // takes. Recomputed as subtrees are collapsed, so the button's count and the
+  // window it governs always describe the same table.
+  const tableRowCount =
+    structureRows.length > 0 ? visibleStructureRows.length : chronologicalResults.length
 
   // Dates whose diagnostics object to them, worst first.
   const flaggedDates = (analysis.results || [])
@@ -1488,40 +1538,56 @@ export default function Results() {
     // navigating by landmark.
     <Container component="main" maxWidth="lg" sx={{ py: 4 }}>
       <Paper sx={{ p: 3, mb: 3 }}>
-        <Box>
-          {/* variant="h1", not h3: the theme defines h1 as 2.5rem/600 -- the
-              design system's Headline -- and this page was rendering its title
-              at MUI's stock h3 (3rem/400), bigger and lighter than the token
-              written for exactly this job. */}
-          <Typography variant="h1" component="h1" gutterBottom>
-            {analysis.name}
-          </Typography>
-        <Typography variant="body2" color="textSecondary">
-            Project:{' '}
+        {/* Identity and finding on the band, the controls that act on them on
+            the working surface beneath it -- the masthead the model editor and
+            the Stratigraphy diagram already introduce themselves with, so all
+            three pages are read the same way. It replaced six stacked rows in
+            which the thing this page exists to deliver, the modelled span, was
+            the last of them and the smallest. */}
+        <GuideBand>
+          <Typography variant="body2" sx={{ mb: 0.5 }}>
             {analysis.project_id ? (
+              /* primary.dark, not main: the blue was darkened to clear AA
+                 against white (5.00:1) and against the canvas (4.65:1), the
+                 two surfaces it was measured on. The muted band is a third and
+                 darker one, where it lands at 4.31:1 -- under AA at this size
+                 and weight. The theme's own dark step is the same hue and
+                 measures 6.02:1 there, so nothing new is invented. */
               <Link
                 component={RouterLink}
                 to={`/projects/${analysis.project_id}`}
                 underline="hover"
-                sx={{ fontWeight: 600 }}
+                sx={{ fontWeight: 600, color: 'primary.dark' }}
               >
                 {analysis.project_name}
               </Link>
             ) : (
-              'Unassigned'
+              <Box component="span" sx={{ color: 'text.secondary' }}>
+                Unassigned
+              </Box>
             )}
           </Typography>
-          <Typography variant="body2" color="textSecondary" gutterBottom>
-            Created: {new Date(analysis.created_at).toLocaleString()}
+
+          {/* h2's scale (2rem/600), not h1's (2.5rem): the band carries the
+              finding as well as the name now, and an identity set larger than
+              the answer under it is the hierarchy this layout exists to
+              replace. Still the page's <h1> element -- the size moved, not the
+              rank. */}
+          <Typography variant="h2" component="h1">
+            {analysis.name}
           </Typography>
-        </Box>
-        
-{/* Highlighted main finding of the analysis.
-    Everything below this is the working: the table, the diagram, the
-            figures. */}
-        {primaryReading.length === 2 && (
-          <Box sx={{ mt: 2 }}>
-            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={{ xs: 1.5, sm: 5 }}>
+
+          {/* The finding, at the same scale as the name: what this analysis IS
+              and what it FOUND, said once each. `primaryReading` is the first
+              and last Boundary of the model by construction, and is empty for
+              a calibration, where there is no modelled transition to report
+              and a headline span would be a claim the analysis does not make. */}
+          {primaryReading.length === 2 && (
+            <Stack
+              direction={{ xs: 'column', sm: 'row' }}
+              spacing={{ xs: 1.5, sm: 5 }}
+              sx={{ mt: 2 }}
+            >
               {primaryReading.map((row, idx) => {
                 const envelope = posteriorEnvelope(
                   row.posterior!.probability_distribution,
@@ -1533,15 +1599,18 @@ export default function Results() {
                 return (
                   <Box key={row.elementId ?? row.name}>
                     {/* The page says what these two ARE; the analyst's own name
-                        for them is in the table. `primaryReading` is the first
-                        and last Boundary of the model by construction. */}
+                        for them is in the table. */}
                     <Typography variant="body2" color="textSecondary">
                       {idx === 0 ? 'Sequence begins' : 'Sequence ends'}
                     </Typography>
                     <Typography
-                      variant="h5"
                       component="p"
-                      sx={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums', lineHeight: 1.15 }}
+                      sx={{
+                        fontSize: (theme) => theme.typography.h2.fontSize,
+                        fontWeight: 600,
+                        fontVariantNumeric: 'tabular-nums',
+                        lineHeight: 1.15,
+                      }}
                     >
                       {range}
                       <CopyCitation
@@ -1557,98 +1626,142 @@ export default function Results() {
                 )
               })}
             </Stack>
-            <Typography variant="body2" color="textSecondary" sx={{ mt: 1 }}>
-              {[`${CONFIDENCE_LABEL} span`, ...analysisProvenance].join(' · ')}
-            </Typography>
-          </Box>
-        )}
-        
-        {/* A compact line -- this is a single record's
-            detail view, not a dashboard. The "results" chip only appears at all
-            when the counts actually diverge -- a pending/failed/partial run --
-            which is exactly when that divergence is worth a reader's attention. */}
-        <Stack direction="row" spacing={1} sx={{ mt: 3 }} flexWrap="wrap" useFlexGap alignItems="center">
-          {solverChip}
-          <Chip
-            label={analysis.analysis_type === 'group_calibration' ? 'calibration' : analysis.analysis_type}
-          />
-          <Chip
-            label={analysis.status}
-            color={
-              analysis.status === 'completed' ? 'success' : analysis.status === 'failed' ? 'error' : 'warning'
-            }
-          />
-          <Chip
-            label={`${analysis.measurements_count} sample${analysis.measurements_count === 1 ? '' : 's'}`}
-          />
-          {analysis.results.length !== analysis.measurements_count && (
-            <Chip
-              color="warning"
-              label={`${analysis.results.length} of ${analysis.measurements_count} have results`}
-            />
           )}
-        </Stack>
 
-        
-
-        {/* Its own row below the title/chips rather than beside the title,
-            so a 220px-minimum select plus four buttons has the full card
-            width to reflow into rather than competing with the title block
-            for horizontal space. flexWrap still earns its place here: on a
-            narrow screen this is five separate controls, and without it
-            they'd force the page to scroll sideways instead of wrapping. */}
-        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, alignItems: 'center', mt: 3 }}>
-          <FormControl size="small" sx={{ minWidth: 220 }}>
-            {/* id + labelId, not just <InputLabel>: without the pair MUI
-                renders a <label> with no `for` and a role="combobox" with no
-                accessible name, so this announced only its current value --
-                "cal BP (years before 1950), combobox" -- with nothing saying
-                what it governs, and voice control had no target to say. */}
-            <InputLabel id="date-format-label">Date Format</InputLabel>
-            <Select
-              labelId="date-format-label"
-              id="date-format"
-              value={dateFormat}
-              label="Date Format"
-              onChange={handleDateFormatChange}
+          <Typography variant="body2" color="textSecondary" sx={{ mt: 2 }}>
+            {[
+              primaryReading.length === 2 ? `${CONFIDENCE_LABEL} span` : null,
+              analysisTypeLabel(analysis.analysis_type),
+              `${analysis.measurements_count} sample${analysis.measurements_count === 1 ? '' : 's'}`,
+              ...analysisProvenance,
+            ]
+              .filter(Boolean)
+              .join(' · ')}
+            {' · '}
+            {/* Date on the line, the full timestamp on hover: the minute a run
+                started matters when two runs of one model are being told
+                apart, and never otherwise. */}
+            <Box
+              component="span"
+              title={new Date(analysis.created_at).toLocaleString()}
             >
-              {DATE_FORMAT_OPTIONS.map((option) => (
-                <MenuItem key={option.value} value={option.value}>
-                  {option.label}
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-          <Button
-            startIcon={<EditIcon />}
-            variant="outlined"
-            onClick={() => navigate(`/analysis/${analysis.id}/edit`)}
+              {new Date(analysis.created_at).toLocaleDateString(undefined, {
+                day: 'numeric',
+                month: 'short',
+                year: 'numeric',
+              })}
+            </Box>
+          </Typography>
+        </GuideBand>
+
+        {/* Below the rule: what state this run is in, and what can be done
+            about it. The chips sit here rather than on the band for a reason
+            beyond composition -- MUI's status colours are tuned against white,
+            and on the muted band the success green measures 4.42:1, under AA.
+            On the paper surface they are the colours they were built to be.
+            
+            What stays a chip at all is what is worth spending colour on: which
+            solver produced every number above, and any state that is NOT the
+            ordinary one. `completed` and the sample count restated what the
+            table below already proves; a failed, queued or partial run is
+            exactly the case a reader must not miss, and keeps its full chip.
+
+            Icons, for the actions. Each has its name for the
+            tooltip and for assistive technology -- an icon button with no
+            accessible name announces nothing and gives voice control no target
+            to say. */}
+        <Box
+          sx={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: 2,
+            rowGap: 1.5,
+            alignItems: 'center',
+            justifyContent: 'space-between',
+          }}
+        >
+          {/* The negative margin puts the first glyph on the band's own text
+              edge rather than a padding's width inside it -- an IconButton's
+              padding is its touch target, not its optical left. It tracks
+              size="small"'s 5px, so the two move together. */}
+         
+
+          {(solverChip ||
+            analysis.status !== 'completed' ||
+            analysis.results.length !== analysis.measurements_count) && (
+            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap alignItems="center">
+              {solverChip}
+              {analysis.status !== 'completed' && (
+                <Chip
+                  label={analysis.status}
+                  color={analysis.status === 'failed' ? 'error' : 'warning'}
+                />
+              )}
+              {analysis.results.length !== analysis.measurements_count && (
+                <Chip
+                  color="warning"
+                  label={`${analysis.results.length} of ${analysis.measurements_count} have results`}
+                />
+              )}
+            </Stack>
+          )}
+          
+           <Stack
+            direction="row"
+            spacing={0.5}
+            alignItems="center"
+            sx={{ ml: '-5px', my: '-5px' }}
           >
-            Edit
-          </Button>
-          <Button
-            startIcon={<ContentCopyIcon />}
-            variant="outlined"
-            disabled={duplicating}
-            onClick={handleDuplicate}
-          >
-            {duplicating ? 'Copying...' : 'Duplicate'}
-          </Button>
-          <Button
-            startIcon={<ReplayIcon />}
-            variant="outlined"
-            onClick={() => setRerunOpen(true)}
-          >
-            Re-run
-          </Button>
-          <Button
-            startIcon={<DeleteIcon />}
-            color="error"
-            variant="outlined"
-            onClick={() => setDeleteOpen(true)}
-          >
-            Delete
-          </Button>
+            <Tooltip title="Edit">
+              <IconButton
+                size="small"
+                aria-label="Edit analysis"
+                onClick={() => navigate(`/analysis/${analysis.id}/edit`)}
+              >
+                <EditIcon />
+              </IconButton>
+            </Tooltip>
+            {/* A disabled button dispatches no pointer events, so the tooltip
+                would disappear exactly while the copy is running. The span is
+                what keeps it. */}
+            <Tooltip title={duplicating ? 'Copying…' : 'Duplicate'}>
+              <span>
+                <IconButton
+                  size="small"
+                  aria-label="Duplicate analysis"
+                  disabled={duplicating}
+                  onClick={handleDuplicate}
+                >
+                  {duplicating ? <CircularProgress size={18} /> : <ContentCopyIcon />}
+                </IconButton>
+              </span>
+            </Tooltip>
+            <Tooltip title="Re-run">
+              <IconButton
+                size="small"
+                aria-label="Re-run analysis"
+                onClick={() => setRerunOpen(true)}
+              >
+                <ReplayIcon />
+              </IconButton>
+            </Tooltip>
+            {/* The one destructive action, held off from the three that are
+                not by a rule. The rule does the separating, not the colour:
+                red at rest reads as an alarm on a page where nothing is wrong,
+                so this matches every other delete in the app -- ink until it
+                is pointed at or focused, error red then. */}
+            <Divider orientation="vertical" flexItem sx={{ mx: 0.75, my: 0.5 }} />
+            <Tooltip title="Delete">
+              <IconButton
+                size="small"
+                aria-label="Delete analysis"
+                onClick={() => setDeleteOpen(true)}
+                sx={{ '&:hover, &:focus-visible': { color: 'error.main' } }}
+              >
+                <DeleteIcon />
+              </IconButton>
+            </Tooltip>
+          </Stack>
         </Box>
       </Paper>
 
@@ -1754,10 +1867,43 @@ export default function Results() {
       <Paper sx={{ p: 3, mb: 3 }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 2, mb: 2 }}>
           <Box>
-            <Typography variant="h6" component="h2" gutterBottom>
+            {/* Not gutterBottom: its 0.35em leaves ~7px, and an outlined
+                Select's floating label rides up over its own top border, so
+                the heading and the word "Date Format" all but touch. The
+                controls are a group under the heading, not a second line of
+                it. */}
+            <Typography variant="h6" component="h2" sx={{ mb: 2.5 }}>
               Results Summary
             </Typography>
             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ sm: 'center' }}>
+              {/* Date format sits with the other two display controls rather
+                  than up in the header: it changes how every number on the
+                  page reads and nothing about what was computed, which is
+                  exactly what HPD confidence and the mean/median toggles do.
+                  In the header it was the widest thing in a row of actions,
+                  where it read as a fourth thing to decide on arrival. */}
+              <FormControl size="small" sx={{ minWidth: 200 }}>
+                {/* id + labelId, not just <InputLabel>: without the pair MUI
+                    renders a <label> with no `for` and a role="combobox" with
+                    no accessible name, so this announced only its current
+                    value -- "cal BP (years before 1950), combobox" -- with
+                    nothing saying what it governs, and voice control had no
+                    target to say. */}
+                <InputLabel id="date-format-label">Date Format</InputLabel>
+                <Select
+                  labelId="date-format-label"
+                  id="date-format"
+                  value={dateFormat}
+                  label="Date Format"
+                  onChange={handleDateFormatChange}
+                >
+                  {DATE_FORMAT_OPTIONS.map((option) => (
+                    <MenuItem key={option.value} value={option.value}>
+                      {option.label}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
               <FormControl size="small" sx={{ minWidth: 140 }}>
                 {/* The most consequential control on the page: it sets the
                     level every figure here is reported at. It announced
@@ -1849,14 +1995,43 @@ export default function Results() {
           </Alert>
         )}
 
+        {/* The control for the scroll window below. Only offered when there
+            are enough rows for 70vh to actually be cutting some off -- on a
+            short table the button would toggle nothing visible -- and only
+            from md up, since the cap itself is desktop-only: below md the
+            table is already whole and a nested vertical scroller would fight
+            the page scroll on touch. */}
+        {tableRowCount > TABLE_WINDOW_ROWS && (
+          <Box sx={{ display: { xs: 'none', md: 'flex' }, justifyContent: 'flex-end', mb: 1 }}>
+            <Button
+              size="small"
+              aria-expanded={tableExpanded}
+              aria-controls="results-table"
+              onClick={() => setTableExpanded((open) => !open)}
+              startIcon={tableExpanded ? <UnfoldLessIcon /> : <UnfoldMoreIcon />}
+            >
+              {tableExpanded
+                ? 'Collapse table to a window'
+                : `Show all ${tableRowCount} rows`}
+            </Button>
+          </Box>
+        )}
+
         {/* maxHeight + a sticky header row: <thead> was position:static and
             the container had no height, so only the name column was sticky and
             only horizontally. On the 63-date model 1,532px of a 2,432px table
             scrolled past with no column headings on screen -- the reader was
             comparing two adjacent right-aligned numeric columns with nothing
             saying which was which. Capped at 70vh so the page still scrolls as
-            one document on short models. */}
-        <TableContainer sx={{ ...SCROLL_HINT_SX, maxHeight: { xs: 'none', md: '70vh' } }}>
+            one document on short models, and uncapped on request by the
+            control above. */}
+        <TableContainer
+          id="results-table"
+          sx={{
+            ...SCROLL_HINT_SX,
+            maxHeight: tableExpanded ? 'none' : { xs: 'none', md: '70vh' },
+          }}
+        >
           {/* tabular-nums so every numeric column -- ages, percentages,
               agreement/outlier diagnostics -- lines up digit-for-digit down
               the column instead of drifting with each digit's own width.
@@ -1887,8 +2062,13 @@ export default function Results() {
               // container, and a nested vertical scroller fights the page
               // scroll on touch. `top: auto` below md leaves the header in
               // flow while KEEPING position:sticky, so the table's horizontal
-              // pin on the name column still works.
-              '& thead th': { backgroundColor: MUTED, top: { xs: 'auto', md: 0 } },
+              // pin on the name column still works. Same when the window is
+              // lifted: the container is then as tall as the table, so there
+              // is no scrollport left for top:0 to pin against.
+              '& thead th': {
+                backgroundColor: MUTED,
+                top: tableExpanded ? 'auto' : { xs: 'auto', md: 0 },
+              },
               // The name column takes what it needs and no more; the numeric
               // columns are nowrap, so nothing else can claim the slack.
               '& tbody td:first-of-type, & thead th:first-of-type': { whiteSpace: 'nowrap' },
@@ -2091,20 +2271,54 @@ export default function Results() {
           one asked before the ranges have been seen. */}
       {analysis.analysis_type === 'bayesian' && analysis.model_tree && (
         <Paper sx={{ p: 3, mb: 3 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <AccountTreeIcon color="action" />
             <Typography variant="h6" component="h2">
               Model Structure used
             </Typography>
+            <Box sx={{ flexGrow: 1 }} />
+            <Button
+              size="small"
+              aria-expanded={structureOpen}
+              aria-controls="model-structure-diagram"
+              onClick={() => setStructureOpen((open) => !open)}
+              startIcon={
+                <KeyboardArrowDownIcon
+                  sx={{
+                    transform: structureOpen ? 'rotate(180deg)' : 'none',
+                    transition: 'transform 160ms ease-out',
+                  }}
+                />
+              }
+            >
+              {structureOpen ? 'Hide' : 'Show'} diagram
+            </Button>
           </Box>
-          <HarrisMatrixDiagram
-            tree={analysis.model_tree}
-            measurements={analysis.measurements || []}
-            assignments={structureAssignments}
-            dateFormat={dateFormat}
-            confidence={confidence}
-            confidenceLabel={CONFIDENCE_LABEL}
-          />
+          {/* The id lives on a wrapper that stays in the DOM, since
+              unmountOnExit takes the Collapse's child away exactly when the
+              button says "Show" and aria-controls would point at nothing.
+              unmountOnExit itself is the point of the collapse: it takes the
+              reactflow canvas -- and its wheel handler -- out of the page
+              entirely while closed, rather than merely hiding it. */}
+          <Box id="model-structure-diagram">
+            <Collapse in={structureOpen} unmountOnExit>
+              <Box sx={{ mt: 2 }}>
+                <HarrisMatrixDiagram
+                  tree={analysis.model_tree}
+                  measurements={analysis.measurements || []}
+                  assignments={structureAssignments}
+                  dateFormat={dateFormat}
+                  confidence={confidence}
+                  confidenceLabel={CONFIDENCE_LABEL}
+                />
+              </Box>
+            </Collapse>
+          </Box>
+          {!structureOpen && structureSummary && (
+            <Typography variant="body2" color="textSecondary" sx={{ mt: 1 }}>
+              {structureSummary} — the ordering these results were modelled under.
+            </Typography>
+          )}
         </Paper>
       )}
 
