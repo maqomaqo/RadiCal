@@ -2340,7 +2340,7 @@ export default function Results() {
           </Box>
           {!structureOpen && structureSummary && (
             <Typography variant="body2" color="textSecondary" sx={{ mt: 1 }}>
-              {structureSummary} — the ordering these results were modelled under.
+              {structureSummary} — expand to view the model diagram.
             </Typography>
           )}
         </Paper>
