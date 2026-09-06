@@ -30,6 +30,8 @@ import {
   Typography,
 } from '@mui/material'
 import { alpha } from '@mui/material/styles'
+import { tint } from '@/theme/diagramColors'
+import { PAPER } from '@/theme/surfaces'
 import DeleteIcon from '@mui/icons-material/Delete'
 import RocketLaunchIcon from '@mui/icons-material/RocketLaunch'
 import TimelineIcon from '@mui/icons-material/Timeline'
@@ -128,9 +130,17 @@ export default function SampleSelectionBar({
         px: 2,
         py: 1.5,
         borderRadius: 1,
+        // Sticky under the app bar: this band sits above a table that runs to
+        // well over a screen, so ticking a row near the bottom used to put
+        // every control that acts on it -- Deploy included -- off screen.
+        position: 'sticky',
+        top: { xs: 56, sm: 64 },
+        zIndex: theme.zIndex.appBar - 1,
         // The primary tint the table paints a selected row with, so the band
         // reads as an extension of the rows rather than a new surface.
-        backgroundColor: alpha(theme.palette.primary.main, 0.08),
+        // Composited rather than translucent, because a sticky band with an
+        // alpha fill shows the rows sliding underneath it.
+        backgroundColor: tint(theme.palette.primary.main, 0.08, PAPER),
         border: `1px solid ${alpha(theme.palette.primary.main, 0.2)}`,
       })}
     >
@@ -171,7 +181,6 @@ export default function SampleSelectionBar({
       <Button
         size="small"
         variant="contained"
-        color="secondary"
         startIcon={<RocketLaunchIcon />}
         onClick={onDeploy}
         disabled={busy}

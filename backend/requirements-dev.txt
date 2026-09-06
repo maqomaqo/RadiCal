@@ -1,8 +1,13 @@
-# Test-only dependencies. The runtime image installs requirements.txt
-# alone, so the suite can't run without these:
+# Test-only dependencies. The dev compose stack installs these into the image
+# (backend/Dockerfile, INSTALL_DEV=true), so `docker exec radiocarbon_backend
+# pytest` works out of the box. A plain `docker build` of the Dockerfile does
+# not, and needs:
 #
 #   pip install -r requirements-dev.txt
 #   pytest
+#
+# Install them from THIS FILE, never by naming the packages: the versions below
+# are pins, not preferences.
 -r requirements.txt
 
 pytest==8.3.4

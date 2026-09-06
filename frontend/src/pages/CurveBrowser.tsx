@@ -36,7 +36,7 @@ import {
 } from '@/api/curves'
 import SimulateDateDialog from '@/components/SimulateDateDialog'
 import { useCurves } from '@/hooks/useCurves'
-import { usePlotColors } from '@/theme/plotColors'
+import { usePlotColors, usePlotFont } from '@/theme/plotColors'
 import {
   DATE_FORMAT_OPTIONS,
   DEFAULT_DATE_FORMAT,
@@ -210,6 +210,7 @@ export default function CurveBrowser() {
   const { curveId = '' } = useParams<{ curveId: string }>()
   const { curves } = useCurves()
   const colors = usePlotColors()
+  const plotFont = usePlotFont()
   const plotBoxRef = useRef<HTMLDivElement>(null)
 
   const [spec, setSpec] = useState<CurveSpec | null>(null)
@@ -553,7 +554,7 @@ export default function CurveBrowser() {
       hoverdistance: -1,
       showlegend: true,
       legend: { orientation: 'h' as const, y: 1.02, yanchor: 'bottom' as const },
-      font: { color: colors.axis },
+      font: plotFont,
       plot_bgcolor: colors.surface,
       paper_bgcolor: colors.surface,
       margin: { l: 70, r: 20, t: 50, b: 60 },
@@ -656,7 +657,7 @@ export default function CurveBrowser() {
         showlegend: false,
         hovermode: 'closest' as const,
         hoverdistance: -1,
-        font: { color: colors.axis },
+        font: plotFont,
         plot_bgcolor: colors.surface,
         paper_bgcolor: colors.surface,
         margin: { l: 52, r: 20, t: 4, b: 4 },
@@ -705,7 +706,7 @@ export default function CurveBrowser() {
         showlegend: false,
         hovermode: 'closest' as const,
         hoverdistance: -1,
-        font: { color: colors.axis },
+        font: plotFont,
         plot_bgcolor: colors.surface,
         paper_bgcolor: colors.surface,
         margin: { l: 52, r: 20, t: 4, b: 4 },

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useParams, useNavigate, Link as RouterLink } from 'react-router-dom'
 import {
   Container,
@@ -24,8 +24,16 @@ import {
   Tab,
   Tooltip,
   Checkbox,
+  Link,
+  Menu,
+  MenuItem,
+  ListItemIcon,
+  ListItemText,
+  Divider,
 } from '@mui/material'
 import EditIcon from '@mui/icons-material/Edit'
+import MoreVertIcon from '@mui/icons-material/MoreVert'
+import ChevronLeftIcon from '@mui/icons-material/ChevronLeft'
 import DeleteIcon from '@mui/icons-material/Delete'
 import AddIcon from '@mui/icons-material/Add'
 import DriveFileMoveIcon from '@mui/icons-material/DriveFileMove'
@@ -41,6 +49,10 @@ import JobProgress from '@/components/JobProgress'
 import { cancelJob } from '@/api/jobs'
 import { useJob } from '@/hooks/useJob'
 import { MAX_COMPARED_RUNS } from '@/theme/compareColors'
+import StatusStrip, { statusSummary } from '@/components/StatusStrip'
+import type { StatusCounts } from '@/components/StatusStrip'
+import { relativeTime, absoluteTime } from '@/utils/serverTime'
+import { analysisTypeLabel } from '@/utils/analysisTypes'
 
 interface AnalysisSummary {
   id: string
@@ -57,7 +69,25 @@ interface ProjectDetailData {
   description: string | null
   created_at: string
   updated_at: string
+  /** Latest of the project's own edit and any of its analyses' -- see api/projects.get_project. */
+  last_activity: string | null
+  /** Dates in the project's reusable collection, not the count deployed into analyses. */
+  samples_count: number
   analyses: AnalysisSummary[]
+}
+
+/**
+ * Colour is spent only where the status is news. A column of green
+ * "completed" would make the most saturated mark on the page the least
+ * discriminating one -- the same rule the Dashboard's cards follow. Failed and
+ * running keep the hues they carry in the masthead strip, so the strip reads
+ * as this column's legend.
+ */
+function statusColor(status: string): string {
+  if (status === 'failed') return 'error.main'
+  if (status === 'running') return 'info.main'
+  if (status === 'completed') return 'text.secondary'
+  return 'text.disabled'
 }
 
 // The result of a "re-run all" pass. A per-analysis batch, so unlike a single
@@ -110,6 +140,14 @@ export default function ProjectDetail() {
   // the order is a choice the user makes rather than whatever the table sorts
   // to. An array, not a Set, to say that out loud.
   const [selectedForCompare, setSelectedForCompare] = useState<string[]>([])
+
+  // The project's own edit/delete, and each row's five actions, live behind a
+  // menu rather than on the surface: four icon buttons per row put twenty grey
+  // glyphs on a five-row table, out-weighing the names they act on.
+  const [projectMenuAnchor, setProjectMenuAnchor] = useState<HTMLElement | null>(null)
+  const [rowMenu, setRowMenu] = useState<{ anchor: HTMLElement; analysis: AnalysisSummary } | null>(
+    null
+  )
 
   useEffect(() => {
     if (projectId) fetchProject(projectId)
@@ -184,13 +222,22 @@ export default function ProjectDetail() {
         const response = await fetch('/api/analysis?unassigned=true&per_page=100')
         const data = await response.json()
         if (data.success) {
+          const items: AnalysisSummary[] = data.data.items
           setProject({
             id: 'unassigned',
             name: 'Unassigned',
             description: 'Analyses not filed under any project',
             created_at: '',
             updated_at: '',
-            analyses: data.data.items,
+            // No project row, so no project edit to be the later of: the
+            // newest analysis IS the activity here. And no date collection --
+            // the collection belongs to a project, which this is not.
+            last_activity: items.reduce<string | null>(
+              (latest, a) => (!latest || a.created_at > latest ? a.created_at : latest),
+              null
+            ),
+            samples_count: 0,
+            analyses: items,
           })
         } else {
           setError('Failed to load unassigned analyses')
@@ -370,6 +417,21 @@ export default function ProjectDetail() {
     }
   }
 
+  // The four-way split the masthead strip draws, derived from the analyses the
+  // page already holds rather than fetched a second time -- so the summary and
+  // the rows printed under it cannot disagree.
+  const statusCounts = useMemo<StatusCounts>(() => {
+    const counts: StatusCounts = { completed: 0, running: 0, failed: 0, pending: 0 }
+    for (const a of project?.analyses ?? []) {
+      if (a.status === 'completed' || a.status === 'running' || a.status === 'failed') {
+        counts[a.status] += 1
+      } else {
+        counts.pending += 1
+      }
+    }
+    return counts
+  }, [project])
+
   if (loading) {
     return (
       <Container sx={{ py: 4, display: 'flex', justifyContent: 'center' }}>
@@ -391,21 +453,165 @@ export default function ProjectDetail() {
     )
   }
 
+  const analysesCount = project.analyses.length
+  const menuAnalysis = rowMenu?.analysis ?? null
+  const showCompare = tab === 'analyses' && analysesCount > 1
+  const compareControl = (
+    <Tooltip
+      title={
+        compareBlockedBecause() ??
+        'Compare these analyses date by date. The first one ticked is the reference.'
+      }
+    >
+      <span>
+        <Button
+          variant="outlined"
+          size="small"
+          startIcon={<CompareArrowsIcon />}
+          disabled={compareBlockedBecause() !== null}
+          onClick={() =>
+            navigate(`/projects/${projectId}/compare?runs=${selectedForCompare.join(',')}`)
+          }
+        >
+          Compare{selectedForCompare.length > 0 ? ` (${selectedForCompare.length})` : ''}
+        </Button>
+      </span>
+    </Tooltip>
+  )
+
   return (
     <Container maxWidth="lg" sx={{ py: 4 }}>
-      <Paper sx={{ p: 3, mb: 3 }}> 
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 4, flexWrap: 'wrap', gap: 2 }}>
-        <Box>
-          <Typography variant="h1" component="h1" gutterBottom>
-            {project.name}
-          </Typography>
-          {project.description && (
-            <Typography variant="body1" color="textSecondary">
-              {project.description}
-            </Typography>
+      {/* MASTHEAD. The project card that opens this page promises a count, a
+          date total, a status breakdown and a last-touched time; before this
+          the click threw all four away and offered a name and a sentence. */}
+      <Paper sx={{ p: 3, mb: 3 }}>
+        {/* Was a lone "Back to Projects" button at the very bottom of the
+            page -- past the table, the dialogs and 300 lines of markup. Where
+            you came from belongs at the top, where you look for it. */}
+        <Box
+          sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1.5 }}
+        >
+          <Link
+            component={RouterLink}
+            to="/projects"
+            variant="body2"
+            sx={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 0.25,
+              ml: -0.5,
+              color: 'text.secondary',
+              textDecoration: 'none',
+              '&:hover': { color: 'primary.main', textDecoration: 'underline' },
+            }}
+          >
+            <ChevronLeftIcon fontSize="small" />
+            Projects
+          </Link>
+          {/* Here rather than in the action row below: at phone widths that row
+              could not hold a third control and wrapped the menu onto a line of
+              its own, and the masthead's own right edge belongs to the measure
+              rail. This line is empty at every width. */}
+          {!isUnassigned && (
+            <Tooltip title="Project actions">
+              <IconButton
+                size="small"
+                aria-label="Project actions"
+                aria-haspopup="true"
+                onClick={(e) => setProjectMenuAnchor(e.currentTarget)}
+                sx={{ mr: -0.5 }}
+              >
+                <MoreVertIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
           )}
         </Box>
-        <Box sx={{ display: 'flex', gap: 1 }}>
+
+        <Box
+          sx={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            alignItems: 'flex-start',
+            gap: { xs: 2.5, md: 4 },
+          }}
+        >
+          <Box sx={{ flex: '1 1 320px', minWidth: 0 }}>
+            <Typography variant="h1" component="h1" sx={{ fontSize: { xs: '2rem', sm: '2.5rem' } }}>
+              {project.name}
+            </Typography>
+            {project.description && (
+              <Typography variant="body1" color="text.secondary" sx={{ mt: 1, maxWidth: '62ch' }}>
+                {project.description}
+              </Typography>
+            )}
+          </Box>
+
+          {/* One dominant number and two supporting facts, not three equal
+              hero figures: the card's own hierarchy, at masthead scale. */}
+          <Box
+            sx={{
+              flex: '0 1 auto',
+              minWidth: 0,
+              textAlign: { xs: 'left', md: 'right' },
+            }}
+          >
+            <Box
+              sx={{
+                display: 'flex',
+                alignItems: 'baseline',
+                gap: 0.75,
+                justifyContent: { xs: 'flex-start', md: 'flex-end' },
+              }}
+            >
+              <Typography
+                component="span"
+                sx={{
+                  fontSize: '2.5rem',
+                  fontWeight: 600,
+                  lineHeight: 1,
+                  color: analysesCount > 0 ? 'primary.main' : 'text.disabled',
+                  fontVariantNumeric: 'tabular-nums',
+                }}
+              >
+                {analysesCount}
+              </Typography>
+              <Typography component="span" variant="body1" color="text.secondary">
+                {analysesCount === 1 ? 'analysis' : 'analyses'}
+              </Typography>
+            </Box>
+            {project.samples_count > 0 && (
+              <Typography
+                variant="body2"
+                color="text.secondary"
+                sx={{ mt: 1, fontVariantNumeric: 'tabular-nums' }}
+              >
+                {project.samples_count} {project.samples_count === 1 ? 'date' : 'dates'} in the
+                collection
+              </Typography>
+            )}
+            <Typography variant="caption" color="text.secondary" component="p" sx={{ mt: 0.5 }}>
+              {analysesCount > 0 ? statusSummary(statusCounts, analysesCount) : 'No analyses yet'}
+              {project.last_activity && (
+                <Box component="span" title={absoluteTime(project.last_activity)}>
+                  {' · '}
+                  {relativeTime(project.last_activity)}
+                </Box>
+              )}
+            </Typography>
+            {/* Under the words that name it, at the width of the rail it
+                belongs to. Bled across the Paper's bottom edge it stopped
+                being a measure and became a coloured rule -- a project whose
+                analyses have all finished drew one saturated green line the
+                full width of the header, louder than the number above it and
+                attached to no caption. */}
+            <StatusStrip counts={statusCounts} total={analysesCount} sx={{ mt: 1.25 }} />
+          </Box>
+        </Box>
+
+        {/* One contained action, one outlined, and everything rarer behind a
+            menu -- rather than the four competing weights this row used to
+            carry. */}
+        <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 1.5, mt: 3 }}>
           <Button
             variant="contained"
             startIcon={<AddIcon />}
@@ -415,36 +621,48 @@ export default function ProjectDetail() {
           >
             New Analysis
           </Button>
-          {project.analyses.length > 0 && (
-            <Button
-              variant="outlined"
-              startIcon={<ReplayIcon />}
-              onClick={() => setRerunAllOpen(true)}
-            >
+          {analysesCount > 0 && (
+            <Button variant="outlined" startIcon={<ReplayIcon />} onClick={() => setRerunAllOpen(true)}>
               Re-run All
             </Button>
           )}
-          {!isUnassigned && (
-            <>
-              <Tooltip title="Edit project">
-                <IconButton onClick={openEdit} aria-label="Edit project">
-                  <EditIcon />
-                </IconButton>
-              </Tooltip>
-              <Tooltip title="Delete project">
-                <IconButton
-                  onClick={() => setDeleteProjectOpen(true)}
-                  aria-label="Delete project"
-                  sx={{ '&:hover, &:focus-visible': { color: 'error.main' } }}
-                >
-                  <DeleteIcon />
-                </IconButton>
-              </Tooltip>
-            </>
-          )}
-    </Box> 
-      </Box>
-</Paper>
+        </Box>
+
+      </Paper>
+
+      <Menu
+        anchorEl={projectMenuAnchor}
+        open={!!projectMenuAnchor}
+        onClose={() => setProjectMenuAnchor(null)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+        transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+      >
+        <MenuItem
+          onClick={() => {
+            setProjectMenuAnchor(null)
+            openEdit()
+          }}
+        >
+          <ListItemIcon>
+            <EditIcon fontSize="small" />
+          </ListItemIcon>
+          <ListItemText>Edit project</ListItemText>
+        </MenuItem>
+        <Divider />
+        <MenuItem
+          onClick={() => {
+            setProjectMenuAnchor(null)
+            setDeleteProjectOpen(true)
+          }}
+          sx={{ color: 'error.main' }}
+        >
+          <ListItemIcon>
+            <DeleteIcon fontSize="small" sx={{ color: 'inherit' }} />
+          </ListItemIcon>
+          <ListItemText>Delete project</ListItemText>
+        </MenuItem>
+      </Menu>
+
       {jobActive && job && (
         <JobProgress job={job} onCancel={handleCancelRerun} cancelling={cancelling} />
       )}
@@ -466,79 +684,108 @@ export default function ProjectDetail() {
         </Alert>
       )}
 
-      {!isUnassigned && (
-        <Tabs value={tab} onChange={(_e, v) => setTab(v)} sx={{ mb: 2 }}>
-          <Tab label={`Analyses (${project.analyses.length})`} value="analyses" />
-          <Tab label="Dates" value="dates" />
-        </Tabs>
-      )}
-
-      {tab === 'dates' && !isUnassigned ? (
-        <Paper sx={{ p: 3 }}>
-          <Typography variant="h5" gutterBottom>
-            Date Collection
-          </Typography>
-          <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
-            This project's radiocarbon dates. Enter them once here, then deploy any selection into a
-            new analysis — the same dates can feed several analyses, each modelling them under
-            different criteria. Deployed dates are copies, so editing one here never alters an
-            analysis already created from it.
-          </Typography>
-          <ProjectSampleTable projectId={project.id} />
-        </Paper>
-      ) : (
-      <Paper sx={{ p: 3 }}>
+      {/* The tabs used to float on the canvas between two Papers, belonging to
+          neither, above a heading that repeated the selected tab's own label
+          word for word. Docked into the content surface they label it, and the
+          heading is gone. */}
+      <Paper sx={{ overflow: 'hidden' }}>
         <Box
           sx={{
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'space-between',
             gap: 2,
-            mb: 1,
+            px: 3,
+            minHeight: 56,
+            borderBottom: 1,
+            borderColor: 'divider',
           }}
         >
-          <Typography variant="h5">Analyses ({project.analyses.length})</Typography>
-          {project.analyses.length > 1 && (
-            <Tooltip
-              title={
-                compareBlockedBecause() ??
-                'Compare these analyses date by date. The first one ticked is the reference.'
-              }
+          {isUnassigned ? (
+            <Typography variant="h6" component="h2">
+              Analyses ({analysesCount})
+            </Typography>
+          ) : (
+            <Tabs
+              value={tab}
+              onChange={(_e, v) => setTab(v)}
+              sx={{ minHeight: 56, '& .MuiTab-root': { minHeight: 56 } }}
             >
-              <span>
-                <Button
-                  variant="outlined"
-                  startIcon={<CompareArrowsIcon />}
-                  disabled={compareBlockedBecause() !== null}
-                  onClick={() =>
-                    navigate(
-                      `/projects/${projectId}/compare?runs=${selectedForCompare.join(',')}`
-                    )
-                  }
-                >
-                  Compare{selectedForCompare.length > 0 ? ` (${selectedForCompare.length})` : ''}
-                </Button>
-              </span>
-            </Tooltip>
+              <Tab label={`Analyses (${analysesCount})`} value="analyses" />
+              <Tab label={`Dates${project.samples_count ? ` (${project.samples_count})` : ''}`} value="dates" />
+            </Tabs>
+          )}
+          <Box sx={{ flex: 1 }} />
+          {showCompare && (
+            <Box sx={{ display: { xs: 'none', sm: 'flex' } }}>{compareControl}</Box>
           )}
         </Box>
+        {/* Below sm the bar cannot hold the tabs and this at once -- the second
+            tab's label was being clipped by it -- so it moves above the table
+            it acts on. Same control, declared once. */}
+        {showCompare && (
+          <Box sx={{ display: { xs: 'flex', sm: 'none' }, justifyContent: 'flex-end', px: 2, pt: 2 }}>
+            {compareControl}
+          </Box>
+        )}
 
-        {project.analyses.length === 0 ? (
-          <Alert severity="info">
-            No analyses in {isUnassigned ? 'the unassigned list' : 'this project'} yet.
-          </Alert>
+        {tab === 'dates' && !isUnassigned ? (
+          <Box sx={{ p: 3 }}>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2, maxWidth: '78ch' }}>
+              This project's radiocarbon dates. Enter them once here, then deploy any selection into a
+              new analysis — the same dates can feed several analyses, each modelling them under
+              different criteria. Deployed dates are copies, so editing one here never alters an
+              analysis already created from it.
+            </Typography>
+            <ProjectSampleTable projectId={project.id} />
+          </Box>
+        ) : analysesCount === 0 ? (
+          <Box sx={{ px: 3, py: 7, textAlign: 'center' }}>
+            <Typography variant="h6" component="p" gutterBottom>
+              No analyses yet
+            </Typography>
+            <Typography color="text.secondary" sx={{ mb: 3, maxWidth: '46ch', mx: 'auto' }}>
+              {isUnassigned
+                ? 'Every analysis is currently filed under a project. Ones created without a project land here.'
+                : 'Deploy dates from this project’s collection into a calibration or a model, or start an analysis from a fresh set of measurements.'}
+            </Typography>
+            {!isUnassigned && (
+              <Button
+                variant="contained"
+                startIcon={<AddIcon />}
+                component={RouterLink}
+                to={`/new-analysis?project=${project.id}`}
+                state={{ fresh: true }}
+              >
+                New Analysis
+              </Button>
+            )}
+          </Box>
         ) : (
-          <TableContainer>
-            <Table>
+          // Sticky only where there is a container to stick inside: a header
+          // with no scrolling ancestor sticks to the VIEWPORT and slides under
+          // the app bar, and a nested scroller fights the page scroll on touch.
+          <TableContainer sx={{ maxHeight: { xs: 'none', md: '70vh' } }}>
+            <Table stickyHeader sx={{ minWidth: 720 }}>
               <TableHead>
-                <TableRow sx={{ backgroundColor: 'background.muted' }}>
-                  <TableCell padding="checkbox" />
-                  <TableCell>Name</TableCell>
-                  <TableCell>Type</TableCell>
-                  <TableCell>Status</TableCell>
-                  <TableCell align="right">Samples</TableCell>
-                  <TableCell align="right">Created</TableCell>
-                  <TableCell align="right" />
+                <TableRow>
+                  <TableCell padding="checkbox" sx={{ backgroundColor: 'background.muted' }} />
+                  <TableCell sx={{ backgroundColor: 'background.muted' }}>Name</TableCell>
+                  {/* Every column but the name shrinks to its own content, so
+                      the surplus goes to the one column that carries meaning
+                      rather than pooling between the short ones. */}
+                  <TableCell sx={{ backgroundColor: 'background.muted', width: '1%', whiteSpace: 'nowrap' }}>
+                    Type
+                  </TableCell>
+                  <TableCell sx={{ backgroundColor: 'background.muted', width: '1%', whiteSpace: 'nowrap' }}>
+                    Status
+                  </TableCell>
+                  <TableCell align="right" sx={{ backgroundColor: 'background.muted', width: '1%', whiteSpace: 'nowrap' }}>
+                    Dates
+                  </TableCell>
+                  <TableCell align="right" sx={{ backgroundColor: 'background.muted', width: '1%', whiteSpace: 'nowrap' }}>
+                    Created
+                  </TableCell>
+                  <TableCell align="right" sx={{ backgroundColor: 'background.muted', width: '1%' }} />
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -558,70 +805,59 @@ export default function ProjectDetail() {
                         inputProps={{ 'aria-label': `Select ${a.name} for comparison` }}
                       />
                     </TableCell>
-                    <TableCell>{a.name}</TableCell>
-                    <TableCell>{a.analysis_type}</TableCell>
-                    <TableCell>{a.status}</TableCell>
-                    <TableCell align="right">{a.measurements_count}</TableCell>
-                    <TableCell align="right">{new Date(a.created_at).toLocaleDateString()}</TableCell>
-                    <TableCell align="right">
-                      {isUnassigned && (
-                        <IconButton
-                          size="small"
-                          aria-label={`Assign ${a.name} to a project`}
-                          title="Assign to project"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            setAssignTarget(a)
-                          }}
-                        >
-                          <DriveFileMoveIcon fontSize="small" />
-                        </IconButton>
-                      )}
-                      <IconButton
-                        size="small"
-                        aria-label={`Duplicate ${a.name}`}
-                        title="Duplicate and edit"
-                        disabled={duplicating}
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          handleDuplicate(a)
+                    {/* The row navigates on click, which no keyboard user can
+                        do. The name is the row's real link; the row click is
+                        the convenience on top of it. */}
+                    <TableCell>
+                      <Link
+                        component={RouterLink}
+                        to={`/results/${a.id}`}
+                        onClick={(e) => e.stopPropagation()}
+                        sx={{
+                          fontWeight: 500,
+                          color: 'text.primary',
+                          textDecoration: 'none',
+                          '&:hover': { textDecoration: 'underline' },
                         }}
                       >
-                        <ContentCopyIcon fontSize="small" />
-                      </IconButton>
+                        {a.name}
+                      </Link>
+                    </TableCell>
+                    <TableCell sx={{ whiteSpace: 'nowrap' }}>
+                      <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 500 }}>
+                        {analysisTypeLabel(a.analysis_type)}
+                      </Typography>
+                    </TableCell>
+                    <TableCell sx={{ whiteSpace: 'nowrap' }}>
+                      <Typography variant="body2" sx={{ fontWeight: 500, color: statusColor(a.status) }}>
+                        {a.status}
+                      </Typography>
+                    </TableCell>
+                    <TableCell align="right" sx={{ whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
+                      {a.measurements_count}
+                    </TableCell>
+                    {/* Relative, because "has this been touched lately?" is the
+                        question a list of runs is scanned for -- with the exact
+                        stamp on the title, since this is a record someone may
+                        need to cite. */}
+                    <TableCell
+                      align="right"
+                      sx={{ whiteSpace: 'nowrap', color: 'text.secondary' }}
+                      title={absoluteTime(a.created_at)}
+                    >
+                      {relativeTime(a.created_at)}
+                    </TableCell>
+                    <TableCell align="right" padding="checkbox">
                       <IconButton
                         size="small"
-                        aria-label={`Edit ${a.name}`}
-                        title="Edit inputs"
+                        aria-label={`Actions for ${a.name}`}
+                        aria-haspopup="true"
                         onClick={(e) => {
                           e.stopPropagation()
-                          navigate(`/analysis/${a.id}/edit`)
+                          setRowMenu({ anchor: e.currentTarget, analysis: a })
                         }}
                       >
-                        <EditIcon fontSize="small" />
-                      </IconButton>
-                      <IconButton
-                        size="small"
-                        aria-label={`Re-run ${a.name}`}
-                        title="Re-run"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          setRerunTarget(a)
-                        }}
-                      >
-                        <ReplayIcon fontSize="small" />
-                      </IconButton>
-                      <IconButton
-                        size="small"
-                        aria-label={`Delete ${a.name}`}
-                        title="Delete"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          setDeleteAnalysisTarget(a)
-                        }}
-                        sx={{ '&:hover, &:focus-visible': { color: 'error.main' } }}
-                      >
-                        <DeleteIcon fontSize="small" />
+                        <MoreVertIcon fontSize="small" />
                       </IconButton>
                     </TableCell>
                   </TableRow>
@@ -631,13 +867,75 @@ export default function ProjectDetail() {
           </TableContainer>
         )}
       </Paper>
-      )}
 
-      <Box sx={{ mt: 4 }}>
-        <Button onClick={() => navigate('/projects')} variant="outlined">
-          Back to Projects
-        </Button>
-      </Box>
+      <Menu
+        anchorEl={rowMenu?.anchor ?? null}
+        open={!!rowMenu}
+        onClose={() => setRowMenu(null)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+        transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+      >
+        {isUnassigned && (
+          <MenuItem
+            onClick={() => {
+              setAssignTarget(menuAnalysis)
+              setRowMenu(null)
+            }}
+          >
+            <ListItemIcon>
+              <DriveFileMoveIcon fontSize="small" />
+            </ListItemIcon>
+            <ListItemText>Assign to project</ListItemText>
+          </MenuItem>
+        )}
+        <MenuItem
+          disabled={duplicating}
+          onClick={() => {
+            setRowMenu(null)
+            if (menuAnalysis) handleDuplicate(menuAnalysis)
+          }}
+        >
+          <ListItemIcon>
+            <ContentCopyIcon fontSize="small" />
+          </ListItemIcon>
+          <ListItemText>Duplicate and edit</ListItemText>
+        </MenuItem>
+        <MenuItem
+          onClick={() => {
+            setRowMenu(null)
+            if (menuAnalysis) navigate(`/analysis/${menuAnalysis.id}/edit`)
+          }}
+        >
+          <ListItemIcon>
+            <EditIcon fontSize="small" />
+          </ListItemIcon>
+          <ListItemText>Edit inputs</ListItemText>
+        </MenuItem>
+        <MenuItem
+          onClick={() => {
+            setRerunTarget(menuAnalysis)
+            setRowMenu(null)
+          }}
+        >
+          <ListItemIcon>
+            <ReplayIcon fontSize="small" />
+          </ListItemIcon>
+          <ListItemText>Re-run</ListItemText>
+        </MenuItem>
+        <Divider />
+        <MenuItem
+          onClick={() => {
+            setDeleteAnalysisTarget(menuAnalysis)
+            setRowMenu(null)
+          }}
+          sx={{ color: 'error.main' }}
+        >
+          <ListItemIcon>
+            <DeleteIcon fontSize="small" sx={{ color: 'inherit' }} />
+          </ListItemIcon>
+          <ListItemText>Delete</ListItemText>
+        </MenuItem>
+      </Menu>
 
       <Dialog open={editOpen} onClose={() => setEditOpen(false)} fullWidth maxWidth="sm">
         <DialogTitle>Edit Project</DialogTitle>

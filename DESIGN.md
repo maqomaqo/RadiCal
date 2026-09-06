@@ -120,11 +120,13 @@ meaning in the model-tree diagrams and posterior plots.
 ### Secondary
 - **Burnt Coral** (`#e14a56`): darkened from the logo's raw coral (`#f05460`). It measures
   **3.95:1** against white — enough for white-on-coral *large* text, not for body text; an earlier
-  version of this document claimed body-text AA for it, which the value does not support. If the
-  token is ever spent on more than its one current use site it has to be darkened again first. Used sparingly and almost never for interactive chrome (one confirmed use
-  site in the codebase) — the logo's exact coral is reserved for illustration, and even this
-  darkened version stays mostly out of the way so it doesn't collide with Boundary Coral's distinct
-  diagram meaning below.
+  version of this document claimed body-text AA for it, which the value does not support. It now has
+  **no use site at all**: the one it had was the date collection's "Deploy to New Analysis" button,
+  a 13px white label on the coral at 3.95:1 — an AA failure this document had already predicted —
+  and the loudest, reddest mark on a bar whose Delete button is drawn in plain ink, so the two read
+  the wrong way round. Deploy is a constructive action and now takes the primary, like every other
+  one in the app. The token stays in the palette as the brand's own colour and has to be darkened
+  before it is spent on anything carrying body text.
 
 ### Neutral
 - **Aged Paper** (`#faf7f4`): the app's canvas (`background.default`) — warm, at the same
@@ -401,6 +403,44 @@ and sticky rules; what follows is what a table *says*.
   estimates. The stacked plot's phase rules and margin labels come from `phaseRule` and `label` for
   the same reason: drawn locally they were pure black, which put a second, cooler grid inside a
   figure whose every other mark is warm.
+- **A figure is lettered in the app's own face.** `usePlotFont` sets `layout.font` on every plot:
+  Roboto at 11px in the axis ink. Plotly's default is `"Open Sans", verdana, arial` at 12px, so
+  until this was set every tick label, axis title and legend in the app was in a face the app uses
+  nowhere else — the one place the design system stopped at the edge of a figure. 11px rather than
+  the body's 16: a figure's lettering annotates the data, and at 12px the row names on a 40-row
+  stack were the loudest thing in the margin.
+- **Every calendar tick carries its era, one size down.** `calendarScaleTicks` graduates in round
+  DISPLAY years (1000 BC, not the 1051 BC that rounding in cal BP would give), and
+  `calendarTickMarkup` prints the era at 9px in the same ink as the number. Naming the era once at
+  the left end was considered and rejected: an axis running 3000 BC to AD 500 then prints "500"
+  twice, two millennia apart. The era is demoted, never dropped — cal BP is the exception, having
+  one direction and its unit in the axis title.
+- **One tick source per figure.** Where a figure is drawn twice — the stacked plot's axis and the
+  ruler the app pins above it — both are built from the same tick array. Two scales graduated
+  independently land a few years apart, and a ruler that disagrees with the figure under it is
+  worse than no ruler.
+
+#### Stacked plot (signature component)
+
+Every posterior in one figure, one row each, on a shared calendar axis. Forty dates is three
+thousand pixels, and everything below follows from that height.
+
+- **The calendar scale is pinned.** A ruler sticks under the app bar for as long as the figure is on
+  screen, graduated from the figure's own ticks and padded to the same margins, so reading the top
+  row's date does not mean scrolling to the axis at the bottom, holding a number, and scrolling
+  back. It carries the group the reader has scrolled into as well, since a row name says which date
+  and not which Phase. Shown only when the figure is taller than the viewport; on a six-row stack
+  the axis is already in view and a second copy of it is a band of chrome buying nothing. The
+  figure's own axis stays where it is: the ruler is HTML and cannot travel into the exported PNG.
+- **A group is a labelled spine, not a heading.** A vertical rule in the left margin spans exactly
+  the rows a Sequence or Phase holds, in that element type's own hue from the diagram palette, with
+  the group's name at its head in the same ink. A name at the first row alone says where a group
+  starts and never where it ends. A Boundary sits outside the spine either side of it — it is the
+  transition between two groups rather than a member of either, and the gap says so.
+- **Row geometry lives in `stackedPlotGeometry`.** The curve height, the axis range, and the pixel
+  offset of any row are one derivation. The pinned ruler turns a scroll offset back into a row to
+  name its group, and that inverse is only right if it is the exact inverse of where the figure
+  drew the row.
 
 ### Browser surfaces
 
@@ -469,8 +509,9 @@ scattered rows in a table.
 - **Don't** give Boundary Coral to a "danger"/destructive UI action — that hue is reserved for
   diagram meaning; destructive confirms use the `error` oxblood instead, which is deliberately far
   darker than either coral token because hue alone cannot separate them.
-- **Don't** spend the brand coral (Burnt Coral) freely on interactive chrome — it is used almost
-  nowhere in the app today, and that scarcity is deliberate, not an oversight to "fix."
+- **Don't** spend the brand coral (Burnt Coral) on interactive chrome — it has no use site in the
+  app today, and that scarcity is deliberate, not an oversight to "fix." Its last one put white body
+  text on it below AA.
 - **Don't** leave a Material default in the palette because it is "just the semantic colour".
   `info`, `error` and `warning` were stock for a long time, and two of the three were sitting within
   a few degrees of a hue this app had already spent — see Semantic state.

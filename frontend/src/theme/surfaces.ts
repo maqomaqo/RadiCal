@@ -40,4 +40,4 @@ export const PAPER = '#ffffff'
  * A step darker than both the canvas and paper, and now of the same warm
  * family as both, so it reads as a band on paper rather than as a hole in it.
  */
-export const MUTED = '#f6f0eb'
+export const MUTED = '#f1e8e0'

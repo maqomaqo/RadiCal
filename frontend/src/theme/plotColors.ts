@@ -64,6 +64,35 @@ export interface PlotColors {
   grid: string
 }
 
+/**
+ * The face and size every figure is lettered in.
+ *
+ * Plotly's own default is `"Open Sans", verdana, arial, sans-serif` at 12px,
+ * so every tick label, axis title and legend in the app was set in a face the
+ * app does not use, beside body text in Roboto -- the one place the design
+ * system stopped at the edge of a plot. The size is a step down from the
+ * theme's body: a figure's lettering annotates the data rather than being
+ * read as text, and at 12px the tick labels on a 40-row stack are the loudest
+ * thing in the margin.
+ *
+ * A hook, and separate from the colours above, because it reads the theme's
+ * own font stack rather than restating it.
+ */
+export interface PlotFont {
+  family: string
+  size: number
+  color: string
+}
+
+export function usePlotFont(): PlotFont {
+  const theme = useTheme()
+  const color = usePlotColors().axis
+  return useMemo(
+    () => ({ family: theme.typography.fontFamily ?? 'Roboto, sans-serif', size: 11, color }),
+    [theme.typography.fontFamily, color]
+  )
+}
+
 // The app's warm ink, as the theme's shadows use. Point estimates are
 // annotation over the data rather than data, so they read as pencil marks
 // instead of taking a hue and competing with the curve they mark. Shared from

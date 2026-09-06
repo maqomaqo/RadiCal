@@ -85,6 +85,7 @@ import type {
   MatrixMeasurement,
   DraftGroup,
   DraftRelationship,
+  ElementType,
   IntervalsBlock,
   ModelElement,
   PosteriorSummary,
@@ -197,6 +198,9 @@ interface PlottableSeries {
   title: string
   /** Where it sits in the structure; null for a date the structure omits. */
   path: string | null
+  /** What kind of element the last step of that path is -- the container, not
+   *  the row. The stacked plot draws a group in its own type's hue. */
+  groupKind?: ElementType
   distribution?: Array<[number, number]>
   /** HPD bands at the page's selected confidence, outer first, from the same
    *  distribution the results table reads -- so a figure and the row above it
@@ -392,6 +396,13 @@ const STRUCTURE_MARKER: Record<string, string> = {
   unassigned: '⚠',
 }
 
+// The inline width the disclosure chevron occupies on a Sequence/Phase row,
+// and the step each level of nesting indents by. The two are the same number
+// on purpose: with the chevron sitting in the space one level of indentation
+// buys, a date's name begins exactly where its Phase's name begins, instead
+// of a step to the left of it, under the Phase's chevron.
+const CHEVRON_GUTTER_PX = 28
+
 // What each glyph above says, for readers who get no glyph. Only the ones
 // carrying information: the date bullet is decoration and the element kind is
 // already printed beside the name, so only the unassigned warning needs a
@@ -563,7 +574,7 @@ function StructureTableRow({
       <TableCell
         title={row.name}
         sx={{
-          pl: 2 + row.depth * 2.5,
+          pl: `${16 + row.depth * CHEVRON_GUTTER_PX}px`,
           ...stickyNameCell(tint ?? PAPER),
         }}
       >
@@ -578,15 +589,17 @@ function StructureTableRow({
             onClick={onToggleCollapse}
             aria-label={`${isCollapsed ? 'Expand' : 'Collapse'} ${row.name}`}
             // The chevron stays small, sitting inline in a dense row, but its
-            // hit target does not: a negative margin lets the 44px target
-            // overlap the row's padding rather than setting the row height.
+            // hit target does not: negative margins let the 44px target
+            // overlap the row's padding rather than setting the row height,
+            // and narrow its inline footprint to one indentation step so the
+            // name beside it lands on the same column its children do.
             sx={{
               p: 0.25,
-              mr: 0.25,
               verticalAlign: 'middle',
               width: 44,
               height: 44,
               my: '-10px',
+              mx: `${(44 - CHEVRON_GUTTER_PX) / -2}px`,
             }}
           >
             {isCollapsed ? (
@@ -1205,6 +1218,16 @@ export default function Results() {
   // no stored structure, which falls back to the flat date list below.
   const structureRows = flattenStructure(analysis.model_tree, analysis.measurements || [])
 
+  // Element type by id, so a date row can say what KIND of thing contains it.
+  // A date row carries its container's id, not its type; the element's own row
+  // in the same walk carries the type.
+  const kindByElementId = new Map<string, ElementType>()
+  for (const row of structureRows) {
+    if (row.elementId && row.kind !== 'date' && row.kind !== 'unassigned') {
+      kindByElementId.set(row.elementId, row.kind)
+    }
+  }
+
   // What the collapsed Model Structure panel says it is hiding, so the button
   // is a decision rather than a guess. Counted off the same walk the table
   // uses, so the two never disagree.
@@ -1338,6 +1361,7 @@ export default function Results() {
         kind: 'date',
         title: result.sample_name || 'Date',
         path: row.path,
+        groupKind: row.elementId ? kindByElementId.get(row.elementId) : undefined,
         distribution: result.probability_distribution,
         bands: bandsFor(`date-${row.sampleId}`, result.probability_distribution),
         priorDistribution: result.unmodelled_distribution ?? undefined,

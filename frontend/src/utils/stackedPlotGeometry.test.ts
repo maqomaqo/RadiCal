@@ -17,7 +17,7 @@
 // what stackedPlotGeometry exists to guarantee and what these assert.
 import { describe, expect, it } from 'vitest'
 
-import { stackedPlotGeometry } from './stackedPlotGeometry'
+import { CURVE_HEIGHT, stackedPlotGeometry } from './stackedPlotGeometry'
 
 /** Where the legend's top edge lands, in pixels below the plot area. */
 function legendGapPixels(rowCount: number): number {
@@ -88,6 +88,51 @@ describe('figure height', () => {
       expect(g.height).toBeGreaterThan(0)
       expect(g.plotAreaHeight).toBeGreaterThan(0)
       expect(Number.isFinite(g.legendY)).toBe(true)
+    }
+  })
+})
+
+describe('row positions', () => {
+  // The pinned calendar ruler names the group of dates the reader has scrolled
+  // to, which means turning a scroll offset into a row. That is only correct
+  // if it is the exact inverse of where the figure draws that row -- one off
+  // by a row and the band names the group above or below the one on screen.
+  const ROWS = 24
+
+  it('places the first row baseline a curve height below the top', () => {
+    const g = stackedPlotGeometry(ROWS)
+    const perUnit = g.plotAreaHeight / (g.yRange[1] - g.yRange[0])
+    expect(g.rowBaselinePx(0)).toBeCloseTo((CURVE_HEIGHT + 0.35) * perUnit, 6)
+  })
+
+  it('steps by one row height per row', () => {
+    const g = stackedPlotGeometry(ROWS)
+    const perUnit = g.plotAreaHeight / (g.yRange[1] - g.yRange[0])
+    for (let i = 1; i < ROWS; i++) {
+      expect(g.rowBaselinePx(i) - g.rowBaselinePx(i - 1)).toBeCloseTo(perUnit, 6)
+    }
+  })
+
+  it('reads back the row it drew at that offset', () => {
+    const g = stackedPlotGeometry(ROWS)
+    for (let i = 0; i < ROWS; i++) {
+      expect(g.rowAtPx(g.rowBaselinePx(i))).toBe(i)
+      // Anywhere in the row's own band, not just on its baseline.
+      expect(g.rowAtPx(g.rowBaselinePx(i) - 10)).toBe(i)
+    }
+  })
+
+  it('clamps rather than naming a row that is not there', () => {
+    const g = stackedPlotGeometry(ROWS)
+    expect(g.rowAtPx(-500)).toBe(0)
+    expect(g.rowAtPx(g.plotAreaHeight * 4)).toBe(ROWS - 1)
+  })
+
+  it('keeps every row inside the axis range', () => {
+    for (const rows of ROW_COUNTS) {
+      const g = stackedPlotGeometry(rows)
+      expect(g.yRange[0]).toBeLessThanOrEqual(-(rows - 1))
+      expect(g.yRange[1]).toBeGreaterThanOrEqual(CURVE_HEIGHT)
     }
   })
 })

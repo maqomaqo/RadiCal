@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Box,
@@ -21,12 +21,19 @@ import {
   Typography,
   CircularProgress,
   Tooltip,
+  TableSortLabel,
+  Menu,
+  Divider,
+  ListItemIcon,
+  ListItemText,
 } from '@mui/material'
 import AddIcon from '@mui/icons-material/Add'
 import DeleteIcon from '@mui/icons-material/Delete'
 import EditIcon from '@mui/icons-material/Edit'
 import PlaylistAddIcon from '@mui/icons-material/PlaylistAdd'
 import UploadFileIcon from '@mui/icons-material/UploadFile'
+import MoreVertIcon from '@mui/icons-material/MoreVert'
+import ViewColumnIcon from '@mui/icons-material/ViewColumn'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import ImportDatesDialog, { type ImportPreview } from '@/components/ImportDatesDialog'
 import SampleSelectionBar, { type DeltaRValue } from '@/components/SampleSelectionBar'
@@ -34,6 +41,13 @@ import { formatApiError } from '@/utils/apiError'
 import { useNotify } from '@/contexts/NotificationContext'
 import { curveLabel, curveOptions } from '@/api/curves'
 import { useCurves } from '@/hooks/useCurves'
+import { deltaRErrorMissing, isMarineMeasurement } from '@/components/MeasurementFields'
+import {
+  columnVisible,
+  loadColumnOverrides,
+  saveColumnOverrides,
+  type ColumnOverrides,
+} from '@/utils/columnPreferences'
 
 // A date in the PROJECT's collection (backend models.ProjectSample), entered
 // once and deployed into as many analyses as needed. Deploying COPIES these
@@ -48,10 +62,35 @@ export interface ProjectSample {
   curve_id: string
   delta_r: number | null
   delta_r_error: number | null
+  /** Superseded by delta_r, but still carried on older and imported rows. */
+  reservoir_age: number | null
+  depth_cm: number | null
+  location: string | null
   default_context_name: string | null
   tpq_age_bp: number | null
   taq_age_bp: number | null
   notes: string | null
+}
+
+/**
+ * A column the reader can turn on or off.
+ *
+ * `auto` is whether the collection earns the column unasked; `populated` is
+ * whether anything is in it at all, which the picker says out loud so ticking
+ * "Notes" on a collection that has none reads as empty rather than broken.
+ * The two differ on ΔR alone: an empty ΔR cell on a marine date is the finding,
+ * not a gap.
+ */
+interface OptionalColumn {
+  id: string
+  label: string
+  auto: boolean
+  populated: boolean
+  align?: 'left' | 'right'
+  numeric?: boolean
+  sortKey?: SortKey
+  headTitle?: string
+  render: (sample: ProjectSample) => ReactNode
 }
 
 type DraftForm = {
@@ -63,6 +102,12 @@ type DraftForm = {
   default_context_name: string
   tpq_age_bp: string
   taq_age_bp: string
+  delta_r: string
+  delta_r_error: string
+  reservoir_age: string
+  depth_cm: string
+  location: string
+  notes: string
 }
 
 const EMPTY_FORM: DraftForm = {
@@ -74,6 +119,12 @@ const EMPTY_FORM: DraftForm = {
   default_context_name: '',
   tpq_age_bp: '',
   taq_age_bp: '',
+  delta_r: '',
+  delta_r_error: '',
+  reservoir_age: '',
+  depth_cm: '',
+  location: '',
+  notes: '',
 }
 
 function toForm(s: ProjectSample): DraftForm {
@@ -86,6 +137,12 @@ function toForm(s: ProjectSample): DraftForm {
     default_context_name: s.default_context_name ?? '',
     tpq_age_bp: s.tpq_age_bp == null ? '' : String(s.tpq_age_bp),
     taq_age_bp: s.taq_age_bp == null ? '' : String(s.taq_age_bp),
+    delta_r: s.delta_r == null ? '' : String(s.delta_r),
+    delta_r_error: s.delta_r_error == null ? '' : String(s.delta_r_error),
+    reservoir_age: s.reservoir_age == null ? '' : String(s.reservoir_age),
+    depth_cm: s.depth_cm == null ? '' : String(s.depth_cm),
+    location: s.location ?? '',
+    notes: s.notes ?? '',
   }
 }
 
@@ -101,6 +158,17 @@ function formToPayload(form: DraftForm) {
     default_context_name: form.default_context_name.trim() || null,
     tpq_age_bp: numOrNull(form.tpq_age_bp),
     taq_age_bp: numOrNull(form.taq_age_bp),
+    // Sent whether or not they are filled in, so emptying one clears it. The
+    // PATCH applies exactly the fields the body carries (exclude_unset), so a
+    // field this form omits is left alone -- which is why these four survived
+    // every edit before the form could reach them, and why they now have to
+    // be sent explicitly rather than dropped when blank.
+    delta_r: numOrNull(form.delta_r),
+    delta_r_error: numOrNull(form.delta_r_error),
+    reservoir_age: numOrNull(form.reservoir_age),
+    depth_cm: numOrNull(form.depth_cm),
+    location: form.location.trim() || null,
+    notes: form.notes.trim() || null,
   }
 }
 
@@ -154,10 +222,64 @@ export function parsePastedDates(
       default_context_name: context || null,
       tpq_age_bp: null,
       taq_age_bp: null,
+      // The paste format carries name, age, error, material, context and
+      // curve; everything else a date can hold is set afterwards, in the row's
+      // own dialog.
+      delta_r: null,
+      delta_r_error: null,
+      reservoir_age: null,
+      depth_cm: null,
+      location: null,
+      notes: null,
     })
   })
 
   return { rows, errors }
+}
+
+/**
+ * What the collection table can be ordered by. Display only: the collection is
+ * a store, not a sequence -- an analysis owns the order its own dates are
+ * modelled in, which is what `SortDatesButton` edits elsewhere. Nothing here
+ * is written back.
+ */
+type SortKey = 'sample_name' | 'age_bp' | 'error_1sigma' | 'default_context_name'
+
+function compareSamples(a: ProjectSample, b: ProjectSample, key: SortKey): number {
+  if (key === 'age_bp' || key === 'error_1sigma') return a[key] - b[key]
+  // Numeric collation so a lab code ending in 7 sorts before one ending in 12,
+  // which is the whole reason anyone sorts a list of lab codes.
+  return (a[key] ?? '').localeCompare(b[key] ?? '', undefined, { numeric: true })
+}
+
+/**
+ * A ΔR cell.
+ *
+ * The column exists whenever any date in the collection is marine, because the
+ * fact worth seeing is the ABSENCE of a correction: a marine date with no ΔR
+ * calibrates as ΔR = 0, which is a choice, and this table is where it would be
+ * caught. Said in words rather than flagged with a warning glyph -- assuming
+ * the global average is legitimate, not an error.
+ */
+function deltaRCell(sample: ProjectSample, marine: boolean) {
+  if (!marine) return { text: '—', muted: true, title: 'Terrestrial date: no reservoir offset applies.' }
+  if (sample.delta_r == null) {
+    return {
+      text: 'none set',
+      muted: true,
+      title: 'No reservoir correction set. This date calibrates as ΔR = 0.',
+    }
+  }
+  const error = sample.delta_r_error == null ? '' : ` ± ${sample.delta_r_error}`
+  return { text: `${sample.delta_r}${error}`, muted: false, title: '' }
+}
+
+/** "TPQ 3000 · TAQ 2000", either half omitted when it is not set. */
+function limitsLabel(sample: ProjectSample): string {
+  const parts: string[] = []
+  if (sample.tpq_age_bp != null) parts.push(`TPQ ${sample.tpq_age_bp}`)
+  if (sample.taq_age_bp != null) parts.push(`TAQ ${sample.taq_age_bp}`)
+  return parts.join(' · ')
 }
 
 interface Props {
@@ -245,6 +367,10 @@ export default function ProjectSampleTable({ projectId }: Props) {
     const payload = formToPayload(form)
     if (!payload.sample_name || !Number.isFinite(payload.age_bp) || !Number.isFinite(payload.error_1sigma)) {
       setFormError('Name, age BP and 1σ error are required.')
+      return
+    }
+    if (deltaRErrorIncomplete) {
+      setFormError('A ΔR needs its 1σ error, or clear both to apply no correction.')
       return
     }
     setFormError(null)
@@ -517,6 +643,229 @@ export default function ProjectSampleTable({ projectId }: Props) {
 
   const allSelected = samples.length > 0 && selected.size === samples.length
 
+  // Which dates are marine decides whether the ΔR column is drawn at all, and
+  // it is the curve registry that answers that, not the stored sample_type
+  // alone -- see isMarineMeasurement.
+  const marineIds = useMemo(
+    () => new Set(samples.filter((s) => isMarineMeasurement(s, curves)).map((s) => s.id)),
+    [samples, curves]
+  )
+
+  /**
+   * A column earns its width by carrying information, and the reader can
+   * overrule that either way.
+   *
+   * Material is stored as the literal string 'unknown' when nobody filled it
+   * in, so a collection imported without materials drew thirty-two rows of the
+   * app's own placeholder in the widest text column on the page. TPQ/TAQ,
+   * reservoir age, depth, location and notes are all carried by the API and
+   * set on a minority of collections. ΔR is the exception that proves the
+   * rule: it appears whenever anything is marine, precisely because an empty
+   * cell there is the finding.
+   */
+  const optionalColumns = useMemo<OptionalColumn[]>(() => {
+    const anyOf = (has: (s: ProjectSample) => boolean) => samples.some(has)
+    const muted = (text: string) => (
+      <Box component="span" sx={{ color: 'text.disabled' }}>
+        {text}
+      </Box>
+    )
+    return [
+      {
+        id: 'delta_r',
+        label: 'ΔR',
+        // Not `populated`: the reason this column exists is to show which
+        // marine dates have NO correction set.
+        auto: marineIds.size > 0,
+        // A marine date with no offset is content, not a blank -- the column
+        // reports "none set" on it. Calling that "no values" in the picker
+        // would advertise the one column whose empties are the finding as the
+        // one worth turning off.
+        populated: marineIds.size > 0 || anyOf((s) => s.delta_r != null),
+        align: 'right',
+        numeric: true,
+        headTitle: 'Reservoir offset. Applies to marine dates only.',
+        render: (s) => {
+          const cell = deltaRCell(s, marineIds.has(s.id))
+          return (
+            <Tooltip title={cell.title}>
+              <Box component="span" sx={{ color: cell.muted ? 'text.disabled' : undefined }}>
+                {cell.text}
+              </Box>
+            </Tooltip>
+          )
+        },
+      },
+      {
+        id: 'material',
+        label: 'Material',
+        auto: anyOf((s) => !!s.material_type && s.material_type !== 'unknown'),
+        populated: anyOf((s) => !!s.material_type && s.material_type !== 'unknown'),
+        render: (s) =>
+          s.material_type && s.material_type !== 'unknown' ? s.material_type : muted('—'),
+      },
+      {
+        id: 'limits',
+        label: 'Limits',
+        auto: anyOf((s) => s.tpq_age_bp != null || s.taq_age_bp != null),
+        populated: anyOf((s) => s.tpq_age_bp != null || s.taq_age_bp != null),
+        numeric: true,
+        headTitle: 'TPQ and TAQ, in cal BP.',
+        render: (s) => limitsLabel(s) || muted('—'),
+      },
+      {
+        id: 'context',
+        label: 'Default Context',
+        auto: true,
+        populated: anyOf((s) => !!s.default_context_name),
+        sortKey: 'default_context_name',
+        render: (s) => s.default_context_name || muted('—'),
+      },
+      {
+        id: 'reservoir_age',
+        label: 'Reservoir age',
+        auto: anyOf((s) => s.reservoir_age != null),
+        populated: anyOf((s) => s.reservoir_age != null),
+        align: 'right',
+        numeric: true,
+        headTitle: 'The older, whole-reservoir form of a marine correction. ΔR supersedes it.',
+        render: (s) => (s.reservoir_age == null ? muted('—') : s.reservoir_age),
+      },
+      {
+        id: 'depth_cm',
+        label: 'Depth (cm)',
+        auto: anyOf((s) => s.depth_cm != null),
+        populated: anyOf((s) => s.depth_cm != null),
+        align: 'right',
+        numeric: true,
+        render: (s) => (s.depth_cm == null ? muted('—') : s.depth_cm),
+      },
+      {
+        id: 'location',
+        label: 'Location',
+        auto: anyOf((s) => !!s.location),
+        populated: anyOf((s) => !!s.location),
+        render: (s) => s.location || muted('—'),
+      },
+      {
+        id: 'notes',
+        label: 'Notes',
+        auto: anyOf((s) => !!s.notes),
+        populated: anyOf((s) => !!s.notes),
+        render: (s) =>
+          s.notes ? (
+            // Notes run to a paragraph. One line here, the whole of it on
+            // hover, rather than a column that sets the height of every row.
+            <Box
+              component="span"
+              title={s.notes}
+              sx={{
+                display: 'block',
+                maxWidth: 260,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {s.notes}
+            </Box>
+          ) : (
+            muted('—')
+          ),
+      },
+    ]
+  }, [samples, marineIds])
+
+  const [columnOverrides, setColumnOverrides] = useState<ColumnOverrides>(() =>
+    loadColumnOverrides(projectId)
+  )
+  useEffect(() => setColumnOverrides(loadColumnOverrides(projectId)), [projectId])
+  const [columnsAnchor, setColumnsAnchor] = useState<HTMLElement | null>(null)
+
+  const visibleColumns = optionalColumns.filter((c) => columnVisible(columnOverrides, c.id, c.auto))
+
+  const toggleColumn = (column: OptionalColumn) => {
+    setColumnOverrides((prev) => {
+      const shown = columnVisible(prev, column.id, column.auto)
+      const next = { ...prev }
+      // Choosing what the data already does is not an override -- dropping it
+      // lets the column go back to following the collection.
+      if (!shown === column.auto) delete next[column.id]
+      else next[column.id] = !shown
+      saveColumnOverrides(projectId, next)
+      return next
+    })
+  }
+
+  // The same rule the measurement form and the selection bar apply, rather
+  // than a second comparison against 'marine20' that could drift from the
+  // registry.
+  const formIsMarine = isMarineMeasurement({ curve_id: form.curve_id }, curves)
+  const showReservoirFields =
+    formIsMarine ||
+    form.delta_r !== '' ||
+    form.delta_r_error !== '' ||
+    form.reservoir_age !== ''
+  // The same pairing rule the measurement form applies: an offset without its
+  // error is not a weaker correction, it is one the solver cannot weight.
+  const deltaRErrorIncomplete = deltaRErrorMissing({
+    delta_r: numOrNull(form.delta_r),
+    delta_r_error: numOrNull(form.delta_r_error),
+  })
+
+  const resetColumns = () => {
+    setColumnOverrides({})
+    saveColumnOverrides(projectId, {})
+    setColumnsAnchor(null)
+  }
+
+  const [sortKey, setSortKey] = useState<SortKey | null>(null)
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
+  const sorted = useMemo(() => {
+    if (!sortKey) return samples
+    const factor = sortDir === 'asc' ? 1 : -1
+    return [...samples].sort((a, b) => factor * compareSamples(a, b, sortKey))
+  }, [samples, sortKey, sortDir])
+
+  const sortBy = (key: SortKey) => {
+    if (sortKey === key) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
+    else {
+      setSortKey(key)
+      setSortDir('asc')
+    }
+  }
+
+  const sortableHead = (
+    key: SortKey,
+    label: string,
+    align: 'left' | 'right' = 'left',
+    cellKey?: string
+  ) => (
+    <TableCell
+      key={cellKey}
+      align={align}
+      sortDirection={sortKey === key ? sortDir : false}
+      sx={{ backgroundColor: 'background.muted', whiteSpace: 'nowrap' }}
+    >
+      <TableSortLabel
+        active={sortKey === key}
+        direction={sortKey === key ? sortDir : 'asc'}
+        onClick={() => sortBy(key)}
+      >
+        {label}
+      </TableSortLabel>
+    </TableCell>
+  )
+
+  // As on the analyses table: two icon buttons a row put sixty-four grey
+  // glyphs on a thirty-two row collection, out-weighing the dates themselves.
+  const [rowMenu, setRowMenu] = useState<{ anchor: HTMLElement; sample: ProjectSample } | null>(null)
+  const menuSample = rowMenu?.sample ?? null
+
+  // Header cells carry the band, never the row: a sticky <tr> scrolls out from
+  // under its own colour.
+  const headCell = { backgroundColor: 'background.muted', whiteSpace: 'nowrap' } as const
+
   if (loading) {
     return (
       <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
@@ -528,7 +877,7 @@ export default function ProjectSampleTable({ projectId }: Props) {
   return (
     <Box>
       <Box sx={{ display: 'flex', gap: 1, mb: 2, flexWrap: 'wrap' }}>
-        <Button variant="contained" startIcon={<AddIcon />} onClick={openAdd}>
+        <Button variant="outlined" startIcon={<AddIcon />} onClick={openAdd}>
           Add Date
         </Button>
         <Button
@@ -548,7 +897,66 @@ export default function ProjectSampleTable({ projectId }: Props) {
         >
           Import File
         </Button>
+
+        {/* Every field the collection stores can be put on screen, whether or
+            not this project has filled it in -- notes, depth, location and
+            reservoir age are carried by the API and by imports, and were
+            unreachable from here. Pushed to the right because it changes how
+            the table reads rather than what is in it. */}
+        <Box sx={{ flex: 1 }} />
+        <Button
+          variant="outlined"
+          startIcon={<ViewColumnIcon />}
+          aria-haspopup="true"
+          onClick={(e) => setColumnsAnchor(e.currentTarget)}
+        >
+          Columns
+        </Button>
       </Box>
+
+      <Menu
+        anchorEl={columnsAnchor}
+        open={!!columnsAnchor}
+        onClose={() => setColumnsAnchor(null)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+        transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+      >
+        <Typography
+          variant="caption"
+          color="text.secondary"
+          component="li"
+          sx={{ display: 'block', px: 2, pt: 0.5, pb: 1 }}
+        >
+          Name, age, error and curve always show.
+        </Typography>
+        {optionalColumns.map((column) => {
+          const shown = columnVisible(columnOverrides, column.id, column.auto)
+          return (
+            <MenuItem
+              key={column.id}
+              role="menuitemcheckbox"
+              aria-checked={shown}
+              // The menu stays open: choosing columns is usually choosing
+              // several, and reopening between each is the errand.
+              onClick={() => toggleColumn(column)}
+            >
+              <ListItemIcon>
+                <Checkbox edge="start" size="small" checked={shown} tabIndex={-1} disableRipple />
+              </ListItemIcon>
+              <ListItemText
+                primary={column.label}
+                // Said plainly, so turning on a column this project never
+                // filled in reads as empty rather than as broken.
+                secondary={column.populated ? undefined : 'No values in this collection'}
+              />
+            </MenuItem>
+          )
+        })}
+        <Divider />
+        <MenuItem onClick={resetColumns} disabled={Object.keys(columnOverrides).length === 0}>
+          <ListItemText inset>Reset to defaults</ListItemText>
+        </MenuItem>
+      </Menu>
 
       {/* Everything that acts on a selection lives here, and appears only
           when there is one -- including Deploy, which used to sit at the end
@@ -576,16 +984,30 @@ export default function ProjectSampleTable({ projectId }: Props) {
       )}
 
       {samples.length === 0 ? (
-        <Alert severity="info">
-          No dates in this project's collection yet. Add dates here once, then deploy any selection of
-          them into as many analyses as you like — each free to group them into different contexts.
-        </Alert>
+        <Box sx={{ py: 6, textAlign: 'center' }}>
+          <Typography variant="h6" component="p" gutterBottom>
+            No dates in the collection yet
+          </Typography>
+          <Typography color="text.secondary" sx={{ mb: 3, maxWidth: '52ch', mx: 'auto' }}>
+            Add dates here once, then deploy any selection of them into as many analyses as you like
+            — each free to group them into different contexts.
+          </Typography>
+          {/* The one contained button on the panel, and only while the
+              collection is empty: with dates in it the page's primary action
+              is the masthead's, not this. */}
+          <Button variant="contained" startIcon={<AddIcon />} onClick={openAdd}>
+            Add Date
+          </Button>
+        </Box>
       ) : (
-        <TableContainer>
-          <Table size="small">
+        // Sticky only where there is a container to stick inside -- a header
+        // with no scrolling ancestor sticks to the viewport and slides under
+        // the app bar, and a nested scroller fights the page scroll on touch.
+        <TableContainer sx={{ maxHeight: { xs: 'none', md: '70vh' } }}>
+          <Table size="small" stickyHeader sx={{ minWidth: 760 }}>
             <TableHead>
-              <TableRow sx={{ backgroundColor: 'background.muted' }}>
-                <TableCell padding="checkbox">
+              <TableRow>
+                <TableCell padding="checkbox" sx={headCell}>
                   <Checkbox
                     checked={allSelected}
                     indeterminate={selected.size > 0 && !allSelected}
@@ -595,52 +1017,109 @@ export default function ProjectSampleTable({ projectId }: Props) {
                     inputProps={{ 'aria-label': 'Select all dates' }}
                   />
                 </TableCell>
-                <TableCell>Name</TableCell>
-                <TableCell align="right">Age BP</TableCell>
-                <TableCell align="right">± 1σ</TableCell>
-                <TableCell>Material</TableCell>
-                <TableCell>Curve</TableCell>
-                <TableCell>Default Context</TableCell>
-                <TableCell align="right" />
+                {sortableHead('sample_name', 'Name')}
+                {sortableHead('age_bp', 'Age BP', 'right')}
+                {sortableHead('error_1sigma', '± 1σ', 'right')}
+                <TableCell sx={headCell}>Curve</TableCell>
+                {visibleColumns.map((column) =>
+                  column.sortKey ? (
+                    sortableHead(column.sortKey, column.label, column.align ?? 'left', column.id)
+                  ) : (
+                    <TableCell key={column.id} align={column.align ?? 'left'} sx={headCell}>
+                      {column.headTitle ? (
+                        <Tooltip title={column.headTitle}>
+                          <span>{column.label}</span>
+                        </Tooltip>
+                      ) : (
+                        column.label
+                      )}
+                    </TableCell>
+                  )
+                )}
+                <TableCell align="right" sx={headCell} />
               </TableRow>
             </TableHead>
             <TableBody>
-              {samples.map((s) => (
-                <TableRow key={s.id} hover selected={selected.has(s.id)}>
-                  <TableCell padding="checkbox">
-                    <Checkbox
-                      checked={selected.has(s.id)}
-                      onChange={() => toggle(s.id)}
-                      inputProps={{ 'aria-label': `Select ${s.sample_name}` }}
-                    />
-                  </TableCell>
-                  <TableCell>{s.sample_name}</TableCell>
-                  <TableCell align="right">{s.age_bp}</TableCell>
-                  <TableCell align="right">{s.error_1sigma}</TableCell>
-                  <TableCell>{s.material_type}</TableCell>
-                  <TableCell>{curveLabel(curves, s.curve_id)}</TableCell>
-                  <TableCell>{s.default_context_name || '—'}</TableCell>
-                  <TableCell align="right">
-                    <IconButton size="small" aria-label={`Edit ${s.sample_name}`} onClick={() => openEdit(s)}>
-                      <EditIcon fontSize="small" />
-                    </IconButton>
-                    <Tooltip title={`Delete ${s.sample_name}`}>
+              {sorted.map((s) => (
+                  <TableRow key={s.id} hover selected={selected.has(s.id)}>
+                    <TableCell padding="checkbox">
+                      <Checkbox
+                        checked={selected.has(s.id)}
+                        onChange={() => toggle(s.id)}
+                        inputProps={{ 'aria-label': `Select ${s.sample_name}` }}
+                      />
+                    </TableCell>
+                    <TableCell sx={{ fontWeight: 500 }}>{s.sample_name}</TableCell>
+                    {/* Tabular figures so a column of ages reads as a column of
+                        numbers rather than drifting with each digit's width. */}
+                    <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>
+                      {s.age_bp}
+                    </TableCell>
+                    <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>
+                      {s.error_1sigma}
+                    </TableCell>
+                    <TableCell sx={{ whiteSpace: 'nowrap' }}>{curveLabel(curves, s.curve_id)}</TableCell>
+                    {visibleColumns.map((column) => (
+                      <TableCell
+                        key={column.id}
+                        align={column.align ?? 'left'}
+                        sx={{
+                          whiteSpace: column.id === 'notes' ? 'normal' : 'nowrap',
+                          fontVariantNumeric: column.numeric ? 'tabular-nums' : undefined,
+                        }}
+                      >
+                        {column.render(s)}
+                      </TableCell>
+                    ))}
+                    <TableCell align="right" padding="checkbox">
                       <IconButton
                         size="small"
-                        aria-label={`Delete ${s.sample_name}`}
-                        onClick={() => setDeleteTarget(s)}
-                        sx={{ '&:hover, &:focus-visible': { color: 'error.main' } }}
+                        aria-label={`Actions for ${s.sample_name}`}
+                        aria-haspopup="true"
+                        onClick={(e) => setRowMenu({ anchor: e.currentTarget, sample: s })}
                       >
-                        <DeleteIcon fontSize="small" />
+                        <MoreVertIcon fontSize="small" />
                       </IconButton>
-                    </Tooltip>
-                  </TableCell>
-                </TableRow>
+                    </TableCell>
+                  </TableRow>
               ))}
             </TableBody>
           </Table>
         </TableContainer>
       )}
+
+      <Menu
+        anchorEl={rowMenu?.anchor ?? null}
+        open={!!rowMenu}
+        onClose={() => setRowMenu(null)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+        transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+      >
+        <MenuItem
+          onClick={() => {
+            setRowMenu(null)
+            if (menuSample) openEdit(menuSample)
+          }}
+        >
+          <ListItemIcon>
+            <EditIcon fontSize="small" />
+          </ListItemIcon>
+          <ListItemText>Edit date</ListItemText>
+        </MenuItem>
+        <Divider />
+        <MenuItem
+          onClick={() => {
+            setDeleteTarget(menuSample)
+            setRowMenu(null)
+          }}
+          sx={{ color: 'error.main' }}
+        >
+          <ListItemIcon>
+            <DeleteIcon fontSize="small" sx={{ color: 'inherit' }} />
+          </ListItemIcon>
+          <ListItemText>Remove from collection</ListItemText>
+        </MenuItem>
+      </Menu>
 
       <Dialog open={formOpen} onClose={() => setFormOpen(false)} fullWidth maxWidth="sm">
         <DialogTitle>{editingId ? 'Edit Date' : 'Add Date'}</DialogTitle>
@@ -707,6 +1186,84 @@ export default function ProjectSampleTable({ projectId }: Props) {
               type="number"
               value={form.taq_age_bp}
               onChange={(e) => setForm({ ...form, taq_age_bp: e.target.value })}
+            />
+
+            {/* Only where it means something -- a reservoir offset on a
+                terrestrial date is not merely unused, it would move the result
+                if it were ever applied. Kept on screen regardless when the row
+                already carries a value, so switching a date to a terrestrial
+                curve cannot strand one out of reach.
+
+                ΔR leads and the reservoir age follows it, in that order,
+                because ΔR is what supersedes the other. Labels and wording are
+                the measurement form's own, so the two places a ΔR can be typed
+                cannot describe it differently. */}
+            {showReservoirFields && (
+              <>
+                <TextField
+                  label="ΔR (yr)"
+                  type="number"
+                  value={form.delta_r}
+                  inputProps={{ min: -5000, max: 5000 }}
+                  onChange={(e) => setForm({ ...form, delta_r: e.target.value })}
+                />
+                <TextField
+                  label="ΔR 1σ error"
+                  type="number"
+                  value={form.delta_r_error}
+                  inputProps={{ min: 0, max: 5000 }}
+                  error={deltaRErrorIncomplete}
+                  helperText={deltaRErrorIncomplete ? 'Required with ΔR' : undefined}
+                  onChange={(e) => setForm({ ...form, delta_r_error: e.target.value })}
+                />
+                <Typography
+                  variant="caption"
+                  color="text.secondary"
+                  sx={{ gridColumn: '1 / -1', mt: -1 }}
+                >
+                  Local marine reservoir offset from the global average the curve already models —
+                  not a whole reservoir age. Leave blank to apply no correction.
+                </Typography>
+                <TextField
+                  label="Reservoir age (years)"
+                  type="number"
+                  value={form.reservoir_age}
+                  inputProps={{ min: -500, max: 2000 }}
+                  helperText="The older, whole-reservoir form. ΔR above supersedes it."
+                  onChange={(e) => setForm({ ...form, reservoir_age: e.target.value })}
+                  sx={{ gridColumn: '1 / -1' }}
+                />
+              </>
+            )}
+
+            <Typography
+              variant="subtitle2"
+              color="text.secondary"
+              sx={{ gridColumn: '1 / -1', mt: 1 }}
+            >
+              Provenance and notes
+            </Typography>
+            <TextField
+              label="Location"
+              value={form.location}
+              inputProps={{ maxLength: 500 }}
+              onChange={(e) => setForm({ ...form, location: e.target.value })}
+            />
+            <TextField
+              label="Depth (cm)"
+              type="number"
+              value={form.depth_cm}
+              inputProps={{ min: 0, max: 10000 }}
+              onChange={(e) => setForm({ ...form, depth_cm: e.target.value })}
+            />
+            <TextField
+              label="Notes"
+              multiline
+              minRows={2}
+              value={form.notes}
+              inputProps={{ maxLength: 2000 }}
+              onChange={(e) => setForm({ ...form, notes: e.target.value })}
+              sx={{ gridColumn: '1 / -1' }}
             />
           </Box>
         </DialogContent>

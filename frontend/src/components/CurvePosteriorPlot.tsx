@@ -6,7 +6,7 @@ import createPlotlyComponent from 'react-plotly.js/factory'
 import { fetchCurvePoints, type CurvePoint } from '@/api/curves'
 import { useCurves } from '@/hooks/useCurves'
 import type { StackedSeries } from '@/components/StackedPosteriorPlot'
-import { usePlotColors } from '@/theme/plotColors'
+import { usePlotColors, usePlotFont } from '@/theme/plotColors'
 import { curveStyles } from '@/theme/curveColors'
 import {
   DateFormat,
@@ -264,6 +264,7 @@ export default function CurvePosteriorPlot({
   height = DEFAULT_HEIGHT,
 }: CurvePosteriorPlotProps) {
   const plot = usePlotColors()
+  const plotFont = usePlotFont()
   const { curves } = useCurves()
   const plotBox = useRef<HTMLDivElement | null>(null)
 
@@ -730,7 +731,7 @@ export default function CurvePosteriorPlot({
         gridcolor: plot.grid,
       },
       hovermode: 'closest' as const,
-      font: { color: plot.axis },
+      font: plotFont,
       plot_bgcolor: plot.surface,
       paper_bgcolor: plot.surface,
       margin: { l: 70, r: 20, t: geometry.marginTop, b: geometry.marginBottom },

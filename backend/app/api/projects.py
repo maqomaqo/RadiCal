@@ -130,6 +130,21 @@ def get_project(project_id: str, db: Session = Depends(get_db)):
         .all()
     )
 
+    # The two measures the project card already promises, so the page a card
+    # opens into can restate them rather than silently dropping them. Both are
+    # computed the same way `list_projects` computes them -- activity is the
+    # latest of the project's own edit and any of its analyses', because
+    # renaming a project is activity too -- so a card and its own page cannot
+    # report different numbers for the same project.
+    samples_count = (
+        db.query(func.count(ProjectSample.id))
+        .filter(ProjectSample.project_id == project_id)
+        .scalar()
+        or 0
+    )
+    latest = max((a.updated_at for a in analyses if a.updated_at), default=None)
+    activity = max(latest, project.updated_at) if latest and project.updated_at else (latest or project.updated_at)
+
     return {
         "success": True,
         "data": {
@@ -138,6 +153,8 @@ def get_project(project_id: str, db: Session = Depends(get_db)):
             "description": project.description,
             "created_at": project.created_at.isoformat(),
             "updated_at": project.updated_at.isoformat(),
+            "last_activity": activity.isoformat() if activity else None,
+            "samples_count": samples_count,
             "analyses": [
                 {
                     "id": a.id,

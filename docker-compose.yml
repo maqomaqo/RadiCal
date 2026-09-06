@@ -20,6 +20,11 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+      args:
+        # This stack bind-mounts the source and runs --reload: it is the
+        # development backend, and `docker exec radiocarbon_backend pytest`
+        # should just work in it.
+        INSTALL_DEV: "true"
     container_name: radiocarbon_backend
     ports:
       - "8000:8000"

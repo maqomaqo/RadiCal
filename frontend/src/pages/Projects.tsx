@@ -18,8 +18,6 @@ import {
   Tooltip,
 } from '@mui/material'
 import { Link as RouterLink, useSearchParams } from 'react-router-dom'
-import { alpha } from '@mui/material/styles'
-import { WARM_INK } from '@/theme/diagramColors'
 import AddIcon from '@mui/icons-material/Add'
 import InboxIcon from '@mui/icons-material/Inbox'
 import DeleteIcon from '@mui/icons-material/Delete'
@@ -28,13 +26,9 @@ import ChevronRightIcon from '@mui/icons-material/ChevronRight'
 import { formatApiError } from '@/utils/apiError'
 import { useNotify } from '@/contexts/NotificationContext'
 import ConfirmDialog from '@/components/ConfirmDialog'
-
-interface StatusCounts {
-  completed: number
-  running: number
-  failed: number
-  pending: number
-}
+import StatusStrip, { statusSummary } from '@/components/StatusStrip'
+import type { StatusCounts } from '@/components/StatusStrip'
+import { parseServerTime, relativeTime } from '@/utils/serverTime'
 
 interface ProjectSummary {
   id: string
@@ -64,87 +58,6 @@ const isSortKey = (value: string | null): value is SortKey =>
 // for finding one to be work. Below that they are chrome over a grid the eye
 // already reads in full.
 const CONTROLS_APPEAR_AT = 6
-
-/**
- * The API writes `datetime.utcnow().isoformat()`, which carries no offset --
- * and a bare timestamp is parsed by JS as LOCAL time, not UTC, so west of
- * Greenwich every date read hours older than it is and "today" became
- * "yesterday" for a whole evening. Read it as the UTC it is.
- */
-function parseServerTime(iso: string): Date {
-  return new Date(/[Z+]|-\d\d:\d\d$/.test(iso) ? iso : `${iso}Z`)
-}
-
-/**
- * Recent activity is relative because that is the question ("has anyone
- * touched this lately?"); past a month it becomes a date, because "in 87 days"
- * is arithmetic the reader has to undo.
- */
-function relativeTime(iso: string | null): string {
-  if (!iso) return ''
-  const then = parseServerTime(iso)
-  const days = Math.floor((Date.now() - then.getTime()) / 86_400_000)
-  if (days < 1) return 'today'
-  if (days === 1) return 'yesterday'
-  if (days < 30) return `${days} days ago`
-  return then.toLocaleDateString(undefined, { month: 'short', year: 'numeric' })
-}
-
-/**
- * The analysis mix as one 3px strip along the foot of the card: segments in
- * proportion, in the app's semantic state colors, never wider than the truth.
- * Anything not completed, running or failed is drawn in ink at low strength
- * rather than given a hue -- "queued" is the absence of an outcome, not an
- * outcome. It sits under the words that name it, and below the count, so that
- * the number stays the card's dominant mark rather than the colour.
- */
-function StatusStrip({ counts, total }: { counts: StatusCounts; total: number }) {
-  const untouched = Math.max(0, total - counts.completed - counts.running - counts.failed)
-  const filled: Array<{ key: string; value: number; color: string }> = [
-    { key: 'completed', value: counts.completed, color: 'success.main' },
-    { key: 'running', value: counts.running, color: 'info.main' },
-    { key: 'failed', value: counts.failed, color: 'error.main' },
-    { key: 'untouched', value: untouched, color: alpha(WARM_INK, 0.16) },
-  ].filter((segment) => segment.value > 0)
-  // A project with nothing in it still gets the empty track, so every card in
-  // the grid ends on the same line. The track is the scale; a card that simply
-  // stopped short would read as unfinished rather than as empty.
-  const segments = filled.length
-    ? filled
-    : [{ key: 'empty', value: 1, color: alpha(WARM_INK, 0.08) }]
-
-  return (
-    <Box
-      aria-hidden
-      sx={{
-        display: 'flex',
-        gap: '2px',
-        height: 3,
-        mt: 1.5,
-        borderRadius: 2,
-        overflow: 'hidden',
-      }}
-    >
-      {segments.map((segment) => (
-        <Box
-          key={segment.key}
-          sx={{ flex: segment.value, backgroundColor: segment.color, borderRadius: 2 }}
-        />
-      ))}
-    </Box>
-  )
-}
-
-/** "12 completed, 2 failed" -- zero states omitted, the app's own status words. */
-function statusSummary(counts: StatusCounts, total: number): string {
-  const untouched = Math.max(0, total - counts.completed - counts.running - counts.failed)
-  const parts: string[] = []
-  if (counts.completed) parts.push(`${counts.completed} completed`)
-  if (counts.running) parts.push(`${counts.running} running`)
-  if (counts.failed) parts.push(`${counts.failed} failed`)
-  if (untouched) parts.push(`${untouched} pending`)
-  return parts.join(' · ')
-}
 
 function ProjectCard({
   project,
@@ -269,7 +182,7 @@ function ProjectCard({
             </Typography>
           </Box>
 
-          <StatusStrip counts={project.status_counts} total={total} />
+          <StatusStrip counts={project.status_counts} total={total} sx={{ mt: 1.5 }} />
         </Box>
       </Box>
 

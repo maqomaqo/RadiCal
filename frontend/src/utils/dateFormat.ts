@@ -291,3 +291,107 @@ export function calendarRulerTicks(
   }
   return ticks
 }
+
+// --- One calendar scale, two renderings --------------------------------
+//
+// A stacked figure taller than the screen needs its calendar scale twice: on
+// the axis Plotly draws at the foot of the figure, and on the ruler the app
+// pins above it while the reader scrolls. Those two must be the SAME scale --
+// a ruler whose graduations sit a few years off the figure's is worse than no
+// ruler at all -- so both are built from the ticks below rather than each
+// choosing its own.
+
+/** One graduation on a calendar scale: where it sits, and what it says. */
+export interface CalendarTick {
+  /** Position in cal BP, the space everything is plotted in. */
+  calBP: number
+  /** The number alone, in the reporting convention, never signed. */
+  value: string
+  /**
+   * The era qualifying that number, or null where the scale needs none. cal BP
+   * needs none: it has one direction and its unit is named in the axis title,
+   * where BC and AD are two directions from a point in the middle of the axis
+   * and cannot be inferred from a number.
+   */
+  era: string | null
+  /** Whether convention puts the era before the number (AD 1000) or after it
+   *  (1000 BC). */
+  eraFirst: boolean
+}
+
+/**
+ * Ticks for a calendar scale, in every reporting format.
+ *
+ * Round years in the DISPLAY convention rather than round cal BP values, so a
+ * BC/AD axis is graduated at "1000 BC" and not at the "1051 BC" that rounding
+ * in cal BP and converting would land on. For cal BP the two are the same
+ * thing, so it graduates in round cal BP.
+ *
+ * Every BC/AD tick carries its era. Naming it once and leaving the rest bare
+ * was tried on paper and rejected: an axis running from 3000 BC to AD 500
+ * would then print "500" twice, two millennia apart, and the reader has to
+ * find the last era word to their left to know which one they are looking at.
+ * The era is demoted typographically instead -- see calendarTickMarkup.
+ */
+export function calendarScaleTicks(
+  minCalBP: number,
+  maxCalBP: number,
+  format: DateFormat,
+  target = 7
+): CalendarTick[] {
+  if (!Number.isFinite(minCalBP) || !Number.isFinite(maxCalBP) || maxCalBP <= minCalBP) {
+    return []
+  }
+
+  if (format === 'calBP') {
+    const step = niceStep(maxCalBP - minCalBP, target)
+    const ticks: CalendarTick[] = []
+    for (let value = Math.ceil(minCalBP / step) * step; value <= maxCalBP; value += step) {
+      ticks.push({ calBP: value, value: `${Math.round(value)}`, era: null, eraFirst: false })
+    }
+    return ticks
+  }
+
+  const from = displayYearFromCalBP(maxCalBP)
+  const to = displayYearFromCalBP(minCalBP)
+  const step = niceStep(to - from, target)
+
+  const ticks: CalendarTick[] = []
+  for (let year = Math.ceil(from / step) * step; year <= to; year += step) {
+    if (year === 0) continue // no year zero
+    const calBP = calBPFromDisplayYear(year)
+    if (calBP < minCalBP || calBP > maxCalBP) continue
+    const currentEra = year > 0
+    ticks.push({
+      calBP,
+      value: `${Math.abs(year)}`,
+      era: currentEra ? (format === 'bcad' ? 'AD' : 'CE') : format === 'bcad' ? 'BC' : 'BCE',
+      // "AD 1000", but "1000 CE" -- BCE/CE are suffixes in both directions.
+      eraFirst: currentEra && format === 'bcad',
+    })
+  }
+  return ticks
+}
+
+/**
+ * A tick as Plotly should letter it: the number at full strength, the era a
+ * size down and lighter.
+ *
+ * The era repeats on every tick because dropping it makes a number ambiguous
+ * (see calendarScaleTicks), but repeated at the number's own weight it doubles
+ * the ink on the busiest line of the figure and reads as eight two-word labels
+ * rather than a scale. Demoted, the numbers line up as a ruler and the era is
+ * still on every graduation for anyone reading one tick on its own.
+ *
+ * Plotly's SVG text supports a small subset of HTML; `span` with `font-size`
+ * and `color` is in it. Lives here, beside the spelling, so the figure's axis
+ * and the app's own ruler cannot letter one tick two ways.
+ */
+export function calendarTickMarkup(
+  tick: CalendarTick,
+  era: { size: number; color: string }
+): string {
+  if (!tick.era) return tick.value
+  const mark = `<span style="font-size:${era.size}px;color:${era.color}">${tick.era}</span>`
+  return tick.eraFirst ? `${mark} ${tick.value}` : `${tick.value} ${mark}`
+}

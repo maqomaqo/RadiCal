@@ -199,6 +199,41 @@ finds, not restoring a line to `package.json`. The `eslint`,
 installed (confirmed 2026-08-20) and still have nothing to run them — so the
 cheapest honest move, if this is not going to be done, is removing them.
 
+### 11. Wiggle matching and age-depth modelling
+*Added 2026-09-02.* Not a gap this file had listed — a feature request, and
+the only one that is already refused **by name**: `oxcal_script.UNSUPPORTED`
+turns away `D_Sequence`, `V_Sequence` and `P_Sequence` on import, so an
+`.oxcal` file containing any of them cannot be read at all. Planned in
+[`docs/AGE_DEPTH_AND_WIGGLE_MATCH_PLAN.md`](AGE_DEPTH_AND_WIGGLE_MATCH_PLAN.md).
+
+They are one feature with two solvers behind it, and the split is the whole
+point of the plan:
+
+- **Wiggle matching** (`D_Sequence`/`V_Sequence`) has ONE free parameter —
+  the reference member's calendar age — so it is a closed form, not a
+  sampler: shift each member's likelihood by its known gap and multiply.
+  Measured at **0.4 ms** a solve against the shipped IntCal20, and it touches
+  neither existing solver. It needs its own calendar grid rather than
+  `exact_chain._build_grid`, whose `BOUNDARY_WINDOW_FACTOR` padding exists
+  for boundaries a wiggle match does not have and costs 2.7–6.6 yr per cell.
+  **~days.**
+- **Age-depth** (`P_Sequence`) couples adjacent ages through the deposition
+  rate and shares a rigidity `k` across the sequence, so it cannot factorise
+  along `exact_chain`'s message passing and belongs in `services/gibbs.py`.
+  The conditionals stay one-dimensional, and `k` is the same shared-
+  hyperparameter draw `Model.draw_scale` already does for the outlier scale.
+  **~weeks.**
+
+Worth the note on value, because it is unusually lopsided: against the
+Hallstatt plateau at 2500 cal BP, a single ±25 date has a median 95.4% range
+of **263.5 years** and comes back split into disjoint ranges every time,
+where 8 samples across 250 rings give **14.0 years** in one range — a 19×
+sharpening from the cheap half of the item. Ship the wiggle match alone
+first; the plan's §8 sequences the rest behind it.
+
+The measurements above are in the plan's §3, made with a prototype of the
+solver rather than estimated, and two of them changed its design.
+
 ---
 
 # Done

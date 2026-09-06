@@ -11,7 +11,7 @@ import {
   formatCalendarAge,
 } from '@/utils/dateFormat'
 import type { HPDBand } from '@/utils/hpd'
-import { usePlotColors } from '@/theme/plotColors'
+import { usePlotColors, usePlotFont } from '@/theme/plotColors'
 import { downloadPlotPng } from '@/utils/downloadPlot'
 
 /**
@@ -127,6 +127,7 @@ export default function PosteriorPlot({
   dateFormat = DEFAULT_DATE_FORMAT,
 }: PosteriorPlotProps) {
   const plot = usePlotColors()
+  const plotFont = usePlotFont()
   const formatAge = (age: number) =>
     Number.isFinite(age) ? formatCalendarAge(age, dateFormat) : 'N/A'
   // The backend sends `null`, not `undefined`, for point estimates that do not
@@ -307,7 +308,7 @@ export default function PosteriorPlot({
         ...(yRange ? { range: yRange, autorange: false } : {}),
       },
       hovermode: 'x unified',
-      font: { color: plot.axis },
+      font: plotFont,
       plot_bgcolor: plot.surface,
       paper_bgcolor: plot.surface,
       margin: { l: 60, r: 20, t: 50, b: 60 },

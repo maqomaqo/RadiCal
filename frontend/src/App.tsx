@@ -55,31 +55,8 @@ const theme = createTheme({
       // only -- see DESIGN.md, which used to claim body-text AA for it.
       main: '#e14a56',
     },
-    // The semantic trio, taken off MUI's stock values. Two of the three
-    // collided with hues this app has already spent:
-    //
-    //   `info` was #0288d1, fourteen degrees from the primary above. That is
-    //   the same near-miss-blue failure DESIGN.md names #1976d2 for, and it
-    //   was repeated on sixteen Alerts including JobProgress, the app's own
-    //   progress component. No blue is both recognisably blue AND far enough
-    //   from the primary to be a different claim -- the nearest usable
-    //   candidate was still only 22 degrees off -- so info stops trying to be
-    //   a SECOND blue and becomes the primary itself. An info alert is the app
-    //   speaking about its own state, and reading as app chrome is correct.
-    //
-    //   `error` was #d32f2f, four degrees from BOUNDARY_CORAL_INK (#d23f4a).
-    //   DESIGN.md says a destructive action is deliberately not the Boundary
-    //   coral; at four degrees a reader cannot act on that distinction. Hue
-    //   separation is unavailable in the red band, so the two separate by
-    //   DEPTH instead: a deep oxblood at 7.46:1 on white reads clearly darker
-    //   than either coral token, and leaves the bright red band to Boundary.
-    //
-    //   `warning` was #ed6c02, which measures 2.92:1 on the canvas -- under
-    //   the 3:1 a graphic mark needs, and it is used directly as one. This
-    //   value clears it at 4.69:1 and sits 34 degrees off the Boundary coral.
-    //
-    // `success` stays MUI's #2e7d32: 41 degrees from the Phase green, only two
-    // use sites, and no reason to spend a change on it.
+    // The semantic trio, shifted slightly from MUI's stock values to accommodate app colour clash/overlap.
+
     info: { main: PRIMARY },
     error: { main: '#a3231d' },
     warning: { main: '#a85c11' },
@@ -88,21 +65,16 @@ const theme = createTheme({
       paper: PAPER,
       muted: MUTED,
     },
-    // Every line and wash in the app was still pure black. The shadows and the
-    // text below were warmed and these were not, which is the larger painted
-    // area of the two: `divider` alone reaches every TableCell, every
+    // The shadows and the text below were warmed so these are too.
+    // `divider` alone reaches every TableCell, every
     // `DialogContent dividers`, every Accordion border and some twenty
     // explicit borderColor sites.
-    //
-    // The swap costs nothing. MUI's rgba(0,0,0,0.12) composites to #e0e0e0 on
-    // white; warm ink at 0.14 gives #e1e0e0 -- the same 1.32:1, warm instead of
-    // dead neutral.
+
     divider: alpha(WARM_INK, 0.14),
     action: {
       // Hover and the active-icon ink are the same substitution as divider.
-      // The alphas are not MUI's own, because warm ink is lighter than black
-      // and copying the number would quietly cost legibility. Each is the
-      // alpha that MATCHES the contrast of the value it replaces: 0.64 here
+      // The alphas are not MUI's own, because warm ink is lighter than black.
+      // Each is the alpha that MATCHES the contrast of the value it replaces: 0.64 here
       // measures 4.75:1 on paper against black-at-0.54's 4.61:1 -- this is the
       // ink an unselected IconButton is drawn in, so it is a real graphic mark
       // and not a wash. 0.30 disabled measures 1.87:1 against 1.88:1.
