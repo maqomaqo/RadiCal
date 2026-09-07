@@ -93,7 +93,7 @@ revisions of this file understated parts of it.
 - **Background job queue** — a long solve is queued rather than held open in the
   request that asked for it (`services/jobs.py`), with progress, cancellation
   and a polling endpoint. See [`docs/ASYNC_JOBS_PLAN.md`](docs/ASYNC_JOBS_PLAN.md).
-- **Tests** — 858 backend, 425 frontend. Counts and per-file breakdown in
+- **Tests** — 899 backend, 425 frontend. Counts and per-file breakdown in
   [Testing & QA](#testing--qa).
 
 ---
@@ -852,9 +852,21 @@ the picker filled up again.
 
 ## Testing & QA
 
-- **Backend: 858 tests** in `backend/tests/`, across 28 files — 857 pass and
-  1 skips (`pytest -q` in the container, 2026-09-07, 16m27s). `test_auth.py`
-  (62) and `test_failures.py` (15) are new; the rest are unchanged. By file:
+- **Backend: 899 tests** in `backend/tests/`, across 29 files — 898 pass and
+  1 skips (`pytest -q` in the container, 2026-09-07, 16m25s). `test_auth.py`
+  (62), `test_curve_privacy.py` (41) and `test_failures.py` (15) are the day's
+  additions. By file:
+
+  | | | | |
+  |---|---|---|---|
+  | `test_imports.py` 104 | `test_exact_chain.py` 66 | `test_auth.py` 62 | `test_oxcal_agreement.py` 44 |
+  | `test_exports.py` 44 | `test_project_samples.py` 42 | `test_curve_privacy.py` 41 | `test_curve_import.py` 41 |
+  | `test_gibbs.py` 40 | `test_intervals.py` 33 | `test_pdf_report.py` 32 | `test_curve_view.py` 32 |
+  | `test_model_tree.py` 31 | `test_curves.py` 30 | `test_agreement.py` 27 | `test_rerun.py` 26 |
+  | `test_calibration.py` 25 | `test_curve_mix.py` 21 | `test_solver_reporting.py` 18 | `test_date_format.py` 18 |
+  | `test_charcoal_outlier.py` 18 | `test_stratigraphy.py` 17 | `test_resolution.py` 17 | `test_jobs.py` 16 |
+  | `test_validation.py` 15 | `test_failures.py` 15 | `test_analysis_list_intervals.py` 11 | `test_migrations.py` 8 |
+  | `test_event_loop.py` 5 | | | |
 
   | | | | |
   |---|---|---|---|

@@ -20,15 +20,28 @@ from app.services import curve_registry
 from app.services.calibration import get_curve
 
 
+# A user id belonging to nobody, and therefore owning no stored curves.
+#
+# Most of this file is about the three BUILTIN curves -- what the registry
+# measures from them, and the name map that both file importers share -- and
+# those belong to everybody, so any scope resolves them. What matters is that
+# the scope owns nothing ELSE: `SCOPE_ANY` would search every account's
+# imports, and this suite really does store a curve called "intcal13"
+# (test_curve_import.py), which would turn
+# `test_unknown_names_are_not_guessed[intcal13]` from a statement about the
+# name map into a statement about what other tests happened to run first.
+NO_STORED_CURVES = 'a-user-id-that-owns-nothing'
+
+
 class TestRegistryMeasuresRatherThanAsserts:
 
     def test_point_count_is_the_loaded_curve_s(self):
-        for spec in curve_registry.list_specs():
+        for spec in curve_registry.list_specs(NO_STORED_CURVES):
             curve = get_curve(spec.id)
             assert spec.data_points == len(curve.cal_ages)
 
     def test_ranges_are_the_loaded_curve_s(self):
-        for spec in curve_registry.list_specs():
+        for spec in curve_registry.list_specs(NO_STORED_CURVES):
             curve = get_curve(spec.id)
             assert spec.cal_min == pytest.approx(float(curve.cal_ages.min()))
             assert spec.cal_max == pytest.approx(float(curve.cal_ages.max()))
@@ -41,7 +54,7 @@ class TestRegistryMeasuresRatherThanAsserts:
         stale, they were of the wrong order for Marine20. Naming them keeps
         this from quietly coming back if someone reintroduces a constant.
         """
-        counts = {spec.id: spec.data_points for spec in curve_registry.list_specs()}
+        counts = {spec.id: spec.data_points for spec in curve_registry.list_specs(NO_STORED_CURVES)}
         assert counts['intcal20'] == 9501 and counts['intcal20'] != 5141
         assert counts['shcal20'] == 9501 and counts['shcal20'] != 5141
         assert counts['marine20'] == 5501 and counts['marine20'] != 1341
@@ -58,7 +71,7 @@ class TestRegistryMeasuresRatherThanAsserts:
         assert curve_registry.get_spec('marine20').resolution == '10 yr (0-55,000)'
 
     def test_content_hash_identifies_the_curve(self):
-        specs = {s.id: s.content_sha256 for s in curve_registry.list_specs()}
+        specs = {s.id: s.content_sha256 for s in curve_registry.list_specs(NO_STORED_CURVES)}
         assert len(set(specs.values())) == len(specs)
         # Stable across calls -- this is what a stored analysis will be
         # compared against on rerun.
@@ -68,7 +81,7 @@ class TestRegistryMeasuresRatherThanAsserts:
 class TestEverythingListedCanActuallyBeUsed:
 
     def test_every_listed_curve_resolves(self):
-        for spec in curve_registry.list_specs():
+        for spec in curve_registry.list_specs(NO_STORED_CURVES):
             curve = curve_registry.resolve(spec.id)
             assert len(curve.cal_ages) > 0
 
@@ -79,7 +92,7 @@ class TestEverythingListedCanActuallyBeUsed:
         registry exists to prevent.
         """
         from app.schemas.sample import VALID_CURVE_IDS
-        assert set(curve_registry.curve_ids()) <= set(VALID_CURVE_IDS)
+        assert set(curve_registry.curve_ids(NO_STORED_CURVES)) <= set(VALID_CURVE_IDS)
 
     def test_unknown_curve_raises_rather_than_defaulting(self):
         with pytest.raises(ValueError) as exc:
@@ -106,10 +119,10 @@ class TestEverythingListedCanActuallyBeUsed:
         monkeypatch.setattr(curve_registry, 'SessionLocal', unreachable)
         try:
             assert len(curve_registry.resolve('intcal20').cal_ages) == 9501
-            assert [s.id for s in curve_registry.list_specs()] == list(
+            assert [s.id for s in curve_registry.list_specs(NO_STORED_CURVES)] == list(
                 curve_registry.BUILTIN_CURVE_IDS
             )
-            assert curve_registry.resolve_alias('SHCal20') == 'shcal20'
+            assert curve_registry.resolve_alias('SHCal20', NO_STORED_CURVES) == 'shcal20'
         finally:
             monkeypatch.undo()
             curve_registry.invalidate()
@@ -132,43 +145,48 @@ class TestAliases:
         ('MARINE20', 'marine20'),
     ])
     def test_known_spellings(self, written, expected):
-        assert curve_registry.resolve_alias(written) == expected
+        assert curve_registry.resolve_alias(written, NO_STORED_CURVES) == expected
 
     @pytest.mark.parametrize('written', ['intcal13', 'marine2020', '', 'Curve'])
     def test_unknown_names_are_not_guessed(self, written):
-        assert curve_registry.resolve_alias(written) is None
+        assert curve_registry.resolve_alias(written, NO_STORED_CURVES) is None
 
     def test_oxcal_and_csv_importers_use_it(self):
         from app.services.date_import import _curve
         from app.services.oxcal_script import _curve_id
 
-        assert _curve_id('=IntCal20.14c') == 'intcal20'
-        assert _curve_id('IntCal13') is None
+        assert _curve_id('=IntCal20.14c', NO_STORED_CURVES) == 'intcal20'
+        assert _curve_id('IntCal13', NO_STORED_CURVES) is None
 
         errors = []
-        assert _curve('SHCal20', 1, errors) == 'shcal20'
+        assert _curve('SHCal20', 1, errors, NO_STORED_CURVES) == 'shcal20'
         assert errors == []
-        assert _curve('IntCal13', 2, errors) is None
+        assert _curve('IntCal13', 2, errors, NO_STORED_CURVES) is None
         assert 'IntCal13' in errors[0]
 
 
 class TestEndpoints:
 
-    def test_list_returns_every_curve(self, client):
+    def test_list_returns_every_curve(self, client, suite_user):
+        # Scoped to the caller: the endpoint lists what THIS account may use,
+        # so the registry has to be asked the same question. Comparing against
+        # an unscoped listing would fail the moment another test's account
+        # imported anything.
+        owner = suite_user['user']['id']
         response = client.get('/api/curves')
         assert response.status_code == 200
         body = response.json()
         items = body['data']['items']
-        assert body['data']['total'] == len(curve_registry.list_specs())
-        assert [i['id'] for i in items] == list(curve_registry.curve_ids())
+        assert body['data']['total'] == len(curve_registry.list_specs(owner))
+        assert [i['id'] for i in items] == list(curve_registry.curve_ids(owner))
 
-    def test_list_default_limit_does_not_truncate(self, client):
+    def test_list_default_limit_does_not_truncate(self, client, suite_user):
         """
         The previous default was 10 -- fine for three curves, silently wrong
         for a picker once imported curves exist.
         """
         items = client.get('/api/curves').json()['data']['items']
-        assert len(items) == len(curve_registry.list_specs())
+        assert len(items) == len(curve_registry.list_specs(suite_user['user']['id']))
 
     def test_list_carries_the_fields_a_picker_needs(self, client):
         item = client.get('/api/curves').json()['data']['items'][0]
