@@ -220,7 +220,7 @@ class TestOxcalMixCurves:
     parsing a file must not create curves. See _define_mixed_curve.
     """
 
-    def test_a_matching_mixture_is_found_and_used(self, client):
+    def test_a_matching_mixture_is_found_and_used(self, client, suite_user):
         from app.services.oxcal_script import parse_oxcal
         assert make_mix(client, 'mix-oxcal-31', percent=31, error=11).status_code == 201
 
@@ -228,12 +228,16 @@ class TestOxcalMixCurves:
             'Plot(){ Mix_Curves("diet","IntCal20","Marine20",31,11); '
             'Curve("=diet"); Phase("A"){ R_Date("a",3000,25); }; };'
         )
-        result = parse_oxcal(script, 'diet.oxcal')
+        # The suite user's own id: the mixture was created through `client`,
+        # which is signed in as them, and a mixed curve is now private to
+        # whoever created it. SCOPE_ANY would pass here and would stop testing
+        # the thing this asserts -- that the file matched THEIR mixture.
+        result = parse_oxcal(script, suite_user['user']['id'], 'diet.oxcal')
         assert result.ok, result.errors
         assert result.dates[0]['curve_id'] == 'mix-oxcal-31'
         assert any('Mix_Curves' in note for note in result.notes)
 
-    def test_the_same_recipe_written_the_other_way_round_matches(self, client):
+    def test_the_same_recipe_written_the_other_way_round_matches(self, client, suite_user):
         """70% Marine20 is 30% IntCal20. A file writing it the other way is
         describing the same mixture, and refusing it would be pedantry."""
         from app.services.oxcal_script import parse_oxcal
@@ -245,7 +249,7 @@ class TestOxcalMixCurves:
             'Plot(){ Mix_Curves("d","IntCal20","Marine20",32,12); Curve("=d"); '
             'Phase("A"){ R_Date("a",3000,25); }; };'
         )
-        result = parse_oxcal(script, 'flip.oxcal')
+        result = parse_oxcal(script, suite_user['user']['id'], 'flip.oxcal')
         assert result.ok, result.errors
         assert result.dates[0]['curve_id'] == 'mix-oxcal-flip'
 

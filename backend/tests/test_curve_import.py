@@ -268,18 +268,21 @@ class TestStoredCurvesAreReReadTheSameWay:
 
 class TestImportedCurvesAreFoundByName:
 
-    def test_a_csv_naming_an_imported_curve_imports(self, client):
+    def test_a_csv_naming_an_imported_curve_imports(self, client, suite_user):
+        # Resolved as the account that stored it: an imported curve is private
+        # to its importer, so the name only means anything to them.
+        owner = suite_user['user']['id']
         store_curve(client, 'intcal13', 'IntCal13', aliases=['IntCal13.14c'])
-        assert curve_registry.resolve_alias('IntCal13') == 'intcal13'
-        assert curve_registry.resolve_alias('IntCal13.14c') == 'intcal13'
+        assert curve_registry.resolve_alias('IntCal13', owner) == 'intcal13'
+        assert curve_registry.resolve_alias('IntCal13.14c', owner) == 'intcal13'
 
         from app.services.oxcal_script import _curve_id
-        assert _curve_id('=IntCal13') == 'intcal13'
+        assert _curve_id('=IntCal13', owner) == 'intcal13'
 
-    def test_a_curve_still_missing_is_still_refused(self, client):
+    def test_a_curve_still_missing_is_still_refused(self, client, suite_user):
         from app.services.date_import import _curve
         errors = []
-        assert _curve('IntCal09', 1, errors) is None
+        assert _curve('IntCal09', 1, errors, suite_user['user']['id']) is None
         assert 'IntCal09' in errors[0]
 
 

@@ -14,11 +14,10 @@ class User(Base):
     a private network), and this table is what makes work attributable and
     separable behind it, not what decides who gets in.
 
-    Every project and analysis belongs to exactly one user and is visible to
-    nobody else. There is no sharing. Calibration curves are the deliberate
-    exception -- they are reference data, shared like the three built-in
-    curves, with `created_by` recording who imported one so it cannot be
-    deleted out from under its owner.
+    Every project, analysis, job and stored calibration curve belongs to
+    exactly one user and is visible to nobody else. There is no sharing. The
+    only things everybody has in common are the three calibration curves that
+    ship with the app.
     """
     __tablename__ = "users"
 
@@ -176,18 +175,20 @@ class StoredCalibrationCurve(Base):
 
     archived = Column(Boolean, default=False, nullable=False)
 
-    # Who imported it. Curves are the one thing NOT partitioned per user --
-    # they are reference data, shared like the three built-in curves, because
-    # a per-user registry would undo the single-source-of-truth the whole of
-    # curve_registry.py is built on, and because two analysts on one site
-    # calibrating against different copies of the same curve is a worse
-    # outcome than either of them seeing that the curve exists.
+    # Who imported it, and therefore who can see it at all.
     #
-    # Shared to READ. Editing, archiving and deleting stay with whoever
-    # imported it, so one user cannot alter or remove reference data another
-    # user's stored results were computed against. Null for a curve imported
-    # before there were users; those stay editable by anyone, since there is
-    # nobody to attribute them to.
+    # This column first meant attribution on a curve everyone could read. It
+    # now means ownership: a stored curve is private to its importer, listed
+    # for nobody else and unreachable by every route (see api/curves.py). The
+    # earlier reading was that curves are reference data and belong to the
+    # install rather than to a person, which sounds right and is not -- a
+    # curve someone is still developing has nobody vouching for it, and in a
+    # shared picker it is indistinguishable from IntCal20.
+    #
+    # Null for a curve imported before there were users. Those are adopted by
+    # the first account to register, alongside the projects and analyses
+    # (api/auth._adopt_existing_work) -- they have to be, or an analysis would
+    # come back to its owner with its curve gone.
     created_by = Column(String, ForeignKey('users.id'), nullable=True, index=True)
 
     created_at = Column(DateTime, default=datetime.utcnow)

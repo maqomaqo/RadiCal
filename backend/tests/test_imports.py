@@ -23,8 +23,31 @@ import pytest
 
 import oxcal_fixture as ox
 from app.services import date_import
-from app.services.date_import import parse_csv, parse_upload, template_csv
-from app.services.oxcal_script import parse_oxcal
+from app.services.date_import import template_csv
+from app.services import curve_registry
+from app.services.date_import import parse_csv as _parse_csv, parse_upload as _parse_upload
+from app.services.oxcal_script import parse_oxcal as _parse_oxcal
+
+
+# The three parsers resolve a file's curve NAMES against one account's curves,
+# so each takes an owner id (see services/oxcal_script.parse_oxcal). Almost
+# nothing in this file is about that -- these are tests of the readers, and the
+# curves they name are the three builtins, which belong to everybody.
+#
+# So they are wrapped once here with SCOPE_ANY rather than threaded through
+# eighty-odd call sites, which would bury what each test is actually about.
+# The scoping itself is covered where it belongs, in test_curve_privacy.py.
+
+def parse_csv(text, filename=None):
+    return _parse_csv(text, curve_registry.SCOPE_ANY, filename)
+
+
+def parse_upload(filename, content):
+    return _parse_upload(filename, content, curve_registry.SCOPE_ANY)
+
+
+def parse_oxcal(text, filename=None):
+    return _parse_oxcal(text, curve_registry.SCOPE_ANY, filename)
 
 FIXTURES = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'fixtures')
 
