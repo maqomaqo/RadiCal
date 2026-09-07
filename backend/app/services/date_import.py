@@ -294,7 +294,7 @@ def _number(value: str, field_name: str, line: int, errors: List[str]) -> Option
         return None
 
 
-def _curve(value: str, line: int, errors: List[str]) -> Optional[str]:
+def _curve(value: str, line: int, errors: List[str], owner_id: str) -> Optional[str]:
     """
     A curve cell as one of the ids the calibration engine loads. Anything
     else is an error naming what was found: falling back to IntCal20 for an
@@ -309,10 +309,13 @@ def _curve(value: str, line: int, errors: List[str]) -> Optional[str]:
     text = _clean(value)
     if not text:
         return None
-    resolved = curve_registry.resolve_alias(text)
+    resolved = curve_registry.resolve_alias(text, owner_id)
     if resolved is not None:
         return resolved
-    available = ', '.join(spec.name for spec in curve_registry.list_specs())
+    # Scoped to the importer: a file naming a curve another account imported
+    # must fail exactly as one naming a curve nobody has, and the list offered
+    # back must be the reader's own.
+    available = ', '.join(spec.name for spec in curve_registry.list_specs(owner_id))
     errors.append(
         f"Row {line}: unknown calibration curve '{text}'. This app calibrates "
         f"against {available}; a curve it does not have cannot be substituted "
@@ -392,7 +395,7 @@ def _sniff_delimiter(text: str) -> str:
     return best if counts[best] else ','
 
 
-def parse_csv(text: str, filename: Optional[str] = None) -> ImportResult:
+def parse_csv(text: str, owner_id: str, filename: Optional[str] = None) -> ImportResult:
     """
     Read a delimited table of dates.
 
@@ -488,7 +491,7 @@ def parse_csv(text: str, filename: Optional[str] = None) -> ImportResult:
         )
 
     for row in rows:
-        parsed = _row_to_date(row['values'], row['line'], result.errors)
+        parsed = _row_to_date(row['values'], row['line'], result.errors, owner_id)
         if parsed is not None:
             result.dates.append(parsed)
 
@@ -500,7 +503,8 @@ def parse_csv(text: str, filename: Optional[str] = None) -> ImportResult:
     return result.refuse()
 
 
-def _row_to_date(values: Dict[str, Any], line: int, errors: List[str]) -> Optional[Dict[str, Any]]:
+def _row_to_date(values: Dict[str, Any], line: int, errors: List[str],
+                 owner_id: str) -> Optional[Dict[str, Any]]:
     """One row as a date dict, or None with errors appended."""
     before = len(errors)
 
@@ -516,7 +520,7 @@ def _row_to_date(values: Dict[str, Any], line: int, errors: List[str]) -> Option
     if error is None and _clean(values.get('error_1sigma')) == '':
         errors.append(f'Row {line}: 1-sigma error is missing')
 
-    curve = _curve(values.get('curve_id'), line, errors)
+    curve = _curve(values.get('curve_id'), line, errors, owner_id)
     sample_type = _clean(values.get('sample_type')).lower() or None
     if sample_type is not None and sample_type not in ('terrestrial', 'marine'):
         errors.append(
@@ -739,7 +743,7 @@ def template_csv() -> str:
 # Dispatch
 # --------------------------------------------------------------------------
 
-def parse_upload(filename: str, content: bytes) -> ImportResult:
+def parse_upload(filename: str, content: bytes, owner_id: str) -> ImportResult:
     """
     Parse an uploaded file, choosing the reader by extension and falling back
     on the content itself.
@@ -780,16 +784,16 @@ def parse_upload(filename: str, content: bytes) -> ImportResult:
     # it as broken CQL2 -- a confusing failure with no obvious cause.
     if lower.endswith('.oxcal'):
         from app.services.oxcal_script import parse_oxcal
-        return parse_oxcal(text, filename)
+        return parse_oxcal(text, owner_id, filename)
     if lower.endswith(('.csv', '.tsv')):
-        return parse_csv(text, filename)
+        return parse_csv(text, owner_id, filename)
 
     # Anything else -- '.txt' above all, an ordinary name for both an exported
     # table and a saved OxCal model -- is decided by the content.
     if looks_like_cql2(text):
         from app.services.oxcal_script import parse_oxcal
-        return parse_oxcal(text, filename)
-    return parse_csv(text, filename)
+        return parse_oxcal(text, owner_id, filename)
+    return parse_csv(text, owner_id, filename)
 
 
 def looks_like_cql2(text: str) -> bool:

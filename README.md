@@ -158,8 +158,29 @@ docker-compose up -d
 # Backend API + interactive docs: http://localhost:8000/docs
 ```
 
+Open the frontend and **create an account** — the first one made on an installation takes
+ownership of any projects and analyses that were there before accounts existed, and the sign-up
+screen says how many it adopted.
+
 See [`docs/INSTALLATION.md`](docs/INSTALLATION.md) for running the frontend and backend outside
 Docker, and for troubleshooting.
+
+### Accounts
+
+Every project and analysis belongs to one account and is visible to nobody else. There is no
+sharing and no administrator who can see everything. Calibration curves are the deliberate
+exception: they are reference data, readable by everyone signed in and editable only by whoever
+imported them, because a per-account curve registry would let two people on one site calibrate
+against different copies of the same curve.
+
+Registration is **open** — anyone who can reach the app can create an account. The gate is
+expected to be whatever fronts the deployment (a VPN, an institutional SSO proxy, a private
+network); what accounts add behind that gate is attribution and separation, not admission control.
+
+Before exposing this to anyone else, set `RADICAL_SECRET_KEY` to a long random string and
+`RADICAL_ENV` to something other than `development`. Login tokens are signed with it, so without
+one the app falls back to a key published in this repository — it says so at startup, and refuses
+to start at all once `RADICAL_ENV` says the deployment is real. See `.env.example`.
 
 ### Development
 
@@ -203,7 +224,19 @@ measured viewport, so nothing in the DOM tells you whether the boxes actually li
 ## API Overview
 
 Full interactive documentation (generated from the actual FastAPI routes) is at
-`http://localhost:8000/docs` once the backend is running. The main groups:
+`http://localhost:8000/docs` once the backend is running.
+
+**Every endpoint below needs a bearer token** except `/api/auth/register`, `/api/auth/login` and
+`/api/health`. Get one from `POST /api/auth/login` and send it as `Authorization: Bearer <token>`;
+it lasts twelve hours. Someone else's project or analysis answers **404**, not 403 — an id must
+not be a way to discover that a row exists.
+
+The main groups:
+
+- **Authentication** (`/api/auth/register`, `/api/auth/login`, `/api/auth/me`,
+  `/api/auth/password`) — register and login both return a token and the account it belongs to.
+  Changing a password requires the current one, so a token left on a shared machine cannot be used
+  to lock its owner out.
 
 - **Calibration curves** (`/api/curves`, `/api/curves/{id}`, `/api/curves/type/{type}`) — what
   curves are available and what is true about each. Served from the registry, so this list and the
@@ -236,7 +269,11 @@ Full interactive documentation (generated from the actual FastAPI routes) is at
 ## Documentation
 
 - [`docs/INSTALLATION.md`](docs/INSTALLATION.md) — setup and troubleshooting.
-- [`docs/USER_MANUAL.md`](docs/USER_MANUAL.md) — using the app.
+- [`frontend/src/content/USER_MANUAL.md`](frontend/src/content/USER_MANUAL.md) — using the app. It
+  lives inside the frontend because the app ships it: the Help page (the question mark in the top
+  bar, `/help`) renders this exact file, so there is no second copy to keep in step. Edit it as
+  Markdown; `frontend/src/utils/markdown.ts` documents the subset the page can render, and its
+  tests fail on anything outside it or on a cross-reference that no longer resolves.
 - [`REMAINING_WORK.md`](REMAINING_WORK.md) — what's built, what isn't, and why, kept current against
   the actual code rather than written once and left to drift.
 

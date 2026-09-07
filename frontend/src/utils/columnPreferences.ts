@@ -11,16 +11,21 @@
  * decision; an empty record is not a decision to hide everything.
  */
 
-const STORAGE_PREFIX = 'radiocarbon:dateColumns:'
+const DATE_PREFIX = 'radiocarbon:dateColumns:'
+// A separate prefix rather than a shared one keyed by id: an analysis id and a
+// project id come from different tables and could collide, and the two tables
+// do not offer the same columns, so one record read as the other would be a
+// set of overrides for columns that do not exist.
+const RESULT_PREFIX = 'radiocarbon:resultColumns:'
 
 export type ColumnOverrides = Record<string, boolean>
 
-export function saveColumnOverrides(projectId: string, overrides: ColumnOverrides): void {
+function write(key: string, overrides: ColumnOverrides): void {
   try {
     if (Object.keys(overrides).length === 0) {
-      window.localStorage.removeItem(`${STORAGE_PREFIX}${projectId}`)
+      window.localStorage.removeItem(key)
     } else {
-      window.localStorage.setItem(`${STORAGE_PREFIX}${projectId}`, JSON.stringify(overrides))
+      window.localStorage.setItem(key, JSON.stringify(overrides))
     }
   } catch {
     // localStorage can be unavailable (private browsing, storage full); the
@@ -28,14 +33,39 @@ export function saveColumnOverrides(projectId: string, overrides: ColumnOverride
   }
 }
 
-export function loadColumnOverrides(projectId: string): ColumnOverrides {
+function read(key: string): ColumnOverrides {
   try {
-    const stored = window.localStorage.getItem(`${STORAGE_PREFIX}${projectId}`)
+    const stored = window.localStorage.getItem(key)
     if (stored) return parseColumnOverrides(stored)
   } catch {
     // ignore
   }
   return {}
+}
+
+/** The date collection's table, remembered per project. */
+export function saveColumnOverrides(projectId: string, overrides: ColumnOverrides): void {
+  write(`${DATE_PREFIX}${projectId}`, overrides)
+}
+
+export function loadColumnOverrides(projectId: string): ColumnOverrides {
+  return read(`${DATE_PREFIX}${projectId}`)
+}
+
+/**
+ * The results table, remembered per analysis rather than per project.
+ *
+ * Per analysis because the choice is about this run: whether the posterior
+ * mean is worth a column depends on what was modelled, and two analyses in one
+ * project routinely differ on that. It is the same reasoning that keeps the
+ * reporting format per analysis (see utils/dateFormat).
+ */
+export function saveResultColumnOverrides(analysisId: string, overrides: ColumnOverrides): void {
+  write(`${RESULT_PREFIX}${analysisId}`, overrides)
+}
+
+export function loadResultColumnOverrides(analysisId: string): ColumnOverrides {
+  return read(`${RESULT_PREFIX}${analysisId}`)
 }
 
 /**

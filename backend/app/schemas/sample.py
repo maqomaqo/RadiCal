@@ -17,17 +17,35 @@ def validate_curve_id(curve_id: Optional[str]) -> Optional[str]:
     rather than reaching get_curve(). Not a Pydantic `Literal`, because the
     set of curves is something a user can add to.
 
-    Builtin ids are answered without a database query (curve_registry.exists),
-    so forty dates all on IntCal20 cost nothing.
+    Builtin ids are answered without a database query, so forty dates all on
+    IntCal20 cost nothing.
+
+    **This is a shape check, not an authorisation check.** A validator has no
+    request and therefore no user, so it can only ask whether the id names a
+    curve that exists anywhere. Whether the CALLER may name it is a separate
+    question, asked by `api.curves.authorise_curve_ids` once the route knows
+    who is asking -- the same division as everywhere else in this app, where
+    schemas check shape and `api/auth.py` checks ownership.
+
+    Leaving the ownership question to the route rather than doing both here is
+    deliberate: a validator that rejected another user's curve id as "unknown"
+    would produce a 422 listing every curve the caller CAN use, which is a
+    fine error message, but it would do it from a layer that cannot tell that
+    case apart from a typo -- and the two want different wording.
     """
     if curve_id is None:
         return None
-    if not curve_registry.exists(curve_id):
-        available = ', '.join(curve_registry.known_ids())
+    if not curve_registry.exists(curve_id, curve_registry.SCOPE_ANY):
+        # Only the builtins are named. Listing every stored id would name the
+        # imports of every account on the server, which is exactly what
+        # per-user curves exist to prevent -- and this layer cannot narrow the
+        # list to the caller's own, having no caller. The route's own refusal
+        # (authorise_curve_ids) does name the curves you can actually use.
+        builtins = ', '.join(curve_registry.BUILTIN_CURVE_IDS)
         raise ValueError(
-            f"Unknown calibration curve '{curve_id}'. This app can calibrate "
-            f"against: {available}. Import a curve to add to that list -- a "
-            "curve it does not have cannot be substituted for one it does."
+            f"Unknown calibration curve '{curve_id}'. This app ships with "
+            f"{builtins}, and calibrates against any curve you have imported. "
+            "A curve it does not have cannot be substituted for one it does."
         )
     return curve_id
 

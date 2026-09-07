@@ -35,6 +35,7 @@ from sqlalchemy.orm import Session
 
 from app.database import SessionLocal
 from app.models import Job
+from app.services import failures
 
 # One at a time. See the module docstring.
 _executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix='radical-job')
@@ -121,20 +122,27 @@ class NullHandle:
 
 
 def submit(kind: str, target_id: Optional[str],
-           work: Callable[[Session, JobHandle], Optional[Dict]]) -> str:
+           work: Callable[[Session, JobHandle], Optional[Dict]],
+           owner_id: Optional[str] = None) -> str:
     """
     Queue `work` and return the id of the job that will run it.
 
     `work` is called with a fresh Session and a JobHandle. Whatever it returns
-    becomes the job's final `detail`. Raising marks the job failed with the
-    exception's message; raising Cancelled marks it cancelled, not failed.
+    becomes the job's final `detail`. Raising marks the job FAILED with a
+    message classified by services/failures.py; raising Cancelled marks it
+    cancelled, not failed.
+
+    `owner_id` is who may poll and cancel it. Optional in the signature and
+    supplied by every caller, because a job with no owner is one nobody can
+    see -- which is the safe way round for a default, but never what a real
+    caller wants.
 
     The row is committed BEFORE the work is queued, so the id returned is always
     readable by the poll that follows. Queuing first would race, since a short
     job can finish before its row exists.
     """
     with SessionLocal() as db:
-        row = Job(kind=kind, target_id=target_id, state='queued')
+        row = Job(kind=kind, target_id=target_id, state='queued', owner_id=owner_id)
         db.add(row)
         db.commit()
         job_id = row.id
@@ -177,11 +185,16 @@ def _run(job_id: str, work: Callable[[Session, JobHandle], Optional[Dict]]) -> N
             db.commit()
         except Exception as exc:
             db.rollback()
-            print(f"Job {job_id} ({row.kind}) failed: {exc}")
+            # The classified message is what the user sees; the log keeps the
+            # original, which is the half a bug report needs and the half the
+            # message deliberately drops.
+            failure = failures.classify(exc)
+            print(f"Job {job_id} ({row.kind}) failed [{failure.category}]: "
+                  f"{failure.detail or exc}")
             print(traceback.format_exc())
             row = db.query(Job).filter(Job.id == job_id).first()
             row.state = 'failed'
-            row.error_message = str(exc)
+            row.error_message = failure.message
             row.finished_at = datetime.utcnow()
             db.commit()
         else:

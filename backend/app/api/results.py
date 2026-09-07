@@ -2,7 +2,8 @@ from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from app.database import get_db
-from app.models import Analysis, RadiocarbonSample, AnalysisResult, ModelElement, SampleGroup
+from app.models import Analysis, RadiocarbonSample, AnalysisResult, ModelElement, SampleGroup, User
+from app.api.auth import current_user, owned_or_404
 from app.services.model_tree import rows_to_tree, flatten_structure
 from app.services.calibration import SIGMA_1, SIGMA_2, get_curve
 from app.services import date_format as date_format_service
@@ -443,10 +444,28 @@ def _build_csv(analysis_id: str, db: Session, date_format: Optional[str] = None)
     return output.getvalue()
 
 
+def _owned_analysis(analysis_id: str, db: Session, user: User) -> Analysis:
+    """
+    The analysis, if it is this user's.
+
+    Every route here takes an id and hands it to an assembly function that
+    looks the row up again. Calling this FIRST is what keeps the ownership
+    check in one place rather than inside each of those -- and it is a 404 for
+    someone else's analysis, not a 403, so an id cannot be used to discover
+    that an analysis exists. See api/auth.owned_or_404.
+    """
+    return owned_or_404(
+        db.query(Analysis).filter(Analysis.id == analysis_id).first(),
+        user, 'That analysis')
+
+
 @router.get("/results/{analysis_id}/table")
-def export_table(analysis_id: str, date_format: Optional[str] = None, db: Session = Depends(get_db)):
+def export_table(analysis_id: str, date_format: Optional[str] = None,
+                 db: Session = Depends(get_db),
+                 user: User = Depends(current_user)):
     """Export results as a CSV table. Same content as /export/csv, kept as a
     separate route for backwards compatibility."""
+    _owned_analysis(analysis_id, db, user)
     csv_content = _build_csv(analysis_id, db, date_format)
     return StreamingResponse(
         iter([csv_content]),
@@ -456,7 +475,9 @@ def export_table(analysis_id: str, date_format: Optional[str] = None, db: Sessio
 
 
 @router.get("/results/{analysis_id}/export/csv")
-def export_csv(analysis_id: str, date_format: Optional[str] = None, db: Session = Depends(get_db)):
+def export_csv(analysis_id: str, date_format: Optional[str] = None,
+               db: Session = Depends(get_db),
+               user: User = Depends(current_user)):
     """
     Export an analysis's results as CSV, in the model's own reading order.
 
@@ -465,6 +486,7 @@ def export_csv(analysis_id: str, date_format: Optional[str] = None, db: Session 
     formatted counterpart. An unrecognised value falls back to cal BP rather
     than failing the download.
     """
+    _owned_analysis(analysis_id, db, user)
     csv_content = _build_csv(analysis_id, db, date_format)
     return StreamingResponse(
         iter([csv_content]),
@@ -512,7 +534,8 @@ def _structure_payload(structure: List[Dict]) -> List[Dict]:
 
 
 @router.get("/results/{analysis_id}/export/json")
-def export_json(analysis_id: str, db: Session = Depends(get_db)):
+def export_json(analysis_id: str, db: Session = Depends(get_db),
+                user: User = Depends(current_user)):
     """
     Export an analysis's results as JSON, with sample details merged into
     each result row.
@@ -526,6 +549,7 @@ def export_json(analysis_id: str, db: Session = Depends(get_db)):
     The nested tree is not repeated here -- GET /api/analysis/{id} already
     returns model_tree.
     """
+    _owned_analysis(analysis_id, db, user)
     data = _gather_export_rows(analysis_id, db)
     analysis = data['analysis']
     structure = _structure_rows(analysis_id, db, data['rows'], data['samples_by_id'])
@@ -570,7 +594,8 @@ def _context_spans(analysis_id: str, db: Session) -> List[Dict]:
 
 @router.get("/results/{analysis_id}/pdf")
 def export_pdf(analysis_id: str, date_format: Optional[str] = None,
-                     db: Session = Depends(get_db)):
+                     db: Session = Depends(get_db),
+                     user: User = Depends(current_user)):
     """
     Export an analysis as a printable PDF report: metadata, the curves and
     solver that produced it, the results table in reading order, each
@@ -584,6 +609,7 @@ def export_pdf(analysis_id: str, date_format: Optional[str] = None,
     parameter, so a large model takes a few seconds -- the thing to revisit
     if models grow.
     """
+    _owned_analysis(analysis_id, db, user)
     data = _gather_export_rows(analysis_id, db)
     analysis = data['analysis']
     structure = _structure_rows(analysis_id, db, data['rows'], data['samples_by_id'])
@@ -619,15 +645,15 @@ def export_pdf(analysis_id: str, date_format: Optional[str] = None,
 
 
 @router.get("/results/{analysis_id}/graphs")
-def get_graphs(analysis_id: str, db: Session = Depends(get_db)):
+def get_graphs(analysis_id: str, db: Session = Depends(get_db),
+               user: User = Depends(current_user)):
     """
     Each sample's probability distribution, for API consumers that want only
     the plot data. The Results page renders from GET /api/analysis/{id}
     instead.
     """
     # An unknown analysis is a 404, not an empty graph list.
-    if not db.query(Analysis.id).filter(Analysis.id == analysis_id).first():
-        raise HTTPException(status_code=404, detail="Analysis not found")
+    _owned_analysis(analysis_id, db, user)
     results = db.query(AnalysisResult).filter(AnalysisResult.analysis_id == analysis_id).all()
     return {
         "success": True,
@@ -641,15 +667,19 @@ def get_graphs(analysis_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/results/{analysis_id}/export")
-def export_results(analysis_id: str, options: Dict, db: Session = Depends(get_db)):
+def export_results(analysis_id: str, options: Dict, db: Session = Depends(get_db),
+                   user: User = Depends(current_user)):
     """Export results in the specified format: 'csv', 'json' or 'pdf'."""
     format_type = options.get('format', 'csv')
 
+    # Each delegate re-checks ownership itself, since they are also routes in
+    # their own right. Passing `user` through rather than dropping it is what
+    # keeps that true when this is called directly rather than over HTTP.
     if format_type == 'csv':
-        return export_csv(analysis_id, options.get('date_format'), db)
+        return export_csv(analysis_id, options.get('date_format'), db, user)
     elif format_type == 'json':
-        return export_json(analysis_id, db)
+        return export_json(analysis_id, db, user)
     elif format_type == 'pdf':
-        return export_pdf(analysis_id, options.get('date_format'), db)
+        return export_pdf(analysis_id, options.get('date_format'), db, user)
     else:
         raise HTTPException(status_code=400, detail=f"Unsupported format: {format_type}")

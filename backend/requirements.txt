@@ -12,6 +12,14 @@ matplotlib==3.8.2
 seaborn==0.13.0
 reportlab==4.0.7
 python-multipart==0.0.6
+# Authentication (see services/auth.py): bcrypt hashes passwords, PyJWT signs
+# the bearer tokens. Both are the maintained, single-purpose libraries for
+# their job -- passlib, the usual pairing, has not had a release since 2020.
+bcrypt==4.1.2
+PyJWT==2.8.0
+# Backs pydantic's EmailStr, which api/auth.py uses to reject an address that
+# cannot exist before it becomes a row.
+email-validator==2.1.0
 aiofiles==23.2.1
 python-dotenv==1.0.0
 cors==1.0.1

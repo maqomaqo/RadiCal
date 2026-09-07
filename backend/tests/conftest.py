@@ -86,17 +86,60 @@ def remove_stored_curves():
     curve_registry.invalidate()
 
 
-@pytest.fixture
-def client():
+@pytest.fixture(scope="session")
+def suite_user():
     """
-    FastAPI TestClient against a throwaway SQLite database.
+    The account the suite runs as, created once.
+
+    Every endpoint except register, login and health now requires one, and
+    everything a request creates belongs to whoever made it -- so a suite
+    without an account would be 795 assertions about 401s. Having ONE user for
+    the whole session also means the suite exercises the authenticated path
+    end to end rather than around it, which is what makes the ownership
+    filters load-bearing here instead of merely present.
+
+    Tests about auth itself -- a second user, a wrong password, someone else's
+    analysis -- make their own accounts. See test_auth.py.
+    """
+    from fastapi.testclient import TestClient
+    from app.main import app
+
+    with TestClient(app) as bare:
+        response = bare.post('/api/auth/register', json={
+            'email': 'suite@radical.example.com',
+            'password': 'a test suite password',
+            'display_name': 'Suite',
+        })
+    assert response.status_code == 201, response.text
+    return response.json()['data']
+
+
+@pytest.fixture
+def client(suite_user):
+    """
+    FastAPI TestClient against a throwaway SQLite database, signed in.
 
     The database is created once for the whole session (above) and shared
     by every test, not rebuilt per test -- so anything a test persists
     under a client-chosen id has to be unique across the entire suite.
     Model element ids are the usual trap: they are a primary key, so two
     tests posting a tree with an element called "p1" collide on the second.
+
+    The Authorization header is set here rather than per test: authentication
+    is a precondition of the app working at all, not the subject of most of
+    these tests, and threading a token through 795 requests would bury what
+    each one is actually about. A test that wants to be unauthenticated builds
+    its own client -- `anonymous_client` below.
     """
+    from fastapi.testclient import TestClient
+    from app.main import app
+    return TestClient(
+        app, headers={'Authorization': f"Bearer {suite_user['token']}"})
+
+
+@pytest.fixture
+def anonymous_client():
+    """A client with no credentials, for asserting that a route requires them."""
     from fastapi.testclient import TestClient
     from app.main import app
     return TestClient(app)

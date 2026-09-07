@@ -1,4 +1,5 @@
-import { Box, Container, Link, Paper, Typography } from '@mui/material'
+import { Box, Button, Container, Link, Paper, Typography } from '@mui/material'
+import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import { Link as RouterLink } from 'react-router-dom'
 
 /**
@@ -12,7 +13,10 @@ import { Link as RouterLink } from 'react-router-dom'
  *
  * Definitions come from the implementation's own comments (services/
  * agreement.py, schemas/sample.py, models.py, utils/dateFormat.ts) rather than
- * being written fresh, so the reference and the behaviour cannot drift.
+ * being written fresh, so the glossary and the behaviour cannot drift.
+ *
+ * It sits under Help, beneath the user manual (pages/Help.tsx): the manual
+ * describes what to do, in these words, and each page links to the other.
  */
 
 interface Entry {
@@ -255,19 +259,48 @@ const SECTIONS: Section[] = [
   },
 ]
 
-export default function Reference() {
+export default function Glossary() {
   return (
     <Container maxWidth="lg" sx={{ py: 4 }}>
-     <Paper sx={{ p: 3, mb: 3 }}>
-         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2, flexWrap: 'wrap', gap: 2 }}>
+      <Paper sx={{ p: 3, mb: 3 }}>
+        <Box
+          sx={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'flex-start',
+            gap: 2,
+            flexWrap: 'wrap',
+          }}
+        >
           <Box sx={{ flexGrow: 1, minWidth: 260 }}>
-      <Typography variant="h1" component="h1">
-        Reference
-      </Typography>
-      <Typography color="text.secondary" sx={{ mt: 1.5, maxWidth: '68ch' }}>
-        The vocabulary RadiCal uses is standard in the literature. Knowing it
-        will enable you to read the output and everyone else&rsquo;s papers.
-      </Typography> </Box> </Box> </Paper>
+            {/* The trail back up: a glossary is usually arrived at from the
+                manual, mid-sentence, and the way back has to be obvious. */}
+            <Link
+              component={RouterLink}
+              to="/help"
+              sx={{ fontSize: '0.875rem', display: 'inline-block', mb: 1 }}
+            >
+              Help
+            </Link>
+            <Typography variant="h1" component="h1">
+              Glossary
+            </Typography>
+            <Typography color="text.secondary" sx={{ mt: 1.5, maxWidth: '68ch' }}>
+              The vocabulary RadiCal uses is standard in the literature. Knowing it
+              will enable you to read the output and everyone else&rsquo;s papers.
+            </Typography>
+          </Box>
+          <Button
+            component={RouterLink}
+            to="/help"
+            variant="outlined"
+            startIcon={<ArrowBackIcon />}
+            sx={{ flexShrink: 0 }}
+          >
+            User Manual
+          </Button>
+        </Box>
+      </Paper>
 
       {/* A contents list, because a glossary is a page people arrive at
           looking for one word, not a page they read top to bottom. */}

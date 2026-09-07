@@ -129,6 +129,14 @@ in one Phase, which asserts no ordering between them.
 add your own. Three are shipped with it (IntCal20, SHCal20 and Marine20) and cannot be edited or
 removed.
 
+**Curves you import or mix are private to your account.** Nobody else signed in to the same
+installation sees them, in this list or in any curve picker, and they cannot open or download one.
+Only the three shipped curves are common to everybody. This is deliberate: a curve you are still
+checking should not appear in a colleague's picker looking like a supported option, and a curve
+added for one site years ago should not quietly become something a newcomer picks by mistake. If a
+colleague needs a curve you have, send them the file — **Download** on the curve's row gives you
+back exactly the bytes you imported — and they import it themselves.
+
 Everything measured in that table is read from the curve that actually loads: its point count,
 calendar range, and the structure of its calendar grid (IntCal20 steps 1 year up to 5,000 cal BP
 and 20 years beyond 25,000). Nothing is recorded separately from the file, so what you see is what

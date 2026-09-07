@@ -13,6 +13,35 @@ session and never will: it opens its own when it has to (see the module
 docstring in `api/curves.py` for the lifecycle rules that make that safe), so
 the `get_curve()` call sites -- several inside solvers with no business holding
 a session -- stay as they are.
+
+Ownership
+---------
+A stored curve belongs to the account that imported it and is invisible to
+every other. The three builtins belong to nobody and are visible to all.
+
+That splits this module's functions cleanly in two, and the split is the thing
+to keep straight when adding to it:
+
+  **Choosing and listing** -- `list_specs`, `curve_ids`, `known_ids`,
+  `exists`, `resolve_alias`, `find_mixed`. These answer "what may this user
+  pick", so every one of them REQUIRES an `owner_id` and filters on it. The
+  argument is required rather than defaulted precisely because a default is
+  how one of these quietly starts returning everyone's curves again.
+
+  **Loading** -- `resolve`, `get_spec`, `usage`, `content_hash`. These answer
+  "what is curve X", take an id that has already been authorised, and do not
+  ask who wants it. A solver re-running a stored analysis has no user in
+  scope and must still load the curve that analysis was computed against.
+
+The security boundary is therefore api/, not here: a route checks
+`visible_to()` before it resolves. Putting it the other way round -- making
+`resolve` scoped -- would mean threading a user id through both solvers, the
+PDF renderer and the exporters to reach code whose only job is to read a file.
+
+`SCOPE_ANY` exists for the handful of internal callers that genuinely mean
+every curve regardless of owner (`usage`, and the alias index the importer
+builds). It is spelled out at each call site so that reading one is enough to
+tell whether the scope was chosen or forgotten.
 """
 from dataclasses import dataclass, asdict
 from functools import lru_cache
@@ -26,13 +55,18 @@ import numpy as np
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.database import SessionLocal
-from app.models import ProjectSample, RadiocarbonSample, StoredCalibrationCurve
+from app.models import Analysis, Project, ProjectSample, RadiocarbonSample, StoredCalibrationCurve
 from app.services.calibration import (
     CalibrationCurve,
     load_intcal20,
     load_marine20,
     load_shcal20,
 )
+
+
+# Passed as `owner_id` by a caller that genuinely means "every curve, whoever
+# imported it". Spelled out rather than defaulted: see the module docstring.
+SCOPE_ANY = '__any_owner__'
 
 
 @dataclass(frozen=True)
@@ -230,7 +264,8 @@ def content_hash(curve: CalibrationCurve) -> str:
 _STORED_CURVES: Dict[str, CalibrationCurve] = {}
 
 _INDEX_TTL_SECONDS = 5.0
-_index_cache: Optional[Dict[str, str]] = None
+# owner_id -> (name -> curve id). Keyed by owner: see _stored_index.
+_index_cache: Optional[Dict[str, Dict[str, str]]] = None
 _index_built_at: float = 0.0
 
 
@@ -285,10 +320,19 @@ def _stored_row(curve_id: str) -> Optional[StoredCalibrationCurve]:
         return None
 
 
-def _stored_rows(include_archived: bool = False) -> List[StoredCalibrationCurve]:
+def _stored_rows(owner_id: str,
+                 include_archived: bool = False) -> List[StoredCalibrationCurve]:
+    """
+    The stored curves `owner_id` may see, oldest first.
+
+    `owner_id` is positional and required so that every caller has to say
+    whose curves it wants; SCOPE_ANY is the way to say "everyone's".
+    """
     try:
         with SessionLocal() as db:
             query = db.query(StoredCalibrationCurve)
+            if owner_id != SCOPE_ANY:
+                query = query.filter(StoredCalibrationCurve.created_by == owner_id)
             if not include_archived:
                 query = query.filter(StoredCalibrationCurve.archived.is_(False))
             return query.order_by(StoredCalibrationCurve.created_at).all()
@@ -494,12 +538,16 @@ def get_spec(curve_id: str) -> CurveSpec:
     return _spec_from_row(row)
 
 
-def list_specs(include_archived: bool = False) -> List[CurveSpec]:
+def list_specs(owner_id: str, include_archived: bool = False) -> List[CurveSpec]:
     """
-    Every curve this app can calibrate against, builtins first and imports in
-    the order they were added. One that cannot be loaded -- a missing file, a
-    stored curve no longer matching its hash -- is left out rather than offered
-    for the user to select and then fail on.
+    Every curve `owner_id` may calibrate against: the three builtins, then
+    their own imports in the order they added them. One that cannot be loaded
+    -- a missing file, a stored curve no longer matching its hash -- is left
+    out rather than offered for the user to select and then fail on.
+
+    Another account's imports are not here, which is the point: a picker built
+    from this must not offer a curve belonging to someone else, and a curve
+    somebody is still developing must not read as a supported option.
     """
     specs = []
     for builtin in _BUILTINS:
@@ -507,7 +555,7 @@ def list_specs(include_archived: bool = False) -> List[CurveSpec]:
             specs.append(_spec_from_builtin(builtin))
         except ValueError:
             continue
-    for row in _stored_rows(include_archived=include_archived):
+    for row in _stored_rows(owner_id, include_archived=include_archived):
         try:
             specs.append(_spec_from_row(row))
         except ValueError:
@@ -515,56 +563,85 @@ def list_specs(include_archived: bool = False) -> List[CurveSpec]:
     return specs
 
 
-def curve_ids(include_archived: bool = False) -> Tuple[str, ...]:
-    """The ids currently resolvable, in listing order."""
-    return tuple(spec.id for spec in list_specs(include_archived=include_archived))
+def curve_ids(owner_id: str, include_archived: bool = False) -> Tuple[str, ...]:
+    """The ids `owner_id` may resolve, in listing order."""
+    return tuple(
+        spec.id for spec in list_specs(owner_id, include_archived=include_archived)
+    )
 
 
-def known_ids() -> Tuple[str, ...]:
+def known_ids(owner_id: str) -> Tuple[str, ...]:
     """
-    Every curve id that resolves, archived included, WITHOUT loading any of
-    them: an error message listing what is available should not parse three
-    curve files to write itself.
+    Every curve id `owner_id` may resolve, archived included, WITHOUT loading
+    any of them: an error message listing what is available should not parse
+    three curve files to write itself.
     """
     try:
         with SessionLocal() as db:
-            stored = [row[0] for row in db.query(StoredCalibrationCurve.id).all()]
+            query = db.query(StoredCalibrationCurve.id)
+            if owner_id != SCOPE_ANY:
+                query = query.filter(StoredCalibrationCurve.created_by == owner_id)
+            stored = [row[0] for row in query.all()]
     except SQLAlchemyError as exc:
         _no_curve_table(exc)
         stored = []
     return BUILTIN_CURVE_IDS + tuple(stored)
 
 
-def exists(curve_id: str) -> bool:
+def exists(curve_id: str, owner_id: str) -> bool:
     """
-    Whether a curve id can be calibrated against. Builtins are answered without
-    touching the database, so a payload of forty dates all on IntCal20 costs no
-    queries.
+    Whether `owner_id` may calibrate against `curve_id`. Builtins are answered
+    without touching the database, so a payload of forty dates all on IntCal20
+    costs no queries.
     """
     if curve_id in _BUILTIN_LOADERS:
         return True
-    return curve_id in _stored_index().values()
+    return curve_id in _stored_index(owner_id).values()
 
 
-def _stored_index() -> Dict[str, str]:
+def visible_to(curve_id: str, owner_id: str) -> bool:
     """
-    Name -> id for every stored curve, archived ones and aliases included.
+    Whether `owner_id` is allowed to name this curve at all.
+
+    The authorisation predicate the API checks before it resolves anything --
+    see the Ownership section of the module docstring. Distinct from `exists`
+    only in intent, and named separately because a route reading
+    `if not visible_to(...)` says what it is enforcing, where `if not
+    exists(...)` reads as a typo check.
+    """
+    return exists(curve_id, owner_id)
+
+
+def _stored_index(owner_id: str) -> Dict[str, str]:
+    """
+    Name -> id for the stored curves `owner_id` may see, archived ones and
+    aliases included.
+
     Cached briefly because it is consulted once per row of an imported CSV, and
-    rebuilding it per row would turn a 500-row import into 500 queries.
+    rebuilding it per row would turn a 500-row import into 500 queries. Keyed
+    BY OWNER: one shared cache would hand whichever user warmed it second the
+    curves of whoever warmed it first, which is the whole bug this scoping
+    exists to prevent.
     """
     global _index_cache, _index_built_at
     now = time.monotonic()
-    if _index_cache is not None and (now - _index_built_at) < _INDEX_TTL_SECONDS:
-        return _index_cache
+
+    # The whole cache ages out together rather than per owner: a dictionary of
+    # timestamps is more bookkeeping than a value that lives a few seconds is
+    # worth.
+    if _index_cache is None or (now - _index_built_at) >= _INDEX_TTL_SECONDS:
+        _index_cache = {}
+        _index_built_at = now
+    elif owner_id in _index_cache:
+        return _index_cache[owner_id]
 
     index: Dict[str, str] = {}
-    for row in _stored_rows(include_archived=True):
+    for row in _stored_rows(owner_id, include_archived=True):
         index[_normalise(row.id)] = row.id
         index[_normalise(row.name)] = row.id
         for alias in (row.aliases or ()):
             index[_normalise(alias)] = row.id
-    _index_cache = index
-    _index_built_at = now
+    _index_cache[owner_id] = index
     return index
 
 
@@ -579,7 +656,7 @@ def _builtin_index() -> Dict[str, str]:
     return index
 
 
-def resolve_alias(name: str) -> Optional[str]:
+def resolve_alias(name: str, owner_id: str) -> Optional[str]:
     """
     A curve name as written in a file -- an OxCal `Curve("=SHCal20")`, a CSV
     cell reading 'IntCal', a filename 'intcal20.14c' -- mapped to the id this
@@ -597,7 +674,7 @@ def resolve_alias(name: str) -> Optional[str]:
     builtin = _builtin_index().get(key)
     if builtin is not None:
         return builtin
-    return _stored_index().get(key)
+    return _stored_index(owner_id).get(key)
 
 
 # How close a stored mixture must be to a requested one to be the same.
@@ -606,9 +683,10 @@ def resolve_alias(name: str) -> Optional[str]:
 MIX_MATCH_TOLERANCE = 0.1
 
 
-def find_mixed(a_id: str, b_id: str, percent_a: float, percent_a_error: float) -> Optional[str]:
+def find_mixed(a_id: str, b_id: str, percent_a: float, percent_a_error: float,
+               owner_id: str) -> Optional[str]:
     """
-    A stored mixed curve built from this recipe, or None.
+    A mixed curve of `owner_id`'s built from this recipe, or None.
 
     Both orderings are checked with the percentage flipped: 30% IntCal20 with
     Marine20 IS 70% Marine20 with IntCal20.
@@ -617,12 +695,20 @@ def find_mixed(a_id: str, b_id: str, percent_a: float, percent_a_error: float) -
     OxCal importer matches a file's Mix_Curves against what this app has, and
     the create endpoint refuses a duplicate -- two curves with one recipe would
     be the same numbers under two names, making that matching arbitrary.
+
+    Scoped, and "duplicate" is therefore per user: two accounts may each hold
+    their own 30/70 mixture. They are the same numbers, but a curve one of them
+    cannot see is not a duplicate they could have reused -- and refusing the
+    second would report the existence of the first.
     """
     try:
         with SessionLocal() as db:
-            rows = db.query(StoredCalibrationCurve).filter(
+            query = db.query(StoredCalibrationCurve).filter(
                 StoredCalibrationCurve.kind == 'mixed'
-            ).order_by(StoredCalibrationCurve.created_at).all()
+            )
+            if owner_id != SCOPE_ANY:
+                query = query.filter(StoredCalibrationCurve.created_by == owner_id)
+            rows = query.order_by(StoredCalibrationCurve.created_at).all()
             recipes = [(row.id, dict(row.recipe or {})) for row in rows]
     except SQLAlchemyError as exc:
         _no_curve_table(exc)
@@ -642,25 +728,52 @@ def find_mixed(a_id: str, b_id: str, percent_a: float, percent_a_error: float) -
     return None
 
 
-def usage(curve_id: str) -> Dict[str, Any]:
+def usage(curve_id: str, owner_id: Optional[str] = None) -> Dict[str, Any]:
     """
     What is already calibrated against this curve.
 
     Deleting a curve out from under a stored analysis would leave a result that
     can be displayed but never reproduced, so api/curves.py checks this first
     and reports it back: "used by 3 analyses" is actionable where "409" is not.
+
+    **The counts are always global, across every user.** Curves are shared
+    reference data, so whether one may be deleted is a question about all of
+    them -- scoping this to the caller would let one user delete a curve
+    another user's stored results were computed against, which is the exact
+    thing this function exists to prevent.
+
+    `owner_id` PARTITIONS rather than filters. The id lists come back holding
+    only that user's own analyses and projects, with everyone else's reduced to
+    a count under `others_count` -- so the answer stays complete without
+    handing one user a list of another's row ids.
     """
     with SessionLocal() as db:
-        analysis_ids = [
+        analysis_rows = [
             row[0] for row in db.query(RadiocarbonSample.analysis_id)
             .filter(RadiocarbonSample.curve_id == curve_id)
             .distinct().all()
         ]
-        project_ids = [
+        project_rows = [
             row[0] for row in db.query(ProjectSample.project_id)
             .filter(ProjectSample.curve_id == curve_id)
             .distinct().all()
         ]
+
+        analysis_ids, project_ids, others = analysis_rows, project_rows, 0
+        if owner_id is not None:
+            mine = {
+                row[0] for row in db.query(Analysis.id)
+                .filter(Analysis.id.in_(analysis_rows or ['']),
+                        Analysis.owner_id == owner_id).all()
+            }
+            my_projects = {
+                row[0] for row in db.query(Project.id)
+                .filter(Project.id.in_(project_rows or ['']),
+                        Project.owner_id == owner_id).all()
+            }
+            others = (len(analysis_rows) - len(mine)) + (len(project_rows) - len(my_projects))
+            analysis_ids = [a for a in analysis_rows if a in mine]
+            project_ids = [p for p in project_rows if p in my_projects]
         # A mixed curve holds its parents by id, so an ingredient is in use
         # for as long as the mix exists.
         mixed = [
@@ -673,5 +786,11 @@ def usage(curve_id: str) -> Dict[str, Any]:
         'analysis_ids': analysis_ids,
         'project_ids': project_ids,
         'mixed_curve_ids': mixed,
-        'in_use': bool(analysis_ids or project_ids or mixed),
+        # Other people's use of this curve, as a bare count. It has to reach
+        # the caller somehow -- it is why their delete was refused -- but it
+        # reaches them as a number, not as a list of ids.
+        'others_count': others,
+        # The global answer, which is the one that decides whether a delete is
+        # allowed. Never derived from the (possibly partitioned) lists above.
+        'in_use': bool(analysis_rows or project_rows or mixed),
     }

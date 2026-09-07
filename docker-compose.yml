@@ -31,6 +31,12 @@ services:
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-radiocarbon}:${POSTGRES_PASSWORD:-password}@postgres:5432/${POSTGRES_DB:-radiocarbon_db}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
+      # Passed through rather than defaulted. An empty RADICAL_SECRET_KEY is
+      # what makes the app fall back to its development key and say so; giving
+      # it a default here would put a real-looking key in version control,
+      # which is the one thing a signing key must never be.
+      RADICAL_ENV: ${RADICAL_ENV:-development}
+      RADICAL_SECRET_KEY: ${RADICAL_SECRET_KEY:-}
       INTCAL_CURVE_PATH: ${INTCAL_CURVE_PATH:-/app/data/intcal20.14c}
       MARINE_CURVE_PATH: ${MARINE_CURVE_PATH:-/app/data/marine20.14c}
       SHCAL_CURVE_PATH: ${SHCAL_CURVE_PATH:-/app/data/shcal20.14c}

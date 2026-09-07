@@ -14,7 +14,9 @@ from sqlalchemy.orm import Session
 from typing import Optional
 
 from app.database import get_db
-from app.models import Project, ProjectSample, Analysis, RadiocarbonSample, SampleGroup
+from app.models import Project, ProjectSample, Analysis, RadiocarbonSample, SampleGroup, User
+from app.api.auth import current_user, owned_or_404
+from app.api.curves import authorise_curve_ids
 from app.schemas.sample import (
     ProjectSampleBulkInput,
     ProjectSampleBulkDelete,
@@ -27,11 +29,21 @@ from app.services import curve_registry
 router = APIRouter()
 
 
-def _require_project(project_id: str, db: Session) -> Project:
-    project = db.query(Project).filter(Project.id == project_id).first()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
-    return project
+def _require_project(project_id: str, db: Session, user: User) -> Project:
+    """
+    The project, if it is this user's.
+
+    Every route in this file goes through here, which is why the ownership
+    check lives here and not in each of them: a ProjectSample carries no owner
+    of its own -- a collected date has no meaning outside its project -- so the
+    project IS the access boundary for everything below.
+
+    Someone else's project is a 404, like a missing one. See
+    api/auth.owned_or_404.
+    """
+    return owned_or_404(
+        db.query(Project).filter(Project.id == project_id).first(),
+        user, 'That project')
 
 
 def _serialize(sample: ProjectSample) -> dict:
@@ -58,9 +70,10 @@ def _serialize(sample: ProjectSample) -> dict:
 
 
 @router.get("/projects/{project_id}/samples")
-def list_project_samples(project_id: str, db: Session = Depends(get_db)):
+def list_project_samples(project_id: str, db: Session = Depends(get_db),
+                         user: User = Depends(current_user)):
     """List every date in this project's collection, oldest entry first."""
-    _require_project(project_id, db)
+    _require_project(project_id, db, user)
     samples = (
         db.query(ProjectSample)
         .filter(ProjectSample.project_id == project_id)
@@ -75,12 +88,17 @@ def create_project_samples(
     project_id: str,
     request: ProjectSampleBulkInput,
     db: Session = Depends(get_db),
+    user: User = Depends(current_user),
 ):
     """
     Add dates to this project's collection. Takes a list so the UI's
     bulk-paste path is one request rather than N.
     """
-    _require_project(project_id, db)
+    _require_project(project_id, db, user)
+    # Every curve named here must be one this user may calibrate against.
+    # The schema has already checked the ids name real curves; this is the
+    # separate question of whether they are theirs. See api/curves.py.
+    authorise_curve_ids([item.curve_id for item in request.samples], user.id)
 
     created = []
     for item in request.samples:
@@ -121,12 +139,13 @@ def update_project_sample(
     sample_id: str,
     updates: ProjectSampleUpdate,
     db: Session = Depends(get_db),
+    user: User = Depends(current_user),
 ):
     """
     Edit a date in the collection. Analyses already deployed from it hold
     their own copies and are untouched (see ProjectSample).
     """
-    _require_project(project_id, db)
+    _require_project(project_id, db, user)
     sample = (
         db.query(ProjectSample)
         .filter(ProjectSample.id == sample_id, ProjectSample.project_id == project_id)
@@ -161,12 +180,13 @@ def update_project_sample(
 
 
 @router.delete("/projects/{project_id}/samples/{sample_id}")
-def delete_project_sample(project_id: str, sample_id: str, db: Session = Depends(get_db)):
+def delete_project_sample(project_id: str, sample_id: str, db: Session = Depends(get_db),
+                          user: User = Depends(current_user)):
     """
     Remove a date from the collection. Analyses already deployed from it
     keep their own copies and are unaffected.
     """
-    _require_project(project_id, db)
+    _require_project(project_id, db, user)
     sample = (
         db.query(ProjectSample)
         .filter(ProjectSample.id == sample_id, ProjectSample.project_id == project_id)
@@ -202,6 +222,7 @@ def bulk_update_project_samples(
     project_id: str,
     request: ProjectSampleBulkUpdate,
     db: Session = Depends(get_db),
+    user: User = Depends(current_user),
 ):
     """
     Apply one value across a selection of this project's dates. Neither field
@@ -224,7 +245,7 @@ def bulk_update_project_samples(
 
     Analyses already deployed from these dates are untouched.
     """
-    _require_project(project_id, db)
+    _require_project(project_id, db, user)
 
     samples = (
         db.query(ProjectSample)
@@ -244,6 +265,7 @@ def bulk_update_project_samples(
     updated, skipped, type_changed = [], [], 0
 
     if 'curve_id' in sent:
+        authorise_curve_ids([request.curve_id], user.id)
         spec = curve_registry.get_spec(request.curve_id)
         sample_type = 'marine' if spec.sample_type == 'marine' else 'terrestrial'
         for sample in samples:
@@ -288,6 +310,7 @@ def bulk_delete_project_samples(
     project_id: str,
     request: ProjectSampleBulkDelete,
     db: Session = Depends(get_db),
+    user: User = Depends(current_user),
 ):
     """
     Remove several dates from the collection at once.
@@ -302,7 +325,7 @@ def bulk_delete_project_samples(
 
     Analyses already deployed from these dates are unaffected.
     """
-    _require_project(project_id, db)
+    _require_project(project_id, db, user)
 
     samples = (
         db.query(ProjectSample)
@@ -333,6 +356,7 @@ def deploy_samples_to_analysis(
     project_id: str,
     request: DeployRequest,
     db: Session = Depends(get_db),
+    user: User = Depends(current_user),
 ):
     """
     Create a new analysis in this project from a selection of its dates.
@@ -348,7 +372,7 @@ def deploy_samples_to_analysis(
     Deploying more than one date as `calibration` produces a
     `group_calibration`; `data.analysis_type` reports the type created.
     """
-    _require_project(project_id, db)
+    _require_project(project_id, db, user)
 
     samples = (
         db.query(ProjectSample)
@@ -381,6 +405,7 @@ def deploy_samples_to_analysis(
         status='pending',
         bayesian_config={},
         project_id=project_id,
+        owner_id=user.id,
     )
     db.add(analysis)
     db.flush()

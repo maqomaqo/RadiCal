@@ -28,8 +28,23 @@ that takes the same file again. The file rather than the parsed rows, so
 there is exactly one parser and no second path by which curve data can reach
 the database.
 
-Mixed curves have a column and a lifecycle here but no endpoint yet -- see
-docs/CURVE_MANAGER_PLAN.md §4.3.
+A stored curve is PRIVATE to the account that imported it. Only the three
+builtins are shared.
+
+That is a reversal of how this started, and the reasons are the ones that only
+show up once more than one person is using an install: a curve someone is
+still developing must not sit in everybody's picker looking like a supported
+option, and a curve imported years ago for one site must not quietly become
+an app-wide default that a newcomer picks by mistake. Reference data that
+everyone can see is only reference data if somebody vouched for it, and
+nothing here does.
+
+So every endpoint below is scoped, and the two rules from api/auth.py apply
+unchanged: another account's curve is a 404, never a 403, and the listing
+endpoints FILTER rather than check. `services/curve_registry.py` carries the
+matching split between the functions that choose (scoped) and the functions
+that load (not scoped, because a solver re-running a stored analysis has no
+user in scope). `authorise_curve_ids` below is the boundary between them.
 """
 from typing import Dict, List, Optional
 
@@ -39,7 +54,8 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.database import SessionLocal, get_db
-from app.models import StoredCalibrationCurve
+from app.models import StoredCalibrationCurve, User
+from app.api.auth import current_user
 from app.services.calibration import SIGMA_1, SIGMA_2, CalibrationCurve
 from app.schemas.curve import (
     CurveMetadata, CurveMetadataUpdate, MixedCurveRequest, SimulateRequest,
@@ -49,6 +65,62 @@ from app.services import curve_import, curve_mix, curve_registry, curve_view, re
 
 router = APIRouter()
 
+
+def visible_or_404(curve_id: str, owner_id: str) -> None:
+    """
+    Refuse unless `owner_id` may see this curve.
+
+    404 rather than 403, for the reason api/auth.owned_or_404 gives: a 403
+    confirms the curve exists, which would turn every id-taking endpoint here
+    into a way to enumerate what other people have imported. "No such curve"
+    is the same answer for a typo and for somebody else's curve, deliberately.
+
+    Called at the TOP of each route that takes a curve id, before anything
+    resolves. The registry's loaders do not check -- see its docstring -- so
+    this is the only thing between a guessed id and another user's curve data.
+    """
+    if not curve_registry.visible_to(curve_id, owner_id):
+        raise HTTPException(status_code=404, detail=f"No calibration curve '{curve_id}'.")
+
+
+def authorise_curve_ids(curve_ids, owner_id: str) -> None:
+    """
+    Refuse the request unless `owner_id` may name every one of these curves.
+
+    The boundary the module docstring names. `schemas.sample.validate_curve_id`
+    has already rejected ids that name no curve at all; what is left for this
+    to catch is an id that names a real curve belonging to somebody else --
+    which arrives looking exactly like a valid request, because it is one for
+    its owner.
+
+    A 422 naming the curves the caller CAN use, rather than a 403: they asked
+    for something that is, from where they stand, not there. The wording does
+    not say the curve exists for someone else, and the list is theirs alone.
+
+    Imported by api/analysis.py and api/project_samples.py as well as used
+    here, so that every path by which a curve id reaches a stored row goes
+    through one check.
+    """
+    wanted = {c for c in curve_ids if c}
+    if not wanted:
+        return
+    unusable = sorted(c for c in wanted
+                      if not curve_registry.visible_to(c, owner_id))
+    if not unusable:
+        return
+
+    available = ', '.join(curve_registry.curve_ids(owner_id))
+    named = ', '.join(f"'{c}'" for c in unusable)
+    raise HTTPException(
+        status_code=422,
+        detail=(
+            f"No calibration curve {named} is available to you. You can "
+            f"calibrate against: {available}. Import the curve to add it to "
+            "that list -- a curve this app does not have for you cannot be "
+            "substituted for one it does."
+        ),
+    )
+
 # Only three curves exist today, but the response has always been paginated
 # and callers may rely on that shape. The default is well clear of the curve
 # count rather than the previous 10, so that adding curves cannot silently
@@ -57,14 +129,15 @@ DEFAULT_LIMIT = 100
 
 
 @router.get("/curves")
-def list_curves(limit: int = DEFAULT_LIMIT, include_archived: bool = False):
+def list_curves(limit: int = DEFAULT_LIMIT, include_archived: bool = False,
+                user: User = Depends(current_user)):
     """
     Every curve available for calibration, in the order they should be
     offered. This is the list the frontend's curve pickers are built from,
     which is why archived curves are left out by default: they still resolve,
     so old analyses rerun, but they are not offered for new work.
     """
-    specs = curve_registry.list_specs(include_archived=include_archived)
+    specs = curve_registry.list_specs(user.id, include_archived=include_archived)
     items = [spec.as_dict() for spec in specs[:limit]]
     return {
         "success": True,
@@ -85,6 +158,7 @@ def compare_curves(
     cal_from: Optional[float] = Query(None),
     cal_to: Optional[float] = Query(None),
     max_points: int = Query(curve_view.DEFAULT_MAX_POINTS, ge=2, le=curve_view.MAX_MAX_POINTS),
+    user: User = Depends(current_user),
 ):
     """
     Two curves on one grid, with their difference.
@@ -99,6 +173,8 @@ def compare_curves(
     pattern is concerned, so the other way round this endpoint is a 404 for a
     curve that does not exist.
     """
+    visible_or_404(a, user.id)
+    visible_or_404(b, user.id)
     try:
         curve_a = curve_registry.resolve(a)
         curve_b = curve_registry.resolve(b)
@@ -116,8 +192,9 @@ def compare_curves(
 
 
 @router.get("/curves/{curve_id}")
-def get_curve(curve_id: str):
+def get_curve(curve_id: str, user: User = Depends(current_user)):
     """One curve's full description, including its measured metadata."""
+    visible_or_404(curve_id, user.id)
     try:
         spec = curve_registry.get_spec(curve_id)
     except ValueError as exc:
@@ -126,14 +203,14 @@ def get_curve(curve_id: str):
 
 
 @router.get("/curves/type/{curve_type}")
-def get_curves_by_type(curve_type: str):
+def get_curves_by_type(curve_type: str, user: User = Depends(current_user)):
     """
     Curves of one display type ('terrestrial', 'marine',
     'southern_hemisphere'). An unknown type is an empty list, not a 404: it
     is a filter that matched nothing, not a missing resource.
     """
     curves = [
-        spec.as_dict() for spec in curve_registry.list_specs()
+        spec.as_dict() for spec in curve_registry.list_specs(user.id)
         if spec.type == curve_type
     ]
     return {"success": True, "data": curves}
@@ -145,6 +222,7 @@ def curve_points(
     cal_from: Optional[float] = Query(None, description="Window start, cal BP"),
     cal_to: Optional[float] = Query(None, description="Window end, cal BP"),
     max_points: int = Query(curve_view.DEFAULT_MAX_POINTS, ge=2, le=curve_view.MAX_MAX_POINTS),
+    user: User = Depends(current_user),
 ):
     """
     A drawable slice of a curve: [cal BP, 14C age, 1-sigma, slope] rows.
@@ -155,6 +233,7 @@ def curve_points(
     services/curve_view) rather than every Nth point, which is a decision that
     belongs with the curve rather than with whichever client is drawing it.
     """
+    visible_or_404(curve_id, user.id)
     try:
         curve = curve_registry.resolve(curve_id)
     except ValueError as exc:
@@ -166,7 +245,8 @@ def curve_points(
 
 
 @router.post("/curves/{curve_id}/simulate")
-def simulate_date(curve_id: str, request: SimulateRequest):
+def simulate_date(curve_id: str, request: SimulateRequest,
+                  user: User = Depends(current_user)):
     """
     What a date from a given calendar year would look like.
 
@@ -178,6 +258,7 @@ def simulate_date(curve_id: str, request: SimulateRequest):
     is the question a curve browser is for. It is also the single-date
     counterpart of the aggregate the resolution panel reports.
     """
+    visible_or_404(curve_id, user.id)
     try:
         curve = curve_registry.resolve(curve_id)
     except ValueError as exc:
@@ -219,9 +300,11 @@ def curve_points_csv(
     cal_from: Optional[float] = Query(None),
     cal_to: Optional[float] = Query(None),
     max_points: int = Query(curve_view.MAX_MAX_POINTS, ge=2, le=curve_view.MAX_MAX_POINTS),
+    user: User = Depends(current_user),
 ):
     """The visible window as CSV, so a stretch of curve can leave this app as
     data rather than only as a picture."""
+    visible_or_404(curve_id, user.id)
     try:
         curve = curve_registry.resolve(curve_id)
         spec = curve_registry.get_spec(curve_id)
@@ -252,6 +335,7 @@ def curve_resolution(
     u0: float = Query(resolution.DEFAULT_U0, gt=0, le=500,
                       description="Laboratory 1-sigma at 0 BP, scaled with age from there"),
     stride: int = Query(5, ge=1, le=200, description="Report every N calendar years"),
+    user: User = Depends(current_user),
 ):
     """
     How tightly a date from each calendar age could be known, before anyone
@@ -262,6 +346,7 @@ def curve_resolution(
     over what a single date might return: how lucky or unlucky one measurement
     of a sample from that year can be.
     """
+    visible_or_404(curve_id, user.id)
     try:
         curve = curve_registry.resolve(curve_id)
         spec = curve_registry.get_spec(curve_id)
@@ -301,11 +386,13 @@ def curve_resolution_csv(
     curve_id: str,
     u0: float = Query(resolution.DEFAULT_U0, gt=0, le=500),
     stride: int = Query(5, ge=1, le=200),
+    user: User = Depends(current_user),
 ):
     """
     The whole curve's resolution profile as a CSV, in the column order res14c
     publishes so the two can be compared directly.
     """
+    visible_or_404(curve_id, user.id)
     try:
         curve = curve_registry.resolve(curve_id)
         spec = curve_registry.get_spec(curve_id)
@@ -345,6 +432,7 @@ def _check_size(content: bytes) -> None:
 async def preview_curve(
     file: UploadFile = File(...),
     calendar: str = Form('cal_bp'),
+    user: User = Depends(current_user),
 ):
     """
     Read an uploaded curve file and report what it holds, storing nothing.
@@ -386,6 +474,7 @@ async def create_curve(
     calendar: str = Form('cal_bp'),
     curve_id: Optional[str] = Form(None),
     db: Session = Depends(get_db),
+    user: User = Depends(current_user),
 ):
     """
     Store a previewed curve.
@@ -401,11 +490,45 @@ async def create_curve(
     """
     content = await file.read()
     return await run_in_threadpool(
-        _create_curve, file.filename, content, metadata, calendar, curve_id, db)
+        _create_curve, file.filename, content, metadata, calendar, curve_id, db,
+        user.id)
+
+
+def _free_slug(slug: str, db: Session) -> str:
+    """
+    `slug`, or the first `slug-2`, `slug-3`... not already taken by SOMEBODY.
+
+    Curve ids are one global primary key while curves themselves are per user,
+    so two accounts each importing "shcal20-local" would collide on an insert
+    even though neither can see the other's. Refusing the second would be both
+    a confusing dead end and a disclosure -- "that id is taken" says a curve
+    exists that the caller cannot see.
+
+    Suffixing instead. The id is an internal handle: pickers, tables and the
+    PDF all show the curve's NAME, which is the user's own and untouched, so
+    the only visible effect is a slightly longer id in a URL. The caller's own
+    clash with their own curve is checked separately and still refused, because
+    that one they can see and act on.
+    """
+    taken = {row[0] for row in db.query(StoredCalibrationCurve.id).all()}
+    taken.update(curve_registry.BUILTIN_CURVE_IDS)
+    if slug not in taken:
+        return slug
+    for n in range(2, 1000):
+        candidate = f'{slug}-{n}'
+        if candidate not in taken:
+            return candidate
+    # A thousand curves sharing one slug is not a case worth coding around,
+    # but silently reusing an id would corrupt whichever curve holds it.
+    raise HTTPException(
+        status_code=409,
+        detail=f"Could not find a free id based on '{slug}'. Choose another id.",
+    )
 
 
 def _create_curve(filename: Optional[str], content: bytes, metadata: str,
-                  calendar: str, curve_id: Optional[str], db: Session) -> Dict:
+                  calendar: str, curve_id: Optional[str], db: Session,
+                  owner_id: str) -> Dict:
     meta = CurveMetadata.model_validate_json(metadata)
 
     _check_size(content)
@@ -426,17 +549,20 @@ def _create_curve(filename: Optional[str], content: bytes, metadata: str,
                 "lowercase letters, digits, hyphens or underscores."
             ),
         )
-    if curve_registry.resolve_alias(slug) is not None:
+    if curve_registry.resolve_alias(slug, owner_id) is not None:
         raise HTTPException(
             status_code=409,
             detail=(
-                f"A calibration curve '{slug}' already exists. Curve data is "
+                f"You already have a calibration curve '{slug}'. Curve data is "
                 "immutable, so a correction is imported as a new curve under "
                 "a new id rather than replacing this one."
             ),
         )
+    # Past their own curves, the id still has to be unique across the table.
+    # Someone else's identical slug is not the caller's problem to solve.
+    slug = _free_slug(slug, db)
     for alias in meta.aliases:
-        clash = curve_registry.resolve_alias(alias)
+        clash = curve_registry.resolve_alias(alias, owner_id)
         if clash is not None:
             raise HTTPException(
                 status_code=409,
@@ -468,6 +594,7 @@ def _create_curve(filename: Optional[str], content: bytes, metadata: str,
         content_sha256=curve_registry.content_hash(curve),
         aliases=meta.aliases,
         archived=False,
+        created_by=owner_id,
     )
     db.add(row)
     db.commit()
@@ -482,7 +609,8 @@ def _create_curve(filename: Optional[str], content: bytes, metadata: str,
 
 
 @router.post("/curves/mixed", status_code=201)
-def create_mixed_curve(request: MixedCurveRequest, db: Session = Depends(get_db)):
+def create_mixed_curve(request: MixedCurveRequest, db: Session = Depends(get_db),
+                       user: User = Depends(current_user)):
     """
     Define a curve as a proportional mixture of two others, for samples whose
     carbon came from more than one reservoir -- most often a human or animal
@@ -493,7 +621,7 @@ def create_mixed_curve(request: MixedCurveRequest, db: Session = Depends(get_db)
     its parents, and they count as in use for as long as it exists.
     """
     for curve_id in (request.a, request.b):
-        if not curve_registry.exists(curve_id):
+        if not curve_registry.exists(curve_id, user.id):
             raise HTTPException(
                 status_code=422,
                 detail=f"There is no calibration curve '{curve_id}' to mix.",
@@ -517,14 +645,15 @@ def create_mixed_curve(request: MixedCurveRequest, db: Session = Depends(get_db)
                 "lowercase letters, digits, hyphens or underscores."
             ),
         )
-    if curve_registry.resolve_alias(slug) is not None:
+    if curve_registry.resolve_alias(slug, user.id) is not None:
         raise HTTPException(
             status_code=409,
-            detail=f"A calibration curve '{slug}' already exists.",
+            detail=f"You already have a calibration curve '{slug}'.",
         )
+    slug = _free_slug(slug, db)
 
     existing = curve_registry.find_mixed(
-        request.a, request.b, request.percent_a, request.percent_a_error
+        request.a, request.b, request.percent_a, request.percent_a_error, user.id
     )
     if existing is not None:
         raise HTTPException(
@@ -571,6 +700,7 @@ def create_mixed_curve(request: MixedCurveRequest, db: Session = Depends(get_db)
         content_sha256=curve_registry.content_hash(mixed),
         aliases=request.aliases,
         archived=False,
+        created_by=user.id,
     )
     db.add(row)
     db.commit()
@@ -584,7 +714,17 @@ def create_mixed_curve(request: MixedCurveRequest, db: Session = Depends(get_db)
 # --------------------------------------------------------------------------
 
 
-def _stored_or_404(curve_id: str, db: Session) -> StoredCalibrationCurve:
+def _stored_or_404(curve_id: str, db: Session, owner_id: str) -> StoredCalibrationCurve:
+    """
+    A stored curve of `owner_id`'s, for the routes that change or remove one.
+
+    The builtin case keeps its 403 and its explanation: those three ids are
+    public knowledge, so saying "that one ships with the app" reveals nothing
+    and is far more use than a 404.
+
+    Another account's curve gets the plain 404, exactly as an id that names
+    nothing does -- the distinction this whole module now maintains.
+    """
     row = db.query(StoredCalibrationCurve).filter(
         StoredCalibrationCurve.id == curve_id
     ).one_or_none()
@@ -598,6 +738,8 @@ def _stored_or_404(curve_id: str, db: Session) -> StoredCalibrationCurve:
                 ),
             )
         raise HTTPException(status_code=404, detail=f"Unknown calibration curve '{curve_id}'.")
+    if row.created_by != owner_id:
+        raise HTTPException(status_code=404, detail=f"Unknown calibration curve '{curve_id}'.")
     return row
 
 
@@ -606,6 +748,7 @@ def update_curve(
     curve_id: str,
     update: CurveMetadataUpdate,
     db: Session = Depends(get_db),
+    user: User = Depends(current_user),
 ):
     """
     Correct a stored curve's description, citation or aliases.
@@ -614,11 +757,11 @@ def update_curve(
     run against this curve has to keep meaning what it said. Importing a
     corrected file creates a new curve.
     """
-    row = _stored_or_404(curve_id, db)
+    row = _stored_or_404(curve_id, db, user.id)
     fields = update.model_dump(exclude_unset=True)
 
     for alias in fields.get('aliases') or []:
-        clash = curve_registry.resolve_alias(alias)
+        clash = curve_registry.resolve_alias(alias, user.id)
         if clash is not None and clash != curve_id:
             raise HTTPException(
                 status_code=409,
@@ -633,12 +776,18 @@ def update_curve(
 
 
 @router.get("/curves/{curve_id}/usage")
-def curve_usage(curve_id: str):
+def curve_usage(curve_id: str, user: User = Depends(current_user)):
     """What is already calibrated against this curve. Empty for a curve
-    nothing uses, which is the only kind that can be deleted outright."""
-    if not curve_registry.exists(curve_id):
+    nothing uses, which is the only kind that can be deleted outright.
+
+    `in_use` counts EVERY user's work, because that is what decides whether the
+    curve may be deleted. The id lists hold only this user's own analyses and
+    projects; everyone else's are reduced to `others_count`, so the answer is
+    complete without handing one user a list of another's row ids. See
+    curve_registry.usage."""
+    if not curve_registry.visible_to(curve_id, user.id):
         raise HTTPException(status_code=404, detail=f"Unknown calibration curve '{curve_id}'.")
-    return {"success": True, "data": curve_registry.usage(curve_id)}
+    return {"success": True, "data": curve_registry.usage(curve_id, owner_id=user.id)}
 
 
 @router.delete("/curves/{curve_id}")
@@ -646,6 +795,7 @@ def delete_curve(
     curve_id: str,
     archive: bool = Query(False, description="Archive instead of deleting"),
     db: Session = Depends(get_db),
+    user: User = Depends(current_user),
 ):
     """
     Remove a stored curve, or archive it.
@@ -655,7 +805,7 @@ def delete_curve(
     displayed but never reproduced. Archiving is the way out -- the curve
     leaves every picker but still resolves, so those analyses still rerun.
     """
-    row = _stored_or_404(curve_id, db)
+    row = _stored_or_404(curve_id, db, user.id)
 
     if archive:
         row.archived = True
@@ -663,7 +813,10 @@ def delete_curve(
         curve_registry.invalidate(curve_id)
         return {"success": True, "data": {"id": curve_id, "archived": True}}
 
-    in_use = curve_registry.usage(curve_id)
+    # No owner_id: the guard is about everyone's work, not this user's. A
+    # curve another analyst has calibrated against must not be deletable just
+    # because the person deleting it has not used it themselves.
+    in_use = curve_registry.usage(curve_id, owner_id=user.id)
     if in_use['in_use']:
         raise HTTPException(
             status_code=409,
@@ -684,9 +837,10 @@ def delete_curve(
 
 
 @router.post("/curves/{curve_id}/restore")
-def restore_curve(curve_id: str, db: Session = Depends(get_db)):
+def restore_curve(curve_id: str, db: Session = Depends(get_db),
+                  user: User = Depends(current_user)):
     """Bring an archived curve back into the pickers."""
-    row = _stored_or_404(curve_id, db)
+    row = _stored_or_404(curve_id, db, user.id)
     row.archived = False
     db.commit()
     curve_registry.invalidate(curve_id)
@@ -694,7 +848,7 @@ def restore_curve(curve_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/curves/{curve_id}/export")
-def export_curve(curve_id: str):
+def export_curve(curve_id: str, user: User = Depends(current_user)):
     """
     The curve as a .14c file.
 
@@ -704,6 +858,7 @@ def export_curve(curve_id: str):
     (a builtin, later a mixed curve) is rendered from its points into the same
     format.
     """
+    visible_or_404(curve_id, user.id)
     try:
         spec = curve_registry.get_spec(curve_id)
     except ValueError as exc:

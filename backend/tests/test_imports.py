@@ -1005,19 +1005,17 @@ class TestImportApi:
         assert data['ok'] is True
         assert data['dates'][0]['sample_name'] == 'OxA-1'
 
-    def test_a_bad_file_is_a_200_carrying_its_problems(self):
+    def test_a_bad_file_is_a_200_carrying_its_problems(self, client):
         """
         The request succeeded; the answer is what is wrong with the file.
         Reserving the error status for actual request failures keeps 'the
         upload broke' distinguishable from 'row 2 has a letter in the age'.
-        """
-        from fastapi.testclient import TestClient
-        from app.main import app
 
-        response = TestClient(app).post(
-            '/api/import/dates',
-            files={'file': ('dates.csv', io.BytesIO(b'name,age,error\nA,oops,25\n'), 'text/csv')},
-        )
+        Uses the shared `client` rather than building a bare TestClient, which
+        is what it did before the endpoints required an account -- a bare one
+        now answers 401 and never reaches the parser this is about.
+        """
+        response = self._upload(client, 'dates.csv', b'name,age,error\nA,oops,25\n')
 
         assert response.status_code == 200
         data = response.json()['data']

@@ -14,15 +14,20 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
+from app.api.auth import current_user, owned_or_404
 from app.database import get_db
-from app.models import Job
+from app.models import Job, User
 from app.services import jobs
 
 router = APIRouter()
 
 
 @router.get("/jobs/{job_id}")
-def get_job(job_id: str, db: Session = Depends(get_db)):
+def get_job(
+    job_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+):
     """
     One job's state, progress and detail.
 
@@ -34,9 +39,8 @@ def get_job(job_id: str, db: Session = Depends(get_db)):
     1.0. `detail.convergence` says how well, and is the figure to show beside
     a bar about to jump from 0.3 to done.
     """
-    row = db.query(Job).filter(Job.id == job_id).first()
-    if row is None:
-        raise HTTPException(status_code=404, detail="Job not found")
+    row = owned_or_404(
+        db.query(Job).filter(Job.id == job_id).first(), user, 'That job')
     return {"success": True, "data": jobs.as_dict(row)}
 
 
@@ -45,6 +49,7 @@ def list_jobs(
     target_id: Optional[str] = Query(None, description="Analysis or project id"),
     limit: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
+    user: User = Depends(current_user),
 ):
     """
     Recent jobs, newest first, optionally about one analysis or project.
@@ -52,7 +57,10 @@ def list_jobs(
     `target_id` is what a bookmarked page uses: it has an analysis id and no
     job id, and still needs to know whether something is running.
     """
-    query = db.query(Job)
+    # Filtered rather than checked per row: a job carries its owner, and
+    # filtering in the query is what stops a new job kind leaking by someone
+    # forgetting a check inside the loop below.
+    query = db.query(Job).filter(Job.owner_id == user.id)
     if target_id:
         query = query.filter(Job.target_id == target_id)
     rows = query.order_by(Job.created_at.desc()).limit(limit).all()
@@ -60,7 +68,11 @@ def list_jobs(
 
 
 @router.delete("/jobs/{job_id}")
-def cancel_job(job_id: str, db: Session = Depends(get_db)):
+def cancel_job(
+    job_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+):
     """
     Ask a job to stop.
 
@@ -70,9 +82,8 @@ def cancel_job(job_id: str, db: Session = Depends(get_db)):
     'cancelled'. A cancelled run writes nothing, so the analysis keeps the
     results it had: a stop, not an undo.
     """
-    row = db.query(Job).filter(Job.id == job_id).first()
-    if row is None:
-        raise HTTPException(status_code=404, detail="Job not found")
+    row = owned_or_404(
+        db.query(Job).filter(Job.id == job_id).first(), user, 'That job')
     if row.state not in ('queued', 'running'):
         raise HTTPException(
             status_code=409,

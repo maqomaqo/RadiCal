@@ -4,6 +4,47 @@ from datetime import datetime
 from app.database import Base
 import uuid
 
+class User(Base):
+    """
+    Someone with an account.
+
+    Registration is open: anyone who can reach the app can create one. That is
+    a deliberate deployment choice and not a security oversight -- the gate is
+    expected to be whatever fronts the app (a VPN, an institutional SSO proxy,
+    a private network), and this table is what makes work attributable and
+    separable behind it, not what decides who gets in.
+
+    Every project and analysis belongs to exactly one user and is visible to
+    nobody else. There is no sharing. Calibration curves are the deliberate
+    exception -- they are reference data, shared like the three built-in
+    curves, with `created_by` recording who imported one so it cannot be
+    deleted out from under its owner.
+    """
+    __tablename__ = "users"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+
+    # Stored lowercased, and unique. Case-folding at the boundary rather than
+    # comparing case-insensitively at every call site: two accounts differing
+    # only in case are two people who each think they are the only one.
+    email = Column(String, nullable=False, unique=True, index=True)
+
+    # bcrypt, via services/auth.py. Never the password.
+    password_hash = Column(String, nullable=False)
+
+    display_name = Column(String, nullable=True)
+
+    # The first account created adopts every project and analysis that existed
+    # before there were users -- the data from before this table, which would
+    # otherwise be visible to nobody. Recorded rather than inferred from
+    # created_at, because "who owns the old work" is a fact worth reading
+    # directly.
+    is_first_account = Column(Boolean, nullable=False, default=False)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    last_login_at = Column(DateTime, nullable=True)
+
+
 class Project(Base):
     """
     Groups analyses together (by site, dig season, or research question).
@@ -18,6 +59,12 @@ class Project(Base):
     description = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Who this belongs to. Nullable only because rows predate the users table;
+    # the first registration adopts those, and every project created since is
+    # written with an owner. A null owner is visible to nobody, which is the
+    # safe direction for a column that should never be null again.
+    owner_id = Column(String, ForeignKey('users.id'), nullable=True, index=True)
 
     analyses = relationship('Analysis', back_populates='project')
     samples = relationship('ProjectSample', back_populates='project', cascade='all, delete-orphan')
@@ -129,6 +176,20 @@ class StoredCalibrationCurve(Base):
 
     archived = Column(Boolean, default=False, nullable=False)
 
+    # Who imported it. Curves are the one thing NOT partitioned per user --
+    # they are reference data, shared like the three built-in curves, because
+    # a per-user registry would undo the single-source-of-truth the whole of
+    # curve_registry.py is built on, and because two analysts on one site
+    # calibrating against different copies of the same curve is a worse
+    # outcome than either of them seeing that the curve exists.
+    #
+    # Shared to READ. Editing, archiving and deleting stay with whoever
+    # imported it, so one user cannot alter or remove reference data another
+    # user's stored results were computed against. Null for a curve imported
+    # before there were users; those stay editable by anyone, since there is
+    # nobody to attribute them to.
+    created_by = Column(String, ForeignKey('users.id'), nullable=True, index=True)
+
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -148,6 +209,13 @@ class Analysis(Base):
     # NULL means "unassigned". Runs with save=False are never persisted, so
     # they never reach this table at all.
     project_id = Column(String, ForeignKey('projects.id'), nullable=True)
+
+    # Who this belongs to. Carried on the analysis itself rather than read
+    # through project_id, because an analysis with no project still has an
+    # owner -- that is most of them, since "unassigned" is a normal state.
+    # Nullable for the same reason as Project.owner_id, and adopted the same
+    # way.
+    owner_id = Column(String, ForeignKey('users.id'), nullable=True, index=True)
 
     # Configuration
     bayesian_config = Column(JSON, nullable=True)  # MCMC parameters if bayesian
@@ -419,6 +487,11 @@ class Job(Base):
     # a different table depending on `kind`. Indexed because the results page
     # looks a job up by its analysis.
     target_id = Column(String, nullable=True, index=True)
+
+    # Who asked for it. A job is about one user's analysis or project, so it
+    # is theirs to poll and theirs to cancel -- without this, a job id would
+    # be a way to watch and stop someone else's run.
+    owner_id = Column(String, ForeignKey('users.id'), nullable=True, index=True)
 
     # 'queued' -> 'running' -> 'completed' | 'failed' | 'cancelled'.
     # A job cancelled before it starts goes straight from queued to

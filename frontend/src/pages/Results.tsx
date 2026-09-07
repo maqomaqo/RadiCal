@@ -21,9 +21,11 @@ import {
   Select,
   MenuItem,
   SelectChangeEvent,
-  FormGroup,
   FormControlLabel,
   Checkbox,
+  ListItemIcon,
+  ListItemText,
+  Menu,
   Chip,
   Collapse,
   Divider,
@@ -45,6 +47,7 @@ import DeleteIcon from '@mui/icons-material/Delete'
 import ReplayIcon from '@mui/icons-material/Replay'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import EditIcon from '@mui/icons-material/Edit'
+import ViewColumnIcon from '@mui/icons-material/ViewColumn'
 import KeyboardArrowRightIcon from '@mui/icons-material/KeyboardArrowRight'
 import JobProgress from '../components/JobProgress'
 import { cancelJob } from '../api/jobs'
@@ -58,11 +61,18 @@ import DurationsPanel from '@/components/DurationsPanel'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import GuideBand from '@/components/GuideBand'
 import { formatApiError } from '@/utils/apiError'
+import {
+  columnVisible,
+  loadResultColumnOverrides,
+  saveResultColumnOverrides,
+  type ColumnOverrides,
+} from '@/utils/columnPreferences'
 import { useNotify } from '@/contexts/NotificationContext'
 import { useCurves } from '@/hooks/useCurves'
 import { analysisTypeLabel } from '@/utils/analysisTypes'
 import { flattenStructure } from '@/utils/stratigraphy'
 import type { StructureRow } from '@/utils/stratigraphy'
+import { describeThinBoundary, describeThinPhase, findThinPhases } from '@/utils/thinPhases'
 import {
   DateFormat,
   DATE_FORMAT_OPTIONS,
@@ -98,6 +108,19 @@ import {
   type Concern,
 } from '@/utils/diagnostics'
 
+/**
+ * A date as this analysis stored it: the laboratory measurement, plus what the
+ * run needed to interpret it. Wider than the Harris matrix needs -- the
+ * citation strings name the curve each date was calibrated against, and the
+ * Curve view draws each measurement against the curve, where for a marine date
+ * the readable value is the age minus Delta-R.
+ */
+type AnalysisMeasurement = MatrixMeasurement & {
+  curve_id?: string
+  delta_r?: number | null
+  delta_r_error?: number | null
+}
+
 interface AnalysisResult {
   id: string
   name: string
@@ -109,13 +132,8 @@ interface AnalysisResult {
   measurements_count: number
   project_id?: string | null
   project_name?: string | null
-  // The samples, groups and relationships this analysis used. Wider than the
-  // Harris matrix needs: the citation strings name the curve each date was
-  // calibrated against, and the Curve view draws each measurement against the
-  // curve, where for a marine date the readable value is the age minus Delta-R.
-  measurements?: Array<
-    MatrixMeasurement & { curve_id?: string; delta_r?: number | null; delta_r_error?: number | null }
-  >
+  // The samples, groups and relationships this analysis used.
+  measurements?: AnalysisMeasurement[]
   groups?: DraftGroup[]
   // Explicit model structure; boundary elements carry their own posterior.
   model_tree?: ModelElement | null
@@ -474,21 +492,133 @@ const SCROLL_HINT_SX = {
 } as const
 
 /**
+ * The laboratory measurement as it is cited: `3120 ± 30`.
+ *
+ * The number on the lab report, not the value the Curve view plots a marine
+ * date at -- that one has Delta-R subtracted, which makes it a derived figure
+ * and this column is the one place on the page showing what was submitted.
+ */
+function measuredAge(measurement?: AnalysisMeasurement): string {
+  if (!measurement || measurement.age_bp == null) return ''
+  const { age_bp, error_1sigma } = measurement
+  return error_1sigma != null ? `${age_bp} ± ${error_1sigma}` : String(age_bp)
+}
+
+/** A results-table column the reader can turn on or off. */
+interface ResultColumn {
+  id: string
+  label: string
+  /** Whether this run earns the column with nobody asking. */
+  auto: boolean
+  /** Whether the run produced any value for it. */
+  populated: boolean
+  /** What the picker says when it did not. */
+  emptyNote: string
+}
+
+/**
+ * The diagnostics column's cell: the chips that say a date wants looking at,
+ * and the two numbers they are drawn from.
+ *
+ * One component for both row renderers. The structured table carried this
+ * inline and the flat one -- every plain calibration, and any Bayesian
+ * analysis with no stored model tree -- rendered no cell at all, so the header
+ * advertised a Diagnostics column above a blank strip while the banner on the
+ * same card named the dates that were supposed to be marked in it.
+ */
+function DiagnosticsCell({
+  result,
+  outlierPrior,
+  outlierModel,
+}: {
+  result?: SampleResult
+  outlierPrior?: number | null
+  outlierModel?: 'general' | 'charcoal' | null
+}) {
+  const concern = concernFor(result, outlierPrior)
+  // A date given a NOTABLE outlier prior whose posterior did not rise above it
+  // still had special treatment -- worth saying, but not as a warning, so it
+  // is a plain chip rather than folded into the reasons text. Below
+  // NOTABLE_OUTLIER_PRIOR it stays quiet: OxCal's routine 5% default across a
+  // phase is not worth a chip on every clean row.
+  const assignedOutlier =
+    !concern && (outlierPrior ?? 0) >= NOTABLE_OUTLIER_PRIOR
+      ? { prior: outlierPrior ?? 0, model: outlierModel }
+      : null
+  return (
+    <TableCell align="right" sx={NUMERIC_CELL_SX}>
+      <Stack direction="column" spacing={0.5} alignItems="flex-end">
+        {concern && (
+          /* describeChild, and focusable: the sentence is the chip's
+             description rather than its name, so a screen reader still
+             hears "Suspect" first, and a keyboard or touch user can
+             reach the reason at all -- a Chip is a div, and nothing in
+             this column is hoverable on a tablet. */
+          <Tooltip title={concernTitle(concern)} describeChild>
+            <Chip
+              size="small"
+              tabIndex={0}
+              color={concern.level === 'suspect' ? 'error' : 'warning'}
+              variant={concern.level === 'suspect' ? 'filled' : 'outlined'}
+              label={concern.level === 'suspect' ? 'Suspect' : 'Check'}
+            />
+          </Tooltip>
+        )}
+        {assignedOutlier && (
+          <Tooltip
+            title={
+              `Given a ${Math.round(assignedOutlier.prior * 100)}% ` +
+              `${assignedOutlier.model === 'charcoal' ? 'charcoal' : 'general'} outlier prior. ` +
+              'The posterior is close to that, so the data did not add anything beyond what was already assumed.'
+            }
+            describeChild
+          >
+            <Chip size="small" tabIndex={0} variant="outlined" label="Assigned" />
+          </Tooltip>
+        )}
+        <Box component="span" sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>
+          {/* Both numbers, always, so a reader can see a date is fine
+              rather than only seeing the ones that are not. An em dash
+              where a diagnostic was not computed -- an older analysis,
+              or a date with no outlier model -- which is not zero. */}
+          {result?.agreement_index != null ? `A ${result.agreement_index.toFixed(0)}` : 'A \u2014'}
+          {'  \u00b7  '}
+          {result?.outlier_probability != null
+            ? `O ${Math.round(result.outlier_probability * 100)}%`
+            : 'O \u2014'}
+        </Box>
+      </Stack>
+    </TableCell>
+  )
+}
+
+/**
  * One row of the structure-ordered results table. A boundary reports through
  * the same columns as a date: both are modelled parameters with a posterior,
  * and one table is what makes the transitions legible against the dates they
  * bracket.
  */
 function StructureTableRow({
-  row, result, isBayesian, showMean, showMedian, confidence, dateFormat,
+  row, result, measurement, curveName,
+  isBayesian, showAge, showCurve, showUnmodelled, showMean, showMedian,
+  showDiagnostics, confidence, dateFormat,
   unmodelledExpanded, posteriorExpanded,
-  isCollapsible, isCollapsed, onToggleCollapse,
+  isCollapsible, isCollapsed, onToggleCollapse, thinNote,
 }: {
   row: StructureRow
   result?: SampleResult
   isBayesian: boolean
+  /** The lab measurement behind a date row; absent on an element row. */
+  measurement?: AnalysisMeasurement
+  /** Its curve's display name, already resolved. */
+  curveName?: string | null
+  showAge: boolean
+  showCurve: boolean
+  showUnmodelled: boolean
+  /** The mean and its sigma: one choice, two columns. */
   showMean: boolean
   showMedian: boolean
+  showDiagnostics: boolean
   confidence: number
   dateFormat: DateFormat
   /** Whether each range column is showing every range or just its span. */
@@ -499,6 +629,9 @@ function StructureTableRow({
   isCollapsible: boolean
   isCollapsed: boolean
   onToggleCollapse?: () => void
+  /** Why this row's figures are expected to be wide; absent when they are not.
+   *  See utils/thinPhases. */
+  thinNote?: string
 }) {
   const theme = useTheme()
   // The same map the Harris matrix and the tree editor colour their nodes
@@ -536,16 +669,9 @@ function StructureTableRow({
   ].filter(Boolean).join(' · ')
 
   const cell = (value: string) => (isHeading ? '' : value)
+  // Still computed here as well as inside DiagnosticsCell: the tint is on the
+  // row, not in the cell, and the cell is not always drawn.
   const concern = isDate ? concernFor(result, row.outlierPrior) : null
-  // A date given a NOTABLE outlier prior whose posterior did not rise above it
-  // still had special treatment -- worth saying, but not as a warning, so it
-  // is a plain chip rather than folded into the reasons text. Below
-  // NOTABLE_OUTLIER_PRIOR it stays quiet: OxCal's routine 5% default across a
-  // phase is not worth a chip on every clean row.
-  const assignedOutlier =
-    isDate && !concern && (row.outlierPrior ?? 0) >= NOTABLE_OUTLIER_PRIOR
-      ? { prior: row.outlierPrior ?? 0, model: row.outlierModel }
-      : null
   // A tint carries the flag across the row so it is findable when scanning;
   // the chip says what it is, since colour alone is not a message.
   const tint = concern
@@ -660,12 +786,42 @@ function StructureTableRow({
             ({limiters})
           </Box>
         )}
+        {/* A phase with fewer than four dates, or a Boundary next to one.
+            Its range is correct and will be very wide, which reads as a
+            failed run unless something says otherwise. Same chip-in-a-
+            tooltip idiom as the outlier column: describeChild so the label
+            is heard first, tabIndex so the reason is reachable without a
+            hover. */}
+        {thinNote && (
+          <Tooltip title={thinNote} describeChild>
+            <Chip
+              size="small"
+              tabIndex={0}
+              variant="outlined"
+              color="warning"
+              label="Few dates"
+              sx={{ ml: 1, height: 20, fontSize: '0.6875rem' }}
+            />
+          </Tooltip>
+        )}
       </TableCell>
+      {/* Only a date was measured. A Sequence or Phase is a heading and a
+          Boundary is a modelled transition, so neither has a lab report or a
+          curve behind it -- the cells are blank rather than filled with a
+          placeholder that would read as missing data. */}
+      {showAge && (
+        <TableCell align="right" sx={NUMERIC_CELL_SX}>
+          {isDate ? measuredAge(measurement) : ''}
+        </TableCell>
+      )}
+      {showCurve && (
+        <TableCell sx={NUMERIC_CELL_SX}>{isDate ? curveName ?? '' : ''}</TableCell>
+      )}
       {/* Unmodelled first, then everything the MODEL produced: mean, std,
           median, span. The point estimates used to sit left of the unmodelled
           column, which put three posterior quantities inside the raw
           calibration's half of the table. */}
-      {isBayesian && (
+      {showUnmodelled && (
         <TableCell align="right" sx={NUMERIC_CELL_SX}>
           {/* Only a date has an unmodelled counterpart -- a boundary exists
               solely as a modelled parameter. */}
@@ -714,53 +870,19 @@ function StructureTableRow({
           />
         )}
       </TableCell>
-      {isBayesian && (
-        <TableCell align="right" sx={NUMERIC_CELL_SX}>
-          {isDate && (
-            <Stack direction="column" spacing={0.5} alignItems="flex-end">
-              {concern && (
-                /* describeChild, and focusable: the sentence is the chip's
-                   description rather than its name, so a screen reader still
-                   hears "Suspect" first, and a keyboard or touch user can
-                   reach the reason at all -- a Chip is a div, and nothing in
-                   this column is hoverable on a tablet. */
-                <Tooltip title={concernTitle(concern)} describeChild>
-                  <Chip
-                    size="small"
-                    tabIndex={0}
-                    color={concern.level === 'suspect' ? 'error' : 'warning'}
-                    variant={concern.level === 'suspect' ? 'filled' : 'outlined'}
-                    label={concern.level === 'suspect' ? 'Suspect' : 'Check'}
-                  />
-                </Tooltip>
-              )}
-              {assignedOutlier && (
-                <Tooltip
-                  title={
-                    `Given a ${Math.round(assignedOutlier.prior * 100)}% ` +
-                    `${assignedOutlier.model === 'charcoal' ? 'charcoal' : 'general'} outlier prior. ` +
-                    'The posterior is close to that, so the data did not add anything beyond what was already assumed.'
-                  }
-                  describeChild
-                >
-                  <Chip size="small" tabIndex={0} variant="outlined" label="Assigned" />
-                </Tooltip>
-              )}
-              <Box component="span" sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>
-                {/* Both numbers, always, so a reader can see a date is fine
-                    rather than only seeing the ones that are not. An em dash
-                    where a diagnostic was not computed -- an older analysis,
-                    or a date with no outlier model -- which is not zero. */}
-                {result?.agreement_index != null ? `A ${result.agreement_index.toFixed(0)}` : 'A —'}
-                {'  ·  '}
-                {result?.outlier_probability != null
-                  ? `O ${Math.round(result.outlier_probability * 100)}%`
-                  : 'O —'}
-              </Box>
-            </Stack>
-          )}
-        </TableCell>
-      )}
+      {showDiagnostics &&
+        (isDate ? (
+          <DiagnosticsCell
+            result={result}
+            outlierPrior={row.outlierPrior}
+            outlierModel={row.outlierModel}
+          />
+        ) : (
+          /* A heading or a boundary has no calibration of its own to agree
+             with, so the column is blank rather than reporting two em
+             dashes as though the diagnostics had been attempted. */
+          <TableCell align="right" sx={NUMERIC_CELL_SX} />
+        ))}
     </TableRow>
   )
 }
@@ -789,11 +911,17 @@ export default function Results() {
   const [cancelling, setCancelling] = useState(false)
   const [duplicating, setDuplicating] = useState(false)
   const [exportingPdf, setExportingPdf] = useState(false)
-  // Opt-in: HPD ranges are the primary convention for reporting a possibly
-  // multimodal result, and a single point estimate can be misleading -- a mean
-  // can fall in the low-probability gap between two peaks.
-  const [showMean, setShowMean] = useState(false)
-  const [showMedian, setShowMedian] = useState(false)
+  // Which optional columns the table draws, remembered per analysis. Only
+  // columns the reader has explicitly turned on or off are stored: a column
+  // they have never touched keeps following the run, exactly as the date
+  // collection's picker works.
+  const [columnOverrides, setColumnOverrides] = useState<ColumnOverrides>(() =>
+    analysisId ? loadResultColumnOverrides(analysisId) : {}
+  )
+  useEffect(() => {
+    setColumnOverrides(analysisId ? loadResultColumnOverrides(analysisId) : {})
+  }, [analysisId])
+  const [columnsAnchor, setColumnsAnchor] = useState<HTMLElement | null>(null)
   // On by default, the transitions usually being the point of the model. A
   // real sequence has a boundary between every pair of phases, though, so on a
   // large one they outnumber the dates -- this hides them without the dates.
@@ -1212,11 +1340,154 @@ export default function Results() {
   }
   collectBoundaries(analysis.model_tree)
   const isBayesian = analysis.analysis_type === 'bayesian'
+  const measurementBySampleId = new Map((analysis.measurements || []).map((m) => [m.id, m]))
+
+  /**
+   * The columns the reader can turn on or off, and whether this run earns
+   * each one unasked.
+   *
+   * `auto` is the default the data implies; `populated` is whether the run
+   * actually produced values, which is what the picker says out loud so that
+   * switching on an empty column reads as empty rather than as broken. The
+   * same contract the date collection's picker uses.
+   *
+   * Mean, median and sigma are opt-in on purpose: HPD ranges are the primary
+   * convention for reporting a possibly multimodal result, and a single point
+   * estimate can mislead -- a mean can fall in the low-probability gap between
+   * two peaks. The unmodelled span and the diagnostics are the opposite: they
+   * are why a Bayesian run was made, so they arrive on and can be put away.
+   *
+   * The mean's entry governs two columns, the estimate and its sigma, and is
+   * labelled to say so -- they are reported as one figure, mean ± σ.
+   */
+  const results = analysis.results || []
+  const someResult = (has: (r: SampleResult) => boolean) => results.some(has)
+  const someMeasurement = (has: (m: AnalysisMeasurement) => boolean) =>
+    (analysis.measurements || []).some(has)
+  const optionalColumns: ResultColumn[] = [
+    // The lab report, off by default: the page exists to show what the
+    // measurement became, and a reader who wants the input has the date
+    // collection and every export. Both sit left of everything derived from
+    // them, in the order the date collection's own table lists them, so the
+    // table reads input first and model last.
+    {
+      id: 'age',
+      // Non-breaking between the sign and the value: with every column on,
+      // the header cells wrap to fit and this one broke as "Age BP ±" over
+      // "1σ", splitting a notation down the middle.
+      label: 'Age BP ±\u00a01σ',
+      auto: false,
+      populated: someMeasurement((m) => m.age_bp != null),
+      emptyNote: 'Not stored for this analysis',
+    },
+    {
+      id: 'curve',
+      label: 'Curve',
+      auto: false,
+      populated: someMeasurement((m) => !!m.curve_id),
+      emptyNote: 'Not stored for this analysis',
+    },
+    ...(isBayesian
+      ? [
+          {
+            id: 'unmodelled',
+            label: 'Unmodelled span',
+            auto: true,
+            populated: someResult((r) => (r.unmodelled_hpd_ranges?.length ?? 0) > 0),
+            emptyNote: 'Not stored for this analysis',
+          } as ResultColumn,
+        ]
+      : []),
+    {
+      id: 'mean',
+      // Two columns, one entry, and the label says so. Sigma is the mean's
+      // own dispersion -- the pair is reported as mean ± σ -- so a picker
+      // that could turn one on without the other would offer a spread with
+      // nothing to read it against. The median's counterpart is the HPD
+      // span, which is always drawn.
+      label: isBayesian ? 'Posterior Mean and σ' : 'Calibrated Mean and σ',
+      auto: false,
+      populated: someResult((r) => r.posterior_mean != null),
+      emptyNote: 'No values in this analysis',
+    },
+    {
+      id: 'median',
+      label: isBayesian ? 'Posterior Median' : 'Calibrated Median',
+      auto: false,
+      populated: someResult((r) => r.posterior_median != null),
+      emptyNote: 'No values in this analysis',
+    },
+    ...(isBayesian
+      ? [
+          {
+            id: 'diagnostics',
+            label: 'Diagnostics',
+            auto: true,
+            populated: someResult(
+              (r) => r.agreement_index != null || r.outlier_probability != null
+            ),
+            emptyNote: 'Not computed for this analysis',
+          } as ResultColumn,
+        ]
+      : []),
+  ]
+
+  const labelOf = (id: string) => optionalColumns.find((c) => c.id === id)?.label ?? ''
+  const shows = (id: string) => {
+    const column = optionalColumns.find((c) => c.id === id)
+    return !!column && columnVisible(columnOverrides, id, column.auto)
+  }
+  const showAge = shows('age')
+  const showCurve = shows('curve')
+  const showUnmodelled = shows('unmodelled')
+  const showMean = shows('mean')
+  const showMedian = shows('median')
+  const showDiagnostics = shows('diagnostics')
+
+  const toggleColumn = (column: ResultColumn) => {
+    setColumnOverrides((prev) => {
+      const shown = columnVisible(prev, column.id, column.auto)
+      const next = { ...prev }
+      // Choosing what the run already does is not an override -- dropping it
+      // lets the column go back to following the analysis.
+      if (!shown === column.auto) delete next[column.id]
+      else next[column.id] = !shown
+      if (analysisId) saveResultColumnOverrides(analysisId, next)
+      return next
+    })
+  }
+
+  const resetColumns = () => {
+    setColumnOverrides({})
+    if (analysisId) saveResultColumnOverrides(analysisId, {})
+  }
 
   // The results table in the model's own order, mirroring the CSV export row
   // for row (backend model_tree.flatten_structure). Empty for an analysis with
   // no stored structure, which falls back to the flat date list below.
   const structureRows = flattenStructure(analysis.model_tree, analysis.measurements || [])
+
+  // Phases too thin for their Boundaries to be informative, and the
+  // Boundaries either side of them. Bayesian only: a plain calibration has no
+  // Boundaries for the count to be about.
+  // Not memoised: this sits below the page's early returns, where a hook
+  // would change the hook count between renders. It is one walk of a tree of
+  // tens of elements, the same as flattenStructure just above.
+  const thinPhases = isBayesian
+    ? findThinPhases(analysis.model_tree, analysis.measurements || [])
+    : { phases: new Map(), boundaries: new Map() }
+  const thinNoteFor = (row: StructureRow): string | undefined => {
+    if (!row.elementId) return undefined
+    if (row.kind === 'phase') {
+      const phase = thinPhases.phases.get(row.elementId)
+      return phase ? describeThinPhase(phase) : undefined
+    }
+    if (row.kind === 'boundary') {
+      const neighbours = thinPhases.boundaries.get(row.elementId)
+      return neighbours ? describeThinBoundary(neighbours) : undefined
+    }
+    return undefined
+  }
 
   // Element type by id, so a date row can say what KIND of thing contains it.
   // A date row carries its container's id, not its type; the element's own row
@@ -1287,8 +1558,6 @@ export default function Results() {
   const resultBySampleId = new Map((analysis.results || []).map((r) => [r.sample_id, r]))
   // As concernFor needs it in StructureTableRow: a posterior close to the
   // prior it was given is not a finding, so the banner needs both.
-  const measurementBySampleId = new Map((analysis.measurements || []).map((m) => [m.id, m]))
-
   // analysis.results arrives in DB insertion order. With no model structure to
   // walk, sort oldest first by posterior mean (larger cal BP is older), which
   // is the convention structureRows gives the structured case. Ties and
@@ -1835,6 +2104,11 @@ export default function Results() {
                 Modelled start and end of each context in this analysis.
               </caption>
               <TableHead>
+                {/* The point-estimate columns follow the results table's own
+                    Columns menu rather than carrying a second control: they
+                    are the same two quantities about the same run, and two
+                    pickers for one decision is how the page ends up showing
+                    a mean in one table and not the other. */}
                 <TableRow sx={{ backgroundColor: 'background.muted' }}>
                   <TableCell>Context</TableCell>
                   {showMean && <TableCell align="right">Start Mean</TableCell>}
@@ -1889,82 +2163,23 @@ export default function Results() {
 
       {/* Results Table */}
       <Paper sx={{ p: 3, mb: 3 }}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 2, mb: 2 }}>
-          <Box>
-            {/* Not gutterBottom: its 0.35em leaves ~7px, and an outlined
-                Select's floating label rides up over its own top border, so
-                the heading and the word "Date Format" all but touch. The
-                controls are a group under the heading, not a second line of
-                it. */}
-            <Typography variant="h6" component="h2" sx={{ mb: 2.5 }}>
-              Results Summary
-            </Typography>
-            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ sm: 'center' }}>
-              {/* Date format sits with the other two display controls rather
-                  than up in the header: it changes how every number on the
-                  page reads and nothing about what was computed, which is
-                  exactly what HPD confidence and the mean/median toggles do.
-                  In the header it was the widest thing in a row of actions,
-                  where it read as a fourth thing to decide on arrival. */}
-              <FormControl size="small" sx={{ minWidth: 200 }}>
-                {/* id + labelId, not just <InputLabel>: without the pair MUI
-                    renders a <label> with no `for` and a role="combobox" with
-                    no accessible name, so this announced only its current
-                    value -- "cal BP (years before 1950), combobox" -- with
-                    nothing saying what it governs, and voice control had no
-                    target to say. */}
-                <InputLabel id="date-format-label">Date Format</InputLabel>
-                <Select
-                  labelId="date-format-label"
-                  id="date-format"
-                  value={dateFormat}
-                  label="Date Format"
-                  onChange={handleDateFormatChange}
-                >
-                  {DATE_FORMAT_OPTIONS.map((option) => (
-                    <MenuItem key={option.value} value={option.value}>
-                      {option.label}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-              <FormControl size="small" sx={{ minWidth: 140 }}>
-                {/* The most consequential control on the page: it sets the
-                    level every figure here is reported at. It announced
-                    "95.4%, combobox" and nothing else. */}
-                <InputLabel id="hpd-confidence-label">HPD Confidence</InputLabel>
-                <Select
-                  labelId="hpd-confidence-label"
-                  id="hpd-confidence"
-                  value={confidence}
-                  label="HPD Confidence"
-                  onChange={(e) => setConfidence(Number(e.target.value))}
-                >
-                  {CONFIDENCE_OPTIONS.map((opt) => (
-                    <MenuItem key={opt.value} value={opt.value}>
-                      {opt.label}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-              <FormGroup row>
-                <FormControlLabel
-                  control={<Checkbox size="small" checked={showMean} onChange={(e) => setShowMean(e.target.checked)} />}
-                  label="Show Mean"
-                />
-                <FormControlLabel
-                  control={<Checkbox size="small" checked={showMedian} onChange={(e) => setShowMedian(e.target.checked)} />}
-                  label="Show Median"
-                />
-              </FormGroup>
-            </Stack>
-          </Box>
+        {/* The card's masthead: what this is, and the two ways to take it
+            away. Everything that changes how it READS is in the strip under
+            the rule, so nothing in this row is a decision about the table. */}
+        <Box
+          sx={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: 2,
+          }}
+        >
+          <Typography variant="h6" component="h2">
+            Results Summary
+          </Typography>
           <Stack direction="row" spacing={1}>
-            <Button
-              startIcon={<DownloadIcon />}
-              onClick={handleExportCSV}
-              variant="outlined"
-            >
+            <Button startIcon={<DownloadIcon />} onClick={handleExportCSV} variant="outlined">
               Export CSV
             </Button>
             <Button
@@ -1979,6 +2194,148 @@ export default function Results() {
             </Button>
           </Stack>
         </Box>
+
+        <Divider sx={{ my: 2 }} />
+
+        {/* Two kinds of control, and the rule above plus the gap between them
+            are what say so. On the left, the reporting convention: both
+            change what every number on the page MEANS. On the right, what is
+            drawn: neither changes a figure.
+
+            Date format sits here rather than up in the masthead because it
+            changes how every number reads and nothing about what was
+            computed, which is exactly what HPD confidence does. In the
+            masthead it was the widest thing in a row of actions, where it
+            read as a fourth thing to decide on arrival.
+
+            Show Mean and Show Median used to sit here as loose checkboxes,
+            which put "which columns exist" in the same row as "what the
+            numbers mean" and left the other four optional columns
+            unreachable. They are entries in the Columns menu now, alongside
+            the ones that had no control at all. */}
+        <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 2, mb: 2.5 }}>
+          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ sm: 'center' }}>
+            <FormControl size="small" sx={{ minWidth: 200 }}>
+              {/* id + labelId, not just <InputLabel>: without the pair MUI
+                  renders a <label> with no `for` and a role="combobox" with
+                  no accessible name, so this announced only its current
+                  value -- "cal BP (years before 1950), combobox" -- with
+                  nothing saying what it governs, and voice control had no
+                  target to say. */}
+              <InputLabel id="date-format-label">Date Format</InputLabel>
+              <Select
+                labelId="date-format-label"
+                id="date-format"
+                value={dateFormat}
+                label="Date Format"
+                onChange={handleDateFormatChange}
+              >
+                {DATE_FORMAT_OPTIONS.map((option) => (
+                  <MenuItem key={option.value} value={option.value}>
+                    {option.label}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            <FormControl size="small" sx={{ minWidth: 140 }}>
+              {/* The most consequential control on the page: it sets the
+                  level every figure here is reported at. It announced
+                  "95.4%, combobox" and nothing else. */}
+              <InputLabel id="hpd-confidence-label">HPD Confidence</InputLabel>
+              <Select
+                labelId="hpd-confidence-label"
+                id="hpd-confidence"
+                value={confidence}
+                label="HPD Confidence"
+                onChange={(e) => setConfidence(Number(e.target.value))}
+              >
+                {CONFIDENCE_OPTIONS.map((opt) => (
+                  <MenuItem key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Stack>
+
+          <Box sx={{ flex: 1 }} />
+
+          <Stack direction="row" spacing={1} alignItems="center">
+            {/* The scroll window's control. Only offered when there are
+                enough rows for 70vh to actually be cutting some off -- on a
+                short table the button would toggle nothing visible -- and
+                only from md up, since the cap itself is desktop-only: below
+                md the table is already whole and a nested vertical scroller
+                would fight the page scroll on touch.
+
+                Here rather than in a row of its own above the table: it
+                shapes how the table is presented and changes no figure in
+                it, which is the same thing Columns does. */}
+            {tableRowCount > TABLE_WINDOW_ROWS && (
+              <Button
+                sx={{ display: { xs: 'none', md: 'inline-flex' } }}
+                aria-expanded={tableExpanded}
+                aria-controls="results-table"
+                onClick={() => setTableExpanded((open) => !open)}
+                startIcon={tableExpanded ? <UnfoldLessIcon /> : <UnfoldMoreIcon />}
+              >
+                {tableExpanded ? 'Collapse to a window' : `Show all ${tableRowCount} rows`}
+              </Button>
+            )}
+            <Button
+              variant="outlined"
+              startIcon={<ViewColumnIcon />}
+              aria-haspopup="true"
+              onClick={(e) => setColumnsAnchor(e.currentTarget)}
+            >
+              Columns
+            </Button>
+          </Stack>
+        </Box>
+
+        <Menu
+          anchorEl={columnsAnchor}
+          open={!!columnsAnchor}
+          onClose={() => setColumnsAnchor(null)}
+          anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+          transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+        >
+          <Typography
+            variant="caption"
+            color="text.secondary"
+            component="li"
+            sx={{ display: 'block', px: 2, pt: 0.5, pb: 1 }}
+          >
+            Sample and the {CONFIDENCE_LABEL} span always show.
+          </Typography>
+          {optionalColumns.map((column) => {
+            const shown = columnVisible(columnOverrides, column.id, column.auto)
+            return (
+              <MenuItem
+                key={column.id}
+                role="menuitemcheckbox"
+                aria-checked={shown}
+                // The menu stays open: choosing columns is usually choosing
+                // several, and reopening between each is the errand.
+                onClick={() => toggleColumn(column)}
+              >
+                <ListItemIcon>
+                  <Checkbox edge="start" size="small" checked={shown} tabIndex={-1} disableRipple />
+                </ListItemIcon>
+                <ListItemText
+                  primary={column.label}
+                  // Said plainly, so turning on a column this run never
+                  // produced reads as empty rather than as broken.
+                  secondary={column.populated ? undefined : column.emptyNote}
+                />
+              </MenuItem>
+            )
+          })}
+          <Divider />
+          <MenuItem onClick={resetColumns} disabled={Object.keys(columnOverrides).length === 0}>
+            <ListItemText inset>Reset to defaults</ListItemText>
+          </MenuItem>
+        </Menu>
 
         {/* Said once at the top as well as marked on each row: a long table
             can hide a flagged date below the fold, and the point of the
@@ -2017,28 +2374,6 @@ export default function Results() {
               moved to another phase, or dropped from the run.
             </Typography>
           </Alert>
-        )}
-
-        {/* The control for the scroll window below. Only offered when there
-            are enough rows for 70vh to actually be cutting some off -- on a
-            short table the button would toggle nothing visible -- and only
-            from md up, since the cap itself is desktop-only: below md the
-            table is already whole and a nested vertical scroller would fight
-            the page scroll on touch. */}
-        {tableRowCount > TABLE_WINDOW_ROWS && (
-          <Box sx={{ display: { xs: 'none', md: 'flex' }, justifyContent: 'flex-end', mb: 1 }}>
-            <Button
-              size="small"
-              aria-expanded={tableExpanded}
-              aria-controls="results-table"
-              onClick={() => setTableExpanded((open) => !open)}
-              startIcon={tableExpanded ? <UnfoldLessIcon /> : <UnfoldMoreIcon />}
-            >
-              {tableExpanded
-                ? 'Collapse table to a window'
-                : `Show all ${tableRowCount} rows`}
-            </Button>
-          </Box>
         )}
 
         {/* maxHeight + a sticky header row: <thead> was position:static and
@@ -2115,7 +2450,10 @@ export default function Results() {
                 <TableCell sx={{ ...stickyNameCell(MUTED), top: 0, zIndex: 4, width: '1%' }}>
                   {structureRows.length > 0 ? 'Structure / Sample' : 'Sample'}
                 </TableCell>
-                {isBayesian && (
+                {/* What was measured, left of everything derived from it. */}
+                {showAge && <TableCell align="right">{labelOf('age')}</TableCell>}
+                {showCurve && <TableCell>{labelOf('curve')}</TableCell>}
+                {showUnmodelled && (
                   <TableCell align="right">
                     <RangeColumnHeader
                       label={<>Unmodelled {CONFIDENCE_LABEL} span</>}
@@ -2124,9 +2462,14 @@ export default function Results() {
                     />
                   </TableCell>
                 )}
-                {showMean && <TableCell align="right">Posterior Mean</TableCell>}
+                {/* The estimate and its dispersion, together or not at all. */}
+                {showMean && (
+                  <TableCell align="right">
+                    {isBayesian ? 'Posterior Mean' : 'Calibrated Mean'}
+                  </TableCell>
+                )}
                 {showMean && <TableCell align="right">σ (yr)</TableCell>}
-                {showMedian && <TableCell align="right">Posterior Median</TableCell>}
+                {showMedian && <TableCell align="right">{labelOf('median')}</TableCell>}
                 <TableCell align="right">
                   {/* "Span", not "HPD Range". This column reports the OUTER
                       BOUNDS of the highest-density region -- its earliest and
@@ -2150,7 +2493,7 @@ export default function Results() {
                     paragraph the key under this table already prints without
                     a hover, and a reader who had read one had no way to know
                     the other said nothing new. */}
-                {isBayesian && <TableCell align="right">Diagnostics</TableCell>}
+                {showDiagnostics && <TableCell align="right">Diagnostics</TableCell>}
               </TableRow>
             </TableHead>
             <TableBody>
@@ -2165,9 +2508,21 @@ export default function Results() {
                       key={`${row.kind}-${row.sampleId ?? row.elementId ?? idx}`}
                       row={row}
                       result={row.sampleId ? resultBySampleId.get(row.sampleId) : undefined}
+                      measurement={
+                        row.sampleId ? measurementBySampleId.get(row.sampleId) : undefined
+                      }
+                      curveName={
+                        row.sampleId
+                          ? curveNameFor(measurementBySampleId.get(row.sampleId)?.curve_id)
+                          : null
+                      }
                       isBayesian={isBayesian}
+                      showAge={showAge}
+                      showCurve={showCurve}
+                      showUnmodelled={showUnmodelled}
                       showMean={showMean}
                       showMedian={showMedian}
+                      showDiagnostics={showDiagnostics}
                       confidence={confidence}
                       dateFormat={dateFormat}
                       unmodelledExpanded={unmodelledExpanded}
@@ -2191,6 +2546,7 @@ export default function Results() {
                           ? () => toggleCollapsed(row.elementId!)
                           : undefined
                       }
+                      thinNote={thinNoteFor(row)}
                     />
                   ))
                 : chronologicalResults.map((result, idx) => {
@@ -2210,7 +2566,19 @@ export default function Results() {
                         >
                           {result.sample_name || `Sample ${idx + 1}`}
                         </TableCell>
-                        {isBayesian && (
+                        {showAge && (
+                          <TableCell align="right" sx={NUMERIC_CELL_SX}>
+                            {measuredAge(measurementBySampleId.get(result.sample_id))}
+                          </TableCell>
+                        )}
+                        {showCurve && (
+                          <TableCell sx={NUMERIC_CELL_SX}>
+                            {curveNameFor(
+                              measurementBySampleId.get(result.sample_id)?.curve_id
+                            ) ?? ''}
+                          </TableCell>
+                        )}
+                        {showUnmodelled && (
                           <TableCell align="right" sx={NUMERIC_CELL_SX}>
                             <RangeCell
                               ranges={unmodelledRanges}
@@ -2248,6 +2616,21 @@ export default function Results() {
                             emphasis
                           />
                         </TableCell>
+                        {/* The prior comes from the measurement, not the
+                            result: it is what the analyst assigned going in,
+                            and the chip's whole claim is how far the
+                            posterior moved from it. */}
+                        {showDiagnostics && (
+                          <DiagnosticsCell
+                            result={result}
+                            outlierPrior={
+                              measurementBySampleId.get(result.sample_id)?.outlier_prior
+                            }
+                            outlierModel={
+                              measurementBySampleId.get(result.sample_id)?.outlier_model
+                            }
+                          />
+                        )}
                       </TableRow>
                     )
                   })}

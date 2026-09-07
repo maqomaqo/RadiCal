@@ -11,10 +11,12 @@ its answer is what is wrong with the file, in `data.ok` and `data.errors`.
 That keeps "the upload broke" distinguishable from "row 12 has a letter in the
 age column".
 """
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 
+from app.api.auth import current_user
+from app.models import User
 from app.services.date_import import (
     MAX_CONTENT_BYTES,
     TEMPLATE_COLUMNS,
@@ -26,7 +28,8 @@ router = APIRouter()
 
 
 @router.post("/import/dates")
-async def import_dates(file: UploadFile = File(...)):
+async def import_dates(file: UploadFile = File(...),
+                       user: User = Depends(current_user)):
     """
     Parse an uploaded file of dates and return what it held, without saving
     any of it.
@@ -44,10 +47,10 @@ async def import_dates(file: UploadFile = File(...)):
     the threadpool.
     """
     content = await file.read()
-    return await run_in_threadpool(_import_dates, file.filename or "", content)
+    return await run_in_threadpool(_import_dates, file.filename or "", content, user.id)
 
 
-def _import_dates(filename: str, content: bytes):
+def _import_dates(filename: str, content: bytes, owner_id: str):
     if not content:
         raise HTTPException(status_code=400, detail="The uploaded file is empty.")
     if len(content) > MAX_CONTENT_BYTES:
@@ -59,14 +62,16 @@ def _import_dates(filename: str, content: bytes):
             ),
         )
 
-    result = parse_upload(filename, content)
+    # Curve names in the file resolve against this user's own curves only:
+    # see services/oxcal_script.parse_oxcal.
+    result = parse_upload(filename, content, owner_id)
     payload = result.as_dict()
     payload["filename"] = filename
     return {"success": True, "data": payload}
 
 
 @router.get("/import/csv-template")
-def csv_template():
+def csv_template(user: User = Depends(current_user)):
     """
     The CSV template, as a download.
 
@@ -82,7 +87,7 @@ def csv_template():
 
 
 @router.get("/import/csv-columns")
-def csv_columns():
+def csv_columns(user: User = Depends(current_user)):
     """
     The columns the CSV importer reads, for the upload dialog's format help.
     Served rather than duplicated in the frontend so the help and the parser

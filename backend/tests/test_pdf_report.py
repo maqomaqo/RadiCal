@@ -217,7 +217,7 @@ class TestReportContent:
         text = pdf_text(_pdf(client, analysis_id, "?date_format=klingon"))
         assert "cal BP" in text
 
-    def test_a_pending_analysis_still_produces_a_report(self, client):
+    def test_a_pending_analysis_still_produces_a_report(self, client, suite_user):
         """
         An analysis with no results says so on the page, rather than
         failing the download -- the same answer the CSV gives with its
@@ -226,13 +226,17 @@ class TestReportContent:
         The row is made directly because every endpoint that creates an
         analysis also runs it; a pending one is what exists between those
         two steps, and after a run that failed.
+
+        It has to be given an owner explicitly, for the same reason: nothing
+        is going through the API to set one, and an ownerless analysis is
+        invisible to everybody -- which the route reports as a 404, correctly.
         """
         from app.database import SessionLocal
         from app.models import Analysis
 
         db = SessionLocal()
         analysis = Analysis(name="Not run yet", analysis_type="calibration",
-                            status="pending")
+                            status="pending", owner_id=suite_user['user']['id'])
         db.add(analysis)
         db.commit()
         analysis_id = analysis.id

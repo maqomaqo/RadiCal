@@ -3,22 +3,29 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from app.database import get_db
-from app.models import Project, ProjectSample, Analysis
+from app.models import Project, ProjectSample, Analysis, User
 from app.schemas.project import ProjectCreate, ProjectUpdate
 from app.api.analysis import _rerun_analysis
+from app.api.auth import current_user, owned_or_404
 from app.services import jobs
+from app.services import failures
 from typing import Dict, Optional
 
 router = APIRouter()
 
 
 @router.post("/projects")
-def create_project(project: ProjectCreate, db: Session = Depends(get_db)):
+def create_project(
+    project: ProjectCreate,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+):
     """Create a new project to group analyses under."""
     if not project.name or not project.name.strip():
         raise HTTPException(status_code=400, detail="Project name is required")
 
-    new_project = Project(name=project.name.strip(), description=project.description)
+    new_project = Project(
+        name=project.name.strip(), description=project.description, owner_id=user.id)
     db.add(new_project)
     db.commit()
     db.refresh(new_project)
@@ -40,7 +47,10 @@ def create_project(project: ProjectCreate, db: Session = Depends(get_db)):
 
 
 @router.get("/projects")
-def list_projects(db: Session = Depends(get_db)):
+def list_projects(
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+):
     """
     List all projects with the numbers the project grid ranks, sorts and draws
     with, plus an 'Unassigned' count so the frontend can offer that bucket
@@ -50,13 +60,19 @@ def list_projects(db: Session = Depends(get_db)):
     than a query per project, so the page costs the same at four projects and
     at four hundred.
     """
-    projects = db.query(Project).order_by(Project.created_at.desc()).all()
+    projects = (
+        db.query(Project)
+        .filter(Project.owner_id == user.id)
+        .order_by(Project.created_at.desc())
+        .all()
+    )
 
     # (project_id, status) -> count. Summed per project this IS the analysis
     # count, so the status breakdown and the total cannot disagree -- they are
     # the same query. A project_id of None is the Unassigned bucket.
     status_rows = (
         db.query(Analysis.project_id, Analysis.status, func.count(Analysis.id))
+        .filter(Analysis.owner_id == user.id)
         .group_by(Analysis.project_id, Analysis.status)
         .all()
     )
@@ -70,12 +86,18 @@ def list_projects(db: Session = Depends(get_db)):
     # otherwise report no activity at all despite having just been created.
     last_analysis = dict(
         db.query(Analysis.project_id, func.max(Analysis.updated_at))
+        .filter(Analysis.owner_id == user.id)
         .group_by(Analysis.project_id)
         .all()
     )
 
     sample_counts = dict(
+        # ProjectSample carries no owner of its own -- a collected date has no
+        # meaning outside its project -- so it is scoped through the join
+        # instead. One place to be wrong, and this is it.
         db.query(ProjectSample.project_id, func.count(ProjectSample.id))
+        .join(Project, Project.id == ProjectSample.project_id)
+        .filter(Project.owner_id == user.id)
         .group_by(ProjectSample.project_id)
         .all()
     )
@@ -117,15 +139,20 @@ def list_projects(db: Session = Depends(get_db)):
 
 
 @router.get("/projects/{project_id}")
-def get_project(project_id: str, db: Session = Depends(get_db)):
+def get_project(
+    project_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+):
     """Retrieve a project and the analyses filed under it."""
-    project = db.query(Project).filter(Project.id == project_id).first()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+    project = owned_or_404(
+        db.query(Project).filter(Project.id == project_id).first(),
+        user, 'That project')
 
     analyses = (
         db.query(Analysis)
         .filter(Analysis.project_id == project_id)
+        .filter(Analysis.owner_id == user.id)
         .order_by(Analysis.created_at.desc())
         .all()
     )
@@ -171,11 +198,16 @@ def get_project(project_id: str, db: Session = Depends(get_db)):
 
 
 @router.patch("/projects/{project_id}")
-def update_project(project_id: str, updates: ProjectUpdate, db: Session = Depends(get_db)):
+def update_project(
+    project_id: str,
+    updates: ProjectUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+):
     """Rename a project or edit its description."""
-    project = db.query(Project).filter(Project.id == project_id).first()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+    project = owned_or_404(
+        db.query(Project).filter(Project.id == project_id).first(),
+        user, 'That project')
 
     if updates.name is not None:
         if not updates.name.strip():
@@ -199,7 +231,7 @@ def update_project(project_id: str, updates: ProjectUpdate, db: Session = Depend
     }
 
 
-def _rerun_project_job(project_id: str):
+def _rerun_project_job(project_id: str, owner_id: str):
     """
     The work function for a 'project_rerun' job: every analysis in one
     project, in turn.
@@ -210,7 +242,15 @@ def _rerun_project_job(project_id: str):
     length.
     """
     def work(db: Session, handle: jobs.JobHandle) -> Dict:
-        analyses = db.query(Analysis).filter(Analysis.project_id == project_id).all()
+        # Scoped to the owner as well as the project. The job runs in its own
+        # session long after the request that authorised it, so it re-states
+        # the constraint rather than trusting that nothing has changed.
+        analyses = (
+            db.query(Analysis)
+            .filter(Analysis.project_id == project_id)
+            .filter(Analysis.owner_id == owner_id)
+            .all()
+        )
         total = len(analyses)
         rerun_count = 0
         failed = []
@@ -227,10 +267,12 @@ def _rerun_project_job(project_id: str):
                 raise
             except Exception as e:
                 db.rollback()
+                failure = failures.classify(e)
                 analysis.status = 'failed'
-                analysis.error_message = str(e)
+                analysis.error_message = failure.message
                 db.commit()
-                failed.append({"id": analysis.id, "name": analysis.name, "error": str(e)})
+                failed.append({"id": analysis.id, "name": analysis.name,
+                               "error": failure.message})
             handle.update(
                 progress=(rerun_count + len(failed)) / total if total else 1.0,
                 force=True,
@@ -245,7 +287,12 @@ def _rerun_project_job(project_id: str):
 # See analysis.rerun_analysis for why 202 is set on the response rather than
 # declared on the route.
 @router.post("/projects/{project_id}/rerun")
-def rerun_project(project_id: str, wait: bool = False, db: Session = Depends(get_db)):
+def rerun_project(
+    project_id: str,
+    wait: bool = False,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+):
     """
     Recompute every analysis in this project in place from its own persisted
     inputs (analysis._rerun_analysis). One failure does not abort the rest;
@@ -256,12 +303,17 @@ def rerun_project(project_id: str, wait: bool = False, db: Session = Depends(get
     Answers 202 with a job_id whose detail carries {completed, total, failed}.
     `wait=true` runs it in the request -- see analysis.rerun_analysis.
     """
-    project = db.query(Project.id).filter(Project.id == project_id).first()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+    owned_or_404(
+        db.query(Project).filter(Project.id == project_id).first(),
+        user, 'That project')
 
     if wait:
-        analyses = db.query(Analysis).filter(Analysis.project_id == project_id).all()
+        analyses = (
+            db.query(Analysis)
+            .filter(Analysis.project_id == project_id)
+            .filter(Analysis.owner_id == user.id)
+            .all()
+        )
         rerun_count = 0
         failed = []
         for analysis in analyses:
@@ -270,16 +322,20 @@ def rerun_project(project_id: str, wait: bool = False, db: Session = Depends(get
                 rerun_count += 1
             except Exception as e:
                 db.rollback()
+                failure = failures.classify(e)
                 analysis.status = 'failed'
-                analysis.error_message = str(e)
+                analysis.error_message = failure.message
                 db.commit()
-                failed.append({"id": analysis.id, "name": analysis.name, "error": str(e)})
+                failed.append({"id": analysis.id, "name": analysis.name,
+                               "error": failure.message})
         return {
             "success": True,
             "data": {"rerun_count": rerun_count, "failed": failed},
         }
 
-    job_id = jobs.submit('project_rerun', project_id, _rerun_project_job(project_id))
+    job_id = jobs.submit(
+        'project_rerun', project_id, _rerun_project_job(project_id, user.id),
+        owner_id=user.id)
     return JSONResponse(status_code=202, content={
         "success": True,
         "data": {"project_id": project_id, "status": "queued", "job_id": job_id},
@@ -287,7 +343,11 @@ def rerun_project(project_id: str, wait: bool = False, db: Session = Depends(get
 
 
 @router.delete("/projects/{project_id}")
-def delete_project(project_id: str, db: Session = Depends(get_db)):
+def delete_project(
+    project_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+):
     """
     Delete a project. Its analyses are NOT deleted, only unassigned, so
     results are never lost to a project being cleaned up.
@@ -296,13 +356,14 @@ def delete_project(project_id: str, db: Session = Depends(get_db)):
     Project.samples: a collected date has no meaning outside its project, and
     any analysis deployed from it holds its own copy of the values.
     """
-    project = db.query(Project).filter(Project.id == project_id).first()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+    project = owned_or_404(
+        db.query(Project).filter(Project.id == project_id).first(),
+        user, 'That project')
 
     reassigned = (
         db.query(Analysis)
         .filter(Analysis.project_id == project_id)
+        .filter(Analysis.owner_id == user.id)
         .update({Analysis.project_id: None})
     )
     db.delete(project)

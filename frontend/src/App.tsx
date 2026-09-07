@@ -1,10 +1,12 @@
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom'
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { CssBaseline, ThemeProvider } from '@mui/material'
 import { alpha, createTheme } from '@mui/material/styles'
 import { WARM_INK } from '@/theme/diagramColors'
 import { CANVAS, MUTED, PAPER } from '@/theme/surfaces'
 import { NotificationProvider } from '@/contexts/NotificationContext'
+import { AuthProvider, useAuth } from '@/contexts/AuthContext'
 import Navigation from '@/components/Navigation'
+import ErrorBoundary from '@/components/ErrorBoundary'
 import Dashboard from '@/pages/Dashboard'
 import NewAnalysis from '@/pages/NewAnalysis'
 import Stratigraphy from '@/pages/Stratigraphy'
@@ -14,7 +16,9 @@ import Curves from '@/pages/Curves'
 import CurveBrowser from '@/pages/CurveBrowser'
 import ProjectDetail from '@/pages/ProjectDetail'
 import CompareResults from '@/pages/CompareResults'
-import Reference from '@/pages/Reference'
+import Help from '@/pages/Help'
+import Glossary from '@/pages/Glossary'
+import SignIn from '@/pages/SignIn'
 
 // `background.muted` is ours, not MUI's -- declared so `sx={{ backgroundColor:
 // 'background.muted' }}` resolves and typechecks like any built-in token.
@@ -173,32 +177,84 @@ const theme = createTheme({
   },
 })
 
+/**
+ * The routed pages, with a boundary around them.
+ *
+ * Split out of App only so it can call useLocation, which has to be inside
+ * the Router. The pathname is the boundary's reset key: a page that throws
+ * would otherwise leave the fallback showing over every page navigated to
+ * afterwards, since nothing else clears it.
+ *
+ * The boundary sits INSIDE the Router and BELOW Navigation deliberately.
+ * Below, so a broken page still leaves the user something to navigate with;
+ * inside, so the fallback's own links are real routes rather than reloads.
+ */
+function RoutedPages() {
+  const location = useLocation()
+  return (
+    <ErrorBoundary resetKey={location.pathname}>
+      <Routes>
+        <Route path="/" element={<Dashboard />} />
+        <Route path="/new-analysis" element={<NewAnalysis />} />
+        <Route path="/new-analysis/model-structure" element={<Stratigraphy />} />
+        {/* Editing a saved analysis reuses the same two pages as creating
+            one -- NewAnalysis loads the saved inputs into the shared draft
+            store, and Stratigraphy edits them exactly as for a new
+            analysis. See NewAnalysis's edit-mode effect. */}
+        <Route path="/analysis/:analysisId/edit" element={<NewAnalysis />} />
+        <Route path="/analysis/:analysisId/edit/model-structure" element={<Stratigraphy />} />
+        <Route path="/results/:analysisId" element={<Results />} />
+        <Route path="/projects" element={<Projects />} />
+        <Route path="/curves" element={<Curves />} />
+        <Route path="/help" element={<Help />} />
+        <Route path="/help/glossary" element={<Glossary />} />
+        {/* The glossary was the whole of /reference before the manual
+            joined it; anything bookmarked or linked to that path is
+            still asking for the same page. */}
+        <Route path="/reference" element={<Navigate to="/help/glossary" replace />} />
+        <Route path="/curves/:curveId/browse" element={<CurveBrowser />} />
+        <Route path="/projects/:projectId" element={<ProjectDetail />} />
+        <Route path="/projects/:projectId/compare" element={<CompareResults />} />
+      </Routes>
+    </ErrorBoundary>
+  )
+}
+
+/**
+ * The app, or the sign-in screen.
+ *
+ * Nothing in RadiCal is readable without an account, so this is a swap rather
+ * than a redirect: there is no route to send an anonymous visitor to that
+ * would show them anything. Not navigating also means a bookmarked deep link
+ * survives signing in -- the URL is untouched throughout, so the page it names
+ * is what appears afterwards.
+ *
+ * Navigation is inside the signed-in branch: its links go to pages that
+ * require an account, and offering them to somebody who has not signed in
+ * would be offering a row of 401s.
+ */
+function AppShell() {
+  const { user } = useAuth()
+  if (!user) return <SignIn />
+  return (
+    <Router>
+      <Navigation />
+      <RoutedPages />
+    </Router>
+  )
+}
+
 function App() {
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
+      {/* NotificationProvider outside AuthProvider: signing in and out both
+          report through it, and the auth layer unmounts everything under it
+          when the session ends. */}
       <NotificationProvider>
-        <Router>
-          <Navigation />
-          <Routes>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/new-analysis" element={<NewAnalysis />} />
-            <Route path="/new-analysis/model-structure" element={<Stratigraphy />} />
-            {/* Editing a saved analysis reuses the same two pages as creating
-                one -- NewAnalysis loads the saved inputs into the shared draft
-                store, and Stratigraphy edits them exactly as for a new
-                analysis. See NewAnalysis's edit-mode effect. */}
-            <Route path="/analysis/:analysisId/edit" element={<NewAnalysis />} />
-            <Route path="/analysis/:analysisId/edit/model-structure" element={<Stratigraphy />} />
-            <Route path="/results/:analysisId" element={<Results />} />
-            <Route path="/projects" element={<Projects />} />
-            <Route path="/curves" element={<Curves />} />
-            <Route path="/reference" element={<Reference />} />
-            <Route path="/curves/:curveId/browse" element={<CurveBrowser />} />
-            <Route path="/projects/:projectId" element={<ProjectDetail />} />
-            <Route path="/projects/:projectId/compare" element={<CompareResults />} />
-          </Routes>
-        </Router>
+        <AuthProvider>
+          <AppShell />
+        </AuthProvider>
       </NotificationProvider>
     </ThemeProvider>
   )

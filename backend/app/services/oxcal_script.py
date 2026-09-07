@@ -332,7 +332,7 @@ def _normalise_curve_name(raw: str) -> str:
     return re.sub(r'[^a-z0-9]+', '', (raw or '').strip().lstrip('=').lower())
 
 
-def _curve_id(raw: str) -> Optional[str]:
+def _curve_id(raw: str, owner_id: str) -> Optional[str]:
     """
     An OxCal curve name as one of the ids the calibration engine loads, or
     None for a curve this app does not have -- which the caller reports as a
@@ -344,7 +344,7 @@ def _curve_id(raw: str) -> Optional[str]:
     how OxCal refers back to a curve already declared in an enclosing scope
     (`Curve("=SHCal20")`), and a name written as a filename.
     """
-    return curve_registry.resolve_alias(raw)
+    return curve_registry.resolve_alias(raw, owner_id)
 
 
 # --------------------------------------------------------------------------
@@ -388,8 +388,12 @@ class _Scope:
 
 
 class _Translator:
-    def __init__(self, result: ImportResult):
+    def __init__(self, result: ImportResult, owner_id: str):
         self.result = result
+        # Whose curves this file's Curve()/Mix_Curves() names resolve against.
+        # See parse_oxcal: another account's curve must be as unreachable here
+        # as one nobody has.
+        self.owner_id = owner_id
         self.declared_outlier_models: Dict[str, Call] = {}
         # Reservoir offsets stated with a name, as (delta_r, delta_r_error),
         # for the `Delta_R("=Name")` references that cite them.
@@ -646,10 +650,11 @@ class _Translator:
         local = self.mixed_curves.get(_normalise_curve_name(name))
         if local is not None:
             return local
-        resolved = _curve_id(name)
+        resolved = _curve_id(name, self.owner_id)
         if resolved is None:
             available = ', '.join(
-                spec.name for spec in curve_registry.list_specs(include_archived=True)
+                spec.name for spec in curve_registry.list_specs(
+                    self.owner_id, include_archived=True)
             )
             self.error(
                 node,
@@ -683,8 +688,8 @@ class _Translator:
             return
 
         local_name = str(args[0]).strip().strip('"')
-        a_id = curve_registry.resolve_alias(str(args[1]))
-        b_id = curve_registry.resolve_alias(str(args[2]))
+        a_id = curve_registry.resolve_alias(str(args[1]), self.owner_id)
+        b_id = curve_registry.resolve_alias(str(args[2]), self.owner_id)
         if a_id is None or b_id is None:
             missing = str(args[1]) if a_id is None else str(args[2])
             self.error(node, f"Mix_Curves() names a curve this app does not have: '{missing}'.")
@@ -697,7 +702,7 @@ class _Translator:
             self.error(node, 'Mix_Curves() needs its percentage as a number.')
             return
 
-        match = curve_registry.find_mixed(a_id, b_id, percent, error)
+        match = curve_registry.find_mixed(a_id, b_id, percent, error, self.owner_id)
         if match is None:
             self.error(
                 node,
@@ -999,7 +1004,7 @@ class _Translator:
 # Entry point
 # --------------------------------------------------------------------------
 
-def parse_oxcal(text: str, filename: Optional[str] = None) -> ImportResult:
+def parse_oxcal(text: str, owner_id: str, filename: Optional[str] = None) -> ImportResult:
     """
     Read an OxCal model file into dates plus a model tree.
 
@@ -1007,6 +1012,12 @@ def parse_oxcal(text: str, filename: Optional[str] = None) -> ImportResult:
     where it appears in the file, and every element keeps the name OxCal gave
     it -- so the structure that comes back is readable against the original
     rather than being a reconstruction with generated labels.
+
+    `owner_id` is whose curves the file's `Curve(...)` and `Mix_Curves(...)`
+    names are resolved against. A file naming a curve that belongs to another
+    account fails exactly as one naming a curve nobody has: the alternative
+    would let an import confirm what other people have imported, and would
+    calibrate one user's dates against a curve they cannot see.
     """
     result = ImportResult(source_format='oxcal')
     result.analysis_name = _name_from_filename(filename)
@@ -1021,7 +1032,7 @@ def parse_oxcal(text: str, filename: Optional[str] = None) -> ImportResult:
         result.errors.append('The file has no OxCal commands in it.')
         return result
 
-    translator = _Translator(result)
+    translator = _Translator(result, owner_id)
     translator.translate(nodes)
 
     if result.model_tree is not None and result.analysis_name is None:

@@ -15,6 +15,9 @@ from app.services import gibbs
 from app.services import jobs
 from app.services import agreement as agreement_service
 from app.services import intervals
+from app.services import failures
+from app.api.auth import current_user, owned_or_404
+from app.api.curves import authorise_curve_ids
 from app.services.model_tree import (
     migrate_from_relationships,
     rows_to_tree,
@@ -24,7 +27,7 @@ from app.services.model_tree import (
 )
 from app.models import (
     Analysis, RadiocarbonSample, AnalysisResult, StratigraphicRelationship,
-    SampleGroup, Project, ModelElement,
+    SampleGroup, Project, ModelElement, User,
 )
 from typing import Callable, List, Dict, Optional, Tuple
 import numpy as np
@@ -38,13 +41,22 @@ router = APIRouter()
 # never derives them from a downsampled plot series.
 
 
-def _validate_project_id(project_id: Optional[str], db: Session) -> Optional[str]:
+def _validate_project_id(project_id: Optional[str], db: Session, user: User) -> Optional[str]:
     """Return a request's project_id unchanged if valid or absent, raising 404
     if it names no real project -- which would otherwise leave the analysis
-    silently unassigned."""
+    silently unassigned.
+
+    "No real project" includes someone else's, and returns the same 404: a
+    project id must not be a way to file an analysis into a project you cannot
+    see, nor a way to find out that one exists."""
     if not project_id:
         return None
-    if not db.query(Project.id).filter(Project.id == project_id).first():
+    owned = (
+        db.query(Project.id)
+        .filter(Project.id == project_id, Project.owner_id == user.id)
+        .first()
+    )
+    if not owned:
         raise HTTPException(status_code=404, detail=f"Project '{project_id}' not found")
     return project_id
 
@@ -537,7 +549,8 @@ def _tree_from_request(request: BayesianRequest) -> Tuple[Dict, Dict, List[Dict]
 
 
 @router.post("/analysis/calibrate")
-def calibrate_single(measurement: CalibrateRequest, db: Session = Depends(get_db)):
+def calibrate_single(measurement: CalibrateRequest, db: Session = Depends(get_db),
+                     user: User = Depends(current_user)):
     """
     Calibrate a single radiocarbon measurement. The body is validated by
     CalibrateRequest (schemas/sample.py).
@@ -549,7 +562,11 @@ def calibrate_single(measurement: CalibrateRequest, db: Session = Depends(get_db
     """
     try:
         save = measurement.save
-        project_id = _validate_project_id(measurement.project_id, db) if save else None
+        project_id = _validate_project_id(measurement.project_id, db, user) if save else None
+
+        # The schema checked the id names a real curve; this checks it is one
+        # of THIS user's. See api/curves.authorise_curve_ids.
+        authorise_curve_ids([measurement.curve_id], user.id)
 
         # Raises ValueError if the curve is unavailable or empty.
         curve_id = measurement.curve_id
@@ -596,7 +613,8 @@ def calibrate_single(measurement: CalibrateRequest, db: Session = Depends(get_db
             analysis_type='calibration',
             status='completed',
             bayesian_config={},
-            project_id=project_id
+            project_id=project_id,
+            owner_id=user.id,
         )
         db.add(analysis)
         db.commit()
@@ -656,13 +674,18 @@ def calibrate_single(measurement: CalibrateRequest, db: Session = Depends(get_db
 
         return {"success": True, "data": response_data}
     except HTTPException:
+        # A refusal this route raised on purpose -- an unavailable curve, a
+        # project that is not this user's -- already carries its own status and
+        # its own wording. Letting it fall into the handler below would flatten
+        # every one of them to a 400 reading "422: ...".
         raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.post("/analysis/calibrate-group")
-def calibrate_group(request: GroupCalibrationRequest, db: Session = Depends(get_db)):
+def calibrate_group(request: GroupCalibrationRequest, db: Session = Depends(get_db),
+                    user: User = Depends(current_user)):
     """
     Calibrate several measurements independently -- each exactly as
     /analysis/calibrate would alone -- and save them as one analysis so they
@@ -674,7 +697,8 @@ def calibrate_group(request: GroupCalibrationRequest, db: Session = Depends(get_
     together is normally worth keeping.
     """
     try:
-        project_id = _validate_project_id(request.project_id, db)
+        project_id = _validate_project_id(request.project_id, db, user)
+        authorise_curve_ids([m.curve_id for m in request.measurements], user.id)
 
         analysis = Analysis(
             name=request.name,
@@ -684,6 +708,7 @@ def calibrate_group(request: GroupCalibrationRequest, db: Session = Depends(get_
             # so a rerun and an edit round-trip it.
             bayesian_config={'estimate_durations': request.estimate_durations},
             project_id=project_id,
+            owner_id=user.id,
         )
         db.add(analysis)
         db.flush()
@@ -723,6 +748,7 @@ def calibrate_group(request: GroupCalibrationRequest, db: Session = Depends(get_
             },
         }
     except HTTPException:
+        db.rollback()
         raise
     except Exception as e:
         db.rollback()
@@ -731,7 +757,8 @@ def calibrate_group(request: GroupCalibrationRequest, db: Session = Depends(get_
 
 @router.post("/analysis/bayesian")
 def bayesian_analysis(request: BayesianRequest, wait: bool = False,
-                      db: Session = Depends(get_db)):
+                      db: Session = Depends(get_db),
+                      user: User = Depends(current_user)):
     """
     Perform Bayesian chronological analysis.
 
@@ -755,7 +782,8 @@ def bayesian_analysis(request: BayesianRequest, wait: bool = False,
     import traceback
     try:
         save = request.save
-        project_id = _validate_project_id(request.project_id, db) if save else None
+        project_id = _validate_project_id(request.project_id, db, user) if save else None
+        authorise_curve_ids([m.curve_id for m in request.measurements], user.id)
 
         # Create analysis record
         analysis = Analysis(
@@ -763,7 +791,8 @@ def bayesian_analysis(request: BayesianRequest, wait: bool = False,
             analysis_type='bayesian',
             status='running',
             bayesian_config=request.bayesian_config.model_dump(),
-            project_id=project_id
+            project_id=project_id,
+            owner_id=user.id,
         )
         if save:
             db.add(analysis)
@@ -947,13 +976,14 @@ def bayesian_analysis(request: BayesianRequest, wait: bool = False,
                         Analysis.id == analysis_id).first()
                     if worker_analysis is not None:
                         worker_analysis.status = 'failed'
-                        worker_analysis.error_message = str(exc)
+                        worker_analysis.error_message = failures.classify(exc).message
                         db.commit()
                     raise
                 return {'analysis_id': analysis_id,
                         'solver': solver.get('method')}
 
-            job_id = jobs.submit('analysis_run', analysis_id, _work)
+            job_id = jobs.submit('analysis_run', analysis_id, _work,
+                                 owner_id=user.id)
             return JSONResponse(status_code=202, content={
                 "success": True,
                 "data": {
@@ -1008,6 +1038,9 @@ def bayesian_analysis(request: BayesianRequest, wait: bool = False,
                 "measurements_count": len(request.measurements)
             }
         }
+    except HTTPException:
+        db.rollback()
+        raise
     except Exception as e:
         db.rollback()
         import traceback
@@ -1016,11 +1049,12 @@ def bayesian_analysis(request: BayesianRequest, wait: bool = False,
         raise HTTPException(status_code=400, detail=str(e))
 
 @router.get("/analysis/{analysis_id}")
-def get_analysis(analysis_id: str, db: Session = Depends(get_db)):
+def get_analysis(analysis_id: str, db: Session = Depends(get_db),
+                 user: User = Depends(current_user)):
     """Retrieve analysis results"""
-    analysis = db.query(Analysis).filter(Analysis.id == analysis_id).first()
-    if not analysis:
-        raise HTTPException(status_code=404, detail="Analysis not found")
+    analysis = owned_or_404(
+        db.query(Analysis).filter(Analysis.id == analysis_id).first(),
+        user, 'That analysis')
 
     results = db.query(AnalysisResult).filter(AnalysisResult.analysis_id == analysis_id).all()
     samples_by_id = {s.id: s for s in analysis.measurements}
@@ -1269,12 +1303,15 @@ def list_analyses(
     project_id: Optional[str] = None,
     unassigned: bool = False,
     db: Session = Depends(get_db),
+    user: User = Depends(current_user),
 ):
     """
     List analyses, most recent first, across all projects by default. Pass
     project_id to scope to one, or unassigned=true for those filed under none.
     """
-    query = db.query(Analysis)
+    # The owner filter goes on the base query, before any of the optional
+    # narrowing below, so no combination of parameters can widen past it.
+    query = db.query(Analysis).filter(Analysis.owner_id == user.id)
     if unassigned:
         query = query.filter(Analysis.project_id.is_(None))
     elif project_id:
@@ -1320,7 +1357,8 @@ def list_analyses(
 
 
 @router.delete("/analysis/{analysis_id}")
-def delete_analysis(analysis_id: str, db: Session = Depends(get_db)):
+def delete_analysis(analysis_id: str, db: Session = Depends(get_db),
+                    user: User = Depends(current_user)):
     """
     Permanently delete an analysis and everything tied to it. Unlike project
     deletion there is no "unassign and keep": a result has no meaning outside
@@ -1331,9 +1369,9 @@ def delete_analysis(analysis_id: str, db: Session = Depends(get_db)):
     dependency order: results and relationships, then samples, then groups,
     then the analysis.
     """
-    analysis = db.query(Analysis).filter(Analysis.id == analysis_id).first()
-    if not analysis:
-        raise HTTPException(status_code=404, detail="Analysis not found")
+    analysis = owned_or_404(
+        db.query(Analysis).filter(Analysis.id == analysis_id).first(),
+        user, 'That analysis')
 
     db.query(AnalysisResult).filter(AnalysisResult.analysis_id == analysis_id).delete(synchronize_session=False)
     db.query(StratigraphicRelationship).filter(StratigraphicRelationship.analysis_id == analysis_id).delete(synchronize_session=False)
@@ -1347,17 +1385,18 @@ def delete_analysis(analysis_id: str, db: Session = Depends(get_db)):
 
 
 @router.patch("/analysis/{analysis_id}")
-def update_analysis(analysis_id: str, updates: Dict, db: Session = Depends(get_db)):
+def update_analysis(analysis_id: str, updates: Dict, db: Session = Depends(get_db),
+                    user: User = Depends(current_user)):
     """
     Update an analysis's project assignment and/or name. Pass
     project_id: null to unassign it.
     """
-    analysis = db.query(Analysis).filter(Analysis.id == analysis_id).first()
-    if not analysis:
-        raise HTTPException(status_code=404, detail="Analysis not found")
+    analysis = owned_or_404(
+        db.query(Analysis).filter(Analysis.id == analysis_id).first(),
+        user, 'That analysis')
 
     if 'project_id' in updates:
-        analysis.project_id = _validate_project_id(updates['project_id'], db)
+        analysis.project_id = _validate_project_id(updates['project_id'], db, user)
     if updates.get('name'):
         analysis.name = updates['name']
 
@@ -1533,7 +1572,7 @@ def _run_analysis_job(analysis_id: str):
             analysis = db.query(Analysis).filter(Analysis.id == analysis_id).first()
             if analysis is not None:
                 analysis.status = 'failed'
-                analysis.error_message = str(exc)
+                analysis.error_message = failures.classify(exc).message
                 db.commit()
             raise
         return {'analysis_id': analysis_id, 'solver': (analysis.solver or {}).get('method')}
@@ -1545,7 +1584,8 @@ def _run_analysis_job(analysis_id: str):
 # on its own response.
 @router.post("/analysis/{analysis_id}/rerun")
 def rerun_analysis(analysis_id: str, wait: bool = False,
-                   db: Session = Depends(get_db)):
+                   db: Session = Depends(get_db),
+                   user: User = Depends(current_user)):
     """
     Recompute a saved analysis's results in place from its own persisted
     inputs -- same id and URL, old results replaced.
@@ -1558,25 +1598,31 @@ def rerun_analysis(analysis_id: str, wait: bool = False,
     permanently, because this app has no client library and anything
     scripting it from outside a browser has no event loop to poll from.
     """
-    analysis = db.query(Analysis).filter(Analysis.id == analysis_id).first()
-    if not analysis:
-        raise HTTPException(status_code=404, detail="Analysis not found")
+    analysis = owned_or_404(
+        db.query(Analysis).filter(Analysis.id == analysis_id).first(),
+        user, 'That analysis')
 
     if wait:
         try:
             _rerun_analysis(analysis, db)
         except Exception as e:
             db.rollback()
+            # Both the stored reason and the response say the same thing: a
+            # synchronous re-run reports through the HTTP error, the queued one
+            # through the analysis, and the two must not describe one failure
+            # differently.
+            failure = failures.classify(e)
             analysis.status = 'failed'
-            analysis.error_message = str(e)
+            analysis.error_message = failure.message
             db.commit()
-            raise HTTPException(status_code=400, detail=str(e))
+            raise HTTPException(status_code=400, detail=failure.message)
         return {"success": True, "data": {"id": analysis.id, "status": analysis.status}}
 
     analysis.status = 'pending'
     analysis.error_message = None
     db.commit()
-    job_id = jobs.submit('analysis_run', analysis.id, _run_analysis_job(analysis.id))
+    job_id = jobs.submit('analysis_run', analysis.id, _run_analysis_job(analysis.id),
+                         owner_id=user.id)
     return JSONResponse(status_code=202, content={
         "success": True,
         "data": {"id": analysis.id, "status": "queued", "job_id": job_id},
@@ -1584,7 +1630,8 @@ def rerun_analysis(analysis_id: str, wait: bool = False,
 
 
 @router.put("/analysis/{analysis_id}/model-tree")
-def replace_model_tree(analysis_id: str, payload: Dict, db: Session = Depends(get_db)):
+def replace_model_tree(analysis_id: str, payload: Dict, db: Session = Depends(get_db),
+                       user: User = Depends(current_user)):
     """
     Replace an analysis's model structure (services/model_tree.py).
 
@@ -1598,9 +1645,9 @@ def replace_model_tree(analysis_id: str, payload: Dict, db: Session = Depends(ge
     and status returns to 'pending', since they were computed under the
     previous structure.
     """
-    analysis = db.query(Analysis).filter(Analysis.id == analysis_id).first()
-    if not analysis:
-        raise HTTPException(status_code=404, detail="Analysis not found")
+    analysis = owned_or_404(
+        db.query(Analysis).filter(Analysis.id == analysis_id).first(),
+        user, 'That analysis')
 
     root = payload.get('model_tree')
     if not root:
@@ -1640,6 +1687,7 @@ def replace_model_tree(analysis_id: str, payload: Dict, db: Session = Depends(ge
         analysis.error_message = None
         db.commit()
     except HTTPException:
+        db.rollback()
         raise
     except Exception as e:
         db.rollback()
@@ -1653,7 +1701,8 @@ def replace_model_tree(analysis_id: str, payload: Dict, db: Session = Depends(ge
 
 
 @router.post("/analysis/{analysis_id}/duplicate")
-def duplicate_analysis(analysis_id: str, db: Session = Depends(get_db)):
+def duplicate_analysis(analysis_id: str, db: Session = Depends(get_db),
+                       user: User = Depends(current_user)):
     """
     Deep-copy an analysis's INPUTS into a new analysis, so a variant can be
     built from an existing one -- "the same dates, but grouped differently".
@@ -1663,9 +1712,9 @@ def duplicate_analysis(analysis_id: str, db: Session = Depends(get_db)):
     the copy can be edited (PUT /analysis/{id}/inputs) and then run
     (POST /analysis/{id}/rerun).
     """
-    source = db.query(Analysis).filter(Analysis.id == analysis_id).first()
-    if not source:
-        raise HTTPException(status_code=404, detail="Analysis not found")
+    source = owned_or_404(
+        db.query(Analysis).filter(Analysis.id == analysis_id).first(),
+        user, 'That analysis')
 
     copy = Analysis(
         name=f"{source.name} (copy)",
@@ -1673,6 +1722,10 @@ def duplicate_analysis(analysis_id: str, db: Session = Depends(get_db)):
         status='pending',
         bayesian_config=source.bayesian_config,
         project_id=source.project_id,
+        # The copier's, not the source's. They are the same person today --
+        # you can only duplicate what you can see -- and writing it explicitly
+        # is what keeps that true if sharing is ever added.
+        owner_id=user.id,
     )
     db.add(copy)
     db.flush()
@@ -1771,6 +1824,7 @@ def replace_analysis_inputs(
     analysis_id: str,
     request: BayesianRequest,
     db: Session = Depends(get_db),
+    user: User = Depends(current_user),
 ):
     """
     Replace a saved analysis's inputs -- measurements, contexts,
@@ -1789,9 +1843,13 @@ def replace_analysis_inputs(
     second one. Omitting it leaves the type alone, which is what an ordinary
     same-type edit means.
     """
-    analysis = db.query(Analysis).filter(Analysis.id == analysis_id).first()
-    if not analysis:
-        raise HTTPException(status_code=404, detail="Analysis not found")
+    analysis = owned_or_404(
+        db.query(Analysis).filter(Analysis.id == analysis_id).first(),
+        user, 'That analysis')
+    # Checked BEFORE anything is deleted below: an edit naming a curve this
+    # user cannot use must leave the analysis exactly as it was, not wipe its
+    # results and then refuse.
+    authorise_curve_ids([m.curve_id for m in request.measurements], user.id)
 
     try:
         # Order matters (see delete_analysis): results and relationships
@@ -1893,6 +1951,7 @@ def replace_analysis_inputs(
         analysis.intervals = None
         db.commit()
     except HTTPException:
+        db.rollback()
         raise
     except Exception as e:
         db.rollback()
