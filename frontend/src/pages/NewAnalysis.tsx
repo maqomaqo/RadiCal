@@ -81,7 +81,7 @@ import type {
   ModelElement,
 } from '@/types'
 import { expandRelationships, findCycle } from '@/utils/stratigraphy'
-import { elementLabel } from '@/utils/elementLabels'
+import { ELEMENT_TYPE_LABEL, elementLabel } from '@/utils/elementLabels'
 import { modelCanReportIntervals } from '@/utils/intervalsAvailable'
 import { summariseTree } from '@/utils/harrisLayout'
 import { validateTree } from '@/components/ModelTreeEditor'
@@ -523,6 +523,40 @@ export default function NewAnalysis() {
     : relationships.length
   const structureDefined = modelTree ? true : groups.length > 0 || relationships.length > 0
   const structureInvalid = modelTree ? treeProblems.length > 0 : !!cycle
+
+  // A wiggle match and a deposition sequence hold their dates DIRECTLY, not
+  // through Phases, and neither needs a Boundary. So a model made of one
+  // summarises to "0 phases, 0 ordering relationships" -- literally true, and
+  // read by the analyst as "you have not built anything yet", sitting right
+  // above a paragraph telling them to go and build it. Name what is actually
+  // there instead.
+  const seriesElements: ModelElement[] = []
+  if (modelTree) {
+    const collect = (element: ModelElement) => {
+      if (
+        element.element_type === 'wiggle_sequence'
+        || element.element_type === 'deposition_sequence'
+      ) {
+        seriesElements.push(element)
+      }
+      for (const child of element.children || []) collect(child)
+    }
+    collect(modelTree)
+  }
+  const datesInElement = (elementId: string) =>
+    measurements.filter((m) => (elementAssignments[m.id] || m.group_id) === elementId).length
+  // Only when the series are the whole story. A deposition sequence between
+  // two Boundaries is an ordinary model that happens to contain one, and the
+  // usual counts describe it perfectly well.
+  const seriesIsTheModel = seriesElements.length > 0 && structurePhaseCount === 0
+  // A model can hold both kinds -- a timber and a core from the same site --
+  // so name both rather than whichever came first in the walk.
+  const seriesOrderedBy = [
+    seriesElements.some((s) => s.element_type === 'wiggle_sequence') ? 'gaps' : null,
+    seriesElements.some((s) => s.element_type === 'deposition_sequence') ? 'depths' : null,
+  ]
+    .filter(Boolean)
+    .join(' and ')
 
   // Optional columns appear only when at least one date has something to put
   // in them. A single terrestrial calibration should not be handed a table
@@ -1955,17 +1989,41 @@ export default function NewAnalysis() {
                 <Typography variant="h5" component="h2" gutterBottom>
                   Model Structure
                 </Typography>
-                <Stack direction="row" spacing={1} sx={{ mb: 1 }}>
-                  <Chip size="small" label={`${structurePhaseCount} phase${structurePhaseCount === 1 ? '' : 's'}`} />
-                  <Chip
-                    size="small"
-                    label={`${structureRelationshipCount} ordering relationship${structureRelationshipCount === 1 ? '' : 's'}`}
-                  />
+                <Stack direction="row" spacing={1} sx={{ mb: 1 }} flexWrap="wrap" useFlexGap>
+                  {seriesElements.map((series) => {
+                    const dated = datesInElement(series.id)
+                    return (
+                      <Chip
+                        key={series.id}
+                        size="small"
+                        label={`${ELEMENT_TYPE_LABEL[series.element_type]} -- ${dated} date${dated === 1 ? '' : 's'}`}
+                      />
+                    )
+                  })}
+                  {!seriesIsTheModel && (
+                    <>
+                      <Chip size="small" label={`${structurePhaseCount} phase${structurePhaseCount === 1 ? '' : 's'}`} />
+                      <Chip
+                        size="small"
+                        label={`${structureRelationshipCount} ordering relationship${structureRelationshipCount === 1 ? '' : 's'}`}
+                      />
+                    </>
+                  )}
                   {structureInvalid && <Chip size="small" color="error" label="Invalid -- fix before running" />}
                 </Stack>
                 <Typography variant="body2" color="textSecondary">
-                  Build the model as nested Sequences and Phases with Boundaries placed where you
-                  want them, then assign each date to a Phase. A Bayesian analysis needs this structure to constrain the dates. Calibrating them independently is what Group Calibration does.
+                  {seriesIsTheModel ? (
+                    <>
+                      The dates in this model are ordered by the {seriesOrderedBy} recorded against
+                      them, not by Phases and Boundaries. Open Model Structure to change the series
+                      or which dates are in it.
+                    </>
+                  ) : (
+                    <>
+                      Build the model as nested Sequences and Phases with Boundaries placed where you
+                      want them, then assign each date to a Phase. A Bayesian analysis needs this structure to constrain the dates. Calibrating them independently is what Group Calibration does.
+                    </>
+                  )}
                 </Typography>
               </Box>
               <Button
