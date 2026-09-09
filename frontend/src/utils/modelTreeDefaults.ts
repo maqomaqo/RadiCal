@@ -190,3 +190,61 @@ export function bootstrapModelTree(dates: DateToPlace[]): BootstrappedTree {
     assignments,
   }
 }
+
+/**
+ * The two one-click presets, for the models whose whole structure is a single
+ * ordinate-bearing sequence.
+ *
+ * Both are UI shortcuts over the same data model, not second code paths. The
+ * standalone case is the common one for each -- one timber, one core -- and
+ * making someone hand-build a tree to match eight rings from one piece of oak
+ * would be a tax with no payoff.
+ *
+ * `dates` are placed into the sequence directly, because a wiggle match and a
+ * deposition sequence hold dates the way a Phase does. Nothing else is
+ * created: neither model has Boundaries, and inventing a pair would be
+ * asserting a transition the model does not have.
+ */
+export function wiggleMatchTree(dateIds: string[]): BootstrappedTree {
+  const tree: ModelElement = {
+    id: newElementId(),
+    element_type: 'wiggle_sequence',
+    name: 'Wiggle match',
+    tpq_age_bp: null,
+    taq_age_bp: null,
+    // Rings by default -- the overwhelming case -- and no reference member
+    // until one is nominated, since the gaps decide that rather than the
+    // structure.
+    params: { gap_units: 'rings', reference_sample_id: null },
+    children: [],
+  }
+  return {
+    tree,
+    assignments: Object.fromEntries(dateIds.map((id) => [id, tree.id])),
+  }
+}
+
+export function depositionSequenceTree(dateIds: string[]): BootstrappedTree {
+  const tree: ModelElement = {
+    id: newElementId(),
+    element_type: 'deposition_sequence',
+    name: 'Core',
+    tpq_age_bp: null,
+    taq_age_bp: null,
+    // The rate is INFERRED rather than fixed: a rigidity chosen badly
+    // dominates the answer, so the default is to let the dates pick it and to
+    // report what they picked.
+    params: {
+      k: null,
+      k_variable: true,
+      log_k_min: -2,
+      log_k_max: 2,
+      depth_units: 'cm',
+    },
+    children: [],
+  }
+  return {
+    tree,
+    assignments: Object.fromEntries(dateIds.map((id) => [id, tree.id])),
+  }
+}

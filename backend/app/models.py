@@ -104,6 +104,14 @@ class ProjectSample(Base):
     delta_r_error = Column(Float, nullable=True)
 
     depth_cm = Column(Float, nullable=True)
+
+    # Where this sample sits in a wiggle-matched series, in years BEFORE the
+    # series reference point -- 0 at the reference, increasing INTO THE PAST.
+    # Same field as on RadiocarbonSample, so deploying stays a field-for-field
+    # copy; see there for the sign convention and why it is not depth_cm.
+    ring_offset = Column(Float, nullable=True)
+    ring_offset_error = Column(Float, nullable=True)
+
     location = Column(String, nullable=True)
     notes = Column(String, nullable=True)
 
@@ -282,6 +290,25 @@ class RadiocarbonSample(Base):
     # Kept because existing rows may hold a value.
     reservoir_age = Column(Float, nullable=True)
     depth_cm = Column(Float, nullable=True)
+
+    # Where this sample sits in a wiggle-matched series (a tree-ring sequence,
+    # a varve count, any sampled series with a measured separation), in years
+    # BEFORE the series reference point: 0 AT the reference and INCREASING
+    # INTO THE PAST, so a member's calendar age is the reference's plus its
+    # offset. Cal BP counts backwards too, which is what makes the sign easy
+    # to invert and the result plausible-looking when it is -- see
+    # services/wiggle_match.py, which states the convention once and asserts
+    # it against an asymmetric stretch of curve.
+    #
+    # NOT depth_cm reused. Rings and depth are different units running in
+    # opposite directions, and overloading one column would put the same sign
+    # error into the importers as well as the solver.
+    ring_offset = Column(Float, nullable=True)
+    # The offset's own 1-sigma uncertainty, in the same units -- OxCal's
+    # V_Sequence, where each gap is measured rather than counted. Null (or
+    # zero) is a D_Sequence: the gaps are asserted exactly.
+    ring_offset_error = Column(Float, nullable=True)
+
     location = Column(String, nullable=True)
     notes = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -342,7 +369,12 @@ class ModelElement(Base):
     parent_id = Column(String, nullable=True)
     position = Column(Integer, nullable=False, default=0)
 
-    element_type = Column(String, nullable=False)  # sequence | phase | boundary | hiatus
+    # sequence | phase | boundary | hiatus | wiggle_sequence |
+    # deposition_sequence | interpolated_depth -- the vocabulary is
+    # model_tree.ELEMENT_TYPES, which is where each one's meaning is written
+    # down. A plain string with no CHECK constraint, so a new type needs no
+    # DDL.
+    element_type = Column(String, nullable=False)
     name = Column(String, nullable=True)
 
     # Age limiters, as on a sample; an element's limiter applies to
@@ -350,8 +382,23 @@ class ModelElement(Base):
     tpq_age_bp = Column(Float, nullable=True)
     taq_age_bp = Column(Float, nullable=True)
 
+    # Settings belonging to ONE kind of element, keyed by element_type and
+    # documented per type in services/model_tree.ELEMENT_PARAMS:
+    #
+    #   wiggle_sequence      {gap_units, reference_sample_id}
+    #   deposition_sequence  {k, k_variable, log_k_min, log_k_max, depth_units}
+    #   interpolated_depth   {depth_cm}
+    #
+    # One JSON column rather than five nullable columns each used by exactly
+    # one type, following Analysis.solver and Analysis.intervals: nothing
+    # queries across these, they are written once and read whole, and the
+    # alternative grows a column every time an element learns a setting.
+    params = Column(JSON, nullable=True)
+
     # For a boundary: its posterior after a run, same shape as a per-sample
-    # result (see exact_chain._summarize). Null otherwise.
+    # result (see exact_chain._summarize). For a wiggle_sequence, the
+    # reference age it solved for; for an interpolated_depth, the age modelled
+    # at that depth. Null otherwise.
     posterior = Column(JSON, nullable=True)
 
     created_at = Column(DateTime, default=datetime.utcnow)

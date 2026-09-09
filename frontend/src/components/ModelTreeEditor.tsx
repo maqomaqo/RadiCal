@@ -44,7 +44,7 @@ import {
   useSortable,
 } from '@dnd-kit/sortable'
 import { useElementTypeColors, type ElementTypeColor } from '@/theme/diagramColors'
-import type { ModelElement, ElementType, MatrixMeasurement } from '@/types'
+import type { ModelElement, ElementType, ElementParams, MatrixMeasurement } from '@/types'
 import SortDatesButton from '@/components/SortDatesButton'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import GuideBand from '@/components/GuideBand'
@@ -52,7 +52,13 @@ import type { MeasurementSortKey } from '@/utils/sortMeasurements'
 // Lives in utils because the starting structure built there (see
 // bootstrapModelTree) mints ids too, and both must mint the same kind.
 // Re-exported so this module stays the one place the editor is imported from.
-import { newElementId } from '@/utils/modelTreeDefaults'
+import {
+  depositionSequenceTree,
+  newElementId,
+  wiggleMatchTree,
+} from '@/utils/modelTreeDefaults'
+import { shortSeriesWarning } from '@/utils/ringOffsets'
+import RingNumberDialog from '@/components/RingNumberDialog'
 
 export { newElementId }
 
@@ -110,6 +116,9 @@ const TYPE_LABEL: Record<ElementType, string> = {
   phase: 'Phase',
   boundary: 'Boundary',
   hiatus: 'Hiatus',
+  wiggle_sequence: 'Wiggle match',
+  deposition_sequence: 'Deposition sequence',
+  interpolated_depth: 'Undated level',
 }
 
 const TYPE_HINT: Record<ElementType, string> = {
@@ -117,6 +126,47 @@ const TYPE_HINT: Record<ElementType, string> = {
   phase: 'Children and contents are unordered. Contains dates',
   boundary: 'A transition; one shared parameter between phases',
   hiatus: 'A deliberate gap; must sit between two boundaries',
+  wiggle_sequence: 'Dates separated by counted rings or varves. Contains dates',
+  deposition_sequence: 'Dates separated by depth, with deposition modelled along it',
+  interpolated_depth: 'A depth with no date, to report an age at',
+}
+
+// The vocabulary in the key and the add menu. The first four are the ordinary
+// model; the last two are the sequences whose members are separated by a
+// MEASURED distance, and are offered second because most models are not one.
+const OFFERED_TYPES: ElementType[] = [
+  'sequence',
+  'boundary',
+  'phase',
+  'hiatus',
+  'wiggle_sequence',
+  'deposition_sequence',
+]
+
+// Types a date can be assigned to. Mirrors model_tree.DATE_HOLDERS: a date is
+// a measurement of one event, and these are the elements that say where that
+// event sits.
+function holdsDates(type: ElementType): boolean {
+  return type === 'phase' || type === 'wiggle_sequence' || type === 'deposition_sequence'
+}
+
+// What a newly added element of each type starts with. Only the
+// ordinate-bearing ones have settings at all; the backend fills in anything a
+// stored element does not carry (model_tree.ELEMENT_PARAMS), so these are the
+// starting VALUES rather than a schema.
+const DEFAULT_PARAMS: Partial<Record<ElementType, ElementParams>> = {
+  wiggle_sequence: { gap_units: 'rings', reference_sample_id: null },
+  // k inferred rather than fixed: a rigidity chosen badly dominates the
+  // answer, so the default is to let the data pick it over two decades either
+  // side of one event per centimetre.
+  deposition_sequence: {
+    k: null,
+    k_variable: true,
+    log_k_min: -2,
+    log_k_max: 2,
+    depth_units: 'cm',
+  },
+  interpolated_depth: { depth_cm: null },
 }
 
 // One MUI spacing unit (8px) times 3 -- the indent step every depth level
@@ -146,8 +196,30 @@ const EMPTY_DATES: MatrixMeasurement[] = []
 // to a visible gap.
 const TYPE_SLOT_PX = 56
 
+// Whether other ELEMENTS can be nested inside. A wiggle match and a
+// deposition sequence hold dates but no elements -- their members are
+// separated by a measured gap, so there is no position in either for a phase
+// or a boundary. Only the deposition sequence takes a child at all, and only
+// the undated level, which is added from its own control rather than by
+// nesting.
 function isContainerType(type: ElementType): boolean {
   return type === 'sequence' || type === 'phase'
+}
+
+/**
+ * Whether the add button appears on this row, and what it may add.
+ *
+ * A deposition sequence is not a container in the nesting sense -- nothing can
+ * be dragged into it -- but it does take one kind of child: an undated level,
+ * a depth with no measurement to report an age at. That is added from its own
+ * row because it belongs to that sequence's depth axis and nowhere else.
+ */
+function acceptsChildren(type: ElementType): boolean {
+  return isContainerType(type) || type === 'deposition_sequence'
+}
+
+function childTypesFor(type: ElementType): ElementType[] {
+  return type === 'deposition_sequence' ? ['interpolated_depth'] : OFFERED_TYPES
 }
 
 /** Depth-first walk, yielding [element, parent]. */
@@ -181,26 +253,31 @@ function findElement(root: ModelElement, id: string): ModelElement | null {
 }
 
 /**
- * A phase is the only legal home for dates, so this is what the sample
- * assignment dropdown offers.
+ * Where a date can be assigned: a Phase, a wiggle match or a deposition
+ * sequence. This is what the sample assignment dropdown offers.
  *
- * Each option carries the containers above it, because phase names are not
- * unique and nothing stops them colliding -- bootstrapModelTree mints "Phase 1"
- * from two different paths, and a bare list of names left two of them
- * indistinguishable at the moment of choosing between them.
+ * Each option carries the containers above it, because names are not unique
+ * and nothing stops them colliding -- bootstrapModelTree mints "Phase 1" from
+ * two different paths, and a bare list of names left two of them
+ * indistinguishable at the moment of choosing between them. The TYPE is
+ * carried too, since "Timber 1" says nothing about whether putting a date in
+ * it also asserts a ring offset for it.
  */
-export function phaseOptions(root: ModelElement): Array<{ id: string; name: string; path: string }> {
-  const out: Array<{ id: string; name: string; path: string }> = []
-  const rec = (el: ModelElement, trail: string[]) => {
-    for (const child of el.children || []) {
-      const name = child.name || TYPE_LABEL[child.element_type]
-      if (child.element_type === 'phase') {
-        out.push({ id: child.id, name, path: trail.join(' › ') })
-      }
-      rec(child, [...trail, name])
+export function phaseOptions(
+  root: ModelElement
+): Array<{ id: string; name: string; path: string; element_type: ElementType }> {
+  const out: Array<{ id: string; name: string; path: string; element_type: ElementType }> = []
+  const consider = (el: ModelElement, trail: string[]) => {
+    const name = el.name || TYPE_LABEL[el.element_type]
+    if (holdsDates(el.element_type)) {
+      out.push({ id: el.id, name, path: trail.join(' › '), element_type: el.element_type })
     }
+    for (const child of el.children || []) consider(child, [...trail, name])
   }
-  rec(root, [root.name || TYPE_LABEL[root.element_type]])
+  // The root can itself be a wiggle match or a deposition sequence -- the one
+  // a preset builds is exactly that -- so it is considered rather than only
+  // walked through.
+  consider(root, [])
   return out
 }
 
@@ -214,11 +291,100 @@ export function validateTree(
   const problems: string[] = []
   const seen = new Set<string>()
   const phaseIds = new Set<string>()
+  const datesIn = new Map<string, number>()
+  for (const m of measurements) {
+    const target = assignments[m.id]
+    if (target) datesIn.set(target, (datesIn.get(target) || 0) + 1)
+  }
 
   walk(root, null, (el, parent) => {
     if (seen.has(el.id)) problems.push(`Element "${el.name || el.id}" appears more than once`)
     seen.add(el.id)
-    if (el.element_type === 'phase') phaseIds.add(el.id)
+    if (holdsDates(el.element_type)) phaseIds.add(el.id)
+    const label = el.name || TYPE_LABEL[el.element_type]
+
+    if (el.element_type === 'wiggle_sequence') {
+      if ((el.children || []).length > 0) {
+        problems.push(
+          `Wiggle match "${label}" contains other elements — its members are separated by measured gaps, so there is no position in it for anything but dates`
+        )
+      }
+      if (!datesIn.get(el.id)) {
+        problems.push(`Wiggle match "${label}" has no dates in it`)
+      }
+      // The gaps ARE the model, so a member without one says no more than it
+      // would on its own. Checked here as well as on the server, because this
+      // is the screen the date was moved in on.
+      const missing = measurements.filter(
+        (m) => assignments[m.id] === el.id && m.ring_offset == null
+      )
+      if (missing.length > 0) {
+        problems.push(
+          `${missing.map((m) => `"${m.sample_name}"`).slice(0, 3).join(', ')} ${
+            missing.length === 1 ? 'has' : 'have'
+          } no ring offset, which wiggle match "${label}" needs`
+        )
+      }
+      const offsets = measurements
+        .filter((m) => assignments[m.id] === el.id && m.ring_offset != null)
+        .map((m) => m.ring_offset as number)
+      if (new Set(offsets).size !== offsets.length) {
+        problems.push(
+          `Wiggle match "${label}" has two dates at the same gap — two samples from one ring are one event measured twice`
+        )
+      }
+      // A wiggle match cannot apply an outlier model: its gaps are asserted,
+      // so there is no room for a date to sit apart from the rest. Refused
+      // rather than dropped, on the server too — a member that does not
+      // belong shows up in the agreement index instead.
+      const flagged = measurements.filter(
+        (m) => assignments[m.id] === el.id && (m.outlier_prior ?? 0) > 0
+      )
+      if (flagged.length > 0) {
+        problems.push(
+          `${flagged.map((m) => `"${m.sample_name}"`).slice(0, 3).join(', ')} ${
+            flagged.length === 1 ? 'has' : 'have'
+          } an outlier model, which wiggle match "${label}" cannot apply — its gaps are asserted, so a date that does not belong shows up in the agreement index instead`
+        )
+      }
+    }
+
+    if (el.element_type === 'deposition_sequence') {
+      for (const child of el.children || []) {
+        if (child.element_type !== 'interpolated_depth') {
+          problems.push(
+            `Deposition sequence "${label}" contains a ${TYPE_LABEL[child.element_type]} — it holds dates and undated levels only`
+          )
+        }
+      }
+      const depths = measurements
+        .filter((m) => assignments[m.id] === el.id)
+        .map((m) => m.depth_cm)
+      if (depths.some((d) => d == null)) {
+        problems.push(
+          `Deposition sequence "${label}" has dates with no depth — depth is the axis the model runs along`
+        )
+      }
+      const levelDepths = [
+        ...depths.filter((d): d is number => d != null),
+        ...(el.children || []).map((c) => c.params?.depth_cm).filter((d): d is number => d != null),
+      ]
+      if (new Set(levelDepths).size !== levelDepths.length) {
+        problems.push(
+          `Deposition sequence "${label}" has two levels at the same depth — a zero interval has no accumulation rate`
+        )
+      }
+      if (levelDepths.length < 2) {
+        problems.push(
+          `Deposition sequence "${label}" needs at least two levels — a rate is a statement about the interval between two`
+        )
+      }
+    }
+
+    if (el.element_type === 'interpolated_depth' && el.params?.depth_cm == null) {
+      problems.push(`Undated level "${label}" has no depth, so there is no age to report`)
+    }
+
     if (parent?.element_type === 'phase' && el.element_type === 'boundary') {
       problems.push(
         `Boundary "${el.name || el.id}" sits directly inside phase "${parent.name}" — a phase is unordered, so put it in a sequence`
@@ -245,7 +411,7 @@ export function validateTree(
   for (const m of measurements) {
     const target = assignments[m.id]
     if (!target) {
-      problems.push(`"${m.sample_name}" is not assigned to a phase`)
+      problems.push(`"${m.sample_name}" is not assigned to a phase or sequence`)
     } else if (!phaseIds.has(target)) {
       problems.push(`"${m.sample_name}" is assigned to an element that no longer exists`)
     }
@@ -542,12 +708,127 @@ interface Props {
    * phases can end up ordered by different rules.
    */
   onSortDates?: (key: MeasurementSortKey) => void
+  /**
+   * Edit one date's ORDINATE -- its ring offset or its depth.
+   *
+   * Optional, and where it is absent those fields are not offered at all
+   * rather than offered and inert. A wiggle match is its gaps and a
+   * deposition sequence is its depths, so a host that cannot write them back
+   * to the draft cannot let a user build either one here.
+   */
+  onSetOrdinate?: (measurementId: string, patch: Partial<MatrixMeasurement>) => void
+}
+
+/**
+ * The settings that belong to ONE kind of element, inline in its row.
+ *
+ * Only three types have any, and each has few enough to sit on the row rather
+ * than behind a disclosure -- unlike TPQ/TAQ, which every container carries
+ * and almost none uses. These are not optional extras: a deposition
+ * sequence's rigidity and an undated level's depth are the model.
+ */
+function ElementSettings({
+  element,
+  onSetParam,
+}: {
+  element: ModelElement
+  onSetParam: (patch: ElementParams) => void
+}) {
+  const params = element.params || {}
+
+  // NO TOOLTIP ON EITHER SELECT BELOW. A tooltip anchored to a Select opens
+  // over the menu the Select just opened -- it sits above the first option and
+  // swallows the click meant for it, so the top item cannot be chosen at all.
+  // The two dropdowns say what they do in their own option words; what a
+  // tooltip would have added is in the user manual, which is where a paragraph
+  // belongs anyway. The text fields beside them keep theirs: a field opens
+  // nothing for a tooltip to cover.
+
+  if (element.element_type === 'wiggle_sequence') {
+    return (
+      <Select
+        size="small"
+        value={params.gap_units || 'rings'}
+        onChange={(e) => onSetParam({ gap_units: e.target.value as ElementParams['gap_units'] })}
+        inputProps={{ 'aria-label': `Gap units for ${element.name || 'wiggle match'}` }}
+        sx={{ minWidth: 104, flexShrink: 0 }}
+      >
+        <MenuItem value="rings">Rings</MenuItem>
+        <MenuItem value="varves">Varves</MenuItem>
+        <MenuItem value="years">Years</MenuItem>
+      </Select>
+    )
+  }
+
+  if (element.element_type === 'deposition_sequence') {
+    const variable = params.k_variable !== false
+    return (
+      <>
+        <Select
+          size="small"
+          value={variable ? 'inferred' : 'fixed'}
+          onChange={(e) =>
+            onSetParam(
+              e.target.value === 'inferred'
+                ? { k_variable: true, k: null }
+                : { k_variable: false, k: params.k ?? 1 }
+            )
+          }
+          inputProps={{ 'aria-label': `Deposition rate for ${element.name || 'sequence'}` }}
+          sx={{ minWidth: 128, flexShrink: 0 }}
+        >
+          <MenuItem value="inferred">Rate inferred</MenuItem>
+          <MenuItem value="fixed">Rate fixed</MenuItem>
+        </Select>
+        {!variable && (
+          <TextField
+            size="small"
+            type="number"
+            label="k"
+            value={params.k ?? ''}
+            onChange={(e) =>
+              onSetParam({ k: e.target.value === '' ? null : Number(e.target.value) })
+            }
+            inputProps={{
+              'aria-label': `Rigidity k for ${element.name || 'deposition sequence'}`,
+              min: 0,
+            }}
+            sx={{ width: 90, flexShrink: 0 }}
+          />
+        )}
+      </>
+    )
+  }
+
+  if (element.element_type === 'interpolated_depth') {
+    return (
+      <Tooltip title="The depth to report an age at. This level has no date of its own — the model reads its age off the levels either side.">
+        <TextField
+          size="small"
+          type="number"
+          label="Depth"
+          value={params.depth_cm ?? ''}
+          onChange={(e) =>
+            onSetParam({ depth_cm: e.target.value === '' ? null : Number(e.target.value) })
+          }
+          inputProps={{
+            'aria-label': `Depth of ${element.name || 'undated level'}`,
+            min: 0,
+          }}
+          sx={{ width: 104, flexShrink: 0 }}
+        />
+      </Tooltip>
+    )
+  }
+
+  return null
 }
 
 interface ElementFieldsProps {
   element: ModelElement
   typeColor: Record<ElementType, ElementTypeColor>
   onRename: (name: string) => void
+  onSetParam: (patch: ElementParams) => void
   onSetLimit: (field: 'tpq_age_bp' | 'taq_age_bp', value: string) => void
   /**
    * Whether this row's TPQ/TAQ pair is showing. Owned by the editor rather
@@ -562,6 +843,7 @@ function ElementFields({
   element,
   typeColor,
   onRename,
+  onSetParam,
   onSetLimit,
   limitersOpen,
   onOpenLimiters,
@@ -657,6 +939,7 @@ function ElementFields({
           '& input': { minWidth: 0 },
         }}
       />
+      <ElementSettings element={element} onSetParam={onSetParam} />
       {/* Limiters on demand, not two permanently-open number boxes.
           
           Every container row carried both fields at all times -- 180px of
@@ -740,6 +1023,207 @@ function ElementFields({
 }
 
 /**
+ * The ORDINATE a date needs to be a member of the sequence it has been put
+ * in: a gap for a wiggle match, a depth for a deposition sequence.
+ *
+ * Edited here, beside the assignment, rather than back on the data-entry
+ * table. Moving a date into a wiggle match is exactly the action that leaves
+ * it without a gap, and a wiggle match with a member at gap 0 by default is a
+ * model asserting something nobody entered -- so the field appears the moment
+ * the date lands somewhere that needs it.
+ *
+ * The blank state is a blank field, not a zero. Zero is a real, meaningful
+ * offset (it is the reference), so defaulting to it would make "not entered"
+ * and "the reference" indistinguishable.
+ */
+function OrdinateField({
+  measurement,
+  holder,
+  onChange,
+}: {
+  measurement: MatrixMeasurement
+  holder: ElementType
+  onChange: (patch: Partial<MatrixMeasurement>) => void
+}) {
+  if (holder === 'wiggle_sequence') {
+    return (
+      <Tooltip title="Years before the series reference: 0 at the reference and increasing into the past, so a larger gap is an older date.">
+        <TextField
+          size="small"
+          type="number"
+          label="Gap"
+          value={measurement.ring_offset ?? ''}
+          onChange={(e) =>
+            onChange({ ring_offset: e.target.value === '' ? null : Number(e.target.value) })
+          }
+          inputProps={{ 'aria-label': `Gap for ${measurement.sample_name}` }}
+          sx={{ width: 96, flexShrink: 0 }}
+        />
+      </Tooltip>
+    )
+  }
+  if (holder === 'deposition_sequence') {
+    return (
+      <Tooltip title="Depth below the surface. Deeper is older, and the deposition model runs along this axis.">
+        <TextField
+          size="small"
+          type="number"
+          label="Depth"
+          value={measurement.depth_cm ?? ''}
+          onChange={(e) =>
+            onChange({ depth_cm: e.target.value === '' ? null : Number(e.target.value) })
+          }
+          inputProps={{ 'aria-label': `Depth for ${measurement.sample_name}`, min: 0 }}
+          sx={{ width: 96, flexShrink: 0 }}
+        />
+      </Tooltip>
+    )
+  }
+  return null
+}
+
+/**
+ * The dates an element holds, listed underneath it.
+ *
+ * Its own component because the ROOT is not a TreeRow: the outline flattens
+ * everything *under* the root and renders the root in a card of its own. That
+ * was harmless while only a Phase could hold dates -- a root is a Sequence or
+ * a Phase wrapping the model, and nothing is ever assigned to it. It stopped
+ * being harmless when a wiggle match or a deposition sequence could BE the
+ * root, which is exactly what both presets and the OxCal importer produce:
+ * every date was assigned to the root, the root had no list, and the dates
+ * were not unassigned either, so they appeared nowhere at all.
+ *
+ * Membership is edited where it is shown, which is the rule this list already
+ * followed: it used to be readable here and changeable only in a panel below
+ * the whole outline, which on a large model put the two halves of one task
+ * thousands of pixels apart.
+ */
+function ElementDates({
+  element,
+  dates,
+  childCount,
+  rootTree,
+  assignments,
+  onAssign,
+  onSetOrdinate,
+  onOpenRingHelper,
+}: {
+  element: ModelElement
+  dates: MatrixMeasurement[]
+  childCount: number
+  rootTree: ModelElement
+  assignments: Record<string, string>
+  onAssign: (measurementId: string, elementId: string) => void
+  onSetOrdinate?: (measurementId: string, patch: Partial<MatrixMeasurement>) => void
+  onOpenRingHelper?: (elementId: string) => void
+}) {
+  const type = element.element_type
+  const ordered = useMemo(() => orderedForHolder(type, dates), [type, dates])
+  // Length decides whether a wiggle match resolves at all; count only decides
+  // how tightly. Said BEFORE the run, where it can still change what gets
+  // commissioned, rather than after the answer comes back in two ranges.
+  const seriesWarning =
+    type === 'wiggle_sequence'
+      ? shortSeriesWarning(
+          dates.map((m) => m.ring_offset),
+          (element.params?.gap_units as string) || 'rings'
+        )
+      : null
+
+  if (!holdsDates(type)) return null
+  // A container holding other elements is a structural wrapper, not somewhere
+  // dates were forgotten.
+  if (dates.length === 0 && childCount > 0) return null
+
+  return (
+    <Box sx={{ mt: 1, pl: 1 }}>
+      {/* The gaps ARE the model, and people have ring NUMBERS, so the
+          conversion is offered here rather than left to be done by hand in a
+          spreadsheet -- which is where the sign goes wrong. */}
+      {type === 'wiggle_sequence' && dates.length > 0 && onSetOrdinate && (
+        <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1, flexWrap: 'wrap' }}>
+          <Button size="small" onClick={() => onOpenRingHelper?.(element.id)}>
+            Set gaps from ring numbers
+          </Button>
+          {seriesWarning && (
+            <Typography variant="caption" color="warning.main" sx={{ flex: '1 1 240px' }}>
+              {seriesWarning}
+            </Typography>
+          )}
+        </Stack>
+      )}
+      {dates.length === 0 ? (
+        <Typography variant="caption" color="textSecondary">
+          {type === 'phase'
+            ? 'No dates in this phase yet — add them from the unassigned list below.'
+            : 'No dates in this sequence yet — add them from the unassigned list below.'}
+        </Typography>
+      ) : (
+        ordered.map((m) => (
+          <Box
+            key={m.id}
+            sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 1, mb: 0.5 }}
+          >
+            <Typography variant="body2" sx={{ fontVariantNumeric: 'tabular-nums', minWidth: 200 }}>
+              {m.sample_name} — {m.age_bp} ± {m.error_1sigma ?? '?'} BP
+            </Typography>
+            <PhaseSelect
+              tree={rootTree}
+              value={m.id in assignments ? assignments[m.id] : ''}
+              onChange={(next) => onAssign(m.id, next)}
+              label={`Phase for ${m.sample_name}`}
+            />
+            {onSetOrdinate && (
+              <OrdinateField
+                measurement={m}
+                holder={type}
+                onChange={(patch) => onSetOrdinate(m.id, patch)}
+              />
+            )}
+          </Box>
+        ))
+      )}
+    </Box>
+  )
+}
+
+/**
+ * The order to list an element's dates in.
+ *
+ * A Phase keeps the reading order the user arranged (utils/sortMeasurements),
+ * because a Phase asserts no order and the list is theirs. The other two do
+ * not: their ORDINATE is the order, and it is the order the solver uses, so
+ * listing a wiggle match's members in anything but gap order shows a series
+ * that is not the series being solved.
+ *
+ * Oldest first in both, matching the outline itself -- ascending gap (a gap
+ * counts years before the reference) and descending depth (deeper is older).
+ * A date with no ordinate yet goes last rather than to a made-up position, so
+ * a half-entered series does not reshuffle on every keystroke.
+ */
+export function orderedForHolder(
+  type: ElementType,
+  dates: MatrixMeasurement[]
+): MatrixMeasurement[] {
+  const key =
+    type === 'wiggle_sequence'
+      ? (m: MatrixMeasurement) => m.ring_offset
+      : type === 'deposition_sequence'
+        ? (m: MatrixMeasurement) => m.depth_cm
+        : null
+  if (!key) return dates
+  return [...dates].sort((a, b) => {
+    const left = key(a)
+    const right = key(b)
+    if (left == null && right == null) return 0
+    if (left == null) return 1
+    if (right == null) return -1
+    return right - left
+  })
+}
+
+/**
  * The one control that moves a date between phases, so the row list and the
  * unassigned panel cannot drift into two different pickers.
  *
@@ -804,7 +1288,7 @@ function RowActions({
   onAdd,
   onDelete,
 }: RowActionsProps) {
-  const canContain = isContainerType(element.element_type)
+  const canContain = acceptsChildren(element.element_type)
   // These arrows move THIS element among its siblings, so what they mean
   // depends on the container it sits in, not on what it is. Inside a Sequence
   // that is a claim about time and says so; inside a Phase -- which is the
@@ -878,6 +1362,15 @@ interface TreeRowProps {
   /** This row is part of the block being dragged. */
   isDragged: boolean
   onRename: (id: string, name: string) => void
+  onSetParam: (id: string, patch: ElementParams) => void
+  /**
+   * Edit a DATE's ordinate -- its gap or its depth. Optional because not
+   * every host of this editor owns the measurements; where it is absent the
+   * fields are simply not offered, rather than offered and inert.
+   */
+  onSetOrdinate?: (measurementId: string, patch: Partial<MatrixMeasurement>) => void
+  /** Open the ring-number converter for this wiggle match. */
+  onOpenRingHelper?: (elementId: string) => void
   onSetLimit: (id: string, field: 'tpq_age_bp' | 'taq_age_bp', value: string) => void
   limitersOpen: boolean
   onOpenLimiters: (id: string) => void
@@ -908,6 +1401,9 @@ function TreeRow({
   isDropTarget,
   isDragged,
   onRename,
+  onSetParam,
+  onSetOrdinate,
+  onOpenRingHelper,
   onSetLimit,
   limitersOpen,
   onOpenLimiters,
@@ -925,7 +1421,7 @@ function TreeRow({
   // its keyboard support.
   const { attributes, listeners, setNodeRef } = useSortable({ id: node.id })
   const { element, depth } = node
-  const canContain = isContainerType(element.element_type)
+  const canContain = acceptsChildren(element.element_type)
   // The direct parent is the last ancestor; it decides what this row's move
   // arrows are actually claiming.
   const parentOrders = ordersChildren(node.ancestors[node.ancestors.length - 1])
@@ -1052,6 +1548,7 @@ function TreeRow({
             element={element}
             typeColor={typeColor}
             onRename={(name) => onRename(node.id, name)}
+            onSetParam={(patch) => onSetParam(node.id, patch)}
             onSetLimit={(field, value) => onSetLimit(node.id, field, value)}
             limitersOpen={limitersOpen}
             onOpenLimiters={() => onOpenLimiters(node.id)}
@@ -1087,44 +1584,17 @@ function TreeRow({
           </Box>
         )}
 
-        {!isCollapsed && element.element_type === 'phase' && !(dates.length === 0 && childCount > 0) && (
-          <Box sx={{ mt: 1, pl: 1 }}>
-            {dates.length === 0 ? (
-              // A phase holding other elements is a structural container, not
-              // somewhere dates were forgotten -- telling the wrapping "Site"
-              // phase to go and fetch dates is an instruction to do the wrong
-              // thing.
-              childCount > 0 ? null : (
-                <Typography variant="caption" color="textSecondary">
-                  No dates in this phase yet — add them from the unassigned list below.
-                </Typography>
-              )
-            ) : (
-              // Membership is edited where it is shown. It used to be readable
-              // here and changeable only in a panel below the whole outline,
-              // which on a large model put the two halves of one task
-              // thousands of pixels apart.
-              dates.map((m) => (
-                <Box
-                  key={m.id}
-                  sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 1, mb: 0.5 }}
-                >
-                  <Typography
-                    variant="body2"
-                    sx={{ fontVariantNumeric: 'tabular-nums', minWidth: 200 }}
-                  >
-                    {m.sample_name} — {m.age_bp} ± {m.error_1sigma ?? '?'} BP
-                  </Typography>
-                  <PhaseSelect
-                    tree={rootTree}
-                    value={m.id in assignments ? assignments[m.id] : ''}
-                    onChange={(next) => onAssign(m.id, next)}
-                    label={`Phase for ${m.sample_name}`}
-                  />
-                </Box>
-              ))
-            )}
-          </Box>
+        {!isCollapsed && (
+          <ElementDates
+            element={element}
+            dates={dates}
+            childCount={childCount}
+            rootTree={rootTree}
+            assignments={assignments}
+            onAssign={onAssign}
+            onSetOrdinate={onSetOrdinate}
+            onOpenRingHelper={onOpenRingHelper}
+          />
         )}
       </Paper>
       </Box>
@@ -1138,8 +1608,16 @@ export default function ModelTreeEditor({
   assignments,
   onChange,
   onSortDates,
+  onSetOrdinate,
 }: Props) {
   const [addMenu, setAddMenu] = useState<{ anchor: HTMLElement; targetId: string } | null>(null)
+  // The wiggle match whose ring-number converter is open, by element id.
+  const [ringHelperFor, setRingHelperFor] = useState<string | null>(null)
+  // A preset awaiting confirmation. Presets REPLACE the model, so they are
+  // confirmed the way a deletion is.
+  const [pendingPreset, setPendingPreset] = useState<
+    'wiggle_sequence' | 'deposition_sequence' | null
+  >(null)
   // The element awaiting a delete confirmation, held by id rather than by node
   // so it cannot go stale against a tree that changed underneath it.
   const [pendingRemoval, setPendingRemoval] = useState<string | null>(null)
@@ -1255,7 +1733,11 @@ export default function ModelTreeEditor({
       parent.children.push({
         id: newElementId(),
         element_type: type,
-        name: type === 'boundary' ? 'Boundary' : type === 'hiatus' ? 'Hiatus' : TYPE_LABEL[type],
+        name: TYPE_LABEL[type],
+        // Only the ordinate-bearing sequences start with settings; every
+        // other type's params are empty, and model_tree.element_params fills
+        // in whatever a stored element does not carry.
+        params: DEFAULT_PARAMS[type] ?? null,
         tpq_age_bp: null,
         taq_age_bp: null,
         children: [],
@@ -1409,6 +1891,23 @@ export default function ModelTreeEditor({
       const el = findElement(draft, id)
       if (el) el[field] = value.trim() === '' ? null : Number(value)
     })
+  }
+
+  // Merged rather than replaced: a control edits one setting and must leave
+  // the rest of that element's params where they were.
+  const setParam = (id: string, patch: ElementParams) => {
+    update((draft) => {
+      const el = findElement(draft, id)
+      if (el) el.params = { ...(el.params || {}), ...patch }
+    })
+  }
+
+  const applyPreset = (type: 'wiggle_sequence' | 'deposition_sequence') => {
+    remember()
+    const ids = measurements.map((m) => m.id)
+    const built =
+      type === 'wiggle_sequence' ? wiggleMatchTree(ids) : depositionSequenceTree(ids)
+    onChange(built.tree, built.assignments)
   }
 
   const assign = (sampleId: string, elementId: string) => {
@@ -1671,7 +2170,7 @@ export default function ModelTreeEditor({
             mb: 0.5,
           }}
         >
-          {(['sequence', 'boundary', 'phase', 'hiatus'] as ElementType[]).map((type) => (
+          {OFFERED_TYPES.map((type) => (
             <Box key={type} sx={{ display: 'flex', gap: 1, alignItems: 'baseline' }}>
               <Box
                 aria-hidden
@@ -1764,7 +2263,53 @@ export default function ModelTreeEditor({
             Bracket phases with boundaries
           </Button>
         </Tooltip>
+        {/* The two models whose whole structure is one sequence. Both are
+            shortcuts over the same data model rather than second code paths;
+            what they save is hand-building a tree to match eight rings from
+            one timber, which is a tax with no payoff.
+
+            They REPLACE the model, so they are confirmed like a deletion. */}
+        <Tooltip title="Replace the model with a single wiggle-matched series holding every date — one timber, one core sample, one varve sequence">
+          <Button
+            size="small"
+            startIcon={<AutoFixHighIcon />}
+            onClick={() => setPendingPreset('wiggle_sequence')}
+            sx={{ minHeight: 44, flexShrink: 0 }}
+          >
+            Make it a wiggle match
+          </Button>
+        </Tooltip>
+        <Tooltip title="Replace the model with a single deposition sequence holding every date, ordered by the depths they were taken from">
+          <Button
+            size="small"
+            startIcon={<AutoFixHighIcon />}
+            onClick={() => setPendingPreset('deposition_sequence')}
+            sx={{ minHeight: 44, flexShrink: 0 }}
+          >
+            Make it an age-depth model
+          </Button>
+        </Tooltip>
       </Box>
+
+      <ConfirmDialog
+        open={pendingPreset !== null}
+        title={
+          pendingPreset === 'wiggle_sequence'
+            ? 'Replace the model with a wiggle match?'
+            : 'Replace the model with an age-depth model?'
+        }
+        message={
+          pendingPreset === 'wiggle_sequence'
+            ? `Every date goes into one wiggle-matched series and the rest of the structure is discarded. You then give each date its gap — the button in the series does that from ring numbers. Undo restores what is there now.`
+            : `Every date goes into one deposition sequence, ordered by the depth each was taken from, and the rest of the structure is discarded. Dates without a depth will need one. Undo restores what is there now.`
+        }
+        confirmLabel="Replace"
+        onCancel={() => setPendingPreset(null)}
+        onConfirm={() => {
+          if (pendingPreset) applyPreset(pendingPreset)
+          setPendingPreset(null)
+        }}
+      />
 
       {problems.length > 0 && (
         <Alert severity="warning" sx={{ mb: 2 }}>
@@ -1790,6 +2335,7 @@ export default function ModelTreeEditor({
               element={tree}
               typeColor={typeColor}
               onRename={(name) => rename(tree.id, name)}
+              onSetParam={(patch) => setParam(tree.id, patch)}
               onSetLimit={(field, value) => setLimit(tree.id, field, value)}
               limitersOpen={openLimiters.has(tree.id)}
               onOpenLimiters={() => showLimiters(tree.id)}
@@ -1809,6 +2355,20 @@ export default function ModelTreeEditor({
               </IconButton>
             </Tooltip>
           </Box>
+          {/* The root's own dates. Both presets and the OxCal importer make a
+              wiggle match or a deposition sequence the ROOT, and the outline
+              below renders only what is nested under it -- so without this the
+              dates of the commonest shape of either model appear nowhere. */}
+          <ElementDates
+            element={tree}
+            dates={datesIn(tree.id)}
+            childCount={(tree.children || []).length}
+            rootTree={tree}
+            assignments={assignments}
+            onAssign={assign}
+            onSetOrdinate={onSetOrdinate}
+            onOpenRingHelper={setRingHelperFor}
+          />
         </Paper>
       </Box>
 
@@ -1860,6 +2420,9 @@ export default function ModelTreeEditor({
                 isDropTarget={!!projection && projection.parentId === node.id}
                 isDragged={draggedIds.has(node.id)}
                 onRename={rename}
+                onSetParam={setParam}
+                onSetOrdinate={onSetOrdinate}
+                onOpenRingHelper={setRingHelperFor}
                 onSetLimit={setLimit}
                 limitersOpen={openLimiters.has(node.id)}
                 onOpenLimiters={showLimiters}
@@ -1963,12 +2526,43 @@ export default function ModelTreeEditor({
         )}
       </Paper>
 
+      {/* The converter, rendered once for the whole outline rather than per
+          row: only one series can be being converted at a time, and a dialog
+          per wiggle match would mount as many as the model holds. */}
+      {ringHelperFor && onSetOrdinate && (
+        <RingNumberDialog
+          open
+          onClose={() => setRingHelperFor(null)}
+          members={measurements.filter((m) => assignments[m.id] === ringHelperFor)}
+          gapUnits={
+            (findElement(tree, ringHelperFor)?.params?.gap_units as string) || 'rings'
+          }
+          onApply={(offsets, referenceSampleId) => {
+            remember()
+            for (const [measurementId, offset] of Object.entries(offsets)) {
+              onSetOrdinate(measurementId, { ring_offset: offset })
+            }
+            // Recorded on the element, not only implied by the zero: it says
+            // which member the gaps were measured FROM, which is what the
+            // results panel names and what a sapwood allowance would later
+            // hang off.
+            setParam(ringHelperFor, { reference_sample_id: referenceSampleId })
+          }}
+        />
+      )}
+
       <Menu
         open={!!addMenu}
         anchorEl={addMenu?.anchor}
         onClose={() => setAddMenu(null)}
       >
-        {(['sequence', 'phase', 'boundary', 'hiatus'] as ElementType[]).map((type) => (
+        {/* Only what THIS target can hold. A deposition sequence takes one
+            kind of child -- an undated level on its own depth axis -- and
+            offering it a Boundary would be offering something the model
+            cannot express. */}
+        {childTypesFor(
+          (addMenu && findElement(tree, addMenu.targetId)?.element_type) || 'phase'
+        ).map((type) => (
           <MenuItem
             key={type}
             onClick={() => {

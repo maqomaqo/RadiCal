@@ -11,12 +11,14 @@
 7. [Running an Analysis](#running-an-analysis)
 8. [Viewing Results](#viewing-results)
 9. [Durations and Differences](#durations-and-differences)
-10. [Exporting Data](#exporting-data)
-11. [Projects and Date Collections](#projects-and-date-collections)
-12. [Comparing Analyses](#comparing-analyses)
-13. [Best Practices](#best-practices)
-14. [Appendix A: Mathematical Methods](#appendix-a-mathematical-methods)
-15. [Bibliography](#bibliography)
+10. [Wiggle Matching](#wiggle-matching)
+11. [Age-Depth Modelling](#age-depth-modelling)
+12. [Exporting Data](#exporting-data)
+13. [Projects and Date Collections](#projects-and-date-collections)
+14. [Comparing Analyses](#comparing-analyses)
+15. [Best Practices](#best-practices)
+16. [Appendix A: Mathematical Methods](#appendix-a-mathematical-methods)
+17. [Bibliography](#bibliography)
 
 ## Getting Started
 
@@ -109,12 +111,20 @@ holding marine dates on Marine20 and terrestrial ones on SHCal20 gives the offse
 dates only. The preview shows the ΔR carried by each date, and a note says how many dates each named
 offset reached.
 
+`D_Sequence` and `V_Sequence` come across as a **wiggle match**, with each `Gap()` turned into a
+distance from the youngest member of the series; `P_Sequence` comes across as an **age-depth
+model**, reading each element's `z=` as its depth below the surface. A `Date()` with a `z=` inside a
+`P_Sequence` becomes an undated level — the "how old is 47 cm" an age-depth model exists to answer —
+and a `Date()` anywhere else is still refused, having nothing to bound it.
+
 OxCal's language is larger than what this app models. Anything that would change the posterior and
 cannot be honoured **fails the import** with a message naming it, rather than being read as the
 nearest thing that is implemented: `Tau_Boundary`, `Sigma_Boundary` and `Zero_Boundary`
-(non-uniform transitions), `C_Date`, `R_Combine`, the deposition-model sequences (`P_Sequence`,
-`D_Sequence`, `V_Sequence`), a curve the app does not have, or a custom `Outlier_Model`. An
-unrecognised command fails it too. Commands that only affect what OxCal plots (`Sum`, `KDE_Plot`,
+(non-uniform transitions), `C_Date`, `R_Combine`, `U_Sequence` (a different deposition prior from
+the `P_Sequence` this app does model), a curve the app does not have, or a custom `Outlier_Model`.
+A `D_Sequence` or `V_Sequence` nested inside a larger model fails too: this app solves a wiggle
+match on its own, and reading its members as ordinary dates in a phase would report a match that
+was never made. An unrecognised command fails it too. Commands that only affect what OxCal plots (`Sum`, `KDE_Plot`,
 `Span`, `Difference`, `Order`…) are skipped with a note, since they query a posterior rather than
 shape one.
 
@@ -463,6 +473,92 @@ error, and the panel says how many draws they came from and whether those draws 
 (the exact solver, or a Group Calibration) or an MCMC chain.
 The reported ranges are quoted at a step that widens for a very long duration, rather than claiming
 five-year precision the draws cannot support.
+
+## Wiggle Matching
+
+For a series of dates whose separations are **counted** rather than inferred: blocks of tree rings
+along one timber, varves in a lake core, samples taken at known intervals down a sequence. OxCal
+calls it `D_Sequence`, or `V_Sequence` where the separations were measured and carry their own
+uncertainty.
+
+A wiggle match has **one** unknown — the calendar age at the reference point — because every other
+member's age is that plus its own gap. RadiCal solves it in closed form: no sampler, nothing to
+converge, and none of the Monte Carlo qualifications the other solvers carry. The Results page
+labels it **Wiggle match**.
+
+**Building one.** On the Model Structure page, **Make it a wiggle match** puts every date into one
+series. Then give each date its gap — or press **Set gaps from ring numbers** and enter the ring
+number each sample came from, counting outwards from the pith. The app does the subtraction, which
+is where the sign usually goes wrong.
+
+The **Rings / Varves / Years** dropdown on the series says what the gaps were
+counted in. It labels the axis and the results panel; the maths is the same either way.
+
+**The convention, once:** a gap is years **before** the reference. It is 0 at the reference and
+**increases into the past**, so a sample nearer the pith has the larger gap and the older age. The
+reference defaults to the outermost sample, which is the one a felling date is quoted against.
+
+**What it buys, and what it does not.** At a calibration plateau a single date is close to useless
+and a long enough series is not: at 2500 cal BP, one date at ±25 gives a 285-year range in two
+disjoint pieces, where eight samples over 250 rings give 20 years in one. But **length decides
+whether the match resolves at all, and count only decides how tightly**. Twelve samples packed into
+60 rings will not break a plateau; eight spread over 250 will. The app warns before the run when a
+series is short, because that is a thing to know before the dates are commissioned rather than
+after the answer comes back in two pieces.
+
+**Reading the result.** Every member's posterior is the *same distribution moved by its own gap* —
+one answer read at several points on the timber, not several independent results. They all have the
+same width for that reason, and the panel says so.
+
+The **combination agreement** is not a diagnostic beside the answer; it is the check that the match
+happened. The gaps are asserted, so a sample misidentified by forty rings cannot be absorbed the way
+a Phase would absorb it — it simply makes everything fit worse. RadiCal quotes the index and
+deliberately quotes **no pass mark** against it: what OxCal compares a combination against depends on
+how many dates are in the series, and the app does not print a threshold it has not checked against
+a real OxCal run.
+
+**No outlier model.** A wiggle match cannot apply one, and RadiCal refuses a member carrying one
+rather than accepting the setting and ignoring it. It follows from the gaps being asserted: an
+outlier model gives a date room to sit apart from the others, and a wiggle match has no room to
+give — every member is the same calendar age plus a fixed number. The agreement index is what tells
+you a member does not belong. (OxCal does allow `Outlier()` inside a `D_Sequence`; this is a
+statement about this app.)
+
+A wiggle match must currently be the **whole** model. One nested inside a larger structure is
+refused by name rather than approximated.
+
+## Age-Depth Modelling
+
+For a core or a profile where the dates are separated by **depth**: peat, lake sediment, a
+stratified section sampled at intervals. OxCal calls it `P_Sequence`, and it is what Bacon and clam
+users expect.
+
+Deposition is modelled as a Poisson process running down the depth axis, so the time between two
+levels carries its own prior rather than being left uniform. This one *is* sampled — the ages are
+coupled to each other by the deposition rate rather than only through their Boundaries, so it goes
+to the MH/Gibbs solver, and the Results page says so.
+
+**Building one.** **Make it an age-depth model** on the Model Structure page puts every date into
+one deposition sequence; each then needs its depth. Add an **Undated level** to the sequence and
+give it a depth to ask "how old was this level" where nothing was dated — a tephra, a pollen
+horizon, the base of a feature.
+
+**The rigidity.** `k` is events per unit depth, and it decides how much the depths constrain the
+ages: a large one drives them onto a straight line, a small one leaves little but the ordering. A
+value chosen badly dominates the answer, so RadiCal **infers it from the dates** by default and
+reports what it inferred — that is the **Rate inferred** setting on the sequence. **Rate fixed**
+holds it at a value you give instead, which is what to use when reproducing a published
+`P_Sequence(name, k)`. Read the band next to that number: a stiff model draws a straighter line
+through a calibration plateau than the dates alone support. Where the inferred rate runs up against
+the end of the range it was allowed, the panel says **Rate pinned at its limit** — the prior is then
+shaping the answer as much as the data is, and the range should be widened.
+
+**Reading the result.** The deliverable is the band — age against depth, with a median line and the
+68.3% and 95.4% envelopes — not a stack of per-date posteriors. Beside it is the accumulation rate
+between each pair of levels, in years per unit depth. Both are read off *joint* draws of the
+posterior, for the same reason durations are: a rate is a function of two ages at once, and pairing
+their separate posteriors gives an answer wrong in shape rather than merely in scale. Undated levels
+are drawn with hollow markers, so it is visible which points carry a measurement.
 
 ## Exporting Data
 
@@ -1021,6 +1117,100 @@ same way that pairing two boundary marginals manufactures phases that end before
 A difference of medians and a ratio of interval widths are functions of two summaries and need no
 such structure, which is why those are what the page reports.
 
+### A.13 Wiggle matching
+
+A series whose separations are counted has **one** free parameter. Writing `t` for the calendar age
+at the reference point and `g_i` for member `i`'s gap,
+
+```
+p(t)  proportional to  product over i of  L_i(t + g_i)
+```
+
+with each `L_i` the ordinary calibration likelihood of A.2 — curve error, ΔR and any TPQ/TAQ
+limiter included. Every member is evaluated on a shared grid shifted by its own gap, the logs are
+summed, and the result exponentiated: `O(n·M)`, deterministic, and exact up to the grid step. There
+is no sampler, so none of A.9's Monte Carlo qualifications apply.
+
+**The sign.** `g_i` counts years *before* the reference, so it is 0 at the reference and increases
+into the past: a member's calendar age is `t + g_i`, and a member nearer the pith has both the
+larger gap and the larger cal BP. Rings count forward in time while cal BP counts backward, which
+is why the direction is stated rather than left to be inferred — reversed, the model still produces
+a tight answer, in the wrong place.
+
+**Measured gaps** (OxCal's `V_Sequence`) give each offset an uncertainty `G_i ~ N(g_i, sigma_i)`.
+Marginalising it convolves that member's shifted likelihood with the Gaussian, so the fixed-gap case
+is exactly `sigma = 0` of the same expression. RadiCal carries **one uncertainty per member** —
+that member's distance from the reference — and treats them as independent. OxCal's gaps form a
+chain, so two members beyond a shared gap have correlated distances; importing an OxCal
+`V_Sequence` accumulates its gap errors in quadrature and says that it did.
+
+**The grid** is the series' own support plus a small fixed pad, at one year, located by a coarse
+first pass. It is not the solver grid of A.6: that one pads by six times the dates' width so that
+Boundaries have room, and a wiggle match has no Boundaries, so at a fixed point budget the padding
+would be paid for in resolution — several years per cell on a long series, quantising an answer
+whose whole point is a range ten years wide.
+
+**Agreement, and no outlier model.** Each member's index is A.8's, comparing its modelled posterior
+(the reference's, shifted) against its own unmodelled likelihood; the combination is the same
+`100·(∏A_i/100)^(1/√n)` A.8 uses. It carries more weight here than elsewhere: the gaps are
+asserted, so a misidentified member cannot be absorbed by the model widening — it can only make
+everything fit worse. No threshold is quoted against it, for the reason A.8 gives for not reporting
+`Amodel`.
+
+The same rigidity is why an outlier model (A.7) is **refused** rather than applied here. Mixing in a
+broad component would marginalise an offset scale independently per member — the approximation A.6
+describes for the exact solver, not OxCal's shared scale — and on a series whose members are one
+rigid distribution that is a stronger assumption than it appears. Refusing is the honest answer
+until there is a real OxCal `D_Sequence` run with `Outlier()` in it to hold an implementation
+against.
+
+### A.14 Age-depth modelling
+
+Deposition is modelled as a Poisson process along depth (Bronk Ramsey 2008). Between two levels
+separated by `Δz` the process contributes `k·Δz` events, so over an ordered set of depths the
+elapsed times are Dirichlet in the normalised increments:
+
+```
+p(t_1 ... t_n | k)  =  Gamma(A) / prod Gamma(a_i)
+                       * prod (dt_i)^(a_i - 1)
+                       * T^(-(A - 1))
+```
+
+with `a_i = k·Δz_i`, `A = Σ a_i`, `dt_i = t_i − t_(i+1) > 0` and `T = Σ dt_i`, levels ordered oldest
+(deepest) first.
+
+This couples adjacent ages *directly*, and `k` couples every level at once, so it cannot factorise
+along the message passing of A.6's exact solver — the same obstruction that stops the exact solver
+sharing an outlier scale. It is sampled instead. Holding everything else fixed, one level's full
+conditional is its own likelihood times two power terms, one per neighbour: still one-dimensional
+and still tabulated on the calendar grid.
+
+**Coincident levels are forbidden** rather than floored. The exponent `a_i − 1` is negative wherever
+`k·Δz_i < 1`, which is the ordinary case, so two levels at the same age is a genuine divergence of
+the density and not a numerical inconvenience. Adjacent levels are required to differ by at least
+one grid cell, and the remaining error is an ordinary discretisation error — checked by refining
+the grid.
+
+**`k` is a parameter, not a setting.** A fixed rigidity chosen badly dominates the answer, so it is
+drawn from its own conditional over a log-uniform prior, exactly as the shared outlier scale of A.7
+is. That is also why the normalising terms above are carried rather than dropped: with `k` fixed
+they are constants, but with `k` free they are functions of it, and dropping them would let the data
+choose a rigidity by the wrong rule. The inferred value is reported, and flagged when its posterior
+has run up against the end of the prior's range.
+
+**Undated levels** are parameters whose likelihood table is flat. A uniform table drawn over the
+interval the neighbours allow, weighted by the two deposition terms, is precisely the right answer,
+so the sampler needs no special case for them.
+
+**One prior, not two.** A deposition sequence's levels must not also be treated as a uniform scatter
+between the enclosing Boundaries (A.5): they are contained by them, and charged no `(span)^(-K)` on
+top of their own interval prior. Two priors over the same intervals would give phase widths wrong by
+a factor that nothing on screen would reveal.
+
+**The band and the rates** are functions of several ages at once, so they come off joint draws, for
+the reason and with the qualification A.9 gives. The bands are quantiles rather than HPD regions:
+an envelope has to nest, and two HPD regions on a multi-peaked posterior need not.
+
 ## Bibliography
 
 - Bronk Ramsey, C. (1995). Radiocarbon calibration and analysis of stratigraphy: the OxCal program.
@@ -1045,6 +1235,8 @@ such structure, which is why those are what the page reports.
   *Journal of the Royal Statistical Society Series C (Applied Statistics)* 43(3), 489–503.
 - Frühwirth-Schnatter, S. (1994). Data augmentation and dynamic linear models. *Journal of Time
   Series Analysis* 15(2), 183–202.
+- Galimberti, M., Bronk Ramsey, C., and Manning, S. W. (2004). Wiggle-match dating of tree-ring
+  sequences. *Radiocarbon* 46(2), 917–924.
 - Geman, S., and Geman, D. (1984). Stochastic relaxation, Gibbs distributions, and the Bayesian
   restoration of images. *IEEE Transactions on Pattern Analysis and Machine Intelligence* 6(6),
   721–741.

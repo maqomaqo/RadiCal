@@ -168,6 +168,26 @@ def layout_with_reason(
     if root is None:
         return None, 'the analysis has no model structure'
     plan = plan_model(root, measurements)
+
+    # Both of these couple the dates to EACH OTHER rather than only through
+    # their Boundaries, which is the one thing the message passing below
+    # cannot express -- the same obstruction the module docstring records for
+    # the outlier scale, and with the same resolution: say so, and let the
+    # caller take the sampler or the closed form.
+    if plan.deposition_groups:
+        return None, (
+            'this model contains a deposition sequence, whose ages are coupled '
+            'to each other by the deposition rate rather than only through '
+            'their Boundaries, so it cannot be integrated exactly'
+        )
+    if plan.wiggle_groups:
+        return None, (
+            'this model contains a wiggle match, whose dates are one calendar '
+            'age with the measured gaps added to it rather than separate '
+            'parameters, so it is not a chain of Boundaries. It is solved in '
+            'closed form instead (services/wiggle_match.py)'
+        )
+
     if not plan.span_groups:
         return None, (
             'no Boundary encloses any date. Add a Boundary at the start and '

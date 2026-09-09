@@ -58,6 +58,9 @@ import StackedPosteriorPlot, { type SeriesMeasurement } from '@/components/Stack
 import CurvePosteriorPlot from '@/components/CurvePosteriorPlot'
 import HarrisMatrixDiagram from '@/components/HarrisMatrixDiagram'
 import DurationsPanel from '@/components/DurationsPanel'
+import { modelCanReportIntervals } from '@/utils/intervalsAvailable'
+import WiggleMatchPanel from '@/components/WiggleMatchPanel'
+import AgeDepthPanel from '@/components/AgeDepthPanel'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import GuideBand from '@/components/GuideBand'
 import { formatApiError } from '@/utils/apiError'
@@ -141,7 +144,7 @@ interface AnalysisResult {
   // How the results were computed. Null for an analysis run before this was
   // recorded, reported as unknown rather than assumed to be either method.
   solver?: {
-    method: 'exact' | 'gibbs' | 'smc'
+    method: 'exact' | 'gibbs' | 'smc' | 'wiggle_match'
     // What the analysis asked for. 'gibbs' means the analyst chose OxCal's
     // method deliberately, so the result is not a fallback and must not be
     // labelled as one.
@@ -162,6 +165,39 @@ interface AnalysisResult {
     // Legacy: set only on analyses run before the current sampler.
     draws?: number
     chains?: number
+    // Wiggle-match path only. The combination index is not a diagnostic
+    // beside the answer -- a D_Sequence asserts the gaps and cannot widen to
+    // absorb a member that does not fit, so this IS the check that the match
+    // is real. Reported without a pass/fail threshold, since what OxCal
+    // quotes a combination against scales with the number of members and this
+    // app does not print a number it has not pinned against a real run.
+    combination_agreement?: number | null
+    series_span?: number
+    gap_units?: string
+    reference_sample_id?: string | null
+    members?: Array<{
+      id: string
+      name: string
+      ring_offset: number
+      ring_offset_error?: number | null
+      agreement_index?: number | null
+    }>
+    // Sampled path: what each deposition sequence inferred about its own
+    // rigidity. `pinned` means the posterior ran up against the prior's own
+    // bound, so the PRIOR is doing the work rather than the data.
+    deposition?: Array<{
+      element_id: string
+      name: string
+      depth_units: string
+      levels: number
+      variable: boolean
+      k_mean?: number
+      log10_k_mean?: number
+      log10_k_hpd_68?: [number, number]
+      log_k_min?: number
+      log_k_max?: number
+      pinned?: boolean | null
+    }>
   } | null
   // Durations and separations. Null when the run was not asked for them, which
   // is not "there are none" -- the page says so and points at the option.
@@ -1192,6 +1228,59 @@ export default function Results() {
     [analysis]
   )
 
+  // The wiggle match this analysis is, if it is one: the element carrying the
+  // series' single free parameter, plus the posterior the run put on it.
+  //
+  // Found from the tree rather than from the solver record alone, because the
+  // panel needs the element's NAME -- which timber this is -- and the record
+  // carries the numbers.
+  const wiggleMatch = useMemo(() => {
+    const tree = analysis?.model_tree
+    if (!tree || analysis?.solver?.method !== 'wiggle_match') return null
+    const found: Array<{ name: string; posterior: PosteriorSummary }> = []
+    const walk = (element: ModelElement) => {
+      if (element.element_type === 'wiggle_sequence' && element.posterior) {
+        found.push({ name: element.name || 'Wiggle match', posterior: element.posterior })
+      }
+      for (const child of element.children || []) walk(child)
+    }
+    walk(tree)
+    return found[0] || null
+  }, [analysis])
+
+  // One record per deposition sequence in the model, empty otherwise. Read off
+  // the intervals block rather than the tree: the band is a function of
+  // several ages at once and so lives with the durations, not on the elements.
+  const ageDepthRecords = useMemo(
+    () => analysis?.intervals?.age_depth || [],
+    [analysis]
+  )
+
+  // Whether this model has anything for a duration or a difference to be
+  // ABOUT -- the question the "turn the option on and re-run" offer below
+  // depends on, and which it used to skip.
+  //
+  // A duration is the interval a pair of Boundaries encloses, or the span of a
+  // phase's own dated events; a difference is between two such intervals. So a
+  // model with neither has nothing to report however the option is set, and
+  // offering a re-run promises something the run cannot produce.
+  //
+  // A WIGGLE MATCH never qualifies, and falls out of the same rule rather
+  // than needing a case of its own: its dates sit in the wiggle sequence
+  // rather than in a phase, and it has no Boundaries at all.
+  const couldReportIntervals = useMemo(() => {
+    if (!analysis) return false
+    // A group calibration has no model, and its differences are between the
+    // dates themselves.
+    if (analysis.analysis_type === 'group_calibration') {
+      return (analysis.results || []).length > 1
+    }
+    if (analysis.analysis_type !== 'bayesian') return false
+    // A run that HAS results has a stored tree, so "cannot tell" here means
+    // an analysis with no structure at all, which reports nothing either way.
+    return modelCanReportIntervals(analysis.model_tree, analysis.measurements || []) === true
+  }, [analysis])
+
   // Declared above the loading/error early returns: a hook after a conditional
   // return is only called on some renders.
   //
@@ -1200,6 +1289,8 @@ export default function Results() {
   const solverName =
     analysis?.solver?.method === 'exact'
       ? 'exact solver'
+      : analysis?.solver?.method === 'wiggle_match'
+      ? 'wiggle-match solver'
       : analysis?.solver?.method
       ? 'MH/Gibbs solver'
       : null
@@ -1725,6 +1816,18 @@ export default function Results() {
           }
         >
           <Chip variant="outlined" color="success" label="Exact solver" />
+        </Tooltip>
+      )
+    } else if (analysis.solver.method === 'wiggle_match') {
+      solverChip = (
+        <Tooltip
+          title={
+            'A wiggle match has one free parameter -- the calendar age at the ' +
+            'series reference point -- so it was solved in closed form. There ' +
+            'is no sampler, nothing to converge, and no calibration lobe to miss.'
+          }
+        >
+          <Chip variant="outlined" color="success" label="Wiggle match" />
         </Tooltip>
       )
     } else if (analysis.solver.method === 'smc') {
@@ -2370,8 +2473,7 @@ export default function Results() {
                 pressed, which left the reader with a verdict and no move. */}
             <Typography variant="body2" sx={{ mt: 0.5 }}>
               Suspect dates highlighted in the table below, hover over the chip to see the reason. Edit
-              analysis reopens the model, where a date can be given an outlier prior,
-              moved to another phase, or dropped from the run.
+              analysis allows you to change the model, remove the date, or apply an outlier prior.
             </Typography>
           </Alert>
         )}
@@ -2667,6 +2769,41 @@ export default function Results() {
         )}
       </Paper>
 
+      {/* A wiggle match, before the results table rather than after it.
+          The table below lists every member as a date of its own, which is
+          the one reading this model does NOT support -- they are one age with
+          the measured gaps added -- so the panel that says so has to come
+          first. */}
+      {wiggleMatch && (
+        <Box sx={{ mb: 3 }}>
+          <WiggleMatchPanel
+            name={wiggleMatch.name}
+            reference={wiggleMatch.posterior}
+            members={analysis.solver?.members || []}
+            gapUnits={analysis.solver?.gap_units || 'rings'}
+            seriesSpan={analysis.solver?.series_span ?? 0}
+            combinationAgreement={analysis.solver?.combination_agreement}
+            referenceSampleId={analysis.solver?.reference_sample_id}
+            dateFormat={dateFormat}
+          />
+        </Box>
+      )}
+
+      {/* An age-depth model, likewise before the table: the band IS the
+          answer, and a column of per-level posteriors answers a different
+          question. */}
+      {ageDepthRecords.map((record) => (
+        <Box key={record.element_id} sx={{ mb: 3 }}>
+          <AgeDepthPanel
+            record={record}
+            rigidity={(analysis.solver?.deposition || []).find(
+              (d) => d.element_id === record.element_id
+            )}
+            dateFormat={dateFormat}
+          />
+        </Box>
+      ))}
+
       {/* Model Structure -- read-only view of the groups/relationships/TPQ-TAQ
           this bayesian analysis actually used, if any. Doubles as the
           "run the Harris matrix as a check" step after the fact: even
@@ -2707,6 +2844,22 @@ export default function Results() {
               unmountOnExit itself is the point of the collapse: it takes the
               reactflow canvas -- and its wheel handler -- out of the page
               entirely while closed, rather than merely hiding it. */}
+          {/* A Harris matrix is a drawing of STRATIGRAPHY, and neither of
+              these two orders its members that way -- one by counted rings,
+              one by measured depth. Drawing them as a column of boxes would
+              imply a stratigraphic reading the model is not making, so the
+              panel above is the real rendering and this says so rather than
+              leaving the diagram to be read as one. */}
+          {(wiggleMatch || ageDepthRecords.length > 0) && (
+            <Typography variant="body2" color="textSecondary" sx={{ mt: 1 }}>
+              {wiggleMatch
+                ? 'The dates in this model are ordered by the ring counts between them, not by stratigraphy'
+                : 'The levels in this model are ordered by their depths, not by stratigraphy'}
+              , so the diagram below shows only where they sit in the model. The{' '}
+              {wiggleMatch ? 'match' : 'age-depth band'} above is what the model
+              actually says.
+            </Typography>
+          )}
           <Box id="model-structure-diagram">
             <Collapse in={structureOpen} unmountOnExit>
               <Box sx={{ mt: 2 }}>
@@ -2910,10 +3063,20 @@ export default function Results() {
           was not asked for durations has none, and the difference between
           that and "there were none to find" is not something the reader can
           work out from an absent table. */}
-      {!analysis.intervals
-        && analysis.status === 'completed'
-        && (isBayesian || analysis.analysis_type === 'group_calibration')
-        && (analysis.results || []).length > 1 && (
+      {/* Said once, quietly, and ONLY WHERE IT COULD HAVE APPLIED -- which is
+          what couldReportIntervals now decides. A wiggle match has no
+          durations to estimate at all, and a model with no Boundary pair and
+          no multi-dated phase has nothing for one to be about, so in both the
+          offer promised something turning the option on would not produce.
+
+          Emptiness, not absence, for the block itself: an age-depth model
+          produces an intervals block whether or not durations were asked for
+          -- its band lives there -- so testing for a missing block would
+          suppress the offer on a run that says nothing about durations. */}
+      {couldReportIntervals
+        && !(analysis.intervals?.durations || []).length
+        && !(analysis.intervals?.differences || []).length
+        && analysis.status === 'completed' && (
         <Typography variant="body2" color="textSecondary" sx={{ mb: 3 }}>
           This run did not estimate{' '}
           {isBayesian ? 'durations and differences' : 'differences between the dates'}.{' '}

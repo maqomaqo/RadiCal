@@ -59,6 +59,55 @@ one-dimensional and exactly samplable:
     which does not factorise along exact_chain's message passing but is nothing
     to a sampler -- see Model._build_outlier_tables.
 
+Age-depth: the deposition model
+-------------------------------
+A `deposition_sequence` (OxCal's P_Sequence, Bronk Ramsey 2008) models
+deposition as a Poisson process running down a depth axis. Between two levels
+separated by dz the process contributes k*dz events, so over an ordered set of
+depths the elapsed times are Dirichlet in the normalised increments:
+
+    p(t_1 ... t_n | k)  =  Gamma(A) / prod Gamma(a_i)
+                           * prod (dt_i)^(a_i - 1)
+                           * T^(-(A - 1))
+
+with a_i = k*dz_i, A = sum a_i, dt_i = t_i - t_(i+1) > 0 and T = sum dt_i.
+
+Less changes here than the maths suggests. Hold everything else fixed and one
+level's full conditional is its own likelihood times TWO power terms, one per
+neighbour -- still one-dimensional, still tabulated on the calendar grid,
+still drawn by one searchsorted. That is structurally what draw_boundary
+already evaluates as a product of at most two span factors.
+
+Three things are worth stating because they are where it would go quietly
+wrong:
+
+  * THE SPAN PRIOR MUST NOT ALSO APPLY. A deposition sequence supplies its own
+    prior over the intervals between its members, so those members must not
+    ALSO be a uniform scatter between the enclosing Boundaries. Two priors
+    over the same intervals would not crash and would not look wrong; they
+    would give phase widths wrong by a factor nobody could eyeball. The
+    separation is made in services/model_tree.py, where such levels bubble up
+    as CONTAINED rather than as members of the span term (SpanGroup), and this
+    module simply never sees them in group_dates.
+
+  * THE NORMALISATION IS NOT OPTIONAL, because k is a parameter. With k fixed,
+    Gamma(A)/prod Gamma(a_i) and the T exponent are constants and could be
+    dropped. With k drawn from its own conditional they are functions of it,
+    and dropping them would let the data choose a rigidity by the wrong rule.
+
+  * dt = 0 IS FORBIDDEN rather than floored. The exponent a_i - 1 is negative
+    wherever k*dz_i < 1, which is the ordinary case, so coincident levels are
+    a genuine divergence of the continuum density and not a numerical
+    nuisance. Adjacent levels are therefore required to differ by at least one
+    grid cell, and the remaining error is an ordinary discretisation error --
+    checked by refining the grid rather than argued about.
+
+`k` itself is a SHARED HYPERPARAMETER over one sequence, which is exactly the
+shape draw_scale already handles for the outlier models: tabulate the
+conditional over a grid of log10 k, accumulate each sequence's contribution at
+its current positions, draw by inverse CDF. That is most of why P_Sequence is
+tractable here at all.
+
 Where this deliberately differs from OxCal
 ------------------------------------------
 OxCal draws each conditional by REJECTION, which is exact but unbounded in cost:
@@ -105,9 +154,10 @@ See tests/test_gibbs.py and tests/test_charcoal_outlier.py, and _span_priors for
 how the UniformSpanPrior correction is grouped so it reduces to exact_chain's on
 a chain.
 """
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
+from scipy.special import gammaln
 
 from app.services import intervals
 from app.services.exact_chain import (
@@ -164,6 +214,75 @@ TARGET_CONVERGENCE = 0.95
 # Rounds the accumulation is split into, which sets both the granularity of the
 # first-half/second-half comparison and how often the run can stop.
 ROUNDS = 8
+# Nodes the deposition rigidity `k` is tabulated over, log-uniform between the
+# sequence's own bounds. Twenty-four is what the outlier scale uses over four
+# decades and is more than enough here: k enters the answer only through
+# k*dz, and the posterior on it is broad on any real core.
+DEPOSITION_K_NODES = 24
+
+
+class _Deposition:
+    """
+    One deposition_sequence, in the form the sampler works in: parameter ids
+    oldest first, the DEPTH GAPS between adjacent levels, and the grid of
+    rigidities `k` may take.
+
+    Depth gaps rather than depths, because nothing downstream wants a depth:
+    every term in the prior is a function of `k * dz` for one adjacent pair.
+    """
+
+    def __init__(self, element_id: str, name: str, ids: List[str],
+                 depth_gaps: np.ndarray, k: Optional[float],
+                 log_k_min: float, log_k_max: float, depth_units: str):
+        self.element_id = element_id
+        self.name = name
+        self.ids = ids
+        self.depth_gaps = depth_gaps
+        # None means the run infers it; see Model.draw_deposition_rate.
+        self.fixed_k = k
+        self.k_nodes = (np.array([k]) if k is not None
+                        else 10.0 ** np.linspace(log_k_min, log_k_max,
+                                                 DEPOSITION_K_NODES))
+        self.log_k_min = log_k_min
+        self.log_k_max = log_k_max
+        self.depth_units = depth_units
+
+    @property
+    def variable(self) -> bool:
+        return self.fixed_k is None
+
+    def shape_parameters(self, k: float) -> np.ndarray:
+        """a_i = k * dz_i, the Dirichlet shape of each interval."""
+        return k * self.depth_gaps
+
+    def __repr__(self):
+        return f"_Deposition({self.element_id}, {len(self.ids)} levels)"
+
+
+def _log_deposition_density(gaps: np.ndarray, alpha: np.ndarray) -> float:
+    """
+    log p(dt | k) for one deposition sequence, NORMALISED.
+
+    `gaps` are the elapsed times between adjacent levels in years, oldest
+    first; `alpha` their Dirichlet shapes k*dz. -inf where any interval has
+    collapsed, which is a real divergence of the continuum density wherever
+    k*dz < 1 rather than a numerical inconvenience -- see the module
+    docstring.
+
+    The normalisation is carried rather than dropped because `k` is a
+    parameter: with it fixed these terms are constants, but with it drawn from
+    its own conditional they are functions of it, and leaving them out would
+    let the data pick a rigidity by the wrong rule.
+    """
+    if np.any(gaps <= 0):
+        return -np.inf
+    total = float(gaps.sum())
+    A = float(alpha.sum())
+    return float(
+        gammaln(A) - gammaln(alpha).sum()
+        + ((alpha - 1.0) * np.log(gaps)).sum()
+        - (A - 1.0) * np.log(total)
+    )
 
 
 class _State:
@@ -181,12 +300,18 @@ class _State:
     Model._build_outlier_tables).
     """
 
-    def __init__(self, index: Dict[str, int], scale: Optional[Dict[str, int]] = None):
+    def __init__(self, index: Dict[str, int],
+                 scale: Optional[Dict[str, int]] = None,
+                 rate: Optional[Dict[str, int]] = None):
         self.index = index
         self.scale = dict(scale or {})
+        # Per deposition sequence, the index of its current rigidity on that
+        # sequence's own grid of k -- one shared value for the whole sequence,
+        # exactly as `scale` is one per outlier model.
+        self.rate = dict(rate or {})
 
     def copy(self) -> '_State':
-        return _State(dict(self.index), self.scale)
+        return _State(dict(self.index), self.scale, self.rate)
 
 
 class Model:
@@ -220,6 +345,8 @@ class Model:
 
         self.likelihood, _cumulative, self.outlier_parts = date_tables(
             self.grid, measurements, self.element_bounds)
+        self.date_ids = [m['id'] for m in measurements]
+        self._build_deposition()
         # Cumulative sums of the likelihood ROWS, for inverse-CDF draws over an
         # arbitrary sub-interval: mass in [a, b] is cdf[b] - cdf[a-1].
         self.log_likelihood = {
@@ -228,15 +355,166 @@ class Model:
         self.cdf = {did: np.cumsum(lik) for did, lik in self.likelihood.items()}
         self._build_outlier_tables()
 
-        self.date_ids = [m['id'] for m in measurements]
         self.boundary_ids = list(self.plan.boundary_names)
         # Every boundary is sampled, including the outermost ones exact_chain
         # marginalises: a Gibbs draw from a truncated power law is exact
         # however heavy the tail.
-        self.params = self.date_ids + self.boundary_ids
+        self.params = self.date_ids + self.level_ids + self.boundary_ids
 
         self._build_constraints()
         self._build_blocks()
+
+    # -- deposition sequences ----------------------------------------------
+
+    def _build_deposition(self):
+        """
+        Each deposition_sequence as a _Deposition, plus a flat likelihood for
+        every UNDATED level in one.
+
+        An undated level -- "how old is 47 cm" -- is a parameter whose
+        likelihood table is flat. Nothing else about it is special: a uniform
+        table drawn over the interval its neighbours allow, weighted by the
+        two deposition terms, is precisely the right answer, so draw_date
+        needs no branch for it.
+        """
+        self.depositions: List[_Deposition] = []
+        self.level_ids: List[str] = []
+        # What an undated level is called when its posterior is reported. Its
+        # depth is in the name where it has no other, since "the age at 47 cm"
+        # is the question it exists to answer.
+        self.level_names: Dict[str, str] = {}
+        # Which sequence each level belongs to, and where in it, so a draw
+        # does not have to scan every sequence.
+        self.deposition_of: Dict[str, Tuple[_Deposition, int]] = {}
+
+        flat = np.full(self.M, 1.0 / (self.M * self.dt))
+        for group in self.plan.deposition_groups:
+            depths = np.array([depth for _pid, depth, _dated in group.levels],
+                              dtype=float)
+            depth_gaps = np.abs(np.diff(depths))
+            if np.any(depth_gaps <= 0):
+                # model_tree.validate_ordinates refuses this at every edge the
+                # app has; restated here because a zero gap gives a Dirichlet
+                # shape of zero, and the failure it produces further in is
+                # "could not find a feasible starting state", which says
+                # nothing about depths.
+                raise ValueError(
+                    f"the deposition sequence '{group.name}' has two levels at "
+                    'the same depth. The model prices the interval between '
+                    'successive depths, and a zero interval has no rate'
+                )
+            deposition = _Deposition(
+                element_id=group.element_id,
+                name=group.name,
+                ids=[pid for pid, _d, _dated in group.levels],
+                depth_gaps=depth_gaps,
+                k=group.k,
+                log_k_min=group.log_k_min,
+                log_k_max=group.log_k_max,
+                depth_units=group.depth_units,
+            )
+            self.depositions.append(deposition)
+            for position, (pid, depth, dated) in enumerate(group.levels):
+                self.deposition_of[pid] = (deposition, position)
+                if dated:
+                    continue
+                self.level_ids.append(pid)
+                self.level_names[pid] = group.level_names.get(pid) or (
+                    f'{depth:g} {group.depth_units}')
+                self.likelihood[pid] = flat.copy()
+
+    def _deposition_gaps(self, deposition: _Deposition,
+                         state: _State) -> np.ndarray:
+        """Elapsed years between adjacent levels, oldest first."""
+        ages = self.grid[[state.index[pid] for pid in deposition.ids]]
+        return -np.diff(ages)
+
+    def _alpha_of(self, deposition: _Deposition, state: _State) -> np.ndarray:
+        node = state.rate.get(deposition.element_id, 0)
+        k = float(deposition.k_nodes[min(node, len(deposition.k_nodes) - 1)])
+        return deposition.shape_parameters(k)
+
+    def _log_deposition_terms(self, param: str, state: _State,
+                              candidates: np.ndarray) -> Optional[np.ndarray]:
+        """
+        The deposition prior as a function of where `param` sits, over
+        `candidates` (grid INDICES), or None if it is not in one.
+
+        Everything not involving this level is a constant across the
+        candidates and cancels in the normalisation, so only the intervals it
+        touches -- and, at either end of the sequence, the total span -- have
+        to be evaluated.
+        """
+        found = self.deposition_of.get(param)
+        if found is None:
+            return None
+        deposition, position = found
+        alpha = self._alpha_of(deposition, state)
+        ids = deposition.ids
+        ages = self.grid[candidates]
+
+        log_dens = np.zeros(len(candidates))
+        with np.errstate(divide='ignore', invalid='ignore'):
+            if position > 0:
+                older = self.grid[state.index[ids[position - 1]]]
+                gap = older - ages
+                log_dens += np.where(
+                    gap > 0,
+                    (alpha[position - 1] - 1.0) * np.log(np.where(gap > 0, gap, 1.0)),
+                    -np.inf)
+            if position < len(ids) - 1:
+                younger = self.grid[state.index[ids[position + 1]]]
+                gap = ages - younger
+                log_dens += np.where(
+                    gap > 0,
+                    (alpha[position] - 1.0) * np.log(np.where(gap > 0, gap, 1.0)),
+                    -np.inf)
+            # The T^-(A-1) factor varies only when this level IS an end of the
+            # sequence; for an interior one the total span is fixed and the
+            # factor cancels.
+            if position in (0, len(ids) - 1):
+                # Written so the span is positive when the ordering holds and
+                # non-positive when it does not, rather than taking an
+                # absolute value -- which would give a finite weight to a
+                # candidate that has crossed the far end of the sequence.
+                other = self.grid[state.index[ids[-1 if position == 0 else 0]]]
+                total = (ages - other) if position == 0 else (other - ages)
+                A = float(alpha.sum())
+                log_dens += np.where(
+                    total > 0,
+                    -(A - 1.0) * np.log(np.where(total > 0, total, 1.0)),
+                    -np.inf)
+        return log_dens
+
+    def draw_deposition_rate(self, deposition: _Deposition, state: _State,
+                             u: float) -> int:
+        """
+        Exact draw of one sequence's rigidity from its full conditional: the
+        NORMALISED deposition density at the levels' current positions, over a
+        log-uniform prior on k.
+
+        The same shape as draw_scale, and for the same reason -- one value
+        shared by every level in the sequence, one dimension, tabulated. It is
+        also why the normalisation in _log_deposition_density cannot be
+        dropped: with k free, Gamma(A)/prod Gamma(a_i) is a function of the
+        parameter being drawn.
+        """
+        if not deposition.variable:
+            return 0
+        gaps = self._deposition_gaps(deposition, state)
+        log_weights = np.array([
+            _log_deposition_density(gaps, deposition.shape_parameters(k))
+            for k in deposition.k_nodes
+        ])
+        finite = np.isfinite(log_weights)
+        if not np.any(finite):
+            return state.rate.get(deposition.element_id, 0)
+        weights = np.where(finite, np.exp(log_weights - log_weights[finite].max()), 0.0)
+        total = weights.sum()
+        if not np.isfinite(total) or total <= 0:
+            return state.rate.get(deposition.element_id, 0)
+        return int(np.searchsorted(np.cumsum(weights) / total, u, side='left')
+                   .clip(0, len(deposition.k_nodes) - 1))
 
     # -- the shared outlier scale ------------------------------------------
 
@@ -341,11 +619,16 @@ class Model:
 
     def _own_window(self, param: str, is_date: bool) -> Tuple[int, int]:
         """Index range this parameter's own TPQ/TAQ limiters allow."""
-        if is_date:
-            m = next(x for x in self.measurements if x['id'] == param)
-            el_taq, el_tpq = self.element_bounds.get(m.get('element_id'), (None, None))
-            taq, tpq = effective_bounds(m, {'taq_age_bp': el_taq, 'tpq_age_bp': el_tpq})
+        measurement = next(
+            (x for x in self.measurements if x['id'] == param), None)
+        if is_date and measurement is not None:
+            el_taq, el_tpq = self.element_bounds.get(
+                measurement.get('element_id'), (None, None))
+            taq, tpq = effective_bounds(
+                measurement, {'taq_age_bp': el_taq, 'tpq_age_bp': el_tpq})
         else:
+            # A boundary, or an undated level -- both take their limits from
+            # the element they are, and from whatever encloses it.
             taq, tpq = self.element_bounds.get(param, (None, None))
         lo, hi = 0, self.M - 1
         if taq is not None:
@@ -391,6 +674,16 @@ class Model:
                 add(group.younger_boundary_id, date_id)
                 self.date_groups.setdefault(date_id, []).append(
                     (group.older_boundary_id, group.younger_boundary_id))
+            # Contained but NOT part of the span term: a deposition
+            # sequence's levels are penned in by the same boundaries while
+            # their spacing is priced by the deposition model instead. They
+            # get the containment and none of the (span)^(-K), which is the
+            # whole of what keeps the two priors from being applied at once.
+            for contained_id in group.contained_ids:
+                if contained_id not in self.likelihood:
+                    continue
+                add(contained_id, group.older_boundary_id)
+                add(group.younger_boundary_id, contained_id)
 
         self.window = {p: self._own_window(p, p in self.likelihood) for p in self.params}
 
@@ -528,17 +821,18 @@ class Model:
         conditionals are independent given everything outside it, so all its
         dates can be drawn at once.
         """
-        conflicts: Dict[str, set] = {d: set() for d in self.date_ids}
-        for date_id in self.date_ids:
+        drawable = self.date_ids + self.level_ids
+        conflicts: Dict[str, set] = {d: set() for d in drawable}
+        for date_id in drawable:
             for other in self.below[date_id] + self.above[date_id]:
                 if other in conflicts:
                     conflicts[date_id].add(other)
                     conflicts[other].add(date_id)
 
         colour: Dict[str, int] = {}
-        for date_id in sorted(self.date_ids, key=lambda d: -len(conflicts[d])):
+        for date_id in sorted(drawable, key=lambda d: -len(conflicts[d])):
             taken = {colour[n] for n in conflicts[date_id] if n in colour}
-            colour[date_id] = next(c for c in range(len(self.date_ids) + 1) if c not in taken)
+            colour[date_id] = next(c for c in range(len(drawable) + 1) if c not in taken)
 
         blocks: Dict[int, List[str]] = {}
         for date_id, c in colour.items():
@@ -592,6 +886,8 @@ class Model:
         lo, hi = self.allowed(date_id, state)
         if hi <= lo:
             return max(lo, min(hi, state.index[date_id])) if hi >= 0 else state.index[date_id]
+        if date_id in self.deposition_of:
+            return self._draw_deposition_level(date_id, state, u, lo, hi)
         node = self._scale_of(date_id, state)
         cdf = self.cdf[date_id] if node is None else self.cdf_at[date_id][node]
         density = (self.likelihood[date_id] if node is None
@@ -616,6 +912,44 @@ class Model:
             return int(np.clip(np.searchsorted(cdf, base + (target - low_end)),
                                lo + 1, hi - 1))
         return hi
+
+    def _draw_deposition_level(self, level_id: str, state: _State, u: float,
+                               lo: int, hi: int) -> int:
+        """
+        Exact draw from a deposition level's full conditional: its own
+        likelihood times the deposition prior's two neighbour terms, over the
+        allowed interval.
+
+        Built explicitly over [lo, hi] rather than through the precomputed
+        cumulative the phase model uses, because the weight now varies with
+        position for a reason other than the likelihood. Still
+        one-dimensional, still one searchsorted, and O(hi - lo) per draw --
+        which is the whole cost of the deposition model over the plain one.
+
+        NO endpoint half-weighting. That correction exists to keep a date's
+        available volume in step with the (span)^(-K) it is charged, and a
+        deposition level is charged no span term at all -- see the module
+        docstring on the two priors.
+        """
+        candidates = np.arange(lo, hi + 1)
+        node = self._scale_of(level_id, state)
+        density = (self.likelihood[level_id] if node is None
+                   else self.likelihood_at[level_id][node])
+        with np.errstate(divide='ignore'):
+            log_dens = np.log(np.maximum(density[lo:hi + 1], 1e-300))
+        terms = self._log_deposition_terms(level_id, state, candidates)
+        if terms is not None:
+            log_dens = log_dens + terms
+
+        finite = np.isfinite(log_dens)
+        if not np.any(finite):
+            return state.index[level_id]
+        weights = np.where(finite, np.exp(log_dens - log_dens[finite].max()), 0.0)
+        total = weights.sum()
+        if total <= 0:
+            return state.index[level_id]
+        cdf = np.cumsum(weights) / total
+        return int(lo + np.clip(np.searchsorted(cdf, u), 0, hi - lo))
 
     def draw_boundary(self, boundary_id: str, state: _State, u: float) -> int:
         """
@@ -691,12 +1025,23 @@ class Model:
         proposal that breaks the ordering is rejected.
         """
         total = 0.0
-        for date_id in self.date_ids:
+        for date_id in self.date_ids + self.level_ids:
             node = self._scale_of(date_id, state)
             table = (self.log_likelihood[date_id] if node is None
                      else self.log_likelihood_at[date_id][node])
             total += float(table[state.index[date_id]])
             total += float(np.log(self.endpoint_weight(date_id, state)))
+
+        # The deposition prior, in full and NORMALISED -- the shift moves
+        # below accept on this ratio, and a term missing here would let them
+        # accept translations the conditionals would never have drawn.
+        for deposition in self.depositions:
+            contribution = _log_deposition_density(
+                self._deposition_gaps(deposition, state),
+                self._alpha_of(deposition, state))
+            if not np.isfinite(contribution):
+                return -np.inf
+            total += contribution
 
         for param in self.params:
             lo, hi = self.window[param]
@@ -769,6 +1114,16 @@ class Model:
         preferred: Dict[str, int] = {}
         for date_id in self.date_ids:
             preferred[date_id] = int(np.argmax(self.likelihood[date_id]))
+        for level_id in self.level_ids:
+            # A flat table has no mode -- argmax would return index 0, the
+            # oldest end of the whole grid, and the topological pass below
+            # would then drag every dated level in the sequence up against it.
+            # Start it between the dated levels either side instead.
+            deposition, position = self.deposition_of[level_id]
+            neighbours = [preferred[pid] for pid in deposition.ids
+                          if pid in preferred]
+            preferred[level_id] = (int(np.mean(neighbours)) if neighbours
+                                   else self.M // 2)
         for boundary_id in self.boundary_ids:
             # Near the dates it bounds, rather than out in the empty part of
             # the window.
@@ -794,7 +1149,8 @@ class Model:
         # its conditional is drawn exactly on the first sweep.
         scale = {model: len(self.scale_grid[model]) // 2
                  for model in self.outlier_models}
-        state = _State(index, scale)
+        rate = {d.element_id: len(d.k_nodes) // 2 for d in self.depositions}
+        state = _State(index, scale, rate)
         if not np.isfinite(self.log_posterior(state)):
             raise ValueError('could not find a feasible starting state for this model')
         return state
@@ -818,6 +1174,23 @@ class Model:
         that group's containment and is rejected 99% of the time.
         """
         sets: List[List[str]] = [list(self.params)]
+
+        # A whole deposition sequence, with whatever encloses it. Its levels
+        # are MORE tightly coupled than a phase's dates -- the deposition
+        # prior resists changing any interval, not just the ordering -- so the
+        # sticky behaviour that motivated group moves is worse here, not
+        # better, and single-site Gibbs would explore the sequence's position
+        # one level at a time against the containment of the rest.
+        for deposition in self.depositions:
+            members = set(deposition.ids)
+            # The boundaries penning it in come along, or the proposal breaks
+            # its own containment and is rejected almost every time.
+            for group in self.plan.span_groups:
+                if members & set(group.contained_ids):
+                    members |= {group.older_boundary_id, group.younger_boundary_id}
+                    members |= set(group.date_ids)
+            sets.append(sorted(members))
+
         for older_id, younger_id, dates in self.group_dates:
             if not dates:
                 continue
@@ -975,6 +1348,13 @@ def run(model: Model, sweeps: int = DEFAULT_SWEEPS, seed: int = 42,
     # rounds: it plays no part in the convergence measure, whose job is the
     # calendar parameters.
     scale_counts = {m: np.zeros(len(model.scale_grid[m])) for m in model.outlier_models}
+    # How often each deposition sequence visited each rigidity, which IS k's
+    # posterior. Reported rather than kept internal: a high-k model
+    # interpolates confidently straight through a plateau and reports a
+    # precision the dates do not support, so the honest instrument shows the
+    # rigidity it inferred and says when the prior is doing the work.
+    rate_counts = {d.element_id: np.zeros(len(d.k_nodes))
+                   for d in model.depositions}
     # P(outlier) accumulated as a running mean of the outlier component's
     # responsibility. With the scale sampled, that responsibility depends on it,
     # so it has to be read while the state is known rather than derived from the
@@ -1011,6 +1391,12 @@ def run(model: Model, sweeps: int = DEFAULT_SWEEPS, seed: int = 42,
         for outlier_model in model.outlier_models:
             state.scale[outlier_model] = model.draw_scale(
                 outlier_model, state, float(rng.random()))
+
+        # Each deposition sequence's rigidity, the same way. A fixed k makes
+        # this a no-op rather than a branch at the call site.
+        for deposition in model.depositions:
+            state.rate[deposition.element_id] = model.draw_deposition_rate(
+                deposition, state, float(rng.random()))
 
         # Translation moves. The Gibbs sweep above cannot move a correlated
         # block as a unit -- see Model.move_sets.
@@ -1064,6 +1450,9 @@ def run(model: Model, sweeps: int = DEFAULT_SWEEPS, seed: int = 42,
                 current[param][state.index[param]] += 1.0
             for outlier_model in model.outlier_models:
                 scale_counts[outlier_model][state.scale[outlier_model]] += 1.0
+            for deposition in model.depositions:
+                rate_counts[deposition.element_id][
+                    state.rate[deposition.element_id]] += 1.0
             for date_id in outlier_total:
                 node = model._scale_of(date_id, state)
                 outlier_total[date_id] += float(
@@ -1115,6 +1504,7 @@ def run(model: Model, sweeps: int = DEFAULT_SWEEPS, seed: int = 42,
     kept_draws = round_draws[_burn_in_start(len(rounds)):] if round_draws else []
     return {
         'histograms': counts,
+        'rate_histograms': rate_counts,
         'draws': (np.concatenate([d for d in kept_draws if len(d)])
                   if any(len(d) for d in kept_draws) else None),
         'draw_params': list(model.params),
@@ -1180,6 +1570,56 @@ def _convergence(rounds: List[Dict[str, np.ndarray]],
     return out
 
 
+def _deposition_report(model: 'Model', chain: Dict) -> List[Dict]:
+    """
+    What each deposition sequence inferred about its own rigidity.
+
+    Reported alongside the ages rather than kept internal. A high-k model
+    interpolates confidently straight through a plateau and reports a
+    precision the dates do not support, so an age-depth answer is only
+    readable next to the rigidity it was produced under -- and `pinned` says
+    when the posterior has run up against the prior's own bound, which is the
+    case where the prior rather than the data is doing the work.
+    """
+    report = []
+    for deposition in model.depositions:
+        entry: Dict = {
+            'element_id': deposition.element_id,
+            'name': deposition.name,
+            'depth_units': deposition.depth_units,
+            'levels': len(deposition.ids),
+            'variable': deposition.variable,
+            'log_k_min': deposition.log_k_min,
+            'log_k_max': deposition.log_k_max,
+        }
+        if not deposition.variable:
+            entry['k_mean'] = float(deposition.fixed_k)
+            entry['pinned'] = None
+            report.append(entry)
+            continue
+
+        visits = chain['rate_histograms'].get(deposition.element_id)
+        total = float(visits.sum()) if visits is not None else 0.0
+        if total <= 0:
+            report.append(entry)
+            continue
+        nodes = np.log10(deposition.k_nodes)
+        weights = visits / total
+        mean = float((nodes * weights).sum())
+        cdf = np.cumsum(weights)
+        entry.update({
+            'log10_k_mean': mean,
+            'k_mean': float(10.0 ** mean),
+            'log10_k_hpd_68': (float(np.interp(0.16, cdf, nodes)),
+                               float(np.interp(0.84, cdf, nodes))),
+            # A tenth of the run spent in the outermost node either side means
+            # the answer is leaning on where the prior was cut off.
+            'pinned': bool(weights[0] > 0.1 or weights[-1] > 0.1),
+        })
+        report.append(entry)
+    return report
+
+
 def solve(measurements: List[Dict], root: Dict, sweeps: int = DEFAULT_SWEEPS,
           num_samples: int = 4000, seed: int = 42,
           uniform_span_prior: bool = True,
@@ -1210,9 +1650,15 @@ def solve(measurements: List[Dict], root: Dict, sweeps: int = DEFAULT_SWEEPS,
     """
     model = Model(measurements, root, grid=grid,
                   uniform_span_prior=uniform_span_prior)
+    # An age-depth model needs joint draws whether or not durations were asked
+    # for: its deliverable IS a function of several ages at once -- the band,
+    # and the accumulation rate between one level and the next -- so it is not
+    # something an analyst should have to opt into to get an answer at all.
+    # Phase durations stay opt-in, being a modelling claim of their own.
+    wants_draws = estimate_durations or bool(model.depositions)
     chain = run(model, sweeps=sweeps, seed=seed,
                 target_convergence=target_convergence, max_sweeps=max_sweeps,
-                collect_draws=interval_draws if estimate_durations else 0,
+                collect_draws=interval_draws if wants_draws else 0,
                 on_progress=on_progress)
     rng = np.random.default_rng(seed)
 
@@ -1236,7 +1682,21 @@ def solve(measurements: List[Dict], root: Dict, sweeps: int = DEFAULT_SWEEPS,
             'posterior': _summarize(model.grid, density, rng, num_samples),
         }
 
+    # Undated levels report through the same slot as boundaries: both are
+    # modelled parameters with a posterior and no measurement behind them, so
+    # they reach the results page, the exports and the model tree the same
+    # way. This is what answers "how old is the level at 47 cm".
+    for level_id in model.level_ids:
+        density = chain['histograms'][level_id]
+        if density.sum() <= 0:
+            continue
+        results['boundaries'][level_id] = {
+            'name': model.level_names.get(level_id, 'Undated level'),
+            'posterior': _summarize(model.grid, density, rng, num_samples),
+        }
+
     results['method'] = 'gibbs'
+    results['deposition'] = _deposition_report(model, chain)
     results['uniform_span_prior'] = bool(model.span_priors)
     results['sweeps'] = chain['sweeps']
     # The WORST parameter's, not the average: one badly-mixed boundary is
@@ -1264,9 +1724,10 @@ def solve(measurements: List[Dict], root: Dict, sweeps: int = DEFAULT_SWEEPS,
         }
     results['grid'] = {'lower': float(model.grid[0]), 'upper': float(model.grid[-1]),
                        'step': model.dt}
-    if estimate_durations and chain['draws'] is not None:
+    if wants_draws and chain['draws'] is not None:
         joint = {param: model.grid[chain['draws'][:, column]]
                  for column, param in enumerate(chain['draw_params'])}
         results['intervals'] = intervals.report(
-            measurements=measurements, root=root, draws=joint, independent=False)
+            measurements=measurements, root=root, draws=joint,
+            independent=False, durations=estimate_durations)
     return results

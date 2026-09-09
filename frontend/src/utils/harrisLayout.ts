@@ -12,6 +12,7 @@
 // types. reactflow draws into a measured viewport, so "the boxes line up"
 // cannot be checked in the DOM -- it has to be asserted on the numbers, which
 // is what utils/harrisLayout.test.ts does.
+import { elementLabel } from '@/utils/elementLabels'
 import type { ElementType, MatrixMeasurement, ModelElement, PosteriorSummary } from '@/types'
 import { estimateTextWidth } from '@/utils/textWidth'
 
@@ -172,7 +173,7 @@ function measure(
       height: RULE_HEIGHT,
       children: [],
       dateCount: 0,
-      minSpan: boundarySpan(element.name || element.element_type, rangeLabel),
+      minSpan: boundarySpan(elementLabel(element), rangeLabel),
       rangeLabel,
     }
   }
@@ -266,7 +267,7 @@ function place(
     id: element.id,
     kind: measured.kind === 'skip' ? 'group' : measured.kind,
     elementType: element.element_type,
-    name: element.name || element.element_type,
+    name: elementLabel(element),
     parentId,
     x,
     y,

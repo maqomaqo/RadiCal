@@ -94,6 +94,22 @@ class MeasurementInput(BaseModel):
     delta_r_error: Optional[float] = Field(default=None, ge=0, le=5000)
     reservoir_age: Optional[float] = Field(default=None, ge=-500, le=2000)
     depth_cm: Optional[float] = Field(default=None, ge=0, le=10000)
+
+    # Where this sample sits in a wiggle-matched series, in years BEFORE the
+    # series reference point: 0 AT the reference and INCREASING INTO THE PAST,
+    # so a member's calendar age is the reference's PLUS its offset. Negative
+    # is allowed and means a member younger than the reference, which is what
+    # a series measured from a mid-series ring looks like.
+    #
+    # A separate field from depth_cm, not a reuse of it: rings and depth are
+    # different units running in opposite directions. See
+    # services/wiggle_match.py, which states the convention once.
+    ring_offset: Optional[float] = Field(default=None, ge=-50000, le=50000)
+    # The gap's own 1-sigma uncertainty, in the same units -- OxCal's
+    # V_Sequence, where a gap was measured rather than counted. Absent or zero
+    # is a D_Sequence: the gaps are asserted exactly.
+    ring_offset_error: Optional[float] = Field(default=None, ge=0, le=10000)
+
     location: Optional[str] = Field(default=None, max_length=500)
     notes: Optional[str] = Field(default=None, max_length=2000)
 
@@ -102,6 +118,20 @@ class MeasurementInput(BaseModel):
     # range is [taq_age_bp, tpq_age_bp] -- see _bounds_not_contradictory.
     tpq_age_bp: Optional[float] = Field(default=None, ge=0, le=60000)
     taq_age_bp: Optional[float] = Field(default=None, ge=0, le=60000)
+
+    @model_validator(mode="after")
+    def _gap_error_belongs_to_a_gap(self):
+        """
+        A gap uncertainty with no gap under it describes nothing. Refused
+        rather than ignored, because the field it would have belonged to is
+        the one thing a wiggle match cannot work without.
+        """
+        if self.ring_offset_error is not None and self.ring_offset is None:
+            raise ValueError(
+                "ring_offset_error cannot be set on its own -- it is the "
+                "uncertainty on a gap, so send the gap it belongs to"
+            )
+        return self
 
     @field_validator("sample_name")
     @classmethod
@@ -184,6 +214,9 @@ class ProjectSampleUpdate(BaseModel):
     delta_r: Optional[float] = Field(default=None, ge=-5000, le=5000)
     delta_r_error: Optional[float] = Field(default=None, ge=0, le=5000)
     depth_cm: Optional[float] = Field(default=None, ge=0, le=10000)
+    # See MeasurementInput for the sign convention.
+    ring_offset: Optional[float] = Field(default=None, ge=-50000, le=50000)
+    ring_offset_error: Optional[float] = Field(default=None, ge=0, le=10000)
     location: Optional[str] = Field(default=None, max_length=500)
     notes: Optional[str] = Field(default=None, max_length=2000)
     default_context_name: Optional[str] = Field(default=None, max_length=200)
@@ -503,12 +536,22 @@ class BayesianRequest(BaseModel):
         # A tree cannot contain a cycle, so it is validated on its own
         # structural rules instead.
         if self.model_tree is not None:
-            from app.services.model_tree import validate_tree
-            validate_tree(
-                self.model_tree,
-                [{'id': m.id, 'sample_name': m.sample_name, 'element_id': m.element_id}
-                 for m in self.measurements],
-            )
+            from app.services.model_tree import validate_ordinates, validate_tree
+            # Enough of each measurement for both checks: the structural one
+            # needs the element assignment, and the ordinate one needs the
+            # ordinate. Sending a wiggle match with a gap missing has to fail
+            # HERE, at the edge, rather than minutes into a run.
+            described = [
+                {'id': m.id, 'sample_name': m.sample_name,
+                 'element_id': m.element_id,
+                 'ring_offset': m.ring_offset,
+                 'ring_offset_error': m.ring_offset_error,
+                 'depth_cm': m.depth_cm,
+                 'outlier_prior': m.outlier_prior}
+                for m in self.measurements
+            ]
+            validate_tree(self.model_tree, described)
+            validate_ordinates(self.model_tree, described)
             return self
 
         group_ids = [g.id for g in self.groups]

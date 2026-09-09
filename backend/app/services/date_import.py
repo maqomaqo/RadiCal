@@ -159,6 +159,19 @@ COLUMN_ALIASES: Dict[str, tuple] = {
         'outlier_prior', 'outlier', 'outlier_probability', 'outlier_p',
     ),
     'depth_cm': ('depth_cm', 'depth'),
+    # Where a date sits in a wiggle-matched series: years BEFORE the series
+    # reference, 0 at the reference and increasing INTO THE PAST. People have
+    # ring NUMBERS rather than offsets, and converting by hand is where the
+    # sign goes wrong -- so the entry table offers a converter and this column
+    # takes what it produces. See services/wiggle_match.py.
+    'ring_offset': (
+        'ring_offset', 'ring_offsets', 'ring', 'rings', 'gap', 'gap_years',
+        'offset', 'ring_gap', 'varve_offset',
+    ),
+    'ring_offset_error': (
+        'ring_offset_error', 'ring_error', 'gap_error', 'offset_error',
+        'ring_offset_sd', 'gap_sd',
+    ),
     'location': ('location', 'site', 'site_name'),
     'notes': ('notes', 'note', 'comment', 'comments', 'remarks'),
     # Not imported, only recognised, so re-importing the app's results export
@@ -541,6 +554,9 @@ def _row_to_date(values: Dict[str, Any], line: int, errors: List[str],
         'tpq_age_bp': _number(values.get('tpq_age_bp'), 'TPQ', line, errors),
         'taq_age_bp': _number(values.get('taq_age_bp'), 'TAQ', line, errors),
         'depth_cm': _number(values.get('depth_cm'), 'depth', line, errors),
+        'ring_offset': _number(values.get('ring_offset'), 'ring offset', line, errors),
+        'ring_offset_error': _number(
+            values.get('ring_offset_error'), 'ring offset error', line, errors),
         'location': _clean(values.get('location')) or None,
         'notes': _clean(values.get('notes')) or None,
         'outlier_model': _outlier_model(values.get('outlier_model'), line, errors) or 'general',

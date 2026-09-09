@@ -188,6 +188,31 @@ export default function Stratigraphy() {
     if (editRouteId) setSavedMeasurements(sortMeasurements(savedMeasurements, key))
   }
 
+  /**
+   * Write one date's ordinate -- its ring offset or its depth -- back to
+   * wherever the dates are held.
+   *
+   * Editable HERE, not only on the data-entry table, because moving a date
+   * into a wiggle match is exactly the action that leaves it without a gap:
+   * the field has to be within reach of the assignment that made it
+   * necessary.
+   *
+   * It writes to the DRAFT, which is what Run Analysis submits -- an ordinate
+   * is a property of the DATE and travels with the measurements, not with the
+   * tree that PUT /model-tree saves. So it is offered only when the draft
+   * holds the dates, the same rule and for the same reason as the sort
+   * control above: arriving on a direct link to this page under
+   * /analysis/:id/edit leaves the store empty, and editing then would change
+   * the screen without changing anything that gets saved.
+   */
+  const canSetOrdinates = measurements.length > 0
+  const setOrdinate = (measurementId: string, patch: Partial<MatrixMeasurement>) => {
+    const apply = <T extends MatrixMeasurement>(list: T[]): T[] =>
+      list.map((m) => (m.id === measurementId ? { ...m, ...patch } : m))
+    setMeasurements(apply(measurements))
+    if (editRouteId) setSavedMeasurements(apply(savedMeasurements))
+  }
+
   const activeTree = editRouteId ? modelTree : draftTree
   const activeAssignments = editRouteId ? assignments : draftAssignments
   const activeMeasurements = editRouteId ? savedMeasurements : measurements
@@ -311,6 +336,7 @@ export default function Stratigraphy() {
                 assignments={draftAssignments}
                 onChange={(nextTree, nextAssignments) => setDraftTree(nextTree, nextAssignments)}
                 onSortDates={canSortDates ? sortDates : undefined}
+                onSetOrdinate={canSetOrdinates ? setOrdinate : undefined}
               />
             ) : (
               <Alert severity="info">Add some dates on the New Analysis page first.</Alert>
@@ -331,6 +357,7 @@ export default function Stratigraphy() {
                 measurements={savedMeasurements}
                 assignments={assignments}
                 onSortDates={canSortDates ? sortDates : undefined}
+                onSetOrdinate={canSetOrdinates ? setOrdinate : undefined}
                 onChange={(nextTree, nextAssignments) => {
                   setModelTree(nextTree)
                   setAssignments(nextAssignments)

@@ -12,6 +12,8 @@ from app.services.calibration import (
 )
 from app.services import exact_chain
 from app.services import gibbs
+from app.services import model_tree as model_tree_service
+from app.services import wiggle_match
 from app.services import jobs
 from app.services import agreement as agreement_service
 from app.services import intervals
@@ -22,6 +24,7 @@ from app.services.model_tree import (
     migrate_from_relationships,
     rows_to_tree,
     tree_to_rows,
+    validate_ordinates,
     validate_tree,
     with_implicit_boundaries,
 )
@@ -169,14 +172,31 @@ def _iter_tree(element: Dict):
         yield from _iter_tree(child)
 
 
-def _relabel_tree(root: Dict, id_map: Dict[str, str]) -> None:
+def _relabel_tree(root: Dict, id_map: Dict[str, str],
+                  sample_map: Optional[Dict[str, str]] = None) -> None:
     """
     Rewrite element ids through `id_map` in place, turning a request's
     client-side context ids into the ids the contexts were saved under.
+
+    `params` can name a SAMPLE -- a wiggle match records which of its members
+    the gaps were measured from -- and those are mapped through `sample_map`,
+    which is kept separate from `id_map` deliberately. Element ids and sample
+    ids are different namespaces, and running both through one map would let a
+    client that happened to reuse an id turn an element into a sample.
+
+    Left unmapped, a saved analysis would name a reference belonging to the
+    request rather than to itself, and validate_ordinates would refuse the
+    next run of it.
     """
+    sample_map = sample_map or {}
     for element in _iter_tree(root):
         if element['id'] in id_map:
             element['id'] = id_map[element['id']]
+        params = element.get('params')
+        if isinstance(params, dict):
+            for key in ('reference_sample_id',):
+                if params.get(key) in sample_map:
+                    element['params'] = {**params, key: sample_map[params[key]]}
 
 
 def _relabel_intervals(block: Optional[Dict], id_map: Dict[str, str]) -> Optional[Dict]:
@@ -206,6 +226,18 @@ def _relabel_intervals(block: Optional[Dict], id_map: Dict[str, str]) -> Optiona
                 if record.get(field)}}
             for record in block.get(key) or []
         ]
+    # An age-depth record names its levels, and a level is a DATE or an
+    # undated element -- so this one carries sample ids as well as element
+    # ids. Left unmapped, the band could not be joined back to the results
+    # table it is drawn beside.
+    relabelled['age_depth'] = [
+        {**record,
+         'element_id': rename(record.get('element_id')) if record.get('element_id')
+         else record.get('element_id'),
+         'levels': [{**level, 'id': rename(level['id'])}
+                    for level in record.get('levels') or []]}
+        for record in block.get('age_depth') or []
+    ]
     return relabelled
 
 
@@ -310,6 +342,8 @@ def _sample_row(
         outlier_model=getattr(measurement, 'outlier_model', None),
         reservoir_age=measurement.reservoir_age,
         depth_cm=measurement.depth_cm,
+        ring_offset=getattr(measurement, 'ring_offset', None),
+        ring_offset_error=getattr(measurement, 'ring_offset_error', None),
         location=measurement.location,
         notes=measurement.notes,
         group_id=group_id,
@@ -341,6 +375,79 @@ def _analysis_result_row(analysis_id: str, sample_id: str, result: Dict) -> Anal
         agreement_index=result.get('agreement_index'),
         outlier_probability=result.get('outlier_probability'),
     )
+
+
+def _run_wiggle_match(
+    measurements: List[Dict], model_tree: Dict, requested: str,
+) -> Optional[Tuple[Dict, Dict, Dict, Optional[Dict]]]:
+    """
+    Solve a model that IS one wiggle-matched series, or None if it is not one.
+
+    A wiggle match has a single free parameter and a closed form
+    (services/wiggle_match.py), so neither the chain integrator nor the
+    sampler is involved: there is no chain to lay out and nothing to converge.
+
+    A wiggle sequence sitting inside a LARGER model is refused rather than
+    solved. Its members are one calendar age with fixed gaps added, not
+    separate parameters, so the surrounding model's boundaries and span terms
+    would have to be told that -- and reading the series as n free dates in a
+    phase, which is the only thing the existing solvers could do with it,
+    would report a match that was never made. The data model already carries
+    everything the composed case needs; what is missing is the inference, and
+    saying so is better than guessing at it.
+    """
+    wiggles = model_tree_service.elements_of_type(model_tree, 'wiggle_sequence')
+    if not wiggles:
+        return None
+
+    element = model_tree_service.standalone_wiggle_match(model_tree, measurements)
+    if element is None:
+        raise ValueError(
+            'this model puts a wiggle match inside a larger structure, which '
+            'this app does not yet solve. A wiggle-matched series has one '
+            'calendar age with the measured gaps added to it, and the '
+            'surrounding Boundaries and phases would have to model it that '
+            'way rather than as separate dates. Run the wiggle match on its '
+            'own for now.'
+        )
+
+    if requested == 'gibbs':
+        raise ValueError(
+            'the MH/Gibbs sampler was asked for, but this model is a wiggle '
+            'match: it has a single free parameter and a closed form, so '
+            'there is nothing to sample and nothing to converge. Leave the '
+            'solver on automatic.'
+        )
+
+    plan = model_tree_service.plan_model(model_tree, measurements)
+    solved = wiggle_match.solve(measurements, plan.wiggle_groups[0], root=model_tree)
+    element_results = {
+        element['id']: {
+            'name': model_tree_service.element_label(element),
+            'posterior': solved['reference'],
+        }
+    }
+    return solved['measurements'], element_results, {
+        'method': 'wiggle_match',
+        'requested': requested,
+        'reason': None,
+        'implicit_boundaries': 0,
+        # The check that the match is REAL, not a diagnostic beside it: a
+        # D_Sequence asserts the ring counts, and if they are wrong the model
+        # cannot widen to absorb it the way a Phase can -- it simply fits
+        # everything worse. Reported without a pass/fail threshold, since what
+        # OxCal quotes a combination against scales with n and this app does
+        # not print a number it has not pinned against a real run.
+        'combination_agreement': solved['combination_agreement'],
+        'series_span': solved['series_span'],
+        'gap_units': solved['gap_units'],
+        'members': solved['members'],
+        'reference_sample_id': solved['reference_sample_id'],
+        'grid': solved['grid'],
+    }, None
+    # No durations block: the spacing of a wiggle match's members is asserted
+    # rather than inferred, so its "duration" is the series span, which is an
+    # input and is reported as one above.
 
 
 def _run_bayesian(
@@ -397,6 +504,16 @@ def _run_bayesian(
     """
     requested = bayesian_config.get('solver') or 'auto'
     estimate_durations = bool(bayesian_config.get('estimate_durations'))
+
+    # Refused here as well as at the request schema, because a rerun comes
+    # from the database rather than from a request and has to be held to the
+    # same rule -- a date that lost its ring offset in an edit would otherwise
+    # be matched at a gap of zero.
+    validate_ordinates(model_tree, measurements)
+
+    wiggle_result = _run_wiggle_match(measurements, model_tree, requested)
+    if wiggle_result is not None:
+        return wiggle_result
 
     # Each solver gets the tree it can take: the sampler the model as
     # AUTHORED, the exact solver a copy with the implied transitions supplied,
@@ -478,6 +595,13 @@ def _run_bayesian(
         'sweeps': sampled['sweeps'],
         'convergence': sampled['convergence'],
         'converged': sampled['converged'],
+        # What each deposition sequence inferred about its own rigidity, and
+        # whether that posterior ran up against the prior's bound. An
+        # age-depth answer is only readable next to the rigidity it was
+        # produced under: a high-k model interpolates confidently straight
+        # through a plateau and reports a precision the dates do not support.
+        # Empty on a model with no deposition sequence in it.
+        'deposition': sampled.get('deposition') or [],
         # Each outlier model's shared offset scale, in the log10(years) OxCal
         # reports its own U(0,n) posterior in, so a published run's inferred
         # hyperparameter can be compared directly.
@@ -905,10 +1029,13 @@ def bayesian_analysis(request: BayesianRequest, wait: bool = False,
 
                 # The tree itself, with each boundary's posterior on it and
                 # ids translated so it lines up with the stored samples.
-                _relabel_tree(root, groups_map)
+                _relabel_tree(root, groups_map, samples_map)
                 for element in _iter_tree(root):
-                    if element['element_type'] == 'boundary':
-                        found = boundary_results.get(element['id'])
+                    # Any element the solver reported a posterior for, not
+                    # boundaries alone: a wiggle match's reference age lives
+                    # on its own element, and an undated level's age on its.
+                    found = boundary_results.get(element['id'])
+                    if found or element['element_type'] == 'boundary':
                         element['posterior'] = found['posterior'] if found else None
                 _persist_tree(analysis.id, root, db)
                 # Which phase each date ended up in, as decided when the tree
@@ -941,7 +1068,11 @@ def bayesian_analysis(request: BayesianRequest, wait: bool = False,
                 # Relabelled alongside the tree: these records name phases by
                 # element id, so leaving the client-side ids would file every
                 # duration against an element that does not exist.
-                analysis.intervals = _relabel_intervals(interval_block, groups_map)
+                # Sample ids as well as context ids: an age-depth record names
+                # the dated levels it is about, and those are the analysis's
+                # own sample rows.
+                analysis.intervals = _relabel_intervals(
+                    interval_block, {**groups_map, **samples_map})
                 analysis.status = 'completed'
                 db.commit()
             return results, context_results, solver, interval_block
@@ -1162,7 +1293,9 @@ def get_analysis(analysis_id: str, db: Session = Depends(get_db),
             "intervals": analysis.intervals,
             # The model structure, migrated from contexts + relationships on
             # first access. Boundary elements carry their own posterior once
-            # the analysis has been run.
+            # the analysis has been run, as do a wiggle match and an undated
+            # level; `params` carries the settings belonging to one kind of
+            # element (see model_tree.ELEMENT_PARAMS).
             "model_tree": model_tree,
             # True when the relationship graph could not be expressed as a
             # tree and was flattened into one order -- strictly MORE
@@ -1192,6 +1325,11 @@ def get_analysis(analysis_id: str, db: Session = Depends(get_db),
                     "outlier_model": s.outlier_model,
                     "reservoir_age": s.reservoir_age,
                     "depth_cm": s.depth_cm,
+                    # Same reason again: a wiggle match IS its ring offsets,
+                    # so leaving them out here would have an edit resubmit the
+                    # series with every gap blank.
+                    "ring_offset": s.ring_offset,
+                    "ring_offset_error": s.ring_offset_error,
                     "location": s.location,
                     "notes": s.notes,
                     "group_id": s.group_id,
@@ -1486,6 +1624,14 @@ def _rerun_analysis(analysis: Analysis, db: Session,
                 'taq_age_bp': s.taq_age_bp,
                 'outlier_prior': s.outlier_prior,
                 'outlier_model': s.outlier_model,
+                # The ordinates an ordinate-bearing sequence is built on. Not
+                # optional extras: a wiggle match IS its ring offsets and a
+                # deposition sequence IS its depths, so a rerun that dropped
+                # them would solve a different model from the one that was
+                # saved.
+                'depth_cm': s.depth_cm,
+                'ring_offset': s.ring_offset,
+                'ring_offset_error': s.ring_offset_error,
             }
             for s in samples
         ]
@@ -1505,7 +1651,11 @@ def _rerun_analysis(analysis: Analysis, db: Session,
             ModelElement.analysis_id == analysis.id
         ).all():
             found = boundary_results.get(element_row.id)
-            if element_row.element_type == 'boundary':
+            # Cleared as well as written, and for every element type that can
+            # carry one: a rerun whose model no longer produces a posterior
+            # here must not leave the last run's behind.
+            if found or element_row.element_type in (
+                    'boundary', 'wiggle_sequence', 'interpolated_depth'):
                 element_row.posterior = found['posterior'] if found else None
 
         context_results = {}
@@ -1668,11 +1818,20 @@ def replace_model_tree(analysis_id: str, payload: Dict, db: Session = Depends(ge
             'id': s.id,
             'sample_name': s.sample_name,
             'element_id': assignments.get(s.id, s.element_id or s.group_id),
+            'ring_offset': s.ring_offset,
+            'ring_offset_error': s.ring_offset_error,
+            'depth_cm': s.depth_cm,
+            'outlier_prior': s.outlier_prior,
         }
         for s in samples
     ]
     try:
         validate_tree(root, prospective)
+        # A structure that needs an ordinate the dates do not carry is
+        # refused here too. Moving a date into a wiggle match is exactly the
+        # edit that leaves it without a gap, and this is the screen it is
+        # made on.
+        validate_ordinates(root, prospective)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
@@ -1792,7 +1951,9 @@ def duplicate_analysis(analysis_id: str, db: Session = Depends(get_db),
             if element['id'] not in element_map:
                 element_map[element['id']] = str(uuid.uuid4())
             element['posterior'] = None
-        _relabel_tree(source_tree, element_map)
+        # Sample ids alongside, in their own map: a wiggle match's params name
+        # one of its members, and the copy's members are the copy's rows.
+        _relabel_tree(source_tree, element_map, samples_map)
         _persist_tree(copy.id, source_tree, db)
         for old_sample in source.measurements:
             new_id = samples_map.get(old_sample.id)

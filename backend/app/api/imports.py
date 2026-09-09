@@ -109,7 +109,10 @@ def csv_columns(user: User = Depends(current_user)):
         'taq_age_bp': 'Terminus ante quem: the date cannot be younger than this (cal BP).',
         'outlier_model': "general or charcoal.",
         'outlier_prior': 'Prior probability the date is an outlier (0.05, or 5%).',
-        'depth_cm': 'Depth below surface, in centimetres.',
+        'depth_cm': 'Depth below surface, in centimetres. The axis an age-depth model runs along.',
+        'ring_offset': ('Years before the series reference point, for a wiggle '
+                        'match: 0 at the reference and increasing into the past.'),
+        'ring_offset_error': 'Uncertainty on ring_offset, where the gap was measured rather than counted.',
         'location': 'Site or find location.',
         'notes': 'Free text.',
     }

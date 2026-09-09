@@ -1,0 +1,25 @@
+ // An age-depth model on a peat core: five dated levels down a 100 cm
+ // profile, with the depth of each written as z=, plus one undated level
+ // asking how old 47 cm is.
+ //
+ // OxCal writes a P_Sequence oldest first, so the deepest level comes first.
+ // The k of 1 with U(-2,2) makes the rigidity a variable of the model rather
+ // than a setting, spanning two decades either side of it.
+ //
+ // The radiocarbon ages were read off IntCal20 at a constant ten years per
+ // centimetre from 1000 cal BP at the surface, so the age this model should
+ // report at any depth is known. The structure is a real one; the lab codes
+ // are not.
+Plot()
+ {
+  Curve("IntCal20","IntCal20.14c");
+  P_Sequence("Peat core",1,0,U(-2,2))
+  {
+   R_Date("PEAT-100", 2070, 40){ z=100; };
+   R_Date("PEAT-80", 1887, 40){ z=80; };
+   R_Date("PEAT-60", 1714, 40){ z=60; };
+   R_Date("PEAT-40", 1537, 40){ z=40; };
+   Date("Tephra"){ z=47; };
+   R_Date("PEAT-20", 1301, 40){ z=20; };
+  };
+ };

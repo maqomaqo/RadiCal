@@ -65,6 +65,12 @@ export interface ProjectSample {
   /** Superseded by delta_r, but still carried on older and imported rows. */
   reservoir_age: number | null
   depth_cm: number | null
+  // Where the date sits in a wiggle-matched series: years BEFORE the series
+  // reference, 0 at the reference and increasing into the past. Held in the
+  // collection because it is a property of the SAMPLE -- which ring of which
+  // timber it came from -- not of any one analysis.
+  ring_offset: number | null
+  ring_offset_error: number | null
   location: string | null
   default_context_name: string | null
   tpq_age_bp: number | null
@@ -106,6 +112,8 @@ type DraftForm = {
   delta_r_error: string
   reservoir_age: string
   depth_cm: string
+  ring_offset: string
+  ring_offset_error: string
   location: string
   notes: string
 }
@@ -123,6 +131,8 @@ const EMPTY_FORM: DraftForm = {
   delta_r_error: '',
   reservoir_age: '',
   depth_cm: '',
+  ring_offset: '',
+  ring_offset_error: '',
   location: '',
   notes: '',
 }
@@ -141,6 +151,8 @@ function toForm(s: ProjectSample): DraftForm {
     delta_r_error: s.delta_r_error == null ? '' : String(s.delta_r_error),
     reservoir_age: s.reservoir_age == null ? '' : String(s.reservoir_age),
     depth_cm: s.depth_cm == null ? '' : String(s.depth_cm),
+    ring_offset: s.ring_offset == null ? '' : String(s.ring_offset),
+    ring_offset_error: s.ring_offset_error == null ? '' : String(s.ring_offset_error),
     location: s.location ?? '',
     notes: s.notes ?? '',
   }
@@ -167,6 +179,8 @@ function formToPayload(form: DraftForm) {
     delta_r_error: numOrNull(form.delta_r_error),
     reservoir_age: numOrNull(form.reservoir_age),
     depth_cm: numOrNull(form.depth_cm),
+    ring_offset: numOrNull(form.ring_offset),
+    ring_offset_error: numOrNull(form.ring_offset_error),
     location: form.location.trim() || null,
     notes: form.notes.trim() || null,
   }
@@ -229,6 +243,8 @@ export function parsePastedDates(
       delta_r_error: null,
       reservoir_age: null,
       depth_cm: null,
+      ring_offset: null,
+      ring_offset_error: null,
       location: null,
       notes: null,
     })
@@ -463,6 +479,8 @@ export default function ProjectSampleTable({ projectId }: Props) {
             tpq_age_bp: d.tpq_age_bp,
             taq_age_bp: d.taq_age_bp,
             depth_cm: d.depth_cm,
+            ring_offset: d.ring_offset,
+            ring_offset_error: d.ring_offset_error,
             location: d.location,
             notes: d.notes,
           })),
@@ -739,6 +757,22 @@ export default function ProjectSampleTable({ projectId }: Props) {
         align: 'right',
         numeric: true,
         render: (s) => (s.depth_cm == null ? muted('—') : s.depth_cm),
+      },
+      {
+        id: 'ring_offset',
+        label: 'Gap',
+        auto: anyOf((s) => s.ring_offset != null),
+        populated: anyOf((s) => s.ring_offset != null),
+        align: 'right',
+        numeric: true,
+        headTitle:
+          "Where this date sits in a wiggle-matched series: years BEFORE the series reference, 0 at the reference and increasing into the past. The Model Structure page converts ring numbers into these.",
+        render: (s) =>
+          s.ring_offset == null
+            ? muted('—')
+            : s.ring_offset_error
+              ? `${s.ring_offset} ± ${s.ring_offset_error}`
+              : s.ring_offset,
       },
       {
         id: 'location',
@@ -1255,6 +1289,23 @@ export default function ProjectSampleTable({ projectId }: Props) {
               value={form.depth_cm}
               inputProps={{ min: 0, max: 10000 }}
               onChange={(e) => setForm({ ...form, depth_cm: e.target.value })}
+              helperText="The axis an age-depth model runs along."
+            />
+            <TextField
+              label="Gap"
+              type="number"
+              value={form.ring_offset}
+              inputProps={{ min: -50000, max: 50000 }}
+              onChange={(e) => setForm({ ...form, ring_offset: e.target.value })}
+              helperText="Years before the series reference, for a wiggle match: 0 at the reference, increasing into the past."
+            />
+            <TextField
+              label="Gap ±"
+              type="number"
+              value={form.ring_offset_error}
+              inputProps={{ min: 0, max: 10000 }}
+              onChange={(e) => setForm({ ...form, ring_offset_error: e.target.value })}
+              helperText="Only where the gap was measured rather than counted."
             />
             <TextField
               label="Notes"

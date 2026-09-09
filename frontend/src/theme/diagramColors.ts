@@ -24,6 +24,29 @@ export const PHASE_GREEN = '#1f7a62'
 export const HIATUS_VIOLET = '#7a5c99'
 
 /**
+ * The two sequences whose members are separated by a MEASURED distance, and
+ * the undated level inside one.
+ *
+ * Their own hues, not borrowings. A hue here is a claim about what something
+ * IS, and neither of these is a Phase or a Sequence: a wiggle match is one
+ * calendar age with fixed gaps hung off it, and a deposition sequence prices
+ * the intervals between its levels rather than leaving them uniform. Painting
+ * either in the Phase green would say they are unordered piles of dates,
+ * which is the opposite of what makes them worth having.
+ *
+ * Amber for the wiggle match and teal for the deposition sequence: both sit
+ * clear of the app's blue, the Phase green and the Boundary coral at the
+ * lightnesses these are used at, and both clear 4.5:1 on white so they can
+ * carry a 10px label as well as a border. The undated level takes the
+ * deposition teal desaturated -- it belongs to that sequence and is not a
+ * different kind of thing from the levels beside it, which is the same rule
+ * CONTEXT_PALETTE follows.
+ */
+export const WIGGLE_AMBER = '#a5651a'
+export const DEPOSITION_TEAL = '#1c6a86'
+export const UNDATED_LEVEL_SLATE = '#5b7f8d'
+
+/**
  * The app's warm ink -- the tint behind every recoloured MUI shadow.
  *
  * Not an element colour and not a hue: it is what the app draws with when a
@@ -67,6 +90,9 @@ export function useElementTypeColors(): Record<ElementType, ElementTypeColor> {
       phase: solid(PHASE_GREEN),
       boundary: { main: BOUNDARY_CORAL, ink: BOUNDARY_CORAL_INK },
       hiatus: solid(HIATUS_VIOLET),
+      wiggle_sequence: solid(WIGGLE_AMBER),
+      deposition_sequence: solid(DEPOSITION_TEAL),
+      interpolated_depth: solid(UNDATED_LEVEL_SLATE),
     }),
     [primary]
   )

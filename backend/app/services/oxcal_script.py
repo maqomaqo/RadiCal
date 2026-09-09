@@ -262,6 +262,21 @@ STRUCTURAL = {
     'hiatus': 'hiatus',
 }
 
+# Sequences whose members are separated by a measured distance rather than by
+# stratigraphy. Their contents are read in a walk of their own, because the
+# Gap() statements BETWEEN the dates carry the whole model and an ordinary
+# block walk would drop them.
+#
+#   D_Sequence   gaps counted exactly -- tree rings.
+#   V_Sequence   gaps measured, each with its own uncertainty -- varves and
+#                any sampled series.
+ORDINATE_SEQUENCES = {'d_sequence', 'v_sequence'}
+
+# The Poisson-process deposition model. Read by a walk of its own too, for the
+# same reason: what makes it a deposition sequence is the `z=` on each
+# element, which an ordinary block walk has no use for and drops.
+DEPOSITION_SEQUENCE = 'p_sequence'
+
 # Queries and plots: they read a posterior rather than shape one, so leaving
 # them out changes nothing.
 IGNORABLE = {
@@ -295,9 +310,19 @@ UNSUPPORTED = {
         'date that is already calendrical. A fixed calendar limit can be '
         'entered as a TPQ or TAQ instead.'
     ),
+    # NARROWED rather than lifted. Inside a P_Sequence a Date() with a depth
+    # is exactly what an age-depth model is for -- "how old is the level at 47
+    # cm" -- and it imports as an undated level. Anywhere else it is still an
+    # undated free parameter with nothing bounding it.
     'date': (
-        'an undated event parameter, which this app does not model as a '
-        'free parameter of its own.'
+        'an undated event parameter outside a deposition sequence. This app '
+        'models an undated level only where a P_Sequence gives it a depth to '
+        'sit at; elsewhere there is nothing to bound it.'
+    ),
+    'interpolate': (
+        'an interpolated age. Ask for one by putting a Date() with its own '
+        'z= inside the P_Sequence, which is what this app imports as an '
+        'undated level.'
     ),
     'age': 'a relative-age parameter, which this app does not model.',
     'r_combine': (
@@ -320,10 +345,12 @@ UNSUPPORTED = {
         'an open-ended ordering constraint. Express the ordering with a '
         'Sequence, or the limit as a TPQ/TAQ.'
     ),
-    'v_sequence': 'a variable-rate sequence, which this app does not model.',
-    'd_sequence': 'a sequence with known gaps, which this app does not model.',
-    'p_sequence': 'a Poisson-process deposition model, which this app does not model.',
-    'u_sequence': 'a uniform-deposition sequence, which this app does not model.',
+    'u_sequence': (
+        'a uniform-deposition sequence. This app models the Poisson-process '
+        'deposition of a P_Sequence, which is a different prior over the same '
+        'depths -- reading one as the other would change the posterior '
+        'without saying so.'
+    ),
 }
 
 def _normalise_curve_name(raw: str) -> str:
@@ -564,6 +591,22 @@ class _Translator:
                 date = self._translate_date(node, scope)
                 if date is not None:
                     items.append(('date', date))
+                continue
+            if command == 'gap':
+                # Emitted rather than acted on here: only a D_Sequence or a
+                # V_Sequence knows what to do with one, and every other
+                # container reports it (see _reject_gaps).
+                items.append(('gap', self._translate_gap(node)))
+                continue
+            if command in ORDINATE_SEQUENCES:
+                element = self._translate_wiggle_sequence(node, scope.copy())
+                if element is not None:
+                    items.append(('element', element))
+                continue
+            if command == DEPOSITION_SEQUENCE:
+                element = self._translate_deposition_sequence(node, scope.copy())
+                if element is not None:
+                    items.append(('element', element))
                 continue
             if command in STRUCTURAL:
                 element = self._translate_structural(node, scope)
@@ -832,6 +875,19 @@ class _Translator:
                 self._apply_delta_r(child, inner)
                 date['delta_r'] = inner.delta_r
                 date['delta_r_error'] = inner.delta_r_error
+            elif command == '=' and child.args and str(child.args[0]).lower() == 'z':
+                # The date's place on a P_Sequence's depth axis. Read here
+                # rather than only in _translate_deposition_sequence so the
+                # same R_Date reader serves both, and so a stray z= outside a
+                # deposition sequence is recorded as an ordinary depth rather
+                # than refused -- depth_cm is a column every date has.
+                try:
+                    date['depth_cm'] = float(child.args[1])
+                except (TypeError, ValueError, IndexError):
+                    self.error(
+                        child,
+                        f'R_Date("{name}") has a z= that is not a number.',
+                    )
             elif command in IGNORABLE:
                 self.seen_ignorable.append(child.command)
             else:
@@ -875,6 +931,349 @@ class _Translator:
         date['outlier_model'] = key
         date['outlier_prior'] = prior
 
+    def _translate_gap(self, node: Node) -> Dict[str, Any]:
+        """
+        `Gap(years)` or `Gap(years, error)` -- the distance between two
+        adjacent members of a D_Sequence or V_Sequence.
+
+        Read here so the value survives the block walk; whether it is in a
+        place that can use it is the container's business.
+        """
+        numbers = node.numbers
+        return {
+            'line': node.line,
+            'value': numbers[0] if numbers else None,
+            'error': numbers[1] if len(numbers) > 1 else 0.0,
+        }
+
+    def _reject_gaps(self, items: List[Tuple[str, Dict[str, Any]]],
+                     where: str) -> None:
+        """A Gap() outside a wiggle-matched sequence measures nothing."""
+        for kind, payload in items:
+            if kind != 'gap':
+                continue
+            self.result.errors.append(
+                f"Line {payload['line']}: Gap() inside {where} is not "
+                'something this app models. A gap between dates is the '
+                'measured separation of a D_Sequence or V_Sequence; between '
+                'phases, write two Boundaries with a Hiatus between them.'
+            )
+
+    def _translate_wiggle_sequence(self, node: Node,
+                                   scope: _Scope) -> Optional[Dict[str, Any]]:
+        """
+        `D_Sequence` / `V_Sequence` -- a series whose members are separated by
+        measured gaps -- into this app's `wiggle_sequence` element.
+
+        OxCal writes the series OLDEST FIRST with a `Gap()` between adjacent
+        members, and this app records each member's distance from a REFERENCE
+        as `ring_offset`: 0 at the reference, increasing into the past. The
+        reference chosen here is the YOUNGEST member -- the last one in the
+        file, the outermost ring -- which is the conventional one and the one a
+        felling date is quoted against. So the offsets are the running total of
+        the gaps counted backwards from the end.
+
+        WHERE A V_SEQUENCE IS NOT REPRODUCED EXACTLY, and it is said out loud
+        rather than left in the arithmetic: OxCal's gaps form a CHAIN, so two
+        members' distances from the reference share every gap between them and
+        their uncertainties are correlated. This app carries one uncertainty
+        per member and treats them as independent (services/wiggle_match.py),
+        which gives each member the right marginal spread but drops that
+        correlation. The gap errors are therefore added in quadrature along the
+        chain and a warning says so, because a reader comparing this against an
+        OxCal run needs to know which model produced which number.
+        """
+        command = node.command.lower()
+        name = node.name or ('Wiggle match' if command == 'd_sequence'
+                             else 'Varve sequence')
+        items = self._translate_block(node.block or [], scope)
+
+        for kind, payload in items:
+            if kind == 'element':
+                self.error(
+                    node,
+                    f'{node.command}("{name}") contains a '
+                    f"{payload.get('element_type')}. A wiggle-matched series "
+                    'is its dates and the gaps between them; there is no '
+                    'position in it for a phase, a boundary or another '
+                    'sequence.',
+                )
+                return None
+
+        entries: List[Tuple[Dict[str, Any], float, float]] = []
+        cumulative = 0.0
+        cumulative_variance = 0.0
+        pending_value = 0.0
+        pending_variance = 0.0
+        pending_seen = False
+        has_gap_error = False
+
+        for kind, payload in items:
+            if kind == 'gap':
+                if payload['value'] is None:
+                    self.error(
+                        node,
+                        f'{node.command}("{name}") has a Gap() with no '
+                        'number in it. The gaps are the model: a gap of '
+                        'unknown size cannot be read as zero.',
+                    )
+                    return None
+                pending_value += float(payload['value'])
+                pending_variance += float(payload['error'] or 0.0) ** 2
+                has_gap_error = has_gap_error or bool(payload['error'])
+                pending_seen = True
+                continue
+
+            date = payload
+            if entries:
+                if not pending_seen:
+                    self.error(
+                        node,
+                        f'{node.command}("{name}") has two dates with no '
+                        f"Gap() between them (at \"{date['sample_name']}\"). "
+                        'Every step of the series needs its measured '
+                        'separation, or the two are one event rather than two.',
+                    )
+                    return None
+                cumulative += pending_value
+                cumulative_variance += pending_variance
+            elif pending_seen:
+                self.error(
+                    node,
+                    f'{node.command}("{name}") opens with a Gap(). A gap '
+                    'separates two members, so there is nothing for the first '
+                    'one to be a gap from.',
+                )
+                return None
+            entries.append((date, cumulative, cumulative_variance))
+            pending_value = pending_variance = 0.0
+            pending_seen = False
+
+        if not entries:
+            self.error(
+                node,
+                f'{node.command}("{name}") has no dates in it.',
+            )
+            return None
+        if pending_seen:
+            self.result.warnings.append(
+                f'Line {node.line}: {node.command}("{name}") ends with a '
+                'Gap() after its last date. A gap to nothing measures '
+                'nothing, so it was left out -- if it is the gap to the '
+                'felling ring, add that ring as a date.'
+            )
+
+        total, total_variance = entries[-1][1], entries[-1][2]
+        element = self.element('wiggle_sequence', name)
+        for date, distance, variance in entries:
+            # Distance BACK from the youngest member, which is the reference.
+            date['ring_offset'] = float(total - distance)
+            spread = total_variance - variance
+            date['ring_offset_error'] = (
+                float(spread ** 0.5) if spread > 0 else None)
+            self._attach(date, element['id'], name)
+
+        element['params'] = {
+            # OxCal's Gap() is a number of years however the series was
+            # counted, so that is what the axis is labelled -- rather than
+            # calling a varve count "rings" and being wrong in a second
+            # literature.
+            'gap_units': 'years',
+            'reference_sample_id': entries[-1][0]['id'],
+        }
+
+        if has_gap_error:
+            self.result.warnings.append(
+                f'Line {node.line}: {node.command}("{name}") gives its gaps '
+                'their own uncertainties. This app carries one uncertainty per '
+                "date -- that date's distance from the reference, here the "
+                'youngest member -- so the gap errors were added in quadrature '
+                'along the series. Each date then has the right spread, but '
+                'this app treats those spreads as independent where OxCal '
+                'shares each gap between every date beyond it.'
+            )
+        self.result.notes.append(
+            f'{node.command}("{name}") was read as a wiggle match of '
+            f'{len(entries)} dates spanning {total:g} years, measured from '
+            f'"{entries[-1][0]["sample_name"]}" as the reference.'
+        )
+        return element
+
+    @staticmethod
+    def _depth_of(node: Node) -> Optional[float]:
+        """
+        The `z=` an element carries, which is what puts it on a P_Sequence's
+        depth axis. None when it has none.
+        """
+        for child in node.block or []:
+            if (child.command == '=' and child.args
+                    and str(child.args[0]).lower() == 'z'):
+                try:
+                    return float(child.args[1])
+                except (TypeError, ValueError, IndexError):
+                    return None
+        return None
+
+    def _translate_deposition_sequence(self, node: Node,
+                                       scope: _Scope) -> Optional[Dict[str, Any]]:
+        """
+        `P_Sequence(name, k, interval, prior)` -- deposition modelled as a
+        Poisson process along a depth axis -- into this app's
+        `deposition_sequence`.
+
+        Every member carries its own `z=`, which is what makes the sequence a
+        depth axis rather than an ordering, and this app reads z as DEPTH
+        BELOW THE SURFACE: larger is deeper and therefore older. OxCal files
+        overwhelmingly write it that way, but nothing in the language says so,
+        so a file whose z runs the other way is warned about rather than
+        silently modelled upside down.
+
+        Three readings worth stating:
+
+          * `Date("...")` with a z is an UNDATED LEVEL -- the "how old is 47
+            cm" this whole model exists to answer -- which is why Date() is
+            narrowed rather than refused outright (see UNSUPPORTED).
+          * `Boundary("...")` with a z is read as an undated level too. In
+            this app a deposition sequence's ends are levels of the same
+            Poisson process, so the parameter is the same one under another
+            name -- but it is not the uniform transition a Boundary is
+            everywhere else here, and that is worth a warning rather than a
+            note.
+          * The INTERPOLATION INTERVAL (OxCal's third argument) inserts extra
+            levels every so many units. This app takes the levels it is given,
+            so the argument is reported and not applied.
+        """
+        name = node.name or 'Deposition sequence'
+        numbers = node.numbers
+        k = numbers[0] if numbers else None
+        if k is None or k <= 0:
+            self.error(
+                node,
+                f'P_Sequence("{name}") needs a positive deposition rate k as '
+                'its first number. k is events per unit depth and decides how '
+                'rigid the model is, so it cannot be guessed at.',
+            )
+            return None
+        if len(numbers) > 1 and numbers[1]:
+            self.result.notes.append(
+                f'Line {node.line}: P_Sequence("{name}") asks OxCal to '
+                f'interpolate every {numbers[1]:g} units. This app models the '
+                'levels it is given and reports an age at any depth you add as '
+                'an undated level, so that argument was not applied.'
+            )
+
+        # A U(a,b) argument makes k variable, a and b being log10 multipliers
+        # on the k given -- so the range is centred on it rather than absolute.
+        variable = None
+        for argument in node.args:
+            if isinstance(argument, Call) and argument.name.lower() == 'u':
+                bounds = [a for a in argument.args if isinstance(a, (int, float))]
+                if len(bounds) >= 2:
+                    variable = (float(bounds[0]), float(bounds[1]))
+        import math
+        log_k = math.log10(k)
+
+        element = self.element('deposition_sequence', name)
+        element['params'] = {
+            'k': None if variable else float(k),
+            'k_variable': variable is not None,
+            'log_k_min': log_k + variable[0] if variable else log_k - 2.0,
+            'log_k_max': log_k + variable[1] if variable else log_k + 2.0,
+            'depth_units': 'cm',
+        }
+
+        inner = scope.copy()
+        depths: List[float] = []
+        dated = 0
+        boundary_levels = 0
+        for child in node.block or []:
+            command = child.command.lower()
+            if command == '=':
+                continue                      # this sequence's own z, if any
+            if command == 'curve':
+                self._select_curve(child, inner)
+                continue
+            if command == 'delta_r':
+                self._apply_delta_r(child, inner)
+                continue
+            if command in IGNORABLE:
+                self._check_ignorable_holds_dates(child)
+                self.seen_ignorable.append(child.command)
+                continue
+
+            depth = self._depth_of(child)
+            if command == 'r_date':
+                date = self._translate_date(child, inner)
+                if date is None:
+                    return None
+                if depth is None:
+                    self.error(
+                        child,
+                        f'R_Date("{date["sample_name"]}") inside '
+                        f'P_Sequence("{name}") has no z=. Depth is the axis '
+                        'the deposition model runs along, so a level without '
+                        'one cannot take part in it.',
+                    )
+                    return None
+                date['depth_cm'] = depth
+                depths.append(depth)
+                dated += 1
+                self._attach(date, element['id'], name)
+                continue
+
+            if command in ('date', 'boundary'):
+                if depth is None:
+                    self.error(
+                        child,
+                        f'{child.command}("{child.name or ""}") inside '
+                        f'P_Sequence("{name}") has no z=. An undated level is '
+                        'a question about a DEPTH, so there is nothing to ask '
+                        'without one.',
+                    )
+                    return None
+                depths.append(depth)
+                boundary_levels += command == 'boundary'
+                element['children'].append({
+                    **self.element('interpolated_depth',
+                                   child.name or f'{depth:g} cm'),
+                    'params': {'depth_cm': depth},
+                })
+                continue
+
+            self.error(
+                child,
+                f'{child.command}() inside P_Sequence("{name}") is not '
+                'something this app models. A deposition sequence holds dates '
+                'and undated levels, each with its own z=.',
+            )
+            return None
+
+        if not dated:
+            self.error(
+                node,
+                f'P_Sequence("{name}") has no R_Date in it. Deposition cannot '
+                'be modelled against depth with nothing measured at any level.',
+            )
+            return None
+
+        if boundary_levels:
+            self.result.warnings.append(
+                f'Line {node.line}: P_Sequence("{name}") has {boundary_levels} '
+                'Boundary element(s) with a depth. They were imported as '
+                'undated levels of the deposition sequence, which is the same '
+                'parameter under another name here -- but NOT the uniform '
+                'transition a Boundary is elsewhere in this app.'
+            )
+        if len(depths) > 1 and depths[0] < depths[-1]:
+            self.result.warnings.append(
+                f'Line {node.line}: P_Sequence("{name}") has z increasing down '
+                'the file. z has been read as DEPTH BELOW THE SURFACE -- '
+                'larger is deeper and older. If it is a height above a datum, '
+                'the sequence is modelled upside down; negate the values and '
+                'import again.'
+            )
+        return element
+
     def _translate_structural(self, node: Node, scope: _Scope) -> Optional[Dict[str, Any]]:
         command = node.command.lower()
         etype = STRUCTURAL[command]
@@ -905,6 +1304,7 @@ class _Translator:
             return self.element(etype, name)
 
         items = self._translate_block(node.block or [], scope.copy())
+        self._reject_gaps(items, f'{node.command}("{name}")')
 
         if etype == 'phase':
             element = self.element(
@@ -951,6 +1351,7 @@ class _Translator:
         a Phase asserts no order between its children, which is exactly what
         two unrelated top-level models assert about each other.
         """
+        self._reject_gaps(items, 'the top level of the file')
         elements = [payload for kind, payload in items if kind == 'element']
         loose_dates = [payload for kind, payload in items if kind == 'date']
 
@@ -986,7 +1387,8 @@ class _Translator:
                 )
             return
 
-        if len(elements) == 1 and elements[0]['element_type'] in ('sequence', 'phase'):
+        if len(elements) == 1 and elements[0]['element_type'] in (
+                'sequence', 'phase', 'wiggle_sequence', 'deposition_sequence'):
             self.result.model_tree = elements[0]
             return
 
@@ -1064,17 +1466,44 @@ def _validate_imported_tree(result: ImportResult) -> None:
     """
     if result.model_tree is None:
         return
-    from app.services.model_tree import validate_tree
+    from app.services.model_tree import (
+        elements_of_type, standalone_wiggle_match, validate_ordinates,
+        validate_tree,
+    )
 
+    described = [
+        {'id': d['id'], 'sample_name': d['sample_name'],
+         'element_id': d.get('element_id'),
+         'ring_offset': d.get('ring_offset'),
+         'ring_offset_error': d.get('ring_offset_error'),
+         'depth_cm': d.get('depth_cm'),
+         'outlier_prior': d.get('outlier_prior')}
+        for d in result.dates
+    ]
     try:
-        validate_tree(
-            result.model_tree,
-            [{'id': d['id'], 'sample_name': d['sample_name'],
-              'element_id': d.get('element_id')} for d in result.dates],
-        )
+        validate_tree(result.model_tree, described)
+        validate_ordinates(result.model_tree, described)
     except ValueError as exc:
         result.errors.append(
             f'The model read from this file is not one this app can run: {exc}'
+        )
+        result.model_tree = None
+        result.element_assignments = {}
+        return
+
+    # A D_Sequence this app can read but cannot run is still a file it cannot
+    # import: the rule here is to fail naming the construct rather than to
+    # hand back a model that fails later, on a screen with less to say about
+    # why.
+    if (elements_of_type(result.model_tree, 'wiggle_sequence')
+            and standalone_wiggle_match(result.model_tree, described) is None):
+        result.errors.append(
+            'This file puts a wiggle-matched sequence inside a larger model, '
+            'which this app does not yet solve: a wiggle match is one '
+            'calendar age with the measured gaps added to it, and the '
+            'surrounding Boundaries and phases would have to model it that '
+            'way rather than as separate dates. A file holding the '
+            'D_Sequence or V_Sequence on its own imports and runs.'
         )
         result.model_tree = None
         result.element_assignments = {}

@@ -17,9 +17,13 @@ import {
   commitDrop,
   flattenTree,
   getProjection,
+  orderedForHolder,
+  phaseOptions,
+  validateTree,
   type FlatNode,
 } from './ModelTreeEditor'
-import type { ModelElement } from '@/types'
+import { depositionSequenceTree, wiggleMatchTree } from '@/utils/modelTreeDefaults'
+import type { MatrixMeasurement, ModelElement } from '@/types'
 
 function el(
   id: string,
@@ -323,5 +327,222 @@ describe('keyboard renesting', () => {
         }
       }
     }
+  })
+})
+
+// --------------------------------------------------------------------------
+// Sequences with a measured ordinate
+// --------------------------------------------------------------------------
+//
+// A wiggle match and a deposition sequence hold DATES but no elements, and
+// each is built on an ordinate the date has to carry. validateTree is the
+// client-side mirror of services/model_tree.py: the point of duplicating it
+// is that a problem surfaces while the model is being built rather than on
+// submit, so what is asserted here is that it catches the same things.
+
+function date(id: string, extra: Partial<MatrixMeasurement> = {}): MatrixMeasurement {
+  return { id, sample_name: id.toUpperCase(), age_bp: 2500, error_1sigma: 25, ...extra }
+}
+
+const dated = date
+
+describe('phaseOptions', () => {
+  it('offers every element a date can be attached to, not phases alone', () => {
+    const tree = el('root', 'phase', 'Site', [
+      el('p1', 'phase', 'Phase 1'),
+      el('w1', 'wiggle_sequence', 'Timber 1'),
+      el('d1', 'deposition_sequence', 'Core A'),
+      el('b1', 'boundary', 'Start'),
+    ])
+    expect(phaseOptions(tree).map((o) => [o.id, o.element_type])).toEqual([
+      ['root', 'phase'],
+      ['p1', 'phase'],
+      ['w1', 'wiggle_sequence'],
+      ['d1', 'deposition_sequence'],
+    ])
+  })
+
+  it('offers a root that is itself a wiggle match', () => {
+    // The preset and the OxCal importer both build exactly this shape, and a
+    // walk that only looked at CHILDREN would leave its dates nowhere to go.
+    const tree = el('w1', 'wiggle_sequence', 'Timber 1')
+    expect(phaseOptions(tree).map((o) => o.id)).toEqual(['w1'])
+  })
+})
+
+describe('validateTree on a wiggle match', () => {
+  const tree = el('w1', 'wiggle_sequence', 'Timber 1')
+
+  it('accepts a series whose members all carry a distinct gap', () => {
+    const dates = [date('a', { ring_offset: 0 }), date('b', { ring_offset: 120 })]
+    expect(validateTree(tree, { a: 'w1', b: 'w1' }, dates)).toEqual([])
+  })
+
+  it('refuses a member with no gap, because the gaps are the model', () => {
+    const dates = [date('a', { ring_offset: 0 }), date('b')]
+    const problems = validateTree(tree, { a: 'w1', b: 'w1' }, dates)
+    expect(problems.some((p) => p.includes('no ring offset'))).toBe(true)
+  })
+
+  it('refuses two members at the same gap', () => {
+    const dates = [date('a', { ring_offset: 40 }), date('b', { ring_offset: 40 })]
+    const problems = validateTree(tree, { a: 'w1', b: 'w1' }, dates)
+    expect(problems.some((p) => p.includes('same gap'))).toBe(true)
+  })
+
+  it('refuses a series holding other elements', () => {
+    const withChild = el('w1', 'wiggle_sequence', 'Timber 1', [
+      el('b1', 'boundary', 'Felling'),
+    ])
+    const problems = validateTree(withChild, { a: 'w1' }, [date('a', { ring_offset: 0 })])
+    expect(problems.some((p) => p.includes('contains other elements'))).toBe(true)
+  })
+
+  it('refuses an empty series', () => {
+    const problems = validateTree(tree, {}, [])
+    expect(problems.some((p) => p.includes('no dates in it'))).toBe(true)
+  })
+})
+
+describe('validateTree on a deposition sequence', () => {
+  it('accepts levels at distinct depths', () => {
+    const tree = el('d1', 'deposition_sequence', 'Core A')
+    const dates = [date('a', { depth_cm: 60 }), date('b', { depth_cm: 20 })]
+    expect(validateTree(tree, { a: 'd1', b: 'd1' }, dates)).toEqual([])
+  })
+
+  it('refuses a date with no depth, since depth is the axis it runs along', () => {
+    const tree = el('d1', 'deposition_sequence', 'Core A')
+    const dates = [date('a', { depth_cm: 60 }), date('b')]
+    const problems = validateTree(tree, { a: 'd1', b: 'd1' }, dates)
+    expect(problems.some((p) => p.includes('no depth'))).toBe(true)
+  })
+
+  it('refuses two levels at one depth, counting undated ones too', () => {
+    // A zero interval has no accumulation rate, whether the two levels are
+    // both dated or one of them is an undated question about a depth.
+    const tree: ModelElement = {
+      ...el('d1', 'deposition_sequence', 'Core A', [
+        { ...el('lv', 'interpolated_depth', 'Tephra'), params: { depth_cm: 60 } },
+      ]),
+    }
+    const dates = [date('a', { depth_cm: 60 }), date('b', { depth_cm: 20 })]
+    const problems = validateTree(tree, { a: 'd1', b: 'd1' }, dates)
+    expect(problems.some((p) => p.includes('same depth'))).toBe(true)
+  })
+
+  it('refuses an undated level with no depth to report an age at', () => {
+    const tree = el('d1', 'deposition_sequence', 'Core A', [
+      el('lv', 'interpolated_depth', 'Tephra'),
+    ])
+    const dates = [date('a', { depth_cm: 60 }), date('b', { depth_cm: 20 })]
+    const problems = validateTree(tree, { a: 'd1', b: 'd1' }, dates)
+    expect(problems.some((p) => p.includes('no depth, so there is no age'))).toBe(true)
+  })
+
+  it('refuses anything but an undated level inside it', () => {
+    const tree = el('d1', 'deposition_sequence', 'Core A', [el('p1', 'phase', 'Phase 1')])
+    const dates = [date('a', { depth_cm: 60 }), date('b', { depth_cm: 20 })]
+    const problems = validateTree(tree, { a: 'd1', b: 'd1' }, dates)
+    expect(problems.some((p) => p.includes('dates and undated levels only'))).toBe(true)
+  })
+})
+
+describe('the presets', () => {
+  it('a wiggle match puts every date in one series and adds nothing else', () => {
+    const { tree, assignments } = wiggleMatchTree(['a', 'b', 'c'])
+    expect(tree.element_type).toBe('wiggle_sequence')
+    expect(tree.children).toEqual([])
+    // No Boundaries: a wiggle match has none, and inventing a pair would
+    // assert a transition the model does not have.
+    expect(Object.values(assignments)).toEqual([tree.id, tree.id, tree.id])
+    expect(tree.params?.gap_units).toBe('rings')
+  })
+
+  it('a deposition sequence infers its rate rather than fixing one', () => {
+    const { tree } = depositionSequenceTree(['a', 'b'])
+    expect(tree.element_type).toBe('deposition_sequence')
+    expect(tree.params?.k).toBeNull()
+    expect(tree.params?.k_variable).toBe(true)
+  })
+})
+
+describe('orderedForHolder', () => {
+  it('leaves a phase in the order the user arranged', () => {
+    // A Phase asserts no order, so the list is the user's, not the model's.
+    const dates = [dated('b', {}), dated('a', {})]
+    expect(orderedForHolder('phase', dates).map((m) => m.id)).toEqual(['b', 'a'])
+  })
+
+  it('lists a wiggle match oldest first, which is the largest gap', () => {
+    // A gap counts years BEFORE the reference, so the biggest gap is the
+    // oldest ring -- the same direction the outline reads in.
+    const dates = [
+      dated('outer', { ring_offset: 0 }),
+      dated('inner', { ring_offset: 250 }),
+      dated('middle', { ring_offset: 120 }),
+    ]
+    expect(orderedForHolder('wiggle_sequence', dates).map((m) => m.id)).toEqual([
+      'inner',
+      'middle',
+      'outer',
+    ])
+  })
+
+  it('lists a deposition sequence deepest first, which is oldest first', () => {
+    const dates = [
+      dated('shallow', { depth_cm: 20 }),
+      dated('deep', { depth_cm: 100 }),
+      dated('mid', { depth_cm: 60 }),
+    ]
+    expect(orderedForHolder('deposition_sequence', dates).map((m) => m.id)).toEqual([
+      'deep',
+      'mid',
+      'shallow',
+    ])
+  })
+
+  it('puts a date with no ordinate yet at the end rather than at a guess', () => {
+    // Half-entered is the normal state while a series is being built, and a
+    // row that jumped position on every keystroke would be unusable.
+    const dates = [dated('blank', {}), dated('a', { ring_offset: 40 })]
+    expect(orderedForHolder('wiggle_sequence', dates).map((m) => m.id)).toEqual(['a', 'blank'])
+  })
+
+  it('does not mutate the list it was given', () => {
+    const dates = [dated('a', { ring_offset: 0 }), dated('b', { ring_offset: 60 })]
+    orderedForHolder('wiggle_sequence', dates)
+    expect(dates.map((m) => m.id)).toEqual(['a', 'b'])
+  })
+})
+
+describe('validateTree on an outlier model in a wiggle match', () => {
+  const tree = el('w1', 'wiggle_sequence', 'Timber 1')
+
+  it('refuses a flagged member, naming it', () => {
+    // A wiggle match has no room for a date to sit apart from the rest: every
+    // member is one age plus a fixed number. The server refuses it rather than
+    // dropping it, and this says so before the run.
+    const dates = [
+      dated('a', { ring_offset: 0 }),
+      dated('b', { ring_offset: 120, outlier_prior: 0.05 }),
+    ]
+    const problems = validateTree(tree, { a: 'w1', b: 'w1' }, dates)
+    expect(problems.some((p) => p.includes('outlier model'))).toBe(true)
+    expect(problems.some((p) => p.includes('"B"'))).toBe(true)
+  })
+
+  it('treats a zero prior as no setting at all', () => {
+    const dates = [
+      dated('a', { ring_offset: 0, outlier_prior: 0 }),
+      dated('b', { ring_offset: 120, outlier_prior: 0 }),
+    ]
+    expect(validateTree(tree, { a: 'w1', b: 'w1' }, dates)).toEqual([])
+  })
+
+  it('leaves a phase alone, where an outlier model is the ordinary thing', () => {
+    const phase = el('p1', 'phase', 'Phase 1')
+    const dates = [dated('a', { outlier_prior: 0.05 })]
+    expect(validateTree(phase, { a: 'p1' }, dates)).toEqual([])
   })
 })
