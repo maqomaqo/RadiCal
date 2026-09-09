@@ -5,6 +5,7 @@
  * Everything is computed and stored as cal BP, which is what the curves and
  * the model work in, so this module affects DISPLAY only.
  */
+import { niceStep } from './linearTicks'
 
 export type DateFormat = 'calBP' | 'bcad' | 'bce_ce'
 
@@ -198,17 +199,6 @@ function calBPFromDisplayYear(displayYear: number): number {
   return displayYear > 0
     ? RADIOCARBON_PRESENT - displayYear
     : RADIOCARBON_PRESENT - 1 - displayYear
-}
-
-/** A round step (1/2/5 x 10^n) giving roughly `target` intervals across `span`. */
-function niceStep(span: number, target: number): number {
-  if (!(span > 0)) return 1
-  const rough = span / target
-  const magnitude = Math.pow(10, Math.floor(Math.log10(rough)))
-  for (const multiple of [1, 2, 5]) {
-    if (multiple * magnitude >= rough) return multiple * magnitude
-  }
-  return 10 * magnitude
 }
 
 /**

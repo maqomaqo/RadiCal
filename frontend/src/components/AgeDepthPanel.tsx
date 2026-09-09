@@ -32,7 +32,14 @@ import {
 } from '@mui/material'
 import { useElementTypeColors } from '@/theme/diagramColors'
 import { usePlotColors } from '@/theme/plotColors'
-import { formatCalendarAge, formatCalendarRange, type DateFormat } from '@/utils/dateFormat'
+import {
+  calendarAxisTitle,
+  calendarRulerTicks,
+  formatCalendarAge,
+  formatCalendarRange,
+  type DateFormat,
+} from '@/utils/dateFormat'
+import { linearTicks } from '@/utils/linearTicks'
 import type { AgeDepthRecord } from '@/types'
 
 /** What the run inferred about one sequence's rigidity, as the solver records it. */
@@ -68,6 +75,13 @@ const NUMERIC_CELL_SX = { whiteSpace: 'nowrap' } as const
  * IntervalPlot is: it is a handful of marks on two linear scales, and it has
  * to sit inside a card that already carries a table.
  *
+ * WHY THE BANDS ARE JOINED UP. The model's claim is about the whole column,
+ * not about the levels it happened to evaluate: between two levels the age is
+ * interpolated, and that is the entire point of a deposition model. Drawn as
+ * a rung per level the figure reads as a set of unrelated intervals, and the
+ * reader has to join them by eye -- so the envelope is closed into a shape,
+ * with its edges stroked so the two confidence levels can be traced.
+ *
  * A dated level is marked; an undated one is not. The difference matters --
  * an undated level's age is entirely inferred from its neighbours, and a
  * reader has to be able to see which points carry a measurement.
@@ -91,31 +105,28 @@ function Band({ record, dateFormat }: { record: AgeDepthRecord; dateFormat: Date
   const x = (calBP: number) => ((ageMax - calBP) / ageSpan) * 100
   const y = (depth: number) => ((depth - depthMin) / depthSpan) * 100
 
-  const segment = (
-    a: number,
-    b: number,
-    depth: number,
-    background: string,
-    key: string
-  ) => {
-    const left = x(Math.max(a, b))
-    return (
-      <Box
-        key={key}
-        sx={{
-          position: 'absolute',
-          left: `${left}%`,
-          // A floor, so a level the model pinned tightly is still visible as
-          // a mark rather than vanishing to nothing.
-          width: `${Math.max(x(Math.min(a, b)) - left, 0.4)}%`,
-          top: `calc(${y(depth)}% - 3px)`,
-          height: '6px',
-          borderRadius: '1px',
-          backgroundColor: background,
-        }}
-      />
-    )
+  // Deepest first, so the polygon walks down one edge of the envelope and
+  // back up the other rather than crossing itself.
+  const ordered = [...levels].sort((a, b) => a.depth - b.depth)
+
+  /** One confidence band closed into a shape: older edge down, younger edge back up. */
+  const envelope = (band: (level: (typeof levels)[number]) => [number, number]) => {
+    const older = ordered.map((l) => `${x(Math.max(...band(l)))},${y(l.depth)}`)
+    const younger = ordered.map((l) => `${x(Math.min(...band(l)))},${y(l.depth)}`).reverse()
+    return [...older, ...younger].join(' ')
   }
+
+  /** One edge of a band on its own, so the envelope can be traced as a line. */
+  const edge = (
+    band: (level: (typeof levels)[number]) => [number, number],
+    side: 'older' | 'younger'
+  ) =>
+    ordered
+      .map((l) => `${x(side === 'older' ? Math.max(...band(l)) : Math.min(...band(l)))},${y(l.depth)}`)
+      .join(' ')
+
+  const band95 = (l: (typeof levels)[number]) => l.band_95
+  const band68 = (l: (typeof levels)[number]) => l.band_68
 
   return (
     <Box
@@ -127,10 +138,8 @@ function Band({ record, dateFormat }: { record: AgeDepthRecord; dateFormat: Date
         ageMin,
         dateFormat
       )}`}
-      sx={{ position: 'relative', height: PLOT_HEIGHT, width: '100%', my: 1 }}
+      sx={{ position: 'relative', height: PLOT_HEIGHT, width: '100%' }}
     >
-      {/* The median line, drawn first so the bands sit over it -- it is the
-          thread through them, not a mark on top. */}
       <Box
         component="svg"
         aria-hidden
@@ -138,36 +147,195 @@ function Band({ record, dateFormat }: { record: AgeDepthRecord; dateFormat: Date
         preserveAspectRatio="none"
         sx={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}
       >
+        {/* Widest first, so the 68.3% sits inside the 95.4% rather than
+            under it. Both are translucent: where they overlap the reader
+            should see one band nested in another, which is what they are. */}
+        <polygon points={envelope(band95)} fill={colors.hpd95} fillOpacity={0.55} stroke="none" />
+        <polygon points={envelope(band68)} fill={colors.hpd68} fillOpacity={0.55} stroke="none" />
+        {([
+          [band95, colors.hpd95],
+          [band68, colors.hpd68],
+        ] as const).map(([band, stroke], i) =>
+          (['older', 'younger'] as const).map((side) => (
+            <polyline
+              key={`${i}-${side}`}
+              points={edge(band, side)}
+              fill="none"
+              stroke={stroke}
+              strokeWidth={1}
+              vectorEffect="non-scaling-stroke"
+            />
+          ))
+        )}
+        {/* Last, so the thread through the envelope is never buried by it. */}
         <polyline
-          points={levels.map((l) => `${x(l.median)},${y(l.depth)}`).join(' ')}
+          points={ordered.map((l) => `${x(l.median)},${y(l.depth)}`).join(' ')}
           fill="none"
           stroke={colors.mean}
-          strokeWidth={0.4}
+          strokeWidth={1.5}
           vectorEffect="non-scaling-stroke"
         />
       </Box>
 
-      {levels.map((level) => (
-        <Box component="span" key={level.id}>
-          {segment(level.band_95[0], level.band_95[1], level.depth, colors.hpd95, `95-${level.id}`)}
-          {segment(level.band_68[0], level.band_68[1], level.depth, colors.hpd68, `68-${level.id}`)}
-          <Box
-            sx={{
-              position: 'absolute',
-              left: `calc(${x(level.median)}% - 3px)`,
-              top: `calc(${y(level.depth)}% - 3px)`,
-              width: 6,
-              height: 6,
-              borderRadius: '50%',
-              // Hollow for a level with no date behind it: its age is
-              // entirely inferred from the levels either side, and a reader
-              // has to be able to tell that from a measured one.
-              backgroundColor: level.dated ? colors.mean : colors.surface,
-              border: `1px solid ${colors.mean}`,
-            }}
-          />
-        </Box>
+      {ordered.map((level) => (
+        <Box
+          component="span"
+          key={level.id}
+          sx={{
+            position: 'absolute',
+            left: `calc(${x(level.median)}% - 3px)`,
+            top: `calc(${y(level.depth)}% - 3px)`,
+            width: 6,
+            height: 6,
+            borderRadius: '50%',
+            // Hollow for a level with no date behind it: its age is
+            // entirely inferred from the levels either side, and a reader
+            // has to be able to tell that from a measured one.
+            backgroundColor: level.dated ? colors.mean : colors.surface,
+            border: `1px solid ${colors.mean}`,
+          }}
+        />
       ))}
+    </Box>
+  )
+}
+
+const AXIS_LABEL_SX = {
+  fontSize: 11,
+  color: 'text.secondary',
+  whiteSpace: 'nowrap',
+} as const
+
+/**
+ * The figure with its two rulers: depth graduated down the left, calendar age
+ * across the foot.
+ *
+ * The plot area is the ONE element both rulers are positioned against, which
+ * is why the gutters are laid out around it rather than the ticks being drawn
+ * inside the plot: a percentage inside the plot box and a percentage inside a
+ * strip of the same width are the same position, so a graduation cannot drift
+ * away from the mark it labels.
+ */
+function BandFigure({
+  record,
+  dateFormat,
+}: {
+  record: AgeDepthRecord
+  dateFormat: DateFormat
+}) {
+  const levels = record.levels
+  if (levels.length < 2) return null
+
+  const units = record.depth_units || 'cm'
+  const ages = levels.flatMap((l) => [l.band_95[0], l.band_95[1]])
+  const ageMin = Math.min(...ages)
+  const ageMax = Math.max(...ages)
+  const ageSpan = Math.max(ageMax - ageMin, 1)
+  const depths = levels.map((l) => l.depth)
+  const depthMin = Math.min(...depths)
+  const depthMax = Math.max(...depths)
+  const depthSpan = Math.max(depthMax - depthMin, 1)
+
+  // A higher target than the dashboard ruler's: niceStep rounds UP to the next
+  // round step, so asking for 5 across a 2,700-year core lands on 1,000 and
+  // graduates it twice. Asking for 7 lands on 500 and gives five graduations.
+  const ageTicks = calendarRulerTicks(ageMin, ageMax, dateFormat, 7)
+  const depthTicks = linearTicks(depthMin, depthMax, 5)
+
+  return (
+    <Box sx={{ my: 1 }}>
+      <Box sx={{ display: 'flex' }}>
+        {/* Rotated rather than stacked: a vertical axis title is the
+            convention, and a horizontal one would need a gutter as wide as
+            the words, taking it out of the plot. */}
+        <Box
+          sx={{
+            width: 20,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            flexShrink: 0,
+          }}
+        >
+          <Typography
+            sx={{ ...AXIS_LABEL_SX, transform: 'rotate(180deg)', writingMode: 'vertical-rl' }}
+          >
+            Depth ({units}) — deeper down
+          </Typography>
+        </Box>
+
+        <Box sx={{ position: 'relative', width: 44, height: PLOT_HEIGHT, flexShrink: 0 }}>
+          {depthTicks.map((depth) => (
+            <Box
+              key={depth}
+              sx={{
+                position: 'absolute',
+                right: 4,
+                top: `${((depth - depthMin) / depthSpan) * 100}%`,
+                transform: 'translateY(-50%)',
+                ...AXIS_LABEL_SX,
+              }}
+            >
+              {depth}
+            </Box>
+          ))}
+        </Box>
+
+        <Box sx={{ position: 'relative', flex: 1, minWidth: 0 }}>
+          {/* Gridlines under the data, at the graduations either ruler
+              names, so a point can be read off both scales at once. */}
+          <Box
+            aria-hidden
+            sx={{ position: 'absolute', inset: 0, height: PLOT_HEIGHT, pointerEvents: 'none' }}
+          >
+            {ageTicks.map((tick) => (
+              <Box
+                key={`v-${tick.calBP}`}
+                sx={{
+                  position: 'absolute',
+                  top: 0,
+                  bottom: 0,
+                  left: `${((ageMax - tick.calBP) / ageSpan) * 100}%`,
+                  borderLeft: '1px solid',
+                  borderColor: 'divider',
+                }}
+              />
+            ))}
+            {depthTicks.map((depth) => (
+              <Box
+                key={`h-${depth}`}
+                sx={{
+                  position: 'absolute',
+                  left: 0,
+                  right: 0,
+                  top: `${((depth - depthMin) / depthSpan) * 100}%`,
+                  borderTop: '1px solid',
+                  borderColor: 'divider',
+                }}
+              />
+            ))}
+          </Box>
+          <Band record={record} dateFormat={dateFormat} />
+          <Box sx={{ position: 'relative', height: 16, mt: 0.5 }}>
+            {ageTicks.map((tick) => (
+              <Box
+                key={tick.calBP}
+                sx={{
+                  position: 'absolute',
+                  left: `${((ageMax - tick.calBP) / ageSpan) * 100}%`,
+                  transform: 'translateX(-50%)',
+                  ...AXIS_LABEL_SX,
+                }}
+              >
+                {tick.label}
+              </Box>
+            ))}
+          </Box>
+          <Typography sx={{ ...AXIS_LABEL_SX, textAlign: 'center', mt: 0.5 }}>
+            {calendarAxisTitle(dateFormat)} — older to the left
+          </Typography>
+        </Box>
+      </Box>
     </Box>
   )
 }
@@ -206,10 +374,11 @@ export default function AgeDepthPanel({ record, rigidity, dateFormat }: Props) {
           </Typography>
         </Box>
 
-        <Band record={record} dateFormat={dateFormat} />
+        <BandFigure record={record} dateFormat={dateFormat} />
         <Typography variant="caption" color="text.secondary">
-          Depth increases downwards; older ages are to the left. The line is the
-          median, the bands the 68.3% and 95.4% intervals.
+          The line is the median; the bands are the 68.3% and 95.4% intervals,
+          drawn as envelopes because the model's claim is about the whole
+          column, not only the levels it was evaluated at.
         </Typography>
 
         {rigidity && (
