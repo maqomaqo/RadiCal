@@ -171,6 +171,85 @@ class TestCoordinatesAreAddedAndCanBeUndone:
             assert self._columns(engine, table) >= columns
 
 
+class TestTheReservoirMirrorIsAddedAndCanBeUndone:
+    """
+    The snapshot tables and the provenance column, checked both ways.
+
+    The interesting half is the downgrade, as above: nothing autogenerates
+    backwards, and this revision creates TABLES rather than columns, so the
+    way back has to drop them in an order the foreign keys allow.
+    """
+
+    TABLES = {'marine_reservoir_snapshots', 'marine_reservoir_points'}
+
+    def test_head_has_the_snapshot_tables(self, blank_db):
+        engine, _ = blank_db
+        _upgrade(engine)
+        assert set(inspect(engine).get_table_names()) >= self.TABLES
+
+    def test_both_sample_tables_record_where_a_delta_r_came_from(self, blank_db):
+        engine, _ = blank_db
+        _upgrade(engine)
+        for table in ('radiocarbon_samples', 'project_samples'):
+            names = {c['name'] for c in inspect(engine).get_columns(table)}
+            assert 'delta_r_source' in names, f'{table} cannot say where a ΔR came from'
+
+    def test_a_point_belongs_to_exactly_one_snapshot(self, blank_db):
+        """
+        The composite key. map_no is the SOURCE's identifier and is unique only
+        within a snapshot, so two snapshots of the database must be able to
+        hold the same map number without colliding -- which is the whole point
+        of keeping an old snapshot around.
+        """
+        engine, path = blank_db
+        _upgrade(engine)
+        con = sqlite3.connect(path)
+        for snapshot in ('calib-2026-01-01', 'calib-2026-05-11'):
+            con.execute(
+                'INSERT INTO marine_reservoir_snapshots '
+                '(id, source, record_count, content_sha256) VALUES (?, ?, ?, ?)',
+                (snapshot, 'calib.org/marine', 1, 'abc'))
+            con.execute(
+                'INSERT INTO marine_reservoir_points '
+                '(snapshot_id, map_no, latitude, longitude) VALUES (?, ?, ?, ?)',
+                (snapshot, 995, 54.5, -5.6))
+        con.commit()
+        assert con.execute('SELECT count(*) FROM marine_reservoir_points').fetchone()[0] == 2
+        con.close()
+
+    def test_downgrading_drops_the_mirror_and_keeps_the_work(self, blank_db):
+        engine, path = blank_db
+        _upgrade(engine)
+
+        con = sqlite3.connect(path)
+        con.execute(
+            "INSERT INTO analyses (id, name, analysis_type, status) "
+            "VALUES ('kept', 'Has results', 'bayesian', 'completed')")
+        con.commit()
+        con.close()
+
+        with engine.begin() as connection:
+            command.downgrade(_alembic_config(connection), 'a4d21f7e9c36')
+
+        tables = set(inspect(engine).get_table_names())
+        assert not (tables & self.TABLES), f'downgrade left {tables & self.TABLES}'
+        for table in ('radiocarbon_samples', 'project_samples'):
+            names = {c['name'] for c in inspect(engine).get_columns(table)}
+            assert 'delta_r_source' not in names
+
+        con = sqlite3.connect(path)
+        assert con.execute("SELECT name FROM analyses WHERE id = 'kept'").fetchone() is not None
+        con.close()
+
+    def test_upgrading_again_after_a_downgrade_works(self, blank_db):
+        engine, _ = blank_db
+        _upgrade(engine)
+        with engine.begin() as connection:
+            command.downgrade(_alembic_config(connection), 'a4d21f7e9c36')
+        _upgrade(engine)
+        assert set(inspect(engine).get_table_names()) >= self.TABLES
+
+
 class TestAdoptingAnExistingDatabase:
     """
     A database created before Alembic existed has the tables but no
