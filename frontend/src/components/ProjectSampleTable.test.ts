@@ -49,3 +49,14 @@ describe('parsePastedDates', () => {
     expect(errors[0]).toContain('Line 2')
   })
 })
+
+describe('a pasted date is unplaced', () => {
+  it('carries null coordinates rather than omitting them', () => {
+    // The paste format is name, age, error, material, context, curve -- there
+    // is no position in it. The keys are still written, because a row that
+    // omits them is a row the table's own types no longer describe.
+    const { rows } = parsePastedDates('OxA-1234, 3000, 25', VALID)
+    expect(rows[0].latitude).toBeNull()
+    expect(rows[0].longitude).toBeNull()
+  })
+})

@@ -41,13 +41,18 @@ import { formatApiError } from '@/utils/apiError'
 import { useNotify } from '@/contexts/NotificationContext'
 import { curveLabel, curveOptions } from '@/api/curves'
 import { useCurves } from '@/hooks/useCurves'
-import { deltaRErrorMissing, isMarineMeasurement } from '@/components/MeasurementFields'
+import {
+  coordinateHalfMissing,
+  deltaRErrorMissing,
+  isMarineMeasurement,
+} from '@/components/MeasurementFields'
 import {
   columnVisible,
   loadColumnOverrides,
   saveColumnOverrides,
   type ColumnOverrides,
 } from '@/utils/columnPreferences'
+import { formatPosition } from '@/utils/coordinates'
 
 // A date in the PROJECT's collection (backend models.ProjectSample), entered
 // once and deployed into as many analyses as needed. Deploying COPIES these
@@ -71,6 +76,11 @@ export interface ProjectSample {
   // timber it came from -- not of any one analysis.
   ring_offset: number | null
   ring_offset_error: number | null
+  // Where the sample came from, in WGS84 decimal degrees. Always the stored
+  // value: the project's coordinate_precision governs what leaves in an export
+  // or a figure, not what its own owner reads back in the table.
+  latitude: number | null
+  longitude: number | null
   location: string | null
   default_context_name: string | null
   tpq_age_bp: number | null
@@ -114,6 +124,8 @@ type DraftForm = {
   depth_cm: string
   ring_offset: string
   ring_offset_error: string
+  latitude: string
+  longitude: string
   location: string
   notes: string
 }
@@ -133,6 +145,8 @@ const EMPTY_FORM: DraftForm = {
   depth_cm: '',
   ring_offset: '',
   ring_offset_error: '',
+  latitude: '',
+  longitude: '',
   location: '',
   notes: '',
 }
@@ -153,6 +167,8 @@ function toForm(s: ProjectSample): DraftForm {
     depth_cm: s.depth_cm == null ? '' : String(s.depth_cm),
     ring_offset: s.ring_offset == null ? '' : String(s.ring_offset),
     ring_offset_error: s.ring_offset_error == null ? '' : String(s.ring_offset_error),
+    latitude: s.latitude == null ? '' : String(s.latitude),
+    longitude: s.longitude == null ? '' : String(s.longitude),
     location: s.location ?? '',
     notes: s.notes ?? '',
   }
@@ -181,6 +197,8 @@ function formToPayload(form: DraftForm) {
     depth_cm: numOrNull(form.depth_cm),
     ring_offset: numOrNull(form.ring_offset),
     ring_offset_error: numOrNull(form.ring_offset_error),
+    latitude: numOrNull(form.latitude),
+    longitude: numOrNull(form.longitude),
     location: form.location.trim() || null,
     notes: form.notes.trim() || null,
   }
@@ -245,6 +263,8 @@ export function parsePastedDates(
       depth_cm: null,
       ring_offset: null,
       ring_offset_error: null,
+      latitude: null,
+      longitude: null,
       location: null,
       notes: null,
     })
@@ -389,6 +409,10 @@ export default function ProjectSampleTable({ projectId }: Props) {
       setFormError('A ΔR needs its 1σ error, or clear both to apply no correction.')
       return
     }
+    if (coordinateIncomplete) {
+      setFormError('A position needs both a latitude and a longitude, or neither.')
+      return
+    }
     setFormError(null)
     setSaving(true)
     try {
@@ -481,6 +505,8 @@ export default function ProjectSampleTable({ projectId }: Props) {
             depth_cm: d.depth_cm,
             ring_offset: d.ring_offset,
             ring_offset_error: d.ring_offset_error,
+            latitude: d.latitude,
+            longitude: d.longitude,
             location: d.location,
             notes: d.notes,
           })),
@@ -759,6 +785,16 @@ export default function ProjectSampleTable({ projectId }: Props) {
         render: (s) => (s.depth_cm == null ? muted('—') : s.depth_cm),
       },
       {
+        id: 'position',
+        label: 'Position',
+        auto: anyOf((s) => s.latitude != null),
+        populated: anyOf((s) => s.latitude != null),
+        numeric: true,
+        headTitle:
+          'Where the date came from, in WGS84 decimal degrees. Shown at full precision here; exports and figures follow the project’s coordinate precision setting.',
+        render: (s) => formatPosition(s.latitude, s.longitude) ?? muted('—'),
+      },
+      {
         id: 'ring_offset',
         label: 'Gap',
         auto: anyOf((s) => s.ring_offset != null),
@@ -845,6 +881,13 @@ export default function ProjectSampleTable({ projectId }: Props) {
   const deltaRErrorIncomplete = deltaRErrorMissing({
     delta_r: numOrNull(form.delta_r),
     delta_r_error: numOrNull(form.delta_r_error),
+  })
+  // And the same rule again for the coordinate: the API refuses half a
+  // position, so the form says which box is empty rather than letting the
+  // save come back a 422.
+  const coordinateIncomplete = coordinateHalfMissing({
+    latitude: numOrNull(form.latitude),
+    longitude: numOrNull(form.longitude),
   })
 
   const resetColumns = () => {
@@ -1282,6 +1325,28 @@ export default function ProjectSampleTable({ projectId }: Props) {
               value={form.location}
               inputProps={{ maxLength: 500 }}
               onChange={(e) => setForm({ ...form, location: e.target.value })}
+            />
+            <TextField
+              label="Latitude"
+              type="number"
+              value={form.latitude}
+              inputProps={{ min: -90, max: 90, step: 'any' }}
+              onChange={(e) => setForm({ ...form, latitude: e.target.value })}
+              error={coordinateIncomplete && form.latitude.trim() === ''}
+              helperText="Decimal degrees, WGS84. Minus for south."
+            />
+            <TextField
+              label="Longitude"
+              type="number"
+              value={form.longitude}
+              inputProps={{ min: -180, max: 180, step: 'any' }}
+              onChange={(e) => setForm({ ...form, longitude: e.target.value })}
+              error={coordinateIncomplete && form.longitude.trim() === ''}
+              helperText={
+                coordinateIncomplete
+                  ? 'A position needs both halves'
+                  : 'Minus for west. Degrees and minutes are not read.'
+              }
             />
             <TextField
               label="Depth (cm)"

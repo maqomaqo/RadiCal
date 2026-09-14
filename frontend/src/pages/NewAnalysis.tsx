@@ -386,6 +386,11 @@ export default function NewAnalysis() {
           // match IS its ring offsets.
           ring_offset: m.ring_offset ?? null,
           ring_offset_error: m.ring_offset_error ?? null,
+          // And the position, for exactly the same reason: an edit resubmits
+          // the draft, so a coordinate missing here is a date unplaced by
+          // being edited.
+          latitude: m.latitude ?? null,
+          longitude: m.longitude ?? null,
           location: m.location ?? null,
           notes: m.notes ?? null,
           group_id: m.group_id ?? null,
@@ -736,6 +741,8 @@ export default function NewAnalysis() {
             depth_cm: d.depth_cm ?? null,
             ring_offset: d.ring_offset ?? null,
             ring_offset_error: d.ring_offset_error ?? null,
+            latitude: d.latitude ?? null,
+            longitude: d.longitude ?? null,
             location: d.location ?? null,
             notes: d.notes ?? null,
           })),
@@ -804,6 +811,8 @@ export default function NewAnalysis() {
       depth_cm: d.depth_cm,
       ring_offset: d.ring_offset,
       ring_offset_error: d.ring_offset_error,
+      latitude: d.latitude,
+      longitude: d.longitude,
       location: d.location,
       notes: d.notes,
       tpq_age_bp: d.tpq_age_bp,

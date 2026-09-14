@@ -150,6 +150,13 @@ export interface DraftMeasurement extends MatrixMeasurement {
   // of blanking them -- dates deployed from a project collection arrive
   // with these already filled in.
   reservoir_age?: number | null
+  // Where the sample came from, in WGS84 decimal degrees. Carried through the
+  // draft for the same reason as reservoir_age above -- a date deployed from a
+  // collection arrives placed, and an edit that dropped these would unplace it
+  // -- and the two are one fact: the API refuses a latitude without its
+  // longitude, as it refuses a ΔR without its error.
+  latitude?: number | null
+  longitude?: number | null
   location?: string | null
   notes?: string | null
   // Stratigraphic phase/group this sample belongs to, if any -- must
