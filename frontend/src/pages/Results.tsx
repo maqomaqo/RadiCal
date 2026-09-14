@@ -158,13 +158,24 @@ interface AnalysisResult {
     // model cannot be integrated exactly at all.
     exact_needs_boundaries?: number
     // Sampled path only. `converged` is against OxCal's 0.95 target for the
-    // overlap-integral convergence measure.
+    // overlap-integral convergence measure -- read off the rounds pooled over
+    // every chain when several ran -- AND, with several chains, Gelman-Rubin
+    // R̂ under `rhat_target`, so chains that settled in different calibration
+    // lobes cannot be pooled in silence. The between-chain overlap is
+    // information only. The chain fields are null on a single chain, which
+    // has nothing to disagree with. `sweeps` is the total over every chain.
     sweeps?: number
     convergence?: number
     converged?: boolean
+    chains?: number
+    sweeps_per_chain?: number[]
+    within_chain_convergence?: number
+    per_chain_convergence?: number[]
+    between_chain_convergence?: number | null
+    rhat?: number | null
+    rhat_target?: number | null
     // Legacy: set only on analyses run before the current sampler.
     draws?: number
-    chains?: number
     // Wiggle-match path only. The combination index is not a diagnostic
     // beside the answer -- a D_Sequence asserts the gaps and cannot widen to
     // absorb a member that does not fit, so this IS the check that the match
@@ -1791,6 +1802,17 @@ export default function Results() {
   // rather than any one, so it sits with the summary chips. Split into a quiet
   // chip for the two good outcomes and an alert for the one worth a paragraph,
   // sampled-and-not-converged. Only one of the two is ever set.
+  //
+  // How the sampling was done, for either: "over 54,000 passes" on one chain,
+  // "over 4 chains and 200,000 passes (R̂ 1.00)" when several were pooled --
+  // the chain count and R̂ being what tells a reader the answer was checked
+  // against independent starts rather than one run's own second half.
+  const chainCount = analysis.solver?.chains ?? 1
+  const passes = analysis.solver?.sweeps?.toLocaleString()
+  const rhat =
+    typeof analysis.solver?.rhat === 'number' ? ` (R̂ ${analysis.solver.rhat.toFixed(2)})` : ''
+  const sampling =
+    chainCount > 1 ? `${chainCount} chains and ${passes} passes${rhat}` : `${passes} passes`
   let solverChip: JSX.Element | null = null
   let solverAlert: JSX.Element | null = null
   if (isBayesian && analysis.status !== 'failed') {
@@ -1877,9 +1899,13 @@ export default function Results() {
             {analysis.solver.convergence !== undefined
               ? `${(analysis.solver.convergence * 100).toFixed(1)}%`
               : 'less than 95%'}{' '}
-            convergence after {analysis.solver.sweeps?.toLocaleString()} passes,
-            short of the 95% usually wanted. The ranges below are probably a few
-            years out rather than wrong
+            convergence after {sampling}
+            {typeof analysis.solver.rhat === 'number' &&
+            typeof analysis.solver.rhat_target === 'number' &&
+            analysis.solver.rhat > analysis.solver.rhat_target
+              ? `, and its chains had not come into agreement: R̂ ${analysis.solver.rhat.toFixed(2)} against the ${analysis.solver.rhat_target.toFixed(2)} wanted, which usually means a date whose calibration has two separated ranges and different chains settled in different ones.`
+              : ', short of the 95% usually wanted.'}{' '}
+            The ranges below are probably a few years out rather than wrong
             {analysis.solver.reason
               ? ', but writing in the Boundary the model implies would let it be solved exactly without changing anything.'
               : '.'}
@@ -1910,7 +1936,7 @@ export default function Results() {
               analysis.solver.convergence !== undefined
                 ? (analysis.solver.convergence * 100).toFixed(1) + '%'
                 : 'the 95% target'
-            } over ${analysis.solver.sweeps?.toLocaleString()} passes.`
+            } over ${sampling}.`
           }
         >
           <Chip
@@ -2076,12 +2102,6 @@ export default function Results() {
             justifyContent: 'space-between',
           }}
         >
-          {/* The negative margin puts the first glyph on the band's own text
-              edge rather than a padding's width inside it -- an IconButton's
-              padding is its touch target, not its optical left. It tracks
-              size="small"'s 5px, so the two move together. */}
-         
-
           {(solverChip ||
             analysis.status !== 'completed' ||
             analysis.results.length !== analysis.measurements_count) && (
@@ -2102,11 +2122,20 @@ export default function Results() {
             </Stack>
           )}
           
-           <Stack
+          {/* Always the right end of the row, whether or not there are chips
+              to sit opposite: space-between alone would slide the actions to
+              the left edge on a plain calibration, which has no solver chip
+              and nothing else to report, and the actions would then be in a
+              different place on two pages of the same shape. The negative
+              right margin puts the last glyph on the band's own text edge
+              rather than a padding's width inside it -- an IconButton's
+              padding is its touch target, not its optical edge. It tracks
+              size="small"'s 5px, so the two move together. */}
+          <Stack
             direction="row"
             spacing={0.5}
             alignItems="center"
-            sx={{ ml: '-5px', my: '-5px' }}
+            sx={{ ml: 'auto', mr: '-5px', my: '-5px' }}
           >
             <Tooltip title="Edit">
               <IconButton

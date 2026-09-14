@@ -70,7 +70,10 @@ def unmodelled_likelihood(measurement: Dict, grid: np.ndarray) -> np.ndarray:
     delta_r_error = measurement.get('delta_r_error') or 0.0
     c14, curve_error = curve.interpolate(grid)
     sigma2 = curve_error ** 2 + measurement['error_1sigma'] ** 2 + delta_r_error ** 2
-    return np.exp(-0.5 * (c14 - (measurement['age_bp'] - delta_r)) ** 2 / sigma2) / np.sqrt(sigma2)
+    lik = np.exp(-0.5 * (c14 - (measurement['age_bp'] - delta_r)) ** 2 / sigma2) / np.sqrt(sigma2)
+    # Nothing beyond the curve's ends; interpolate() clamps rather than
+    # extrapolates there (see exact_chain._date_likelihood).
+    return np.where((grid >= curve.cal_ages[0]) & (grid <= curve.cal_ages[-1]), lik, 0.0)
 
 
 def _support(measurement: Dict) -> Tuple[float, float]:

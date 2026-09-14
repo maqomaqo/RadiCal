@@ -39,7 +39,25 @@ class CalibrationPoint:
     c14_error: float
 
 
-def hpd_ranges_from_distribution(ages, weights, confidence: float = SIGMA_2) -> List[Dict[str, float]]:
+def cell_edges(ages) -> np.ndarray:
+    """
+    The calendar-year edges of the cell each point in `ages` stands for: the
+    midpoints between neighbours, with the two end cells closed at the end
+    points themselves. np.diff of this is the width each point represents,
+    which is what turns a probability MASS per point into a density.
+
+    One definition, shared by the curve's grid weights, the HPD ranking and
+    the point estimates, so a mass and its density can never disagree about
+    how wide a cell is.
+    """
+    ages = np.asarray(ages, dtype=float)
+    if len(ages) < 2:
+        return ages.copy()
+    return np.concatenate([ages[:1], (ages[:-1] + ages[1:]) / 2.0, ages[-1:]])
+
+
+def hpd_ranges_from_distribution(ages, weights, confidence: float = SIGMA_2,
+                                 widths=None) -> List[Dict[str, float]]:
     """
     Highest Posterior Density (HPD) ranges from a discretized calendar-age
     distribution, in OxCal/CALIB reporting style.
@@ -63,6 +81,15 @@ def hpd_ranges_from_distribution(ages, weights, confidence: float = SIGMA_2) -> 
             (need not already be normalized to sum to 1)
         confidence: target coverage -- SIGMA_1 / SIGMA_2 / SIGMA_3 above,
             which are the levels this app reports at
+        widths: optional calendar width each point stands for, aligned with
+            `ages`. When given, points are RANKED by density (weight / width)
+            while MASS (weight) is what accumulates to the level -- the two
+            coincide only on a uniform grid. Required for correctness on the
+            curve's own grid: IntCal20 steps from 1 to 5 years at 5000 cal
+            BP, and ranking by mass there lets a 5-year cell in the tail
+            outrank a 1-year cell of four times the density, so the region
+            came back with a different shape either side of the step.
+            frontend/src/utils/hpd.ts makes the same distinction.
 
     Returns:
         List of dicts, ordered oldest-first (largest 'max' first), each
@@ -81,9 +108,17 @@ def hpd_ranges_from_distribution(ages, weights, confidence: float = SIGMA_2) -> 
 
     norm_weights = weights / total
 
-    # The standard HPD construction: take the highest-density points first,
+    # The standard HPD construction: take the highest-DENSITY points first,
     # regardless of where they fall on the age axis, until the level is met.
-    sorted_indices = np.argsort(-norm_weights)
+    if widths is None:
+        rank = norm_weights
+    else:
+        widths = np.asarray(widths, dtype=float)
+        if widths.shape != norm_weights.shape:
+            raise ValueError("widths must align with ages and weights")
+        rank = np.divide(norm_weights, widths,
+                         out=np.zeros_like(norm_weights), where=widths > 0)
+    sorted_indices = np.argsort(-rank, kind='stable')
     cumsum = np.cumsum(norm_weights[sorted_indices])
     idx = np.where(cumsum >= confidence)[0]
     if len(idx) == 0:
@@ -147,12 +182,7 @@ class CalibrationCurve:
         elif n == 1:
             self._grid_weights_cache = np.array([1.0])
         else:
-            d = np.diff(self.cal_ages)
-            w = np.empty(n)
-            w[0] = d[0] / 2.0
-            w[-1] = d[-1] / 2.0
-            w[1:-1] = (d[:-1] + d[1:]) / 2.0
-            self._grid_weights_cache = w
+            self._grid_weights_cache = np.diff(cell_edges(self.cal_ages))
 
         return self._grid_weights_cache
 
@@ -274,8 +304,14 @@ class CalibrationCurve:
             The percentages are shares of the ENTIRE distribution, so they
             typically sum to slightly more than the level asked for: the set
             is built from whole grid points, as in OxCal.
+
+        `probs` are MASSES (what calibrate returns) on a grid that is not
+        uniformly spaced, so the ranking is by density -- see
+        hpd_ranges_from_distribution's `widths`.
         """
-        return hpd_ranges_from_distribution(cal_ages, probs, confidence)
+        cal_ages = np.asarray(cal_ages, dtype=float)
+        widths = np.diff(cell_edges(cal_ages)) if len(cal_ages) > 1 else None
+        return hpd_ranges_from_distribution(cal_ages, probs, confidence, widths)
     
     def get_point_estimate(self, cal_ages: np.ndarray, probs: np.ndarray) -> dict:
         """
@@ -284,16 +320,24 @@ class CalibrationCurve:
         Returns:
             dict with: mean, median, mode, std
         """
+        cal_ages = np.asarray(cal_ages, dtype=float)
+        probs = np.asarray(probs, dtype=float)
         mean = np.average(cal_ages, weights=probs)
-        
-        # Median: find age where cumsum reaches 0.5
-        cumsum = np.cumsum(probs)
-        median_idx = np.searchsorted(cumsum, 0.5)
-        median = cal_ages[min(median_idx, len(cal_ages)-1)]
-        
-        # Mode: age with highest probability
-        mode_idx = np.argmax(probs)
-        mode = cal_ages[mode_idx]
+
+        if len(cal_ages) > 1:
+            # `probs` are masses on a non-uniform grid. The median is where
+            # the cumulative mass crosses a half, read off the CELL EDGES so
+            # it is interpolated within a cell rather than snapped to the
+            # grid point that first exceeds it. The mode is the highest
+            # DENSITY, not the heaviest cell: a 20-year cell holds twenty
+            # times the mass of a 1-year cell of equal density.
+            edges = cell_edges(cal_ages)
+            cdf = np.concatenate([[0.0], np.cumsum(probs) / probs.sum()])
+            median = np.interp(0.5, cdf, edges)
+            density = probs / np.diff(edges)
+            mode = cal_ages[np.argmax(density)]
+        else:
+            median = mode = cal_ages[0]
         
         # Standard deviation (weighted)
         std = np.sqrt(np.average((cal_ages - mean)**2, weights=probs))
@@ -507,6 +551,19 @@ def load_shcal20() -> Optional[CalibrationCurve]:
     return CalibrationCurve([], [], [])
 
 
+# Curves handed to this process directly, looked up before the registry is
+# consulted. Set by preload_curves in a sampler worker process (see
+# gibbs._run_chain): the worker then never imports the registry, and so never
+# opens a database connection to resolve a stored or mixed curve that its
+# parent already had in hand.
+_PRELOADED: Dict[str, CalibrationCurve] = {}
+
+
+def preload_curves(curves: Dict[str, CalibrationCurve]) -> None:
+    """Make `curves` answer get_curve() in this process ahead of the registry."""
+    _PRELOADED.update(curves)
+
+
 def get_curve(curve_id: str) -> CalibrationCurve:
     """
     Shared curve lookup, so the calibration endpoint and the solvers cannot
@@ -523,5 +580,8 @@ def get_curve(curve_id: str) -> CalibrationCurve:
     the registry imports this module for its loaders. Those loaders are
     lru_cache'd, so each .14c file is parsed once per process.
     """
+    preloaded = _PRELOADED.get(curve_id)
+    if preloaded is not None:
+        return preloaded
     from app.services.curve_registry import resolve
     return resolve(curve_id)

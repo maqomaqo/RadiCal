@@ -439,6 +439,11 @@ class BayesianConfigInput(BaseModel):
     # Unused by either solver. Retained so a saved analysis's bayesian_config
     # still round-trips through an edit rather than being rejected.
     mcmc_tune: int = Field(default=1000, ge=100, le=20000)
+    # Independent chains the sampler runs in parallel and pools, each with
+    # its own seed. Above one, a chain settled in a different calibration
+    # lobe from the others is reported as disagreement (gibbs.solve_chains);
+    # one chain is the plain run. Ignored by the exact solver, which has no
+    # chain.
     mcmc_chains: int = Field(default=4, ge=1, le=16)
     # OxCal's UniformSpanPrior, on by default there and here: it stops a
     # sequence's span prior depending on how many sub-groups it is divided

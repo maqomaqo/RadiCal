@@ -941,3 +941,178 @@ class TestReportedShape:
         for m in measurements:
             probability = sampled['measurements'][m['id']]['outlier_probability']
             assert 0.0 <= probability <= 1.0
+
+
+class TestParallelChains:
+    """
+    Several independent chains in worker processes, pooled (gibbs.solve_chains).
+
+    The pooling is arithmetic on run()'s output, so it is checked as
+    arithmetic: the pooled histograms must be exactly the sum of the chains
+    run one at a time with the seeds solve_chains gives them -- at a length
+    forced to the cap, since the pooled run stops on its own rule and a
+    chain alone on its own. Everything else here is about the stopping rule,
+    the diagnostics and the plumbing -- progress, cancellation, a failing
+    chain -- which are the parts a process boundary can silently break.
+    """
+
+    def _model(self):
+        phase = _element('phase', 'Only')
+        tree = _element('sequence', 'Site', [
+            _element('boundary', 'Start'), phase, _element('boundary', 'End')])
+        return ([_date(phase['id'], 3000), _date(phase['id'], 3020),
+                 _date(phase['id'], 3040)], tree)
+
+    def test_the_pool_is_the_sum_of_the_chains_run_alone(self):
+        measurements, tree = self._model()
+        model = gibbs.Model(measurements, tree)
+        pooled = gibbs.solve_chains(measurements, tree, chains=3, sweeps=1500,
+                                    max_sweeps=1500, seed=7, grid=model.grid,
+                                    target_convergence=1.01)
+        alone = [gibbs.run(model, sweeps=1500, max_sweeps=1500, seed=7 + c,
+                           target_convergence=1.01)
+                 for c in range(3)]
+        for param in model.params:
+            expected = sum(r['histograms'][param] for r in alone)
+            assert np.array_equal(pooled['histograms'][param], expected), param
+        assert pooled['sweeps'] == sum(r['sweeps'] for r in alone)
+        assert pooled['sweeps_per_chain'] == [r['sweeps'] for r in alone]
+        assert pooled['sweeps_kept'] == sum(r['sweeps_kept'] for r in alone)
+        assert pooled['chains'] == 3
+
+    def test_chain_zero_is_the_single_chain_run(self):
+        """So a multi-chain result is reproducible chain by chain, and a
+        single-chain run is chain zero of any wider one with the same seed."""
+        measurements, tree = self._model()
+        model = gibbs.Model(measurements, tree)
+        alone = gibbs.run(model, sweeps=1500, max_sweeps=1500, seed=42,
+                          target_convergence=1.01)
+        pooled = gibbs.solve_chains(measurements, tree, chains=2, sweeps=1500,
+                                    max_sweeps=1500, seed=42, grid=model.grid,
+                                    target_convergence=1.01)
+        other = gibbs.run(model, sweeps=1500, max_sweeps=1500, seed=43,
+                          target_convergence=1.01)
+        for param in model.params:
+            assert np.array_equal(pooled['histograms'][param],
+                                  alone['histograms'][param] + other['histograms'][param])
+
+    def test_solve_reports_the_agreement_between_chains(self):
+        measurements, tree = self._model()
+        one = _fixed(measurements, tree, sweeps=3000, num_samples=50)
+        four = _fixed(measurements, tree, sweeps=3000, num_samples=50, chains=4)
+        assert one['chains'] == 1
+        assert one['between_chain_convergence'] is None and one['rhat'] is None
+        assert four['chains'] == 4
+        assert four['sweeps'] == sum(four['sweeps_per_chain'])
+        assert len(four['per_chain_convergence']) == 4
+        assert 0.0 < four['between_chain_convergence'] <= 1.0
+        assert four['rhat'] >= 1.0
+        # An easy model: the chains agree by R-hat. The overlap is held
+        # loosely because 2,400 kept sweeps on a one-year grid is a noisy
+        # histogram (0.89 measured) -- which is why it is not the gate.
+        assert four['between_chain_convergence'] > 0.8
+        assert four['rhat'] < gibbs.TARGET_RHAT
+        assert four['rhat_target'] == gibbs.TARGET_RHAT
+        assert four['convergence'] == four['within_chain_convergence']
+        # Same answer, more draws behind it.
+        for d in measurements:
+            assert four['measurements'][d['id']]['posterior_mean'] == pytest.approx(
+                one['measurements'][d['id']]['posterior_mean'], abs=3.0)
+
+    def test_the_shared_rule_stops_each_chain_sooner(self):
+        """
+        Why the chains share a stopping rule. The first-half/second-half
+        deficit is mostly Monte Carlo noise, which falls with the draws
+        pooled, so four chains reach the target in well under the sweeps one
+        chain needs -- and that, not the extra draws, is what makes the idle
+        cores into wall time. Measured on the Nenthorn fixture: 54,000 on one
+        chain against about 14,000 each on four.
+        """
+        measurements = ox.measurements()
+        tree = ox.model_tree('unordered')
+        one = gibbs.solve(measurements, tree, num_samples=50, sweeps=4000)
+        four = gibbs.solve(measurements, tree, num_samples=50, sweeps=4000, chains=4)
+        assert one['converged'] and four['converged']
+        assert max(four['sweeps_per_chain']) < one['sweeps'] * 0.6, (
+            four['sweeps_per_chain'], one['sweeps'])
+        # All chains advance in step under one rule.
+        assert len(set(four['sweeps_per_chain'])) == 1
+
+    def test_disagreeing_chains_are_reported_as_such(self):
+        """_between_chains on histograms built by hand: identical chains score
+        perfect agreement, chains in different places score none."""
+        same = [{'p': np.array([1.0, 4.0, 1.0])}] * 3
+        overlap, rhat = gibbs._between_chains(same, ['p'])
+        assert overlap == pytest.approx(1.0)
+        assert rhat == pytest.approx(1.0)
+
+        apart = [{'p': np.array([6.0, 0.0, 0.0, 0.0])},
+                 {'p': np.array([0.0, 0.0, 0.0, 6.0])}]
+        overlap, rhat = gibbs._between_chains(apart, ['p'])
+        assert overlap == pytest.approx(0.5)
+        # No variance within either chain, so R-hat is undefined rather than
+        # infinite: None survives JSON where inf does not.
+        assert rhat is None
+
+        drifted = [{'p': np.array([4.0, 2.0, 0.0, 0.0])},
+                   {'p': np.array([0.0, 0.0, 2.0, 4.0])}]
+        overlap, rhat = gibbs._between_chains(drifted, ['p'])
+        assert overlap < 0.6
+        assert rhat > 2.0
+
+    def test_progress_is_reported_as_one_run(self):
+        measurements, tree = self._model()
+        seen = []
+        gibbs.solve_chains(measurements, tree, chains=2, sweeps=1500,
+                           max_sweeps=1500,
+                           on_progress=lambda info: seen.append(info) or True)
+        assert seen, 'no progress reported'
+        assert all(info['chains'] == 2 for info in seen)
+        assert all(info['max_sweeps'] == 2 * 1500 for info in seen)
+        assert seen[-1]['sweeps'] == 2 * 1500
+        assert seen[-1]['phase'] == 'sampling'
+        assert 0.0 < seen[-1]['convergence'] <= 1.0
+
+    def test_returning_false_cancels_every_chain(self):
+        measurements, tree = self._model()
+        calls = []
+
+        def stop(info):
+            calls.append(info)
+            return len(calls) < 2
+
+        with pytest.raises(gibbs.Cancelled):
+            gibbs.solve_chains(measurements, tree, chains=2, sweeps=4000,
+                               max_sweeps=4000, on_progress=stop)
+        # ...and the pool is still usable afterwards.
+        again = gibbs.solve_chains(measurements, tree, chains=2, sweeps=1000,
+                                   max_sweeps=1000)
+        assert again['sweeps'] == 2000
+
+    def test_a_failing_chain_raises_its_error_here(self):
+        measurements, tree = self._model()
+        measurements[0]['taq_age_bp'] = 100.0
+        measurements[0]['tpq_age_bp'] = 50.0
+        with pytest.raises(ValueError, match='no probability'):
+            gibbs.solve_chains(measurements, tree, chains=2, sweeps=1000,
+                               max_sweeps=1000)
+
+    def test_a_failure_leaves_the_workers_clean_for_the_next_solve(self):
+        """
+        The regression: with one worker's error raised before the others'
+        replies were read, a reply to the FAILED solve's build sat at the
+        head of the next solve's pipe and was read as its first answer --
+        "unsupported operand type(s) for +: 'int' and 'dict'" from the
+        progress arithmetic, several tests later.
+        """
+        measurements, tree = self._model()
+        broken = [dict(m) for m in measurements]
+        broken[0]['taq_age_bp'] = 100.0
+        broken[0]['tpq_age_bp'] = 50.0
+        for _ in range(2):
+            with pytest.raises(ValueError):
+                gibbs.solve_chains(broken, tree, chains=3, sweeps=1000, max_sweeps=1000)
+            good = gibbs.solve_chains(measurements, tree, chains=3, sweeps=1000,
+                                      max_sweeps=1000, target_convergence=1.01,
+                                      on_progress=lambda info: True)
+            assert good['sweeps'] == 3000

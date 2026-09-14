@@ -297,6 +297,22 @@ const SECTIONS: Section[] = [
           </>
         ),
       },
+      {
+        term: 'Convergence, chains and R̂',
+        id: 'convergence',
+        body: (
+          <>
+            Only the sampled solver has these; exact integration has nothing to converge. The
+            convergence figure is OxCal&rsquo;s: how closely the first half of the run agrees with
+            the second, targeting 95%. Several chains run at once, each from its own random start,
+            and R̂ (Gelman&ndash;Rubin) says how far they agree with <em>each other</em> &mdash;
+            1.00 is agreement and the run must bring it under 1.05 before it may stop. It is the
+            check a single chain cannot make on itself: a chain settled into one of a date&rsquo;s
+            two calendar ranges looks perfectly converged alone. A run that fell short of either is
+            flagged on its results page rather than quietly returned.
+          </>
+        ),
+      },
     ],
   },
 ]

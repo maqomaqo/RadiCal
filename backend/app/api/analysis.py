@@ -577,6 +577,9 @@ def _run_bayesian(
         uniform_span_prior=bayesian_config.get('uniform_span_prior', True),
         estimate_durations=estimate_durations,
         on_progress=on_progress,
+        # Independent chains in parallel processes, pooled; see
+        # gibbs.solve_chains for what the extra chains are for.
+        chains=int(bayesian_config.get('mcmc_chains') or gibbs.DEFAULT_CHAINS),
     )
     agreement_service.attach(sampled['measurements'], measurements)
     return sampled['measurements'], sampled['boundaries'], {
@@ -595,6 +598,19 @@ def _run_bayesian(
         'sweeps': sampled['sweeps'],
         'convergence': sampled['convergence'],
         'converged': sampled['converged'],
+        # How many independent chains were pooled and how they agreed with
+        # one another. `convergence` is the pooled first-half/second-half
+        # overlap the run stopped on; `rhat` is the Gelman-Rubin ratio it
+        # also had to bring under `rhat_target`; the between-chain overlap
+        # is information only. All None on a single chain, which has
+        # nothing to disagree with.
+        'chains': sampled['chains'],
+        'sweeps_per_chain': sampled['sweeps_per_chain'],
+        'within_chain_convergence': sampled['within_chain_convergence'],
+        'per_chain_convergence': sampled['per_chain_convergence'],
+        'between_chain_convergence': sampled['between_chain_convergence'],
+        'rhat': sampled['rhat'],
+        'rhat_target': sampled['rhat_target'],
         # What each deposition sequence inferred about its own rigidity, and
         # whether that posterior ran up against the prior's bound. An
         # age-depth answer is only readable next to the rigidity it was

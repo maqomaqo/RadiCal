@@ -299,6 +299,10 @@ def _date_likelihood(grid: np.ndarray, measurement: Dict,
     c14, curve_error = curve.interpolate(grid)
     sigma2 = curve_error ** 2 + measurement['error_1sigma'] ** 2 + delta_r_error ** 2
     lik = np.exp(-0.5 * (c14 - (measurement['age_bp'] - delta_r)) ** 2 / sigma2) / np.sqrt(sigma2)
+    # interpolate() CLAMPS beyond the curve's ends rather than extrapolating,
+    # which would give a grid point past the curve the finite likelihood of
+    # its last point. The curve says nothing there, so neither does the date.
+    lik = np.where((grid >= curve.cal_ages[0]) & (grid <= curve.cal_ages[-1]), lik, 0.0)
 
     taq, tpq = bounds
     if taq is not None:
@@ -533,8 +537,31 @@ def _build_grid(measurements: List[Dict], element_bounds: Dict,
 
     # Up to GROUPS_AT_FULL_RESOLUTION groups the full point count fits.
     budget = MAX_GRID_POINTS / max(1.0, np.sqrt(num_groups / GROUPS_AT_FULL_RESOLUTION))
-    step = max(MIN_GRID_STEP_YEARS, (hi - lo) / budget)
-    return np.arange(lo, hi + step, step)
+    step = _reporting_aligned_step(max(MIN_GRID_STEP_YEARS, (hi - lo) / budget))
+    # An explicit count rather than np.arange(lo, hi + step, step), whose
+    # length depends on floating-point rounding at the end point.
+    count = int(np.ceil((hi - lo) / step - 1e-9)) + 1
+    return lo + step * np.arange(count)
+
+
+def _reporting_aligned_step(step: float) -> float:
+    """
+    The smallest calendar step >= `step` that tiles REPORTING_STEP_YEARS
+    exactly -- a divisor of it below, a multiple of it above.
+
+    The raw step is (range / point budget), 1.015 years on a typical model,
+    and a 5-year reporting bin then holds four grid cells or five depending
+    on where it falls. That is not cosmetic: the mass per bin swung between
+    0.81 and 1.04 of its true value on a smooth posterior, and an HPD region
+    built by ranking bins was picking them on that sawtooth. _reported_ranges
+    now integrates the density exactly, which removes the error whatever the
+    step; aligning the step as well keeps the internal cells and the reported
+    bins nested, so a bin is always a whole number of cells.
+    """
+    reporting = REPORTING_STEP_YEARS
+    if step >= reporting:
+        return float(np.ceil(step / reporting - 1e-9) * reporting)
+    return float(reporting / np.floor(reporting / step + 1e-9))
 
 
 def _rescaled(log_weights: np.ndarray) -> np.ndarray:
@@ -911,7 +938,14 @@ def _sample_columns(rng, weights: np.ndarray) -> np.ndarray:
         raise ValueError('a conditional came out empty while drawing from the '
                          'joint posterior; the model may be contradictory')
     draw = rng.random(len(totals)) * totals
-    return np.clip((cumulative < draw[:, None]).sum(axis=1), 0, weights.shape[1] - 1)
+    # One searchsorted over every row at once: each row's cumulative is lifted
+    # by its row number times a step larger than any total, so the flattened
+    # array is monotone and a row's draw, lifted the same way, lands in it.
+    rows, width = cumulative.shape
+    lift = (np.arange(rows) * (2.0 * float(totals.max()) + 1.0))
+    flat = (cumulative + lift[:, None]).ravel()
+    found = np.searchsorted(flat, draw + lift, side='left') - np.arange(rows) * width
+    return np.clip(found, 0, width - 1)
 
 
 # Draws taken at a time when sampling the joint posterior. One block holds a
@@ -994,6 +1028,13 @@ def _messages_with_span_prior(chain: Chain, allowed: Dict, transfer,
 
     O(M^3) per group instead of O(M^2), which is why it is only built when
     the correction is actually going to change something.
+
+    Both P_k and the boundary marginals share the left factor A_k^T C, so it
+    is formed once per boundary here and reused; the marginal is then the
+    diagonal of (A_i^T C) D_i^T, which is a row-wise dot product and costs
+    O(M^2) rather than the O(M^3) of forming the product and discarding all
+    but its diagonal. Measured on the shared-boundary Nenthorn fixture the
+    solve went from 5.1 s to about 2 s for identical output.
     """
     num_groups = len(chain.groups)
     first_ok = np.where(allowed[chain.boundary_ids[0]], 1.0, 0.0)
@@ -1013,12 +1054,20 @@ def _messages_with_span_prior(chain: Chain, allowed: Dict, transfer,
     for i in range(num_groups - 1, -1, -1):
         D[i] = _normalised(transfer(i).T @ D[i + 1])
 
+    # L[k] = A[k]^T C, indexed [b_k, b_last]: everything before boundary k
+    # with the end-to-end correction folded in. Only A[n] is needed after
+    # this (by draw_boundaries), so the rest of A is released.
+    L = [A[k].T @ C for k in range(num_groups + 1)]
+    A_last = A[num_groups]
+    del A
+
     def pair_weight(k):
         # [older, younger] -> transposed to the [younger, older] the caller uses.
-        return (A[k].T @ C @ D[k + 1].T).T
+        return (L[k] @ D[k + 1].T).T
 
     def boundary_density(i):
-        return np.diagonal(A[i].T @ C @ D[i].T).copy()
+        # diag(L[i] @ D[i].T) without forming the product.
+        return np.einsum('ij,ij->i', L[i], D[i])
 
     def draw_boundaries(rng, count: int) -> np.ndarray:
         """
@@ -1038,7 +1087,7 @@ def _messages_with_span_prior(chain: Chain, allowed: Dict, transfer,
         than being imposed on it.
         """
         num_groups = len(chain.groups)
-        joint = C * A[num_groups]                     # [b_first, b_last]
+        joint = C * A_last                            # [b_first, b_last]
         width = joint.shape[1]
         flat = _sample_indices(rng, joint.ravel(), count)
         indices = np.empty((count, num_groups + 1), dtype=np.int64)
@@ -1198,6 +1247,10 @@ def solve(measurements: List[Dict], root: Dict, chain: Chain,
     densities: List[np.ndarray] = []
 
     for index, date_ids in enumerate(chain.groups):
+        # Everything outside this group, once per group: on the span-prior
+        # path it is two M x M matrix products, and every date in the group
+        # shares it.
+        outside = pair_weight(index)
         for date_id in date_ids:
             # This date's own integral divided back out, leaving it free.
             with np.errstate(invalid='ignore'):
@@ -1207,12 +1260,15 @@ def solve(measurements: List[Dict], root: Dict, chain: Chain,
                                    -np.inf)
             G = np.exp(_rescaled(weights))
             G = np.where(np.isfinite(G), G, 0.0)
-            W = G * pair_weight(index)
+            W = G * outside
             # Sum over {older boundary >= t} x {younger boundary <= t}, which
-            # a pair of cumulative sums leaves on the diagonal.
-            quadrant = np.cumsum(W, axis=0)
-            quadrant = np.cumsum(quadrant[:, ::-1], axis=1)[:, ::-1]
-            density = likelihood[date_id] * np.diagonal(quadrant)
+            # a pair of cumulative sums leaves on the diagonal. Both in place:
+            # at M = 2000 each M x M temporary is 32 MB, and the sums are the
+            # same whether or not they overwrite their input.
+            np.cumsum(W, axis=0, out=W)
+            reversed_view = W[:, ::-1]
+            np.cumsum(reversed_view, axis=1, out=reversed_view)
+            density = likelihood[date_id] * np.diagonal(W)
             densities.append(density)
             summary = _summarize(grid, density, rng, num_samples)
             if date_id in outlier_parts:
@@ -1304,10 +1360,19 @@ def _reported_ranges(grid: np.ndarray, mass: np.ndarray, confidence: float) -> L
     gets plotted and what the point estimates come from.
     """
     step = REPORTING_STEP_YEARS
-    lo = np.floor(grid[0] / step) * step
-    hi = np.ceil(grid[-1] / step) * step + step
+    dt = float(grid[1] - grid[0])
+    # Each grid point stands for the cell [t - dt/2, t + dt/2]; the mass in a
+    # reporting bin is the cumulative mass between its edges, read off the
+    # cell edges by interpolation. Exact for a density that is constant
+    # within a cell, and -- unlike np.histogram on the points -- unaffected
+    # by how many grid points happen to fall in each bin, which for a 1.015
+    # year step is four or five and put a +/-20% sawtooth on the bin masses.
+    cell_edges = np.concatenate([[grid[0] - dt / 2.0], grid + dt / 2.0])
+    cdf = np.concatenate([[0.0], np.cumsum(mass)])
+    lo = np.floor(cell_edges[0] / step) * step
+    hi = np.ceil(cell_edges[-1] / step) * step
     edges = np.arange(lo, hi + step, step)
-    binned, _ = np.histogram(grid, bins=edges, weights=mass)
+    binned = np.clip(np.diff(np.interp(edges, cell_edges, cdf)), 0.0, None)
     centres = (edges[:-1] + edges[1:]) / 2.0
 
     keep = binned > 0

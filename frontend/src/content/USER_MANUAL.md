@@ -313,10 +313,19 @@ by a wide margin: a single deterministic pass, with no progress bar because ther
 
 **MH/Gibbs sampling** is OxCal's own scheme (Metropolis-Hastings within Gibbs) and takes any model:
 branching structures, parallel groups, two groups ordered against each other with no Boundary
-between them, dates sitting outside every Boundary. It runs a minimum of 20,000 sweeps and extends
-up to 200,000 until the worst parameter reaches 95% on OxCal's own convergence measure; the achieved
-figure is reported with the results, and a run that fell short is flagged rather than quietly
-returned.
+between them, dates sitting outside every Boundary. It is budgeted 20,000 sweeps, stops as soon as
+the worst parameter reaches 95% on OxCal's own convergence measure, and extends up to 200,000 if it
+has not; the achieved figure is reported with the results, and a run that fell short is flagged
+rather than quietly returned.
+
+By default four independent chains run at once on separate processor cores, each from its own
+random start, and stop together under one rule: the convergence measure is read off their pooled
+draws, so the target is reached in about a quarter of the sweeps per chain and the run finishes about
+three times sooner than a single chain would. The chains must also agree with one another before the
+run may stop — the Gelman–Rubin R̂, reported with the results, has to sit under 1.05 — which is a
+check a single chain cannot make on itself: a chain settled into one of a date's two calendar ranges
+looks perfectly converged to itself, and only another chain that settled into the other range can show
+it up. The chain count is set in the analysis options; one chain is the plain run.
 
 Where both can be asked, they agree to under a year, and they are checked against each other on
 every model both can handle.
@@ -325,8 +334,8 @@ every model both can handle.
 |---|---|---|
 | Model shapes | chain-shaped only; fails rather than sampling | all |
 | Result | deterministic; the same input gives the same numbers | stochastic; converges to the same posterior |
-| Speed | one pass; typically much faster | 20,000–200,000 sweeps, extended until converged |
-| Convergence | not applicable, since nothing iterates | reported per run; can fall short and say so |
+| Speed | one pass; typically much faster | up to 200,000 sweeps per chain, stopped as soon as converged; chains run in parallel |
+| Convergence | not applicable, since nothing iterates | reported per run, within and between chains; can fall short and say so |
 | Multi-lobe calibration | resolved exactly | handled by whole-group translation moves, but a sampled answer |
 | Duration/difference draws | independent draws from the joint posterior | draws from an MCMC chain, so correlated |
 | Outlier models | how big an outlier's offset is, taken over its prior range date by date (an approximation) | one offset size shared across the model and estimated from the data, as OxCal does |
@@ -784,8 +793,9 @@ Three details carry weight:
   marine curve models only the global average. Its uncertainty `sigma_dR` joins the quadrature sum,
   so a poorly known offset widens the calibrated range rather than only moving it.
 
-Curve values at non-grid calendar ages are linearly interpolated in both `mu` and `sigma_c`, and
-clamped at the curve's ends rather than extrapolated.
+Curve values at non-grid calendar ages are linearly interpolated in both `mu` and `sigma_c`.
+Beyond the curve's ends the likelihood is zero: the curve says nothing there, so neither does the
+date, rather than carrying its last tabulated value outward.
 
 The built-in curves are IntCal20 (Reimer et al. 2020), SHCal20 (Hogg et al. 2020) and Marine20
 (Heaton et al. 2020).
@@ -809,18 +819,28 @@ curve is defined on the union of the two parent grids, restricted to their overl
 
 ### A.4 Summarising a posterior
 
-**HPD regions.** Grid points are taken in order of decreasing probability density until the target
-coverage is reached; the selected points are then grouped into maximal runs, each reported as a
-range with its own share of the total probability. Because calibration curves are not monotonic, a
-single date routinely produces several disjoint ranges, and reporting only the outer envelope would
-claim probability in the near-empty gaps between them. The percentages are shares of the entire
-distribution, so they sum to slightly more than the level requested: the set is built from whole
-grid points and the last one taken overshoots. This is standard radiocarbon reporting practice
-(Stuiver and Reimer 1993; Bronk Ramsey 2009a).
+**HPD regions.** Grid points are taken in order of decreasing probability *density* until the
+*mass* they hold reaches the target coverage; the selected points are then grouped into maximal
+runs, each reported as a range with its own share of the total probability. The two words matter on
+the curve's own grid, which is not uniform: IntCal20 steps from 1 to 5 years at 5,000 cal BP, and a
+5-year cell there holds five times the mass of a 1-year cell of the same density. Ranking by mass
+would let a low-density cell in the coarse stretch outrank a high-density one in the fine, and the
+region would come back a different shape either side of the step. Each point is therefore ranked by
+its mass divided by the calendar width it stands for (`w(t)` of A.2), while what accumulates to the
+level is the mass itself; on a uniform grid the two orderings coincide. Ties are broken toward the
+lower index, so the same distribution always gives the same region.
+
+Because calibration curves are not monotonic, a single date routinely produces several disjoint
+ranges, and reporting only the outer envelope would claim probability in the near-empty gaps
+between them. The percentages are shares of the entire distribution, so they sum to slightly more
+than the level requested: the set is built from whole grid points and the last one taken overshoots.
+This is standard radiocarbon reporting practice (Stuiver and Reimer 1993; Bronk Ramsey 2009a).
 
 **Point estimates** are computed from the density, not from draws, so they carry no Monte Carlo
-error even on the sampled path: mean and standard deviation as probability-weighted moments, median
-by interpolating the CDF at 0.5, mode as the highest-density grid point.
+error even on the sampled path: mean and standard deviation as probability-weighted moments; median
+by interpolating the cumulative mass at 0.5 across the cell edges, so it falls within a cell rather
+than snapping to the first grid point past the half; mode as the highest-*density* grid point, again
+mass divided by cell width, since on the curve's grid the heaviest cell is simply the widest.
 
 **Rebinning, for modelled posteriors only.** A modelled posterior is multiplied by the model's own
 constraints on top of an already-wiggly likelihood, and comes off a grid whose step the solver
@@ -829,7 +849,16 @@ would make a published range depend on an implementation detail, and the same da
 sequence would come back with different widths. At a fine step the HPD picks out peak tops and
 skips the dips between them.
 
-Modelled ranges are therefore rebinned to the 5-year reporting step before the HPD is taken.
+Modelled ranges are therefore rebinned to the 5-year reporting step before the HPD is taken. The
+rebinning integrates the density: each grid point stands for the cell half a step either side of
+it, the cumulative mass is read off the cell edges, and a reporting bin's mass is the difference
+between the readings at its two edges. This is exact for a density that is constant within a cell,
+and — unlike counting which grid *points* fall in each bin — it does not depend on how the two
+grids happen to align. That alignment is not a detail: a solver step of 1.015 years puts four grid
+points in one 5-year bin and five in the next, a ±20% sawtooth on the bin masses that the HPD then
+selects on. The solver's step is also chosen to tile the reporting step exactly (a divisor of five
+years below it, a multiple above), so a reporting bin is always a whole number of solver cells.
+
 Unmodelled calibration is *not* rebinned. It has no solver grid to hide, and the curve's own
 spacing is the honest resolution of the answer.
 
@@ -936,6 +965,35 @@ over the first half of the run and over the second half, per parameter, targetin
 extends until the worst parameter meets the target or the sweep ceiling is reached, and the achieved
 value is always reported.
 
+**Several chains, one stopping rule.** By default four independent chains run at once, one per
+processor core, each seeded differently (chain 0 with the run's own seed, so a single-chain run is
+chain 0 of any wider one). They advance in step — the same burn-in, one round at a time — and the
+convergence measure above is read off their rounds *pooled*, so the run stops when the pooled
+histogram has converged rather than when each chain has on its own. The deficit in that measure is
+mostly Monte Carlo noise, which falls as `1/sqrt(draws)`, so four chains reach the target in about a
+quarter of the sweeps each: on the Nenthorn fixture, 54,000 sweeps on one chain against 12,000 each
+on four, three times sooner in wall time for the same accuracy. Before it may stop, the run must also
+bring the chains into agreement with one another on the Gelman–Rubin statistic (Gelman and Rubin
+1992)
+
+```
+R-hat = sqrt( ((n-1)/n * W + B/n) / W )
+```
+
+with `W` the mean within-chain variance and `B` the between-chain variance of the chain means, both
+read from the chains' histograms with `n` the draws each holds, held under 1.05 for every parameter.
+That is the check a single chain cannot make on itself: a chain settled into one of a date's two
+calendar ranges looks perfectly converged to itself, and only another chain that settled into the
+other range can show it up, as `R-hat` in the tens. A run that hits the sweep ceiling with the chains
+still apart is reported as unconverged whatever its pooled overlap says. The overlap of each chain's
+own histogram with the pool is reported beside these for information, but not held to the 0.95
+target: one chain holds a quarter of the pooled draws, so that overlap is noisier by construction and
+sits near 0.93 when the chains agree perfectly by `R-hat`.
+
+The pooled histogram is the sum of the chains' and so assumes every chain has mixed, which is
+exactly what `R-hat` checks. The chains run as separate processes and never touch the database; the
+count is set in the analysis options, and one chain is the plain run.
+
 ### A.7 Outlier models
 
 A Bernoulli outlier indicator is integrated out per date, which is exact and costs the exact solver
@@ -1019,6 +1077,11 @@ forward-filtering/backward-sampling over the same chain the solver already built
 1994; Carter and Kohn 1994), so the Monte Carlo error is a plain `1/sqrt(N)` with no autocorrelation.
 The default is 20,000 draws. These are the only Monte Carlo figures the exact solver reports, which
 is why the draw count and whether the draws were independent are printed alongside them.
+
+On the sampled path the draws are whole states of the chain, thinned evenly through the run and
+pooled across every chain that ran (A.6). They are not independent: consecutive states of a Markov
+chain are correlated, so a duration read off them converges more slowly than the marginals beside
+it, and the run is not extended on its account. The report says which kind of draws it holds.
 
 **The three durations** are OxCal's quantities under the app's own names: the *Sequence duration*
 (first Boundary minus last), the *Phase duration* (the interval a pair of Boundaries encloses,
@@ -1237,6 +1300,8 @@ an envelope has to nest, and two HPD regions on a multi-peaked posterior need no
   Series Analysis* 15(2), 183–202.
 - Galimberti, M., Bronk Ramsey, C., and Manning, S. W. (2004). Wiggle-match dating of tree-ring
   sequences. *Radiocarbon* 46(2), 917–924.
+- Gelman, A., and Rubin, D. B. (1992). Inference from iterative simulation using multiple sequences.
+  *Statistical Science* 7(4), 457–472.
 - Geman, S., and Geman, D. (1984). Stochastic relaxation, Gibbs distributions, and the Bayesian
   restoration of images. *IEEE Transactions on Pattern Analysis and Machine Intelligence* 6(6),
   721–741.
