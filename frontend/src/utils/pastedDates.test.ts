@@ -1,9 +1,14 @@
 // The bulk-paste parser. Its curve column is checked against the ids the
 // backend registry offers, passed in rather than hardcoded, which is what
 // makes the two agree.
+//
+// Moved here from beside ProjectSampleTable when that component gained the map
+// dialog: importing the component now pulls in Plotly, whose UMD wrapper reads
+// `self` at module scope, and this file died on the import rather than on an
+// assertion. The parser is pure, so the fix was to move the parser.
 import { describe, expect, it } from 'vitest'
 
-import { parsePastedDates } from './ProjectSampleTable'
+import { parsePastedDates } from '@/utils/pastedDates'
 
 const VALID = new Set(['intcal20', 'shcal20', 'marine20'])
 

@@ -36,6 +36,7 @@ import DeleteIcon from '@mui/icons-material/Delete'
 import RocketLaunchIcon from '@mui/icons-material/RocketLaunch'
 import TimelineIcon from '@mui/icons-material/Timeline'
 import WavesIcon from '@mui/icons-material/Waves'
+import PlaceIcon from '@mui/icons-material/Place'
 
 import { curveOptions, type CurveSpec } from '@/api/curves'
 import { isMarineMeasurement } from '@/components/MeasurementFields'
@@ -54,6 +55,12 @@ interface Props {
   onDeploy: () => void
   onAssignCurve: (curveId: string) => void
   onAssignDeltaR: (value: DeltaRValue) => void
+  /**
+   * Opens the map. Unlike the two edits beside it this one is a dialog and is
+   * therefore owned by the caller -- see PlaceOnMapDialog for why a map cannot
+   * keep the selection on screen the way a popover does.
+   */
+  onPlaceOnMap: () => void
   onDelete: () => void
 }
 
@@ -65,6 +72,7 @@ export default function SampleSelectionBar({
   onDeploy,
   onAssignCurve,
   onAssignDeltaR,
+  onPlaceOnMap,
   onDelete,
 }: Props) {
   const [curveAnchor, setCurveAnchor] = useState<HTMLElement | null>(null)
@@ -174,6 +182,18 @@ export default function SampleSelectionBar({
         disabled={busy}
       >
         Set ΔR
+      </Button>
+      {/* Beside ΔR because it is the same kind of edit: one value that
+          belongs to a PLACE rather than to a measurement, so it lands on the
+          whole selection at once. */}
+      <Button
+        size="small"
+        variant="outlined"
+        startIcon={<PlaceIcon />}
+        onClick={onPlaceOnMap}
+        disabled={busy}
+      >
+        Place on map
       </Button>
 
       <Box sx={{ flexGrow: 1 }} />

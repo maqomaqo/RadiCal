@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Box, Button, Paper, Typography } from '@mui/material'
 import DownloadIcon from '@mui/icons-material/Download'
 import Plotly from 'plotly.js-dist-min'
@@ -128,29 +128,55 @@ export default function SiteMap({
     return list
   }, [sites, selected, plot])
 
-  const handleClick = (event: React.MouseEvent<HTMLDivElement>) => {
-    if (!editable || !onPlace) return
-    const projection = geoProjectionOf(graphDiv.current)
-    const svg = plotBox.current?.querySelector<SVGElement>('.main-svg')
-    if (!projection || !svg) {
-      // The map cannot answer where the click was. Said out loud rather than
-      // swallowed: a map that silently ignores clicks reads as broken, and the
-      // typed boxes beside it still work.
-      setCannotPlace(true)
-      return
+  /**
+   * Clicks are taken in the CAPTURE phase, on a native listener, and both
+   * halves of that are load-bearing.
+   *
+   * Plotly covers the drawn map with its own drag rect, which stops the event:
+   * an ordinary bubble-phase handler (React's onClick included) fires only for
+   * clicks in the letterboxed margin AROUND the map, which is to say never
+   * where anybody aims. Capturing on the container gets the event on the way
+   * down, before that rect sees it. Verified in Chromium against 2.35.3:
+   * clicking the mark drawn at a known coordinate returns that coordinate to
+   * within a pixel.
+   *
+   * A native listener rather than onClickCapture because React's delegated
+   * capture happens to work here for reasons internal to React's root
+   * listener, and this does not depend on them.
+   */
+  useEffect(() => {
+    const container = plotBox.current
+    if (!editable || !onPlace || !container) return
+
+    const handle = (event: MouseEvent) => {
+      const projection = geoProjectionOf(graphDiv.current)
+      const svg = container.querySelector<SVGElement>('.main-svg')
+      if (!projection || !svg) {
+        // The map cannot say where the click was. Announced rather than
+        // swallowed: a map that silently ignores clicks reads as broken, and
+        // the typed boxes beside it still work.
+        setCannotPlace(true)
+        return
+      }
+      // The projection's frame is the .main-svg box, margins included --
+      // established by projecting a known coordinate forward and finding the
+      // rendered mark at exactly that offset from the SVG's origin.
+      const box = svg.getBoundingClientRect()
+      const place = latLonFromPoint(
+        projection,
+        event.clientX - box.left,
+        event.clientY - box.top,
+      )
+      // Off the globe. The corners of a rectangular plot are not on the earth,
+      // so this is ignored rather than clamped to the nearest coast.
+      if (!place) return
+      setCannotPlace(false)
+      onPlace(roundPlacement(place.latitude), roundPlacement(place.longitude))
     }
-    const box = svg.getBoundingClientRect()
-    const place = latLonFromPoint(
-      projection,
-      event.clientX - box.left,
-      event.clientY - box.top,
-    )
-    // Off the globe -- the corners of a rectangular plot are not on the earth.
-    // Ignored rather than clamped to the nearest coast.
-    if (!place) return
-    setCannotPlace(false)
-    onPlace(roundPlacement(place.latitude), roundPlacement(place.longitude))
-  }
+
+    container.addEventListener('click', handle, true)
+    return () => container.removeEventListener('click', handle, true)
+  }, [editable, onPlace])
 
   const layout = useMemo(
     () => ({
@@ -196,7 +222,6 @@ export default function SiteMap({
         elevation={0}
         variant="outlined"
         ref={plotBox}
-        onClick={handleClick}
         sx={{
           p: 0,
           overflow: 'hidden',
@@ -239,12 +264,9 @@ export default function SiteMap({
         <Button
           size="small"
           startIcon={<DownloadIcon />}
-          onClick={(event) => {
-            // The map's own click handler is on the Paper, not here, but a
-            // click on this button still bubbles through the Box above it.
-            event.stopPropagation()
-            downloadPlotPng(plotBox.current, exportName)
-          }}
+          // Outside plotBox, so the map's capture listener never sees this
+          // click and saving a figure cannot also move a pin.
+          onClick={() => downloadPlotPng(plotBox.current, exportName)}
         >
           Download PNG
         </Button>

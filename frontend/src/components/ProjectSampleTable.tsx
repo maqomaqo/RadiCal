@@ -37,6 +37,7 @@ import ViewColumnIcon from '@mui/icons-material/ViewColumn'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import ImportDatesDialog, { type ImportPreview } from '@/components/ImportDatesDialog'
 import SampleSelectionBar, { type DeltaRValue } from '@/components/SampleSelectionBar'
+import PlaceOnMapDialog from '@/components/PlaceOnMapDialog'
 import { formatApiError } from '@/utils/apiError'
 import { useNotify } from '@/contexts/NotificationContext'
 import { curveLabel, curveOptions } from '@/api/curves'
@@ -53,6 +54,9 @@ import {
   type ColumnOverrides,
 } from '@/utils/columnPreferences'
 import { formatPosition } from '@/utils/coordinates'
+// Pure, and deliberately not defined here: this file reaches Plotly through
+// the map dialog, so anything a Node test needs has to live outside it.
+import { parsePastedDates } from '@/utils/pastedDates'
 
 // A date in the PROJECT's collection (backend models.ProjectSample), entered
 // once and deployed into as many analyses as needed. Deploying COPIES these
@@ -205,75 +209,6 @@ function formToPayload(form: DraftForm) {
 }
 
 /**
- * Parse the bulk-paste textarea: one date per line, comma or tab separated, as
- * `name, age, error[, material[, context[, curve]]]`. Forgiving, since this is
- * for pasting a column range out of a spreadsheet or lab report -- blank lines
- * are skipped and a malformed one is reported by number rather than dropped.
- * Curve is optional and defaults to IntCal20, most batches being a single
- * terrestrial curve.
- *
- * `validCurveIds` is passed in so this stays pure while the curves come from
- * the backend registry. An empty set accepts any curve id and leaves rejection
- * to the backend, which is right when the curve list could not be loaded:
- * refusing every line would blame the paste for a failed request.
- */
-export function parsePastedDates(
-  text: string,
-  validCurveIds: Set<string>
-): { rows: ReturnType<typeof formToPayload>[]; errors: string[] } {
-  const rows: ReturnType<typeof formToPayload>[] = []
-  const errors: string[] = []
-
-  text.split(/\r?\n/).forEach((rawLine, index) => {
-    const line = rawLine.trim()
-    if (!line) return
-    const parts = line.split(/[\t,;]/).map((p) => p.trim())
-    const [name, age, error, material, context, curve] = parts
-    if (!name || !age || !error) {
-      errors.push(`Line ${index + 1}: expected at least "name, age, error"`)
-      return
-    }
-    if (!Number.isFinite(Number(age)) || !Number.isFinite(Number(error))) {
-      errors.push(`Line ${index + 1}: age and error must be numbers`)
-      return
-    }
-    const curveId = curve ? curve.toLowerCase() : 'intcal20'
-    if (validCurveIds.size > 0 && !validCurveIds.has(curveId)) {
-      errors.push(
-        `Line ${index + 1}: unknown curve "${curve}" (expected ` +
-          `${[...validCurveIds].join(', ')})`
-      )
-      return
-    }
-    rows.push({
-      sample_name: name,
-      age_bp: Number(age),
-      error_1sigma: Number(error),
-      material_type: material || 'unknown',
-      curve_id: curveId,
-      default_context_name: context || null,
-      tpq_age_bp: null,
-      taq_age_bp: null,
-      // The paste format carries name, age, error, material, context and
-      // curve; everything else a date can hold is set afterwards, in the row's
-      // own dialog.
-      delta_r: null,
-      delta_r_error: null,
-      reservoir_age: null,
-      depth_cm: null,
-      ring_offset: null,
-      ring_offset_error: null,
-      latitude: null,
-      longitude: null,
-      location: null,
-      notes: null,
-    })
-  })
-
-  return { rows, errors }
-}
-
-/**
  * What the collection table can be ordered by. Display only: the collection is
  * a store, not a sequence -- an analysis owns the order its own dates are
  * modelled in, which is what `SortDatesButton` edits elsewhere. Nothing here
@@ -330,6 +265,7 @@ export default function ProjectSampleTable({ projectId }: Props) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [placeOpen, setPlaceOpen] = useState(false)
 
   const [formOpen, setFormOpen] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -626,6 +562,39 @@ export default function ProjectSampleTable({ projectId }: Props) {
           : { message: applied }
       },
       'Could not apply ΔR',
+    )
+
+  /**
+   * One position across the whole selection -- the map's Apply, and its
+   * Remove.
+   *
+   * Through the same bulk PATCH ΔR goes through, but it reaches every date
+   * rather than the marine ones: where a sample came from is a fact about the
+   * place, not about the material. Null for both halves unplaces them; the
+   * endpoint refuses one without the other, as it should.
+   */
+  const handlePlaceSelection = (
+    latitude: number | null,
+    longitude: number | null,
+  ) =>
+    runBulk(
+      () =>
+        fetch(`/api/projects/${projectId}/samples`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sample_ids: [...selected], latitude, longitude }),
+        }),
+      (data) => {
+        const n = data.updated_count
+        const dates = `${n} date${n === 1 ? '' : 's'}`
+        return {
+          message:
+            latitude === null
+              ? `Position removed from ${dates}`
+              : `${dates} placed at ${latitude}, ${longitude}`,
+        }
+      },
+      'Could not place the selected dates',
     )
 
   const handleBulkDelete = async () => {
@@ -1050,9 +1019,28 @@ export default function ProjectSampleTable({ projectId }: Props) {
           }}
           onAssignCurve={handleAssignCurve}
           onAssignDeltaR={handleAssignDeltaR}
+          onPlaceOnMap={() => setPlaceOpen(true)}
           onDelete={() => setBulkDeleteOpen(true)}
         />
       )}
+
+      <PlaceOnMapDialog
+        open={placeOpen}
+        onClose={() => setPlaceOpen(false)}
+        // The WHOLE collection, not just the ticked rows: a pin means little
+        // without the other sites around it, and seeing them is how someone
+        // notices they are about to place a date in the wrong bay.
+        points={samples.map((s) => ({
+          id: s.id,
+          name: s.sample_name,
+          latitude: s.latitude,
+          longitude: s.longitude,
+        }))}
+        selectedIds={[...selected]}
+        onApply={(latitude, longitude) => handlePlaceSelection(latitude, longitude)}
+        onClear={() => handlePlaceSelection(null, null)}
+        busy={bulkBusy}
+      />
 
       {error && (
         <Alert severity="error" sx={{ mb: 2 }}>
