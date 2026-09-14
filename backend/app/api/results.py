@@ -10,11 +10,63 @@ from app.services import date_format as date_format_service
 from app.services import pdf_report
 from app.services import intervals as intervals_service
 from typing import Dict, List, Optional
+from decimal import Decimal, ROUND_HALF_EVEN
 import io
 import csv
 import json
 
 router = APIRouter()
+
+
+# How precisely a coordinate may leave the app, as the project's setting spells
+# it, mapped to decimal places. The names are the bare numbers rather than
+# '0.01 degrees' so this table can read them; the degree sign and the
+# approximate distance are the UI's business.
+#
+# This dict is the definition of the setting. schemas/project.py validates
+# against these keys, so an unrecognised value cannot be stored, and
+# _rounded_coordinate need not decide what to do with one.
+COORDINATE_PRECISIONS: Dict[str, Optional[int]] = {
+    'full': None,   # what was entered
+    '0.01': 2,      # about 1.1 km
+    '0.1': 1,       # about 11 km
+    '1': 0,         # about 110 km
+}
+
+
+def _rounded_coordinate(value: Optional[float], precision: str) -> Optional[float]:
+    """
+    A coordinate as it is allowed to leave this project.
+
+    Site coordinates are restricted data under many heritage bodies',
+    landowners' and Indigenous data-governance frameworks. Full precision is
+    what is STORED -- degrading data at rest helps nobody and cannot be undone
+    -- so this is where a project's choice is applied, at the boundary, to
+    every export and every rendered figure alike.
+
+    Round-half-to-even on the decimal the user actually typed, via Decimal
+    rather than round(): two exports of the same project must agree with each
+    other digit for digit, and binary floating point does not promise that for
+    a value like 54.125 the way an exact decimal does.
+    """
+    if value is None:
+        return None
+    places = COORDINATE_PRECISIONS.get(precision)
+    if places is None:
+        return value
+    quantum = Decimal(1).scaleb(-places)
+    return float(Decimal(str(value)).quantize(quantum, rounding=ROUND_HALF_EVEN))
+
+
+def _export_precision(analysis) -> str:
+    """
+    The precision governing this analysis's downloads, which belongs to the
+    PROJECT: an analysis is one question asked of a site's dates, and the
+    sensitivity of the site does not vary between them. An analysis with no
+    project falls back to full, which is the column's default anyway.
+    """
+    project = getattr(analysis, 'project', None)
+    return (getattr(project, 'coordinate_precision', None) or 'full')
 
 
 def _format_hpd_ranges(ranges: Optional[List[Dict]], fallback_min, fallback_max) -> str:
@@ -252,6 +304,13 @@ def _gather_export_rows(analysis_id: str, db: Session) -> Dict:
         s.id: s for s in db.query(RadiocarbonSample).filter(RadiocarbonSample.analysis_id == analysis_id).all()
     }
 
+    # Applied HERE, in the one assembly all three downloads are built from,
+    # rather than in each of them: a coordinate below the project's declared
+    # precision then has no path out of the app at all, and the CSV, the JSON
+    # and the PDF cannot disagree about a position any more than they can
+    # about a posterior.
+    precision = _export_precision(analysis)
+
     rows = []
     for r in results:
         sample = samples_by_id.get(r.sample_id)
@@ -263,6 +322,10 @@ def _gather_export_rows(analysis_id: str, db: Session) -> Dict:
             'material_type': sample.material_type if sample else None,
             'sample_type': sample.sample_type if sample else None,
             'curve_id': sample.curve_id if sample else None,
+            'latitude': _rounded_coordinate(
+                sample.latitude if sample else None, precision),
+            'longitude': _rounded_coordinate(
+                sample.longitude if sample else None, precision),
             'calibrated_age_bp': r.calibrated_age_bp,
             'posterior_mean': r.posterior_mean,
             'posterior_median': r.posterior_median,
@@ -278,7 +341,8 @@ def _gather_export_rows(analysis_id: str, db: Session) -> Dict:
             **_unmodelled_ranges(sample, analysis.analysis_type),
         })
 
-    return {'analysis': analysis, 'rows': rows, 'samples_by_id': samples_by_id}
+    return {'analysis': analysis, 'rows': rows, 'samples_by_id': samples_by_id,
+            'coordinate_precision': precision}
 
 
 def _structure_rows(analysis_id: str, db: Session, export_rows: List[Dict],
@@ -323,6 +387,14 @@ CSV_HEADER = [
     'Age BP', '1-Sigma Error', 'Material', 'Sample Type', 'Curve',
     'Unmodelled 95.4% HPD', 'Posterior Mean', 'Posterior Median', 'Posterior Std',
     '68.3% HPD', '95.4% HPD', 'Agreement %', 'Outlier %', 'TPQ BP', 'TAQ BP',
+    # Appended, beside the age limiters, rather than filed with the measured
+    # columns they belong with: everything before this point has held its
+    # position since the export existed, and a spreadsheet or script reading
+    # this file by column number should not be moved by a new input. Decimal
+    # degrees at the project's declared precision, spelled the way the
+    # importer reads them back -- this file is an accepted import format, so a
+    # table corrected in a spreadsheet has to return intact.
+    'Latitude', 'Longitude',
 ]
 
 # The calendar-age columns, in the order their formatted counterparts are
@@ -356,6 +428,23 @@ def _measurement_cells(row: Optional[Dict]) -> List:
         row['material_type'] or '',
         row['sample_type'] or '',
         row['curve_id'] or '',
+    ]
+
+
+def _coordinate_cells(row: Optional[Dict]) -> List:
+    """
+    Where the date came from; blank for a structural row, since a phase has no
+    position of its own.
+
+    Already rounded to the project's precision by _gather_export_rows, so
+    there is nothing to decide here -- which is the point of rounding in the
+    assembly rather than in each writer.
+    """
+    if not row:
+        return ['', '']
+    return [
+        row['latitude'] if row.get('latitude') is not None else '',
+        row['longitude'] if row.get('longitude') is not None else '',
     ]
 
 
@@ -517,6 +606,7 @@ def _build_csv(analysis_id: str, db: Session, date_format: Optional[str] = None)
                 [order, 'Date', 0, '', row['sample_name'] or row['sample_id'] or '']
                 + _measurement_cells(row) + [_unmodelled_cell(row)]
                 + _posterior_cells(row) + ['', '']
+                + _coordinate_cells(row)
                 + extra(row, None, None)
             )
         _write_intervals(writer, analysis)
@@ -544,6 +634,9 @@ def _build_csv(analysis_id: str, db: Session, date_format: Optional[str] = None)
             + measured + [unmodelled] + modelled
             + [row['tpq_age_bp'] if row['tpq_age_bp'] is not None else '',
                row['taq_age_bp'] if row['taq_age_bp'] is not None else '']
+            # A boundary's `result` is posterior-shaped and carries no
+            # position, so this is blank for everything but a date.
+            + _coordinate_cells(row.get('result') if row['kind'] == 'date' else None)
             + extra(result, row['tpq_age_bp'], row['taq_age_bp'])
         )
 
@@ -672,6 +765,10 @@ def export_json(analysis_id: str, db: Session = Depends(get_db),
             "created_at": analysis.created_at.isoformat(),
             "project_id": analysis.project_id,
             "results": data['rows'],
+            # Stated rather than left to be inferred: a consumer reading
+            # 54.5, -5.6 cannot otherwise tell a site recorded to that
+            # precision from one rounded to it on the way out.
+            "coordinate_precision": data['coordinate_precision'],
             "structure": _structure_payload(structure),
             # Null unless the run was asked for them (Analysis.intervals).
             # Carried whole rather than flattened as the CSV flattens it,
@@ -741,6 +838,7 @@ def export_pdf(analysis_id: str, date_format: Optional[str] = None,
         intervals=analysis.intervals,
         project_name=analysis.project.name if analysis.project else None,
         date_format=date_format,
+        coordinate_precision=data['coordinate_precision'],
     )
     return StreamingResponse(
         iter([pdf_bytes]),

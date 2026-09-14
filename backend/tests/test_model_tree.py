@@ -380,7 +380,11 @@ class TestCsvExport:
         # is judging.
         assert header.index('Agreement %') == modelled + 1
         assert header.index('Outlier %') == modelled + 2
-        assert len(header) == 20
+        # The eighteen columns this export has always had, plus Latitude and
+        # Longitude, which were APPENDED so that nothing already here moved.
+        # Counted so a column duplicated rather than repurposed still shows up.
+        assert len(header) == 22
+        assert header[-2:] == ['Latitude', 'Longitude']
 
         by_name = {r[4]: r for r in data}
         # Every date reports one, formatted like the other HPD columns.
