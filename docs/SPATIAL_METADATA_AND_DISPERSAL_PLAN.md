@@ -997,13 +997,13 @@ neighbourhood; a result an order of magnitude away is a bug, not a discovery.
 | # | Risk | Likelihood | Impact | Mitigation |
 |---|---|---|---|---|
 | 11.1 | **Redistribution permission.** The bundled snapshot redistributes Reimer & Reimer's compilation. Their About page asks that original authors be cited and gives a contact. | medium | high — blocks the bundle | Email p.j.reimer@qub.ac.uk before shipping it. If declined, fall back to "no bundle, user runs the ingest" (§5.3 already supports it unchanged); only the shipped CSV goes away. |
-| 11.2 | **calib.org changes or disappears.** Apache 2.4.61 / PHP 5.6.40, HTML scraping, no API, no versioning. | medium | low | The mirror is the mitigation. A broken ingest breaks *refresh*, never *analysis*. The parser fails loudly on an unexpected table shape rather than importing garbage. |
+| 11.2 | **calib.org changes or disappears.** Apache 2.4.61 / PHP 5.6.40, HTML scraping, no API, no versioning. | medium | low | The mirror is the mitigation. A broken ingest breaks *refresh*, never *analysis*. The parser must fail loudly on an unexpected table shape rather than importing garbage. *[2026-09-14: the parser is not written — see feature 3 — so this mitigation is a requirement on whoever writes it, not a property the code has yet. Until then there is no refresh path to break.]* |
 | 11.3 | **A derived ΔR is trusted more than it deserves.** §2.4 says the floor is ~84 yr, §2.5 says the answer moves with N, §2.7 says it can move 465 yr with feeding habit. | **high** | high | The number never appears without its σ, its N, its nearest-point distance, its point list with habits, and the suspension-only counterfactual (§7.3). This is a UI obligation, not a documentation one. |
 | 11.8 | **Alert fatigue defeats the habit warning.** A prompt that fires on 61% of lookups is dismissed reflexively, including on the 4% where it mattered. | high *if prompted* | high | §5.4.1: never prompt on presence. Show the counterfactual always, warn only above the settled **35 yr** threshold (~11% of lookups). Worth re-measuring against real usage once the feature has been in hand for a while. |
 | 11.4 | **A dispersal fit that is confident and wrong.** OLS on autocorrelated residuals with an assumed origin will always return a tidy *v*. | **high** | high | §6.6 residuals, §6.8 disclosures in the panel, and the §10 coverage test run before the feature ships. Consider refusing to report *v* below a minimum site count (~6) rather than fitting 3 points and printing an interval. |
 | 11.5 | **A coordinate leaks.** | low | severe and irreversible | §4.5: local-only lookup, offline default basemap, opt-in tiles, export precision control. |
 | 11.6 | **Site derivation surprises the user** — a Phase holding dates from two sites (§6.2). | medium | medium | Refuse and name both coordinates and the distance between them, rather than using the centroid. |
-| 11.7 | **The mixed-encoding rows regress** on a future ingest (§2.2). | low | low | Fixture test on the raw bytes; the ingest report counts fallbacks, so a jump is visible. |
+| 11.7 | **The mixed-encoding rows regress** on a future ingest (§2.2). | low | low | Fixture test on the raw bytes; the ingest report counts fallbacks, so a jump is visible. *[2026-09-14: the fixture is SYNTHESISED, not captured — calib.org was unreachable. It exercises every documented case per field, so `decode_field` is genuinely pinned; what it cannot catch is a change in the real response's shape. Replace it with a capture when one is available.]* |
 
 ---
 
@@ -1066,8 +1066,10 @@ else changes the schema.
 Operations within a feature run in order. Features 1–2 and 3 are independent and can interleave;
 4 waits for both; 6 waits for 1–2 and for the three §13 decisions marked below.
 
-*Features 1 and 2 are done (2026-09-14); Alembic head is now `a4d21f7e9c36` and op 3a chains from
-it. Feature 6's prerequisite on 1–2 is therefore met, leaving only the three §13 decisions.*
+*Features 1 and 2 are done (2026-09-14), and feature 3 all but its fetch — see there. Alembic head
+is now `b7c4e0a13d92`. Feature 6's prerequisite on 1–2 is met, leaving only the three §13
+decisions; feature 4 (the lookup) can be built against an ingested snapshot, but cannot be
+exercised end to end until either op 0 lands a bundled snapshot or `fetch_records` is written.*
 
 ### Op 0 — the permission request *(human; start now, longest lead time)*
 
@@ -1170,7 +1172,30 @@ click writes the same `{latitude, longitude}` to the whole selection through the
 once per project behind the notice naming what a tile request discloses (§4.5 rule 4). *Done when*
 the network tab shows no request until the switch is on.
 
-### Feature 3 — the ΔR mirror (§5.2–5.3)
+### Feature 3 — the ΔR mirror (§5.2–5.3) — **3a, 3c done; 3b partial; 3d still gated**
+
+*2026-09-14.* **calib.org is not reachable from the environment this was built in** — the network
+policy allows package registries and nothing else — so op 3b split in two:
+
+- **Written and tested:** the feeding vocabulary (`services/reservoir.py`), the per-field
+  UTF-8→cp1252 decode, `content_sha256`, `IngestReport`, `store`, and the bundled-CSV format
+  (`rows_to_csv` / `rows_from_csv`, so 3d is a data drop rather than new code).
+- **Deliberately not written:** `reservoir_ingest.fetch_records` — the HTTP session and the
+  extraction of calib.org's own table shape. Its docstring carries the full contract. Guessing a
+  response shape from a description is the failure `date_import` refuses by name, and here it
+  would be confidently wrong about numbers that move published dates. `POST
+  /api/reservoir/snapshots` answers **501** until it is written, rather than 200 with an empty
+  snapshot.
+- **The fixture is synthesised, not captured**, and says so in its own README. It carries every
+  property §2 documents — both encodings in one response, a byte valid in neither, all 25 feeding
+  spellings, rows with no uncertainty — but it cannot carry the one thing nobody here has seen,
+  which is the shape of the real table.
+
+Two additions the plan did not call for, both forced by the code: `in_use()` matches the
+`delta_r_source` JSON as text, because SQLite and PostgreSQL disagree about JSON operators and a
+check that silently returned zero on one of them would let a cited snapshot be deleted; and the
+snapshot list reports `has_bundled`, because until op 0 is answered a fresh install has no lookup
+at all and that changes what the UI can offer.
 
 **3a. Schema.** `MarineReservoirSnapshot` (with `created_by`, §5.2 rev.) and `MarineReservoirPoint`
 in `models.py`; `delta_r_source` (JSON, nullable) on both sample tables, since it is this feature's
