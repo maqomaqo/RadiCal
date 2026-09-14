@@ -65,6 +65,28 @@ class Project(Base):
     # safe direction for a column that should never be null again.
     owner_id = Column(String, ForeignKey('users.id'), nullable=True, index=True)
 
+    # How precisely this project's coordinates are allowed to LEAVE the app:
+    # 'full' (default), or the size of the cell they are rounded into --
+    # '0.01' (about 1.1 km), '0.1' (about 11 km), '1'. It applies to every
+    # export and every rendered figure and to nothing else; the stored values
+    # stay full precision. Held as the bare number rather than '0.01 degrees'
+    # so the rounding can read it; the degree sign is the UI's business.
+    #
+    # Site coordinates are restricted data for many heritage bodies,
+    # landowners and Indigenous data-governance frameworks, and this is the
+    # control that makes an export shareable. Defaulting to 'full' rather than
+    # a rounded value is deliberate: an export that silently moved a site by a
+    # kilometre would be the worse surprise, and rounding is then the owner's
+    # deliberate act.
+    coordinate_precision = Column(String, nullable=False, default='full')
+
+    # Whether the map may fetch raster basemap tiles. Off by default, per
+    # project, because a tile request tells a third-party tile server which
+    # square of the earth someone is looking at -- the one disclosure the
+    # offline basemap avoids. Defaulting to tiles and mentioning it in a
+    # footnote would be the same disclosure with better manners.
+    map_tiles_enabled = Column(Boolean, nullable=False, default=False)
+
     analyses = relationship('Analysis', back_populates='project')
     samples = relationship('ProjectSample', back_populates='project', cascade='all, delete-orphan')
 
@@ -102,6 +124,14 @@ class ProjectSample(Base):
     # dates from one site share a value -- hence the bulk edit in the UI.
     delta_r = Column(Float, nullable=True)
     delta_r_error = Column(Float, nullable=True)
+
+    # Where the sample came from, in WGS84 decimal degrees. The pair is the
+    # unit: schemas.ProjectSampleInput refuses half of it, for the reason
+    # delta_r_error is refused without delta_r. Stored at full precision
+    # whatever the project's coordinate_precision says -- that setting governs
+    # what LEAVES the app, and degrading data at rest cannot be undone.
+    latitude = Column(Float, nullable=True)   # -90..90
+    longitude = Column(Float, nullable=True)  # -180..180
 
     depth_cm = Column(Float, nullable=True)
 
@@ -277,6 +307,12 @@ class RadiocarbonSample(Base):
     # see schemas.MeasurementInput.delta_r for the sign convention.
     delta_r = Column(Float, nullable=True)
     delta_r_error = Column(Float, nullable=True)
+    # Where the sample came from, in WGS84 decimal degrees -- same field pair
+    # as on ProjectSample, so deploying stays a field-for-field copy. No
+    # elevation, no coordinate uncertainty and no CRS column: a file carrying
+    # any of those is refused by name rather than assumed (services/date_import).
+    latitude = Column(Float, nullable=True)   # -90..90
+    longitude = Column(Float, nullable=True)  # -180..180
     # Prior probability this date does not belong to the population being
     # modelled (OxCal's Outlier()). Persisted, not just applied: a rerun
     # rebuilds the model from these rows, so leaving it off would silently

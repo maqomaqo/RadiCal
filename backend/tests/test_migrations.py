@@ -85,6 +85,92 @@ class TestTheMigrationsBuildTheSchema:
         assert len(heads) == 1, f"the migration history has forked: {heads}"
 
 
+class TestCoordinatesAreAddedAndCanBeUndone:
+    """
+    The one revision that adds coordinates, checked in both directions.
+
+    test_the_migrations_and_the_models_agree above already catches a column
+    declared on a model and never migrated. What it cannot catch is a
+    downgrade that does not undo its own upgrade -- nothing autogenerates
+    backwards -- so the round trip is written out here, on a database holding a
+    row, to show that going back drops the columns and keeps the work.
+    """
+
+    COORDINATE_COLUMNS = {
+        'radiocarbon_samples': {'latitude', 'longitude'},
+        'project_samples': {'latitude', 'longitude'},
+        'projects': {'coordinate_precision', 'map_tiles_enabled'},
+    }
+
+    def _columns(self, engine, table):
+        return {c['name'] for c in inspect(engine).get_columns(table)}
+
+    def test_head_has_the_coordinate_columns(self, blank_db):
+        engine, _ = blank_db
+        _upgrade(engine)
+        for table, columns in self.COORDINATE_COLUMNS.items():
+            assert self._columns(engine, table) >= columns, (
+                f"{table} is missing {columns - self._columns(engine, table)}")
+
+    def test_the_project_settings_default_rather_than_null(self, blank_db):
+        """
+        Both are NOT NULL on a table that already has rows, so the defaults are
+        the migration's business and not the model's. A project made before
+        this ran must come back with full precision and tiles off -- the latter
+        especially: a null read as falsy by accident is not the same as a
+        default that says no.
+        """
+        engine, path = blank_db
+        _upgrade(engine, 'f3b81c60d5a7')
+        con = sqlite3.connect(path)
+        con.execute("INSERT INTO projects (id, name) VALUES ('older', 'Made before coordinates')")
+        con.commit()
+        con.close()
+
+        _upgrade(engine)
+
+        con = sqlite3.connect(path)
+        precision, tiles = con.execute(
+            'SELECT coordinate_precision, map_tiles_enabled FROM projects '
+            "WHERE id = 'older'").fetchone()
+        con.close()
+        assert precision == 'full'
+        assert not tiles
+
+    def test_downgrading_drops_the_columns_and_keeps_the_row(self, blank_db):
+        engine, path = blank_db
+        _upgrade(engine)
+
+        con = sqlite3.connect(path)
+        con.execute(
+            "INSERT INTO projects (id, name, coordinate_precision, map_tiles_enabled) "
+            "VALUES ('kept', 'Has a coordinate', '0.01', 1)")
+        con.commit()
+        con.close()
+
+        with engine.begin() as connection:
+            command.downgrade(_alembic_config(connection), 'f3b81c60d5a7')
+
+        for table, columns in self.COORDINATE_COLUMNS.items():
+            assert not (self._columns(engine, table) & columns), (
+                f"downgrade left {self._columns(engine, table) & columns} on {table}")
+
+        con = sqlite3.connect(path)
+        assert con.execute("SELECT name FROM projects WHERE id = 'kept'").fetchone() is not None
+        con.close()
+
+    def test_upgrading_again_after_a_downgrade_works(self, blank_db):
+        """A downgrade that leaves the table in a state the upgrade cannot run
+        against again is a downgrade that only looked reversible."""
+        engine, _ = blank_db
+        _upgrade(engine)
+        with engine.begin() as connection:
+            command.downgrade(_alembic_config(connection), 'f3b81c60d5a7')
+        _upgrade(engine)
+        for table, columns in self.COORDINATE_COLUMNS.items():
+            assert self._columns(engine, table) >= columns
+
+
 class TestAdoptingAnExistingDatabase:
     """
     A database created before Alembic existed has the tables but no
