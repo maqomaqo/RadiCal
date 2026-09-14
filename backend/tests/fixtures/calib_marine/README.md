@@ -23,7 +23,14 @@ Kept deliberately, not sampled:
   judgements the source truncates at sixteen characters and the one that
   arrives with a leading non-breaking space;
 - **3 rows carrying a ΔR with no uncertainty on it**, which is a real shape in
-  this database and one a weighted mean cannot use.
+  this database and one a weighted mean cannot use;
+- **3 rows whose longitude is outside ±180** — the Chatham Islands at 183.5 and
+  Fiji at −181, real places written with an unwrapped longitude, which the
+  ingest refused outright until it was first run against the whole database;
+- **the points behind §2.3's three published results**, and **every neighbour of
+  Strangford Lough out to N = 10**, so the plan's own acceptance figure for the
+  lookup (−209 ± 44 at N = 5) is an assertion in `tests/test_reservoir.py`
+  rather than a note.
 
 The whole 2060-row response is not committed: at 1.0 MB it would be forty
 times the rest of the fixtures put together, and nothing in it that these 85

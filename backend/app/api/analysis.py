@@ -338,6 +338,7 @@ def _sample_row(
         curve_id=measurement.curve_id,
         delta_r=measurement.delta_r,
         delta_r_error=measurement.delta_r_error,
+        delta_r_source=getattr(measurement, 'delta_r_source', None),
         latitude=getattr(measurement, 'latitude', None),
         longitude=getattr(measurement, 'longitude', None),
         outlier_prior=getattr(measurement, 'outlier_prior', 0.0),
@@ -779,6 +780,7 @@ def calibrate_single(measurement: CalibrateRequest, db: Session = Depends(get_db
             # correction the first run made.
             delta_r=measurement.delta_r,
             delta_r_error=measurement.delta_r_error,
+            delta_r_source=measurement.delta_r_source,
             latitude=measurement.latitude,
             longitude=measurement.longitude,
             reservoir_age=measurement.reservoir_age,
@@ -1339,6 +1341,9 @@ def get_analysis(analysis_id: str, db: Session = Depends(get_db),
                     "curve_id": s.curve_id,
                     "delta_r": s.delta_r,
                     "delta_r_error": s.delta_r_error,
+                    # Same reason again: a derived offset that lost its
+                    # derivation is an offset nobody can account for.
+                    "delta_r_source": s.delta_r_source,
                     # Same reason: left out here, a date would be unplaced by
                     # the next edit of the analysis it belongs to.
                     "latitude": s.latitude,

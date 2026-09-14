@@ -441,3 +441,101 @@ class TestProvenance:
         result = reservoir.lookup(54.5, -5.6, points, n=3)
         record = reservoir.provenance(result)
         assert record['feeding_raw']['1'] == 'Deposit'
+
+
+class TestStrangfordLoughEndToEnd:
+    """
+    The plan's own acceptance figure for this feature, against real data.
+
+    Every other test here builds its points by hand. This one reads the
+    captured calib.org response, takes Strangford Lough's own recorded
+    position out of it, and asks for the nearest five -- so it exercises
+    extract, decode, normalise, nearest and combine in one line, against
+    numbers nobody in this test chose.
+
+    §14 op 4d: *Done when Strangford Lough at N=5 reads -209 ± 44.*
+    """
+    import os as _os
+    FIXTURE = _os.path.join(
+        _os.path.dirname(_os.path.abspath(__file__)),
+        'fixtures', 'calib_marine', 'query_response.html')
+
+    def _points(self):
+        from app.services import reservoir_ingest as ingest
+
+        with open(self.FIXTURE, 'rb') as handle:
+            records, declared = ingest.extract_records(handle.read())
+        rows, report = ingest.records_to_rows(records, declared=declared)
+        assert report.ok, report.errors
+        return rows, [
+            ReservoirPoint(
+                map_no=r.map_no, latitude=r.latitude, longitude=r.longitude,
+                delta_r=r.delta_r, delta_r_error=r.delta_r_error,
+                feeding=r.feeding, feeding_raw=r.feeding_raw,
+                locality=r.locality, reference=r.reference,
+            )
+            for r in rows
+        ]
+
+    def test_strangford_lough_at_five_points(self):
+        rows, points = self._points()
+        anchor = next(r for r in rows if r.map_no == 995)
+        assert anchor.locality == 'Strangford Lough'
+
+        result = reservoir.lookup(
+            anchor.latitude, anchor.longitude, points, n=5,
+            snapshot_id='calib-marine20-test')
+
+        assert round(result.delta_r) == -209
+        assert round(result.delta_r_error) == 44
+        assert result.included_all.map_nos == [995, 993, 994, 992, 527]
+        assert result.nearest_km == 0
+
+    def test_the_value_moves_with_n(self):
+        """
+        §2.5, on real data and in the one place it can be asserted: the same
+        position at N=5 and N=10 gives answers 37 years apart. This is why the
+        panel makes N a live control -- a user who never sees the number move
+        does not know their answer was a choice.
+        """
+        rows, points = self._points()
+        anchor = next(r for r in rows if r.map_no == 995)
+
+        five = reservoir.lookup(anchor.latitude, anchor.longitude, points, n=5)
+        ten = reservoir.lookup(anchor.latitude, anchor.longitude, points, n=10)
+
+        assert round(five.delta_r) == -209
+        assert round(ten.delta_r) == -172
+        assert abs(five.delta_r - ten.delta_r) > 30
+        # And the evidence reaches further for it: 53 km against 144.
+        assert ten.farthest_km > five.farthest_km
+
+    def test_the_counterfactual_is_small_here_and_says_so(self):
+        """
+        Strangford's nearest five include one deposit feeder, and dropping it
+        moves the answer by 3 years -- far below the 35 yr threshold. This is
+        the ordinary case the design is built around: a difference that exists,
+        is computed, is shown, and does not warrant a warning.
+        """
+        rows, points = self._points()
+        anchor = next(r for r in rows if r.map_no == 995)
+        result = reservoir.lookup(anchor.latitude, anchor.longitude, points, n=5)
+
+        assert result.feeding_counts == {'suspension': 4, 'deposit': 1}
+        assert result.suspension_equivalent.n == 4
+        assert result.feeding_shift < reservoir.FEEDING_SHIFT_WARN_YEARS
+        assert result.feeding_shift_matters is False
+
+    def test_the_provenance_names_what_a_reviewer_would_check(self):
+        rows, points = self._points()
+        anchor = next(r for r in rows if r.map_no == 995)
+        result = reservoir.lookup(
+            anchor.latitude, anchor.longitude, points, n=5,
+            snapshot_id='calib-marine20-2026-05-11')
+
+        record = reservoir.provenance(result)
+        # The five map numbers are what makes the value checkable on
+        # calib.org's own page without this app ever calling calib.org.
+        assert record['map_nos'] == [995, 993, 994, 992, 527]
+        assert record['snapshot_id'] == 'calib-marine20-2026-05-11'
+        assert record['feeding'] == {'suspension': 4, 'deposit': 1}

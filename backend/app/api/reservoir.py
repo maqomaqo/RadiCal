@@ -21,12 +21,16 @@ runs when a person asks. Never on a timer, never on startup, never as a side
 effect of a lookup. It issues ONE query against a courtesy interface on
 somebody else's Apache/PHP host -- see services/reservoir_ingest.py.
 """
+from typing import List, Optional
+
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.api.auth import current_user
 from app.models import MarineReservoirSnapshot, User
+from app.services import reservoir
 from app.services import reservoir_registry
 from app.services import reservoir_ingest
 
@@ -184,3 +188,104 @@ def delete_snapshot(
     db.delete(row)
     db.commit()
     return {"success": True, "data": {"deleted_snapshot_id": snapshot_id}}
+
+
+class LookupRequest(BaseModel):
+    """
+    Where to look, and how widely.
+
+    The position is required and the rest have defaults, because the question
+    this answers is "what is the ΔR here" and everything else is a refinement
+    of it.
+    """
+    latitude: float = Field(..., ge=-90, le=90)
+    longitude: float = Field(..., ge=-180, le=180)
+    snapshot_id: str
+    # calib.org's own page defaults to ten. Bounded above because the weighted
+    # mean of two hundred points spread over an ocean is not a local offset,
+    # it is a global average wearing one's clothes.
+    n: int = Field(default=10, ge=1, le=50)
+    # A hard cutoff in kilometres. Off by default: the app shows how far the
+    # points are (§2.6) rather than deciding for the user how far is too far.
+    max_km: Optional[float] = Field(default=None, gt=0, le=20000)
+    exclude_map_nos: List[int] = Field(default_factory=list, max_length=50)
+    suspension_only: bool = False
+
+
+@router.post("/reservoir/lookup")
+def lookup_delta_r(
+    request: LookupRequest,
+    user: User = Depends(current_user),
+):
+    """
+    Derive a ΔR for a position from a snapshot, without telling anybody where
+    it is.
+
+    That is the whole point of the local mirror: this endpoint answers "what
+    reservoir measurements are near HERE" out of a table this installation
+    already has, where asking calib.org the same question would send a site's
+    coordinates to a third party on every lookup.
+
+    Returns the value AND what is needed to judge it -- the sigma, the N, the
+    distance to the nearest point, the point list with habits, and the
+    counterfactual with the biased habit classes dropped. The panel that shows
+    this is obliged to show them; see §11.3, which is the risk that a derived
+    number gets trusted more than it deserves.
+
+    Writes nothing. Applying a value is a separate, explicit act through the
+    bulk update, which is what records the provenance.
+    """
+    if not reservoir_registry.visible_to(request.snapshot_id, owner_id=user.id):
+        raise HTTPException(status_code=404, detail="That snapshot was not found")
+
+    try:
+        rows = reservoir_registry.resolve(request.snapshot_id)
+    except reservoir_registry.SnapshotCorrupt as exc:
+        # A snapshot that no longer hashes to its recorded value must not be
+        # used to derive anything, least of all a number somebody publishes.
+        raise HTTPException(status_code=409, detail=str(exc))
+    except reservoir_registry.SnapshotNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+    points = [
+        reservoir.ReservoirPoint(
+            map_no=row.map_no,
+            latitude=row.latitude,
+            longitude=row.longitude,
+            delta_r=row.delta_r,
+            delta_r_error=row.delta_r_error,
+            feeding=row.feeding,
+            feeding_raw=row.feeding_raw,
+            locality=row.locality,
+            reference=row.reference,
+        )
+        for row in rows
+    ]
+
+    try:
+        result = reservoir.lookup(
+            request.latitude,
+            request.longitude,
+            points,
+            n=request.n,
+            snapshot_id=request.snapshot_id,
+            max_km=request.max_km,
+            exclude_map_nos=request.exclude_map_nos,
+            suspension_only=request.suspension_only,
+        )
+    except reservoir.LookupRefused as exc:
+        # A 200 would invite the caller to use a value that is not there. The
+        # message says what it would have taken, which is the useful part.
+        raise HTTPException(status_code=422, detail=str(exc))
+
+    payload = result.as_dict()
+    # The record to store if this value is applied. Returned with the result
+    # rather than rebuilt on apply, so the provenance describes the lookup the
+    # user actually looked at -- a second computation could differ if the
+    # snapshot changed underneath them.
+    payload['delta_r_source'] = reservoir.provenance(
+        result,
+        max_km=request.max_km,
+        suspension_only=request.suspension_only,
+    )
+    return {"success": True, "data": payload}

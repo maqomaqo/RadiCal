@@ -92,6 +92,11 @@ class MeasurementInput(BaseModel):
     # sample YOUNGER than it would uncorrected. Supersedes `reservoir_age`.
     delta_r: Optional[float] = Field(default=None, ge=-5000, le=5000)
     delta_r_error: Optional[float] = Field(default=None, ge=0, le=5000)
+    # Where a looked-up ΔR came from. Carried through the draft for the same
+    # reason the coordinates are: an edit resubmits whatever it holds, so a
+    # derivation missing here is a derivation deleted by editing the analysis
+    # it belongs to. Null means hand-entered, which is the honest answer.
+    delta_r_source: Optional[Dict[str, Any]] = None
 
     # Where the sample came from, in WGS84 decimal degrees. The bounds are the
     # real ones, not sanity checks: there is no latitude of 91. Degrees and
@@ -295,6 +300,16 @@ class ProjectSampleBulkUpdate(BaseModel):
     latitude: Optional[float] = Field(default=None, ge=-90, le=90)
     longitude: Optional[float] = Field(default=None, ge=-180, le=180)
 
+    # Where a looked-up ΔR came from, as api/reservoir.lookup_delta_r returned
+    # it. Only meaningful alongside a delta_r in the same request: sent on its
+    # own it would attach a derivation to a number it did not derive.
+    #
+    # Its absence is load-bearing. A delta_r arriving WITHOUT one is a hand
+    # edit, and the endpoint clears any provenance already stored -- see
+    # api/project_samples.bulk_update_project_samples. Provenance that
+    # survived an edit would be a lie about the number beside it.
+    delta_r_source: Optional[dict] = None
+
     @field_validator('curve_id')
     @classmethod
     def _known_curve(cls, value: Optional[str]) -> Optional[str]:
@@ -339,6 +354,24 @@ class ProjectSampleBulkUpdate(BaseModel):
                 "delta_r_error cannot be set on its own -- send the offset it "
                 "belongs to"
             )
+        return self
+
+    @model_validator(mode="after")
+    def _provenance_belongs_to_an_offset(self):
+        """
+        A derivation with no derived value attached to it describes nothing.
+
+        Refused rather than ignored, because the mistake it catches is the
+        expensive one: provenance applied on its own would sit beside whatever
+        ΔR happened to already be there and claim to explain it.
+        """
+        sent = self.model_fields_set
+        if 'delta_r_source' in sent and self.delta_r_source is not None:
+            if 'delta_r' not in sent or self.delta_r is None:
+                raise ValueError(
+                    "delta_r_source cannot be sent without the delta_r it "
+                    "describes -- a derivation with no derived value beside "
+                    "it would claim to explain whatever was already there")
         return self
 
     @model_validator(mode="after")

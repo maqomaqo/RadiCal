@@ -638,6 +638,137 @@ class TestDeltaRTravelsWithADeployedDate:
         assert (measurement["latitude"], measurement["longitude"]) == (54.5, -5.6)
 
 
+class TestDeltaRProvenance:
+    """
+    Where a ΔR came from, and the rule that keeps it honest.
+
+    NULL means hand-entered, which is not the same as unknown: it is the app
+    saying it does not know, rather than the app having forgotten. The rule
+    worth testing is the clearing one -- a derivation that survived a hand edit
+    would sit beside a number it did not produce and claim to explain it, which
+    is worse than no record at all.
+    """
+
+    SOURCE = {
+        'method': 'nearest_n',
+        'snapshot_id': 'calib-marine20-2026-05-11',
+        'centre': {'lat': 54.5, 'lon': -5.6},
+        'n': 2,
+        'map_nos': [995, 992],
+        'nearest_km': 0.0,
+    }
+
+    def _marine(self, client, tag):
+        pid = _make_project(client, f'Provenance {tag}')
+        ids = [d['id'] for d in _add_dates(client, pid, [
+            _date(f'{tag}-M1', 3000, sample_type='marine', curve_id='marine20',
+                  material_type='shell'),
+        ])]
+        return pid, ids
+
+    def _apply_lookup(self, client, pid, ids):
+        response = client.patch(f'/api/projects/{pid}/samples', json={
+            'sample_ids': ids,
+            'delta_r': -239, 'delta_r_error': 20,
+            'delta_r_source': self.SOURCE,
+        })
+        assert response.status_code == 200, response.text
+        return response.json()['data']['items'][0]
+
+    def test_a_derived_offset_carries_its_derivation(self, client):
+        pid, ids = self._marine(client, 'carry')
+        item = self._apply_lookup(client, pid, ids)
+        assert item['delta_r'] == -239
+        assert item['delta_r_source']['map_nos'] == [995, 992]
+        assert item['delta_r_source']['snapshot_id'] == 'calib-marine20-2026-05-11'
+
+    def test_a_hand_edited_offset_clears_it(self, client):
+        """
+        The load-bearing one. The same bulk endpoint, without a source: that
+        is somebody typing a number, and the record of a derivation that did
+        not produce it has to go.
+        """
+        pid, ids = self._marine(client, 'clear')
+        self._apply_lookup(client, pid, ids)
+
+        response = client.patch(f'/api/projects/{pid}/samples', json={
+            'sample_ids': ids, 'delta_r': -100, 'delta_r_error': 40})
+        assert response.status_code == 200, response.text
+        item = response.json()['data']['items'][0]
+        assert item['delta_r'] == -100
+        assert item['delta_r_source'] is None
+
+    def test_clearing_the_offset_clears_the_derivation_too(self, client):
+        pid, ids = self._marine(client, 'null')
+        self._apply_lookup(client, pid, ids)
+
+        response = client.patch(f'/api/projects/{pid}/samples',
+                                json={'sample_ids': ids, 'delta_r': None})
+        assert response.status_code == 200
+        item = response.json()['data']['items'][0]
+        assert item['delta_r'] is None
+        assert item['delta_r_source'] is None
+
+    def test_editing_one_date_by_hand_clears_its_derivation(self, client):
+        """The single-date form has no way to send a derivation -- deriving is
+        the lookup's job -- so touching either half clears it."""
+        pid, ids = self._marine(client, 'single')
+        self._apply_lookup(client, pid, ids)
+
+        response = client.patch(f'/api/projects/{pid}/samples/{ids[0]}',
+                                json={'delta_r': -150})
+        assert response.status_code == 200, response.text
+        assert response.json()['data']['delta_r_source'] is None
+
+    def test_an_edit_that_does_not_touch_the_offset_leaves_it_alone(self, client):
+        """A renamed date has not had its ΔR re-derived."""
+        pid, ids = self._marine(client, 'untouched')
+        self._apply_lookup(client, pid, ids)
+
+        response = client.patch(f'/api/projects/{pid}/samples/{ids[0]}',
+                                json={'sample_name': 'Renamed'})
+        assert response.status_code == 200
+        assert response.json()['data']['delta_r_source'] is not None
+
+    def test_a_curve_only_bulk_edit_leaves_it_alone(self, client):
+        pid, ids = self._marine(client, 'curveonly')
+        self._apply_lookup(client, pid, ids)
+
+        response = client.patch(f'/api/projects/{pid}/samples',
+                                json={'sample_ids': ids, 'curve_id': 'marine20'})
+        assert response.status_code == 200
+        assert response.json()['data']['items'][0]['delta_r_source'] is not None
+
+    def test_a_derivation_without_an_offset_is_refused(self, client):
+        """It would sit beside whatever ΔR was already there and claim to
+        explain it."""
+        pid, ids = self._marine(client, 'orphan')
+        response = client.patch(f'/api/projects/{pid}/samples', json={
+            'sample_ids': ids, 'delta_r_source': self.SOURCE})
+        assert response.status_code == 422
+
+    def test_deploying_carries_the_derivation_into_the_analysis(self, client):
+        """A deployed date whose ΔR kept its value but lost its derivation
+        would be an offset nobody could account for."""
+        pid, ids = self._marine(client, 'deploy')
+        self._apply_lookup(client, pid, ids)
+
+        deployed = client.post(f'/api/projects/{pid}/deploy',
+                               json={'name': 'Carried', 'sample_ids': ids}).json()['data']
+        measurement = client.get(
+            f"/api/analysis/{deployed['id']}").json()['data']['measurements'][0]
+        assert measurement['delta_r'] == -239
+        assert measurement['delta_r_source']['map_nos'] == [995, 992]
+
+    def test_a_hand_entered_offset_has_none_from_the_start(self, client):
+        """NULL is the honest answer for a number the app did not derive."""
+        pid = _make_project(client, 'Provenance none')
+        item = _add_dates(client, pid, [
+            _date('HAND', 3000, sample_type='marine', curve_id='marine20',
+                  delta_r=-95, delta_r_error=30)])[0]
+        assert item['delta_r_source'] is None
+
+
 class TestBulkDelete:
     def test_several_dates_go_at_once(self, client):
         pid = _make_project(client, "Bulk delete")

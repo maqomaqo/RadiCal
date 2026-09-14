@@ -71,6 +71,12 @@ export interface ProjectSample {
   curve_id: string
   delta_r: number | null
   delta_r_error: number | null
+  /**
+   * Where a derived ΔR came from, or null for one somebody typed. Null is an
+   * answer rather than a gap: the app saying it does not know, not the app
+   * having forgotten.
+   */
+  delta_r_source: Record<string, unknown> | null
   /** Superseded by delta_r, but still carried on older and imported rows. */
   reservoir_age: number | null
   depth_cm: number | null

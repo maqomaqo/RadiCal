@@ -368,3 +368,132 @@ class TestStoring:
         with pytest.raises(ingest.IngestError) as raised:
             _store(_user_id(ada), 'duplicate')
         assert 'already stored' in str(raised.value)
+
+
+class TestTheLookupEndpoint:
+    """
+    POST /api/reservoir/lookup, over a stored snapshot.
+
+    The endpoint's own job is small -- resolve, verify, hand to
+    services/reservoir.lookup -- so what is tested here is the boundary: that
+    it will not derive from a snapshot it cannot verify, that someone else's
+    snapshot is not reachable through it, and that it returns the provenance
+    record rather than leaving the caller to rebuild one.
+    """
+
+    def _placed(self, client, tag):
+        snapshot = _store(_user_id(client), f'lookup-{tag}')
+        # A position inside the fixture's own spread, so there is something
+        # near it to find.
+        rows, _ = _fixture_rows()
+        anchor = next(r for r in rows if r.delta_r is not None and r.delta_r_error)
+        return snapshot, anchor
+
+    def test_it_derives_a_value_and_says_what_from(self, ada):
+        snapshot, anchor = self._placed(ada, 'basic')
+        response = ada.post('/api/reservoir/lookup', json={
+            'latitude': anchor.latitude, 'longitude': anchor.longitude,
+            'snapshot_id': snapshot.id, 'n': 5,
+        })
+        assert response.status_code == 200, response.text
+        data = response.json()['data']
+
+        assert data['delta_r'] is not None
+        assert data['delta_r_error'] is not None
+        assert data['n'] >= 2
+        assert data['nearest_km'] is not None
+        assert len(data['points']) >= 2
+
+    def test_it_returns_the_record_to_store_if_the_value_is_applied(self, ada):
+        """Built here rather than on apply, so the provenance describes the
+        lookup the user actually looked at -- a second computation could
+        differ if the snapshot changed underneath them."""
+        snapshot, anchor = self._placed(ada, 'provenance')
+        data = ada.post('/api/reservoir/lookup', json={
+            'latitude': anchor.latitude, 'longitude': anchor.longitude,
+            'snapshot_id': snapshot.id, 'n': 5,
+        }).json()['data']
+
+        record = data['delta_r_source']
+        assert record['snapshot_id'] == snapshot.id
+        assert record['map_nos']
+        assert record['centre'] == {'lat': anchor.latitude, 'lon': anchor.longitude}
+        assert record['computed_at']
+
+    def test_the_counterfactual_comes_back_whether_or_not_it_was_asked_for(self, ada):
+        snapshot, anchor = self._placed(ada, 'counterfactual')
+        data = ada.post('/api/reservoir/lookup', json={
+            'latitude': anchor.latitude, 'longitude': anchor.longitude,
+            'snapshot_id': snapshot.id, 'n': 10,
+        }).json()['data']
+
+        assert 'suspension_equivalent' in data
+        assert data['feeding_shift_warn_years'] == 35.0
+        assert 'feeding_shift_matters' in data
+
+    def test_it_writes_nothing(self, ada):
+        """Deriving a value and applying one are separate acts. This endpoint
+        only answers a question."""
+        snapshot, anchor = self._placed(ada, 'readonly')
+        before = ada.get(f'/api/reservoir/snapshots/{snapshot.id}').json()['data']
+        ada.post('/api/reservoir/lookup', json={
+            'latitude': anchor.latitude, 'longitude': anchor.longitude,
+            'snapshot_id': snapshot.id, 'n': 5,
+        })
+        after = ada.get(f'/api/reservoir/snapshots/{snapshot.id}').json()['data']
+        assert before['content_sha256'] == after['content_sha256']
+        assert after['in_use_by'] == 0
+
+    def test_another_account_cannot_derive_from_your_snapshot(self, ada, grace):
+        """A 404, as everywhere else: an id must not be usable to discover
+        that somebody else's snapshot exists."""
+        snapshot, anchor = self._placed(ada, 'private')
+        response = grace.post('/api/reservoir/lookup', json={
+            'latitude': anchor.latitude, 'longitude': anchor.longitude,
+            'snapshot_id': snapshot.id, 'n': 5,
+        })
+        assert response.status_code == 404
+
+    def test_a_tampered_snapshot_will_not_derive_anything(self, ada):
+        """
+        The refusal that matters most. A snapshot that no longer hashes to its
+        recorded value must not produce a number somebody then publishes.
+        """
+        from app.database import SessionLocal
+
+        snapshot, anchor = self._placed(ada, 'tampered')
+        with SessionLocal() as db:
+            point = (
+                db.query(MarineReservoirPoint)
+                .filter(MarineReservoirPoint.snapshot_id == snapshot.id)
+                .first()
+            )
+            point.delta_r = (point.delta_r or 0) + 5
+            db.commit()
+
+        response = ada.post('/api/reservoir/lookup', json={
+            'latitude': anchor.latitude, 'longitude': anchor.longitude,
+            'snapshot_id': snapshot.id, 'n': 5,
+        })
+        assert response.status_code == 409
+        assert 'reproduced' in response.json()['detail']
+
+    def test_nothing_within_range_is_a_422_that_says_so(self, ada):
+        snapshot, _anchor = self._placed(ada, 'empty')
+        response = ada.post('/api/reservoir/lookup', json={
+            'latitude': 0, 'longitude': 0,
+            'snapshot_id': snapshot.id, 'n': 5, 'max_km': 1,
+        })
+        assert response.status_code == 422
+        assert '1 km' in response.json()['detail']
+
+    def test_a_position_off_the_earth_is_refused_by_the_schema(self, ada):
+        snapshot, _anchor = self._placed(ada, 'offearth')
+        assert ada.post('/api/reservoir/lookup', json={
+            'latitude': 91, 'longitude': 0, 'snapshot_id': snapshot.id,
+        }).status_code == 422
+
+    def test_an_anonymous_request_is_refused(self, anonymous_client):
+        assert anonymous_client.post('/api/reservoir/lookup', json={
+            'latitude': 54.5, 'longitude': -5.6, 'snapshot_id': 'anything',
+        }).status_code == 401

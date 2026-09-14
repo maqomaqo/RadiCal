@@ -25,6 +25,8 @@ import {
   MenuItem,
   Popover,
   Stack,
+  Tab,
+  Tabs,
   TextField,
   Tooltip,
   Typography,
@@ -40,11 +42,19 @@ import PlaceIcon from '@mui/icons-material/Place'
 
 import { curveOptions, type CurveSpec } from '@/api/curves'
 import { isMarineMeasurement } from '@/components/MeasurementFields'
+import DeltaRLookupPanel from '@/components/DeltaRLookupPanel'
+import type { DeltaRLookupValue } from '@/components/DeltaRLookupPanel'
 import type { ProjectSample } from '@/components/ProjectSampleTable'
 
 export interface DeltaRValue {
   delta_r: number | null
   delta_r_error: number | null
+  /**
+   * Where a derived offset came from. Absent for a typed one, and its
+   * ABSENCE is what clears any derivation already stored -- see §5.5:
+   * provenance that survives a hand edit is a lie about the number beside it.
+   */
+  delta_r_source?: Record<string, unknown>
 }
 
 interface Props {
@@ -79,6 +89,10 @@ export default function SampleSelectionBar({
   const [deltaAnchor, setDeltaAnchor] = useState<HTMLElement | null>(null)
   const [deltaR, setDeltaR] = useState('')
   const [deltaRError, setDeltaRError] = useState('')
+  // Typed or derived. Typing is first because it is what works without a
+  // reservoir database ingested, and because a date whose position is not
+  // recorded has nothing to derive from.
+  const [deltaTab, setDeltaTab] = useState<'typed' | 'derived'>('typed')
 
   const count = selected.length
 
@@ -116,14 +130,26 @@ export default function SampleSelectionBar({
     setDeltaAnchor(null)
     setDeltaR('')
     setDeltaRError('')
+    setDeltaTab('typed')
   }
 
   const applyDeltaR = () => {
+    // No delta_r_source: this is a number somebody typed, and sending none is
+    // what clears a derivation that no longer describes it.
     onAssignDeltaR(
       clearing
         ? { delta_r: null, delta_r_error: null }
         : { delta_r: deltaRNumber, delta_r_error: deltaRErrorNumber },
     )
+    closeDelta()
+  }
+
+  const applyDerivedDeltaR = (value: DeltaRLookupValue) => {
+    onAssignDeltaR({
+      delta_r: value.delta_r,
+      delta_r_error: value.delta_r_error,
+      delta_r_source: value.delta_r_source,
+    })
     closeDelta()
   }
 
@@ -274,6 +300,27 @@ export default function SampleSelectionBar({
         onClose={closeDelta}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
       >
+        <Tabs
+          value={deltaTab}
+          onChange={(_event, value) => setDeltaTab(value)}
+          variant="fullWidth"
+          sx={{ borderBottom: 1, borderColor: 'divider' }}
+        >
+          <Tab value="typed" label="Enter a value" />
+          {/* Second, not first: it needs a reservoir database ingested and a
+              position on the dates, and neither is guaranteed. */}
+          <Tab value="derived" label="Derive from position" />
+        </Tabs>
+
+        {deltaTab === 'derived' ? (
+          <DeltaRLookupPanel
+            dates={selected}
+            marineCount={marineCount}
+            onApply={applyDerivedDeltaR}
+            onCancel={closeDelta}
+            busy={busy}
+          />
+        ) : (
         <Box sx={{ p: 2, width: 320 }}>
           <Typography variant="subtitle2" gutterBottom>
             Local reservoir offset
@@ -344,6 +391,7 @@ export default function SampleSelectionBar({
             </Typography>
           )}
         </Box>
+        )}
       </Popover>
     </Box>
   )

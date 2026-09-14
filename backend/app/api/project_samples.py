@@ -59,6 +59,9 @@ def _serialize(sample: ProjectSample) -> dict:
         "reservoir_age": sample.reservoir_age,
         "delta_r": sample.delta_r,
         "delta_r_error": sample.delta_r_error,
+        # NULL means hand-entered, which is not the same as unknown: it is the
+        # app saying it does not know where this number came from, honestly.
+        "delta_r_source": sample.delta_r_source,
         # Full precision, always. project.coordinate_precision governs what
         # leaves the app in an EXPORT or a figure (api/results.py), not what
         # the app's own UI reads back to the owner of the project.
@@ -174,6 +177,14 @@ def update_project_sample(
             value = value.strip() or None
         setattr(sample, field, value)
 
+    # A ΔR edited here is a ΔR typed by a person, so any derivation stored
+    # against it stops being true of it. This form has no way to send one --
+    # deriving a value is the lookup's job, through the bulk path -- so
+    # touching either half clears it. See §5.5: provenance that survives an
+    # edit is a lie about the number beside it.
+    if 'delta_r' in provided or 'delta_r_error' in provided:
+        sample.delta_r_source = None
+
     # The ordering check cannot live on ProjectSampleUpdate, which may carry
     # only one of the pair, so it is applied to the merged result here.
     if sample.tpq_age_bp is not None and sample.taq_age_bp is not None:
@@ -270,6 +281,12 @@ def bulk_update_project_samples(
     work, which matters because "everything from this site" is how dates
     sharing an offset are naturally selected.
 
+    **delta_r_source** rides with delta_r and is cleared by its absence. A ΔR
+    the lookup derived arrives with the record that reproduces it; a ΔR
+    somebody typed arrives without one, and that clears whatever was there.
+    Provenance surviving a hand edit would describe a number it did not
+    produce -- see §5.5 of the spatial plan.
+
     **latitude/longitude** go to the whole selection, marine or not, because
     where a date came from is a fact about the place rather than about the
     material. This is the path the map's "place on map" uses: dates from one
@@ -331,6 +348,12 @@ def bulk_update_project_samples(
                 sample.delta_r = request.delta_r
                 sample.delta_r_error = (
                     request.delta_r_error if request.delta_r is not None else None)
+                # An offset arriving WITHOUT a derivation is a hand edit, and
+                # any provenance already stored is now a lie about the number
+                # beside it. Cleared rather than kept: a record saying this
+                # value came from five map numbers, sitting next to a value
+                # somebody typed, is worse than no record at all.
+                sample.delta_r_source = request.delta_r_source
                 changed.add(sample.id)
             else:
                 skipped.append(sample.id)
@@ -493,6 +516,9 @@ def deploy_samples_to_analysis(
             # came from, so a deployed date arrives already corrected.
             delta_r=src.delta_r,
             delta_r_error=src.delta_r_error,
+            # Carried too: a deployed date whose ΔR kept its value but lost
+            # its derivation would be an offset nobody could account for.
+            delta_r_source=src.delta_r_source,
             # And for the same reason: where the sample came from travels with
             # it. An analysis that lost the coordinates could not be mapped,
             # and a dispersal model reads them from its own deployed copies.
