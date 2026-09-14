@@ -426,3 +426,71 @@ class TestTheQueryIsTheOneTheSchemaNeeds:
         position and an offset. An inner join would silently shrink the
         database."""
         assert 'left join taxa' in ingest.SOURCE_QUERY
+
+
+class TestFreshnessProbe:
+    """
+    The 2 KB question: what does the source hold now?
+
+    Its response has a DIFFERENT shape from the join query's -- calib.org
+    renders a one-row aggregate transposed, one <tr> per column -- so it gets
+    its own reader. Conflating the two would have produced one function that
+    was right about neither.
+    """
+
+    FRESHNESS = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        'fixtures', 'calib_marine', 'freshness_response.html')
+
+    def _raw(self):
+        with open(self.FRESHNESS, 'rb') as handle:
+            return handle.read()
+
+    def test_it_is_actually_small(self):
+        """The whole basis of offering this as a button: 2 KB against the
+        megabyte a full fetch costs."""
+        assert len(self._raw()) < 4096
+
+    def test_it_reads_the_count_and_the_stamp(self):
+        freshness = ingest.extract_freshness(self._raw())
+        assert freshness.record_count == 2060
+        assert freshness.source_last_changed is not None
+        assert freshness.source_last_changed.date().isoformat() == '2026-05-11'
+
+    def test_a_response_with_no_table_is_refused(self):
+        with pytest.raises(ingest.IngestError) as raised:
+            ingest.extract_freshness(b'<html><body>nope</body></html>')
+        assert 'no result table' in str(raised.value)
+
+    def test_a_response_with_no_count_is_refused(self):
+        """
+        A probe that silently read zero would report the source as empty and
+        invite a re-ingest of nothing.
+        """
+        tampered = self._raw().replace(b'count(*)', b'something_else')
+        with pytest.raises(ingest.IngestError) as raised:
+            ingest.extract_freshness(tampered)
+        assert 'row count' in str(raised.value)
+
+    def test_a_count_that_is_not_a_number_is_refused(self):
+        tampered = self._raw().replace(
+            b'<td>count(*)</td><td>2060</td>', b'<td>count(*)</td><td>lots</td>')
+        with pytest.raises(ingest.IngestError):
+            ingest.extract_freshness(tampered)
+
+    def test_a_missing_stamp_is_survivable(self):
+        """
+        The count alone still answers "has this grown?", which is what the
+        button is for. Refusing the whole probe over a missing timestamp would
+        be disproportionate.
+        """
+        tampered = self._raw().replace(b'max(last_changed)', b'max(nothing)')
+        freshness = ingest.extract_freshness(tampered)
+        assert freshness.record_count == 2060
+        assert freshness.source_last_changed is None
+
+    def test_the_probe_query_asks_only_for_the_two_numbers(self):
+        """It must stay cheap. A probe that grew a column would stop being a
+        probe."""
+        assert ingest.FRESHNESS_QUERY == (
+            'select count(*), max(last_changed) from details')

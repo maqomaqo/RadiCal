@@ -90,7 +90,9 @@ def _store(owner_id, snapshot_suffix, rows=None):
     else:
         report = ingest.IngestReport()
         report.row_count = len(rows)
-    report.source_last_changed = datetime(2026, 5, 11)
+    # To the second, as a real ingest records it: the maximum last_changed
+    # across the rows, not a date with the time thrown away.
+    report.source_last_changed = datetime(2026, 5, 11, 10, 15, 16)
 
     with SessionLocal() as db:
         return ingest.store(
@@ -497,3 +499,105 @@ class TestTheLookupEndpoint:
         assert anonymous_client.post('/api/reservoir/lookup', json={
             'latitude': 54.5, 'longitude': -5.6, 'snapshot_id': 'anything',
         }).status_code == 401
+
+
+class TestTheFreshnessEndpoint:
+    """
+    GET /api/reservoir/freshness -- what the source has, beside what we have.
+
+    The fetch is stubbed throughout: the suite must never probe calib.org, for
+    the reason the one-query rule exists. What is tested is the comparison and
+    the refusal to act on it.
+    """
+
+    def _remote(self, count=2060, changed='2026-05-11 10:15:16'):
+        from datetime import datetime
+        return ingest.Freshness(
+            record_count=count,
+            source_last_changed=(
+                datetime.strptime(changed, '%Y-%m-%d %H:%M:%S') if changed else None),
+        )
+
+    def test_it_reports_both_sides(self, ada, monkeypatch):
+        snapshot = _store(_user_id(ada), 'freshness-both')
+        monkeypatch.setattr(ingest, 'fetch_freshness', lambda *a, **k: self._remote())
+
+        data = ada.get('/api/reservoir/freshness').json()['data']
+        assert data['source']['record_count'] == 2060
+        assert data['mine']['snapshot_id'] == snapshot.id
+        assert data['mine']['record_count'] == snapshot.record_count
+
+    def test_a_grown_source_reads_as_behind(self, ada, monkeypatch):
+        _store(_user_id(ada), 'freshness-grown')
+        monkeypatch.setattr(
+            ingest, 'fetch_freshness',
+            lambda *a, **k: self._remote(count=2078, changed='2026-08-02 09:00:00'))
+
+        data = ada.get('/api/reservoir/freshness').json()['data']
+        assert data['behind'] is True
+        assert data['source']['record_count'] == 2078
+
+    def test_an_unchanged_source_does_not(self, ada, monkeypatch):
+        """
+        Compared on the SOURCE's own last-changed, not on when we fetched: two
+        installs that ingested the same unchanged database on different days
+        are equally current, and saying otherwise would invite a re-ingest that
+        achieved nothing.
+        """
+        snapshot = _store(_user_id(ada), 'freshness-current')
+        # Exactly what the stored snapshot recorded -- which is what an
+        # unchanged source looks like.
+        monkeypatch.setattr(
+            ingest, 'fetch_freshness',
+            lambda *a, **k: self._remote(
+                count=snapshot.record_count, changed='2026-05-11 10:15:16'))
+
+        data = ada.get('/api/reservoir/freshness').json()['data']
+        assert data['behind'] is False
+
+    def test_an_account_with_nothing_mirrored_is_behind(self, grace, monkeypatch):
+        """The state a fresh install is in, and the one the button exists
+        for."""
+        monkeypatch.setattr(ingest, 'fetch_freshness', lambda *a, **k: self._remote())
+        data = grace.get('/api/reservoir/freshness').json()['data']
+        assert data['mine'] is None
+        assert data['behind'] is True
+
+    def test_it_never_ingests(self, ada, monkeypatch):
+        """
+        The whole point of §5.6. A ΔR that changed because a remote database
+        changed, underneath a published analysis, is the failure the snapshot
+        rules exist to prevent -- so this answers and does nothing else.
+        """
+        monkeypatch.setattr(ingest, 'fetch_freshness', lambda *a, **k: self._remote())
+
+        def refuse(*_a, **_k):
+            raise AssertionError('the freshness probe must not fetch the database')
+        monkeypatch.setattr(ingest, 'fetch_records', refuse)
+
+        before = ada.get('/api/reservoir/snapshots').json()['data']['items']
+        ada.get('/api/reservoir/freshness')
+        after = ada.get('/api/reservoir/snapshots').json()['data']['items']
+        assert len(before) == len(after)
+
+    def test_an_unreachable_host_is_a_503_and_not_a_disaster(self, ada, monkeypatch):
+        """The mirror already stored is unaffected: this breaks refresh, never
+        analysis."""
+        def unreachable(*_a, **_k):
+            raise ingest.IngestUnavailable('calib.org could not be reached')
+        monkeypatch.setattr(ingest, 'fetch_freshness', unreachable)
+
+        assert ada.get('/api/reservoir/freshness').status_code == 503
+        # And the snapshots are still there and still usable.
+        assert ada.get('/api/reservoir/snapshots').status_code == 200
+
+    def test_a_response_that_is_not_this_database_is_a_502(self, ada, monkeypatch):
+        def wrong(*_a, **_k):
+            raise ingest.IngestError('The freshness probe returned no result table')
+        monkeypatch.setattr(ingest, 'fetch_freshness', wrong)
+        assert ada.get('/api/reservoir/freshness').status_code == 502
+
+    def test_an_anonymous_request_is_refused(self, anonymous_client):
+        """Explicit means a person asked, and a person is somebody with an
+        account."""
+        assert anonymous_client.get('/api/reservoir/freshness').status_code == 401

@@ -35,6 +35,7 @@ import { Link as RouterLink } from 'react-router-dom'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import ImportCurveDialog from '@/components/ImportCurveDialog'
 import MixCurvesDialog from '@/components/MixCurvesDialog'
+import ReservoirSnapshotCard from '@/components/ReservoirSnapshotCard'
 import {
   curveExportUrl,
   deleteCurve,
@@ -338,6 +339,11 @@ export default function Curves() {
           </Table>
         </TableContainer>
       )}
+
+      {/* Under the curves rather than beside them: a reservoir snapshot is
+          the same KIND of thing -- versioned reference data a published result
+          depends on -- but it is not a curve, and only marine dates touch it. */}
+      <ReservoirSnapshotCard />
 
       <ImportCurveDialog
         open={importOpen}

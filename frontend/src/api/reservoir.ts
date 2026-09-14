@@ -143,3 +143,53 @@ export async function lookupDeltaR(request: LookupRequest): Promise<LookupResult
   const parsed = await readOrThrow(response)
   return parsed.data as LookupResult
 }
+
+export interface Freshness {
+  source: { record_count: number; source_last_changed: string | null }
+  mine: {
+    snapshot_id: string
+    record_count: number | null
+    source_last_changed: string | null
+  } | null
+  /** Whether re-ingesting would gain anything. True when nothing is mirrored. */
+  behind: boolean
+}
+
+/**
+ * Ask calib.org what it holds now.
+ *
+ * Costs about 2 KB against the megabyte a full fetch costs, and it is called
+ * only when somebody presses the button. Never on mount: a page that probed a
+ * third party every time it was opened would be making a request its reader
+ * did not ask for, and this app's whole position on that is that reaching the
+ * network is a decision.
+ */
+export async function fetchFreshness(): Promise<Freshness> {
+  const parsed = await readOrThrow(await fetch('/api/reservoir/freshness'))
+  return parsed.data as Freshness
+}
+
+/**
+ * Fetch the whole database and store it as a new snapshot.
+ *
+ * Never automatic, and never an update in place. A ΔR that changed because a
+ * remote database changed, underneath an analysis somebody has already
+ * published, is exactly the failure the snapshot rules exist to prevent -- so
+ * this adds a snapshot beside the old one, which stays resolvable for as long
+ * as anything cites it.
+ */
+export async function ingestSnapshot(): Promise<{
+  snapshot: SnapshotSpec
+  report: Record<string, unknown>
+}> {
+  const response = await fetch('/api/reservoir/snapshots', { method: 'POST' })
+  const body = await response.json().catch(() => null)
+  if (!response.ok) throw new Error(formatApiError(body))
+  if (!body?.success) {
+    // A 200 carrying problems: the request worked and the answer is what was
+    // wrong with the source. The errors are the useful part.
+    const errors = (body?.data?.errors ?? []) as string[]
+    throw new Error(errors.join('; ') || formatApiError(body))
+  }
+  return body.data as { snapshot: SnapshotSpec; report: Record<string, unknown> }
+}

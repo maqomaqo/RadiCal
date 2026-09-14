@@ -67,6 +67,14 @@ EXPECTED_COLUMNS = (
     'c14err', 'labid', 'last_changed', 'genus', 'species', 'feeding',
 )
 
+# The freshness probe: what the source has now, without fetching any of it.
+#
+# 2 KB against the 1.0 MB of a full fetch, which is what makes asking cheap
+# enough to offer as a button. It is still EXPLICIT -- nothing runs it on a
+# timer or on startup -- because the answer is only ever an invitation to
+# re-ingest, and re-ingesting is a decision.
+FRESHNESS_QUERY = 'select count(*), max(last_changed) from details'
+
 # Where the query interface lives. http rather than https deliberately: the
 # host's TLS is not reachable, and this fetch carries no credentials and no
 # coordinates -- it pulls a published reference table down whole. Nothing
@@ -280,6 +288,72 @@ def extract_records(raw: bytes) -> Tuple[List[Dict[str, bytes]], Optional[int]]:
         records.append(dict(zip(EXPECTED_COLUMNS, cells)))
 
     return records, declared
+
+
+# A one-row aggregate comes back TRANSPOSED: calib.org renders
+# `select count(*), max(last_changed)` as one <tr> per column --
+# `<td>count(*)</td><td>2060</td>` -- rather than as a header row and a data
+# row. A different shape from the join query's, so it gets its own reader
+# rather than a flag on extract_records; conflating the two would mean one
+# function that is right about neither.
+_AGGREGATE_ROW = re.compile(
+    rb'<tr>\s*<td>([^<]*)</td>\s*<td>([^<]*)</td>\s*</tr>', re.I | re.S)
+
+
+@dataclass
+class Freshness:
+    """What the source says it holds now, beside what we hold."""
+    record_count: int
+    source_last_changed: Optional[datetime]
+
+    def as_dict(self) -> Dict[str, Any]:
+        return {
+            'record_count': self.record_count,
+            'source_last_changed': (
+                self.source_last_changed.isoformat()
+                if self.source_last_changed else None),
+        }
+
+
+def extract_freshness(raw: bytes) -> Freshness:
+    """
+    The row count and last-changed stamp out of a probe response.
+
+    Fails loudly on anything else, for the same reason extract_records does:
+    a probe that silently read zero would report the source as empty and
+    invite a re-ingest that destroyed nothing but wasted the user's time
+    wondering why.
+    """
+    start = _TABLE_START.search(raw)
+    if not start:
+        raise IngestError(
+            'The freshness probe returned no result table. The query interface '
+            'may have changed, or the query may have been rejected.')
+
+    values: Dict[str, str] = {}
+    for match in _AGGREGATE_ROW.finditer(raw[start.end():]):
+        label, _how = decode_field(match.group(1))
+        value, _how = decode_field(match.group(2))
+        if label is not None:
+            values[label.strip().lower()] = (value or '').strip()
+
+    count_text = values.get('count(*)')
+    if count_text is None:
+        raise IngestError(
+            f'The freshness probe did not report a row count. Got {list(values)}.')
+    try:
+        count = int(count_text)
+    except ValueError:
+        raise IngestError(
+            f'The freshness probe reported a row count of {count_text!r}, '
+            'which is not a number.')
+
+    return Freshness(
+        record_count=count,
+        # Absent rather than fatal: the count alone still answers "has this
+        # grown?", which is the question the button is for.
+        source_last_changed=_parse_timestamp(values.get('max(last_changed)')),
+    )
 
 
 def _number(value: Optional[str]) -> Optional[float]:
@@ -753,23 +827,47 @@ def fetch_records(timeout: int = 180) -> Tuple[List[Dict[str, bytes]], Optional[
         ),
     })
 
+    # Raw bytes, never requests' decoded .text: it would guess a codec for the
+    # whole document from a header that is wrong about 60 of its fields.
+    return extract_records(_query(session, SOURCE_QUERY, timeout))
+
+
+def _query(session, query: str, timeout: int) -> bytes:
+    """One POST to the query interface, as raw bytes."""
     try:
-        # What the form does: the query endpoint answers in the context of a
-        # session, and the page says so out loud.
         session.get(SESSION_URL, timeout=timeout)
-        response = session.post(
-            QUERY_URL, data={'query': SOURCE_QUERY}, timeout=timeout)
+        response = session.post(QUERY_URL, data={'query': query}, timeout=timeout)
     except Exception as exc:
         raise IngestUnavailable(
-            f'calib.org could not be reached: {exc}. The mirror already '
-            'stored, if any, is unaffected -- a failed fetch breaks refresh, '
-            'never analysis.')
-
+            f'calib.org could not be reached: {exc}. Whatever is already '
+            'mirrored is unaffected -- this breaks refresh, never analysis.')
     if response.status_code != 200:
         raise IngestUnavailable(
-            f'calib.org answered {response.status_code} to the query. '
-            'Nothing was stored.')
+            f'calib.org answered {response.status_code} to the query.')
+    return response.content
 
-    # response.content, never response.text: requests would guess a codec for
-    # the whole document from a header that is wrong about 60 of its fields.
-    return extract_records(response.content)
+
+def fetch_freshness(timeout: int = 60) -> Freshness:
+    """
+    Ask the source what it holds now, without fetching any of it.
+
+    Two KB against the megabyte a full fetch costs, which is what makes this
+    cheap enough to put behind a button. What it is NOT is automatic: nothing
+    calls this on a timer or on startup. A ΔR that changed because a remote
+    database changed, underneath an analysis somebody has already published, is
+    exactly the failure the snapshot rules exist to prevent -- so the answer
+    here is an invitation to re-ingest and never an act of one.
+    """
+    try:
+        import requests
+    except ImportError as exc:  # pragma: no cover - requests is a dependency
+        raise IngestUnavailable(f'The HTTP client is unavailable: {exc}')
+
+    session = requests.Session()
+    session.headers.update({
+        'User-Agent': (
+            'RadiCal/1.0 (radiocarbon analysis; marine reservoir mirror; '
+            'freshness probe)'
+        ),
+    })
+    return extract_freshness(_query(session, FRESHNESS_QUERY, timeout))

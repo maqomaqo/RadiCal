@@ -90,6 +90,75 @@ def get_snapshot(snapshot_id: str, user: User = Depends(current_user)):
     return {"success": True, "data": payload}
 
 
+@router.get("/reservoir/freshness")
+def check_freshness(user: User = Depends(current_user)):
+    """
+    What calib.org holds now, beside what this installation holds.
+
+    **Explicit, and only ever informational.** Nothing calls this on a timer or
+    on startup, and it never re-ingests: a ΔR that changed because a remote
+    database changed, underneath an analysis somebody has already published, is
+    exactly the failure the snapshot rules exist to prevent. The answer is an
+    invitation, and the button beside it is the decision.
+
+    It costs about 2 KB against the megabyte a full fetch costs, which is what
+    makes asking cheap enough to offer at all.
+
+    A 503 when the host cannot be reached is not an error state for the app:
+    the mirror already stored is unaffected, and this breaks refresh rather
+    than analysis.
+    """
+    specs = reservoir_registry.list_specs(owner_id=user.id)
+    # The newest thing this account could be looking at. Compared against the
+    # SOURCE's own last-changed rather than against when we fetched: two
+    # installs that ingested the same unchanged database on different days are
+    # equally current, and saying otherwise would invite a pointless re-ingest.
+    current = max(
+        (s for s in specs if s.source_last_changed),
+        key=lambda s: s.source_last_changed,
+        default=None,
+    )
+
+    try:
+        remote = reservoir_ingest.fetch_freshness()
+    except reservoir_ingest.IngestUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    except reservoir_ingest.IngestError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    mine_count = current.record_count if current else None
+    mine_changed = current.source_last_changed if current else None
+    # String comparison is enough and is what avoids a timezone question the
+    # source does not answer: both are the source's own ISO stamps, and the
+    # only thing being asked is whether one is later than the other.
+    remote_changed = (
+        remote.source_last_changed.isoformat() if remote.source_last_changed else None)
+    behind = bool(
+        current is None
+        or (remote_changed and mine_changed and remote_changed > mine_changed)
+        or (mine_count is not None and remote.record_count != mine_count)
+    )
+
+    return {
+        "success": True,
+        "data": {
+            "source": remote.as_dict(),
+            "mine": (
+                {
+                    "snapshot_id": current.id,
+                    "record_count": mine_count,
+                    "source_last_changed": mine_changed,
+                }
+                if current else None
+            ),
+            # True when there is something to gain by re-ingesting -- including
+            # the case where nothing is mirrored at all, which is the one a
+            # fresh install is in.
+            "behind": behind,
+        },
+    }
+
+
 @router.post("/reservoir/snapshots")
 def create_snapshot(
     db: Session = Depends(get_db),

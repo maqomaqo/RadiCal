@@ -1081,11 +1081,11 @@ else changes the schema.
 Operations within a feature run in order. Features 1–2 and 3 are independent and can interleave;
 4 waits for both; 6 waits for 1–2 and for the three §13 decisions marked below.
 
-*Features 1–4 are done (2026-09-14) apart from op 3d, which op 0 still gates. Alembic head is
+*Features 1–5 are done (2026-09-14) apart from op 3d, which op 0 still gates. Alembic head is
 `b7c4e0a13d92`. What op 0 still buys is the BUNDLED snapshot — a fresh install with a working
 lookup and no network, and two installs agreeing on what they compute; until then the lookup runs
-on a snapshot somebody ingested. Feature 5 (freshness) and feature 6 (wave of advance) are next;
-6's prerequisite on 1–2 is met, leaving only the three §13 decisions.*
+on a snapshot somebody ingested, which feature 5's card is now the way to get. Feature 6 (wave of
+advance) is next; its prerequisite on 1–2 is met, leaving only the three §13 decisions.*
 
 ### Op 0 — the permission request *(human; start now, longest lead time)*
 
@@ -1291,7 +1291,28 @@ the counterfactual line, the ≥ 35 yr warning, the one preset, the snapshot id.
 three fields to the selection through 4c. *Done when* Strangford Lough at N=5 reads −209 ± 44 in
 the UI and the stored `delta_r_source` reproduces it.
 
-### Feature 5 — freshness (§5.6)
+### Feature 5 — freshness (§5.6) — **done 2026-09-14**
+
+Two things were done differently from the text below:
+
+- **The line lives in its own card, not in the curve list.** `ReservoirSnapshotCard.tsx`, mounted
+  under the curves table. A snapshot is the same *kind* of thing as a calibration curve — versioned
+  reference data an already-published result depends on, immutable once stored, citable by id — but
+  it is not one, and only marine dates ever touch it. Weaving it into the list would have made it
+  read as a curve. It carries three states the list has no room for: nothing mirrored, mirrored and
+  current, mirrored and behind.
+- **The probe is a second query, not a parse of the big one.** `FRESHNESS_QUERY` is `select
+  count(*), max(last_changed) from details` against the same Generalized Query endpoint, and
+  `extract_freshness` reads the single aggregate row. It costs 2.2 KB measured against calib.org,
+  versus about a megabyte for the records. `_query` is now shared by `fetch_records` and
+  `fetch_freshness`; that was the whole of the backend change beyond the route, since the ingest
+  the button calls is op 3c's `POST /reservoir/snapshots`, unchanged.
+
+Nothing in the card reaches calib.org on mount. Opening the page is one local request for the
+snapshot list; asking calib.org what it holds is a button, and re-ingesting is a second button.
+The reason is not politeness about somebody's server: a ΔR that changed because a remote database
+changed, underneath an analysis already published, is exactly the failure a frozen snapshot exists
+to prevent, so refreshing has to be a decision a person takes at a moment they chose.
 
 **5a.** `GET /api/reservoir/freshness` (auth, explicit, the 2 KB probe) and one line plus the
 ingest button on `Curves.tsx`, in the register the curve list already uses.

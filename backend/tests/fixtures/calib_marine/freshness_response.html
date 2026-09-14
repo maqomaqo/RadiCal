@@ -1,0 +1,72 @@
+<head><title>CHRONO Marine Database</title>
+<style type='text/css' media='print'>
+.noprint{display:none;visibility:hidden;}
+</style>
+<style>
+h1 {font-size: 30pt}
+.alert {color: #FF0000; font-weight: bold}
+table#subtable {font-family: Arial; font-size: 14; line-height: 8pt;}
+table#invoice {font-family: Times-Roman; font-size: 10; line-height: 4pt;}
+p#codebox { border: 4px groove black; padding: 0.5em; margin-top: .2em; margin-left: 12em; margin-right: 12em; font-size: 14pt}
+</style>
+</head>
+<body bgcolor='lightblue'>
+<center>
+<div class='noprint'>
+<p><br>Connected to marine20 database as query<br>
+<table><tr><td><a href='../logout.php'>Reset</a><td></tr></table>
+</div>
+</center>
+<a href='index.php'>select count(*), max(last_changed) from details</a><br>
+1 records<br>
+<table border>
+<tr><td>count(*)</td><td>2060</td></tr>
+<tr><td>max(last_changed)</td><td>2026-05-11 10:15:16</td></tr>
+</table>
+<div id='map_canvas' style='width:800px;height:600px'></div>
+<script 
+  src='https://maps.googleapis.com/maps/api/js?key=AIzaSyBmgioATDCwWTuDqXqZZTd4McKrvcVAqmU' type='text/javascript'>
+</script>
+<script type='text/javascript'>
+var map;
+   var myLatLng = new google.maps.LatLng(0,0);
+   var myOptions =
+   {
+      mapTypeId: google.maps.MapTypeId.HYBRID,
+      center: myLatLng,
+      zoom: 1
+   };
+   map = new google.maps.Map(document.getElementById('map_canvas'), myOptions);
+   google.maps.event.addListener(map, 'click',
+   function(event)
+   {
+      var mylatlon = event.latLng;
+      var mylat = mylatlon.lat();
+      var mylon = mylatlon.lng();
+      document.mymap.clat.value = mylat;
+      document.mymap.clon.value = mylon;
+      var marker = new google.maps.Marker({
+         position: mylatlon,
+         title: String(event.latLng),
+         map: map,
+         icon: 'mm_20_green.png'
+      });
+      google.maps.event.addListener(marker, 'click',
+      function()
+      {
+      });
+   });
+var gbounds = new google.maps.LatLngBounds();
+point = new google.maps.LatLng(0.00072916666666667,0.00010416666666667);
+marker = new google.maps.Marker({
+position: point,
+map: map,
+icon: 'mm_20_yellow.png',
+title: ''
+});
+gbounds.extend(point);
+map.fitBounds(gbounds)
+;</script>
+</center>
+</body>
+</html>
