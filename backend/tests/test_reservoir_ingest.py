@@ -3,7 +3,7 @@ Tests for the marine reservoir ingest: services/reservoir.py's vocabulary and
 services/reservoir_ingest.py's extraction, decode, normalisation and hashing.
 
 **No network, and real bytes.** fixtures/calib_marine/query_response.html is
-85 rows of what calib.org actually returned on 2026-09-14, inside its own
+106 rows of what calib.org actually returned on 2026-09-14, inside its own
 preamble and table markup -- see that directory's README for what was kept and
 why. Every test here runs against those bytes, so the parser is pinned against
 the source rather than against a description of it.

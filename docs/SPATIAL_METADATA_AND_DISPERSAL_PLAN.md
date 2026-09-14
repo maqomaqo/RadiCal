@@ -1081,11 +1081,11 @@ else changes the schema.
 Operations within a feature run in order. Features 1–2 and 3 are independent and can interleave;
 4 waits for both; 6 waits for 1–2 and for the three §13 decisions marked below.
 
-*Features 1, 2 and 3 are done (2026-09-14) apart from op 3d, which op 0 still gates. Alembic head
-is now `b7c4e0a13d92`. Feature 4 (the lookup) is unblocked: a user can ingest a snapshot and the
-lookup can be built and exercised against it end to end. What op 0 still buys is the BUNDLED
-snapshot — a fresh install with a working lookup and no network, and two installs agreeing on what
-they compute. Feature 6's prerequisite on 1–2 is met, leaving only the three §13 decisions.*
+*Features 1–4 are done (2026-09-14) apart from op 3d, which op 0 still gates. Alembic head is
+`b7c4e0a13d92`. What op 0 still buys is the BUNDLED snapshot — a fresh install with a working
+lookup and no network, and two installs agreeing on what they compute; until then the lookup runs
+on a snapshot somebody ingested. Feature 5 (freshness) and feature 6 (wave of advance) are next;
+6's prerequisite on 1–2 is met, leaving only the three §13 decisions.*
 
 ### Op 0 — the permission request *(human; start now, longest lead time)*
 
@@ -1241,7 +1241,30 @@ private snapshot invisible to another account (mirror `test_curve_privacy.py`).
 **3d. Bundled snapshot** *(gated on op 0)*: `calibration_data/marine_reservoir_2026-05-11.csv`,
 193 KB, produced by 3b's parser and committed with its hash recorded in the registry.
 
-### Feature 4 — the lookup (§5.4–5.5, §7.3)
+### Feature 4 — the lookup (§5.4–5.5, §7.3) — **done 2026-09-14**
+
+All four ops. The arithmetic is confirmed twice over: the three §2.3 cases are asserted to the
+printed integer, and `tests/manual/calib_regioncalc.py` was run once against calib.org's own
+calculator — **20/20 exact on both integers**, over sets whose uncertainties span 22 to 447 years.
+4d's acceptance figure is now an assertion rather than a note: **Strangford Lough at N=5 reads
+−209 ± 44**, read off the captured database through extract, decode, normalise, nearest and
+combine.
+
+Two things the code decided that the plan did not:
+
+- **`FAR_NEAREST_KM = 100`**, the distance at which the panel flags how far the nearest point is.
+  §2.6 required the distance to be shown and said Tampa's is 163 km, but named no threshold. 100 km
+  is about where a local offset stops being local; it is one named constant with its reasoning
+  beside it, like `FEEDING_SHIFT_WARN_YEARS`.
+- **A selection spanning two positions is refused, not averaged.** §7.3 assumed the selection has a
+  position; it does not say what to do when the ticked dates disagree about it. A centroid of two
+  sites is a place neither of them is, so the panel says so and asks for one site at a time.
+
+**A bug in op 3b, surfaced by running the ingest against all 2060 rows for the first time** (op 4a
+needed them): three rows carry a longitude outside ±180 — the Chatham Islands at 183.5, Fiji at
+−181 — and the validation refused them, rejecting the whole fetch over three good rows. Longitude
+is modular and 183.5 has exactly one reading, so it is now wrapped and counted; latitude has no
+such identity and 91 is still refused.
 
 **4a. `services/reservoir.py`.** `nearest(lat, lon, n, snapshot_id, *, max_km)` by haversine
 (R = 6371.0088); `combine(points)` implementing §2.3 exactly; `lookup(...)` returning

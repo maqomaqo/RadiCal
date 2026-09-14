@@ -1,6 +1,6 @@
 # Reservoir ingest fixture
 
-`query_response.html` is **real**: 28 KB of the bytes calib.org's generalized
+`query_response.html` is **real**: 34 KB of the bytes calib.org's generalized
 query interface actually returned, captured on 2026-09-14 from
 
     POST http://calib.org/marine/query/query.php
@@ -33,7 +33,7 @@ Kept deliberately, not sampled:
   rather than a note.
 
 The whole 2060-row response is not committed: at 1.0 MB it would be forty
-times the rest of the fixtures put together, and nothing in it that these 85
+times the rest of the fixtures put together, and nothing in it that these 106
 rows do not already carry is exercised by a test.
 
 ## Re-capturing it
