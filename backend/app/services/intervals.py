@@ -164,14 +164,21 @@ def severity(overlap: float) -> str:
 # Summarising a derived quantity
 # --------------------------------------------------------------------------
 
-def _step_for(values: np.ndarray) -> float:
+def _step_for(values: np.ndarray, base: Optional[float] = None) -> float:
     """
     Bin width for a set of draws: the reporting step, widened until MAX_BINS
     covers the draws' central spread (and MAX_BINS_WITH_TAILS the whole of
     them), and always a whole multiple of the reporting step so two quantities
     on one page are quoted on compatible grids.
+
+    `base` overrides the five-year floor for a quantity that is NOT measured in
+    years. The only such caller is a dispersal speed in km/yr (services/
+    dispersal.py), where the default would quote a front whose whole posterior
+    spans half a kilometre per year in a single five-wide bin and return an
+    HPD of nonsense. Every quantity actually measured in years leaves it alone,
+    so they all stay on one grid.
     """
-    base = _reporting_step()
+    base = _reporting_step() if base is None else float(base)
     low, high = np.percentile(values, SPREAD_PERCENTILES)
     bins = [float(high - low) / (MAX_BINS * base),
             float(values.max() - values.min()) / (MAX_BINS_WITH_TAILS * base)]
@@ -211,7 +218,8 @@ def _ranges(centres: np.ndarray, weights: np.ndarray, confidence: float,
     return found
 
 
-def summarise(values: Sequence[float]) -> Optional[Dict]:
+def summarise(values: Sequence[float],
+              base_step: Optional[float] = None) -> Optional[Dict]:
     """
     Draws of a quantity measured in YEARS, turned into the reported shape.
 
@@ -219,13 +227,16 @@ def summarise(values: Sequence[float]) -> Optional[Dict]:
     a date, converting it to BC/AD would be nonsense, and the exports format
     calendar-age columns BY NAME -- so different names are what stops a
     duration reaching a calendar formatter by accident.
+
+    `base_step` is for the one quantity here that is not in years -- a front
+    speed in km/yr -- and says what resolution to quote it at. See _step_for.
     """
     values = np.asarray(values, dtype=float)
     values = values[np.isfinite(values)]
     if values.size == 0:
         return None
 
-    step = _step_for(values)
+    step = _step_for(values, base_step)
     lo = np.floor(values.min() / step) * step
     hi = np.ceil(values.max() / step) * step + step
     edges = np.arange(lo, hi + step, step)
@@ -634,12 +645,16 @@ def evaluate(duration_specs: List[Dict], difference_specs: List[Dict],
 BAND_LEVELS = ((SIGMA_1, 68), (SIGMA_2, 95))
 
 
-def _band(values: np.ndarray) -> Dict:
-    """One level's calendar age from joint draws, as a median and two bands.
+def calendar_band(values: np.ndarray) -> Dict:
+    """A calendar age from joint draws, as a median and two bands.
 
     Calendar-age key names, deliberately unlike a duration's: these ARE dates
     and the exports format them as such, where every other figure in this
     module is a length in years and must never be converted to BC/AD.
+
+    Public because a dispersal fit's t0 -- the front's arrival age at the
+    origin -- is a calendar age in exactly this sense, and reporting it in the
+    duration grammar would tell the UI not to format it as a date.
     """
     entry = {
         'median': float(np.median(values)),
@@ -709,7 +724,7 @@ def evaluate_age_depth(specs: List[Dict], draws: Dict[str, np.ndarray]) -> List[
                 'name': level['name'],
                 'depth': level['depth'],
                 'dated': level['dated'],
-                **_band(draws[level['id']]),
+                **calendar_band(draws[level['id']]),
             })
 
         accumulation = []

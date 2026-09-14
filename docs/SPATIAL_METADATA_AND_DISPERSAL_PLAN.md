@@ -1040,23 +1040,29 @@ upstream ever wants only that. Item 6 no longer needs one (§6.3).
 
 ## 13. Open decisions
 
-1. **A `sites` table, or derived sites?** (§4.1, §6.2) Derived is planned *(§14 keeps it; revisit
-   at op 6a, not before)*, because the model tree
-   and the date collection already express what a site is, and a `Site` entity would fork the schema
-   much further. A first-class entity would be tidier for Part C and would give a site one
-   coordinate instead of *n* equal ones. Decide before item 6, not before item 1 — the derived
-   design does not block it.
+1. ~~**A `sites` table, or derived sites?**~~ **Decided 2026-09-14: derived**, as planned. The model
+   tree and the date collection already express what a site is, and a `Site` entity would fork the
+   schema much further for no gain feature 6 needs. A first-class entity would be tidier and would
+   give a site one coordinate instead of *n* equal ones, and it would make §11.6 structurally
+   impossible rather than caught by a threshold — that is the cost accepted here, and op 6a's
+   descent rule is what pays it. Revisit if a second Part C model wants a site to carry anything
+   of its own.
 2. **Where does the ΔR snapshot live in the UI?** It behaves like a calibration curve (versioned,
    immutable, citable), which argues for the Curves page. It is used from the date collection, which
    argues for the project. Currently planned: managed on Curves, used from the collection.
-3. **Minimum site count for a dispersal fit.** §11.4 suggests refusing below ~6. Needs a number
-   chosen deliberately rather than defaulted. *§14 op 6a proposes 6 as `MIN_DISPERSAL_SITES`, with
-   the reasoning beside it; it is the one number in op 6 to confirm before coding.*
-4. **Does dispersal belong to an analysis or to a project?** Planned as an analysis (it consumes the
-   run's joint draws, §6.3). But a dispersal question usually spans several analyses of one region,
-   which the current model has no place for. A project-level dispersal built from several analyses'
-   stored boundaries would have to fall back to marginals (§3.2) and lose the joint structure —
-   which may be an acceptable trade, and is not decided.
+3. ~~**Minimum site count for a dispersal fit.**~~ **Decided 2026-09-14: 6**, as
+   `MIN_DISPERSAL_SITES`. The reasoning, now in the constant's own comment: OLS through three points
+   returns a slope, a speed and an interval, all tidy and none worth anything, because with *n* − 2
+   = 1 residual degree of freedom there is nothing left with which the data could contradict the
+   line. Six is where the residual table starts being able to say *this is not a front* — which is
+   the diagnostic §6.6 leans on, and the reason the number is a refusal rather than a warning.
+4. ~~**Does dispersal belong to an analysis or to a project?**~~ **Decided 2026-09-14:
+   per-analysis**, as planned — it consumes the run's joint draws (§6.3). A dispersal question
+   usually spans several analyses of one region, which the current model still has no place for;
+   that is the known cost. A project-level fit built from several analyses' stored boundaries would
+   have to fall back to marginals (§3.2) and lose the joint structure between sites, which is
+   precisely what makes this estimator better than regressing point estimates — so the trade was
+   refused rather than accepted.
 5. **Coordinate precision default.** Planned as `full`. An argument exists for defaulting to `0.01°`
    and making full precision the deliberate choice. *§14 op 1 ships `full`: an export that silently
    rounds is a surprise, and a project owner choosing to round is the deliberate act.*
@@ -1081,11 +1087,12 @@ else changes the schema.
 Operations within a feature run in order. Features 1–2 and 3 are independent and can interleave;
 4 waits for both; 6 waits for 1–2 and for the three §13 decisions marked below.
 
-*Features 1–5 are done (2026-09-14) apart from op 3d, which op 0 still gates. Alembic head is
-`b7c4e0a13d92`. What op 0 still buys is the BUNDLED snapshot — a fresh install with a working
-lookup and no network, and two installs agreeing on what they compute; until then the lookup runs
-on a snapshot somebody ingested, which feature 5's card is now the way to get. Feature 6 (wave of
-advance) is next; its prerequisite on 1–2 is met, leaving only the three §13 decisions.*
+*Features 1–5 are done (2026-09-14) apart from op 3d, which op 0 still gates, and feature 6 is
+under way: 6a is in, 6b–6d are next. Alembic head is `b7c4e0a13d92`. What op 0 still buys is the
+BUNDLED snapshot — a fresh install with a working lookup and no network, and two installs agreeing
+on what they compute; until then the lookup runs on a snapshot somebody ingested, which feature 5's
+card is now the way to get. §13's three open decisions for feature 6 were settled on 2026-09-14,
+all three as proposed.*
 
 ### Op 0 — the permission request *(human; start now, longest lead time)*
 
@@ -1317,10 +1324,44 @@ to prevent, so refreshing has to be a decision a person takes at a moment they c
 **5a.** `GET /api/reservoir/freshness` (auth, explicit, the 2 KB probe) and one line plus the
 ingest button on `Curves.tsx`, in the register the curve list already uses.
 
-### Feature 6 — wave of advance (§6.2–6.4, §6.6, §7.4)
+### Feature 6 — wave of advance (§6.2–6.4, §6.6, §7.4) — **6a done 2026-09-14**
 
-*Confirm before 6a:* §13.1 stays derived; §13.3 `MIN_DISPERSAL_SITES = 6`; §13.4 stays
-per-analysis.
+*Confirmed 2026-09-14, all three as proposed:* §13.1 stays derived; §13.3 `MIN_DISPERSAL_SITES = 6`;
+§13.4 stays per-analysis.
+
+Three things in 6a were settled in the code rather than by the text above:
+
+- **"A site per opening Boundary" needed a descent rule.** Taken literally it gives a Sequence of
+  three phases at one place three sites, tripling that place's weight in the regression while adding
+  no information. `derive_sites` instead walks outermost-first and descends only where a candidate's
+  dates scatter beyond `SITE_SCATTER_KM` — so a region modelled as one Sequence of site-Sequences
+  splits into its sites, and a site modelled as a Sequence of Phases does not. The threshold
+  therefore does **two** jobs: higher up it separates places, and at the bottom of the descent,
+  where there is no structure left to split, it reports §11.6's modelling error. That is why the
+  refusal reads the way it does only in the second position.
+- **A wrapper is not a site.** A root Sequence containing one site Sequence is coherent at the root,
+  but the root's opening Boundary is the start of the *model* — older than the site's own, and a
+  different parameter, so dating the site by it reports an arrival earlier than the model says.
+  The walk descends past a single covering child *when that child opens on a different Boundary*.
+  The second condition is load-bearing: a named Sequence holding one anonymous Phase shares its
+  opening Boundary, so they are the same arrival, and the element the analyst named is the one to
+  report.
+- **`intervals.summarise` could not report a speed as written.** Its bin width floors at five
+  *years* (`_reporting_step`), and a front whose whole posterior spans a quarter of a km/yr came
+  back in a single bin with an HPD of nonsense. `summarise` and `_step_for` gained a `base_step`
+  override, used by nothing but the speed; every quantity actually measured in years is untouched
+  and they all stay on one grid. `_band` also became public as `calendar_band`, because *t₀* is a
+  calendar age in exactly its sense and reporting it in the duration grammar would tell the UI not
+  to format it as a date.
+
+Also in 6a rather than later: `derive_sites_from_dates`, §6.2's group-calibration fallback. It
+takes each place's earliest dated event — decided once on the draws' median, not per draw, since a
+per-draw minimum is biased low and would let the representative date change between draws — and
+labels it `basis='earliest_dated_event'` so no panel can show it as an arrival time.
+
+**Not yet wired:** `api/analysis.py`'s `measurement_dicts` (`:1642`) does not carry `latitude`/
+`longitude`, so `derive_sites` sees no coordinates on a real run. That is one line, and it belongs
+to 6b with the rest of the threading.
 
 **6a. `services/dispersal.py`.** `derive_sites(root, measurements)`: a site per opening Boundary,
 centroid of its dates' coordinates, refusal above `SITE_SCATTER_KM = 5` naming both coordinates and
