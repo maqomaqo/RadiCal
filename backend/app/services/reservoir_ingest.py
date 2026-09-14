@@ -138,6 +138,11 @@ class IngestReport:
     # U+FFFD. A locality name must never be quietly turned into question
     # marks.
     undecodable_fields: int = 0
+    # Rows whose longitude was outside ±180 and was wrapped back onto the
+    # earth. Three in the 2060 captured on 2026-09-14, all real places written
+    # with an unwrapped longitude. Counted rather than silent: it is a shape
+    # of the source, and a number that jumped would be worth looking at.
+    wrapped_longitudes: int = 0
     # Feeding spellings services/reservoir.py has never seen, with how many
     # rows carried each. Reported rather than absorbed: they all normalise to
     # 'unknown', and a silent 'unknown' is how a source's new vocabulary
@@ -161,6 +166,7 @@ class IngestReport:
             'without_error': self.without_error,
             'cp1252_fallbacks': self.cp1252_fallbacks,
             'undecodable_fields': self.undecodable_fields,
+            'wrapped_longitudes': self.wrapped_longitudes,
             'unrecognised_feeding': dict(self.unrecognised_feeding),
             'errors': list(self.errors),
         }
@@ -290,6 +296,27 @@ def _number(value: Optional[str]) -> Optional[float]:
         return None
 
 
+def _wrap_longitude(value: float) -> float:
+    """
+    A longitude outside ±180 brought back onto the earth.
+
+    Three rows of the 2060 captured on 2026-09-14 carry one: map 460 and 461
+    at 183.5 (the Chatham Islands, which is 176.5 West) and map 1349 at -181
+    (Fiji, which is 179 East). They are not bad data -- they are real places
+    written with an unwrapped longitude, and the source's own map plots them
+    correctly because Google Maps wraps too.
+
+    Wrapping is not a guess, which is why this is allowed where the importer
+    refuses to guess at a DMS coordinate: longitude is modular, 183.5 and
+    -176.5 are the same meridian, and there is exactly one answer. LATITUDE
+    has no such identity -- 91 is not a latitude, it is a mistake -- so it is
+    still refused.
+    """
+    if -180 <= value <= 180:
+        return value
+    return ((value + 180) % 360) - 180
+
+
 def _parse_timestamp(value: Optional[str]) -> Optional[datetime]:
     """
     A 'YYYY-MM-DD HH:MM:SS' stamp, or None.
@@ -377,11 +404,16 @@ def records_to_rows(
                 f"mapno={decoded.get('mapno')!r}, lat={decoded.get('lat')!r}, "
                 f"lon={decoded.get('lon')!r}")
             continue
-        if not (-90 <= latitude <= 90) or not (-180 <= longitude <= 180):
+        if not (-90 <= latitude <= 90):
             report.errors.append(
-                f"Row {index} (map no {int(map_no)}): position "
-                f"{latitude}, {longitude} is not on the earth")
+                f"Row {index} (map no {int(map_no)}): latitude {latitude} is "
+                "not a latitude")
             continue
+        if not (-180 <= longitude <= 180):
+            # Wrapped rather than refused -- see _wrap_longitude. Counted,
+            # because it is a shape of the source worth being able to see.
+            longitude = _wrap_longitude(longitude)
+            report.wrapped_longitudes += 1
 
         key = int(map_no)
         if key in seen:

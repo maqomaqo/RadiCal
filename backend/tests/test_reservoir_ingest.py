@@ -257,6 +257,38 @@ class TestRecordsToRows:
         _, report = _rows()
         assert report.without_error == 3
 
+    def test_a_longitude_off_the_map_is_wrapped_rather_than_refused(self):
+        """
+        Three rows of the real 2060 carry one: the Chatham Islands at 183.5
+        and Fiji at -181. They are real places written with an unwrapped
+        longitude, and the source's own map plots them correctly because
+        Google Maps wraps too. Refusing them -- which this ingest did until
+        it was first run against the whole database -- rejects the entire
+        fetch over three good rows.
+        """
+        rows, report = _rows()
+        assert report.ok, report.errors
+        assert report.wrapped_longitudes == 3
+        assert all(-180 <= r.longitude <= 180 for r in rows)
+
+        chathams = next(r for r in rows if r.map_no == 460)
+        assert chathams.longitude == -176.5
+        fiji = next(r for r in rows if r.map_no == 1349)
+        assert fiji.longitude == 179.0
+
+    def test_a_latitude_off_the_map_is_still_refused(self):
+        """
+        Longitude is modular and 183.5 has exactly one reading. Latitude is
+        not: 91 is not a place expressed oddly, it is a mistake, and wrapping
+        it would invent a position.
+        """
+        records, _ = _records()
+        broken = dict(records[0])
+        broken['lat'] = b'91'
+        _, report = ingest.records_to_rows([broken])
+        assert not report.ok
+        assert any('not a latitude' in e for e in report.errors)
+
     def test_the_source_last_changed_is_the_latest_the_rows_carry(self):
         """What identifies the snapshot. Taken from the rows rather than from
         a second query."""
@@ -291,14 +323,6 @@ class TestRecordsToRows:
         assert not report.ok
         assert any(missing in e for e in report.errors)
 
-    def test_a_position_off_the_earth_fails_the_fetch(self):
-        records, _ = _records()
-        broken = dict(records[0])
-        broken['lat'] = b'95'
-        _, report = ingest.records_to_rows([broken])
-        assert not report.ok
-        assert any('not on the earth' in e for e in report.errors)
-
     def test_a_repeated_map_number_fails_rather_than_picking_a_winner(self):
         """map_no identifies a point and is this app's key within a snapshot.
         Two rows claiming one is a source that has changed shape."""
@@ -311,7 +335,7 @@ class TestRecordsToRows:
         records, _ = _records()
         first, second = dict(records[0]), dict(records[1])
         first['lat'] = b''
-        second['lon'] = b'999'
+        second['lat'] = b'91'
         _, report = ingest.records_to_rows([first, second])
         assert len(report.errors) == 2
 
