@@ -358,6 +358,108 @@ def snapshot_id(source_slug: str, last_changed: Optional[datetime]) -> str:
 
 
 # --------------------------------------------------------------------------
+# The bundled snapshot's file format
+# --------------------------------------------------------------------------
+#
+# The column order of calibration_data/marine_reservoir_YYYY-MM-DD.csv. A
+# plain CSV rather than the source's own format, because what ships is the
+# NORMALISED rows -- the decode and the feeding fold have already happened,
+# and shipping the raw response would mean re-running a parser at load time on
+# every install, which is the thing content_sha256 exists to make unnecessary.
+CSV_COLUMNS = (
+    'map_no', 'latitude', 'longitude', 'delta_r', 'delta_r_error',
+    'reference', 'locality', 'subregion', 'notes',
+    'c14_age', 'c14_error', 'lab_id', 'collection_year', 'reservoir_age',
+    'genus', 'species', 'feeding', 'feeding_raw',
+)
+
+
+def rows_to_csv(rows: Iterable[ReservoirRow]) -> str:
+    """
+    The normalised rows as the file that ships in calibration_data/.
+
+    Sorted by map number, as content_hash sorts them, so the file and the hash
+    are in the same order and a diff between two snapshots reads as a change
+    in the data rather than a reshuffle.
+    """
+    import csv
+    import io
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(CSV_COLUMNS)
+    for row in sorted(rows, key=lambda r: r.map_no):
+        writer.writerow([
+            '' if getattr(row, column) is None else getattr(row, column)
+            for column in CSV_COLUMNS
+        ])
+    return output.getvalue()
+
+
+def rows_from_csv(text: str) -> List[ReservoirRow]:
+    """
+    Read a bundled snapshot back.
+
+    Deliberately strict about its header: a file whose columns are not these
+    is not this format, and reading it positionally would silently swap
+    latitude for longitude. Raises rather than guessing.
+    """
+    import csv
+    import io
+
+    reader = csv.reader(io.StringIO(text))
+    try:
+        header = next(reader)
+    except StopIteration:
+        raise IngestError('The bundled snapshot file is empty.')
+    if tuple(h.strip() for h in header) != CSV_COLUMNS:
+        raise IngestError(
+            'The bundled snapshot does not have the expected columns. Found '
+            f'{header!r}; wanted {list(CSV_COLUMNS)!r}.')
+
+    numeric = {'latitude', 'longitude', 'delta_r', 'delta_r_error',
+               'c14_age', 'c14_error', 'reservoir_age'}
+    rows: List[ReservoirRow] = []
+    for line, values in enumerate(reader, start=2):
+        if not any(v.strip() for v in values):
+            continue
+        if len(values) != len(CSV_COLUMNS):
+            raise IngestError(
+                f'Row {line} of the bundled snapshot has {len(values)} values, '
+                f'not {len(CSV_COLUMNS)}.')
+        record = dict(zip(CSV_COLUMNS, values))
+        try:
+            rows.append(ReservoirRow(
+                map_no=int(record['map_no']),
+                latitude=float(record['latitude']),
+                longitude=float(record['longitude']),
+                delta_r=_number(record['delta_r']),
+                delta_r_error=_number(record['delta_r_error']),
+                reference=_text(record['reference']),
+                locality=_text(record['locality']),
+                subregion=_text(record['subregion']),
+                notes=_text(record['notes']),
+                c14_age=_number(record['c14_age']),
+                c14_error=_number(record['c14_error']),
+                lab_id=_text(record['lab_id']),
+                collection_year=(
+                    int(float(record['collection_year']))
+                    if record['collection_year'].strip() else None),
+                reservoir_age=_number(record['reservoir_age']),
+                genus=_text(record['genus']),
+                species=_text(record['species']),
+                feeding=_text(record['feeding']),
+                feeding_raw=_text(record['feeding_raw']),
+            ))
+        except ValueError as exc:
+            raise IngestError(
+                f'Row {line} of the bundled snapshot could not be read: {exc}')
+    if not rows:
+        raise IngestError('The bundled snapshot has a header and no rows.')
+    return rows
+
+
+# --------------------------------------------------------------------------
 # Storing
 # --------------------------------------------------------------------------
 
