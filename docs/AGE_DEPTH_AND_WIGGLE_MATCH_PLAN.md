@@ -1,5 +1,52 @@
 # Wiggle matching and age-depth modelling — implementation plan
 
+> **Built 2026-09-09.** Everything in §8's order of work is in the app:
+> `services/wiggle_match.py`, the deposition model in `services/gibbs.py`, both
+> importers, the new element types and their entry and results panels. Where
+> what was built differs from what is written below, the code is the record and
+> the differences are these:
+>
+> - **§4.1's sign.** The prose in §4.4 settles the UI convention — `ring_offset`
+>   is years *before* the reference, increasing into the past — and the app is
+>   built to it, so a member's calendar age is the reference's **plus** its
+>   offset. §4.1's `L(t − g)` is the same statement with `g` running the other
+>   way; the one in §4.4 is the one the field help, the importer and the solver
+>   all say.
+> - **§5.2's obstruction, and the normalisation §5.5 needs.** The deposition
+>   density is carried NORMALISED (the Gamma terms and the `T` exponent), not
+>   only up to a constant. With `k` fixed those are constants and could be
+>   dropped; with `k` drawn from its own conditional they are functions of it,
+>   and dropping them would let the data pick a rigidity by the wrong rule.
+> - **§10.2's `k → 0` limit.** Measured rather than assumed. On the three-level
+>   test core, `k·Δz = 0.02` moves the three modelled means 11.4, 4.2 and 5.3
+>   years from the ordering-only model and their standard deviations by 2.0, 4.0
+>   and 0.9 — close, and not identical. It is *not* the plain Sequence's
+>   **uniform** interval prior, which is the `k·Δz = 1` case; what a vanishing
+>   rigidity leaves is a scale-free prior on the gaps, which the depths no
+>   longer inform. `TestTheRigidityLimits` asserts the closeness at the
+>   tolerance that was measured rather than the identity that was expected.
+> - **§10.2's interpolated depth.** A level at *exactly* a dated depth is a
+>   zero interval, which has no deposition rate; it is refused, and the test
+>   places the level a centimetre away instead.
+> - **§4.7's composition.** The data model composes, as planned. The
+>   *inference* does not yet: a wiggle sequence inside a larger model is
+>   refused by name at both the importer and the run, because its members are
+>   one age with fixed gaps rather than n free parameters and the surrounding
+>   Boundaries would have to be told so. §12.3's reference member is recorded,
+>   so adding it later is not a migration.
+> - **The outlier model, which §4 does not mention.** A wiggle match REFUSES a
+>   member carrying one rather than applying it, at the request, at the
+>   importer and in the solver. It follows from §4.1's second bullet: the gaps
+>   are hard, so there is nowhere for a date to sit apart from the rest, and
+>   §4.5's agreement index is what says a member does not belong. Implementing
+>   it would mean marginalising an offset scale independently per member,
+>   which is `exact_chain`'s approximation rather than OxCal's shared scale;
+>   OxCal does allow `Outlier()` in a `D_Sequence`, so this is open work and
+>   wants a fixture before it is attempted.
+> - **§4.2's V_Sequence.** Implemented as written — one uncertainty per member,
+>   convolved independently. OxCal's gaps form a chain and share their errors,
+>   so the importer accumulates them in quadrature and warns that it did.
+
 Written 2026-09-02. Scope: OxCal's `D_Sequence` and `V_Sequence` (wiggle matching a series of
 dates separated by known gaps — tree rings, varves, a sampled sequence of any kind) and
 `P_Sequence` (a Poisson-process deposition model against depth, the age-depth curve that

@@ -1,0 +1,34 @@
+ // A wiggle match on a single oak timber: eight blocks of rings dated along a
+ // 250-ring sequence, with the ring counts between them written as Gap().
+ //
+ // OxCal writes a D_Sequence OLDEST FIRST, so "OAK-001" is the innermost block
+ // and "OAK-008" the outermost -- the one a felling date is quoted against.
+ // The gaps are exact ring counts, which is what makes this a D_Sequence and
+ // not a V_Sequence.
+ //
+ // The radiocarbon ages were read straight off IntCal20 at the calendar age
+ // each block would have if the outermost ring formed in 2500 cal BP, so the
+ // answer this model should recover is known independently of any solver. The
+ // structure is a real one; the lab codes are not.
+Plot()
+ {
+  Curve("IntCal20","IntCal20.14c");
+  D_Sequence("Timber 1")
+  {
+   R_Date("OAK-001", 2621, 25);
+   Gap(36);
+   R_Date("OAK-002", 2519, 25);
+   Gap(36);
+   R_Date("OAK-003", 2462, 25);
+   Gap(36);
+   R_Date("OAK-004", 2472, 25);
+   Gap(36);
+   R_Date("OAK-005", 2442, 25);
+   Gap(36);
+   R_Date("OAK-006", 2495, 25);
+   Gap(36);
+   R_Date("OAK-007", 2488, 25);
+   Gap(34);
+   R_Date("OAK-008", 2482, 25);
+  };
+ };

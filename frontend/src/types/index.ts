@@ -23,7 +23,55 @@ export type NodeType = 'sample' | 'group'
 // convention of oldest at the bottom. A Boundary placed between two Phases
 // inside a Sequence is a SINGLE shared parameter -- the end of the earlier
 // phase and the start of the later one at once -- not two independent ones.
-export type ElementType = 'sequence' | 'phase' | 'boundary' | 'hiatus'
+// Two of these order their members by a distance measured on an axis OUTSIDE
+// the model rather than by stratigraphy:
+//
+//   wiggle_sequence      OxCal's D_Sequence/V_Sequence. Dates separated by
+//                        KNOWN gaps -- tree rings, varves -- so the whole
+//                        series has ONE free age and every member's is that
+//                        plus its own ring_offset.
+//   deposition_sequence  OxCal's P_Sequence. Dates separated by DEPTH, with
+//                        deposition modelled as a Poisson process along it.
+//   interpolated_depth   A level inside a deposition sequence with no
+//                        measurement -- "how old is 47 cm".
+//
+// Dates attach directly to the first two, as they do to a phase.
+export type ElementType =
+  | 'sequence'
+  | 'phase'
+  | 'boundary'
+  | 'hiatus'
+  | 'wiggle_sequence'
+  | 'deposition_sequence'
+  | 'interpolated_depth'
+
+// The element types a date can be assigned to. Mirrors
+// model_tree.DATE_HOLDERS.
+export const DATE_HOLDER_TYPES: ElementType[] = [
+  'phase',
+  'wiggle_sequence',
+  'deposition_sequence',
+]
+
+// Settings belonging to ONE kind of element, keyed by element_type. Mirrors
+// model_tree.ELEMENT_PARAMS; every field optional, because an element written
+// before a setting existed simply does not carry it and the backend fills in
+// the default.
+export interface ElementParams {
+  // wiggle_sequence: what a gap is counted in, and which member offset 0 was
+  // measured from.
+  gap_units?: 'rings' | 'varves' | 'years'
+  reference_sample_id?: string | null
+  // deposition_sequence: the rigidity, and the log10 range it is inferred
+  // over when it is not fixed.
+  k?: number | null
+  k_variable?: boolean
+  log_k_min?: number
+  log_k_max?: number
+  depth_units?: string
+  // interpolated_depth: the depth the level sits at.
+  depth_cm?: number | null
+}
 
 export interface ModelElement {
   id: string
@@ -33,7 +81,10 @@ export interface ModelElement {
   // element; the tightest of an element and its ancestors wins.
   tpq_age_bp?: number | null
   taq_age_bp?: number | null
-  // Set on boundary elements once the analysis has been run.
+  params?: ElementParams | null
+  // Set once the analysis has been run, on the element types that carry a
+  // parameter of their own: a boundary's transition, a wiggle match's
+  // reference age, an undated level's age.
   posterior?: PosteriorSummary | null
   children?: ModelElement[]
 }
@@ -62,6 +113,25 @@ export interface MatrixMeasurement {
   // probability the data found from one reporting back the analyst's prior.
   outlier_prior?: number | null
   outlier_model?: 'general' | 'charcoal' | null
+  // The two ORDINATES: where this date sits on an axis outside the model.
+  // Declared here rather than only on DraftMeasurement because the tree
+  // editor's own validation needs them -- whether a date may go into a
+  // deposition sequence or a wiggle match depends on whether it carries the
+  // one that sequence is built on, and that check belongs on the screen the
+  // date is moved on.
+  depth_cm?: number | null
+  // Years BEFORE the series reference point: 0 AT the reference and
+  // INCREASING INTO THE PAST, so a member's calendar age is the reference's
+  // PLUS its offset.
+  //
+  // The sign is the thing to get right. Rings count forward and cal BP counts
+  // backward, so an inverted offset gives a tight answer in the WRONG PLACE
+  // rather than an obviously wrong one. utils/ringOffsets converts ring
+  // NUMBERS, which is what people actually have, into these.
+  ring_offset?: number | null
+  // The gap's own 1-sigma uncertainty, where it was measured rather than
+  // counted (OxCal's V_Sequence). Absent or zero means the gaps are exact.
+  ring_offset_error?: number | null
 }
 
 export interface DraftMeasurement extends MatrixMeasurement {
@@ -80,7 +150,6 @@ export interface DraftMeasurement extends MatrixMeasurement {
   // of blanking them -- dates deployed from a project collection arrive
   // with these already filled in.
   reservoir_age?: number | null
-  depth_cm?: number | null
   location?: string | null
   notes?: string | null
   // Stratigraphic phase/group this sample belongs to, if any -- must
@@ -178,9 +247,54 @@ export interface DifferenceRecord {
   shared_boundary?: boolean
 }
 
+// --- age against depth ---
+//
+// Mirrors services/intervals.py's age_depth section. Every figure here is read
+// off JOINT draws: an accumulation rate is a function of two ages at once, and
+// pairing their marginals gives a rate distribution wrong in SHAPE rather than
+// scale -- which no eyeball check catches.
+
+export interface AgeDepthLevel {
+  // A dated sample's id, or an undated level's element id.
+  id: string
+  name: string
+  depth: number
+  dated: boolean
+  // Calendar ages, cal BP. Bands are QUANTILES rather than HPD regions, so
+  // they nest and an envelope drawn from them cannot cross itself.
+  median: number
+  mean: number
+  band_68: [number, number]
+  band_95: [number, number]
+}
+
+export interface AccumulationStep {
+  from_depth: number
+  to_depth: number
+  from_name: string
+  to_name: string
+  depth_gap: number
+  // How long the interval took, in the same shape every other duration takes.
+  years: DurationSummary
+  // ...and the same thing per unit depth, which is what an accumulation rate
+  // is and what the literature quotes.
+  rate_median: number
+  rate_band_68: [number, number]
+}
+
+export interface AgeDepthRecord {
+  element_id: string
+  name: string
+  depth_units: string
+  levels: AgeDepthLevel[]
+  accumulation: AccumulationStep[]
+}
+
 export interface IntervalsBlock {
   durations: DurationRecord[]
   differences: DifferenceRecord[]
+  // One entry per deposition sequence in the model; empty otherwise.
+  age_depth?: AgeDepthRecord[]
   // How many joint draws these were estimated from, and whether those draws
   // were independent (the exact solver, or a group calibration) or an MCMC
   // chain, where the effective count is smaller than the count.

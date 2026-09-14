@@ -20,6 +20,7 @@ import { persist, createJSONStorage } from 'zustand/middleware'
 import type { DraftMeasurement, DraftGroup, DraftRelationship, ModelElement } from '@/types'
 import type { Concern } from '@/utils/diagnostics'
 import { DateFormat, DEFAULT_DATE_FORMAT } from '@/utils/dateFormat'
+import { phaseForContext } from '@/utils/modelTreeDefaults'
 
 export type SolverChoice = 'auto' | 'exact' | 'gibbs'
 
@@ -176,11 +177,25 @@ const createDraftState: StateCreator<AnalysisDraftState> = (set) => ({
   setMeasurements: (measurements) => set({ measurements }),
 
   addMeasurement: (measurement) =>
-    set((state) => ({ measurements: [...state.measurements, measurement] })),
+    set((state) => {
+      // A date added once the tree exists is filed under the phase its
+      // context names, when there is exactly one. Otherwise it arrives
+      // unassigned and the Model Structure page asks where it goes.
+      const phaseId = phaseForContext(state.modelTree, measurement.default_context_name)
+      return {
+        measurements: [...state.measurements, measurement],
+        elementAssignments: phaseId
+          ? { ...state.elementAssignments, [measurement.id]: phaseId }
+          : state.elementAssignments,
+      }
+    }),
 
   removeMeasurement: (id) =>
     set((state) => ({
       measurements: state.measurements.filter((m) => m.id !== id),
+      elementAssignments: Object.fromEntries(
+        Object.entries(state.elementAssignments).filter(([mid]) => mid !== id)
+      ),
       // Unlinking a removed sample's group membership is implicit --
       // it's just gone -- but any relationship that named this sample
       // directly (not via a group) is now dangling and must go too.

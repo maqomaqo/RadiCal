@@ -283,7 +283,8 @@ def _children(element: Dict) -> List[Dict]:
 
 
 def _name_of(element: Dict) -> str:
-    return element.get('name') or (element.get('element_type') or 'element').title()
+    from app.services.model_tree import element_label
+    return element_label(element)
 
 
 def _enclosures(root: Dict) -> Tuple[Dict[str, Tuple[str, str]], List[Dict]]:
@@ -621,17 +622,154 @@ def evaluate(duration_specs: List[Dict], difference_specs: List[Dict],
     return durations, differences
 
 
+# --------------------------------------------------------------------------
+# Age against depth
+# --------------------------------------------------------------------------
+
+# Where the age-depth envelopes are cut. QUANTILES, not HPD regions: an
+# envelope is drawn as a band and has to nest, and two HPD regions on a
+# multi-peaked posterior need not -- the 68.3% one can reach outside the
+# 95.4% one at a different depth and the band crosses itself. The coverages
+# are the same two every other figure here is quoted at.
+BAND_LEVELS = ((SIGMA_1, 68), (SIGMA_2, 95))
+
+
+def _band(values: np.ndarray) -> Dict:
+    """One level's calendar age from joint draws, as a median and two bands.
+
+    Calendar-age key names, deliberately unlike a duration's: these ARE dates
+    and the exports format them as such, where every other figure in this
+    module is a length in years and must never be converted to BC/AD.
+    """
+    entry = {
+        'median': float(np.median(values)),
+        'mean': float(values.mean()),
+    }
+    for coverage, label in BAND_LEVELS:
+        tail = (1.0 - coverage) / 2.0
+        low, high = np.quantile(values, [tail, 1.0 - tail])
+        entry[f'band_{label}'] = [float(low), float(high)]
+    return entry
+
+
+def plan_age_depth(root: Optional[Dict], measurements: List[Dict]) -> List[Dict]:
+    """
+    Every deposition sequence in the model, as the levels and intervals an
+    age-depth answer is made of.
+
+    A stack of per-date posteriors is NOT the deliverable of an age-depth
+    model: what the reader wants is age against depth, with a band round it,
+    and how fast the deposit accumulated between one level and the next.
+    Every one of those is a function of SEVERAL ages at once, which is why it
+    lives in this module and comes off joint draws.
+    """
+    from app.services.model_tree import DepositionGroup, plan_model
+    if not root:
+        return []
+    groups: List[DepositionGroup] = plan_model(root, measurements).deposition_groups
+    names = {m['id']: (m.get('sample_name') or m['id']) for m in measurements}
+
+    specs = []
+    for group in groups:
+        specs.append({
+            'element_id': group.element_id,
+            'name': group.name,
+            'depth_units': group.depth_units,
+            'levels': [
+                {'id': pid, 'depth': depth, 'dated': dated,
+                 'name': names.get(pid) or group.level_names.get(pid)
+                 or f'{depth:g} {group.depth_units}'}
+                for pid, depth, dated in group.levels
+            ],
+        })
+    return specs
+
+
+def evaluate_age_depth(specs: List[Dict], draws: Dict[str, np.ndarray]) -> List[Dict]:
+    """
+    Specs plus joint draws into the age-depth records the API stores.
+
+    The accumulation rate between two levels is (older age - younger age)
+    divided by the depth between them, and it is read off the SAME draw of
+    both ages. Pairing their marginals would give a rate distribution that is
+    wrong in shape rather than scale -- the identical trap this module opens
+    with for durations, and the reason nothing here is computed from a
+    marginal.
+    """
+    records = []
+    for spec in specs:
+        levels = [level for level in spec['levels'] if level['id'] in draws]
+        if len(levels) < 2:
+            continue
+
+        reported_levels = []
+        for level in levels:
+            reported_levels.append({
+                'id': level['id'],
+                'name': level['name'],
+                'depth': level['depth'],
+                'dated': level['dated'],
+                **_band(draws[level['id']]),
+            })
+
+        accumulation = []
+        for older, younger in zip(levels, levels[1:]):
+            depth_gap = abs(older['depth'] - younger['depth'])
+            if depth_gap <= 0:
+                continue
+            elapsed = draws[older['id']] - draws[younger['id']]
+            years = summarise(elapsed)
+            if years is None:
+                continue
+            rate = elapsed / depth_gap
+            tail = (1.0 - SIGMA_1) / 2.0
+            low, high = np.quantile(rate, [tail, 1.0 - tail])
+            accumulation.append({
+                'from_depth': older['depth'],
+                'to_depth': younger['depth'],
+                'from_name': older['name'],
+                'to_name': younger['name'],
+                'depth_gap': float(depth_gap),
+                # The elapsed time, in the same shape every other duration
+                # here takes, so it renders and exports through the same code.
+                'years': years,
+                # ...and the same thing per unit depth, which is what an
+                # accumulation rate IS and what the literature quotes.
+                'rate_median': float(np.median(rate)),
+                'rate_band_68': [float(low), float(high)],
+            })
+
+        records.append({
+            'element_id': spec['element_id'],
+            'name': spec['name'],
+            'depth_units': spec['depth_units'],
+            'levels': reported_levels,
+            'accumulation': accumulation,
+        })
+    return records
+
+
 def report(root: Optional[Dict], measurements: List[Dict],
-           draws: Dict[str, np.ndarray], independent: bool) -> Dict:
+           draws: Dict[str, np.ndarray], independent: bool,
+           durations: bool = True) -> Dict:
     """
     The whole durations-and-differences block for a modelled analysis, ready
     to store on Analysis.intervals.
+
+    `durations` False leaves the durations and differences out and reports
+    only the age-depth section. That is for a run that has joint draws for a
+    reason of its own -- an age-depth model always does -- without the analyst
+    having asked for phase durations, which are a modelling claim of their own
+    (see BayesianConfigInput.estimate_durations).
     """
-    duration_specs = plan_durations(root, measurements) if root else []
+    duration_specs = plan_durations(root, measurements) if root and durations else []
     difference_specs, note = (plan_phase_differences(root, measurements)
-                              if root else ([], None))
-    durations, differences = evaluate(duration_specs, difference_specs, draws)
-    return _block(durations, differences, draws, independent, note)
+                              if root and durations else ([], None))
+    found_durations, differences = evaluate(duration_specs, difference_specs, draws)
+    block = _block(found_durations, differences, draws, independent, note)
+    block['age_depth'] = evaluate_age_depth(
+        plan_age_depth(root, measurements), draws)
+    return block
 
 
 def report_dates(dates: List[Dict], draws: Dict[str, np.ndarray]) -> Dict:
@@ -645,7 +783,9 @@ def report_dates(dates: List[Dict], draws: Dict[str, np.ndarray]) -> Dict:
     _durations, differences = evaluate([], specs, draws)
     # Independent by construction: a group calibration asserts no relationship,
     # so drawing each date separately IS drawing from the joint.
-    return _block([], differences, draws, True, note)
+    block = _block([], differences, draws, True, note)
+    block['age_depth'] = []
+    return block
 
 
 def _block(durations: List[Dict], differences: List[Dict],
@@ -655,6 +795,10 @@ def _block(durations: List[Dict], differences: List[Dict],
     return {
         'durations': durations,
         'differences': differences,
+        # Filled in by report()/report_dates(); declared here so every block
+        # has the key and no consumer has to tell "no age-depth model" from
+        # "written before there was one".
+        'age_depth': [],
         'draws': min(sizes) if sizes else 0,
         # True when the draws are independent rather than an MCMC chain, where
         # autocorrelation makes the effective count smaller than the count.

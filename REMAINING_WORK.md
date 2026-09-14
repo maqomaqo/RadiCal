@@ -161,38 +161,11 @@ snapshot guarantee — and, since Alembic landed, adding the column is a migrati
 rather than an entry on a hand-maintained list. (No such column exists;
 confirmed 2026-09-07.)
 
-### 4. Wiggle matching and age-depth modelling
-*Added 2026-09-02.* Not a gap this file had listed — a feature request, and the
-only one that is already refused **by name**: `oxcal_script.UNSUPPORTED` turns
-away `D_Sequence`, `V_Sequence`, `P_Sequence` and `U_Sequence` on import, so an
-`.oxcal` file containing any of them cannot be read at all. Planned in
-[`docs/AGE_DEPTH_AND_WIGGLE_MATCH_PLAN.md`](docs/AGE_DEPTH_AND_WIGGLE_MATCH_PLAN.md).
-
-They are one feature with two solvers behind it, and the split is the whole
-point of the plan:
-
-- **Wiggle matching** (`D_Sequence`/`V_Sequence`) has ONE free parameter — the
-  reference member's calendar age — so it is a closed form, not a sampler: shift
-  each member's likelihood by its known gap and multiply. Measured at **0.4 ms**
-  a solve against the shipped IntCal20, and it touches neither existing solver.
-  It needs its own calendar grid rather than `exact_chain._build_grid`, whose
-  `BOUNDARY_WINDOW_FACTOR` padding exists for boundaries a wiggle match does not
-  have and costs 2.7–6.6 yr per cell. **~days.**
-- **Age-depth** (`P_Sequence`) couples adjacent ages through the deposition rate
-  and shares a rigidity `k` across the sequence, so it cannot factorise along
-  `exact_chain`'s message passing and belongs in `services/gibbs.py`. The
-  conditionals stay one-dimensional, and `k` is the same shared-hyperparameter
-  draw `Model.draw_scale` already does for the outlier scale. **~weeks.**
-
-Worth the note on value, because it is unusually lopsided: against the Hallstatt
-plateau at 2500 cal BP, a single ±25 date has a median 95.4% range of **263.5
-years** and comes back split into disjoint ranges every time, where 8 samples
-across 250 rings give **14.0 years** in one range — a 19× sharpening from the
-cheap half of the item. Ship the wiggle match alone first; the plan's §8
-sequences the rest behind it.
-
-The measurements above are in the plan's §3, made with a prototype of the solver
-rather than estimated, and two of them changed its design.
+### 4. Wiggle matching and age-depth modelling — **delivered**
+*Added 2026-09-02, delivered 2026-09-09.* Moved to Done #20. What is left of it
+is one deliberate limitation, recorded there: a wiggle match must be the whole
+model, and one nested inside a larger structure is refused by name rather than
+approximated.
 
 ### 5. Spatial metadata, ΔR lookup, and dispersal modelling
 *Added 2026-09-07*, from a plan committed the day before and not previously
@@ -850,6 +823,101 @@ the picker filled up again.
 
 ---
 
+### 20. ~~Wiggle matching and age-depth modelling~~
+**Added 2026-09-02, delivered 2026-09-09.** Planned in
+[`docs/AGE_DEPTH_AND_WIGGLE_MATCH_PLAN.md`](docs/AGE_DEPTH_AND_WIGGLE_MATCH_PLAN.md)
+and built to it. Two features with one shape -- a sequence whose members are
+separated by a measured distance on an axis outside the model -- and two very
+different solvers behind them.
+
+**Wiggle matching** (`D_Sequence`/`V_Sequence`) is `services/wiggle_match.py`:
+one free parameter, the calendar age at the series reference point, and a closed
+form. Shift each member's likelihood by its own `ring_offset` and multiply.
+There is no sampler, so none of `services/intervals.py`'s Monte Carlo
+qualifications apply to it. It builds its OWN calendar grid rather than
+borrowing `exact_chain._build_grid`, whose `BOUNDARY_WINDOW_FACTOR` padding
+exists for boundaries a wiggle match does not have --
+`test_wiggle_match.TestTheGrid` halves the step and requires the reported range
+not to move, which is the check that would have failed on the borrowed one.
+
+The 19x on the worked example holds: at 2500 cal BP a single +/-25 date comes
+back 285 years wide in two ranges, and eight samples over 250 rings come back 20
+years wide in one. `TestWhatTheMatchBuys` asserts it as a RATIO rather than
+against a remembered figure, so a curve update moves the number and not the test.
+
+**Age-depth** (`P_Sequence`) is in `services/gibbs.py`, as the plan said it would
+be: a level's full conditional is its own likelihood times two power terms, one
+per neighbour, so it stays one-dimensional and tabulated. `k` is drawn from its
+own conditional exactly as `Model.draw_scale` draws the outlier scale, and its
+posterior is REPORTED -- a stiff model interpolates confidently through a
+plateau, and `pinned` says when the answer is leaning on the end of the prior's
+range rather than on the dates.
+
+Three things worth knowing, none of them visible from the endpoint:
+
+- **The double interval prior was the real risk**, and it is prevented in
+  `model_tree.plan_model` rather than in the solver: a deposition sequence's
+  levels bubble up as `SpanGroup.contained_ids` rather than as `date_ids`, so
+  they are penned in by the enclosing Boundaries and charged no `(span)^(-K)` on
+  top of their own Poisson prior. `TestTheSpanPriorIsNotAppliedTwice` asserts
+  that structurally as well as in the answer, because it would not have shown up
+  as a crash or as a wrong-looking number.
+- **The strongest check is the brute force.** Three dated levels make a 3-D
+  integral computable directly on a grid, and `TestAgainstBruteForce` writes the
+  deposition density out again from the paper rather than calling the sampler's
+  own -- so what is checked is the sampler against the model. Whether the MODEL
+  is discretised finely enough is a separate question, answered by refining the
+  grid rather than argued about.
+- **The sign convention is stated once** (`services/wiggle_match.py`, the field
+  help, `utils/ringOffsets.ts`, the importer) and pinned against an ASYMMETRIC
+  stretch of IntCal20. A reversed series on a symmetric stretch comes back merely
+  shifted and every assertion still passes, which is the failure mode that
+  fixture exists to catch.
+
+Both import. `D_Sequence`, `V_Sequence` and `P_Sequence` are gone from
+`oxcal_script.UNSUPPORTED`, and `Date()` is NARROWED rather than lifted: inside a
+`P_Sequence` with a `z=` it is an undated level, which is what makes "how old is
+47 cm" answerable, and anywhere else it is still an undated free parameter with
+nothing bounding it. `U_Sequence` stays refused, deliberately -- it is a
+different prior over the same depths, and reading one as the other would change
+the posterior silently.
+
+Where a V_Sequence is not reproduced exactly, the import says so rather than
+leaving it in the arithmetic: OxCal's gaps form a chain, so two members' 
+distances from the reference share every gap between them, and this app carries
+one uncertainty per member and treats them as independent. The gap errors are
+added in quadrature along the series and a warning states the difference.
+
+**What is deliberately NOT done.** An OUTLIER MODEL on a wiggle-match member is
+refused, at the request schema, at the importer and in the solver itself. It
+follows from the gaps being hard: an outlier model gives a date room to sit
+apart from the others and a wiggle match has none to give, so the agreement
+index is what says a member does not belong. It was refused rather than
+implemented because implementing it means marginalising an offset scale
+independently per member -- `exact_chain`'s approximation rather than OxCal's
+shared scale -- and OxCal does allow `Outlier()` in a `D_Sequence`, so a real
+fixture should come before an implementation. The guard is repeated in
+`wiggle_match.solve` and not only at the edges, because that function is the
+one that would otherwise drop it: its likelihoods come from
+`exact_chain._date_likelihood`, where the outlier mixture lives a level up in
+`date_tables`.
+
+A wiggle sequence nested inside a larger model is refused by name too, at the
+importer and at the run. Its members are one calendar
+age with fixed gaps added rather than n free parameters, and the surrounding
+Boundaries and span terms would have to be told that; reading the series as n
+dates in a phase -- the only thing the existing solvers could do with it -- would
+report a match that was never made. The data model already carries what the
+composed case needs, including the reference member
+(`ELEMENT_PARAMS['wiggle_sequence']`), so adding the inference later is not a
+migration of everything.
+
+Two open decisions from the plan stay open, and both are recorded where they
+bite: no pass/fail threshold is printed against the combination agreement (plan
+S12.1 -- the same standard `agreement.py` holds `Amodel` to), and a sapwood
+allowance is not modelled (S12.3).
+
+
 ## Testing & QA
 
 - **Backend: 899 tests** in `backend/tests/`, across 29 files — 898 pass and
@@ -1015,31 +1083,29 @@ the picker filled up again.
 
 ## Where to start
 
-1. **Open #4's cheap half** (the wiggle match) is the largest gain per day of
-   work anywhere on this list — 19× on the worked example — and it touches
-   neither existing solver, so it cannot break what is there.
-2. **Revisit the queue and the connection pool.** Both were sized on the
+1. **Revisit the queue and the connection pool.** Both were sized on the
    grounds that there was one user (Done #4), which stopped being true today.
    Open registration plus a single-worker queue means any account can occupy
    the only solver thread — the first thing to look at if this becomes public
    rather than sitting behind a VPN.
-3. **Before any real deployment**, set `RADICAL_SECRET_KEY` and `RADICAL_ENV`.
+2. **Before any real deployment**, set `RADICAL_SECRET_KEY` and `RADICAL_ENV`.
    The app refuses to start without them once `RADICAL_ENV` says it is real,
    but that is a backstop, not a plan.
-4. Everything else as concrete need arises.
+3. Everything else as concrete need arises.
 
 ---
 
-*Status, 2026-09-07: calibration and Bayesian math correct and tested (including
-OxCal-style Boundaries, both outlier models, and durations and differences from
-the joint posterior); project management, date collections, deploy,
+*Status, 2026-09-09: calibration and Bayesian math correct and tested (including
+OxCal-style Boundaries, both outlier models, durations and differences from the
+joint posterior, wiggle matching in closed form and age-depth modelling against
+a Poisson deposition process); project management, date collections, deploy,
 duplicate/edit, re-run and side-by-side comparison working end to end; a long
 run is queued, reports progress and can be stopped; the schema is versioned; the
 user manual ships inside the app; and every project and analysis now belongs to
 an account and is private to it. **Every HIGH and MEDIUM item this file has ever
-carried is closed.** What remains is five elective items, of which two are
-planned but unbuilt features — wiggle matching/age-depth (Open #4) and spatial
-metadata/ΔR/dispersal (Open #5, and written for a fork).*
+carried is closed.** What remains is four elective items, of which one is a
+planned but unbuilt feature — spatial metadata/ΔR/dispersal (Open #5, and written
+for a fork).*
 
 *The one thing to do before this is reachable by anyone else: set
 `RADICAL_SECRET_KEY`. Without it, login tokens are signed with a key published

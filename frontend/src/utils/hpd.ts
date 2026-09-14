@@ -111,8 +111,8 @@ export const REPORTING_STEP_YEARS = 5
 /**
  * Ranges for a modelled posterior, rebinned to REPORTING_STEP_YEARS first.
  *
- * A line-for-line mirror of exact_chain._reported_ranges, and it exists for
- * the same two reasons. The solver picks its internal grid step from the date
+ * A mirror of exact_chain._reported_ranges, and it exists for the same two
+ * reasons. The solver picks its internal grid step from the date
  * range and the number of groups, so reporting at that step would make a
  * published range depend on an implementation detail -- the same dates in a
  * longer sequence come back with different bounds. And a modelled posterior is
@@ -136,16 +136,35 @@ function reportedRangesFromPosterior(
   const mass = densities.map((d, i) => d * widths[i])
 
   const step = REPORTING_STEP_YEARS
-  const lo = Math.floor(ages[0] / step) * step
-  // Half-open bins [edge, edge + step), matching numpy.histogram on the edges
-  // the backend builds. Bins no point falls in are dropped rather than carried
-  // as zeros, again as the backend does.
-  const binned = new Map<number, number>()
-  ages.forEach((age, i) => {
-    const bin = Math.floor((age - lo) / step)
-    binned.set(bin, (binned.get(bin) ?? 0) + mass[i])
-  })
-  const kept = [...binned.entries()].filter(([, m]) => m > 0).sort((a, b) => a[0] - b[0])
+  // The mass in a reporting bin is the cumulative mass between its two
+  // edges, read off the CELL edges by interpolation: each grid point stands
+  // for the cell half a solver step either side of it. Exact for a density
+  // constant within a cell and, unlike counting which grid points fall in
+  // each bin, independent of how the two grids align -- a 1.015-year solver
+  // step put four points in one bin and five in the next, a +/-20% sawtooth
+  // the HPD then selected on. Mirrors the backend's _reported_ranges; bins
+  // holding no mass are dropped rather than carried as zeros, as there.
+  const cellEdges = [ages[0] - widths[0] / 2]
+  ages.forEach((age, i) => cellEdges.push(age + widths[i] / 2))
+  const cdf = [0]
+  mass.forEach((m) => cdf.push(cdf[cdf.length - 1] + m))
+  const cdfAt = (x: number): number => {
+    if (x <= cellEdges[0]) return 0
+    const last = cellEdges.length - 1
+    if (x >= cellEdges[last]) return cdf[last]
+    let hi = 1
+    while (cellEdges[hi] < x) hi++
+    const span = cellEdges[hi] - cellEdges[hi - 1]
+    const frac = span > 0 ? (x - cellEdges[hi - 1]) / span : 1
+    return cdf[hi - 1] + frac * (cdf[hi] - cdf[hi - 1])
+  }
+  const lo = Math.floor(cellEdges[0] / step) * step
+  const hi = Math.ceil(cellEdges[cellEdges.length - 1] / step) * step
+  const kept: Array<[number, number]> = []
+  for (let edge = lo, bin = 0; edge < hi; edge += step, bin++) {
+    const m = Math.max(0, cdfAt(edge + step) - cdfAt(edge))
+    if (m > 0) kept.push([bin, m])
+  }
   if (kept.length === 0) return []
 
   const centres = kept.map(([bin]) => lo + (bin + 0.5) * step)

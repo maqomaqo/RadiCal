@@ -112,17 +112,23 @@ class TestAgainstOxCalLikelihoods:
 
 def test_sub_resolution_slivers_are_reported():
     """
-    Two of these dates come back with a THIRD HPD range carrying under 1% of
-    the probability, one of them zero years wide -- Wk-50100's 95.4% region is
-    reported as AD 1304-1304, 1306-1360, 1381-1402.
+    One of these dates comes back with a THIRD HPD range carrying under 1% of
+    the probability -- ANU-55206's 95.4% region is reported as AD 1306-1308,
+    1313-1360, 1381-1408.
 
     This is not a calibration error: the app searches the curve's own grid,
     which is finer than OxCal's 5-year bins, so it resolves a one-point dip
-    that OxCal smooths across. But a zero-width range is not meaningful
-    output, and OxCal reports neither of them. Pinned here so the behaviour
-    is a known, deliberate state rather than a surprise, and so that
-    suppressing slivers below some probability or width shows up as a
+    that OxCal smooths across. But a three-year range at 0.6% is not
+    meaningful output, and OxCal does not report it. Pinned here so the
+    behaviour is a known, deliberate state rather than a surprise, and so
+    that suppressing slivers below some probability or width shows up as a
     deliberate change to this test.
+
+    Wk-50100 used to carry a second sliver, zero years wide at AD 1304. That
+    was a three-way TIE in probability at the region's edge, broken by
+    whichever point an unstable argsort happened to put first; the ranking
+    is now stable, so the tie goes to the lowest index and the point joins
+    the neighbouring range instead of sitting alone one cell away from it.
     """
     curve = get_curve('shcal20')
     found = {}
@@ -134,8 +140,7 @@ def test_sub_resolution_slivers_are_reported():
             found[m['sample_name']] = [(r['max'] - r['min'], r['probability_percent'])
                                        for r in slivers]
 
-    assert sorted(found) == ['ANU-55206', 'Wk-50100']
-    assert found['Wk-50100'][0][0] == 0.0, 'the zero-width range is the point'
+    assert sorted(found) == ['ANU-55206']
     for slivers in found.values():
         for width, share in slivers:
             assert width <= 5.0 and share < 1.0

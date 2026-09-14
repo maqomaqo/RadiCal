@@ -60,6 +60,11 @@ def _serialize(sample: ProjectSample) -> dict:
         "delta_r": sample.delta_r,
         "delta_r_error": sample.delta_r_error,
         "depth_cm": sample.depth_cm,
+        # The wiggle-match ordinate. A property of the SAMPLE -- which ring of
+        # which timber it came from -- so it belongs to the collection rather
+        # than to any one analysis, and deploying carries it across.
+        "ring_offset": sample.ring_offset,
+        "ring_offset_error": sample.ring_offset_error,
         "location": sample.location,
         "notes": sample.notes,
         "default_context_name": sample.default_context_name,
@@ -117,6 +122,8 @@ def create_project_samples(
             delta_r=item.delta_r,
             delta_r_error=item.delta_r_error,
             depth_cm=item.depth_cm,
+            ring_offset=item.ring_offset,
+            ring_offset_error=item.ring_offset_error,
             location=item.location,
             notes=item.notes,
             default_context_name=item.default_context_name,
@@ -443,6 +450,11 @@ def deploy_samples_to_analysis(
             delta_r=src.delta_r,
             delta_r_error=src.delta_r_error,
             depth_cm=src.depth_cm,
+            # Carried across for the same reason as Delta-R above: a ring
+            # offset is where the sample sits in its own series, and a
+            # deployed date that lost it is no longer a member of one.
+            ring_offset=src.ring_offset,
+            ring_offset_error=src.ring_offset_error,
             location=src.location,
             notes=src.notes,
             group_id=groups_by_name.get(name),

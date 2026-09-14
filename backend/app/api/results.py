@@ -113,6 +113,95 @@ def _interval_rows(intervals: Optional[Dict]) -> List[List]:
     return rows
 
 
+# The age-depth band, as two more tables. Kept apart from INTERVAL_HEADER
+# because these rows are not lengths in years: the level rows are CALENDAR
+# AGES and the accumulation rows are years per unit depth, and the file's rule
+# is that only calendar-age columns gain a BC/AD counterpart. Written only
+# when the run has an age-depth model in it, so a plain calibration does not
+# grow an empty accumulation-rate section.
+AGE_DEPTH_HEADER = [
+    'Row Type', 'Sequence', 'Level', 'Depth', 'Dated',
+    'Median BP', '68.3% Band BP', '95.4% Band BP',
+]
+ACCUMULATION_HEADER = [
+    'Row Type', 'Sequence', 'From', 'To', 'Depth Gap',
+    'Elapsed Median (yr)', 'Elapsed 95.4% (yr)',
+    'Rate (yr per unit depth)', 'Rate 68.3%',
+]
+# The one calendar-age column of the level table that gains a formatted
+# counterpart, on the same rule as _FORMATTED_COLUMNS above.
+_AGE_DEPTH_FORMATTED = ['Median BP', '68.3% Band BP', '95.4% Band BP']
+
+
+def _band_cell(band: Optional[List[float]]) -> str:
+    """A band as one cell, oldest first -- the order every calendar range in
+    this file is written in."""
+    if not band:
+        return ''
+    return f"{max(band):.0f}-{min(band):.0f}"
+
+
+def _age_depth_rows(intervals: Optional[Dict], date_format: str) -> List[Dict]:
+    """
+    The age-depth section as (header, rows) blocks, or [] when the run has no
+    deposition sequence in it.
+    """
+    records = (intervals or {}).get('age_depth') or []
+    if not records:
+        return []
+
+    fmt = date_format_service
+    era = fmt.ERA_LABELS.get(date_format)
+    level_header = list(AGE_DEPTH_HEADER)
+    if era:
+        level_header += [f'{name} ({era})' for name in _AGE_DEPTH_FORMATTED]
+
+    level_rows: List[List] = []
+    rate_rows: List[List] = []
+    for record in records:
+        units = record.get('depth_units') or 'cm'
+        for level in record.get('levels') or []:
+            row = [
+                'Age-Depth Level', record.get('name') or '',
+                level.get('name') or '',
+                f"{level['depth']:g} {units}" if level.get('depth') is not None else '',
+                'yes' if level.get('dated') else 'no',
+                f"{level['median']:.0f}" if level.get('median') is not None else '',
+                _band_cell(level.get('band_68')),
+                _band_cell(level.get('band_95')),
+            ]
+            if era:
+                band_68 = level.get('band_68') or [None, None]
+                band_95 = level.get('band_95') or [None, None]
+                row += [
+                    fmt.format_age(level.get('median'), date_format),
+                    fmt.format_range(band_68[0], band_68[1], date_format),
+                    fmt.format_range(band_95[0], band_95[1], date_format),
+                ]
+            level_rows.append(row)
+
+        for step in record.get('accumulation') or []:
+            years = step.get('years') or {}
+            band = step.get('rate_band_68') or []
+            rate_rows.append([
+                'Accumulation Rate', record.get('name') or '',
+                f"{step['from_depth']:g} {units}",
+                f"{step['to_depth']:g} {units}",
+                f"{step['depth_gap']:g} {units}",
+                _years(years.get('median')),
+                _years_ranges(years.get('hpd_95_ranges')),
+                f"{step['rate_median']:.2f}" if step.get('rate_median') is not None else '',
+                f"{min(band):.2f}-{max(band):.2f}" if band else '',
+            ])
+
+    blocks = []
+    if level_rows:
+        blocks.append({'header': level_header, 'rows': level_rows})
+    if rate_rows:
+        blocks.append({'header': list(ACCUMULATION_HEADER), 'rows': rate_rows})
+    return blocks
+
+
 def _unmodelled_ranges(sample, analysis_type: str) -> Dict:
     """
     What this date calibrates to on its own, with no stratigraphic constraint
@@ -354,6 +443,23 @@ def _boundary_as_result(posterior: Dict) -> Dict:
     }
 
 
+def _write_age_depth(writer, analysis, date_format: str) -> None:
+    """
+    The age-depth band and the accumulation rates, appended below the
+    durations table in the same file.
+
+    Written only when the run produced them, so a plain calibration does not
+    grow an empty accumulation-rate section -- README's rule that a column
+    appears only when there is something to put in it, applied to a whole
+    table.
+    """
+    for block in _age_depth_rows(analysis.intervals, date_format):
+        writer.writerow([])
+        writer.writerow(block['header'])
+        for row in block['rows']:
+            writer.writerow(row)
+
+
 def _write_intervals(writer, analysis) -> None:
     """
     The durations-and-differences table, appended below the results table with
@@ -414,6 +520,7 @@ def _build_csv(analysis_id: str, db: Session, date_format: Optional[str] = None)
                 + extra(row, None, None)
             )
         _write_intervals(writer, analysis)
+        _write_age_depth(writer, analysis, date_format)
         return output.getvalue()
 
     for order, row in enumerate(structure, start=1):
@@ -441,6 +548,7 @@ def _build_csv(analysis_id: str, db: Session, date_format: Optional[str] = None)
         )
 
     _write_intervals(writer, analysis)
+    _write_age_depth(writer, analysis, date_format)
     return output.getvalue()
 
 

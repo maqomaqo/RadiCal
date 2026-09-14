@@ -73,8 +73,16 @@ import { buildInputsPayload } from '@/utils/analysisPayload'
 import { useNotify } from '@/contexts/NotificationContext'
 import { useAnalysisDraftStore, DEFAULT_MCMC } from '@/stores/analysisStore'
 import type { McmcConfig, SolverChoice } from '@/stores/analysisStore'
-import type { DraftGroup, DraftMeasurement, DraftRelationship, ModelElement } from '@/types'
+import type {
+  DraftGroup,
+  DraftMeasurement,
+  DraftRelationship,
+  ElementType,
+  ModelElement,
+} from '@/types'
 import { expandRelationships, findCycle } from '@/utils/stratigraphy'
+import { ELEMENT_TYPE_LABEL, elementLabel } from '@/utils/elementLabels'
+import { modelCanReportIntervals } from '@/utils/intervalsAvailable'
 import { summariseTree } from '@/utils/harrisLayout'
 import { validateTree } from '@/components/ModelTreeEditor'
 
@@ -91,7 +99,7 @@ function elementName(tree: ModelElement | null, id: string | null): string | nul
   const stack: ModelElement[] = [tree]
   while (stack.length) {
     const el = stack.pop()!
-    if (el.id === id) return el.name || el.element_type
+    if (el.id === id) return elementLabel(el)
     for (const child of el.children || []) stack.push(child)
   }
   return null
@@ -372,6 +380,12 @@ export default function NewAnalysis() {
           outlier_model: m.outlier_model ?? 'general',
           reservoir_age: m.reservoir_age ?? null,
           depth_cm: m.depth_cm ?? null,
+          // The two ordinates. Loaded for the same reason as the outlier
+          // settings above: an edit resubmits whatever the draft holds, so a
+          // ring offset missing here is a ring offset deleted -- and a wiggle
+          // match IS its ring offsets.
+          ring_offset: m.ring_offset ?? null,
+          ring_offset_error: m.ring_offset_error ?? null,
           location: m.location ?? null,
           notes: m.notes ?? null,
           group_id: m.group_id ?? null,
@@ -510,6 +524,40 @@ export default function NewAnalysis() {
   const structureDefined = modelTree ? true : groups.length > 0 || relationships.length > 0
   const structureInvalid = modelTree ? treeProblems.length > 0 : !!cycle
 
+  // A wiggle match and a deposition sequence hold their dates DIRECTLY, not
+  // through Phases, and neither needs a Boundary. So a model made of one
+  // summarises to "0 phases, 0 ordering relationships" -- literally true, and
+  // read by the analyst as "you have not built anything yet", sitting right
+  // above a paragraph telling them to go and build it. Name what is actually
+  // there instead.
+  const seriesElements: ModelElement[] = []
+  if (modelTree) {
+    const collect = (element: ModelElement) => {
+      if (
+        element.element_type === 'wiggle_sequence'
+        || element.element_type === 'deposition_sequence'
+      ) {
+        seriesElements.push(element)
+      }
+      for (const child of element.children || []) collect(child)
+    }
+    collect(modelTree)
+  }
+  const datesInElement = (elementId: string) =>
+    measurements.filter((m) => (elementAssignments[m.id] || m.group_id) === elementId).length
+  // Only when the series are the whole story. A deposition sequence between
+  // two Boundaries is an ordinary model that happens to contain one, and the
+  // usual counts describe it perfectly well.
+  const seriesIsTheModel = seriesElements.length > 0 && structurePhaseCount === 0
+  // A model can hold both kinds -- a timber and a core from the same site --
+  // so name both rather than whichever came first in the walk.
+  const seriesOrderedBy = [
+    seriesElements.some((s) => s.element_type === 'wiggle_sequence') ? 'gaps' : null,
+    seriesElements.some((s) => s.element_type === 'deposition_sequence') ? 'depths' : null,
+  ]
+    .filter(Boolean)
+    .join(' and ')
+
   // Optional columns appear only when at least one date has something to put
   // in them. A single terrestrial calibration should not be handed a table
   // with three columns of em-dashes.
@@ -519,6 +567,79 @@ export default function NewAnalysis() {
   const showContextColumn = measurements.some((m) => !!m.default_context_name)
   const showDeltaRColumn = measurements.some((m) => m.delta_r != null)
   const showOutlierColumn = measurements.some((m) => (m.outlier_prior ?? 0) > 0)
+  // The two ORDINATES. Like ΔR and the outlier settings, they change the
+  // answer rather than describing the sample -- a wiggle match IS its gaps and
+  // a deposition sequence IS its depths -- so once any date carries one they
+  // are readable without opening anything.
+  const showGapColumn = measurements.some((m) => m.ring_offset != null)
+  const showDepthColumn = measurements.some((m) => m.depth_cm != null)
+
+  /**
+   * The element type a date is assigned to, or null.
+   *
+   * What makes a gap or a depth PERTINENT to a particular date: it either
+   * already carries one, or it sits in the kind of sequence built on one. A
+   * date in neither is offered neither, because a stray value would be
+   * carried, exported, and eventually read as if someone meant it.
+   */
+  const holderTypeFor = (measurementId: string): ElementType | null => {
+    const elementId = elementAssignments[measurementId]
+    if (!modelTree || !elementId) return null
+    let found: ElementType | null = null
+    const walk = (element: ModelElement) => {
+      if (element.id === elementId) found = element.element_type
+      for (const child of element.children || []) walk(child)
+    }
+    walk(modelTree)
+    return found
+  }
+
+  // Whether the model as it stands has anything for a duration to be about.
+  // `null` is "no structure yet", the ordinary state on this form before one
+  // is built, and is treated as yes -- hiding the option because the user has
+  // not got to the Model Structure page would be worse than offering one that
+  // turns out to report nothing.
+  //
+  // A wiggle match answers false, which is the point: the spacing of its
+  // members is an INPUT rather than something the run infers, so the switch
+  // would promise a table that comes back empty.
+  const canReportIntervals =
+    modelCanReportIntervals(
+      modelTree,
+      measurements.map((m) => ({
+        id: m.id,
+        element_id: elementAssignments[m.id] || null,
+        group_id: m.group_id ?? null,
+      }))
+    ) !== false
+
+  const ordinatesFor = (measurementId: string) => {
+    // Read from the SAVED measurement, not from the dialog's draft. Clearing
+    // the field would otherwise set the value to null, make it no longer
+    // pertinent, and unmount the field being typed in.
+    const saved = measurements.find((m) => m.id === measurementId)
+    const holder = holderTypeFor(measurementId)
+    return {
+      showRingOffset: saved?.ring_offset != null || holder === 'wiggle_sequence',
+      showDepth: saved?.depth_cm != null || holder === 'deposition_sequence',
+      // A wiggle match cannot apply an outlier model -- its gaps are
+      // asserted, so there is nowhere for a date to sit apart from the rest,
+      // and the server refuses one rather than dropping it. So the switch is
+      // not offered for a member of one, EXCEPT where a prior is already set:
+      // hiding it then would leave the analyst unable to clear the very
+      // setting the refusal is about.
+      showOutlier:
+        analysisType === 'bayesian'
+        && (holder !== 'wiggle_sequence' || (saved?.outlier_prior ?? 0) > 0),
+    }
+  }
+
+  // One decision, read by the outlier switch in the edit dialog and by the
+  // "apply to the rest of the phase" checkbox beneath it, so the two cannot
+  // disagree about whether this date has an outlier model to set at all.
+  const editFieldVisibility = editing
+    ? ordinatesFor(editing.id)
+    : { showRingOffset: false, showDepth: false, showOutlier: false }
 
   // The reservoir offset applies only to marine carbon against a marine
   // curve, so that is the only time it is asked for. It is useless without its
@@ -613,6 +734,8 @@ export default function NewAnalysis() {
             tpq_age_bp: d.tpq_age_bp ?? null,
             taq_age_bp: d.taq_age_bp ?? null,
             depth_cm: d.depth_cm ?? null,
+            ring_offset: d.ring_offset ?? null,
+            ring_offset_error: d.ring_offset_error ?? null,
             location: d.location ?? null,
             notes: d.notes ?? null,
           })),
@@ -679,6 +802,8 @@ export default function NewAnalysis() {
       outlier_prior: d.outlier_prior,
       outlier_model: d.outlier_model,
       depth_cm: d.depth_cm,
+      ring_offset: d.ring_offset,
+      ring_offset_error: d.ring_offset_error,
       location: d.location,
       notes: d.notes,
       tpq_age_bp: d.tpq_age_bp,
@@ -1218,21 +1343,31 @@ export default function NewAnalysis() {
                       'Uses the same MCMC sampling method as Oxcal, works for all models.'}
                   </FormHelperText>
                 </FormControl>
-                <FormControlLabel
-                  sx={{ display: 'flex' }}
-                  control={
-                    <Switch
-                      checked={mcmc.estimate_durations}
-                      onChange={(e) => setMcmc({ estimate_durations: e.target.checked })}
+{/* Offered only where the model has something for a duration to
+                    be about: a pair of Boundaries, or a phase with two dates
+                    in it. A wiggle match has neither -- its members' spacing
+                    is an INPUT rather than something the run infers -- so the
+                    switch would promise a table that comes back empty, which
+                    is what the Results page used to invite. */}
+                {canReportIntervals && (
+                  <>
+                    <FormControlLabel
+                      sx={{ display: 'flex' }}
+                      control={
+                        <Switch
+                          checked={mcmc.estimate_durations}
+                          onChange={(e) => setMcmc({ estimate_durations: e.target.checked })}
+                        />
+                      }
+                      label={<span>Durations and differences</span>}
                     />
-                  }
-                  label={<span>Durations and differences</span>}
-                />
-                <FormHelperText sx={{ mt: 0, ml: 0 }}>
-                  How long each sequence, phase and set of dated events lasted, and how
-                  far apart the phases sit. Off by default: a phase&rsquo;s duration
-                  assumes its dates sample a bounded episode.
-                </FormHelperText>
+                    <FormHelperText sx={{ mt: 0, ml: 0 }}>
+                      How long each sequence, phase and set of dated events lasted, and how
+                      far apart the phases sit. Off by default: a phase&rsquo;s duration
+                      assumes its dates sample a bounded episode.
+                    </FormHelperText>
+                  </>
+                )}
                 {/* Draws and the span prior are correct as they stand for
                     almost every run, so they sit behind an expander rather
                     than in front of everyone who opens the page. */}
@@ -1389,7 +1524,7 @@ export default function NewAnalysis() {
                   current ? { ...current, draft: next as Measurement } : current
                 )
               }
-              showOutlier={analysisType === 'bayesian'}
+              {...editFieldVisibility}
             />
           )}
           {/* Setting an outlier model one date at a time is the usual case
@@ -1397,7 +1532,12 @@ export default function NewAnalysis() {
               charcoal samples is one decision, not sixteen. Only the outlier
               settings travel; everything else on this form describes the
               individual sample. */}
-          {analysisType === 'bayesian' && editing && editSiblings.length > 0 && (
+          {/* Gated on the SAME decision as the switch above, not on the
+              analysis type. A wiggle match cannot apply an outlier model at
+              all, so offering to apply one to every other date in the series
+              is offering to spread a setting that is not there and would be
+              refused if it were. */}
+          {editFieldVisibility.showOutlier && editing && editSiblings.length > 0 && (
             <FormControlLabel
               sx={{ mt: 1 }}
               control={
@@ -1443,7 +1583,10 @@ export default function NewAnalysis() {
                   ? draft.delta_r_error ?? null
                   : null,
               })
-              if (editing.applyToPhase) {
+              // The visibility check as well as the flag: the checkbox is
+              // not rendered where an outlier model cannot apply, and a flag
+              // left true by an earlier edit must not spread one anyway.
+              if (editing.applyToPhase && editFieldVisibility.showOutlier) {
                 for (const sibling of editSiblings) {
                   updateMeasurement(sibling.id, {
                     outlier_prior: draft.outlier_prior ?? 0,
@@ -1697,6 +1840,16 @@ export default function NewAnalysis() {
                       ΔR (yr)
                     </TableCell>
                   )}
+                  {showGapColumn && (
+                    <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
+                      Gap
+                    </TableCell>
+                  )}
+                  {showDepthColumn && (
+                    <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
+                      Depth (cm)
+                    </TableCell>
+                  )}
                   {showOutlierColumn && <TableCell sx={{ whiteSpace: 'nowrap' }}>Outlier</TableCell>}
                   <TableCell align="right" sx={{ width: '1%' }}>
                     <Box component="span" sx={visuallyHidden}>
@@ -1770,6 +1923,24 @@ export default function NewAnalysis() {
                         {m.delta_r != null ? `${m.delta_r} ± ${m.delta_r_error ?? 0}` : '—'}
                       </TableCell>
                     )}
+                    {/* The gap carries its own uncertainty where the
+                        separation was measured rather than counted, and the
+                        two read as one figure, so they share a cell as ΔR
+                        does. */}
+                    {showGapColumn && (
+                      <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
+                        {m.ring_offset == null
+                          ? '—'
+                          : m.ring_offset_error
+                            ? `${m.ring_offset} ± ${m.ring_offset_error}`
+                            : m.ring_offset}
+                      </TableCell>
+                    )}
+                    {showDepthColumn && (
+                      <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
+                        {m.depth_cm ?? '—'}
+                      </TableCell>
+                    )}
                     {showOutlierColumn && (
                       <TableCell sx={{ whiteSpace: 'nowrap' }}>
                         {(m.outlier_prior ?? 0) > 0
@@ -1818,17 +1989,41 @@ export default function NewAnalysis() {
                 <Typography variant="h5" component="h2" gutterBottom>
                   Model Structure
                 </Typography>
-                <Stack direction="row" spacing={1} sx={{ mb: 1 }}>
-                  <Chip size="small" label={`${structurePhaseCount} phase${structurePhaseCount === 1 ? '' : 's'}`} />
-                  <Chip
-                    size="small"
-                    label={`${structureRelationshipCount} ordering relationship${structureRelationshipCount === 1 ? '' : 's'}`}
-                  />
+                <Stack direction="row" spacing={1} sx={{ mb: 1 }} flexWrap="wrap" useFlexGap>
+                  {seriesElements.map((series) => {
+                    const dated = datesInElement(series.id)
+                    return (
+                      <Chip
+                        key={series.id}
+                        size="small"
+                        label={`${ELEMENT_TYPE_LABEL[series.element_type]} -- ${dated} date${dated === 1 ? '' : 's'}`}
+                      />
+                    )
+                  })}
+                  {!seriesIsTheModel && (
+                    <>
+                      <Chip size="small" label={`${structurePhaseCount} phase${structurePhaseCount === 1 ? '' : 's'}`} />
+                      <Chip
+                        size="small"
+                        label={`${structureRelationshipCount} ordering relationship${structureRelationshipCount === 1 ? '' : 's'}`}
+                      />
+                    </>
+                  )}
                   {structureInvalid && <Chip size="small" color="error" label="Invalid -- fix before running" />}
                 </Stack>
                 <Typography variant="body2" color="textSecondary">
-                  Build the model as nested Sequences and Phases with Boundaries placed where you
-                  want them, then assign each date to a Phase. A Bayesian analysis needs this structure to constrain the dates. Calibrating them independently is what Group Calibration does.
+                  {seriesIsTheModel ? (
+                    <>
+                      The dates in this model are ordered by the {seriesOrderedBy} recorded against
+                      them, not by Phases and Boundaries. Open Model Structure to change the series
+                      or which dates are in it.
+                    </>
+                  ) : (
+                    <>
+                      Build the model as nested Sequences and Phases with Boundaries placed where you
+                      want them, then assign each date to a Phase. A Bayesian analysis needs this structure to constrain the dates. Calibrating them independently is what Group Calibration does.
+                    </>
+                  )}
                 </Typography>
               </Box>
               <Button

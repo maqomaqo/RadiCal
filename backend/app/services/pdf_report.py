@@ -603,11 +603,62 @@ def _differences_table(records: List[Dict], styles: Dict[str, ParagraphStyle]) -
     return _intervals_table(records, columns, cells, styles)
 
 
+def _band_text(band: Optional[Sequence[float]], date_format: str) -> str:
+    """
+    One age-depth band as text.
+
+    Not _hpd_text: a band is a pair of QUANTILES rather than an HPD region, so
+    it is one contiguous interval by construction and has no per-range
+    breakdown to preserve.
+    """
+    if not band or len(band) < 2:
+        return ''
+    return date_format_service.format_range(max(band), min(band), date_format)
+
+
+def _age_depth_table(record: Dict, date_format: str,
+                     styles: Dict[str, ParagraphStyle]) -> Table:
+    units = record.get('depth_units') or 'cm'
+    columns = [('Level', 2.6), (f'Depth ({units})', 1.2), ('Median', 1.8),
+               ('68.3%', 2.2), ('95.4%', 2.2)]
+
+    def cells(level: Dict) -> List[Any]:
+        return [
+            f"{level.get('name') or ''}{'' if level.get('dated') else ' (undated)'}",
+            _number(level.get('depth'), 1),
+            _age_text(level.get('median'), date_format),
+            _band_text(level.get('band_68'), date_format),
+            _band_text(level.get('band_95'), date_format),
+        ]
+
+    return _intervals_table(record.get('levels') or [], columns, cells, styles)
+
+
+def _accumulation_table(record: Dict, styles: Dict[str, ParagraphStyle]) -> Table:
+    units = record.get('depth_units') or 'cm'
+    columns = [('Between', 3.2), (units, 1.0), ('Years', 1.6),
+               (f'Rate (yr/{units})', 1.6), ('68.3% rate', 1.8)]
+
+    def cells(step: Dict) -> List[Any]:
+        years = step.get('years') or {}
+        band = step.get('rate_band_68') or []
+        return [
+            f"{step.get('from_name') or ''} to {step.get('to_name') or ''}",
+            _number(step.get('depth_gap'), 1),
+            _number(years.get('median')),
+            _number(step.get('rate_median'), 1),
+            f"{min(band):.1f}-{max(band):.1f}" if band else '',
+        ]
+
+    return _intervals_table(record.get('accumulation') or [], columns, cells, styles)
+
+
 # --- narrative -----------------------------------------------------------
 
 _SOLVER_NAMES = {
     'exact': 'exact integration',
     'gibbs': "OxCal's MH/Gibbs sampler",
+    'wiggle_match': 'the closed-form wiggle match',
 }
 
 
@@ -654,6 +705,33 @@ def _solver_sentence(solver: Optional[Dict]) -> Optional[str]:
             sentence += '.'
     if solver.get('converged') is False:
         sentence += ' The sampler did not meet its convergence criterion.'
+    if solver.get('method') == 'wiggle_match':
+        # The check that the match is REAL rather than a diagnostic beside it:
+        # the gaps are asserted, so a member at the wrong ring cannot be
+        # absorbed. Quoted without a pass mark, for the reason
+        # services/agreement.py gives for not publishing Amodel.
+        combination = solver.get('combination_agreement')
+        if combination is not None:
+            sentence += (
+                f" The series spans {solver.get('series_span', 0):g}"
+                f" {solver.get('gap_units') or 'rings'} and its dates agree with"
+                f" their own calibrations at a combination index of"
+                f" {combination:.0f}%."
+            )
+    for deposition in solver.get('deposition') or []:
+        if deposition.get('k_mean') is None:
+            continue
+        sentence += (
+            f" {deposition.get('name') or 'The deposition sequence'} was modelled at"
+            f" a rate of about {deposition['k_mean']:.2g} events per"
+            f" {deposition.get('depth_units') or 'cm'}"
+            f"{', inferred from the dates' if deposition.get('variable') else ', as set'}."
+        )
+        if deposition.get('pinned'):
+            sentence += (
+                ' That rate ran up against the end of the range it was allowed,'
+                ' so the prior is shaping the answer as much as the dates are.'
+            )
     return sentence
 
 
@@ -961,6 +1039,22 @@ def render_report(
             story.append(_differences_table(differences, styles))
         if (intervals or {}).get('note'):
             story.append(Paragraph(str(intervals['note']), styles['note']))
+
+    # --- age against depth, when the model has a deposition sequence in it
+    for record in ((intervals or {}).get('age_depth') or []):
+        story.append(Paragraph(f"Age and Depth: {record.get('name') or ''}",
+                               styles['heading']))
+        story.append(Paragraph(
+            "Age against depth, and how fast the deposit accumulated between one "
+            "level and the next. The bands are quantiles rather than HPD regions, "
+            "so they nest; the rates are read off the same joint draws as the ages "
+            "above them, since a rate is a function of two ages at once and pairing "
+            "their separate posteriors would give an answer wrong in shape.",
+            styles['note'],
+        ))
+        story.append(_age_depth_table(record, date_format, styles))
+        if record.get('accumulation'):
+            story.append(_accumulation_table(record, styles))
 
     # --- one figure per modelled parameter
     figures: List[Any] = []

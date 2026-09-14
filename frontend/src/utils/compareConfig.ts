@@ -99,16 +99,36 @@ export function structureSummary(tree: ModelElement | null | undefined): string 
   // Written out rather than suffixed with an "s": the OxCal vocabulary these
   // names come from is the app's, and "2 boundarys" in a panel about
   // Boundaries reads as a bug in the model, not in the sentence.
+  const singulars: Record<ElementType, string> = {
+    sequence: 'sequence',
+    phase: 'phase',
+    boundary: 'boundary',
+    hiatus: 'hiatus',
+    wiggle_sequence: 'wiggle match',
+    deposition_sequence: 'deposition sequence',
+    interpolated_depth: 'undated level',
+  }
   const plurals: Record<ElementType, string> = {
     sequence: 'sequences',
     phase: 'phases',
     boundary: 'boundaries',
     hiatus: 'hiatuses',
+    wiggle_sequence: 'wiggle matches',
+    deposition_sequence: 'deposition sequences',
+    interpolated_depth: 'undated levels',
   }
-  const order: ElementType[] = ['sequence', 'phase', 'boundary', 'hiatus']
+  const order: ElementType[] = [
+    'sequence',
+    'phase',
+    'boundary',
+    'hiatus',
+    'wiggle_sequence',
+    'deposition_sequence',
+    'interpolated_depth',
+  ]
   const parts = order
     .filter((type) => counts[type])
-    .map((type) => `${counts[type]} ${counts[type] === 1 ? type : plurals[type]}`)
+    .map((type) => `${counts[type]} ${counts[type] === 1 ? singulars[type] : plurals[type]}`)
   return parts.join(', ')
 }
 

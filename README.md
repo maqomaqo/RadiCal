@@ -56,6 +56,19 @@ Boundaries), and interactive posterior visualization.
   an optional outlier model per date. Solved exactly where the model permits it, and by OxCal's own
   MH/Gibbs scheme otherwise — see [`REMAINING_WORK.md`](REMAINING_WORK.md) for how the solvers were
   validated against real OxCal 4.4 runs.
+- **Wiggle matching** (OxCal's `D_Sequence`/`V_Sequence`): a series of dates separated by counted
+  rings or varves has ONE free parameter — the calendar age at the reference ring — so it is solved
+  in closed form rather than sampled. At the Hallstatt plateau that is the difference between a
+  single date's 285-year range in two pieces and eight samples over 250 rings giving 20 years in
+  one. Enter ring numbers and the app converts them to gaps, in the one direction that is right:
+  a gap counts years *before* the reference and increases into the past. Where the gaps were
+  measured rather than counted, each carries its own uncertainty.
+- **Age-depth modelling** (OxCal's `P_Sequence`): deposition modelled as a Poisson process down a
+  core, giving age against depth with a band round it, the accumulation rate between each pair of
+  levels, and an age at any depth you ask for — including ones nothing was dated at. The rigidity
+  is inferred from the dates rather than set, and reported alongside the band: a stiff model draws
+  a straighter line through a calibration plateau than the dates alone support, and the app says
+  when that rigidity has run up against the end of the range it was allowed.
 - **Harris matrix diagram**: the model tree drawn to the conventional reading, oldest at the bottom
   — nesting shown as boxes within boxes, Boundaries as labelled rules carrying their modelled
   range, and an arrow only between adjacent blocks that nothing else already separates. Laid out
@@ -84,11 +97,11 @@ Boundaries), and interactive posterior visualization.
   analysis or every analysis in a project; duplicate or edit an existing analysis's inputs.
 - **File import**: read dates from a CSV (header-driven, column order irrelevant, common lab-report
   spellings understood) or straight from an OxCal `.oxcal` model file, whose Sequences, Phases,
-  Boundaries, per-scope curves and per-date outlier settings all come across. Every import is
-  previewed before anything is stored, and is all-or-nothing. An OxCal construct this app does not
-  model — a non-uniform Boundary, `C_Date`, `R_Combine`, a deposition-model sequence, an unknown
-  curve — fails the import naming itself rather than being read as the nearest thing that is
-  implemented.
+  Boundaries, wiggle-matched and deposition sequences, per-scope curves and per-date outlier
+  settings all come across. Every import is previewed before anything is stored, and is
+  all-or-nothing. An OxCal construct this app does not model — a non-uniform Boundary, `C_Date`,
+  `R_Combine`, `U_Sequence`, an unknown curve — fails the import naming itself rather than being
+  read as the nearest thing that is implemented.
 - **Export**: CSV, JSON, and a printable PDF report — the analysis's metadata, the curves and
   solver that actually produced it, the results table in the model's own reading order with dates
   and Boundaries reporting through the same columns, the durations-and-differences table where one
@@ -129,7 +142,7 @@ RadiCal/
 ├── backend/                  # FastAPI application
 │   └── app/
 │       ├── api/               # Route handlers
-│       ├── services/          # Calibration math, both Bayesian solvers, model tree, agreement
+│       ├── services/          # Calibration math, the three solvers, model tree, agreement
 │       ├── schemas/            # Pydantic request/response schemas
 │       ├── models.py           # SQLAlchemy ORM models
 │       └── main.py
@@ -286,4 +299,6 @@ The main groups:
 - Buck, C. E., et al. (1996). Bayesian Approach to Interpreting Archaeological Data.
 - Heaton, T. J., et al. (2020). Marine20—the marine radiocarbon age calibration curve. Radiocarbon, 62(4).
 - Nicholls, G., and Jones, M. (2001). Radiocarbon dating with temporal order constraints. Applied Statistics, 50(4).
+- Bronk Ramsey, C. (2008). Deposition models for chronological records. Quaternary Science Reviews, 27(1-2).
+- Galimberti, M., Bronk Ramsey, C., and Manning, S. W. (2004). Wiggle-match dating of tree-ring sequences. Radiocarbon, 46(2).
 

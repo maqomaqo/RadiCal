@@ -67,6 +67,17 @@ interface Props {
    * a date to be an outlier FROM, so the control would be inert.
    */
   showOutlier?: boolean
+  /**
+   * The ORDINATES -- where this date sits on an axis outside the model.
+   *
+   * Offered where they mean something rather than on every date, the same rule
+   * ΔR follows above: a gap belongs to a wiggle-matched series and a depth to
+   * a core, and a stray value on a date in neither would be carried, exported
+   * and eventually read as one. The caller decides, because deciding needs the
+   * model tree -- see NewAnalysis.ordinatesFor.
+   */
+  showRingOffset?: boolean
+  showDepth?: boolean
 }
 
 /**
@@ -89,7 +100,13 @@ export function deltaRErrorMissing(m: MeasurementDraft): boolean {
   return m.delta_r != null && m.delta_r_error == null
 }
 
-export default function MeasurementFields({ value, onChange, showOutlier = false }: Props) {
+export default function MeasurementFields({
+  value,
+  onChange,
+  showOutlier = false,
+  showRingOffset = false,
+  showDepth = false,
+}: Props) {
   const { curves, loading: curvesLoading, error: curvesError } = useCurves()
   const set = (patch: MeasurementDraft) => onChange({ ...value, ...patch })
   const marine = isMarineMeasurement(value, curves)
@@ -259,6 +276,70 @@ export default function MeasurementFields({ value, onChange, showOutlier = false
           <Typography variant="caption" color="textSecondary">
             Local marine reservoir offset from the global average the curve already models --
             not a whole reservoir age. Leave blank to apply no correction.
+          </Typography>
+        </Box>
+      )}
+
+      {/* The gap. It is not metadata: a wiggle match IS its gaps, and a member
+          without one says no more than it would on its own. The sign is the
+          part worth spelling out on the field itself -- rings count forward
+          and cal BP counts backward, so an inverted gap gives a tight answer
+          in the wrong place rather than an obviously wrong one. */}
+      {showRingOffset && (
+        <Box sx={{ mb: 2 }}>
+          <Box sx={{ display: 'flex', gap: 1 }}>
+            <TextField
+              type="number"
+              label="Gap"
+              value={value.ring_offset ?? ''}
+              onChange={(e) =>
+                set({ ring_offset: e.target.value === '' ? null : parseFloat(e.target.value) })
+              }
+              size="small"
+              sx={{ flex: 1 }}
+              inputProps={{ min: -50000, max: 50000, step: 1 }}
+            />
+            <TextField
+              type="number"
+              label="Gap 1σ error"
+              value={value.ring_offset_error ?? ''}
+              onChange={(e) =>
+                set({
+                  ring_offset_error: e.target.value === '' ? null : parseFloat(e.target.value),
+                })
+              }
+              size="small"
+              sx={{ flex: 1 }}
+              inputProps={{ min: 0, max: 10000, step: 1 }}
+              helperText="Only if measured, not counted"
+            />
+          </Box>
+          <Typography variant="caption" color="textSecondary">
+            Years before the series reference point: 0 at the reference and increasing into the
+            past, so a larger gap is an older date. The Model Structure page can work these out
+            from ring numbers.
+          </Typography>
+        </Box>
+      )}
+
+      {/* The depth. Provenance for an ordinary date, and the axis an age-depth
+          model runs along for a date in one. */}
+      {showDepth && (
+        <Box sx={{ mb: 2 }}>
+          <TextField
+            type="number"
+            label="Depth (cm)"
+            value={value.depth_cm ?? ''}
+            onChange={(e) =>
+              set({ depth_cm: e.target.value === '' ? null : parseFloat(e.target.value) })
+            }
+            size="small"
+            fullWidth
+            inputProps={{ min: 0, max: 10000, step: 1 }}
+          />
+          <Typography variant="caption" color="textSecondary">
+            Depth below the surface. Deeper is older, and it is the axis a deposition sequence
+            models age against.
           </Typography>
         </Box>
       )}

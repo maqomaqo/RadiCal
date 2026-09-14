@@ -2,6 +2,7 @@
 // expand_relationships/find_cycle. The backend is the authoritative check,
 // rejecting a cyclic request with a 422 before any run; this gives the
 // Stratigraphy UI instant feedback without a round trip on every edit.
+import { elementLabel } from '@/utils/elementLabels'
 import type {
   DraftGroup, MatrixMeasurement, DraftRelationship, ModelElement, ElementType, PosteriorSummary,
 } from '@/types'
@@ -175,7 +176,7 @@ export function flattenStructure(
   }
 
   const visit = (element: ModelElement, depth: number, ancestors: string[]) => {
-    const name = element.name || element.element_type
+    const name = elementLabel(element)
     const path = [...ancestors, name]
     rows.push({
       kind: element.element_type,

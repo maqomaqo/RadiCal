@@ -51,6 +51,11 @@ export interface ImportedDate {
   tpq_age_bp: number | null
   taq_age_bp: number | null
   depth_cm: number | null
+  // The wiggle-match ordinate: years before the series reference, 0 at the
+  // reference and increasing into the past. A D_Sequence or V_Sequence in an
+  // .oxcal file arrives with these filled in from its Gap() statements.
+  ring_offset: number | null
+  ring_offset_error: number | null
   location: string | null
   notes: string | null
   outlier_prior: number

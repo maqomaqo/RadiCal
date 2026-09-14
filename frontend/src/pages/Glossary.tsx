@@ -210,6 +210,48 @@ const SECTIONS: Section[] = [
         body: <>A gap of unknown length between two parts of a Sequence, modelled as a break rather than assumed to be brief.</>,
       },
       {
+        term: 'Wiggle match',
+        id: 'wiggle-match',
+        body: (
+          <>
+            A series of dates whose separations were <em>counted</em> rather than inferred — blocks
+            of rings along one timber, varves in a core. Because every member's age is the same
+            calendar age plus its own gap, the series has one unknown between them all, and it can
+            be pinned against the shape of the calibration curve far more tightly than any of the
+            dates could be alone. What decides whether it works is the <strong>length</strong> of the
+            series rather than the number of dates in it: the series has to span enough of the curve
+            to tell one of its wiggles from the next.
+          </>
+        ),
+      },
+      {
+        term: 'Deposition sequence (age-depth model)',
+        id: 'deposition-sequence',
+        body: (
+          <>
+            Dates separated by <em>depth</em> down a core or a section, with deposition modelled as a
+            Poisson process along that axis, so the time between two levels carries a prior instead
+            of being left uniform. It answers "how old is this depth" — including depths nothing was
+            dated at — and gives the accumulation rate between one level and the next. Its rigidity{' '}
+            <em>k</em> decides how much the depths constrain the ages, and is inferred from the dates
+            rather than set.
+          </>
+        ),
+      },
+      {
+        term: 'Ring offset (gap)',
+        id: 'ring-offset',
+        body: (
+          <>
+            Where a date sits in a wiggle-matched series: years <strong>before</strong> the series
+            reference point, 0 at the reference and <strong>increasing into the past</strong>. So a
+            larger gap is an older date. Rings count forward in time while cal BP counts backward,
+            which is why the direction is worth stating: an inverted gap does not produce an
+            obviously wrong answer, it produces a tight one in the wrong place.
+          </>
+        ),
+      },
+      {
         term: 'TPQ and TAQ',
         id: 'tpq-taq',
         body: (
@@ -252,6 +294,22 @@ const SECTIONS: Section[] = [
             The posterior probability that a date does not belong to the population being modelled,
             reported only where you set an outlier prior on it. No value is not the same as zero: it
             means the question was never asked of that date.
+          </>
+        ),
+      },
+      {
+        term: 'Convergence, chains and R̂',
+        id: 'convergence',
+        body: (
+          <>
+            Only the sampled solver has these; exact integration has nothing to converge. The
+            convergence figure is OxCal&rsquo;s: how closely the first half of the run agrees with
+            the second, targeting 95%. Several chains run at once, each from its own random start,
+            and R̂ (Gelman&ndash;Rubin) says how far they agree with <em>each other</em> &mdash;
+            1.00 is agreement and the run must bring it under 1.05 before it may stop. It is the
+            check a single chain cannot make on itself: a chain settled into one of a date&rsquo;s
+            two calendar ranges looks perfectly converged alone. A run that fell short of either is
+            flagged on its results page rather than quietly returned.
           </>
         ),
       },

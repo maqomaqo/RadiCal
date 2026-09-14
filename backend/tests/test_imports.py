@@ -283,8 +283,7 @@ class TestConstructsThatMustBeRefused:
         ('Zero_Boundary', 'Sequence(){ Zero_Boundary("z"); Phase("A"){ R_Date("a",3000,25); }; Boundary(); };'),
         ('C_Date', 'Phase("A"){ R_Date("a",3000,25); C_Date("h",1500,10); };'),
         ('R_Combine', 'Phase("A"){ R_Combine("c"){ R_Date("a",3000,25); }; };'),
-        ('P_Sequence', 'P_Sequence("p",1){ Boundary(); Phase("A"){ R_Date("a",3000,25); }; Boundary(); };'),
-        ('D_Sequence', 'D_Sequence("d"){ R_Date("a",3000,25); Gap(10); };'),
+        ('U_Sequence', 'U_Sequence("u",1){ Boundary(); Phase("A"){ R_Date("a",3000,25); }; Boundary(); };'),
         ('After', 'Phase("A"){ After(R_Date("a",3000,25)); };'),
     ])
     def test_a_model_changing_construct_fails_the_import(self, construct, fragment):
@@ -1142,3 +1141,260 @@ class TestImportedDatesRunAsAnAnalysis:
         items = response.json()['data']['items']
         assert items[0]['sample_name'] == 'IMP-1'
         assert items[0]['default_context_name'] == 'Pit 9'
+
+
+class TestWiggleMatchedSequences:
+    """
+    D_Sequence and V_Sequence -- a series whose members are separated by
+    measured gaps rather than by stratigraphy (services/wiggle_match.py).
+
+    The whole risk here is the ORDINATE. OxCal writes the series oldest first
+    with a Gap() between adjacent members; this app records each member's
+    distance from a reference, 0 at the reference and increasing INTO THE
+    PAST. Getting that conversion backwards produces a tight answer in the
+    wrong place, so it is asserted member by member rather than in aggregate.
+    """
+
+    def test_a_d_sequence_becomes_a_wiggle_match_with_offsets_from_the_youngest(self):
+        result = parse_oxcal(
+            read_fixture('oxcal_wiggle', 'Timber_D_Sequence.oxcal'),
+            'Timber_D_Sequence.oxcal')
+        assert result.ok, result.errors
+
+        tree = result.model_tree
+        assert tree['element_type'] == 'wiggle_sequence'
+        assert tree['name'] == 'Timber 1'
+        assert len(result.dates) == 8
+
+        by_name = {d['sample_name']: d for d in result.dates}
+        # OAK-008 is the last date in the file, so it is the youngest, the
+        # reference, and offset zero. OAK-001 is 250 rings older.
+        assert by_name['OAK-008']['ring_offset'] == 0.0
+        assert by_name['OAK-001']['ring_offset'] == 250.0
+        assert by_name['OAK-002']['ring_offset'] == 214.0
+        assert tree['params']['reference_sample_id'] == by_name['OAK-008']['id']
+        # Exact gaps: no uncertainty is invented for a D_Sequence.
+        assert all(d['ring_offset_error'] is None for d in result.dates)
+
+    def test_the_imported_series_recovers_the_age_it_was_built_at(self):
+        """
+        The fixture's ages were read off IntCal20 for an outermost ring in
+        2500 cal BP, so the import is checked all the way through the solver
+        rather than only as a tree -- which is what would catch a sign error
+        surviving into the offsets.
+        """
+        from app.services import wiggle_match
+        from app.services.model_tree import plan_model
+
+        result = parse_oxcal(
+            read_fixture('oxcal_wiggle', 'Timber_D_Sequence.oxcal'),
+            'Timber_D_Sequence.oxcal')
+        assert result.ok, result.errors
+
+        plan = plan_model(result.model_tree, result.dates)
+        solved = wiggle_match.solve(result.dates, plan.wiggle_groups[0],
+                                    root=result.model_tree)
+        assert abs(solved['reference']['posterior_median'] - 2500.0) < 15.0
+
+    def test_a_v_sequence_accumulates_its_gap_errors_and_says_it_did(self):
+        result = parse_oxcal(
+            read_fixture('oxcal_wiggle', 'Varves_V_Sequence.oxcal'),
+            'Varves_V_Sequence.oxcal')
+        assert result.ok, result.errors
+
+        by_name = {d['sample_name']: d for d in result.dates}
+        assert by_name['VAR-003']['ring_offset'] == 0.0
+        assert by_name['VAR-002']['ring_offset'] == 130.0
+        assert by_name['VAR-001']['ring_offset'] == 250.0
+        # The reference has no distance and so no uncertainty; VAR-002 is one
+        # gap away and VAR-001 two, in quadrature.
+        assert by_name['VAR-003']['ring_offset_error'] is None
+        assert by_name['VAR-002']['ring_offset_error'] == pytest.approx(6.0)
+        assert by_name['VAR-001']['ring_offset_error'] == pytest.approx(10.0)
+        assert any('independent' in w for w in result.warnings), result.warnings
+
+    def test_two_dates_with_no_gap_between_them_fail(self):
+        """
+        A missing Gap() is not a gap of zero. Read as one it would put two
+        samples on the same ring, which is a different claim and a tighter
+        answer than the file makes.
+        """
+        result = parse_oxcal(oxcal_model(
+            'D_Sequence("d"){ R_Date("a",2500,25); R_Date("b",2520,25); };'
+        ), 't.oxcal')
+        assert not result.ok
+        assert any('no Gap()' in e for e in result.errors), result.errors
+
+    def test_a_gap_outside_a_wiggle_match_is_refused(self):
+        result = parse_oxcal(oxcal_model(
+            'Phase("A"){ R_Date("a",3000,25); Gap(10); R_Date("b",3010,25); };'
+        ), 't.oxcal')
+        assert not result.ok
+        assert any('Gap()' in e for e in result.errors), result.errors
+
+    def test_a_boundary_inside_a_wiggle_match_is_refused(self):
+        """
+        OxCal lets a D_Sequence end with a Boundary standing for the felling
+        ring. That is a parameter beyond the series, and this app has nowhere
+        to put it -- so it is named rather than dropped.
+        """
+        result = parse_oxcal(oxcal_model(
+            'D_Sequence("d"){ R_Date("a",2500,25); Gap(10); '
+            'R_Date("b",2520,25); Boundary("Felling"); };'
+        ), 't.oxcal')
+        assert not result.ok
+        assert any('boundary' in e.lower() for e in result.errors), result.errors
+
+    def test_a_wiggle_match_inside_a_larger_model_fails_the_import(self):
+        """
+        Importable as a tree, but not runnable -- and this importer's rule is
+        to fail naming the construct rather than to hand back a model that
+        fails later on a screen with less to say about why.
+        """
+        result = parse_oxcal(oxcal_model(
+            'Sequence(){ Boundary("Start"); '
+            'D_Sequence("d"){ R_Date("a",2500,25); Gap(10); R_Date("b",2520,25); }; '
+            'Boundary("End"); };'
+        ), 't.oxcal')
+        assert not result.ok
+        assert any('inside a larger model' in e for e in result.errors), result.errors
+
+    def test_a_trailing_gap_is_reported_rather_than_counted(self):
+        result = parse_oxcal(oxcal_model(
+            'D_Sequence("d"){ R_Date("a",2500,25); Gap(10); '
+            'R_Date("b",2520,25); Gap(12); };'
+        ), 't.oxcal')
+        assert result.ok, result.errors
+        assert any('ends with a Gap()' in w for w in result.warnings), result.warnings
+        by_name = {d['sample_name']: d for d in result.dates}
+        assert by_name['b']['ring_offset'] == 0.0
+        assert by_name['a']['ring_offset'] == 10.0
+
+
+class TestDepositionSequences:
+    """
+    P_Sequence -- deposition modelled as a Poisson process down a depth axis
+    (services/gibbs.py). The ordinate here is the `z=` each element carries,
+    and the two readings worth pinning are what happens to a Date() (an
+    undated level, the thing an age-depth model exists to answer) and to a
+    Boundary() (the same parameter under another name, which is a warning
+    rather than a note).
+    """
+
+    def test_a_p_sequence_becomes_a_deposition_sequence_with_depths(self):
+        result = parse_oxcal(
+            read_fixture('oxcal_wiggle', 'Core_P_Sequence.oxcal'),
+            'Core_P_Sequence.oxcal')
+        assert result.ok, result.errors
+
+        tree = result.model_tree
+        assert tree['element_type'] == 'deposition_sequence'
+        assert tree['name'] == 'Peat core'
+        assert {d['sample_name']: d['depth_cm'] for d in result.dates} == {
+            'PEAT-100': 100.0, 'PEAT-80': 80.0, 'PEAT-60': 60.0,
+            'PEAT-40': 40.0, 'PEAT-20': 20.0,
+        }
+
+    def test_the_rigidity_prior_is_centred_on_the_k_the_file_gives(self):
+        """
+        OxCal's U(a,b) argument makes k variable, a and b being log10
+        MULTIPLIERS on the k written beside them rather than absolute bounds.
+        """
+        result = parse_oxcal(oxcal_model(
+            'P_Sequence("c",10,0,U(-1,1)){ R_Date("a",2500,25){z=20;}; '
+            'R_Date("b",2400,25){z=10;}; };'
+        ), 't.oxcal')
+        assert result.ok, result.errors
+        params = result.model_tree['params']
+        assert params['k_variable'] is True
+        assert params['log_k_min'] == pytest.approx(0.0)     # log10(10) - 1
+        assert params['log_k_max'] == pytest.approx(2.0)     # log10(10) + 1
+
+    def test_a_k_with_no_prior_is_fixed(self):
+        result = parse_oxcal(oxcal_model(
+            'P_Sequence("c",1){ R_Date("a",2500,25){z=20;}; '
+            'R_Date("b",2400,25){z=10;}; };'
+        ), 't.oxcal')
+        assert result.ok, result.errors
+        assert result.model_tree['params'] == {
+            'k': 1.0, 'k_variable': False, 'log_k_min': -2.0,
+            'log_k_max': 2.0, 'depth_units': 'cm',
+        }
+
+    def test_a_dated_level_with_no_depth_fails(self):
+        result = parse_oxcal(oxcal_model(
+            'P_Sequence("c",1){ R_Date("a",2500,25){z=20;}; '
+            'R_Date("b",2400,25); };'
+        ), 't.oxcal')
+        assert not result.ok
+        assert any('no z=' in e for e in result.errors), result.errors
+
+    def test_an_undated_level_is_imported_as_a_question_about_a_depth(self):
+        result = parse_oxcal(oxcal_model(
+            'P_Sequence("c",1){ R_Date("a",2500,25){z=20;}; '
+            'Date("tephra"){z=15;}; R_Date("b",2400,25){z=10;}; };'
+        ), 't.oxcal')
+        assert result.ok, result.errors
+        children = result.model_tree['children']
+        assert [c['element_type'] for c in children] == ['interpolated_depth']
+        assert children[0]['params']['depth_cm'] == 15.0
+        # ...and only there. Date() elsewhere is still an undated free
+        # parameter with nothing bounding it.
+        elsewhere = parse_oxcal(oxcal_model(
+            'Phase("A"){ R_Date("a",3000,25); Date("d"); };'), 't.oxcal')
+        assert not elsewhere.ok
+        assert any('Date' in e for e in elsewhere.errors)
+
+    def test_a_boundary_with_a_depth_is_imported_but_warned_about(self):
+        """
+        In this app a deposition sequence's ends are levels of the same
+        Poisson process, so the parameter is the same one -- but it is not the
+        uniform transition a Boundary is everywhere else here, and reading it
+        silently as one would be exactly the substitution this importer
+        refuses to make quietly.
+        """
+        result = parse_oxcal(oxcal_model(
+            'P_Sequence("c",1){ Boundary("Base"){z=30;}; '
+            'R_Date("a",2500,25){z=20;}; R_Date("b",2400,25){z=10;}; '
+            'Boundary("Top"){z=0;}; };'
+        ), 't.oxcal')
+        assert result.ok, result.errors
+        assert [c['element_type'] for c in result.model_tree['children']] == [
+            'interpolated_depth', 'interpolated_depth']
+        assert any('under another name' in w for w in result.warnings), result.warnings
+
+    def test_z_running_the_wrong_way_is_warned_about_rather_than_guessed_at(self):
+        result = parse_oxcal(oxcal_model(
+            'P_Sequence("c",1){ R_Date("a",2400,25){z=10;}; '
+            'R_Date("b",2500,25){z=20;}; };'
+        ), 't.oxcal')
+        assert result.ok, result.errors
+        assert any('upside down' in w for w in result.warnings), result.warnings
+
+    def test_a_p_sequence_with_no_dates_fails(self):
+        result = parse_oxcal(oxcal_model(
+            'P_Sequence("c",1){ Date("a"){z=20;}; Date("b"){z=10;}; };'
+        ), 't.oxcal')
+        assert not result.ok
+        assert any('no R_Date' in e for e in result.errors), result.errors
+
+    def test_the_imported_core_recovers_the_ages_it_was_built_at(self):
+        """
+        The fixture's ages were read off IntCal20 at a constant ten years per
+        centimetre, so the import is checked through the solver rather than
+        only as a tree.
+        """
+        from app.services import gibbs
+
+        result = parse_oxcal(
+            read_fixture('oxcal_wiggle', 'Core_P_Sequence.oxcal'),
+            'Core_P_Sequence.oxcal')
+        assert result.ok, result.errors
+
+        solved = gibbs.solve(result.dates, result.model_tree, sweeps=6000,
+                             num_samples=300, max_sweeps=40000, seed=31)
+        for date in result.dates:
+            expected = 1000.0 + 10.0 * date['depth_cm']
+            got = solved['measurements'][date['id']]['posterior_median']
+            assert abs(got - expected) < 60.0, (
+                f"{date['sample_name']} came back at {got:.0f}, not {expected:.0f}")

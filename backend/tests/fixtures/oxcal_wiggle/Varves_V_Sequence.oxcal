@@ -1,0 +1,20 @@
+ // The same idea where the gaps were MEASURED rather than counted: a varve
+ // sequence, where each interval carries its own uncertainty. OxCal writes
+ // that as Gap(years, error), and the whole construct as V_Sequence.
+ //
+ // This app records ONE uncertainty per date -- that date's distance from the
+ // reference -- so importing this accumulates the gap errors in quadrature and
+ // says so. See services/oxcal_script._translate_wiggle_sequence for what that
+ // does and does not reproduce.
+Plot()
+ {
+  Curve("IntCal20","IntCal20.14c");
+  V_Sequence("Lake core varves")
+  {
+   R_Date("VAR-001", 2621, 25);
+   Gap(120, 8);
+   R_Date("VAR-002", 2472, 25);
+   Gap(130, 6);
+   R_Date("VAR-003", 2482, 25);
+  };
+ };
