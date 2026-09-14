@@ -809,10 +809,18 @@ completes a task and can defend the result afterwards.
 `frontend/node_modules`). *[rev. 2026-09-14]* `scattermap` (MapLibre) rather than `scattermapbox`,
 which 2.35 deprecates; both are in the bundle. One `SiteMap` component covers every surface here:
 
-- **Default basemap is `scattergeo`**: coastlines, country outlines and graticule rendered from
-  data inside the bundle. **No network request, no tile server, no leak** (§4.5 rule 4), and it
-  works in an air-gapped install. Adequate to regional scale, which is the scale every figure in
-  Part C is drawn at.
+- **Default basemap is `scattergeo`**: coastlines and country outlines, **no network request, no
+  tile server, no leak** (§4.5 rule 4), working in an air-gapped install. Adequate to regional
+  scale, which is the scale every figure in Part C is drawn at.
+
+  *[corrected 2026-09-14, op 2a]* This was written as "rendered from data inside the bundle",
+  **and that is false**. `plotly.js-dist-min` ships the `scattergeo` renderer and none of the
+  geometry: left alone it fetches `https://cdn.plot.ly/world_110m.json` at render time, and where
+  that request cannot be made `Plotly.newPlot` **rejects** — the map does not degrade to a blank
+  basemap, it does not appear. Verified in Chromium against the 2.35.3 bundle. The property above
+  is therefore something the app must *do*, not something it gets: `world_110m.json` (278 KB,
+  Natural Earth via Plotly, MIT) is served from `frontend/public/geo/` and `config.topojsonURL`
+  points at it. See `public/geo/README.md` for provenance and how to refresh it.
 - **Tiles are opt-in per project** (`scattermap`, `open-street-map`; `projects.map_tiles_enabled`), for the one job the offline
   map cannot do: dropping a pin at site precision. Enabled once, behind a notice naming what a tile
   request discloses.
@@ -1058,7 +1066,8 @@ else changes the schema.
 Operations within a feature run in order. Features 1–2 and 3 are independent and can interleave;
 4 waits for both; 6 waits for 1–2 and for the three §13 decisions marked below.
 
-*Feature 1 is done (2026-09-14); Alembic head is now `a4d21f7e9c36` and op 3a chains from it.*
+*Features 1 and 2 are done (2026-09-14); Alembic head is now `a4d21f7e9c36` and op 3a chains from
+it. Feature 6's prerequisite on 1–2 is therefore met, leaving only the three §13 decisions.*
 
 ### Op 0 — the permission request *(human; start now, longest lead time)*
 
@@ -1125,7 +1134,29 @@ tiles switch. `ProjectSampleTable.test.ts`,
 `columnPreferences.test.ts` extended. *Done when* a coordinate typed in the table survives export,
 edit-in-spreadsheet, and re-import.
 
-### Feature 2 — the map (§7.1–7.2)
+### Feature 2 — the map (§7.1–7.2) — **done 2026-09-14**
+
+Three commits, one per op. Four things were done differently from the text below:
+
+- **The offline basemap needed a vendored topojson.** §7.1's "no network request" was not a
+  property of `scattergeo`; it is now a property of this app. See the correction in §7.1.
+- **Clicks are taken in the capture phase.** `plotly_click` on a geo subplot fires only when a
+  MARK is hit, so the public API cannot answer where an empty-map click landed, and Plotly's own
+  drag rect stops a bubble-phase handler over the whole drawn map. Built the obvious way this
+  feature would have looked finished and worked only in the letterbox margin. The internals it
+  reads instead (`_fullLayout.geo._subplot.projection`, and MapLibre's `unproject` for tiles) are
+  behind guarded accessors that return null rather than throw, so a Plotly upgrade costs the
+  click and not the screen.
+- **Pins are not individually draggable** (§7.2 asked for it). A pin is a position, every date at
+  it shares that position, and the editing unit is the selection — so dragging one would have to
+  rewrite dates that may not be selected. Clicking again moves the selection's pin: the same
+  gesture, with a scope that can be stated.
+- **Placement is a dialog**, breaking `SampleSelectionBar`'s rule that a bulk edit keeps the
+  selection on screen. A map needs the space, and the other sites it shows are worth more than
+  the rows it covers.
+
+Also: `parsePastedDates` moved to `utils/pastedDates.ts`, because `ProjectSampleTable` now reaches
+Plotly through the map dialog and its test died on the import.
 
 **2a. `SiteMap.tsx`.** One component on `scattergeo`, `displayModeBar: false`, `usePlotFont`,
 `plotColors`, the app-drawn Download PNG at `PNG_EXPORT_SCALE` via `utils/plotExport.ts`. Props:
