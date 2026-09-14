@@ -10,10 +10,13 @@ import {
   frameFor,
   geoProjectionOf,
   groupIntoSites,
+  latLonFromMapPoint,
   latLonFromPoint,
+  mapLibreOf,
   roundPlacement,
   siteLabel,
   unplaced,
+  zoomForFrame,
 } from '@/utils/siteMapGeometry'
 import type { MapPoint, MapSite } from '@/utils/siteMapGeometry'
 
@@ -29,6 +32,49 @@ const Plot = createPlotlyComponent(Plotly)
  * -- it rejects, and there is no map at all.
  */
 const TOPOJSON_URL = '/geo/'
+
+/**
+ * The basemap could not say where the click landed -- distinct from "that
+ * click was not on the earth", which is null and perfectly ordinary.
+ */
+const UNAVAILABLE = Symbol('placement unavailable')
+
+type Placement = { latitude: number; longitude: number } | null | typeof UNAVAILABLE
+
+/**
+ * Where a click landed on the offline basemap.
+ *
+ * The projection's frame is the `.main-svg` box, margins included --
+ * established by projecting a known coordinate forward and finding the
+ * rendered mark at exactly that offset from the SVG's origin, not the plot
+ * area's.
+ */
+function placeFromOfflineMap(
+  graphDiv: unknown,
+  container: HTMLElement,
+  event: MouseEvent,
+): Placement {
+  const projection = geoProjectionOf(graphDiv)
+  const svg = container.querySelector<SVGElement>('.main-svg')
+  if (!projection || !svg) return UNAVAILABLE
+  const box = svg.getBoundingClientRect()
+  return latLonFromPoint(projection, event.clientX - box.left, event.clientY - box.top)
+}
+
+/**
+ * Where a click landed on the tiled basemap.
+ *
+ * A different frame from the offline map's: MapLibre measures from its own
+ * container, not from Plotly's SVG. Confirmed the same way, against a
+ * tile-free style so the check did not need a tile server.
+ */
+function placeFromTiledMap(graphDiv: unknown, event: MouseEvent): Placement {
+  const map = mapLibreOf(graphDiv)
+  const element = map?.getContainer()
+  if (!map || !element) return UNAVAILABLE
+  const box = element.getBoundingClientRect()
+  return latLonFromMapPoint(map, event.clientX - box.left, event.clientY - box.top)
+}
 
 interface SiteMapProps {
   /** Every date the map is about, placed or not. */
@@ -46,6 +92,16 @@ interface SiteMapProps {
    * to claim ten centimetres.
    */
   onPlace?: (latitude: number, longitude: number) => void
+  /**
+   * Whether to draw a tiled basemap instead of the offline one.
+   *
+   * OFF unless a project has turned it on, and that is the whole design: a
+   * raster tile request tells the tile server which square of the earth is
+   * being looked at, which for a restricted site is the disclosure everything
+   * else here exists to prevent. Turning it on is a per-project decision made
+   * once, behind a notice that says what the request gives away.
+   */
+  tiles?: boolean
   /** Height of the plot area in pixels. */
   height?: number
   /** Used to name the downloaded PNG. */
@@ -77,6 +133,7 @@ export default function SiteMap({
   selectedIds = [],
   editable = false,
   onPlace,
+  tiles = false,
   height = 420,
   exportName = 'site-map',
 }: SiteMapProps) {
@@ -102,7 +159,10 @@ export default function SiteMap({
     // position is either in the selection's reach or not.
     const isSelected = (site: MapSite) => site.ids.some((id) => selected.has(id))
     const build = (subset: MapSite[], name: string, colour: string, size: number) => ({
-      type: 'scattergeo' as const,
+      // scattermap is MapLibre's trace and scattergeo the offline one; they
+      // take the same lat/lon/marker fields, so only the type changes.
+      // scattermapbox is deprecated in 2.35 and is deliberately not used.
+      type: (tiles ? 'scattermap' : 'scattergeo') as 'scattermap' | 'scattergeo',
       mode: 'markers' as const,
       name,
       lat: subset.map((s) => s.latitude),
@@ -126,7 +186,7 @@ export default function SiteMap({
     // sitting at the same place on screen.
     if (chosen.length > 0) list.push(build(chosen, 'Selected', plot.posteriorLine, 13))
     return list
-  }, [sites, selected, plot])
+  }, [sites, selected, plot, tiles])
 
   /**
    * Clicks are taken in the CAPTURE phase, on a native listener, and both
@@ -149,24 +209,16 @@ export default function SiteMap({
     if (!editable || !onPlace || !container) return
 
     const handle = (event: MouseEvent) => {
-      const projection = geoProjectionOf(graphDiv.current)
-      const svg = container.querySelector<SVGElement>('.main-svg')
-      if (!projection || !svg) {
+      const place = tiles
+        ? placeFromTiledMap(graphDiv.current, event)
+        : placeFromOfflineMap(graphDiv.current, container, event)
+      if (place === UNAVAILABLE) {
         // The map cannot say where the click was. Announced rather than
         // swallowed: a map that silently ignores clicks reads as broken, and
         // the typed boxes beside it still work.
         setCannotPlace(true)
         return
       }
-      // The projection's frame is the .main-svg box, margins included --
-      // established by projecting a known coordinate forward and finding the
-      // rendered mark at exactly that offset from the SVG's origin.
-      const box = svg.getBoundingClientRect()
-      const place = latLonFromPoint(
-        projection,
-        event.clientX - box.left,
-        event.clientY - box.top,
-      )
       // Off the globe. The corners of a rectangular plot are not on the earth,
       // so this is ignored rather than clamped to the nearest coast.
       if (!place) return
@@ -176,10 +228,44 @@ export default function SiteMap({
 
     container.addEventListener('click', handle, true)
     return () => container.removeEventListener('click', handle, true)
-  }, [editable, onPlace])
+  }, [editable, onPlace, tiles])
 
-  const layout = useMemo(
-    () => ({
+  const layout = useMemo(() => {
+    const common = {
+      margin: { l: 0, r: 0, t: 0, b: 0 },
+      paper_bgcolor: plot.surface,
+      font: plotFont,
+      showlegend: false,
+      // dragmode false in edit mode: a click that also pans puts the pin down
+      // a few degrees from where the reader let go of the mouse.
+      dragmode: editable ? (false as const) : ('pan' as const),
+      autosize: true,
+    }
+
+    if (tiles) {
+      return {
+        ...common,
+        map: {
+          // open-street-map, which needs no access token. The style name is
+          // also the disclosure: choosing it is what sends a request naming
+          // the square of the earth on screen to a third party, which is why
+          // this branch is reached only for a project that has said yes.
+          style: 'open-street-map',
+          center: frame
+            ? {
+                lat: (frame.lat[0] + frame.lat[1]) / 2,
+                lon: (frame.lon[0] + frame.lon[1]) / 2,
+              }
+            : { lat: 20, lon: 0 },
+          // A tiled map takes a centre and a zoom where the offline one takes
+          // two ranges, so the same frame has to be restated.
+          zoom: frame ? zoomForFrame(frame) : 1,
+        },
+      }
+    }
+
+    return {
+      ...common,
       geo: {
         scope: 'world' as const,
         projection: { type: 'natural earth' as const },
@@ -204,17 +290,8 @@ export default function SiteMap({
           ? { lonaxis: { range: frame.lon }, lataxis: { range: frame.lat } }
           : {}),
       },
-      margin: { l: 0, r: 0, t: 0, b: 0 },
-      paper_bgcolor: plot.surface,
-      font: plotFont,
-      showlegend: false,
-      // dragmode false in edit mode: a click that also pans puts the pin down
-      // a few degrees from where the reader let go of the mouse.
-      dragmode: editable ? (false as const) : ('pan' as const),
-      autosize: true,
-    }),
-    [plot, plotFont, frame, editable],
-  )
+    }
+  }, [plot, plotFont, frame, editable, tiles])
 
   return (
     <Box>
@@ -256,7 +333,9 @@ export default function SiteMap({
             ? 'This map cannot read a click on this version of the plotting library. Type the position instead.'
             : editable
               ? 'Click the map to place every selected date at that position.'
-              : 'Coastlines are drawn from data this app serves itself: no tiles are requested.'}
+              : tiles
+                ? 'Basemap tiles are on for this project, so the tile server is told which area is on screen.'
+                : 'Coastlines are drawn from data this app serves itself: no tiles are requested.'}
         </Typography>
         {/* The app's own download control, as on every other figure: Plotly's
             modebar renders anchors with no href, role or accessible name, none

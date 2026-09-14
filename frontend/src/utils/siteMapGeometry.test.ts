@@ -12,12 +12,15 @@ import {
   frameFor,
   geoProjectionOf,
   groupIntoSites,
+  latLonFromMapPoint,
   latLonFromPoint,
+  mapLibreOf,
   roundPlacement,
   siteLabel,
   unplaced,
+  zoomForFrame,
 } from './siteMapGeometry'
-import type { GeoProjection, MapPoint } from './siteMapGeometry'
+import type { GeoProjection, MapLibreMap, MapPoint } from './siteMapGeometry'
 
 const point = (id: string, latitude: number | null, longitude: number | null): MapPoint => ({
   id,
@@ -197,5 +200,83 @@ describe('roundPlacement', () => {
   it('leaves a value that is already coarse alone', () => {
     expect(roundPlacement(54.5)).toBe(54.5)
     expect(roundPlacement(0)).toBe(0)
+  })
+})
+
+describe('mapLibreOf', () => {
+  // The shape MapLibre actually has under Plotly 2.35.3, confirmed in a
+  // browser against a tile-free style.
+  const realShape = {
+    _fullLayout: {
+      map: { _subplot: { map: { unproject: () => ({ lat: 0, lng: 0 }), getContainer: () => null } } },
+    },
+  }
+
+  it('finds the map on a real graph div', () => {
+    expect(mapLibreOf(realShape)).not.toBeNull()
+  })
+
+  it.each([
+    ['null', null],
+    ['no _fullLayout', {}],
+    ['no map', { _fullLayout: {} }],
+    ['no _subplot', { _fullLayout: { map: {} } }],
+    ['no maplibre', { _fullLayout: { map: { _subplot: {} } } }],
+    ['no unproject', { _fullLayout: { map: { _subplot: { map: { getContainer: () => null } } } } }],
+    ['no getContainer', { _fullLayout: { map: { _subplot: { map: { unproject: () => null } } } } }],
+  ])('returns null rather than throwing when there is %s', (_label, div) => {
+    expect(mapLibreOf(div)).toBeNull()
+  })
+
+  it('does not mistake the offline map for the tiled one', () => {
+    // The two live at different keys. Reading one as the other would give a
+    // projection with the wrong frame and place every pin in the wrong place.
+    const geoOnly = { _fullLayout: { geo: { _subplot: { projection: { invert: () => [0, 0] } } } } }
+    expect(mapLibreOf(geoOnly)).toBeNull()
+    expect(geoProjectionOf(realShape)).toBeNull()
+  })
+})
+
+describe('latLonFromMapPoint', () => {
+  const map = (result: unknown): MapLibreMap =>
+    ({ unproject: () => result, getContainer: () => null }) as MapLibreMap
+
+  it('translates MapLibre lng into longitude', () => {
+    expect(latLonFromMapPoint(map({ lat: 54.5, lng: -5.6 }), 10, 10)).toEqual({
+      latitude: 54.5,
+      longitude: -5.6,
+    })
+  })
+
+  it('refuses the same nonsense the offline map refuses', () => {
+    expect(latLonFromMapPoint(map(null), 0, 0)).toBeNull()
+    expect(latLonFromMapPoint(map({ lat: NaN, lng: 0 }), 0, 0)).toBeNull()
+    expect(latLonFromMapPoint(map({ lat: 91, lng: 0 }), 0, 0)).toBeNull()
+  })
+
+  it('does not throw when unproject does', () => {
+    const throwing = {
+      unproject: () => { throw new Error('no') },
+      getContainer: () => null,
+    } as MapLibreMap
+    expect(latLonFromMapPoint(throwing, 0, 0)).toBeNull()
+  })
+})
+
+describe('zoomForFrame', () => {
+  it('is further out for a wider window', () => {
+    const wide = zoomForFrame({ lon: [-40, 40], lat: [0, 40] })
+    const narrow = zoomForFrame({ lon: [-3, 3], lat: [50, 56] })
+    expect(wide).toBeLessThan(narrow)
+  })
+
+  it('shows the world at the bottom of its range', () => {
+    expect(zoomForFrame({ lon: [-180, 180], lat: [-90, 90] })).toBe(1)
+  })
+
+  it('is clamped, so a degenerate window cannot ask for infinite zoom', () => {
+    const z = zoomForFrame({ lon: [5, 5], lat: [5, 5] })
+    expect(Number.isFinite(z)).toBe(true)
+    expect(z).toBeLessThanOrEqual(12)
   })
 })

@@ -38,6 +38,8 @@ interface Props {
   onApply: (latitude: number, longitude: number) => void
   /** Remove the position from the selection: both halves, or neither. */
   onClear: () => void
+  /** The project's basemap-tiles setting, passed straight to the map. */
+  tiles?: boolean
   busy?: boolean
 }
 
@@ -51,6 +53,7 @@ export default function PlaceOnMapDialog({
   selectedIds,
   onApply,
   onClear,
+  tiles = false,
   busy = false,
 }: Props) {
   // The pending position, as text, because these boxes are also where someone
@@ -105,6 +108,9 @@ export default function PlaceOnMapDialog({
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
           Click the map, or type the position. It is written to every selected date — dates from
           one site share a coordinate, which is why this is one edit rather than {count}.
+          {tiles
+            ? ' Basemap tiles are on for this project: panning here tells the tile server which area you are looking at.'
+            : ' The basemap is the offline one, which is accurate to about a kilometre. Paste a recorded position for anything finer.'}
         </Typography>
 
         <SiteMap
@@ -112,6 +118,7 @@ export default function PlaceOnMapDialog({
           selectedIds={selectedIds}
           editable
           onPlace={place}
+          tiles={tiles}
           height={380}
           exportName="site-map"
         />

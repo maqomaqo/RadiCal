@@ -133,6 +133,75 @@ export function geoProjectionOf(graphDiv: unknown): GeoProjection | null {
 }
 
 /**
+ * MapLibre's map object, as the tiled basemap exposes it, narrowed to what is
+ * used here. Reached the same guarded way as the geo projection above, and for
+ * the same reason -- it hangs off Plotly internals.
+ */
+export interface MapLibreMap {
+  unproject(point: [number, number]): { lat: number; lng: number } | null | undefined
+  getContainer(): Element | null | undefined
+}
+
+/** The MapLibre map behind a tiled basemap, or null. */
+export function mapLibreOf(graphDiv: unknown): MapLibreMap | null {
+  const layout = (graphDiv as { _fullLayout?: unknown } | null)?._fullLayout
+  const subplot = (layout as { map?: { _subplot?: unknown } } | undefined)?.map?._subplot
+  const map = (subplot as { map?: unknown } | undefined)?.map
+  if (!map) return null
+  const candidate = map as MapLibreMap
+  if (typeof candidate.unproject !== 'function' || typeof candidate.getContainer !== 'function') {
+    return null
+  }
+  return candidate
+}
+
+/** Whether an inverted pair is a place on the earth. */
+function validPlace(latitude: number, longitude: number): boolean {
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return false
+  return latitude >= -90 && latitude <= 90 && longitude >= -180 && longitude <= 180
+}
+
+/**
+ * A position from a point in the TILED map's frame, which is its own container
+ * rather than the SVG the offline map draws into -- confirmed by projecting a
+ * known coordinate forward and finding it at that offset inside
+ * `getContainer()`'s box.
+ *
+ * MapLibre spells it lng; everything else in this app spells it longitude, and
+ * the translation happens here so nothing downstream has to remember which.
+ */
+export function latLonFromMapPoint(
+  map: MapLibreMap,
+  x: number,
+  y: number,
+): { latitude: number; longitude: number } | null {
+  let inverted: { lat: number; lng: number } | null | undefined
+  try {
+    inverted = map.unproject([x, y])
+  } catch {
+    return null
+  }
+  if (!inverted) return null
+  const { lat, lng } = inverted
+  return validPlace(lat, lng) ? { latitude: lat, longitude: lng } : null
+}
+
+/**
+ * A starting zoom for the tiled map from the window the offline one would
+ * open on.
+ *
+ * An approximation, and knowingly: the exact figure depends on the viewport's
+ * pixel width, which a pure function has no business knowing. 360 degrees
+ * across one 512-pixel world tile is the standard slippy-map relation, and at
+ * the sizes this map is rendered at it lands within a zoom level of right --
+ * close enough for an opening view someone can then scroll.
+ */
+export function zoomForFrame(frame: MapFrame): number {
+  const degrees = Math.max(frame.lon[1] - frame.lon[0], 0.01)
+  return Math.min(12, Math.max(1, Math.log2(360 / degrees)))
+}
+
+/**
  * A position from a point in the map's own pixel frame, or null if that point
  * is not on the earth.
  *
@@ -160,9 +229,7 @@ export function latLonFromPoint(
   }
   if (!inverted) return null
   const [longitude, latitude] = inverted
-  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null
-  if (latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) return null
-  return { latitude, longitude }
+  return validPlace(latitude, longitude) ? { latitude, longitude } : null
 }
 
 /**

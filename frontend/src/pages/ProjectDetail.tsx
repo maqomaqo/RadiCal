@@ -30,6 +30,8 @@ import {
   ListItemIcon,
   ListItemText,
   Divider,
+  FormControlLabel,
+  Switch,
 } from '@mui/material'
 import EditIcon from '@mui/icons-material/Edit'
 import MoreVertIcon from '@mui/icons-material/MoreVert'
@@ -125,6 +127,7 @@ export default function ProjectDetail() {
   const [editName, setEditName] = useState('')
   const [editDescription, setEditDescription] = useState('')
   const [editPrecision, setEditPrecision] = useState<CoordinatePrecision>('full')
+  const [editTiles, setEditTiles] = useState(false)
   const [saving, setSaving] = useState(false)
 
   const [deleteProjectOpen, setDeleteProjectOpen] = useState(false)
@@ -284,6 +287,7 @@ export default function ProjectDetail() {
     setEditName(project.name)
     setEditDescription(project.description || '')
     setEditPrecision(project.coordinate_precision || 'full')
+    setEditTiles(project.map_tiles_enabled)
     setEditOpen(true)
   }
 
@@ -298,6 +302,7 @@ export default function ProjectDetail() {
           name: editName.trim(),
           description: editDescription.trim() || null,
           coordinate_precision: editPrecision,
+          map_tiles_enabled: editTiles,
         }),
       })
       const data = await response.json()
@@ -758,7 +763,7 @@ export default function ProjectDetail() {
               different criteria. Deployed dates are copies, so editing one here never alters an
               analysis already created from it.
             </Typography>
-            <ProjectSampleTable projectId={project.id} />
+            <ProjectSampleTable projectId={project.id} mapTilesEnabled={project.map_tiles_enabled} />
           </Box>
         ) : analysesCount === 0 ? (
           <Box sx={{ px: 3, py: 7, textAlign: 'center' }}>
@@ -999,6 +1004,30 @@ export default function ProjectDetail() {
               </MenuItem>
             ))}
           </TextField>
+
+          <FormControlLabel
+            sx={{ mt: 2 }}
+            control={
+              <Switch
+                checked={editTiles}
+                onChange={(e) => setEditTiles(e.target.checked)}
+              />
+            }
+            label="Show a basemap with streets and satellite detail"
+          />
+          {/* The notice says what the request gives away, and says it BEFORE
+              the switch is thrown rather than in a footnote afterwards. That
+              ordering is the point: defaulting to tiles and mentioning it
+              later would be the same disclosure with better manners. */}
+          <Alert severity={editTiles ? 'warning' : 'info'} sx={{ mt: 1 }}>
+            The map draws its coastlines from data this app serves itself, and asks nothing of
+            anyone. Turning this on fetches map images from OpenStreetMap instead, which tells
+            their servers which patch of ground is on screen each time someone opens or pans the
+            map — not the coordinates themselves, but enough to locate a site. Worth it to drop a
+            pin on a field boundary; not worth it to look at a distribution. It also needs the
+            internet: on an installation that cannot reach OpenStreetMap, leave this off, because
+            the tiled map has no offline state to fall back to.
+          </Alert>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setEditOpen(false)}>Cancel</Button>

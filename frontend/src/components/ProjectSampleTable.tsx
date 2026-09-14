@@ -255,9 +255,15 @@ function limitsLabel(sample: ProjectSample): string {
 
 interface Props {
   projectId: string
+  /**
+   * Whether this project has turned basemap tiles on. Passed down rather than
+   * fetched here: the flag belongs to the project, and the page that owns the
+   * project has it already.
+   */
+  mapTilesEnabled?: boolean
 }
 
-export default function ProjectSampleTable({ projectId }: Props) {
+export default function ProjectSampleTable({ projectId, mapTilesEnabled = false }: Props) {
   const navigate = useNavigate()
   const notify = useNotify()
   const { curves, loading: curvesLoading, error: curvesError } = useCurves()
@@ -1039,6 +1045,7 @@ export default function ProjectSampleTable({ projectId }: Props) {
         selectedIds={[...selected]}
         onApply={(latitude, longitude) => handlePlaceSelection(latitude, longitude)}
         onClear={() => handlePlaceSelection(null, null)}
+        tiles={mapTilesEnabled}
         busy={bulkBusy}
       />
 
