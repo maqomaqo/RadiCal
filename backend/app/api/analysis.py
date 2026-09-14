@@ -338,6 +338,8 @@ def _sample_row(
         curve_id=measurement.curve_id,
         delta_r=measurement.delta_r,
         delta_r_error=measurement.delta_r_error,
+        latitude=getattr(measurement, 'latitude', None),
+        longitude=getattr(measurement, 'longitude', None),
         outlier_prior=getattr(measurement, 'outlier_prior', 0.0),
         outlier_model=getattr(measurement, 'outlier_model', None),
         reservoir_age=measurement.reservoir_age,
@@ -777,6 +779,8 @@ def calibrate_single(measurement: CalibrateRequest, db: Session = Depends(get_db
             # correction the first run made.
             delta_r=measurement.delta_r,
             delta_r_error=measurement.delta_r_error,
+            latitude=measurement.latitude,
+            longitude=measurement.longitude,
             reservoir_age=measurement.reservoir_age,
             depth_cm=measurement.depth_cm,
             location=measurement.location,
@@ -1335,6 +1339,10 @@ def get_analysis(analysis_id: str, db: Session = Depends(get_db),
                     "curve_id": s.curve_id,
                     "delta_r": s.delta_r,
                     "delta_r_error": s.delta_r_error,
+                    # Same reason: left out here, a date would be unplaced by
+                    # the next edit of the analysis it belongs to.
+                    "latitude": s.latitude,
+                    "longitude": s.longitude,
                     # Same reason: omitted here, an outlier setting would be
                     # switched off by editing the analysis.
                     "outlier_prior": s.outlier_prior,

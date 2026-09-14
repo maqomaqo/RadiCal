@@ -59,6 +59,11 @@ def _serialize(sample: ProjectSample) -> dict:
         "reservoir_age": sample.reservoir_age,
         "delta_r": sample.delta_r,
         "delta_r_error": sample.delta_r_error,
+        # Full precision, always. project.coordinate_precision governs what
+        # leaves the app in an EXPORT or a figure (api/results.py), not what
+        # the app's own UI reads back to the owner of the project.
+        "latitude": sample.latitude,
+        "longitude": sample.longitude,
         "depth_cm": sample.depth_cm,
         # The wiggle-match ordinate. A property of the SAMPLE -- which ring of
         # which timber it came from -- so it belongs to the collection rather
@@ -121,6 +126,8 @@ def create_project_samples(
             reservoir_age=item.reservoir_age,
             delta_r=item.delta_r,
             delta_r_error=item.delta_r_error,
+            latitude=item.latitude,
+            longitude=item.longitude,
             depth_cm=item.depth_cm,
             ring_offset=item.ring_offset,
             ring_offset_error=item.ring_offset_error,
@@ -181,6 +188,23 @@ def update_project_sample(
                 ),
             )
 
+    # Likewise the both-or-neither coordinate rule: a PATCH carrying only a
+    # longitude is correcting one half of a position that is already there,
+    # which is legitimate, so what has to hold is the MERGED row.
+    if (sample.latitude is None) != (sample.longitude is None):
+        db.rollback()
+        present, missing = (
+            ('latitude', 'longitude') if sample.longitude is None
+            else ('longitude', 'latitude'))
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"this edit would leave the date with a {present} and no "
+                f"{missing} -- a position needs both halves, so send the other "
+                "one too, or clear them together"
+            ),
+        )
+
     db.commit()
     db.refresh(sample)
     return {"success": True, "data": _serialize(sample)}
@@ -232,8 +256,8 @@ def bulk_update_project_samples(
     user: User = Depends(current_user),
 ):
     """
-    Apply one value across a selection of this project's dates. Neither field
-    is a plain assignment.
+    Apply one value across a selection of this project's dates. None of the
+    three is a plain assignment.
 
     **curve_id** carries the sample type with it, since a date calibrated
     against a marine curve is marine; the single-date form keeps the two in
@@ -246,9 +270,15 @@ def bulk_update_project_samples(
     work, which matters because "everything from this site" is how dates
     sharing an offset are naturally selected.
 
-    `delta_r: null` clears the offset and its uncertainty; omitting the key
-    leaves both alone. The endpoint reads `model_fields_set` rather than
-    checking for None, so the two stay distinguishable.
+    **latitude/longitude** go to the whole selection, marine or not, because
+    where a date came from is a fact about the place rather than about the
+    material. This is the path the map's "place on map" uses: dates from one
+    site share a position, so a pin is one request.
+
+    `delta_r: null` clears the offset and its uncertainty, and a null
+    coordinate pair unplaces the selection; omitting the key leaves them
+    alone. The endpoint reads `model_fields_set` rather than checking for
+    None, so the two stay distinguishable.
 
     Analyses already deployed from these dates are untouched.
     """
@@ -269,7 +299,7 @@ def bulk_update_project_samples(
         )
 
     sent = request.model_fields_set
-    updated, skipped, type_changed = [], [], 0
+    changed, skipped, type_changed = set(), [], 0
 
     if 'curve_id' in sent:
         authorise_curve_ids([request.curve_id], user.id)
@@ -280,6 +310,17 @@ def bulk_update_project_samples(
             if (sample.sample_type or 'terrestrial') != sample_type:
                 sample.sample_type = sample_type
                 type_changed += 1
+            changed.add(sample.id)
+
+    if 'latitude' in sent:
+        # Unlike delta_r below, this applies to the WHOLE selection: where a
+        # date came from is a fact about the place, and a terrestrial date has
+        # a position just as much as a marine one does. The schema has already
+        # checked both halves arrived together.
+        for sample in samples:
+            sample.latitude = request.latitude
+            sample.longitude = request.longitude
+            changed.add(sample.id)
 
     if 'delta_r' in sent:
         for sample in samples:
@@ -290,11 +331,14 @@ def bulk_update_project_samples(
                 sample.delta_r = request.delta_r
                 sample.delta_r_error = (
                     request.delta_r_error if request.delta_r is not None else None)
-                updated.append(sample.id)
+                changed.add(sample.id)
             else:
                 skipped.append(sample.id)
-    else:
-        updated = [s.id for s in samples]
+
+    # skipped_sample_ids is specifically "the offset did not land here", and a
+    # terrestrial date in a request that also carried a coordinate can be in
+    # both lists: it was skipped for the offset and updated for the position.
+    updated = [s.id for s in samples if s.id in changed]
 
     db.commit()
     for sample in samples:
@@ -449,6 +493,11 @@ def deploy_samples_to_analysis(
             # came from, so a deployed date arrives already corrected.
             delta_r=src.delta_r,
             delta_r_error=src.delta_r_error,
+            # And for the same reason: where the sample came from travels with
+            # it. An analysis that lost the coordinates could not be mapped,
+            # and a dispersal model reads them from its own deployed copies.
+            latitude=src.latitude,
+            longitude=src.longitude,
             depth_cm=src.depth_cm,
             # Carried across for the same reason as Delta-R above: a ring
             # offset is where the sample sits in its own series, and a

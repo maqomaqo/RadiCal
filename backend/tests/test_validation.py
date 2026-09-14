@@ -116,6 +116,67 @@ class TestCalibrateValidation:
         assert response.status_code == 404
 
 
+class TestCoordinateValidation:
+    """
+    Where a date came from, in WGS84 decimal degrees.
+
+    Two rules, and the second is the one worth having a test for: the bounds
+    are the real ones (there is no latitude of 91), and the pair is indivisible.
+    A half-located date is the quiet failure -- it passes every other check,
+    looks placed in the table, and then vanishes from every map and every
+    distance the app computes, because nothing downstream can do anything with
+    one number.
+    """
+
+    def test_a_coordinate_is_accepted(self, client):
+        response = client.post(
+            "/api/analysis/calibrate",
+            json={**VALID_MEASUREMENT, "latitude": 54.5, "longitude": -5.6},
+        )
+        assert response.status_code == 200
+
+    def test_no_coordinate_at_all_is_still_fine(self, client):
+        """The columns are optional, and most dates will never carry one."""
+        response = client.post("/api/analysis/calibrate", json=VALID_MEASUREMENT)
+        assert response.status_code == 200
+
+    @pytest.mark.parametrize("half", [
+        {"latitude": 54.5},
+        {"longitude": -5.6},
+    ])
+    def test_half_a_coordinate_is_refused(self, client, half):
+        response = client.post(
+            "/api/analysis/calibrate", json={**VALID_MEASUREMENT, **half})
+        assert response.status_code == 422
+        missing = "longitude" if "latitude" in half else "latitude"
+        assert missing in str(response.json()["detail"])
+
+    @pytest.mark.parametrize("out_of_range", [
+        {"latitude": 91, "longitude": 0},
+        {"latitude": -90.5, "longitude": 0},
+        {"latitude": 0, "longitude": 180.1},
+        {"latitude": 0, "longitude": -181},
+    ])
+    def test_a_position_off_the_earth_is_refused(self, client, out_of_range):
+        response = client.post(
+            "/api/analysis/calibrate", json={**VALID_MEASUREMENT, **out_of_range})
+        assert response.status_code == 422
+
+    @pytest.mark.parametrize("edge", [
+        {"latitude": 90, "longitude": 180},
+        {"latitude": -90, "longitude": -180},
+        {"latitude": 0, "longitude": 0},
+    ])
+    def test_the_edges_of_the_earth_are_accepted(self, client, edge):
+        """Including (0, 0). It is almost always an empty spreadsheet cell
+        rather than a site in the Gulf of Guinea, but that is a judgement the
+        importer makes as a WARNING -- refusing it here would make the one
+        person legitimately working there unable to say so."""
+        response = client.post(
+            "/api/analysis/calibrate", json={**VALID_MEASUREMENT, **edge})
+        assert response.status_code == 200
+
+
 class TestBayesianValidation:
     def _measurement(self, sample_id, age_bp=3000):
         return {
