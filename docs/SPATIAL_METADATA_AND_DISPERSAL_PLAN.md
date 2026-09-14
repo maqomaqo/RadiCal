@@ -11,6 +11,24 @@ Everything in §2 was **measured against the live calib.org database on 2026-09-
 Four of those measurements changed the design, and one of them is the reason kriging is second in
 the order of work rather than first.
 
+**Reviewed against the code on 2026-09-14**, eight days and five commits after it was written. The
+measurements stand; four things in the codebase moved underneath the design and are corrected
+inline, each marked *[rev. 2026-09-14]*:
+
+1. **Users and ownership landed (2026-09-07).** Stored curves are now *private to their importer*,
+   not install-wide reference data. The ΔR snapshot has to pick a side — §5.2 now does.
+2. **Age-depth modelling landed (2026-09-09) and set the precedent §6.3 was guessing at.** A
+   statistic computed from the joint draws is a *section of `Analysis.intervals`*, not a column of
+   its own. Dispersal follows it; item 6 no longer needs a migration.
+3. **Gibbs now runs parallel chains under one burn-in cut (b3721eb).** The joint draws a dispersal
+   fit consumes are pooled across chains. Nothing in the estimator changes, but the coverage test in
+   §10 must go through `solve_chains`, not a single chain.
+4. **Plotly 2.35.3 deprecates `scattermapbox` for `scattermap`** (MapLibre, token-free). Both are in
+   the bundle; the plan names the one that is not deprecated.
+
+Line references and the Alembic head are updated where cited. §14 is new: the operation sequence
+for executing this on the current branch.
+
 ---
 
 ## 1. Verdict
@@ -280,24 +298,30 @@ the difference.**
 - **`StoredCalibrationCurve`**'s discipline — `source_text` verbatim, `parse_options` recorded,
   `content_sha256` re-checked on every load, corrections made by *adding* rather than editing — is
   precisely the discipline a ΔR snapshot needs, for precisely the same reason (§5.2).
-- **`intervals.report`** (`intervals.py:624`) turns joint draws into a JSON block on
+- **`intervals.report`** (`intervals.py:752`) turns joint draws into a JSON block on
   `Analysis.intervals`, with the "NULL means not asked for" convention the results page already
-  understands. **Dispersal statistics are the same shape of thing and take the same slot** (§6.3).
+  understands. *[rev. 2026-09-14]* Since 2026-09-09 that block also carries `age_depth`, computed
+  from the same draws by a run that "wants draws" for a reason of its own (`gibbs.py:2210`,
+  `report(..., durations=False)`). **Dispersal statistics are the same shape of thing and take a
+  section of the same block** (§6.3).
 - **`ModelElement.posterior`** already stores a Boundary's posterior in the shape a per-date result
   uses. A site's modelled arrival time is a Boundary, so it needs no new column (§6.2).
-- **`calibration.hpd_ranges_from_distribution`** (`calibration.py:42`) turns any weighted sample
-  into HPD ranges. A posterior for a *speed* in km/yr reads like every other quantity in the app if
-  it goes through this.
-- **`agreement.overall_agreement`** (`agreement.py:148`) is the app's existing idiom for "how badly
+- **`intervals.summarise`** (`intervals.py:214`) turns a vector of joint draws into the median and
+  68/95 HPD block a duration reports as. *[rev. 2026-09-14]* Named here instead of
+  `calibration.hpd_ranges_from_distribution` (now `calibration.py:59`, density-ranked on a grid
+  since b3721eb): a per-draw fit yields a *sample* of speeds, not a density on a grid, and
+  `summarise` is the function durations already take for exactly that input. A posterior for a
+  *speed* in km/yr reads like every other quantity in the app if it goes through this.
+- **`agreement.overall_agreement`** (`agreement.py:151`) is the app's existing idiom for "how badly
   does this one observation disagree with the model". A site's residual against a fitted front is
   the spatial analogue, and should be presented in the same register (§6.6).
-- **plotly.js-dist-min is already a dependency and already contains `scattergeo`, `scattermapbox`,
-  `densitymapbox` and the token-free `open-street-map` / `carto-positron` styles** — verified in
-  `frontend/node_modules`. See §7.1: the map costs no new dependency.
+- **plotly.js-dist-min (2.35.3) is already a dependency and already contains `scattergeo`,
+  `scattermap`, `densitymapbox` and the token-free `open-street-map` / `carto-positron` styles** —
+  verified in `frontend/node_modules`. See §7.1: the map costs no new dependency.
 
 ### 3.2 The one thing that does not exist, and constrains §6
 
-`AnalysisResult.posterior_samples` holds **marginal** draws. `exact_chain.py:1090` says so outright:
+`AnalysisResult.posterior_samples` holds **marginal** draws. `exact_chain.py:1159` says so outright:
 
 > Those draws are from the MARGINALS and carry no joint correlation between dates. Nothing reads
 > joint structure off them: `estimate_durations` is the one caller that needs it and takes its own
@@ -328,7 +352,10 @@ longitude = Column(Float, nullable=True)   # decimal degrees, WGS84, −180..180
 ```
 
 One Alembic revision, all nullable, no backfill, no server default. Existing rows are unaffected and
-every existing analysis reruns identically.
+every existing analysis reruns identically. *[rev. 2026-09-14]* The same revision carries the two
+per-project settings this plan needs — `projects.coordinate_precision` (String, default `'full'`,
+§4.5) and `projects.map_tiles_enabled` (Boolean, default false, §4.5 rule 4 / §7.1) — so item 2
+needs no migration of its own.
 
 **No `sites` table.** A site is *derived*, not stored: dates sharing a coordinate are one site, and
 in a modelled analysis a site is the model element its dates belong to (§6.2). A first-class `Site`
@@ -454,6 +481,21 @@ published result must not move underneath the person who published it**:
 `marine_reservoir_YYYY-MM-DD.csv` ships in `calibration_data/` beside the `.14c` files, so a fresh
 install has a working ΔR lookup with no network, and two installs of the same version compute the
 same ΔR. §11.1 is the permission question this raises.
+
+*[rev. 2026-09-14]* **Who can see a snapshot.** Users landed on 2026-09-07 and a stored curve is now
+private to its importer (`StoredCalibrationCurve.created_by`, and the reasoning on it: a curve
+someone is still developing has nobody vouching for it). The snapshot takes the same split the
+curves take:
+
+- The **bundled** snapshot is a file in `calibration_data/`, served the way the three shipped
+  `.14c` files are — no row, no owner, install-wide, read-only. It is the one the fresh install
+  uses and the one two installs agree on.
+- An **ingested** snapshot is a row with `created_by`, private to the account that ran the ingest,
+  listed for nobody else — exactly the curve rule, for exactly the curve reason. `POST
+  /api/reservoir/snapshots` requires `current_user` like every other write.
+- `delta_r_source.snapshot_id` names either kind. An analysis whose provenance names a private
+  snapshot is still reproducible by its owner, and by anyone else from the map numbers on
+  calib.org's page — which is the property §5.5 was built for.
 
 Note that `genus`/`species`/`feeding` come from the taxa tables, so the ingest query joins them:
 
@@ -667,9 +709,14 @@ exactly —
 
 - computed during the run, from the same joint draws `estimate_durations` takes;
 - requested by `bayesian_config.estimate_dispersal`, so it costs nothing when not asked for;
-- stored as one JSON block on **`Analysis.dispersal`**, with `NULL` meaning *not asked for* rather
-  than *nothing to report* — the convention the results page already reads for `Analysis.intervals`,
-  down to offering a re-run rather than showing an empty table.
+- stored as a **`dispersal` section of `Analysis.intervals`**, beside `age_depth`, with the section
+  absent meaning *not asked for* rather than *nothing to report* — the convention the results page
+  already reads for durations and age-depth, down to offering a re-run rather than showing an empty
+  table. *[rev. 2026-09-14]* The first draft of this plan gave dispersal a column of its own;
+  age-depth landed three days later as a section of the existing block, computed by
+  `intervals.report(..., durations=False)` when a run wants joint draws for a reason other than
+  durations. Dispersal is the third such reason, `wants_draws` in `gibbs.py` grows one more `or`,
+  and item 6 needs no migration.
 
 ### 6.4 Model 1 — wave of advance (ships first)
 
@@ -682,8 +729,8 @@ run an ordinary least-squares fit of *t* on *d*, and keep `v = −1/slope` and `
 *J* values of *v* — a posterior for the front speed with the chronological uncertainty already
 inside it, not bolted onto it afterwards.
 
-Reported through `hpd_ranges_from_distribution`, so a speed in **km/yr** reads with the same median
-and 68/95 HPD grammar as every date in the app. A negative or non-significant *v* is reported as
+Reported through `intervals.summarise`, so a speed in **km/yr** reads with the same median and
+68/95 HPD grammar as every duration in the app. A negative or non-significant *v* is reported as
 such; there is no absolute value taken and no sign flipped to make the answer look like a dispersal.
 
 **The origin.** Two modes, in this order:
@@ -757,15 +804,16 @@ completes a task and can defend the result afterwards.
 
 ### 7.1 The map: one component, no new dependency
 
-`plotly.js-dist-min` — already a dependency — contains `scattergeo`, `scattermapbox`,
+`plotly.js-dist-min` 2.35.3 — already a dependency — contains `scattergeo`, `scattermap`,
 `densitymapbox`, and the token-free `open-street-map` and `carto-positron` styles (verified in
-`frontend/node_modules`). One `SiteMap` component covers every surface here:
+`frontend/node_modules`). *[rev. 2026-09-14]* `scattermap` (MapLibre) rather than `scattermapbox`,
+which 2.35 deprecates; both are in the bundle. One `SiteMap` component covers every surface here:
 
 - **Default basemap is `scattergeo`**: coastlines, country outlines and graticule rendered from
   data inside the bundle. **No network request, no tile server, no leak** (§4.5 rule 4), and it
   works in an air-gapped install. Adequate to regional scale, which is the scale every figure in
   Part C is drawn at.
-- **Tiles are opt-in per project** (`scattermapbox`, `open-street-map`), for the one job the offline
+- **Tiles are opt-in per project** (`scattermap`, `open-street-map`; `projects.map_tiles_enabled`), for the one job the offline
   map cannot do: dropping a pin at site precision. Enabled once, behind a notice naming what a tile
   request discloses.
 - Consequence: every map inherits the app's existing plot discipline for free —
@@ -830,7 +878,8 @@ existing "applied to N dates" confirmation says how many.
 
 ### 7.4 Dispersal results
 
-A panel on the Results page, alongside `DurationsPanel`, following its conventions exactly
+A panel on the Results page, alongside `DurationsPanel` and `AgeDepthPanel`, following their
+conventions exactly
 (including "not asked for → offer a re-run" rather than an empty table):
 
 - **The map is the headline**: sites as markers, marker colour = modelled arrival age on a
@@ -867,7 +916,7 @@ unrelated colours.
 | 3 | **ΔR mirror**: snapshot tables, ingest, bundled snapshot, hash verification (§5.2–5.3) | — | ~3 days |
 | 4 | **ΔR lookup**: `reservoir.py`, `combine` validated against `regioncalc.php`, provenance, the popover tab (§5.4–5.5, §7.3) | 1, 3 | ~4 days |
 | 5 | **Freshness probe** and the ingest button (§5.6) | 3 | hours |
-| 6 | **Wave of advance**: site derivation from elements, per-draw fit, `Analysis.dispersal`, panel, map, residuals (§6.2–6.4, §6.6, §7.4) | 1, 2 | ~2 weeks |
+| 6 | **Wave of advance**: site derivation from elements, per-draw fit, `intervals.dispersal`, panel, map, residuals (§6.2–6.4, §6.6, §7.4) | 1, 2 | ~2 weeks |
 | 7 | **Trend surface / isochrons** (§6.5) | 6 | ~3 days |
 | 8 | **Origin inference** surface (§6.4 mode 2) | 6 | ~3 days |
 | 9 | **MST sequence proposal** (§6.7) | 6 | ~2 days |
@@ -959,15 +1008,17 @@ files carry essentially all the conflict risk, and all three are additive here o
 - **`backend/app/services/date_import.py`** — two `COLUMN_ALIASES` entries, two `TEMPLATE_COLUMNS`.
 - **`backend/app/api/results.py`** — two `CSV_HEADER` entries.
 
-Alembic revisions branch from `20260826_2140_sample_sort_order`. Keep each of items 1, 3 and 6 in
-§8 to its own revision, so the fork can take the coordinate schema without the ΔR mirror if upstream
-ever wants only that.
+Alembic revisions branch from the current head, `20260909_1200_wiggle_match_and_deposition_elements`
+(`f3b81c60d5a7`) *[rev. 2026-09-14; was `20260826_2140_sample_sort_order`]*. Keep items 1 and 3 in
+§8 to their own revisions, so the fork can take the coordinate schema without the ΔR mirror if
+upstream ever wants only that. Item 6 no longer needs one (§6.3).
 
 ---
 
 ## 13. Open decisions
 
-1. **A `sites` table, or derived sites?** (§4.1, §6.2) Derived is planned, because the model tree
+1. **A `sites` table, or derived sites?** (§4.1, §6.2) Derived is planned *(§14 keeps it; revisit
+   at op 6a, not before)*, because the model tree
    and the date collection already express what a site is, and a `Site` entity would fork the schema
    much further. A first-class entity would be tidier for Part C and would give a site one
    coordinate instead of *n* equal ones. Decide before item 6, not before item 1 — the derived
@@ -976,14 +1027,16 @@ ever wants only that.
    immutable, citable), which argues for the Curves page. It is used from the date collection, which
    argues for the project. Currently planned: managed on Curves, used from the collection.
 3. **Minimum site count for a dispersal fit.** §11.4 suggests refusing below ~6. Needs a number
-   chosen deliberately rather than defaulted.
+   chosen deliberately rather than defaulted. *§14 op 6a proposes 6 as `MIN_DISPERSAL_SITES`, with
+   the reasoning beside it; it is the one number in op 6 to confirm before coding.*
 4. **Does dispersal belong to an analysis or to a project?** Planned as an analysis (it consumes the
    run's joint draws, §6.3). But a dispersal question usually spans several analyses of one region,
    which the current model has no place for. A project-level dispersal built from several analyses'
    stored boundaries would have to fall back to marginals (§3.2) and lose the joint structure —
    which may be an acceptable trade, and is not decided.
 5. **Coordinate precision default.** Planned as `full`. An argument exists for defaulting to `0.01°`
-   and making full precision the deliberate choice.
+   and making full precision the deliberate choice. *§14 op 1 ships `full`: an export that silently
+   rounds is a surprise, and a project owner choosing to round is the deliberate act.*
 6. **Per-species rather than per-class habit correction.** §2.7 could only measure the bias at class
    level, because that is all the paired data supports. A published per-species offset — *Austrovenus*
    against *Amphibola*, say — would let the app inflate a point's error by a defensible amount
@@ -992,3 +1045,176 @@ ever wants only that.
 7. ~~**The escalation threshold.**~~ **Decided 2026-09-06: 35 yr**, the median reported ΔR error,
    firing on ~11% of lookups. The 84 yr co-located nugget was the alternative; §5.4.1 records why it
    was not chosen.
+
+---
+
+## 14. Execution sequence
+
+*Added 2026-09-14.* §8 is the order of features; this is the order of operations, each small enough
+to be one commit with its own tests, each naming the files it touches and what "done" is. Branch:
+the current one, from Alembic head `f3b81c60d5a7`. The two migrations are ops 1a and 3a; nothing
+else changes the schema.
+
+Operations within a feature run in order. Features 1–2 and 3 are independent and can interleave;
+4 waits for both; 6 waits for 1–2 and for the three §13 decisions marked below.
+
+### Op 0 — the permission request *(human; start now, longest lead time)*
+
+Email p.j.reimer@qub.ac.uk asking to redistribute the Marine20 reservoir compilation as a bundled
+snapshot, citing Reimer & Reimer 2001 and naming the app. Blocks **only op 3d** (the shipped CSV).
+Every other operation proceeds; if the answer is no, op 3d is dropped and the ingest (op 3c) is the
+whole story, unchanged. *The app cannot send this; a person does.*
+
+### Feature 1 — coordinates (§4)
+
+**1a. Schema.** `backend/app/models.py`: `latitude`, `longitude` (Float, nullable) on
+`ProjectSample` and `RadiocarbonSample`, beside `delta_r`/`delta_r_error` and in their voice;
+`coordinate_precision` (String, `'full'`) and `map_tiles_enabled` (Boolean, false) on `Project`.
+One revision `20260914_HHMM_coordinates_on_samples` from `f3b81c60d5a7`; `tests/test_migrations.py`
+learns the new columns. *Done when* the migration test passes up and down and every existing test
+still passes untouched.
+
+**1b. Validation.** `backend/app/schemas/sample.py`: the two `Field`s on `MeasurementInput`,
+`_coordinates_come_in_pairs` beside `_delta_r_has_an_uncertainty` (`:157`), the same on
+`ProjectSampleBulkInput` (`:285`) across a selection. `tests/test_validation.py`: half a coordinate
+refused, both accepted, out-of-range refused.
+
+**1c. Deploy copy.** `backend/app/api/project_samples.py:450` copies the two fields alongside
+`delta_r`. `tests/test_project_samples.py`: a deployed date carries its coordinates.
+
+**1d. Import.** `backend/app/services/date_import.py`: two `COLUMN_ALIASES` entries (`:146`), two
+`TEMPLATE_COLUMNS` (`:726`), the template's `NZ-7756` row given real coordinates, a DMS detector
+that fails the file naming the cell and the format wanted, and the `(0, 0)` warning through the
+existing `result.warnings`. `tests/test_imports.py`: aliases resolve in any order, DMS in each of
+the four spellings refused, `(0,0)` warns, template round-trips.
+
+**1e. Export.** `backend/app/api/results.py`: `CSV_HEADER` (`:321`), the JSON export, and the
+PDF's date table (`services/pdf_report.py`), all through one `_rounded_coordinate(value,
+precision)` applied at serialisation, round-half-to-even. `tests/test_exports.py`: export → import
+round-trip at `full`; `0.01°` rounds identically on two exports; nothing below the precision leaks
+into any of the three downloads.
+
+**1f. Frontend.** `ProjectSampleTable.tsx`: `latitude`/`longitude` columns beside `depth_cm`,
+governed by `utils/columnPreferences.ts`'s existing "appears once any date has it" rule;
+`MeasurementFields.tsx` inline form; `ProjectDetail.tsx` gains a small project-settings control
+(there is none today) holding the precision selector, its four values named in km, and later 2c's
+tiles switch. `ProjectSampleTable.test.ts`,
+`columnPreferences.test.ts` extended. *Done when* a coordinate typed in the table survives export,
+edit-in-spreadsheet, and re-import.
+
+### Feature 2 — the map (§7.1–7.2)
+
+**2a. `SiteMap.tsx`.** One component on `scattergeo`, `displayModeBar: false`, `usePlotFont`,
+`plotColors`, the app-drawn Download PNG at `PNG_EXPORT_SCALE` via `utils/plotExport.ts`. Props:
+points, selection, `editable`, `onPlace(lat, lon)`. No tiles yet.
+
+**2b. Placement.** `SampleSelectionBar.tsx` gains "Place on map": opens `SiteMap` in edit mode, a
+click writes the same `{latitude, longitude}` to the whole selection through the bulk-update path
+1b validated; draggable pins re-write. The unplaced list beside the map is the empty state.
+
+**2c. Tiles, opt-in.** `scattermap` + `open-street-map` behind `project.map_tiles_enabled`, set
+once per project behind the notice naming what a tile request discloses (§4.5 rule 4). *Done when*
+the network tab shows no request until the switch is on.
+
+### Feature 3 — the ΔR mirror (§5.2–5.3)
+
+**3a. Schema.** `MarineReservoirSnapshot` (with `created_by`, §5.2 rev.) and `MarineReservoirPoint`
+in `models.py`; `delta_r_source` (JSON, nullable) on both sample tables, since it is this feature's
+provenance. Revision `20260914_HHMM_marine_reservoir_snapshots`, chained after 1a.
+
+**3b. Ingest and normalisation.** `backend/app/services/reservoir_ingest.py`: session `GET`, the
+§5.2 join query, per-field UTF-8→cp1252 decode (§2.2), parse, `content_sha256` over normalised
+rows, insert, `IngestReport` (rows, `max(last_changed)`, no-error count, cp1252-fallback count,
+unrecognised feeding spellings, hash). `FEEDING_CLASSES` normalisation table from §2.7 in
+`services/reservoir.py`, raw string kept beside the class. Fixtures in `tests/fixtures/calib_marine/`:
+the raw bytes of an HTML response containing all 54 cp1252 rows and all 25 feeding spellings — no
+network in the test suite. `tests/test_reservoir_ingest.py`: the 54 decode to the expected
+strings; 25 spellings → 7 classes with the five truncated compounds in `ambiguous`; a novel
+spelling → `unknown` *and counted*; an unexpected table shape fails loudly; two parses of one
+fixture hash the same.
+
+**3c. Loader and API.** `services/reservoir_registry.py` on the `curve_registry.py` pattern:
+builtin-from-file and stored-from-row behind one interface, hash verified on every load, a
+mismatch refusing to serve. `backend/app/api/reservoir.py`: `POST /snapshots` (auth, runs 3b,
+returns the report), `GET /snapshots` (builtin plus the caller's own), snapshot deletion refused
+while any `delta_r_source` names it. `tests/test_reservoir_registry.py`: tampered file refuses,
+private snapshot invisible to another account (mirror `test_curve_privacy.py`).
+
+**3d. Bundled snapshot** *(gated on op 0)*: `calibration_data/marine_reservoir_2026-05-11.csv`,
+193 KB, produced by 3b's parser and committed with its hash recorded in the registry.
+
+### Feature 4 — the lookup (§5.4–5.5, §7.3)
+
+**4a. `services/reservoir.py`.** `nearest(lat, lon, n, snapshot_id, *, max_km)` by haversine
+(R = 6371.0088); `combine(points)` implementing §2.3 exactly; `lookup(...)` returning
+`included_all`, `suspension_equivalent`, per-point classification, `nearest_km`, `farthest_km`,
+`excluded_no_error`, and the refusal when exclusion leaves < 2 weighted points.
+`FEEDING_SHIFT_WARN_YEARS = 35` defined beside a comment carrying the §2.7 numbers.
+`tests/test_reservoir.py`: the three §2.3 cases to the printed integer; a hand-computed
+counterfactual; the < 2 refusal naming the classes; `unknown`/`grazer` never excluded; a no-error
+point excluded and listed.
+
+**4b. Manual validation.** `tests/manual/calib_regioncalc.py` beside `oxcal_reference.py`: twenty
+random point sets against `regioncalc.php`, exact integer match or fail. Run once before 4d ships
+and recorded in its docstring.
+
+**4c. API and provenance.** `POST /api/reservoir/lookup` (auth) returns 4a's result for
+`{lat, lon, n, snapshot_id, exclude_map_nos, suspension_only, max_km}`. The bulk update in
+`api/project_samples.py` accepts `delta_r_source` and — the rule from §5.5 — **clears it whenever
+`delta_r` or `delta_r_error` arrives without one**. `tests/test_project_samples.py`: hand edit
+clears provenance; a lookup-applied value carries it; deploy copies it.
+
+**4d. The popover tab.** `SampleSelectionBar.tsx`'s ΔR popover (`:251`) gains the second tab laid
+out in §7.3: value large, N live, nearest-km, the point list with the habit column and checkboxes,
+the counterfactual line, the ≥ 35 yr warning, the one preset, the snapshot id. Applying writes the
+three fields to the selection through 4c. *Done when* Strangford Lough at N=5 reads −209 ± 44 in
+the UI and the stored `delta_r_source` reproduces it.
+
+### Feature 5 — freshness (§5.6)
+
+**5a.** `GET /api/reservoir/freshness` (auth, explicit, the 2 KB probe) and one line plus the
+ingest button on `Curves.tsx`, in the register the curve list already uses.
+
+### Feature 6 — wave of advance (§6.2–6.4, §6.6, §7.4)
+
+*Confirm before 6a:* §13.1 stays derived; §13.3 `MIN_DISPERSAL_SITES = 6`; §13.4 stays
+per-analysis.
+
+**6a. `services/dispersal.py`.** `derive_sites(root, measurements)`: a site per opening Boundary,
+centroid of its dates' coordinates, refusal above `SITE_SCATTER_KM = 5` naming both coordinates and
+the distance; the earliest-dated-event fallback for a group calibration, labelled as such in the
+returned spec. `fit_wave(sites, draws, origin)`: per-draw OLS of *t* on great-circle *d*, `v =
+−1/slope`, no sign flip; `summarise` on *v* and on *t₀*; signed per-site residuals in years, sorted;
+refusal below `MIN_DISPERSAL_SITES` with the §11.4 reason. `tests/test_dispersal.py`: a synthetic
+front recovers *v* and *t₀*; a two-site Phase 6 km apart refuses; five sites refuse; a negative
+slope reports negative.
+
+**6b. Wiring.** `BayesianConfigInput` (`schemas/sample.py:418`): `estimate_dispersal: bool = False`,
+`dispersal_origin: Optional[{lat, lon}]`. `intervals.report(..., dispersal=spec)` adds
+`block['dispersal']`; `wants_draws` in `gibbs.py:2215` and the `estimate_durations` branch in
+`exact_chain.py:1289` grow the third reason; `api/analysis.py:506` threads the flag.
+`tests/test_intervals.py` and `test_solver_reporting.py`: the section is present only when asked,
+on both solvers, through `solve_chains`.
+
+**6c. Coverage test.** `tests/test_dispersal_coverage.py`, marked slow: ≥ 200 simulated fronts
+through calibration and `solve_chains`, the 95% interval on *v* containing the truth ~95% of the
+time. Its measured coverage is recorded in the feature's Done entry in `REMAINING_WORK.md` when it
+runs, as the age-depth and wiggle-match entries record theirs.
+
+**6d. `DispersalPanel.tsx`.** Beside `DurationsPanel`/`AgeDepthPanel` on `Results.tsx`, reading
+`analysis.intervals.dispersal` the way `:1266` reads `age_depth`: `SiteMap` headline with the
+sequential arrival ramp, the front, the origin; the speed block; the residual table; the §6.8
+caveats in the panel. Origin placement reuses 2b's pin. *Done when* a Neolithic-scale synthetic
+lands near 1 km/yr in the UI (§10 landmark).
+
+### Features 7–9
+
+**7.** `fit_trend(sites, draws)` in `dispersal.py`: Lambert azimuthal at the centroid, per-draw
+plane fit, speed and azimuth with circular mean/interval; isochrons on `SiteMap`. **8.** Origin
+profile over a ~1° grid, rendered as a likelihood region. **9.** MST walk → proposed Sequence in
+`ModelTreeEditor.tsx`, accept/reject, never applied. Each waits on 6d and is one commit.
+
+### What this sequence does not schedule
+
+Regional kriging (§5.7) and over-water distance (§9) stay deferred. §13.2 (snapshot on the Curves
+page, used from the collection) is taken as written and needs no decision before op 5a.
