@@ -836,6 +836,138 @@ class TestARealLabTable:
         assert summarise(from_csv) == summarise(from_model)
 
 
+class TestCsvCoordinates:
+    """
+    Where a date came from, read in WGS84 decimal degrees and in nothing else.
+
+    The refusal is the point of this class. Degrees-and-minutes is the one bad
+    cell nothing downstream catches: read 54°30' as 54.30 and the result is in
+    range, plots on the map, and is 55 km from the site. So the file fails,
+    naming the cell and the format wanted, rather than the importer reading a
+    construct as the nearest thing it implements.
+    """
+
+    def test_a_coordinate_is_read(self):
+        result = parse_csv(
+            'name,age,error,latitude,longitude\nOxA-1,3000,25,54.5,-5.6\n')
+
+        assert result.ok, result.errors
+        assert (result.dates[0]['latitude'], result.dates[0]['longitude']) == (54.5, -5.6)
+
+    @pytest.mark.parametrize("header", [
+        'name,age,error,latitude,longitude',
+        'name,age,error,lat,lon',
+        'name,age,error,Lat,Long',
+        'name,age,error,decimal_latitude,decimal_longitude',
+        'name,age,error,lat_dd,lon_dd',
+        'name,age,error,y,x',
+    ])
+    def test_the_spellings_a_site_gazetteer_actually_uses(self, header):
+        result = parse_csv(f'{header}\nOxA-1,3000,25,54.5,-5.6\n')
+
+        assert result.ok, result.errors
+        assert result.dates[0]['latitude'] == 54.5
+
+    def test_the_columns_can_be_in_any_order(self):
+        result = parse_csv(
+            'longitude,name,latitude,error,age\n-5.6,OxA-1,54.5,25,3000\n')
+
+        assert result.ok, result.errors
+        assert (result.dates[0]['latitude'], result.dates[0]['longitude']) == (54.5, -5.6)
+
+    @pytest.mark.parametrize("cell", [
+        "54°30'N",
+        "54 30 00 N",
+        "N54.5",
+        "54 deg 30 min",
+        '54°30\'15"',
+        "54 30.5",
+    ])
+    def test_degrees_and_minutes_fails_the_file(self, cell):
+        result = parse_csv(
+            f'name,age,error,latitude,longitude\nOxA-1,3000,25,"{cell}",-5.6\n')
+
+        assert not result.ok, f"{cell!r} was parsed rather than refused"
+        assert any(cell in e for e in result.errors), (
+            "the error must show the offending cell")
+        assert any('decimal degrees' in e for e in result.errors), (
+            "the error must name the format wanted")
+
+    def test_a_refused_coordinate_imports_nothing_at_all(self):
+        """An import is all-or-nothing: a file with one bad coordinate must
+        not hand back the rows it managed to read."""
+        result = parse_csv(
+            'name,age,error,latitude,longitude\n'
+            'OxA-1,3000,25,54.5,-5.6\n'
+            "OxA-2,3100,30,54°30'N,-5.6\n"
+        ).refuse()
+
+        assert not result.ok
+        assert result.dates == []
+
+    def test_a_decimal_comma_is_refused_rather_than_read_as_thousands(self):
+        """
+        _number strips thousands separators, so '5,6' would arrive as 56 --
+        in range for a longitude, fifty degrees out, and silent. The same
+        class of error as the DMS one, and refused the same way.
+        """
+        result = parse_csv(
+            'name,age,error,latitude,longitude\nOxA-1,3000,25,"54,5","-5,6"\n')
+
+        assert not result.ok
+        assert any('comma' in e for e in result.errors)
+
+    def test_half_a_coordinate_in_a_file_is_refused(self):
+        result = parse_csv('name,age,error,latitude\nOxA-1,3000,25,54.5\n')
+
+        assert not result.ok
+        assert any('longitude' in e for e in result.errors)
+
+    def test_no_coordinate_columns_at_all_is_normal(self):
+        result = parse_csv('name,age,error\nOxA-1,3000,25\n')
+
+        assert result.ok, result.errors
+        assert result.dates[0]['latitude'] is None
+
+    def test_null_island_warns_but_imports(self):
+        """
+        (0, 0) is a real position in the Gulf of Guinea and someone has to be
+        able to say so -- but it is far more often what a spreadsheet leaves
+        when a column is filled down over empty cells, so it is a warning
+        rather than a refusal.
+        """
+        result = parse_csv(
+            'name,age,error,latitude,longitude\n'
+            'OxA-1,3000,25,0,0\n'
+            'OxA-2,3100,30,54.5,-5.6\n'
+        )
+
+        assert result.ok, result.errors
+        assert len(result.dates) == 2
+        assert any('Gulf of Guinea' in w for w in result.warnings)
+        assert any('OxA-1' in w for w in result.warnings)
+        assert not any('OxA-2' in w for w in result.warnings)
+
+    def test_a_position_off_the_earth_is_refused_by_the_shared_schema(self):
+        """Row-level parsing lets it through; schemas/sample.py's bounds are
+        what stop it, which is the same check a typed date meets."""
+        result = parse_csv(
+            'name,age,error,latitude,longitude\nOxA-1,3000,25,95,-5.6\n')
+
+        assert not result.ok
+
+    def test_the_template_carries_a_readable_coordinate(self):
+        """The marine row is the one a reader copies when they have a placed
+        date, so it has to demonstrate the accepted format."""
+        result = parse_csv(template_csv())
+
+        assert result.ok, result.errors
+        placed = [d for d in result.dates if d['latitude'] is not None]
+        assert len(placed) == 1
+        assert placed[0]['sample_name'] == 'NZ-7756'
+        assert placed[0]['longitude'] == 170.5036
+
+
 class TestReImportingOurOwnExports:
     """
     Export a results table, correct it in a spreadsheet, import it back. A

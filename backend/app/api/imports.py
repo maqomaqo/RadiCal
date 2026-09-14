@@ -113,6 +113,10 @@ def csv_columns(user: User = Depends(current_user)):
         'ring_offset': ('Years before the series reference point, for a wiggle '
                         'match: 0 at the reference and increasing into the past.'),
         'ring_offset_error': 'Uncertainty on ring_offset, where the gap was measured rather than counted.',
+        'latitude': ('Decimal degrees, WGS84, minus for south. Degrees and '
+                     "minutes (54°30'N) are refused, not converted."),
+        'longitude': ('Decimal degrees, WGS84, minus for west. Both halves of '
+                      'a coordinate are needed, or neither.'),
         'location': 'Site or find location.',
         'notes': 'Free text.',
     }
