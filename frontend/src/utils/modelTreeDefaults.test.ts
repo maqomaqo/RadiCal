@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { bootstrapModelTree } from './modelTreeDefaults'
+import { bootstrapModelTree, phaseForContext } from './modelTreeDefaults'
 import type { ModelElement } from '@/types'
 
 function phaseNames(root: ModelElement): string[] {
@@ -183,5 +183,32 @@ describe('bootstrapModelTree — ordering contexts by depth', () => {
     for (const id of ['a', 'b']) {
       expect(find(tree, assignments[id])?.element_type).toBe('phase')
     }
+  })
+})
+
+describe('phaseForContext', () => {
+  const tree: ModelElement = {
+    id: 'root',
+    element_type: 'sequence',
+    children: [
+      { id: 'p1', element_type: 'phase', name: 'Layer 1' },
+      { id: 'p2', element_type: 'phase', name: 'Layer 2' },
+      { id: 'p3', element_type: 'phase', name: 'Layer 2' },
+    ],
+  }
+
+  it('finds the one phase named for the context', () => {
+    expect(phaseForContext(tree, 'Layer 1')).toBe('p1')
+    expect(phaseForContext(tree, '  Layer 1 ')).toBe('p1')
+  })
+
+  it('refuses to guess between two phases with the same name', () => {
+    expect(phaseForContext(tree, 'Layer 2')).toBeNull()
+  })
+
+  it('returns null with no tree, no context, or no such phase', () => {
+    expect(phaseForContext(null, 'Layer 1')).toBeNull()
+    expect(phaseForContext(tree, null)).toBeNull()
+    expect(phaseForContext(tree, 'Layer 9')).toBeNull()
   })
 })

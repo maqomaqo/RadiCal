@@ -110,6 +110,28 @@ function element(type: ModelElement['element_type'], name: string): ModelElement
   return { id: newElementId(), element_type: type, name, tpq_age_bp: null, taq_age_bp: null, children: [] }
 }
 
+/**
+ * The phase a date arriving with this context belongs in, once a tree already
+ * exists -- or null when the tree has no such phase, or has two, since a guess
+ * between them would put the date somewhere the user did not say.
+ *
+ * bootstrapModelTree turns contexts into phases when the tree is first built;
+ * this is the same rule applied to a date added AFTER that, so re-adding a
+ * date from a collection lands it back in its phase rather than leaving it
+ * unassigned for the user to place by hand.
+ */
+export function phaseForContext(tree: ModelElement | null, context: string | null | undefined): string | null {
+  const wanted = (context || '').trim()
+  if (!tree || !wanted) return null
+  const matches: string[] = []
+  const walk = (el: ModelElement) => {
+    if (el.element_type === 'phase' && (el.name || '').trim() === wanted) matches.push(el.id)
+    for (const child of el.children || []) walk(child)
+  }
+  walk(tree)
+  return matches.length === 1 ? matches[0] : null
+}
+
 export function bootstrapModelTree(dates: DateToPlace[]): BootstrappedTree {
   // Distinct contexts in the order the dates introduce them, which is the only
   // ordering information available.

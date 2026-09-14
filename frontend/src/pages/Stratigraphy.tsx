@@ -52,6 +52,7 @@ export default function Stratigraphy() {
     modelTree: draftTree,
     elementAssignments: draftAssignments,
     setModelTree: setDraftTree,
+    editingAnalysisId,
   } = useAnalysisDraftStore()
 
   // Reached either as /new-analysis/model-structure (building a new analysis)
@@ -64,6 +65,17 @@ export default function Stratigraphy() {
   // start, so coming back -- by this button, by browser Back, or by a reload
   // -- lands on the draft that is already there.
   const backState = undefined
+
+  // Whether the dates to build around are the DRAFT's. Always, for a new
+  // analysis. For a saved one, only when the Edit Analysis page has loaded it
+  // into the store -- a direct link here leaves the store empty (or holding
+  // some other analysis), and then the saved copy from the API is all there
+  // is. The distinction matters because the draft is what Run Analysis
+  // submits: a date deleted and re-added on the Edit Analysis page exists only
+  // there, and a structure built around the saved copy could neither show it
+  // nor place it.
+  const draftHoldsDates =
+    !editRouteId || (editingAnalysisId === editRouteId && measurements.length > 0)
 
   // The default tab, being the authoring surface in both flows. A saved
   // analysis loads it from and writes it back to the API; a new one holds it
@@ -121,13 +133,25 @@ export default function Stratigraphy() {
         setSavedType(data.data.analysis_type || null)
         const saved: MatrixMeasurement[] = data.data.measurements || []
         setSavedMeasurements(saved)
-        let tree: ModelElement | null = data.data.model_tree || null
+        // When the draft holds this analysis, its tree and assignments are
+        // the ones being edited -- they started as the saved copy (see
+        // NewAnalysis.loadFromAnalysis) and carry whatever has changed since.
+        // Reloading the saved copy over them would discard those changes and
+        // drop any date added to the draft.
+        let tree: ModelElement | null = draftHoldsDates && draftTree ? draftTree : data.data.model_tree || null
         const initial: Record<string, string> = {}
-        for (const m of saved) {
-          if (m.element_id) initial[m.id] = m.element_id
-          else if (m.group_id) initial[m.id] = m.group_id
+        if (draftHoldsDates && draftTree) {
+          Object.assign(initial, draftAssignments)
+        } else {
+          for (const m of saved) {
+            if (m.element_id) initial[m.id] = m.element_id
+            else if (m.group_id) initial[m.id] = m.group_id
+          }
         }
-        if (!tree && saved.length > 0) {
+        // The dates to place: the draft's when it holds them, for the reason
+        // given at draftHoldsDates.
+        const toPlace: MatrixMeasurement[] = draftHoldsDates ? measurements : saved
+        if (!tree && toPlace.length > 0) {
           // A saved analysis with no structure, usually a group calibration
           // being converted to Bayesian. It has dates, so start it as a new
           // analysis starts rather than asking for dates that are right there.
@@ -141,7 +165,7 @@ export default function Stratigraphy() {
             // converted analysis always starts unordered. That is the honest
             // result rather than a gap to paper over -- the ordering evidence
             // genuinely is not in this payload.
-            saved.map((m) => ({
+            toPlace.map((m) => ({
               id: m.id,
               context: groupNames[initial[m.id]] ?? null,
             }))
@@ -165,6 +189,9 @@ export default function Stratigraphy() {
       })
       .catch((err) => setStructureError((err as Error).message))
       .finally(() => setLoadingStructure(false))
+    // The draft values are read once, when the structure is first loaded;
+    // the early return above makes later changes to them irrelevant here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, editRouteId, modelTree, setDraftTree])
 
   /**
@@ -182,7 +209,7 @@ export default function Stratigraphy() {
    * saved. The measurement list on the Edit Analysis page has the control in
    * that case.
    */
-  const canSortDates = measurements.length > 1
+  const canSortDates = draftHoldsDates && measurements.length > 1
   const sortDates = (key: MeasurementSortKey) => {
     setMeasurements(sortMeasurements(measurements, key))
     if (editRouteId) setSavedMeasurements(sortMeasurements(savedMeasurements, key))
@@ -205,7 +232,7 @@ export default function Stratigraphy() {
    * /analysis/:id/edit leaves the store empty, and editing then would change
    * the screen without changing anything that gets saved.
    */
-  const canSetOrdinates = measurements.length > 0
+  const canSetOrdinates = draftHoldsDates && measurements.length > 0
   const setOrdinate = (measurementId: string, patch: Partial<MatrixMeasurement>) => {
     const apply = <T extends MatrixMeasurement>(list: T[]): T[] =>
       list.map((m) => (m.id === measurementId ? { ...m, ...patch } : m))
@@ -215,7 +242,22 @@ export default function Stratigraphy() {
 
   const activeTree = editRouteId ? modelTree : draftTree
   const activeAssignments = editRouteId ? assignments : draftAssignments
-  const activeMeasurements = editRouteId ? savedMeasurements : measurements
+  const activeMeasurements = draftHoldsDates ? measurements : savedMeasurements
+  // Whether the draft's dates are still the saved analysis's dates. A date
+  // added on the Edit Analysis page is not on the server yet, so a structure
+  // that places it can only reach the backend with the dates themselves --
+  // through Run Analysis -- and PUT /model-tree would reject its id.
+  const datesDiverged =
+    !!editRouteId &&
+    draftHoldsDates &&
+    !loadingStructure &&
+    (measurements.length !== savedMeasurements.length ||
+      measurements.some((m) => !savedMeasurements.some((s) => s.id === m.id)))
+  // Only a Bayesian analysis stores a structure, so until the conversion
+  // happens there is nothing to save the tree INTO; and once the dates have
+  // changed, the tree has to travel with them. Either way the structure is
+  // part of the unsaved edit and Run Analysis applies both.
+  const structureSavesWithRun = (savedType !== null && savedType !== 'bayesian') || datesDiverged
   const unassignedCount = activeMeasurements.filter((m) => !activeAssignments[m.id]).length
 
   // The Harris matrix is a derived VIEW rather than an editable source, and
@@ -354,7 +396,7 @@ export default function Stratigraphy() {
             <>
               <ModelTreeEditor
                 tree={modelTree}
-                measurements={savedMeasurements}
+                measurements={activeMeasurements}
                 assignments={assignments}
                 onSortDates={canSortDates ? sortDates : undefined}
                 onSetOrdinate={canSetOrdinates ? setOrdinate : undefined}
@@ -365,16 +407,23 @@ export default function Stratigraphy() {
                   setStructureDirty(true)
                 }}
               />
-              {savedType && savedType !== 'bayesian' ? (
-                // Saved as something with no structure: only a Bayesian
-                // analysis stores one, so there is nothing to save the tree
-                // INTO until the conversion happens. It goes with the draft,
-                // and Run Analysis applies both.
+              {structureSavesWithRun ? (
                 <Alert severity="info" sx={{ mt: 3 }}>
-                  This analysis is still saved as a{' '}
-                  {savedType === 'group_calibration' ? 'group calibration' : savedType}, which has
-                  no model structure to write to. The structure above is part of your unsaved edit:
-                  go back and press Run Analysis to convert the analysis and apply it.
+                  {savedType !== 'bayesian' ? (
+                    <>
+                      This analysis is still saved as a{' '}
+                      {savedType === 'group_calibration' ? 'group calibration' : savedType}, which
+                      has no model structure to write to. The structure above is part of your
+                      unsaved edit: go back and press Run Analysis to convert the analysis and apply
+                      it.
+                    </>
+                  ) : (
+                    <>
+                      The dates in this edit differ from the ones saved with the analysis, so the
+                      structure above is part of your unsaved edit and travels with them: go back
+                      and press Run Analysis to apply both.
+                    </>
+                  )}
                   {structureProblems.length > 0 && (
                     <>
                       {' '}
