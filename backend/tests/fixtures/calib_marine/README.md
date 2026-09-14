@@ -1,25 +1,53 @@
-# Reservoir ingest fixtures
+# Reservoir ingest fixture
 
-**These are synthesised, not captured.** The plan (§14 op 3b) asks for the raw
-bytes of a real calib.org response; calib.org was not reachable from the
-environment this was built in, so what is here instead is a fixture
-constructed to carry every property §2 of the plan documents about the real
-one:
+`query_response.html` is **real**: 28 KB of the bytes calib.org's generalized
+query interface actually returned, captured on 2026-09-14 from
 
-- both encodings in one response, per field — `Håkansson` as correct UTF-8
-  beside `Thybor\xf8n` as raw cp1252, which is what makes a per-field decode
-  necessary rather than a per-document one;
-- a byte that is valid in neither UTF-8 nor cp1252 (0x81), which is the third
-  branch of `decode_field` and is reachable in the real data;
-- all 25 feeding spellings, including the five compound values the source
-  truncates at sixteen characters;
-- rows carrying a ΔR with no uncertainty on it.
+    POST http://calib.org/marine/query/query.php
+    query=<services.reservoir_ingest.SOURCE_QUERY>
 
-What it therefore does NOT test is the shape of calib.org's actual HTML table,
-because that shape is unknown here. That is exactly why
-`reservoir_ingest.fetch_records` is unimplemented rather than guessed: see its
-docstring for the contract, and replace this fixture with a captured response
-when one is available.
+which answered 200 with 2060 records. What is here is a SUBSET of those rows,
+reassembled inside the response's own preamble and table markup — every byte
+of every row is the source's, and the only edit is the declared record count
+in the `N records` line, changed to match the rows kept.
 
-`records.py` builds the records rather than storing a blob, so what each row
-is meant to demonstrate is readable beside it.
+Kept deliberately, not sampled:
+
+- **all 60 rows carrying a field that fails a strict UTF-8 decode** — the
+  `Thybor\xf8n` case, raw cp1252;
+- **4 rows whose non-ASCII fields are correct multi-byte UTF-8** — the
+  `H\xc3\xa5kansson` case. Both kinds in one response is the whole reason
+  `decode_field` works per field rather than per document, so a fixture
+  carrying only one of them would not test the thing;
+- **all 26 distinct `feeding` spellings**, including the five compound
+  judgements the source truncates at sixteen characters and the one that
+  arrives with a leading non-breaking space;
+- **3 rows carrying a ΔR with no uncertainty on it**, which is a real shape in
+  this database and one a weighted mean cannot use.
+
+The whole 2060-row response is not committed: at 1.0 MB it would be forty
+times the rest of the fixtures put together, and nothing in it that these 85
+rows do not already carry is exercised by a test.
+
+## Re-capturing it
+
+Needs network. One request, and please keep it to one — this is a courtesy
+interface on somebody else's Apache/PHP host, not an API:
+
+```python
+from app.services.reservoir_ingest import fetch_records
+records, declared = fetch_records()
+```
+
+`extract_records` will refuse a response whose header row is not
+`EXPECTED_COLUMNS`, which is the check that catches the source changing shape
+rather than letting it be read positionally.
+
+## What the capture corrected
+
+Two numbers in the plan's §2, measured on 2026-09-06 and stale by the time
+this was captured: **60** fields fail strict UTF-8, not 54, and there are
+**26** distinct feeding spellings, not 25. The normalisation table built from
+the plan's prose nevertheless folds the real 2060 rows into exactly the class
+counts §2.7 tabulates, with nothing unrecognised — see
+`tests/test_reservoir_ingest.py`.

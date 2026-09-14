@@ -18,8 +18,8 @@ Three rules, enforced rather than merely documented:
 
 The ingest is the only code in this app that talks to the internet, and it
 runs when a person asks. Never on a timer, never on startup, never as a side
-effect of a lookup -- see services/reservoir_ingest.py, whose fetch half is
-currently unimplemented and says why.
+effect of a lookup. It issues ONE query against a courtesy interface on
+somebody else's Apache/PHP host -- see services/reservoir_ingest.py.
 """
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -100,18 +100,19 @@ def create_snapshot(
     with no uncertainty, cp1252 fallbacks, feeding spellings nobody has seen
     -- are what a person needs to judge the source, not just the fetch.
 
-    Currently returns 501. services/reservoir_ingest.fetch_records is
-    deliberately unimplemented: calib.org could not be reached when it was
-    written, and a parser guessed at a response shape would be confidently
-    wrong about numbers that move published dates. Everything behind it --
-    decode, normalisation, hashing, storage -- is written and tested.
+    503 when calib.org cannot be reached, which is a different thing from a
+    response that will not parse: one is a network to try again on, the other
+    is a source that has changed shape and needs a person to look at it.
     """
     try:
-        records = reservoir_ingest.fetch_records()
+        records, declared = reservoir_ingest.fetch_records()
     except reservoir_ingest.IngestUnavailable as exc:
-        raise HTTPException(status_code=501, detail=str(exc))
+        raise HTTPException(status_code=503, detail=str(exc))
+    except reservoir_ingest.IngestError as exc:
+        # The host answered, but with something that is not this database.
+        raise HTTPException(status_code=502, detail=str(exc))
 
-    rows, report = reservoir_ingest.records_to_rows(records)
+    rows, report = reservoir_ingest.records_to_rows(records, declared=declared)
     if not report.ok:
         # A 200 carrying the problems, as api/imports.py answers an unreadable
         # file: the caller asked a reasonable question and the answer is what

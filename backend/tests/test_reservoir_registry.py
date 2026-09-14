@@ -18,12 +18,25 @@ tested is that there is NO route to another account's snapshot -- not listing,
 not reading, not deleting -- because each of those is a separate way in and
 each got the check separately. Mirrors test_curve_privacy.py.
 """
+import os
+
 import pytest
 
 from app.models import MarineReservoirPoint, MarineReservoirSnapshot
 from app.services import reservoir_registry
 from app.services import reservoir_ingest as ingest
-from tests.fixtures.calib_marine import records as fixture
+
+
+FIXTURE = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    'fixtures', 'calib_marine', 'query_response.html')
+
+
+def _fixture_rows():
+    """The captured response, parsed. Real bytes -- see the fixture README."""
+    with open(FIXTURE, 'rb') as handle:
+        records, declared = ingest.extract_records(handle.read())
+    return ingest.records_to_rows(records, declared=declared)
 
 
 def _client_for(email):
@@ -65,15 +78,15 @@ def _store(owner_id, snapshot_suffix, rows=None):
     Put a snapshot in the database directly.
 
     Through reservoir_ingest.store rather than the API, because the API's
-    create route cannot run: fetch_records is deliberately unimplemented. What
-    is under test here is everything downstream of the fetch, and this is the
-    seam the plan puts it behind.
+    create route reaches the network and the suite must not. What is under
+    test here is the registry over a stored snapshot, and the rows are the
+    captured response's own.
     """
     from datetime import datetime
     from app.database import SessionLocal
 
     if rows is None:
-        rows, report = ingest.records_to_rows(fixture.records())
+        rows, report = _fixture_rows()
     else:
         report = ingest.IngestReport()
         report.row_count = len(rows)
@@ -224,20 +237,65 @@ class TestDeletion:
         assert reservoir_registry.in_use(snapshot.id) == 0
 
 
-class TestTheIngestRouteIsHonest:
-    def test_it_answers_501_rather_than_pretending(self, ada):
-        """
-        fetch_records is unimplemented on purpose, and the route says so with
-        a status that means it. What it must not do is answer 200 with an
-        empty snapshot, which a caller would take for a working mirror.
-        """
-        response = ada.post('/api/reservoir/snapshots')
-        assert response.status_code == 501
-        assert 'not implemented' in response.json()['detail']
+class TestTheIngestRouteDoesNotReachTheNetworkInTests:
+    """
+    The suite must never call calib.org: it is somebody else's server, and a
+    test run that hammered it would be exactly the behaviour the one-query
+    rule exists to prevent. So the fetch is stubbed here, and what is checked
+    is how the route treats each kind of failure.
+    """
 
-    def test_nothing_was_written(self, ada):
+    def test_an_unreachable_host_is_a_503(self, ada, monkeypatch):
+        def unreachable(*_a, **_k):
+            raise ingest.IngestUnavailable('calib.org could not be reached')
+        monkeypatch.setattr(ingest, 'fetch_records', unreachable)
+
+        response = ada.post('/api/reservoir/snapshots')
+        assert response.status_code == 503
+
+    def test_a_response_that_is_not_this_database_is_a_502(self, ada, monkeypatch):
+        """Different from unreachable, and the difference matters: one is a
+        network to try again on, the other is a source that has changed shape
+        and needs a person to look at it."""
+        def wrong_shape(*_a, **_k):
+            raise ingest.IngestError('The result table does not have the columns')
+        monkeypatch.setattr(ingest, 'fetch_records', wrong_shape)
+
+        response = ada.post('/api/reservoir/snapshots')
+        assert response.status_code == 502
+
+    def test_a_successful_fetch_stores_and_reports(self, ada, monkeypatch):
+        """The whole route, on the captured response, with no network."""
+        with open(FIXTURE, 'rb') as handle:
+            raw = handle.read()
+        monkeypatch.setattr(
+            ingest, 'fetch_records', lambda *a, **k: ingest.extract_records(raw))
+
+        response = ada.post('/api/reservoir/snapshots')
+        assert response.status_code == 200, response.text
+        data = response.json()['data']
+        assert data['snapshot']['kind'] == 'ingested'
+        assert data['report']['row_count'] == data['snapshot']['record_count']
+        # The counts a person needs to judge the SOURCE, not just the fetch.
+        assert data['report']['cp1252_fallbacks'] == 60
+        assert data['report']['unrecognised_feeding'] == {}
+
+        # And it verifies on the way back out.
+        stored = ada.get(f"/api/reservoir/snapshots/{data['snapshot']['id']}")
+        assert stored.json()['data']['verified'] is True
+
+    def test_a_source_that_will_not_parse_writes_nothing(self, ada, monkeypatch):
+        with open(FIXTURE, 'rb') as handle:
+            records, declared = ingest.extract_records(handle.read())
+        broken = [dict(records[0])]
+        broken[0]['lat'] = b''
+        monkeypatch.setattr(ingest, 'fetch_records', lambda *a, **k: (broken, 1))
+
         before = len(ada.get('/api/reservoir/snapshots').json()['data']['items'])
-        ada.post('/api/reservoir/snapshots')
+        response = ada.post('/api/reservoir/snapshots')
+        assert response.status_code == 200
+        assert response.json()['success'] is False
+        assert response.json()['data']['errors']
         after = len(ada.get('/api/reservoir/snapshots').json()['data']['items'])
         assert before == after
 
@@ -260,13 +318,13 @@ class TestTheBundledSnapshot:
         data drop rather than new code -- and so the format is pinned before
         anything depends on it.
         """
-        rows, _ = ingest.records_to_rows(fixture.records())
+        rows, _ = _fixture_rows()
         text = ingest.rows_to_csv(rows)
         back = ingest.rows_from_csv(text)
         assert ingest.content_hash(back) == ingest.content_hash(rows)
 
     def test_the_csv_keeps_what_the_normalisation_decided(self):
-        rows, _ = ingest.records_to_rows(fixture.records())
+        rows, _ = _fixture_rows()
         back = ingest.rows_from_csv(ingest.rows_to_csv(rows))
         hedged = [r for r in back if r.feeding == 'ambiguous']
         assert len(hedged) == 5

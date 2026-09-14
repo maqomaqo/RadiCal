@@ -12,23 +12,31 @@ rather than the first.
 The pipeline is four stages, and they are separate functions because only the
 first needs a network:
 
-    fetch_records()      the HTTP session and the source's own table shape
+    fetch_records()      one HTTP session and one query
+    extract_records()    the source's table, as undecoded bytes per field
     records_to_rows()    per-field decode, feeding normalisation, validation
     content_hash()       sha256 over the normalised rows
     store()              one snapshot row and its points, in one transaction
 
-**fetch_records is not implemented.** See its docstring: it is the one part of
-this that cannot be written without the source in front of you, and guessing
-at a response shape is precisely the failure the importer's rules elsewhere in
-this codebase refuse. Everything below it is written, tested, and independent
-of how the bytes arrive -- a caller that has records from any source can use
-the rest of this module today, which is how the tests exercise it.
+Only the first needs a network, and nothing below it knows that a network
+exists -- which is what lets the tests run the whole rest of the pipeline
+against a captured response (tests/fixtures/calib_marine/).
+
+The two stages either side of the decode are where the care goes, because
+both have a failure mode that looks like success. extract_records checks the
+response's header row against EXPECTED_COLUMNS and refuses anything else,
+since a source that reordered its columns read positionally would store
+latitude as longitude. decode_field works per FIELD, since one response
+carries both correct UTF-8 and raw cp1252 and either codec applied to the
+whole document silently mangles the other kind.
 """
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import hashlib
+import html
+import re
 
 from app.models import MarineReservoirPoint, MarineReservoirSnapshot
 from app.services.reservoir import is_recognised_feeding, normalise_feeding
@@ -42,12 +50,31 @@ from app.services.reservoir import is_recognised_feeding, normalise_feeding
 # A LEFT join: a details row whose taxon is unknown is still a reservoir
 # measurement with a position and an offset, and dropping it would silently
 # shrink the database.
-SOURCE_QUERY = """
-select d.mapno, d.lon, d.lat, d.deltar, d.deltarerr, d.reference, d.locality,
-       d.subregion, d.notes, d.collectionyear, d.reservoirage,
-       d.c14age, d.c14err, d.labid, t.genus, t.species, t.feeding
-from details d left join taxa t using (taxano)
-""".strip()
+SOURCE_QUERY = (
+    'select mapno,lon,lat,deltar,deltarerr,reference,locality,subregion,notes,'
+    'collectionyear,reservoirage,c14age,c14err,labid,last_changed,genus,species,'
+    'feeding from details left join taxa using (taxano)'
+)
+
+# The columns SOURCE_QUERY asks for, in order. The response's header row is
+# checked against this EXACTLY: a source that has renamed, reordered or
+# dropped a column is a source that has changed, and a parser that shrugs at
+# that produces a mirror silently missing a field or -- worse -- with latitude
+# read out of the longitude column.
+EXPECTED_COLUMNS = (
+    'mapno', 'lon', 'lat', 'deltar', 'deltarerr', 'reference', 'locality',
+    'subregion', 'notes', 'collectionyear', 'reservoirage', 'c14age',
+    'c14err', 'labid', 'last_changed', 'genus', 'species', 'feeding',
+)
+
+# Where the query interface lives. http rather than https deliberately: the
+# host's TLS is not reachable, and this fetch carries no credentials and no
+# coordinates -- it pulls a published reference table down whole. Nothing
+# about a user's data is in the request, which is the property that makes
+# plain HTTP acceptable here and would not make it acceptable anywhere else
+# in this app.
+QUERY_URL = 'http://calib.org/marine/query/query.php'
+SESSION_URL = 'http://calib.org/marine/query/'
 
 # The fields a record must carry for the row to mean anything. Everything else
 # is descriptive and may be absent.
@@ -150,8 +177,9 @@ def decode_field(raw: Any) -> Tuple[Optional[str], str]:
 
     **Per field, not per document, and that is the whole point.** One response
     from this source contains both correctly-encoded UTF-8 (`Håkansson`) and
-    raw cp1252 bytes (`Thyborøn` arriving as `Thybor\\xf8n`) -- 54 rows of 2060
-    fail a strict UTF-8 decode. Reading the whole document as cp1252 fixes
+    raw cp1252 bytes (`Thyborøn` arriving as `Thybor\\xf8n`) -- 60 fields of the
+    2060 rows captured on 2026-09-14 fail a strict UTF-8 decode, every one of
+    them valid cp1252. Reading the whole document as cp1252 fixes
     those and breaks the others; reading it as UTF-8 with errors='replace'
     turns a Danish harbour into `Thybor?n`. Trying each field both ways is the
     only reading that is right about both.
@@ -180,6 +208,74 @@ def decode_field(raw: Any) -> Tuple[Optional[str], str]:
         return repr(data)[2:-1], 'escaped'
 
 
+# The response is an HTML table. Matched with regular expressions rather than
+# an HTML parser, and the reason is the per-field decode: the document is not
+# valid in any single encoding (see decode_field), so handing it to a parser
+# that wants a str means choosing a codec for the whole thing, which is the
+# one thing that cannot be done here. These run on BYTES and hand each cell
+# back as bytes, still undecoded.
+#
+# The markup they run against is plain and machine-generated -- `<tr>\n<td>
+# ...</td>...</tr>` with no nesting inside a cell -- which is what makes this
+# tractable. The header check below is what catches it changing.
+_TABLE_START = re.compile(rb'<table\s+border\s*>', re.I)
+_ROW = re.compile(rb'<tr>\s*(<td>.*?</td>)\s*</tr>', re.I | re.S)
+_CELL = re.compile(rb'<td>(.*?)</td>', re.I | re.S)
+# 'N records', which the page prints above the table. Checked against the rows
+# actually parsed: a mismatch means the extraction lost some, and a mirror
+# quietly missing 40 measurements would give quietly wrong averages.
+_DECLARED_COUNT = re.compile(rb'(\d+)\s+records', re.I)
+
+
+def extract_records(raw: bytes) -> Tuple[List[Dict[str, bytes]], Optional[int]]:
+    """
+    The result table out of one query response, as undecoded bytes per field.
+
+    Returns the records and the count the page declared, so the caller can
+    check one against the other.
+
+    Fails loudly on anything that is not the table SOURCE_QUERY asks for. That
+    is the plan's §11.2 mitigation and it is the whole defence here: the host
+    is an unversioned PHP application with no API, and the failure mode to
+    avoid is not an outage -- it is a response whose columns moved being read
+    positionally and stored as a mirror in which latitude is longitude.
+    """
+    start = _TABLE_START.search(raw)
+    if not start:
+        raise IngestError(
+            'The response has no result table in it. The query interface may '
+            'have changed, or the query may have been rejected.')
+
+    declared_match = _DECLARED_COUNT.search(raw[:start.start()])
+    declared = int(declared_match.group(1)) if declared_match else None
+
+    body = raw[start.end():]
+    rows = [
+        [cell for cell in _CELL.findall(match.group(1))]
+        for match in _ROW.finditer(body)
+    ]
+    if not rows:
+        raise IngestError('The response has a result table with no rows in it.')
+
+    header = [c.strip().lower().decode('ascii', 'replace') for c in rows[0]]
+    if tuple(header) != EXPECTED_COLUMNS:
+        raise IngestError(
+            'The result table does not have the columns this ingest asks '
+            f'for. Found {header}; wanted {list(EXPECTED_COLUMNS)}. The '
+            'source has changed shape and the parser must be updated rather '
+            'than the rows read positionally.')
+
+    records: List[Dict[str, bytes]] = []
+    for index, cells in enumerate(rows[1:], start=1):
+        if len(cells) != len(EXPECTED_COLUMNS):
+            raise IngestError(
+                f'Row {index} of the result table has {len(cells)} cells, not '
+                f'{len(EXPECTED_COLUMNS)}. Refusing to read it positionally.')
+        records.append(dict(zip(EXPECTED_COLUMNS, cells)))
+
+    return records, declared
+
+
 def _number(value: Optional[str]) -> Optional[float]:
     """A numeric field, or None. The source writes an absent value several
     ways -- empty, 'NULL', a lone dash -- and none of them is a zero."""
@@ -192,6 +288,27 @@ def _number(value: Optional[str]) -> Optional[float]:
         return float(text)
     except ValueError:
         return None
+
+
+def _parse_timestamp(value: Optional[str]) -> Optional[datetime]:
+    """
+    A 'YYYY-MM-DD HH:MM:SS' stamp, or None.
+
+    None rather than an error for anything else: last_changed is metadata
+    about the source's own housekeeping, and a row with an odd one is still a
+    perfectly good measurement. The consequence of losing one is a snapshot
+    identified by a slightly earlier date, which is visible; refusing the
+    whole fetch over it would not be proportionate.
+    """
+    text = _text(value)
+    if text is None:
+        return None
+    for fmt in ('%Y-%m-%d %H:%M:%S', '%Y-%m-%d'):
+        try:
+            return datetime.strptime(text, fmt)
+        except ValueError:
+            continue
+    return None
 
 
 def _text(value: Optional[str]) -> Optional[str]:
@@ -210,6 +327,7 @@ def _text(value: Optional[str]) -> Optional[str]:
 def records_to_rows(
     records: Iterable[Dict[str, Any]],
     report: Optional[IngestReport] = None,
+    declared: Optional[int] = None,
 ) -> Tuple[List[ReservoirRow], IngestReport]:
     """
     Raw records from the source into normalised rows, with the report that
@@ -236,7 +354,12 @@ def records_to_rows(
                 report.cp1252_fallbacks += 1
             elif how == 'escaped':
                 report.undecodable_fields += 1
-            decoded[key] = text
+            # AFTER the decode, never before: the entities are ASCII, but the
+            # bytes around them are not necessarily anything, and unescaping
+            # first would mean having already chosen a codec. The source
+            # writes an empty cell as &nbsp;, which becomes U+00A0 here and
+            # then nothing at all in _text, whose strip() takes it.
+            decoded[key] = html.unescape(text) if text is not None else None
 
         missing = [f for f in REQUIRED_FIELDS if _text(decoded.get(f)) is None]
         if missing:
@@ -284,6 +407,15 @@ def records_to_rows(
 
         collection_year = _number(decoded.get('collectionyear'))
 
+        # What the SOURCE says about its own currency. The maximum across the
+        # rows is what identifies the snapshot, so it is collected here rather
+        # than in a second query.
+        changed = _parse_timestamp(decoded.get('last_changed'))
+        if changed is not None and (
+                report.source_last_changed is None
+                or changed > report.source_last_changed):
+            report.source_last_changed = changed
+
         rows.append(ReservoirRow(
             map_no=key,
             latitude=latitude,
@@ -308,6 +440,14 @@ def records_to_rows(
     report.row_count = len(rows)
     if not rows and not report.errors:
         report.errors.append('The fetch returned no rows at all.')
+    if declared is not None and report.ok and len(rows) != declared:
+        # The page prints its own row count above the table. A mismatch means
+        # the extraction lost rows, and a mirror quietly missing forty
+        # measurements gives quietly wrong averages -- the failure this whole
+        # design exists to prevent.
+        report.errors.append(
+            f'The source said {declared} records and {len(rows)} were read. '
+            'Refusing to store a partial mirror.')
     return rows, report
 
 
@@ -544,42 +684,60 @@ def store(
 # Fetching -- the one part that needs the source in front of you
 # --------------------------------------------------------------------------
 
-def fetch_records(*_args, **_kwargs) -> List[Dict[str, Any]]:
+def fetch_records(timeout: int = 180) -> Tuple[List[Dict[str, bytes]], Optional[int]]:
     """
-    Fetch SOURCE_QUERY from calib.org and return one mapping per result row.
+    Fetch SOURCE_QUERY from calib.org and return one record per result row,
+    each field still as undecoded BYTES, plus the row count the page declared.
 
-    **Deliberately not implemented.** Writing this needs the source's actual
-    response in front of you, and it was not reachable from the environment
-    the rest of this module was written in. The alternative was to guess at a
-    table shape from a description, which is the failure services/date_import
-    refuses by name: read a construct as the nearest thing implemented and you
-    get a result that is confident and wrong. A reservoir mirror that is
-    confidently wrong would move published dates.
+    Bytes rather than text, and that is the contract rather than an
+    implementation detail: the response is not valid in any single encoding
+    (see decode_field), so anything that decodes it wholesale here has already
+    destroyed what the next stage exists to recover.
 
-    The contract for whoever completes it:
+    ONE query. This is a courtesy interface offered for interactive use on an
+    Apache / PHP host that owes this app nothing; it is not an API, there is
+    no rate limit published, and the right way to treat it is as though a
+    person were typing into the form. The session GET before it is what the
+    form does -- the page reports "Connected to marine20 database" -- and is
+    the only other request made.
 
-    - Return a list of dicts keyed by SOURCE_QUERY's column names -- mapno,
-      lat, lon, deltar, deltarerr, reference, locality, subregion, notes,
-      collectionyear, reservoirage, c14age, c14err, labid, genus, species,
-      feeding.
-    - Return each text value as **bytes**, undecoded. decode_field must see
-      the original bytes to do its per-field job; decoding upstream with one
-      codec is what this pipeline exists to avoid.
-    - Set `report.source_last_changed` from max(details.last_changed) across
-      the result. It is what a snapshot is identified by.
-    - Issue ONE query. This is a courtesy interface on an Apache 2.4.61 /
-      PHP 5.6.40 host; do not retry in a loop.
-    - Fail loudly on a table shape that is not this one -- a missing column or
-      an unexpected row width is a source that has changed, and a parser that
-      shrugs at it produces a mirror silently missing a field.
-
-    Everything downstream of this -- records_to_rows, content_hash, store --
-    is written and tested, and takes records from any source.
+    Raises IngestUnavailable when the host cannot be reached, which is a
+    different thing from a response that will not parse: one is a network to
+    try again on, the other is a source that has changed shape.
     """
-    raise IngestUnavailable(
-        'Fetching from calib.org is not implemented: the source could not be '
-        'reached when this was written, and a parser guessed at a response '
-        'shape would be confidently wrong about numbers that move published '
-        'dates. See the docstring for the contract, and use the bundled '
-        'snapshot in the meantime.'
-    )
+    try:
+        import requests
+    except ImportError as exc:  # pragma: no cover - requests is a dependency
+        raise IngestUnavailable(f'The HTTP client is unavailable: {exc}')
+
+    session = requests.Session()
+    session.headers.update({
+        # Named, and saying what it is doing, because this is somebody else's
+        # server and an anonymous scraper is how a courtesy interface gets
+        # closed. Worth adding a contact URL here if this app ever has one.
+        'User-Agent': (
+            'RadiCal/1.0 (radiocarbon analysis; marine reservoir mirror; '
+            'one query per ingest)'
+        ),
+    })
+
+    try:
+        # What the form does: the query endpoint answers in the context of a
+        # session, and the page says so out loud.
+        session.get(SESSION_URL, timeout=timeout)
+        response = session.post(
+            QUERY_URL, data={'query': SOURCE_QUERY}, timeout=timeout)
+    except Exception as exc:
+        raise IngestUnavailable(
+            f'calib.org could not be reached: {exc}. The mirror already '
+            'stored, if any, is unaffected -- a failed fetch breaks refresh, '
+            'never analysis.')
+
+    if response.status_code != 200:
+        raise IngestUnavailable(
+            f'calib.org answered {response.status_code} to the query. '
+            'Nothing was stored.')
+
+    # response.content, never response.text: requests would guess a codec for
+    # the whole document from a header that is wrong about 60 of its fields.
+    return extract_records(response.content)
