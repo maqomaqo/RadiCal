@@ -1058,6 +1058,8 @@ else changes the schema.
 Operations within a feature run in order. Features 1–2 and 3 are independent and can interleave;
 4 waits for both; 6 waits for 1–2 and for the three §13 decisions marked below.
 
+*Feature 1 is done (2026-09-14); Alembic head is now `a4d21f7e9c36` and op 3a chains from it.*
+
 ### Op 0 — the permission request *(human; start now, longest lead time)*
 
 Email p.j.reimer@qub.ac.uk asking to redistribute the Marine20 reservoir compilation as a bundled
@@ -1065,7 +1067,28 @@ snapshot, citing Reimer & Reimer 2001 and naming the app. Blocks **only op 3d** 
 Every other operation proceeds; if the answer is no, op 3d is dropped and the ingest (op 3c) is the
 whole story, unchanged. *The app cannot send this; a person does.*
 
-### Feature 1 — coordinates (§4)
+### Feature 1 — coordinates (§4) — **done 2026-09-14**
+
+Shipped in five commits rather than six: 1b and 1c share the bulk-update and deploy paths in
+`api/project_samples.py` and could not be usefully split. Three things were done differently from
+the text below, each for a reason found in the code:
+
+- **1b lands on `ProjectSampleBulkUpdate`, not `ProjectSampleBulkInput`.** The line reference
+  (`:285`) and feature 2b's "place on map writes the whole selection" both point at the
+  apply-one-value-across-a-selection path; `ProjectSampleBulkInput` is a list of
+  `ProjectSampleInput` and inherits the rule already. The both-or-neither check is a schema rule
+  there and a **merged-row** rule on the single-date PATCH, where a request carrying only a
+  longitude is legitimately correcting one half of a complete position.
+- **1d also refuses a decimal comma.** `_number` strips thousands separators, so `5,6` would have
+  been read as 56 — in range for a longitude, fifty degrees out, silent. Same failure class as DMS,
+  and a European locale's Excel writes exactly that.
+- **1e appends Latitude/Longitude to `CSV_HEADER` rather than filing them after `Curve`.** Every
+  column before them has held its position since the export existed. Also pulled forward from 1f:
+  `coordinate_precision` had to become *settable* (`schemas/project.py`'s Literal, which is what
+  keeps it to the four values the exporter can apply) for 1e's guarantee to mean anything.
+
+1f put the precision selector in the existing project dialog, retitled *Project Settings*, rather
+than adding a second dialog beside it.
 
 **1a. Schema.** `backend/app/models.py`: `latitude`, `longitude` (Float, nullable) on
 `ProjectSample` and `RadiocarbonSample`, beside `delta_r`/`delta_r_error` and in their voice;
