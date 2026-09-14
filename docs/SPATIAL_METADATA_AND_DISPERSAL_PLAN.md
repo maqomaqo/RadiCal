@@ -1324,7 +1324,7 @@ to prevent, so refreshing has to be a decision a person takes at a moment they c
 **5a.** `GET /api/reservoir/freshness` (auth, explicit, the 2 KB probe) and one line plus the
 ingest button on `Curves.tsx`, in the register the curve list already uses.
 
-### Feature 6 — wave of advance (§6.2–6.4, §6.6, §7.4) — **6a done 2026-09-14**
+### Feature 6 — wave of advance (§6.2–6.4, §6.6, §7.4) — **6a–6b done 2026-09-14**
 
 *Confirmed 2026-09-14, all three as proposed:* §13.1 stays derived; §13.3 `MIN_DISPERSAL_SITES = 6`;
 §13.4 stays per-analysis.
@@ -1359,9 +1359,24 @@ takes each place's earliest dated event — decided once on the draws' median, n
 per-draw minimum is biased low and would let the representative date change between draws — and
 labels it `basis='earliest_dated_event'` so no panel can show it as an arrival time.
 
-**Not yet wired:** `api/analysis.py`'s `measurement_dicts` (`:1642`) does not carry `latitude`/
-`longitude`, so `derive_sites` sees no coordinates on a real run. That is one line, and it belongs
-to 6b with the rest of the threading.
+Two notes on 6b:
+
+- **The flag is an origin, not a boolean, everywhere below the schema.** `intervals.report` and
+  both solvers take `dispersal_origin`, because a front speed is meaningless without the point it
+  was measured from and a pair of parameters that can disagree is a pair that eventually will.
+  `BayesianConfigInput` keeps both — `estimate_dispersal` is what the analyst toggles — and a
+  `model_validator` refuses the combination that has no meaning. `api/analysis._dispersal_origin`
+  collapses the two back into one for the solvers, and returns None when the flag is off *even
+  where an origin is still stored*: a rerun reads the saved config, and an origin left behind by a
+  fit the analyst switched off is not a request.
+- **`measurement_dicts` gained `latitude`/`longitude`.** Without them `derive_sites` saw no
+  coordinates on a real run and every fit refused for having nothing to place — the one wiring
+  failure that unit tests against the solvers could not have caught, so it has an API-level test
+  that asserts six sites came back from a saved analysis.
+
+`derive_sites_from_dates` is reachable through `report_dates(..., dispersal_origin=...)` but the
+group-calibration request does not offer it yet; that is a schema addition on
+`GroupCalibrationRequest` and not in feature 6's path.
 
 **6a. `services/dispersal.py`.** `derive_sites(root, measurements)`: a site per opening Boundary,
 centroid of its dates' coordinates, refusal above `SITE_SCATTER_KM = 5` naming both coordinates and

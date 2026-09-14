@@ -513,6 +513,18 @@ class RelationshipInput(BaseModel):
     relationship: Literal["above", "below", "equal"]
 
 
+class DispersalOrigin(BaseModel):
+    """
+    Where a wave of advance is hypothesised to have started.
+
+    Both halves required, unlike a sample's coordinates: a date with half a
+    position is a half-entered date, but an origin with half a position is not
+    an origin at all -- there is nothing to measure a distance from.
+    """
+    lat: float = Field(..., ge=-90, le=90)
+    lon: float = Field(..., ge=-180, le=180)
+
+
 class BayesianConfigInput(BaseModel):
     # Which solver to use.
     #
@@ -557,6 +569,31 @@ class BayesianConfigInput(BaseModel):
     # modelling assumption to make. These are also the only figures here
     # carrying Monte Carlo error, since they can only be read off JOINT draws.
     estimate_durations: bool = False
+    # Also fit a wave of advance: how fast the thing being dated moved across
+    # the landscape, and when it set out (services/dispersal.py).
+    #
+    # Opt-in for the durations reason and one more. OLS on spatially
+    # autocorrelated residuals with an ASSUMED origin will always return a tidy
+    # speed with a tidy interval, whether or not the dates describe a front at
+    # all, so this must be a claim somebody made deliberately rather than a
+    # number that appears beside every analysis with coordinates on it.
+    estimate_dispersal: bool = False
+    # Where the front is hypothesised to have started. Required when
+    # estimate_dispersal is set: a speed is measured FROM somewhere, moving the
+    # origin moves the answer, and an app that picked one silently would be
+    # inventing the hypothesis rather than testing it. Inferring it from the
+    # data is a separate feature with a separate output -- a likelihood
+    # surface, not a point.
+    dispersal_origin: Optional[DispersalOrigin] = None
+
+    @model_validator(mode="after")
+    def _dispersal_needs_an_origin(self):
+        if self.estimate_dispersal and self.dispersal_origin is None:
+            raise ValueError(
+                'a dispersal fit needs an origin to measure distances from. '
+                'Place one on the map, at the point the hypothesis puts the '
+                'front starting from.')
+        return self
 
 
 class GroupCalibrationRequest(BaseModel):

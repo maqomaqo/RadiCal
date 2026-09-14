@@ -766,7 +766,8 @@ def evaluate_age_depth(specs: List[Dict], draws: Dict[str, np.ndarray]) -> List[
 
 def report(root: Optional[Dict], measurements: List[Dict],
            draws: Dict[str, np.ndarray], independent: bool,
-           durations: bool = True) -> Dict:
+           durations: bool = True,
+           dispersal_origin: Optional[Tuple[float, float]] = None) -> Dict:
     """
     The whole durations-and-differences block for a modelled analysis, ready
     to store on Analysis.intervals.
@@ -776,6 +777,12 @@ def report(root: Optional[Dict], measurements: List[Dict],
     reason of its own -- an age-depth model always does -- without the analyst
     having asked for phase durations, which are a modelling claim of their own
     (see BayesianConfigInput.estimate_durations).
+
+    `dispersal_origin` adds the wave-of-advance section, computed here for the
+    same reason durations are: it is a function of many modelled ages at once
+    and so has to come off these joint draws. An origin rather than a flag,
+    because a front speed is meaningless without the point it was measured
+    from and the two must not be separable.
     """
     duration_specs = plan_durations(root, measurements) if root and durations else []
     difference_specs, note = (plan_phase_differences(root, measurements)
@@ -784,15 +791,29 @@ def report(root: Optional[Dict], measurements: List[Dict],
     block = _block(found_durations, differences, draws, independent, note)
     block['age_depth'] = evaluate_age_depth(
         plan_age_depth(root, measurements), draws)
+    if dispersal_origin is not None:
+        # Imported here rather than at module scope: dispersal imports this
+        # module for summarise and calendar_band, and at the top the two would
+        # be a cycle.
+        from app.services import dispersal as dispersal_service
+        block['dispersal'] = dispersal_service.fit_wave(
+            dispersal_service.derive_sites(root, measurements),
+            draws, dispersal_origin)
     return block
 
 
-def report_dates(dates: List[Dict], draws: Dict[str, np.ndarray]) -> Dict:
+def report_dates(dates: List[Dict], draws: Dict[str, np.ndarray],
+                 dispersal_origin: Optional[Tuple[float, float]] = None) -> Dict:
     """
     The same block for a group calibration: differences only.
 
     Dates with no relationship asserted between them belong to no phase and no
     sequence, so they have no duration: the table is pairwise differences only.
+
+    A dispersal fit here runs on §6.2's fallback -- each place's earliest dated
+    event, because there is no model and therefore no Boundary. That is a
+    terminus ante quem rather than an arrival, and the sites carry
+    `basis='earliest_dated_event'` saying so.
     """
     specs, note = plan_date_differences(dates)
     _durations, differences = evaluate([], specs, draws)
@@ -800,6 +821,11 @@ def report_dates(dates: List[Dict], draws: Dict[str, np.ndarray]) -> Dict:
     # so drawing each date separately IS drawing from the joint.
     block = _block([], differences, draws, True, note)
     block['age_depth'] = []
+    if dispersal_origin is not None:
+        from app.services import dispersal as dispersal_service
+        block['dispersal'] = dispersal_service.fit_wave(
+            dispersal_service.derive_sites_from_dates(dates, draws),
+            draws, dispersal_origin)
     return block
 
 
@@ -814,6 +840,11 @@ def _block(durations: List[Dict], differences: List[Dict],
         # has the key and no consumer has to tell "no age-depth model" from
         # "written before there was one".
         'age_depth': [],
+        # None means NOT ASKED FOR, which the results page reads as an offer to
+        # re-run -- the same convention durations and age-depth already use. A
+        # fit that was asked for and refused is a block with a `refused`
+        # string, which is a different thing and says so.
+        'dispersal': None,
         'draws': min(sizes) if sizes else 0,
         # True when the draws are independent rather than an MCMC chain, where
         # autocorrelation makes the effective count smaller than the count.

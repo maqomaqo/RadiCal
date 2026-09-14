@@ -453,6 +453,26 @@ def _run_wiggle_match(
     # input and is reported as one above.
 
 
+def _dispersal_origin(bayesian_config: Dict) -> Optional[Tuple[float, float]]:
+    """
+    The wave-of-advance origin a config asks for, or None.
+
+    Read from the stored config rather than the request, so a RERUN fits the
+    same front from the same point: an origin that changed between a run and
+    its rerun would change the speed without changing anything about the
+    dates, which is exactly the kind of silent drift a rerun exists to rule
+    out. Returns None unless the fit was actually asked for -- an origin left
+    behind by a config the analyst later switched off is not a request.
+    """
+    if not bayesian_config.get('estimate_dispersal'):
+        return None
+    origin = bayesian_config.get('dispersal_origin') or {}
+    lat, lon = origin.get('lat'), origin.get('lon')
+    if lat is None or lon is None:
+        return None
+    return (float(lat), float(lon))
+
+
 def _run_bayesian(
     measurements: List[Dict],
     model_tree: Dict,
@@ -507,6 +527,7 @@ def _run_bayesian(
     """
     requested = bayesian_config.get('solver') or 'auto'
     estimate_durations = bool(bayesian_config.get('estimate_durations'))
+    dispersal_origin = _dispersal_origin(bayesian_config)
 
     # Refused here as well as at the request schema, because a rerun comes
     # from the database rather than from a request and has to be held to the
@@ -561,6 +582,7 @@ def _run_bayesian(
             num_samples=bayesian_config.get('mcmc_samples', 2000),
             uniform_span_prior=bayesian_config.get('uniform_span_prior', True),
             estimate_durations=estimate_durations,
+            dispersal_origin=dispersal_origin,
         )
         agreement_service.attach(solved['measurements'], measurements)
         return solved['measurements'], solved['boundaries'], {
@@ -579,6 +601,7 @@ def _run_bayesian(
         num_samples=bayesian_config.get('mcmc_samples', 2000),
         uniform_span_prior=bayesian_config.get('uniform_span_prior', True),
         estimate_durations=estimate_durations,
+        dispersal_origin=dispersal_origin,
         on_progress=on_progress,
         # Independent chains in parallel processes, pooled; see
         # gibbs.solve_chains for what the extra chains are for.
@@ -1649,6 +1672,12 @@ def _rerun_analysis(analysis: Analysis, db: Session,
                 'delta_r': s.delta_r,
                 'delta_r_error': s.delta_r_error,
                 'element_id': s.element_id or s.group_id,
+                # Where the date is. Carried for services/dispersal.py, which
+                # derives a site's position from the dates inside it -- so a
+                # run that dropped these would report "no coordinates" on a
+                # collection that has them.
+                'latitude': s.latitude,
+                'longitude': s.longitude,
                 'tpq_age_bp': s.tpq_age_bp,
                 'taq_age_bp': s.taq_age_bp,
                 'outlier_prior': s.outlier_prior,
