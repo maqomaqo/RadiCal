@@ -150,6 +150,15 @@ interface SiteMapProps {
    * was excavated there, and it is an assumption rather than an observation.
    */
   origin?: { latitude: number; longitude: number } | null
+  /**
+   * Lines of equal arrival age across a fitted trend surface.
+   *
+   * Drawn under the marks and labelled by age, in one hue at one strength:
+   * they are all the same KIND of thing and differ only in which age they
+   * stand for, which the labels carry. Grading them would say the lines
+   * themselves were a quantity.
+   */
+  isochrons?: Array<{ age: number; points: Array<{ latitude: number; longitude: number }> }>
 }
 
 /**
@@ -184,6 +193,7 @@ export default function SiteMap({
   valueLabel,
   front,
   origin,
+  isochrons,
 }: SiteMapProps) {
   const plot = usePlotColors()
   const plotFont = usePlotFont()
@@ -230,7 +240,36 @@ export default function SiteMap({
       'scattermap' | 'scattergeo'
     const list: unknown[] = []
 
-    // The front first, so it lies UNDER the marks it was fitted to. A line
+    // Isochrons first of all, so every mark and every other line sits over
+    // them: they are the surface the rest is drawn on.
+    for (const line of isochrons || []) {
+      if (line.points.length < 2) continue
+      const [from, to] = [line.points[0], line.points[line.points.length - 1]]
+      // Labelled at the MIDDLE, not at an end. The ends are where the lines
+      // run off the frame -- an isochron is drawn past the sites on purpose --
+      // so an end label is the one part of the figure most likely to be
+      // clipped, which is what a first render showed. The middle is inside the
+      // site cluster by construction.
+      const middle = {
+        latitude: (from.latitude + to.latitude) / 2,
+        longitude: (from.longitude + to.longitude) / 2,
+      }
+      list.push({
+        type: geoType,
+        mode: 'lines+text' as const,
+        name: `${Math.round(line.age)}`,
+        lat: [from.latitude, middle.latitude, to.latitude],
+        lon: [from.longitude, middle.longitude, to.longitude],
+        line: { color: plot.axis, width: 1 },
+        // One caption per line: a line captioned twice reads as two.
+        text: ['', `${Math.round(line.age)}`, ''],
+        textposition: 'top center' as const,
+        textfont: { size: 10, color: plot.axis },
+        hoverinfo: 'skip' as const,
+      })
+    }
+
+    // The front next, so it lies UNDER the marks it was fitted to. A line
     // drawn over a site would hide the observation behind the model.
     if (front && front.length > 1) {
       list.push({
@@ -312,7 +351,7 @@ export default function SiteMap({
     }
 
     return list
-  }, [sites, selected, plot, tiles, values, valueLabel, front, origin])
+  }, [sites, selected, plot, tiles, values, valueLabel, front, origin, isochrons])
 
   /**
    * Clicks are taken in the CAPTURE phase, on a native listener, and both

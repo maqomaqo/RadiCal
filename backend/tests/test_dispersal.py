@@ -458,3 +458,254 @@ class TestTheGroupCalibrationFallback:
         draws = {'d1': np.full(50, 5000.0), 'd2': np.full(50, 6000.0)}
         sites = dispersal.derive_sites_from_dates(measurements, draws)
         assert [s.parameter_id for s in sites] == ['d2']
+
+
+# --------------------------------------------------------------------------
+# Model 2: the trend surface
+# --------------------------------------------------------------------------
+
+def _grid(bearing_deg, speed=1.0, t0=6500.0, draws=200, rows=3, cols=3,
+          lat0=50.0, lon0=0.0, spacing_km=80.0, scatter=0.0, seed=5):
+    """
+    Sites on a grid, with arrival ages falling along `bearing_deg`.
+
+    Positions are built by walking north and east in KILOMETRES from a corner,
+    and the arrival age at each is set from its distance along the bearing --
+    so the truth is a plane in ground distance, which is what the model claims
+    to fit, rather than a plane in degrees, which nothing does.
+    """
+    rng = np.random.default_rng(seed)
+    radians = math.radians(bearing_deg)
+    # Unit vector of ADVANCE, in (east, north) kilometres.
+    east_hat, north_hat = math.sin(radians), math.cos(radians)
+
+    sites, draws_by_id = [], {}
+    for i in range(rows):
+        for j in range(cols):
+            north_km, east_km = spacing_km * i, spacing_km * j
+            lat = lat0 + north_km / 111.32
+            lon = lon0 + east_km / (111.32 * math.cos(math.radians(lat)))
+            along = east_km * east_hat + north_km * north_hat
+            sid = f'g{i}{j}'
+            sites.append(dispersal.SiteSpec(
+                element_id=sid, name=sid, parameter_id=sid, basis='boundary',
+                latitude=lat, longitude=lon))
+            draws_by_id[sid] = (t0 - along / speed
+                                + rng.normal(0.0, scatter, draws))
+    return sites, draws_by_id
+
+
+class TestTheTrendSurface:
+    """
+    §6.5. The model that assumes NO origin, which is what makes it the right
+    first look at a dataset -- before a hypothesis has been imposed on it.
+    """
+
+    def test_it_takes_no_origin_at_all(self):
+        """Not a default origin, not an optional one: a trend surface has no
+        place to measure from, and offering one would invite the reader to
+        think it did."""
+        sites, draws = _grid(90.0)
+        fit = dispersal.fit_trend(sites, draws)
+        assert 'origin' not in fit
+
+    def test_it_recovers_the_speed(self):
+        sites, draws = _grid(90.0, speed=1.0)
+        assert dispersal.fit_trend(sites, draws)['speed']['median'] == pytest.approx(
+            1.0, rel=0.02)
+
+    def test_it_recovers_a_speed_that_is_not_one(self):
+        sites, draws = _grid(90.0, speed=0.4)
+        assert dispersal.fit_trend(sites, draws)['speed']['median'] == pytest.approx(
+            0.4, rel=0.02)
+
+    @pytest.mark.parametrize('bearing', [0.0, 90.0, 180.0, 270.0, 45.0, 225.0])
+    def test_it_recovers_the_bearing(self, bearing):
+        """
+        Compass bearing, clockwise from north. Every quadrant, because a sign
+        error in either component passes on the axis it does not affect: a
+        front tested only due east would not notice `-b` written as `b`.
+        """
+        sites, draws = _grid(bearing)
+        azimuth = dispersal.fit_trend(sites, draws)['azimuth']
+        offset = (azimuth['mean_deg'] - bearing + 180.0) % 360.0 - 180.0
+        assert abs(offset) < 2.0, f'{azimuth["mean_deg"]} vs {bearing}'
+
+    def test_the_direction_is_where_the_front_WENT(self):
+        """
+        Not where it came from. Arrival age DECREASES the way the front
+        travels, so the reported azimuth is that of -grad(t); reporting the
+        gradient itself would name the origin's direction and look entirely
+        plausible while being exactly backwards.
+        """
+        sites, draws = _grid(90.0)
+        fit = dispersal.fit_trend(sites, draws)
+        # The eastern edge is younger than the western one, so the front went
+        # east. (Ties within a column: every site in one column has the same
+        # arrival, which is what a due-east front means.)
+        def age(site):
+            return float(np.median(draws[site.parameter_id]))
+        west = min(sites, key=lambda s: s.longitude)
+        east = max(sites, key=lambda s: s.longitude)
+        assert age(east) < age(west)
+        assert abs(fit['azimuth']['mean_deg'] - 90.0) < 2.0
+
+    def test_collinear_sites_are_refused(self):
+        """
+        A plane through a line is not determined: the gradient along the line
+        is fixed and the gradient across it is free. lstsq would return one of
+        infinitely many planes without saying which.
+        """
+        sites, draws = _grid(90.0, rows=7, cols=1)
+        fit = dispersal.fit_trend(sites, draws)
+        assert fit['speed'] is None
+        assert 'line' in fit['refused']
+
+    def test_a_transect_along_a_PARALLEL_is_refused_too(self):
+        """
+        The case a rank check misses. A parallel is a curve in this projection,
+        so the design matrix has full rank and a plane IS determined -- by the
+        curvature of the map rather than by anything anybody dug. It looks like
+        an answer and is an artefact of the projection.
+        """
+        sites, draws = _grid(90.0, rows=1, cols=7)
+        fit = dispersal.fit_trend(sites, draws)
+        assert fit['speed'] is None
+        assert 'line' in fit['refused']
+
+    def test_five_sites_are_refused(self):
+        sites, draws = _grid(90.0, rows=1, cols=5)
+        sites[0].latitude += 0.5   # not collinear, just too few
+        fit = dispersal.fit_trend(sites, draws)
+        assert fit['refused'] is not None
+        assert str(dispersal.MIN_DISPERSAL_SITES) in fit['refused']
+
+    def test_chronological_uncertainty_lands_inside_the_speed(self):
+        tight = dispersal.fit_trend(*_grid(90.0, scatter=10.0, seed=3))
+        loose = dispersal.fit_trend(*_grid(90.0, scatter=150.0, seed=3))
+
+        def width(fit):
+            low, high = fit['speed']['hpd_95']
+            return high - low
+
+        assert width(loose) > width(tight)
+
+    def test_residuals_are_reported_and_sum_to_nothing(self):
+        sites, draws = _grid(90.0, scatter=40.0, seed=9)
+        residuals = dispersal.fit_trend(sites, draws)['residuals']
+        assert len(residuals) == 9
+        years = [r['residual_years'] for r in residuals]
+        assert years == sorted(years, reverse=True)
+        assert sum(years) == pytest.approx(0.0, abs=1e-6)
+
+    def test_a_site_in_two_places_refuses_the_surface_too(self):
+        sites, draws = _grid(90.0)
+        sites.append(dispersal.SiteSpec(
+            element_id='bad', name='Mixed', parameter_id='bbad',
+            basis='boundary', refusal='two places in one phase'))
+        assert dispersal.fit_trend(sites, draws)['refused'] == 'two places in one phase'
+
+
+class TestACircularMean:
+    """
+    A direction near due north cannot be averaged as a number. This is the one
+    piece of arithmetic in the module where the plausible-looking wrong answer
+    is exactly 180 degrees out.
+    """
+
+    def test_draws_straddling_north_average_to_north(self):
+        angles = np.array([359.0, 358.0, 1.0, 2.0, 0.0])
+        summary = dispersal._circular_summary(angles)
+        # The arithmetic mean of these is 144, which is south-east.
+        assert float(np.mean(angles)) > 100.0
+        offset = (summary['mean_deg'] + 180.0) % 360.0 - 180.0
+        assert abs(offset) < 1.0
+
+    def test_the_interval_wraps_with_it(self):
+        summary = dispersal._circular_summary(
+            np.array([355.0, 358.0, 0.0, 2.0, 5.0]))
+        low, high = summary['hpd_95_deg']
+        # Reported as bearings, so the pair reads 355-ish to 5-ish rather than
+        # as a 350-degree span the wrong way round.
+        assert low > 300.0 and high < 60.0
+        assert summary['width_deg'] < 30.0
+
+    def test_scattered_draws_report_a_low_concentration(self):
+        """
+        R near zero means the draws point every which way and the mean
+        direction is an artefact of the arithmetic. Reported so a reader can
+        tell "north, confidently" from "north, meaninglessly".
+        """
+        rng = np.random.default_rng(1)
+        assert dispersal._circular_summary(
+            rng.uniform(0, 360, 2000))['concentration'] < 0.1
+        assert dispersal._circular_summary(
+            np.full(200, 42.0))['concentration'] == pytest.approx(1.0)
+
+
+class TestIsochrons:
+
+    def test_they_are_drawn_at_round_ages(self):
+        """An isochron every 137 years is arithmetically fine and reads as
+        noise."""
+        sites, draws = _grid(90.0)
+        ages = [line['age'] for line in dispersal.fit_trend(sites, draws)['isochrons']]
+        assert ages, 'a fitted surface should carry isochrons'
+        steps = {round(b - a, 6) for a, b in zip(ages, ages[1:])}
+        assert len(steps) == 1
+        step = steps.pop()
+        assert step in (10.0, 20.0, 50.0, 100.0, 200.0, 500.0, 1000.0)
+        assert all(age % step == 0 for age in ages)
+
+    def test_there_are_few_of_them(self):
+        """They are parallel straight lines on a PLANE, so a sixth says
+        nothing a fifth did not."""
+        sites, draws = _grid(90.0)
+        lines = dispersal.fit_trend(sites, draws)['isochrons']
+        assert len(lines) <= dispersal.ISOCHRON_COUNT + 1
+
+    def test_each_is_a_pair_of_coordinates_the_map_can_draw(self):
+        sites, draws = _grid(90.0)
+        for line in dispersal.fit_trend(sites, draws)['isochrons']:
+            assert len(line['points']) == 2
+            for point in line['points']:
+                assert -90 <= point['latitude'] <= 90
+                assert -180 <= point['longitude'] <= 180
+
+    def test_they_run_across_the_front_not_along_it(self):
+        """
+        An isochron is a line of EQUAL arrival, so it is perpendicular to the
+        direction of advance. Drawn parallel to it instead -- an easy sign slip
+        -- it would look like a plausible figure showing the opposite thing.
+        """
+        sites, draws = _grid(90.0)   # front heads east
+        line = dispersal.fit_trend(sites, draws)['isochrons'][0]
+        first, second = line['points']
+        # So the line should run north-south: much more change in latitude
+        # than in longitude.
+        assert abs(first['latitude'] - second['latitude']) > 1.0
+        assert abs(first['longitude'] - second['longitude']) < 0.5
+
+    def test_a_surface_with_no_gradient_has_none(self):
+        sites, draws = _grid(90.0)
+        for key in draws:
+            draws[key] = np.full(200, 6000.0)
+        assert dispersal.fit_trend(sites, draws)['isochrons'] == []
+
+
+class TestUnprojecting:
+
+    def test_it_inverts_the_projection(self):
+        """The isochrons are computed in the plane and drawn in degrees, so a
+        wrong inverse would put a correct line in the wrong place."""
+        sites, _draws = _grid(45.0)
+        x, y, centre = dispersal._lambert_azimuthal(sites)
+        for i, site in enumerate(sites):
+            lat, lon = dispersal._unproject(float(x[i]), float(y[i]), centre)
+            assert lat == pytest.approx(site.latitude, abs=1e-6)
+            assert lon == pytest.approx(site.longitude, abs=1e-6)
+
+    def test_the_centre_projects_to_the_origin(self):
+        sites, _draws = _grid(0.0)
+        x, y, centre = dispersal._lambert_azimuthal(sites)
+        assert dispersal._unproject(0.0, 0.0, centre) == centre

@@ -453,24 +453,29 @@ def _run_wiggle_match(
     # input and is reported as one above.
 
 
-def _dispersal_origin(bayesian_config: Dict) -> Optional[Tuple[float, float]]:
+def _dispersal_spec(bayesian_config: Dict) -> Optional[Dict]:
     """
-    The wave-of-advance origin a config asks for, or None.
+    What the stored config asks of services/dispersal.py, or None.
 
     Read from the stored config rather than the request, so a RERUN fits the
     same front from the same point: an origin that changed between a run and
     its rerun would change the speed without changing anything about the
     dates, which is exactly the kind of silent drift a rerun exists to rule
-    out. Returns None unless the fit was actually asked for -- an origin left
-    behind by a config the analyst later switched off is not a request.
+    out.
+
+    An origin is OPTIONAL here where the wave-of-advance model requires one.
+    A trend surface assumes no origin at all -- that is what makes it the right
+    first look at a dataset, before a hypothesis has been imposed on it -- so
+    asking for dispersal without placing a pin is a legitimate request for the
+    trend alone, not an incomplete one. An origin left behind by a config the
+    analyst later switched off is still not a request: the flag decides.
     """
     if not bayesian_config.get('estimate_dispersal'):
         return None
     origin = bayesian_config.get('dispersal_origin') or {}
     lat, lon = origin.get('lat'), origin.get('lon')
-    if lat is None or lon is None:
-        return None
-    return (float(lat), float(lon))
+    placed = None if lat is None or lon is None else (float(lat), float(lon))
+    return {'origin': placed}
 
 
 def _run_bayesian(
@@ -527,7 +532,7 @@ def _run_bayesian(
     """
     requested = bayesian_config.get('solver') or 'auto'
     estimate_durations = bool(bayesian_config.get('estimate_durations'))
-    dispersal_origin = _dispersal_origin(bayesian_config)
+    dispersal_spec = _dispersal_spec(bayesian_config)
 
     # Refused here as well as at the request schema, because a rerun comes
     # from the database rather than from a request and has to be held to the
@@ -582,7 +587,7 @@ def _run_bayesian(
             num_samples=bayesian_config.get('mcmc_samples', 2000),
             uniform_span_prior=bayesian_config.get('uniform_span_prior', True),
             estimate_durations=estimate_durations,
-            dispersal_origin=dispersal_origin,
+            dispersal=dispersal_spec,
         )
         agreement_service.attach(solved['measurements'], measurements)
         return solved['measurements'], solved['boundaries'], {
@@ -601,7 +606,7 @@ def _run_bayesian(
         num_samples=bayesian_config.get('mcmc_samples', 2000),
         uniform_span_prior=bayesian_config.get('uniform_span_prior', True),
         estimate_durations=estimate_durations,
-        dispersal_origin=dispersal_origin,
+        dispersal=dispersal_spec,
         on_progress=on_progress,
         # Independent chains in parallel processes, pooled; see
         # gibbs.solve_chains for what the extra chains are for.

@@ -745,9 +745,9 @@ class TestDispersalThroughTheSolvers:
     def test_the_exact_solver_reports_it_when_asked(self):
         tree, measurements = _front_model()
         solved = ec.solve(measurements, tree, ec.layout(tree, measurements),
-                          dispersal_origin=self.ORIGIN)
+                          dispersal={'origin': self.ORIGIN})
 
-        fit = solved['intervals']['dispersal']
+        fit = solved['intervals']['dispersal']['wave']
         assert fit['refused'] is None
         assert fit['n_sites'] == 6
         assert fit['origin'] == {'lat': 50.0, 'lon': 0.0}
@@ -758,9 +758,9 @@ class TestDispersalThroughTheSolvers:
     def test_the_sampler_reports_it_too(self):
         tree, measurements = _front_model()
         solved = gibbs.solve(measurements, tree, sweeps=4000,
-                             dispersal_origin=self.ORIGIN, interval_draws=4000)
+                             dispersal={'origin': self.ORIGIN}, interval_draws=4000)
 
-        fit = solved['intervals']['dispersal']
+        fit = solved['intervals']['dispersal']['wave']
         assert fit['refused'] is None
         assert fit['n_sites'] == 6
         assert fit['speed']['median'] > 0
@@ -774,7 +774,7 @@ class TestDispersalThroughTheSolvers:
         """
         tree, measurements = _front_model()
         solved = ec.solve(measurements, tree, ec.layout(tree, measurements),
-                          dispersal_origin=self.ORIGIN)
+                          dispersal={'origin': self.ORIGIN})
 
         assert solved['intervals']['dispersal'] is not None
         assert solved['intervals']['durations'] == []
@@ -788,9 +788,9 @@ class TestDispersalThroughTheSolvers:
         """
         tree, measurements = _front_model()
         solved = ec.solve(measurements, tree, ec.layout(tree, measurements),
-                          dispersal_origin=self.ORIGIN)
+                          dispersal={'origin': self.ORIGIN})
 
-        sites = solved['intervals']['dispersal']['sites']
+        sites = solved['intervals']['dispersal']['wave']['sites']
         assert [s['parameter_id'] for s in sites] == [f'b{i}' for i in range(6)]
         assert all(s['basis'] == 'boundary' for s in sites)
 
@@ -802,8 +802,8 @@ class TestDispersalThroughTheSolvers:
         measurements[7]['longitude'] = 1.4 * 3 + 0.6
 
         solved = ec.solve(measurements, tree, ec.layout(tree, measurements),
-                          dispersal_origin=self.ORIGIN)
-        fit = solved['intervals']['dispersal']
+                          dispersal={'origin': self.ORIGIN})
+        fit = solved['intervals']['dispersal']['wave']
         assert fit['refused'] is not None
         assert fit['speed'] is None
         # ...and the run still produced everything else.
@@ -812,16 +812,14 @@ class TestDispersalThroughTheSolvers:
 
 class TestTheDispersalConfig:
 
-    def test_a_dispersal_without_an_origin_is_refused(self):
+    def test_a_dispersal_without_an_origin_is_allowed(self):
         """
-        A speed is measured FROM somewhere and moving the origin moves the
-        answer, so an app that picked one silently would be inventing the
-        hypothesis rather than testing it.
+        It asks for the trend surface, which has no origin to be missing. The
+        wave of advance is what an origin buys.
         """
         from app.schemas.sample import BayesianConfigInput
-        with pytest.raises(ValueError) as raised:
-            BayesianConfigInput(estimate_dispersal=True)
-        assert 'origin' in str(raised.value)
+        config = BayesianConfigInput(estimate_dispersal=True)
+        assert config.dispersal_origin is None
 
     def test_an_origin_alone_asks_for_nothing(self):
         from app.schemas.sample import BayesianConfigInput
@@ -831,10 +829,14 @@ class TestTheDispersalConfig:
     def test_an_origin_left_behind_by_a_switched_off_fit_is_not_a_request(self):
         """A rerun reads the STORED config. An origin still sitting in it after
         the analyst turned the fit off must not quietly re-enable it."""
-        from app.api.analysis import _dispersal_origin
-        assert _dispersal_origin({
+        from app.api.analysis import _dispersal_spec
+        assert _dispersal_spec({
             'estimate_dispersal': False,
             'dispersal_origin': {'lat': 50.0, 'lon': 0.0}}) is None
+
+    def test_the_flag_without_a_pin_asks_for_the_trend(self):
+        from app.api.analysis import _dispersal_spec
+        assert _dispersal_spec({'estimate_dispersal': True}) == {'origin': None}
 
     def test_half_an_origin_is_not_an_origin(self):
         from app.schemas.sample import BayesianConfigInput
@@ -881,8 +883,9 @@ class TestDispersalThroughTheApi:
         assert created.status_code == 200, created.text
         analysis_id = created.json()['data']['id']
 
-        fit = client.get(
+        section = client.get(
             f'/api/analysis/{analysis_id}').json()['data']['intervals']['dispersal']
+        fit = section['wave']
         assert fit['refused'] is None, fit['refused']
         # Six sites means the coordinates survived the trip through the
         # database and into the solver's measurement dicts. Without them the
@@ -898,8 +901,93 @@ class TestDispersalThroughTheApi:
             f'/api/analysis/{created.json()["data"]["id"]}').json()['data']['intervals']
         assert block['dispersal'] is None
 
-    def test_asking_without_an_origin_is_refused_at_the_edge(self, client):
+    def test_asking_without_an_origin_gives_the_trend_alone(self, client):
+        """
+        Not a refusal. A trend surface assumes no origin -- that is what makes
+        it the right first look at a dataset -- so a dispersal request with no
+        pin is a request for the trend, not a half-finished one.
+        """
         created = client.post('/api/analysis/bayesian?wait=true', json=self._body(
             'Originless', 'dspno', {'estimate_dispersal': True}))
-        assert created.status_code == 422
-        assert 'origin' in created.text
+        assert created.status_code == 200, created.text
+        section = client.get(
+            f'/api/analysis/{created.json()["data"]["id"]}'
+        ).json()['data']['intervals']['dispersal']
+
+        assert section['wave'] is None, (
+            'no origin was placed, so there is nothing to measure a front '
+            'speed from and the app must not invent one')
+        # The sites are collinear (a transect), so the trend is refused for
+        # THAT reason -- which is still the trend having been attempted.
+        assert section['trend'] is not None
+
+
+class TestTheTrendSurfaceThroughTheSolvers:
+    """
+    §6.5 through the wiring. The trend is computed whenever dispersal is asked
+    for at all, origin or not, because the two models answer different
+    questions off the same draws and comparing them is the point.
+    """
+
+    def _region(self, prefix='tr'):
+        """Six sites in two rows, so a plane through them is determined."""
+        children, measurements = [], []
+        places = [(50.0, 0.0), (50.0, 1.4), (50.0, 2.8),
+                  (50.8, 0.0), (50.8, 1.4), (50.8, 2.8)]
+        for index, (lat, lon) in enumerate(places):
+            children.append(_boundary(f'{prefix}-b{index}', f'Start {index}'))
+            children.append(_phase(f'{prefix}-p{index}', f'Site {index}'))
+            for half in (0, 1):
+                measurements.append({
+                    'id': f'{prefix}-d{index}{half}', 'sample_name': f'S{index}{half}',
+                    'age_bp': 4400 - 100 * index + 10 * half, 'error_1sigma': 25,
+                    'curve_id': 'intcal20', 'element_id': f'{prefix}-p{index}',
+                    'latitude': lat, 'longitude': lon,
+                })
+        children.append(_boundary(f'{prefix}-b6', 'End'))
+        return _sequence(f'{prefix}-root', children, name='Region'), measurements
+
+    def test_a_trend_comes_back_with_no_origin_at_all(self):
+        tree, measurements = self._region()
+        solved = ec.solve(measurements, tree, ec.layout(tree, measurements),
+                          dispersal={'origin': None})
+
+        section = solved['intervals']['dispersal']
+        assert section['wave'] is None
+        trend = section['trend']
+        assert trend['refused'] is None, trend['refused']
+        assert trend['n_sites'] == 6
+        assert trend['speed']['median'] > 0
+        assert 0.0 <= trend['azimuth']['mean_deg'] < 360.0
+        assert trend['isochrons']
+
+    def test_an_origin_buys_both_models(self):
+        tree, measurements = self._region()
+        solved = ec.solve(measurements, tree, ec.layout(tree, measurements),
+                          dispersal={'origin': (50.4, 0.0)})
+
+        section = solved['intervals']['dispersal']
+        assert section['wave']['refused'] is None
+        assert section['trend']['refused'] is None
+
+    def test_a_transect_gets_a_wave_but_no_surface(self):
+        """
+        The honest answer for the commonest layout there is. A line of sites
+        fixes the gradient along itself and leaves it free across, so a wave
+        from a placed origin is the model a transect can support and a plane
+        is not.
+        """
+        tree, measurements = _front_model()      # six sites on one parallel
+        solved = ec.solve(measurements, tree, ec.layout(tree, measurements),
+                          dispersal={'origin': (50.0, 0.0)})
+
+        section = solved['intervals']['dispersal']
+        assert section['wave']['refused'] is None
+        assert section['trend']['refused'] is not None
+        assert 'line' in section['trend']['refused']
+
+    def test_the_sampler_reports_the_trend_too(self):
+        tree, measurements = self._region('trg')
+        solved = gibbs.solve(measurements, tree, sweeps=4000,
+                             dispersal={'origin': None}, interval_draws=4000)
+        assert solved['intervals']['dispersal']['trend']['refused'] is None

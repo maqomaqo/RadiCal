@@ -41,17 +41,42 @@ import {
   formatCalendarRange,
   type DateFormat,
 } from '@/utils/dateFormat'
-import { arrivalAges, frontLine, speedText } from '@/utils/dispersalFigure'
-import type { DispersalFit } from '@/types'
+import { arrivalAges, compassPoint, frontLine, speedText } from '@/utils/dispersalFigure'
+import type { DispersalFit, DispersalSection, TrendFit } from '@/types'
 
 interface Props {
-  fit: DispersalFit
+  section: DispersalSection
   dateFormat: DateFormat
   /** Drawn on the project's tiled basemap when it has opted into one. */
   tiles?: boolean
 }
 
-export default function DispersalPanel({ fit, dateFormat, tiles = false }: Props) {
+export default function DispersalPanel({ section, dateFormat, tiles = false }: Props) {
+  const { wave, trend } = section
+  return (
+    <Stack spacing={3}>
+      {/* The trend first, deliberately. It assumes no origin, so it is the
+          look at the data that has no hypothesis in it yet — and a reader who
+          meets the wave first has already accepted somebody's origin before
+          seeing whether the dates point that way at all. */}
+      {trend && <TrendCard trend={trend} tiles={tiles} />}
+      {wave && <WaveCard fit={wave} dateFormat={dateFormat} tiles={tiles} />}
+      {!wave && trend && !trend.refused && (
+        <Alert severity="info">
+          No origin was placed, so no front <strong>speed from a point</strong> was
+          fitted — only the trend above, which assumes none. Place an origin on the
+          map and re-run to add a wave of advance measured from it.
+        </Alert>
+      )}
+    </Stack>
+  )
+}
+
+function WaveCard({ fit, dateFormat, tiles }: {
+  fit: DispersalFit
+  dateFormat: DateFormat
+  tiles: boolean
+}) {
   const plot = usePlotColors()
 
   const placed = fit.sites.filter((s) => s.latitude !== null && s.longitude !== null)
@@ -296,6 +321,135 @@ export default function DispersalPanel({ fit, dateFormat, tiles = false }: Props
           <li>Distances are great-circle, measured from the origin above.</li>
         </Typography>
       </Box>
+    </Paper>
+  )
+}
+
+/**
+ * The trend surface: is there a gradient at all, and which way does it point.
+ *
+ * DRAWN FIRST, and that ordering is the argument. This model assumes no
+ * origin, so it is the look at the data with no hypothesis in it — and a
+ * reader who meets the wave of advance first has already accepted somebody's
+ * origin before seeing whether the dates point that way at all. When the two
+ * disagree, the finding is usually about the origin rather than about either
+ * fit, and that is only visible if both are on the page.
+ */
+function TrendCard({ trend, tiles }: { trend: TrendFit; tiles: boolean }) {
+  const placed = trend.sites.filter(
+    (s) => s.latitude !== null && s.longitude !== null && !s.refusal
+  )
+  const points = placed.map((site) => ({
+    id: site.element_id,
+    name: site.name,
+    latitude: site.latitude as number,
+    longitude: site.longitude as number,
+  }))
+
+  return (
+    <Paper sx={{ p: 3 }}>
+      <Stack direction="row" alignItems="baseline" spacing={1} sx={{ mb: 0.5 }}>
+        <Typography variant="h6" component="h2">
+          Trend surface
+        </Typography>
+        <Typography variant="body2" color="text.secondary">
+          no origin assumed
+        </Typography>
+      </Stack>
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 2, maxWidth: '74ch' }}>
+        A plane fitted through arrival age against position, per draw, in an equal-area
+        projection centred on these sites. It asks whether there is a gradient at all and
+        which way it points — without being told where anything started.
+      </Typography>
+
+      {trend.refused ? (
+        <Alert severity="info">{trend.refused}</Alert>
+      ) : (
+        <>
+          <Box sx={{ mb: 2 }}>
+            <SiteMap
+              points={points}
+              isochrons={trend.isochrons}
+              tiles={tiles}
+              height={380}
+              exportName="trend-surface"
+            />
+          </Box>
+
+          <Stack
+            direction={{ xs: 'column', sm: 'row' }}
+            spacing={3}
+            sx={{ mb: 2 }}
+            divider={<Box sx={{ borderLeft: 1, borderColor: 'divider' }} />}
+          >
+            {trend.speed && (
+              <Box>
+                <Typography variant="overline" color="text.secondary" display="block">
+                  Speed
+                </Typography>
+                <Typography variant="h4" component="p">
+                  {speedText(trend.speed.median)}{' '}
+                  <Typography variant="body1" component="span" color="text.secondary">
+                    km/yr
+                  </Typography>
+                </Typography>
+                {trend.speed.hpd_95 && (
+                  <Typography variant="body2" color="text.secondary">
+                    95.4%: {speedText(trend.speed.hpd_95[0])} to{' '}
+                    {speedText(trend.speed.hpd_95[1])}
+                  </Typography>
+                )}
+              </Box>
+            )}
+
+            {trend.azimuth && (
+              <Box>
+                <Typography variant="overline" color="text.secondary" display="block">
+                  Direction of advance
+                </Typography>
+                <Typography variant="h4" component="p">
+                  {Math.round(trend.azimuth.mean_deg)}°{' '}
+                  <Typography variant="body1" component="span" color="text.secondary">
+                    {compassPoint(trend.azimuth.mean_deg)}
+                  </Typography>
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  95.4%: {Math.round(trend.azimuth.hpd_95_deg[0])}° to{' '}
+                  {Math.round(trend.azimuth.hpd_95_deg[1])}° (
+                  {Math.round(trend.azimuth.width_deg)}° wide)
+                </Typography>
+              </Box>
+            )}
+
+            <Box>
+              <Typography variant="overline" color="text.secondary" display="block">
+                Sites
+              </Typography>
+              <Typography variant="h5" component="p">{trend.n_sites}</Typography>
+              <Typography variant="body2" color="text.secondary">fitted per draw</Typography>
+            </Box>
+          </Stack>
+
+          {/* R near zero means the draws point every which way, and the mean
+              direction above is then an artefact of the arithmetic rather than
+              a finding. Said out loud, because a bearing printed to the degree
+              looks equally confident either way. */}
+          {trend.azimuth && trend.azimuth.concentration < 0.5 && (
+            <Alert severity="warning" sx={{ mb: 2 }}>
+              The direction is <strong>poorly determined</strong>: across draws the
+              gradient points every which way (concentration{' '}
+              {trend.azimuth.concentration.toFixed(2)} of a possible 1.00). Read the
+              bearing above as "no clear direction", not as the one printed.
+            </Alert>
+          )}
+
+          <Typography variant="caption" color="text.secondary" display="block">
+            Isochrons are lines of equal arrival age on the fitted plane, drawn from the
+            median surface. On a plane they are straight, parallel and evenly spaced — so
+            a curved front, or one that speeds up, is a model this does not fit.
+          </Typography>
+        </>
+      )}
     </Paper>
   )
 }

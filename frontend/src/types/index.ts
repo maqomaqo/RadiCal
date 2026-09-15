@@ -332,6 +332,65 @@ export interface DispersalResidual {
   residual_sd: number
 }
 
+export interface DispersalResidualPlain {
+  element_id: string
+  name: string
+  residual_years: number
+  residual_sd: number
+}
+
+/** A direction, summarised on the circle rather than as a number. */
+export interface CircularSummary {
+  mean_deg: number
+  /** Bearings, so 350–10 is a twenty-degree interval and not a 340-degree one. */
+  hpd_95_deg: [number, number]
+  /** How wide that interval actually is, which the pair above does not show. */
+  width_deg: number
+  /**
+   * R, the mean resultant length, in [0, 1]. Near zero the draws point every
+   * which way and the mean direction is an artefact of the arithmetic — so
+   * this is what tells "north, confidently" from "north, meaninglessly".
+   */
+  concentration: number
+}
+
+/** One line of equal arrival age across the fitted surface. */
+export interface Isochron {
+  age: number
+  points: Array<{ latitude: number; longitude: number }>
+}
+
+/**
+ * Model 2: a plane through arrival age against position.
+ *
+ * Assumes NO origin, which is what makes it the right first look at a dataset
+ * — before a hypothesis has been imposed on it. Where the wave answers "how
+ * fast did it move away from here", this answers "is there a gradient at all,
+ * and which way does it point".
+ */
+export interface TrendFit {
+  sites: DispersalSite[]
+  n_sites: number
+  min_sites: number
+  refused: string | null
+  speed: DurationSummary | null
+  azimuth: CircularSummary | null
+  /** The projection centre the plane was fitted in. */
+  centre: { lat: number; lon: number } | null
+  isochrons: Isochron[]
+  residuals: DispersalResidualPlain[]
+  basis: 'boundary' | 'earliest_dated_event' | null
+  draws?: number
+  degenerate_draws?: number
+}
+
+/** Both spatial models, side by side. */
+export interface DispersalSection {
+  /** Null when no origin was placed: there is nothing to measure a front from. */
+  wave: DispersalFit | null
+  trend: TrendFit | null
+}
+
 export interface DispersalFit {
   origin: { lat: number; lon: number }
   sites: DispersalSite[]
@@ -361,9 +420,9 @@ export interface IntervalsBlock {
   // One entry per deposition sequence in the model; empty otherwise.
   age_depth?: AgeDepthRecord[]
   // NULL means the fit was not asked for, which the page reads as an offer to
-  // re-run. A fit that was asked for and refused is an object with `refused`
-  // set, which is a different thing.
-  dispersal?: DispersalFit | null
+  // re-run. A fit that was asked for and refused is a section whose models
+  // carry `refused`, which is a different thing.
+  dispersal?: DispersalSection | null
   // How many joint draws these were estimated from, and whether those draws
   // were independent (the exact solver, or a group calibration) or an MCMC
   // chain, where the effective count is smaller than the count.

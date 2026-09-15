@@ -1450,12 +1450,43 @@ sequential arrival ramp, the front, the origin; the speed block; the residual ta
 caveats in the panel. Origin placement reuses 2b's pin. *Done when* a Neolithic-scale synthetic
 lands near 1 km/yr in the UI (§10 landmark).
 
-### Features 7–9
+### Features 7–9 — **7 done 2026-09-15**
 
 **7.** `fit_trend(sites, draws)` in `dispersal.py`: Lambert azimuthal at the centroid, per-draw
 plane fit, speed and azimuth with circular mean/interval; isochrons on `SiteMap`. **8.** Origin
 profile over a ~1° grid, rendered as a likelihood region. **9.** MST walk → proposed Sequence in
 `ModelTreeEditor.tsx`, accept/reject, never applied. Each waits on 6d and is one commit.
+
+Four things in 7 that the text above did not settle:
+
+- **A rank check is not enough to catch a transect.** A line of sites along a MERIDIAN is exactly
+  rank-deficient and would be caught; a line along a PARALLEL is not, because a parallel is a curve
+  in this projection — so the design matrix has full rank and the cross-gradient is estimated from
+  the curvature of the map rather than from anything anybody excavated. It looks like an answer.
+  `MIN_TREND_ASPECT = 0.05` refuses on the SHAPE of the layout instead, measured by SVD: a 480 km
+  transect along a parallel at 50°N scores 0.013 and a deliberately squat 2×6 grid scores 0.29, so
+  the threshold sits in a wide empty gap and is not a judgement call. **This was found by a test I
+  wrote expecting it to pass.**
+- **The origin became optional, and `estimate_dispersal` alone now means the trend.** §6.5 says the
+  trend surface assumes no origin, and that this is what makes it the right first look at a
+  dataset — so op 6b's rule that a dispersal request needs a pin was wrong as soon as feature 7
+  existed. The schema validator is gone; `_dispersal_spec` returns `{'origin': None}` for the flag
+  alone, and `intervals.report` takes a `dispersal` spec rather than an origin. An origin buys the
+  wave IN ADDITION, and both models are always computed when either is: they answer different
+  questions off the same draws, and a tidy wave with a trend pointing elsewhere means the ORIGIN is
+  wrong, which is a finding neither makes alone. `Analysis.intervals.dispersal` is therefore
+  `{wave, trend}` rather than one fit.
+- **The trend is rendered FIRST, above the wave.** It is the look at the data with no hypothesis in
+  it, and a reader who meets the wave first has already accepted somebody's origin before seeing
+  whether the dates point that way at all.
+- **Isochrons are labelled at their midpoint, not at an end.** They are drawn past the sites on
+  purpose, so the ends are the part of the figure most likely to be clipped — which is what the
+  first browser render showed, with "6100" cut off at the frame edge.
+
+Verified in Chromium on a real solve of a north-east front: trend **0.681 km/yr at 54° (NE), 95%
+49°–61°, R = 0.999**, against a wave of **0.688 km/yr** from a placed origin — the two models
+agreeing to within 1%, which is the cross-check having both on the page buys. Isochrons run NW–SE,
+perpendicular to the advance. Still zero external requests.
 
 ### What this sequence does not schedule
 

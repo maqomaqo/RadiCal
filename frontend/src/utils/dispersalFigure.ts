@@ -95,3 +95,18 @@ export function frontLine(
     },
   ]
 }
+
+/**
+ * A bearing as the eight-point name a reader thinks in.
+ *
+ * Beside the number rather than instead of it. "112°" is the answer and "ESE"
+ * is not — eight points is 45° of slop — but a reader checking a fit against
+ * what they know of the region thinks in compass points, and making them do
+ * the conversion is making them do arithmetic to read a figure.
+ */
+export function compassPoint(degrees: number): string {
+  const names = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']
+  if (!Number.isFinite(degrees)) return ''
+  const wrapped = ((degrees % 360) + 360) % 360
+  return names[Math.round(wrapped / 45) % 8]
+}

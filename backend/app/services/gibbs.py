@@ -2178,7 +2178,7 @@ def solve(measurements: List[Dict], root: Dict, sweeps: int = DEFAULT_SWEEPS,
           target_convergence: float = TARGET_CONVERGENCE,
           max_sweeps: Optional[int] = None,
           estimate_durations: bool = False,
-          dispersal_origin: Optional[Tuple[float, float]] = None,
+          dispersal: Optional[Dict] = None,
           interval_draws: int = intervals.DEFAULT_DRAWS,
           on_progress: Optional[Callable[[Dict], bool]] = None,
           chains: int = 1) -> Dict:
@@ -2206,8 +2206,8 @@ def solve(measurements: List[Dict], root: Dict, sweeps: int = DEFAULT_SWEEPS,
     than independent draws, so a duration read off them converges more slowly
     than the marginals beside it and the run is not extended on its account.
 
-    `dispersal_origin` asks for the wave-of-advance section and takes the same
-    joint states, with the same MCMC qualification on everything read off them.
+    `dispersal` asks for the spatial section and takes the same joint states,
+    with the same MCMC qualification on everything read off them.
     """
     model = Model(measurements, root, grid=grid,
                   uniform_span_prior=uniform_span_prior)
@@ -2220,7 +2220,7 @@ def solve(measurements: List[Dict], root: Dict, sweeps: int = DEFAULT_SWEEPS,
     # the other two: a front's speed is a function of many modelled ages at
     # once, and asking for it is not asking for phase durations.
     wants_draws = (estimate_durations or bool(model.depositions)
-                   or dispersal_origin is not None)
+                   or dispersal is not None)
     if chains > 1:
         chain = solve_chains(
             measurements, root, chains=chains, sweeps=sweeps, seed=seed,
@@ -2321,5 +2321,5 @@ def solve(measurements: List[Dict], root: Dict, sweeps: int = DEFAULT_SWEEPS,
         results['intervals'] = intervals.report(
             measurements=measurements, root=root, draws=joint,
             independent=False, durations=estimate_durations,
-            dispersal_origin=dispersal_origin)
+            dispersal=dispersal)
     return results

@@ -1148,7 +1148,7 @@ def solve(measurements: List[Dict], root: Dict, chain: Chain,
           num_samples: int = 4000, seed: int = 42,
           uniform_span_prior: bool = True,
           estimate_durations: bool = False,
-          dispersal_origin: Optional[Tuple[float, float]] = None,
+          dispersal: Optional[Dict] = None,
           interval_draws: int = intervals.DEFAULT_DRAWS) -> Dict:
     """
     Exact marginal posteriors for every date and every boundary in `chain`.
@@ -1170,9 +1170,9 @@ def solve(measurements: List[Dict], root: Dict, chain: Chain,
     extent not every analysis wants to make. Its draws use their own generator,
     so every other number here is bit-for-bit what it would be with the flag off.
 
-    `dispersal_origin` asks for the wave-of-advance section, and needs the same
-    joint draws for the same reason -- so it is a second reason to take them,
-    independent of whether durations were wanted.
+    `dispersal` asks for the spatial section, and needs the same joint draws
+    for the same reason -- so it is a second reason to take them, independent
+    of whether durations were wanted. See intervals.report for its shape.
     """
     element_bounds = inherited_bounds(root)
     by_id = {m['id']: m for m in measurements}
@@ -1294,7 +1294,7 @@ def solve(measurements: List[Dict], root: Dict, chain: Chain,
     # A dispersal fit is the second reason to take joint draws, and it is
     # independent of the first: a front's speed is a function of many modelled
     # ages at once whether or not anybody wanted phase durations.
-    if estimate_durations or dispersal_origin is not None:
+    if estimate_durations or dispersal is not None:
         # Seeded apart from the generator above, so every other number here
         # stays bit-for-bit identical whether or not durations were asked for.
         joint_rng = np.random.default_rng(seed + 1)
@@ -1305,7 +1305,7 @@ def solve(measurements: List[Dict], root: Dict, chain: Chain,
         joint.update({date_id: grid[idx] for date_id, idx in date_draws.items()})
         results['intervals'] = intervals.report(
             root, measurements, joint, independent=True,
-            durations=estimate_durations, dispersal_origin=dispersal_origin)
+            durations=estimate_durations, dispersal=dispersal)
 
     results['method'] = 'exact'
     results['uniform_span_prior'] = log_correction is not None

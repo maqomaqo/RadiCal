@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 
-import { arrivalAges, frontLine, speedText } from './dispersalFigure'
+import { arrivalAges, compassPoint, frontLine, speedText } from './dispersalFigure'
 import type { DispersalFit } from '@/types'
 
 function summary(median: number) {
@@ -140,5 +140,31 @@ describe('frontLine', () => {
 
   it('draws nothing when no site has a position', () => {
     expect(frontLine(fit({ sites: [] }))).toEqual([])
+  })
+})
+
+describe('compassPoint', () => {
+  it('names the cardinals', () => {
+    expect(compassPoint(0)).toBe('N')
+    expect(compassPoint(90)).toBe('E')
+    expect(compassPoint(180)).toBe('S')
+    expect(compassPoint(270)).toBe('W')
+  })
+
+  it('rounds to the nearest of eight', () => {
+    expect(compassPoint(44)).toBe('NE')
+    // 112 is closer to E (90) than to SE (135).
+    expect(compassPoint(112)).toBe('E')
+  })
+
+  it('wraps rather than falling off the end', () => {
+    // 359 is north, not an index past the array.
+    expect(compassPoint(359)).toBe('N')
+    expect(compassPoint(360)).toBe('N')
+    expect(compassPoint(-90)).toBe('W')
+  })
+
+  it('says nothing for a non-number', () => {
+    expect(compassPoint(NaN)).toBe('')
   })
 })

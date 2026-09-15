@@ -569,31 +569,27 @@ class BayesianConfigInput(BaseModel):
     # modelling assumption to make. These are also the only figures here
     # carrying Monte Carlo error, since they can only be read off JOINT draws.
     estimate_durations: bool = False
-    # Also fit a wave of advance: how fast the thing being dated moved across
-    # the landscape, and when it set out (services/dispersal.py).
+    # Also fit the spatial models: how fast the thing being dated moved across
+    # the landscape, and which way (services/dispersal.py).
     #
     # Opt-in for the durations reason and one more. OLS on spatially
-    # autocorrelated residuals with an ASSUMED origin will always return a tidy
-    # speed with a tidy interval, whether or not the dates describe a front at
-    # all, so this must be a claim somebody made deliberately rather than a
-    # number that appears beside every analysis with coordinates on it.
+    # autocorrelated residuals will always return a tidy speed with a tidy
+    # interval, whether or not the dates describe a front at all, so this must
+    # be a claim somebody made deliberately rather than a number that appears
+    # beside every analysis with coordinates on it.
     estimate_dispersal: bool = False
-    # Where the front is hypothesised to have started. Required when
-    # estimate_dispersal is set: a speed is measured FROM somewhere, moving the
-    # origin moves the answer, and an app that picked one silently would be
-    # inventing the hypothesis rather than testing it. Inferring it from the
-    # data is a separate feature with a separate output -- a likelihood
-    # surface, not a point.
+    # Where the front is hypothesised to have started.
+    #
+    # OPTIONAL, and what it buys is a second model rather than a complete one.
+    # The trend surface assumes no origin -- that is exactly what makes it the
+    # right first look at a dataset, before a hypothesis has been imposed on
+    # it -- so a dispersal request with no pin is a request for the trend
+    # alone, not a half-finished one. Placing a pin adds the wave of advance,
+    # which IS measured from somewhere: moving the origin moves its speed, and
+    # an app that picked one silently would be inventing the hypothesis rather
+    # than testing it. Inferring the origin from the data is a separate thing
+    # again, with a separate output -- a likelihood surface, not a point.
     dispersal_origin: Optional[DispersalOrigin] = None
-
-    @model_validator(mode="after")
-    def _dispersal_needs_an_origin(self):
-        if self.estimate_dispersal and self.dispersal_origin is None:
-            raise ValueError(
-                'a dispersal fit needs an origin to measure distances from. '
-                'Place one on the map, at the point the hypothesis puts the '
-                'front starting from.')
-        return self
 
 
 class GroupCalibrationRequest(BaseModel):

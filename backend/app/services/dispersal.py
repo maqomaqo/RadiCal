@@ -63,7 +63,8 @@ from typing import Dict, List, Optional, Sequence, Tuple
 import numpy as np
 
 from app.services import intervals
-from app.services.reservoir import haversine_km
+from app.services.calibration import SIGMA_2
+from app.services.reservoir import EARTH_RADIUS_KM, haversine_km
 
 # How far two dates in one site may sit apart before the app refuses to treat
 # them as one place.
@@ -536,3 +537,293 @@ def fit_wave(sites: Sequence[SiteSpec], draws: Dict[str, np.ndarray],
         # Excluded from the speed summary, and visible rather than silent.
         degenerate_draws=int(ages.shape[0] - finite),
     )
+
+
+# --------------------------------------------------------------------------
+# Model 2 -- the trend surface
+# --------------------------------------------------------------------------
+
+# How square a set of sites must be before a plane through them means
+# anything: the across-axis spread as a fraction of the along-axis spread.
+#
+# Five per cent is nowhere near either measured case -- a 480 km transect along
+# a parallel scores 0.013 and a deliberately squat 2x6 grid scores 0.29 -- so
+# it separates a transect from a survey without being a judgement call about
+# borderline layouts, of which there are none in practice.
+MIN_TREND_ASPECT = 0.05
+
+# Isochrons drawn across the fitted surface. Five is enough to read a gradient
+# and few enough to label; more would be a contour plot of a PLANE, which has
+# nothing further to say.
+ISOCHRON_COUNT = 5
+
+
+def _lambert_azimuthal(sites: Sequence[SiteSpec]) -> Tuple[np.ndarray, np.ndarray, Tuple[float, float]]:
+    """
+    Site positions as kilometres east and north of their own centroid.
+
+    Lambert azimuthal EQUAL-AREA, centred on the data rather than on a global
+    default. Two reasons, and the second is the one that matters:
+
+    - A plane fitted in degrees is fitted in a coordinate system whose units
+      change with latitude -- a degree of longitude is 111 km at the equator
+      and 38 km at 70 degrees north -- so the gradient would mean different
+      things in different parts of one map.
+    - Choosing the projection from the data is what keeps it honest at high
+      latitude. A Nordic dataset projected on a global default is distorted
+      exactly where the archaeology is; centred on its own centroid it is not.
+
+    Equal-area rather than conformal because the quantity being fitted is
+    spread over ground, and preserving area is what keeps a gradient in
+    years-per-kilometre meaning the same thing across the map.
+    """
+    lats = np.array([s.latitude for s in sites], dtype=float)
+    lons = np.array([s.longitude for s in sites], dtype=float)
+    centre = _centroid(list(zip(lats, lons)))
+    lat0, lon0 = math.radians(centre[0]), math.radians(centre[1])
+
+    phi, lam = np.radians(lats), np.radians(lons)
+    cos_c = (math.sin(lat0) * np.sin(phi)
+             + math.cos(lat0) * np.cos(phi) * np.cos(lam - lon0))
+    # The antipode of the projection centre, where the scale factor diverges.
+    # Unreachable for any real dataset -- sites 20,000 km apart are not one
+    # study -- but a silent inf here would surface as a nonsense gradient.
+    k = np.sqrt(np.maximum(2.0 / np.maximum(1.0 + cos_c, 1e-12), 0.0))
+    x = EARTH_RADIUS_KM * k * np.cos(phi) * np.sin(lam - lon0)
+    y = EARTH_RADIUS_KM * k * (math.cos(lat0) * np.sin(phi)
+                               - math.sin(lat0) * np.cos(phi) * np.cos(lam - lon0))
+    return x, y, centre
+
+
+def _circular_summary(angles: np.ndarray) -> Dict:
+    """
+    A direction's mean and 95% interval, on the circle.
+
+    A direction near due north CANNOT be averaged as a number: draws at 359 and
+    1 degree average to 180, which is due south -- the exact opposite of the
+    answer, and it would look perfectly plausible on screen. So the mean is the
+    argument of the mean unit vector, and the interval is taken on deviations
+    from it wrapped into (-180, 180].
+
+    `concentration` is R, the mean resultant length, in [0, 1]. It is not
+    decoration: R near zero means the draws point every which way and the
+    "mean direction" is an artefact of the arithmetic rather than a finding.
+    """
+    radians = np.radians(angles)
+    sin_mean = float(np.mean(np.sin(radians)))
+    cos_mean = float(np.mean(np.cos(radians)))
+    concentration = math.hypot(sin_mean, cos_mean)
+    mean = math.degrees(math.atan2(sin_mean, cos_mean)) % 360.0
+
+    deviation = (angles - mean + 180.0) % 360.0 - 180.0
+    low, high = np.quantile(deviation, [(1.0 - SIGMA_2) / 2.0,
+                                        1.0 - (1.0 - SIGMA_2) / 2.0])
+    return {
+        'mean_deg': mean,
+        'hpd_95_deg': [float((mean + low) % 360.0), float((mean + high) % 360.0)],
+        # How wide that interval is, which a pair of wrapped bearings does not
+        # show at a glance: 350 to 10 is twenty degrees, not three hundred.
+        'width_deg': float(high - low),
+        'concentration': concentration,
+    }
+
+
+def fit_trend(sites: Sequence[SiteSpec], draws: Dict[str, np.ndarray]) -> Dict:
+    """
+    A plane through arrival age against position: t = a + b*x + c*y.
+
+    **This model assumes no origin**, which is what makes it the right first
+    look at a dataset -- before any hypothesis has been imposed on it. Where
+    fit_wave answers "how fast did it move away from HERE", this answers "is
+    there a gradient at all, and which way does it point", and the two can
+    disagree in a way that is informative rather than contradictory: a tidy
+    wave from an assumed origin and a trend pointing somewhere else means the
+    origin is wrong, not that the arithmetic is.
+
+    Speed is 1/|gradient| and the direction of ADVANCE is the direction in
+    which arrival age DECREASES -- older is a larger cal BP, so the front
+    travels down the gradient, and the azimuth reported is that of -grad(t)
+    rather than of the gradient itself.
+    """
+    usable = [s for s in sites if s.usable and s.parameter_id in draws]
+    refused_sites = [s for s in sites if s.refusal]
+
+    def block(**extra) -> Dict:
+        base = {
+            'sites': [s.as_dict() for s in sites],
+            'n_sites': len(usable),
+            'min_sites': MIN_DISPERSAL_SITES,
+            'refused': None,
+            'speed': None,
+            'azimuth': None,
+            'centre': None,
+            'isochrons': [],
+            'residuals': [],
+            'basis': (usable[0].basis if usable else None),
+        }
+        base.update(extra)
+        return base
+
+    if refused_sites:
+        return block(refused=refused_sites[0].refusal)
+
+    if len(usable) < MIN_DISPERSAL_SITES:
+        return block(refused=(
+            f'A trend surface needs at least {MIN_DISPERSAL_SITES} sites and '
+            f'this model has {len(usable)}. A plane through three points passes '
+            'through them exactly, whatever they are, and reports a gradient '
+            'with nothing left over to contradict it.'))
+
+    x, y, centre = _lambert_azimuthal(usable)
+
+    # A plane needs the sites to span two dimensions, and a rank check is not
+    # enough to establish that. A transect along a MERIDIAN is exactly
+    # rank-deficient and would be caught; a transect along a PARALLEL is not,
+    # because a parallel is a curve in this projection -- so the design matrix
+    # has full rank and the cross-gradient is estimated from the curvature of
+    # the map rather than from anything anybody excavated. Measured at 50
+    # degrees north over 480 km, that gives an aspect ratio of 0.013 where a
+    # squat 2x6 grid gives 0.29, so the two are not close and the threshold
+    # does not have to be delicate.
+    spread = np.column_stack([x - x.mean(), y - y.mean()])
+    along, across = np.linalg.svd(spread, compute_uv=False)
+    if along <= 0 or across / along < MIN_TREND_ASPECT:
+        return block(refused=(
+            'These sites lie too close to a straight line for a plane through '
+            'them to be determined: the gradient along the line is fixed and '
+            'the gradient across it would come from rounding rather than from '
+            'the dates. A wave of advance from a placed origin is the model '
+            'for a transect; a trend surface needs sites spread in two '
+            'directions.'))
+
+    design = np.column_stack([np.ones_like(x), x, y])
+
+    # (J, n) as in fit_wave, and for the same reason: every site's age read off
+    # the SAME draw. The design matrix is identical across draws because the
+    # sites do not move, so one pseudo-inverse serves all of them.
+    ages = np.column_stack([np.asarray(draws[s.parameter_id], dtype=float)
+                            for s in usable])
+    coefficients = ages @ np.linalg.pinv(design).T      # (J, 3): a, b, c
+    a, b, c = coefficients[:, 0], coefficients[:, 1], coefficients[:, 2]
+
+    gradient = np.hypot(b, c)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        speed = 1.0 / gradient
+    finite = np.isfinite(speed)
+
+    # Direction of ADVANCE: down the gradient, since arrival age decreases the
+    # way the front is going. Compass bearing, clockwise from north, so x
+    # (east) is the sine and y (north) the cosine.
+    azimuth = np.degrees(np.arctan2(-b, -c)) % 360.0
+
+    fitted = coefficients @ design.T                     # (J, n)
+    residual_mean = (ages - fitted).mean(axis=0)
+    residual_sd = (ages - fitted).std(axis=0, ddof=1)
+    order = np.argsort(-residual_mean)
+    residuals = [{
+        'element_id': usable[i].element_id,
+        'name': usable[i].name,
+        'residual_years': float(residual_mean[i]),
+        'residual_sd': float(residual_sd[i]),
+    } for i in order]
+
+    step = _speed_step(speed[finite]) if finite.any() else None
+    return block(
+        speed=intervals.summarise(speed[finite], base_step=step),
+        azimuth=_circular_summary(azimuth[finite]),
+        centre={'lat': float(centre[0]), 'lon': float(centre[1])},
+        isochrons=_isochrons(
+            float(np.median(a)), float(np.median(b)), float(np.median(c)),
+            x, y, centre),
+        residuals=residuals,
+        draws=int(ages.shape[0]),
+        degenerate_draws=int(ages.shape[0] - int(finite.sum())),
+    )
+
+
+def _unproject(x: float, y: float, centre: Tuple[float, float]) -> Tuple[float, float]:
+    """A point in the local plane back to latitude and longitude."""
+    lat0, lon0 = math.radians(centre[0]), math.radians(centre[1])
+    rho = math.hypot(x, y)
+    if rho < 1e-9:
+        return centre
+    angle = 2.0 * math.asin(min(1.0, rho / (2.0 * EARTH_RADIUS_KM)))
+    sin_c, cos_c = math.sin(angle), math.cos(angle)
+    lat = math.asin(cos_c * math.sin(lat0) + y * sin_c * math.cos(lat0) / rho)
+    lon = lon0 + math.atan2(
+        x * sin_c,
+        rho * math.cos(lat0) * cos_c - y * math.sin(lat0) * sin_c)
+    return (math.degrees(lat), (math.degrees(lon) + 180.0) % 360.0 - 180.0)
+
+
+def _isochrons(a: float, b: float, c: float,
+               x: np.ndarray, y: np.ndarray,
+               centre: Tuple[float, float]) -> List[Dict]:
+    """
+    Lines of equal arrival age across the fitted surface.
+
+    The classic representation, and the one a reader of Ammerman &
+    Cavalli-Sforza will recognise. On a PLANE they are straight, parallel and
+    evenly spaced, so drawing more of them says nothing more -- which is why
+    there are five rather than a contour density.
+
+    Drawn from the MEDIAN plane, not from a plane fitted to median ages: the
+    first is a draw-wise summary of the surface and the second is a surface
+    fitted to a summary, and only the first has the joint structure in it.
+
+    Each line is returned as lat/lon points so the map can draw it without
+    knowing the projection -- the projection is this module's business and
+    should not leak into a figure.
+    """
+    gradient_sq = b * b + c * c
+    if gradient_sq <= 0:
+        return []
+
+    fitted = a + b * x + c * y
+    low, high = float(fitted.min()), float(fitted.max())
+    if not math.isfinite(low) or high <= low:
+        return []
+
+    # Round ages rather than the fitted extremes: "6200 cal BP" is a line a
+    # reader can reason about and "6187.4 cal BP" is an artefact of which sites
+    # happened to be dug.
+    step = _round_step((high - low) / ISOCHRON_COUNT)
+    first = math.ceil(low / step) * step
+
+    # Half-length of each drawn line: enough to cross the sites, plus a margin
+    # so the lines do not stop exactly at the outermost marker.
+    reach = 1.25 * max(float(np.hypot(x - x.mean(), y - y.mean()).max()), 1.0)
+    along = np.array([-c, b]) / math.sqrt(gradient_sq)
+
+    lines = []
+    age = first
+    while age <= high and len(lines) < ISOCHRON_COUNT + 1:
+        # The point on this isochron closest to the projection's origin.
+        base = np.array([b, c]) * (age - a) / gradient_sq
+        points = [base - reach * along, base + reach * along]
+        lines.append({
+            'age': float(age),
+            'points': [
+                {'latitude': lat, 'longitude': lon}
+                for lat, lon in (_unproject(float(p[0]), float(p[1]), centre)
+                                 for p in points)
+            ],
+        })
+        age += step
+    return lines
+
+
+def _round_step(raw: float) -> float:
+    """
+    A spacing a reader would have chosen: 1, 2 or 5 times a power of ten.
+
+    Same reasoning as a plot's axis ticks. An isochron every 137 years is
+    arithmetically fine and reads as noise.
+    """
+    if not math.isfinite(raw) or raw <= 0:
+        return 1.0
+    magnitude = 10.0 ** math.floor(math.log10(raw))
+    for multiple in (1.0, 2.0, 5.0):
+        if raw <= multiple * magnitude:
+            return multiple * magnitude
+    return 10.0 * magnitude

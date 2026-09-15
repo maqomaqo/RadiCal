@@ -767,7 +767,7 @@ def evaluate_age_depth(specs: List[Dict], draws: Dict[str, np.ndarray]) -> List[
 def report(root: Optional[Dict], measurements: List[Dict],
            draws: Dict[str, np.ndarray], independent: bool,
            durations: bool = True,
-           dispersal_origin: Optional[Tuple[float, float]] = None) -> Dict:
+           dispersal: Optional[Dict] = None) -> Dict:
     """
     The whole durations-and-differences block for a modelled analysis, ready
     to store on Analysis.intervals.
@@ -778,11 +778,15 @@ def report(root: Optional[Dict], measurements: List[Dict],
     having asked for phase durations, which are a modelling claim of their own
     (see BayesianConfigInput.estimate_durations).
 
-    `dispersal_origin` adds the wave-of-advance section, computed here for the
-    same reason durations are: it is a function of many modelled ages at once
-    and so has to come off these joint draws. An origin rather than a flag,
-    because a front speed is meaningless without the point it was measured
-    from and the two must not be separable.
+    `dispersal` adds the dispersal section, computed here for the same reason
+    durations are: every figure in it is a function of many modelled ages at
+    once and so has to come off these joint draws. It is a spec rather than a
+    flag -- `{'origin': (lat, lon) | None}` -- because the two models in it
+    want different things. A trend surface assumes no origin at all, which is
+    what makes it the right first look at a dataset; a wave of advance is
+    measured FROM somewhere, and its speed is meaningless without the point it
+    was measured from. So an origin buys the wave AND the trend, and no origin
+    buys the trend alone.
     """
     duration_specs = plan_durations(root, measurements) if root and durations else []
     difference_specs, note = (plan_phase_differences(root, measurements)
@@ -791,19 +795,41 @@ def report(root: Optional[Dict], measurements: List[Dict],
     block = _block(found_durations, differences, draws, independent, note)
     block['age_depth'] = evaluate_age_depth(
         plan_age_depth(root, measurements), draws)
-    if dispersal_origin is not None:
+    if dispersal is not None:
         # Imported here rather than at module scope: dispersal imports this
         # module for summarise and calendar_band, and at the top the two would
         # be a cycle.
         from app.services import dispersal as dispersal_service
-        block['dispersal'] = dispersal_service.fit_wave(
-            dispersal_service.derive_sites(root, measurements),
-            draws, dispersal_origin)
+        block['dispersal'] = _dispersal_section(
+            dispersal_service.derive_sites(root, measurements), draws, dispersal)
     return block
 
 
+def _dispersal_section(sites, draws: Dict[str, np.ndarray],
+                       spec: Dict) -> Dict:
+    """
+    The two spatial models, side by side.
+
+    Both are always computed when either is, because they answer different
+    questions off the same draws and comparing them is the point: a tidy wave
+    from an assumed origin together with a trend pointing somewhere else means
+    the ORIGIN is wrong, which is a finding neither model makes alone. The
+    trend costs one more pseudo-inverse, so there is no reason to make the
+    reader ask for it separately.
+    """
+    from app.services import dispersal as dispersal_service
+    origin = spec.get('origin')
+    return {
+        # Null when no origin was placed -- which is not a refusal, it is the
+        # model declining to invent the hypothesis it would be testing.
+        'wave': (dispersal_service.fit_wave(sites, draws, origin)
+                 if origin is not None else None),
+        'trend': dispersal_service.fit_trend(sites, draws),
+    }
+
+
 def report_dates(dates: List[Dict], draws: Dict[str, np.ndarray],
-                 dispersal_origin: Optional[Tuple[float, float]] = None) -> Dict:
+                 dispersal: Optional[Dict] = None) -> Dict:
     """
     The same block for a group calibration: differences only.
 
@@ -821,11 +847,11 @@ def report_dates(dates: List[Dict], draws: Dict[str, np.ndarray],
     # so drawing each date separately IS drawing from the joint.
     block = _block([], differences, draws, True, note)
     block['age_depth'] = []
-    if dispersal_origin is not None:
+    if dispersal is not None:
         from app.services import dispersal as dispersal_service
-        block['dispersal'] = dispersal_service.fit_wave(
+        block['dispersal'] = _dispersal_section(
             dispersal_service.derive_sites_from_dates(dates, draws),
-            draws, dispersal_origin)
+            draws, dispersal)
     return block
 
 
@@ -842,8 +868,8 @@ def _block(durations: List[Dict], differences: List[Dict],
         'age_depth': [],
         # None means NOT ASKED FOR, which the results page reads as an offer to
         # re-run -- the same convention durations and age-depth already use. A
-        # fit that was asked for and refused is a block with a `refused`
-        # string, which is a different thing and says so.
+        # fit that was asked for and refused is a section whose models carry a
+        # `refused` string, which is a different thing and says so.
         'dispersal': None,
         'draws': min(sizes) if sizes else 0,
         # True when the draws are independent rather than an MCMC chain, where

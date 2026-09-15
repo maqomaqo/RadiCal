@@ -1268,10 +1268,10 @@ export default function Results() {
     [analysis]
   )
 
-  // The wave-of-advance fit, or null when it was not asked for. Read the same
+  // Both spatial models, or null when neither was asked for. Read the same
   // way age_depth is, and NULL means the same thing it means there: the run
   // was not asked, rather than there being nothing to report.
-  const dispersalFit = useMemo(
+  const dispersalSection = useMemo(
     () => analysis?.intervals?.dispersal || null,
     [analysis]
   )
@@ -2850,9 +2850,9 @@ export default function Results() {
           this page has no project loaded, and the offline basemap is the
           private default. Passing the project's setting through is the one
           thing left to do if that is ever wanted. */}
-      {dispersalFit && (
+      {dispersalSection && (
         <Box sx={{ mb: 3 }}>
-          <DispersalPanel fit={dispersalFit} dateFormat={dateFormat} />
+          <DispersalPanel section={dispersalSection} dateFormat={dateFormat} />
         </Box>
       )}
 
