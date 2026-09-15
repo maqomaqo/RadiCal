@@ -41,6 +41,8 @@ import DeleteIcon from '@mui/icons-material/Delete'
 import EditIcon from '@mui/icons-material/Edit'
 import AddIcon from '@mui/icons-material/Add'
 import AccountTreeIcon from '@mui/icons-material/AccountTree'
+import PlaceIcon from '@mui/icons-material/Place'
+import PlaceOnMapDialog from '@/components/PlaceOnMapDialog'
 import UploadFileIcon from '@mui/icons-material/UploadFile'
 import LibraryAddIcon from '@mui/icons-material/LibraryAdd'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
@@ -617,6 +619,20 @@ export default function NewAnalysis() {
         group_id: m.group_id ?? null,
       }))
     ) !== false
+
+  // Dates carrying a position. A dispersal fit is about where sites are, so
+  // with none of them placed the switch would promise a section that comes
+  // back refused -- the same reason the durations switch is gated on the model
+  // having something for a duration to be about.
+  const placedCount = measurements.filter(
+    (m) => m.latitude !== null && m.latitude !== undefined
+      && m.longitude !== null && m.longitude !== undefined
+  ).length
+
+  // The dispersal origin's pin dialog. Reuses the collection's own
+  // place-on-map rather than a second map: an origin is a position, and a
+  // reader who has placed a date already knows how this works.
+  const [originDialogOpen, setOriginDialogOpen] = useState(false)
 
   const ordinatesFor = (measurementId: string) => {
     // Read from the SAVED measurement, not from the dialog's draft. Clearing
@@ -1375,6 +1391,62 @@ export default function NewAnalysis() {
                       far apart the phases sit. Off by default: a phase&rsquo;s duration
                       assumes its dates sample a bounded episode.
                     </FormHelperText>
+                  </>
+                )}
+                {/* Offered only where the dates are placed: a dispersal fit is
+                    about where sites ARE, and with nothing placed the switch
+                    would promise a section that comes back refused. */}
+                {placedCount > 0 && (
+                  <>
+                    <FormControlLabel
+                      sx={{ display: 'flex' }}
+                      control={
+                        <Switch
+                          checked={mcmc.estimate_dispersal}
+                          onChange={(e) => setMcmc({ estimate_dispersal: e.target.checked })}
+                        />
+                      }
+                      label={<span>Spatial dispersal</span>}
+                    />
+                    <FormHelperText sx={{ mt: 0, ml: 0 }}>
+                      Whether these {placedCount} placed dates describe something moving
+                      across the landscape: the direction and speed of a trend, and where
+                      it could have started. Off by default &mdash; a straight line through
+                      dated points returns a speed whether or not there is a front.
+                    </FormHelperText>
+                    {mcmc.estimate_dispersal && (
+                      <Box sx={{ mt: 1, mb: 1 }}>
+                        <Stack direction="row" spacing={1} alignItems="center">
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            startIcon={<PlaceIcon />}
+                            onClick={() => setOriginDialogOpen(true)}
+                          >
+                            {mcmc.dispersal_origin ? 'Move the origin' : 'Place an origin'}
+                          </Button>
+                          {mcmc.dispersal_origin && (
+                            <>
+                              <Typography variant="body2" color="text.secondary">
+                                {mcmc.dispersal_origin.lat.toFixed(3)},{' '}
+                                {mcmc.dispersal_origin.lon.toFixed(3)}
+                              </Typography>
+                              <Button
+                                size="small"
+                                onClick={() => setMcmc({ dispersal_origin: null })}
+                              >
+                                Clear
+                              </Button>
+                            </>
+                          )}
+                        </Stack>
+                        <FormHelperText sx={{ mt: 0.5, ml: 0 }}>
+                          {mcmc.dispersal_origin
+                            ? 'Adds a wave of advance measured from this point, beside the models that assume no origin.'
+                            : 'Optional. Without one you get the trend surface and a profile of where the front could have started, both of which assume no origin. Placing a pin adds a front speed measured from it.'}
+                        </FormHelperText>
+                      </Box>
+                    )}
                   </>
                 )}
                 {/* Draws and the span prior are correct as they stand for
@@ -2176,6 +2248,29 @@ export default function NewAnalysis() {
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* The origin is a position like any other, so it is placed the same
+          way -- with the dates on the map for context, since an origin nobody
+          can see against the sites is a number rather than a decision. */}
+      <PlaceOnMapDialog
+        open={originDialogOpen}
+        onClose={() => setOriginDialogOpen(false)}
+        points={measurements.map((m) => ({
+          id: m.id,
+          name: m.sample_name,
+          latitude: m.latitude ?? null,
+          longitude: m.longitude ?? null,
+        }))}
+        selectedIds={[]}
+        onApply={(latitude, longitude) => {
+          setMcmc({ dispersal_origin: { lat: latitude, lon: longitude } })
+          setOriginDialogOpen(false)
+        }}
+        onClear={() => {
+          setMcmc({ dispersal_origin: null })
+          setOriginDialogOpen(false)
+        }}
+      />
     </Container>
   )
 }
