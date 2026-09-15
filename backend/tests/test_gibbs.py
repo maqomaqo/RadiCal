@@ -529,6 +529,33 @@ class TestTheChainCanActuallyMove:
         state = model.initial_state()
         assert np.isfinite(model.log_posterior(state))
 
+    def test_the_starting_state_leaves_room_below_a_date_at_the_young_edge(self):
+        """
+        A date whose likelihood peaks in the youngest cell of the grid -- a
+        marine shell at 620 BP, which is about what the ocean reads AT 1950,
+        so its likelihood only rises towards the young edge -- used to be
+        placed THERE, and the End boundary that has to be younger than it
+        then had no cell to go to. Found on a fourteen-site regional model,
+        on the atoll with the youngest dates, as "must be older than 0 and
+        younger than -1".
+
+        The oldest-to-youngest walk has to look ahead: a parameter with
+        things below it cannot take the youngest cells those things need.
+        """
+        phase = _element('phase', 'Tongareva')
+        tree = _element('sequence', 'Site', [
+            _element('boundary', 'Start'), phase, _element('boundary', 'End')])
+        shell = dict(_date(phase['id'], 620), curve_id='marine20',
+                     error_1sigma=60, material_type='shell',
+                     sample_type='marine')
+        measurements = [shell, _date(phase['id'], 150)]
+
+        model = gibbs.Model(measurements, tree)
+        # The premise: the naive placement really is the youngest cell.
+        assert int(np.argmax(model.likelihood[shell['id']])) == 0
+        state = model.initial_state()
+        assert np.isfinite(model.log_posterior(state))
+
     def test_a_phase_of_unordered_dates_updates_as_one_block(self):
         """
         Dates in a phase are unordered with respect to each other, so they are

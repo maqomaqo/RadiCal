@@ -1207,9 +1207,30 @@ class Model:
             preferred[boundary_id] = (int(np.mean(neighbours)) if neighbours
                                       else self.M // 2)
 
+        # The youngest cell each parameter may take and still leave room for
+        # everything that must be YOUNGER than it: one cell per link of the
+        # longest chain below, from wherever that chain's own windows floor
+        # it. Without this look-ahead the walk placed a date at its likelihood
+        # mode even when that was the youngest cell of the grid -- a marine
+        # shell at 620 BP peaks at 1950 -- and the End boundary below it then
+        # had no cell to go to. Found on a regional model's youngest atoll.
+        floor: Dict[str, int] = {}
+
+        def compute_floor(param: str) -> int:
+            if param in floor:
+                return floor[param]
+            value = self.window[param][0]
+            for younger in self.above[param]:
+                value = max(value, 1 + compute_floor(younger))
+            floor[param] = value
+            return value
+
+        for param in self.params:
+            compute_floor(param)
+
         index: Dict[str, int] = {}
         for param in sorted(self.params, key=lambda p: depth[p]):
-            lo, hi = self.window[param]
+            lo, hi = floor[param], self.window[param][1]
             for older in self.below[param]:
                 hi = min(hi, index[older] - 1)
             if hi < lo:

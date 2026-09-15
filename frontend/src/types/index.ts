@@ -132,6 +132,16 @@ export interface MatrixMeasurement {
   // The gap's own 1-sigma uncertainty, where it was measured rather than
   // counted (OxCal's V_Sequence). Absent or zero means the gaps are exact.
   ring_offset_error?: number | null
+  // Where the sample is from -- as a coordinate, and as the placename and
+  // context it was filed under. Declared here, not only on DraftMeasurement,
+  // because the tree editor groups dates into SITES on them
+  // (utils/siteGrouping) and sends the coordinates with a spatial-order
+  // proposal, and a saved analysis's measurements carry them just as a
+  // draft's do.
+  latitude?: number | null
+  longitude?: number | null
+  location?: string | null
+  default_context_name?: string | null
 }
 
 export interface DraftMeasurement extends MatrixMeasurement {

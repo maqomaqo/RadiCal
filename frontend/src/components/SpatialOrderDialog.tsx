@@ -66,6 +66,13 @@ export default function SpatialOrderDialog({
   // order and the one the analyst chose agree — and offering to apply it would
   // suggest otherwise.
   const wouldChange = proposal ? proposalChangesAnything(tree, orderedIds) : false
+  // How many of the dates actually carry a coordinate. Counted here, on the
+  // dates themselves, so that a refusal for too few SITES can be told apart
+  // from too few COORDINATES: the server's message names both, but this
+  // dialog can say which one applies to this model.
+  const placedDates = measurements.filter(
+    (m) => m.latitude != null && m.longitude != null,
+  ).length
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
@@ -74,7 +81,23 @@ export default function SpatialOrderDialog({
         {loading && <CircularProgress size={24} />}
         {error && <Alert severity="warning">{error}</Alert>}
 
-        {proposal?.refused && <Alert severity="info">{proposal.refused}</Alert>}
+        {proposal?.refused && (
+          <Alert severity="info">
+            {proposal.refused}
+            {proposal.n_sites < 2 && placedDates > 0 && (
+              <Typography variant="body2" sx={{ mt: 1 }}>
+                <strong>
+                  {placedDates} of {measurements.length} date{measurements.length === 1 ? '' : 's'}{' '}
+                  {placedDates === 1 ? 'carries' : 'carry'} coordinates
+                </strong>
+                , so this is the model's structure rather than the data: the dates sit in a
+                phase no Boundary of its own opens. Close this and use{' '}
+                <em>Group dates into sites</em>, which builds one bracketed Sequence per
+                location, context or position.
+              </Typography>
+            )}
+          </Alert>
+        )}
 
         {proposal && !proposal.refused && (
           <>

@@ -48,6 +48,8 @@ import type { ModelElement, ElementType, ElementParams, MatrixMeasurement } from
 import SortDatesButton from '@/components/SortDatesButton'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import { reorderToProposal } from '@/utils/spatialOrder'
+import { groupingPreview, siteModelTree } from '@/utils/siteGrouping'
+import type { SiteGroupingKey } from '@/utils/siteGrouping'
 import GuideBand from '@/components/GuideBand'
 import type { MeasurementSortKey } from '@/utils/sortMeasurements'
 // Lives in utils because the starting structure built there (see
@@ -1636,6 +1638,10 @@ export default function ModelTreeEditor({
   // Whether the spatial-order proposal is open. A PROPOSAL and nothing else:
   // see SpatialOrderDialog for why it is never applied on its own.
   const [spatialOrderOpen, setSpatialOrderOpen] = useState(false)
+  // The "group into sites" menu, and the key awaiting confirmation. Grouping
+  // REPLACES the model, as the presets do, so it is confirmed the same way.
+  const [groupMenu, setGroupMenu] = useState<HTMLElement | null>(null)
+  const [pendingGrouping, setPendingGrouping] = useState<SiteGroupingKey | null>(null)
   // Containers whose children are hidden. Ids rather than nodes, so a tree
   // edit cannot leave this pointing at something that no longer exists.
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
@@ -1923,6 +1929,37 @@ export default function ModelTreeEditor({
     const built =
       type === 'wiggle_sequence' ? wiggleMatchTree(ids) : depositionSequenceTree(ids)
     onChange(built.tree, built.assignments)
+  }
+
+  /**
+   * Replace the model with one site per distinct value of a column the dates
+   * carry -- a bracketed Sequence each, so the dispersal models can read them
+   * as sites. See utils/siteGrouping for the shape and why it is that one.
+   */
+  const applyGrouping = (by: SiteGroupingKey) => {
+    remember()
+    const built = siteModelTree(measurements, by)
+    onChange(built.tree, built.assignments)
+  }
+
+  // What each key would make of these dates, so the menu can say before the
+  // model is replaced -- and so a key with nothing to group on is disabled
+  // rather than offered and then producing one phase of unassigned dates.
+  const groupingOptions = useMemo(
+    () =>
+      (
+        [
+          ['location', 'Location'],
+          ['context', 'Context'],
+          ['position', 'Position (within 5 km)'],
+        ] as Array<[SiteGroupingKey, string]>
+      ).map(([key, label]) => ({ key, label, ...groupingPreview(measurements, key) })),
+    [measurements],
+  )
+  const groupingLabel: Record<SiteGroupingKey, string> = {
+    location: 'location',
+    context: 'context',
+    position: 'position',
   }
 
   /**
@@ -2300,6 +2337,47 @@ export default function ModelTreeEditor({
             one timber, which is a tax with no payoff.
 
             They REPLACE the model, so they are confirmed like a deletion. */}
+        {/* The dispersal models read the tree as a set of sites, one per
+            Boundary-opened element, and the one starting phase every analysis
+            begins with is none. This builds that structure from a column the
+            dates already carry, which is what makes the map proposal beside
+            it answerable. It REPLACES the model, so it is confirmed like the
+            presets below. */}
+        <Tooltip title="Replace the model with one bracketed Sequence per site, sites read off a column the dates carry — their location, their context, or their coordinates">
+          <Button
+            size="small"
+            startIcon={<AutoFixHighIcon />}
+            onClick={(e) => setGroupMenu(e.currentTarget)}
+            disabled={measurements.length === 0}
+            sx={{ minHeight: 44, flexShrink: 0 }}
+          >
+            Group dates into sites
+          </Button>
+        </Tooltip>
+        <Menu open={!!groupMenu} anchorEl={groupMenu} onClose={() => setGroupMenu(null)}>
+          {groupingOptions.map((option) => (
+            <MenuItem
+              key={option.key}
+              disabled={option.sites === 0}
+              onClick={() => {
+                setGroupMenu(null)
+                setPendingGrouping(option.key)
+              }}
+            >
+              <Box>
+                <Typography variant="body2">By {option.label.toLowerCase()}</Typography>
+                <Typography variant="caption" color="text.secondary">
+                  {option.sites === 0
+                    ? 'No date carries one'
+                    : `${option.sites} site${option.sites === 1 ? '' : 's'}` +
+                      (option.unassigned > 0
+                        ? `, ${option.unassigned} date${option.unassigned === 1 ? '' : 's'} without one`
+                        : '')}
+                </Typography>
+              </Box>
+            </MenuItem>
+          ))}
+        </Menu>
         {/* A PROPOSAL, unlike every other button here: it opens a dialog that
             shows the order and says plainly that spatial adjacency is not
             chronology, and nothing changes unless the analyst accepts. */}
@@ -2376,6 +2454,36 @@ export default function ModelTreeEditor({
         onConfirm={() => {
           if (pendingPreset) applyPreset(pendingPreset)
           setPendingPreset(null)
+        }}
+      />
+
+      <ConfirmDialog
+        open={pendingGrouping !== null}
+        title={`Group the dates into sites by ${pendingGrouping ? groupingLabel[pendingGrouping] : ''}?`}
+        message={
+          pendingGrouping
+            ? (() => {
+                const option = groupingOptions.find((o) => o.key === pendingGrouping)!
+                return (
+                  `Every date goes into a Sequence for its ${groupingLabel[pendingGrouping]} — ` +
+                  `${option.sites} site${option.sites === 1 ? '' : 's'}, each bracketed by its own ` +
+                  `start and end Boundary, inside one unordered phase — and the rest of the structure ` +
+                  `is discarded. No order between the sites is asserted; propose one from the map ` +
+                  `afterwards if you want it.` +
+                  (option.unassigned > 0
+                    ? ` ${option.unassigned} date${option.unassigned === 1 ? ' has' : 's have'} no ` +
+                      `${groupingLabel[pendingGrouping]} and will sit in an unassigned phase beside the sites.`
+                    : '') +
+                  ' Undo restores what is there now.'
+                )
+              })()
+            : ''
+        }
+        confirmLabel="Replace"
+        onCancel={() => setPendingGrouping(null)}
+        onConfirm={() => {
+          if (pendingGrouping) applyGrouping(pendingGrouping)
+          setPendingGrouping(null)
         }}
       />
 

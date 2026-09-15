@@ -89,6 +89,18 @@ SITE_SCATTER_KM = 5.0
 # not be printed.
 MIN_DISPERSAL_SITES = 6
 
+# What a site IS, appended to every "this model has N sites" refusal. The
+# count on its own was read as "the dates have no coordinates" by a user whose
+# 224 dates all carried them: they had been deployed into the one starting
+# phase every analysis begins with, which no Boundary of its own opens, so
+# the tree had nothing for the coordinates to hang on. The number has to say
+# what would raise it.
+SITE_DEFINITION = (
+    'A site is an element opened by its own Boundary — a Sequence bracketed '
+    'by a start and an end, one per place — whose dates carry coordinates. '
+    'Dates with coordinates in one shared phase are not sites: group them '
+    'into sites in the model editor, by location, context or position.')
+
 # Distinct site distances needed before a slope means anything. Two sites at
 # the same distance from the origin constrain the intercept and say nothing
 # about the gradient, so a fit needs at least two distinct radii; with fewer,
@@ -475,7 +487,8 @@ def fit_wave(sites: Sequence[SiteSpec], draws: Dict[str, np.ndarray],
             f'and this model has {len(usable)}. A straight line through fewer '
             'points returns a speed and an interval whichever way the dates '
             'fall, with too few residuals left over for the data to contradict '
-            'it. The number is withheld rather than shown with a caveat.'))
+            f'it. The number is withheld rather than shown with a caveat. '
+            f'{SITE_DEFINITION}'))
 
     distances = np.array(
         [haversine_km(origin[0], origin[1], s.latitude, s.longitude)
@@ -672,7 +685,7 @@ def fit_trend(sites: Sequence[SiteSpec], draws: Dict[str, np.ndarray]) -> Dict:
             f'A trend surface needs at least {MIN_DISPERSAL_SITES} sites and '
             f'this model has {len(usable)}. A plane through three points passes '
             'through them exactly, whatever they are, and reports a gradient '
-            'with nothing left over to contradict it.'))
+            f'with nothing left over to contradict it. {SITE_DEFINITION}'))
 
     x, y, centre = _lambert_azimuthal(usable)
 
@@ -925,7 +938,7 @@ def profile_origin(sites: Sequence[SiteSpec], draws: Dict[str, np.ndarray],
             f'Profiling an origin needs at least {MIN_DISPERSAL_SITES} sites '
             f'and this model has {len(usable)}. With fewer, every candidate '
             'origin fits about as well as every other and the surface says '
-            'nothing.'))
+            f'nothing. {SITE_DEFINITION}'))
 
     lats = np.array([s.latitude for s in usable], dtype=float)
     lons = np.array([s.longitude for s in usable], dtype=float)
@@ -1086,8 +1099,8 @@ def propose_sequence(sites: Sequence[SiteSpec],
         return block(refused=refused_sites[0].refusal)
     if len(usable) < 2:
         return block(refused=(
-            'A spatial order needs at least two placed sites. Add coordinates '
-            'to the dates, or place them on the map.'))
+            f'A spatial order needs at least two placed sites and this model '
+            f'has {len(usable)}. {SITE_DEFINITION}'))
 
     edges = _minimum_spanning_tree(usable)
     neighbours: Dict[int, List[Tuple[int, float]]] = {i: [] for i in range(len(usable))}
