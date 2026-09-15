@@ -37,5 +37,24 @@ export function formatPosition(
   longitude: number | null | undefined,
 ): string | null {
   if (latitude == null || longitude == null) return null
-  return `${latitude}, ${longitude}`
+  return `${trimDegrees(latitude)}, ${trimDegrees(longitude)}`
+}
+
+/**
+ * A degree value as somebody would write it, not as a float prints.
+ *
+ * `String(1.4 * 3)` is "4.199999999999999", and the table showed exactly that
+ * for a site entered at 4.2 -- fifteen significant figures of binary
+ * representation where the user typed two. Six decimals is about 11 cm at the
+ * equator, finer than any coordinate this app accepts is meaningful to, so
+ * nothing real is lost; trailing zeros go too, so 50 stays "50" rather than
+ * becoming "50.000000".
+ *
+ * Display only. The stored value keeps its full precision -- rounding for
+ * EXPORT is a separate, deliberate control (the project's coordinate
+ * precision), and this must not be mistaken for it.
+ */
+function trimDegrees(value: number): string {
+  if (!Number.isFinite(value)) return String(value)
+  return String(Number(value.toFixed(6)))
 }

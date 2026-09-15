@@ -16,7 +16,7 @@
  * anchored to its button. Both keep the selection on screen while it is
  * edited, where a modal would cover it.
  */
-import { useMemo, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import {
   Box,
   Button,
@@ -125,6 +125,16 @@ export default function SampleSelectionBar({
       deltaRError.trim() !== '' &&
       Number.isFinite(deltaRErrorNumber) &&
       deltaRErrorNumber >= 0)
+
+  // Keeping the ΔR popover on screen as it grows. See the Popover below.
+  const popoverAction = useRef<{ updatePosition: () => void } | null>(null)
+  const observer = useRef<ResizeObserver | null>(null)
+  const popoverPaper = useCallback((node: HTMLElement | null) => {
+    observer.current?.disconnect()
+    if (!node || typeof ResizeObserver === 'undefined') return
+    observer.current = new ResizeObserver(() => popoverAction.current?.updatePosition())
+    observer.current.observe(node)
+  }, [])
 
   const closeDelta = () => {
     setDeltaAnchor(null)
@@ -299,6 +309,21 @@ export default function SampleSelectionBar({
         open={Boolean(deltaAnchor)}
         onClose={closeDelta}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+        // MUI positions a popover ONCE, when it opens. This one grows after
+        // that: the lookup tab fetches, and ten point rows and a
+        // counterfactual arrive into a paper that was measured while it still
+        // held a two-field form. Measured in the real app, that is 709px of
+        // popover opening at y=629 on a 1200px viewport -- so Cancel and Apply
+        // sit 138px below the fold, with nothing to scroll, because the paper
+        // had already grown to fit. The buttons were simply unreachable.
+        //
+        // `action.updatePosition()` re-runs MUI's own clamp, which moves the
+        // paper up so it fits. A ResizeObserver drives it, rather than the two
+        // components coordinating: anything that changes the height -- the tab,
+        // the fetch, excluding a point, the suspension-only toggle -- is the
+        // same event to a box that got taller.
+        action={popoverAction}
+        slotProps={{ paper: { ref: popoverPaper, sx: { maxHeight: 'calc(100vh - 32px)' } } }}
       >
         <Tabs
           value={deltaTab}

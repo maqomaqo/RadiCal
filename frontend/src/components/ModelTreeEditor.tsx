@@ -2342,7 +2342,17 @@ export default function ModelTreeEditor({
           <SpatialOrderDialog
             open
             tree={tree}
-            measurements={measurements}
+            // With the phase assignment MERGED IN. The draft keeps
+            // `assignments` beside the measurements rather than on them, so a
+            // date here carries a position but no element_id -- and
+            // derive_sites groups dates by element_id, so every date would
+            // look unassigned and the proposal would refuse for having no
+            // placed sites, on a model where every date is placed. Found by
+            // driving the real app.
+            measurements={measurements.map((m) => ({
+              ...m,
+              element_id: assignments[m.id] || m.element_id || m.group_id || null,
+            }))}
             onClose={() => setSpatialOrderOpen(false)}
             onApply={applySpatialOrder}
           />
