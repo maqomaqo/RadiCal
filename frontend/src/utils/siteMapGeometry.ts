@@ -254,11 +254,12 @@ const PADDING = 0.25
  * A single site has no extent, and a zero-width range is not a map. Six
  * degrees is about the width of Britain, and it is chosen to match what the
  * basemap can honestly draw rather than what a reader might like: the vendored
- * geometry is Natural Earth 110m, which at a county-sized window renders a
- * coastline as visible straight-line segments and an island as a polygon. A
- * map zoomed past its own data invites a precision it does not have -- and
- * placing a pin at site precision is exactly the job the offline basemap is
- * not for, which is why tiles exist as a per-project opt-in.
+ * geometry is Natural Earth 50m, which holds up at a window this size and
+ * not much tighter -- at a county-sized one it renders a coastline as visible
+ * straight-line segments and an island as a polygon. A map zoomed past its
+ * own data invites a precision it does not have -- and placing a pin at site
+ * precision is exactly the job the offline basemap is not for, which is why
+ * tiles exist as a per-project opt-in.
  */
 const MINIMUM_SPAN = 6
 

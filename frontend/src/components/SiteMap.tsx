@@ -27,12 +27,21 @@ const Plot = createPlotlyComponent(Plotly)
  * Where the basemap geometry is served from -- this app, not a CDN.
  *
  * Plotly builds the request as `${topojsonURL}${scope}_${resolution}m.json`,
- * so this directory must contain `world_110m.json`; see public/geo/README.md
- * for why it is vendored rather than fetched. Left unset, Plotly goes to
+ * so this directory must contain `world_${GEO_RESOLUTION}m.json`; see
+ * public/geo/README.md for why it is vendored rather than fetched. Left unset, Plotly goes to
  * cdn.plot.ly, and on a network that cannot reach it the plot does not degrade
  * -- it rejects, and there is no map at all.
  */
 const TOPOJSON_URL = '/geo/'
+
+/**
+ * Natural Earth 1:50m rather than Plotly's default 1:110m. The map opens on
+ * a six-degree window at its tightest, and at that scale the 110m geometry
+ * drew a coastline as visible straight segments and an island as a polygon;
+ * 50m holds up there. It is six times the download (1.7 MB against 285 kB),
+ * fetched once per page load and cached by the browser thereafter.
+ */
+const GEO_RESOLUTION = 50
 
 /**
  * The basemap could not say where the click landed -- distinct from "that
@@ -526,6 +535,7 @@ export default function SiteMap({
       ...common,
       geo: {
         scope: 'world' as const,
+        resolution: GEO_RESOLUTION,
         projection: { type: 'natural earth' as const },
         showcoastlines: true,
         coastlinecolor: plot.axis,

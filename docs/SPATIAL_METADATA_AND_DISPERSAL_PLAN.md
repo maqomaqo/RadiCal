@@ -833,9 +833,12 @@ which 2.35 deprecates; both are in the bundle. One `SiteMap` component covers ev
   geometry: left alone it fetches `https://cdn.plot.ly/world_110m.json` at render time, and where
   that request cannot be made `Plotly.newPlot` **rejects** — the map does not degrade to a blank
   basemap, it does not appear. Verified in Chromium against the 2.35.3 bundle. The property above
-  is therefore something the app must *do*, not something it gets: `world_110m.json` (278 KB,
+  is therefore something the app must *do*, not something it gets: `world_50m.json` (1.7 MB,
   Natural Earth via Plotly, MIT) is served from `frontend/public/geo/` and `config.topojsonURL`
-  points at it. See `public/geo/README.md` for provenance and how to refresh it.
+  points at it, with `geo.resolution: 50` so Plotly asks for that file rather than its 110m
+  default. *[2026-09-15]* Started at 110m (278 KB); moved to 50m because the map's tightest
+  window is six degrees, where 110m drew coastlines as straight segments. See
+  `public/geo/README.md` for provenance and how to refresh it.
 - **Tiles are opt-in per project** (`scattermap`, `open-street-map`; `projects.map_tiles_enabled`), for the one job the offline
   map cannot do: dropping a pin at site precision. Enabled once, behind a notice naming what a tile
   request discloses.

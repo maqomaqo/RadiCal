@@ -92,7 +92,7 @@ describe('frameFor', () => {
 
   it('opens on a readable window around a single site', () => {
     // One point has no extent, and a zero-width range is not a map. The span
-    // is set by what 110m geometry can draw without looking like a polygon,
+    // is set by what 50m geometry can draw without looking like a polygon,
     // not by how close the reader would like to get.
     const frame = frameFor(groupIntoSites([point('A', 54.5, -5.6)]))!
     expect(frame.lat[1] - frame.lat[0]).toBeCloseTo(6)
