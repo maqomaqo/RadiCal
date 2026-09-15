@@ -709,3 +709,111 @@ class TestUnprojecting:
         sites, _draws = _grid(0.0)
         x, y, centre = dispersal._lambert_azimuthal(sites)
         assert dispersal._unproject(0.0, 0.0, centre) == centre
+
+
+# --------------------------------------------------------------------------
+# Profiling the origin
+# --------------------------------------------------------------------------
+
+class TestProfilingAnOrigin:
+    """
+    §6.4 mode 2: what the data say about where the front started, when nobody
+    has told them. The answer is a SURFACE, and most of these tests are about
+    the app being honest about how broad it is.
+    """
+
+    def test_the_true_origin_is_inside_the_region(self):
+        """The one thing the profile has to get right. A region that excluded
+        the origin the data were built from would be worse than no region."""
+        sites, draws, origin = _front(n_sites=8, scatter=60.0, seed=4)
+        profile = dispersal.profile_origin(sites, draws)
+
+        near = [p for p in profile['region']
+                if abs(p['lat'] - origin[0]) <= 1.0 and abs(p['lon'] - origin[1]) <= 1.0]
+        assert near, 'the true origin fell outside the supported region'
+
+    def test_the_region_is_long_along_the_front_and_narrow_across_it(self):
+        """
+        The degeneracy that makes this a region rather than a point: sliding
+        the origin BACKWARDS along the line of travel and adjusting t0 to match
+        fits almost exactly as well. That is a real property of the model, so
+        the surface has to show it rather than hide it behind a best guess.
+        """
+        sites, draws, _origin = _front(n_sites=8, scatter=60.0, seed=4)
+        region = dispersal.profile_origin(sites, draws)['region']
+
+        # The front runs due east along latitude zero.
+        along = max(p['lon'] for p in region) - min(p['lon'] for p in region)
+        across = max(p['lat'] for p in region) - min(p['lat'] for p in region)
+        assert along > across
+
+    def test_it_says_how_much_of_the_grid_survived(self):
+        """
+        Near 1 the data do not locate an origin at all -- which is a finding,
+        and exactly what a single best-guess marker would have hidden.
+        """
+        sites, draws, _origin = _front(n_sites=8, scatter=60.0, seed=4)
+        profile = dispersal.profile_origin(sites, draws)
+        assert 0.0 < profile['share_inside'] <= 1.0
+        assert profile['candidates'] > len(profile['region'])
+
+    def test_support_is_a_ratio_against_the_best_candidate(self):
+        sites, draws, _origin = _front(n_sites=8, scatter=60.0, seed=4)
+        region = dispersal.profile_origin(sites, draws)['region']
+        assert all(0.0 < p['support'] <= 1.0 for p in region)
+        assert max(p['support'] for p in region) == pytest.approx(1.0)
+        assert all(p['support'] >= dispersal.ORIGIN_SUPPORT_CUTOFF for p in region)
+
+    def test_the_peak_sits_inside_the_region_it_defines(self):
+        sites, draws, _origin = _front(n_sites=8, scatter=60.0, seed=4)
+        profile = dispersal.profile_origin(sites, draws)
+        peak = profile['peak']
+        assert any(p['lat'] == peak['lat'] and p['lon'] == peak['lon']
+                   for p in profile['region'])
+
+    def test_a_tighter_front_gives_a_tighter_region(self):
+        """If chronological precision did not narrow the surface, the profile
+        would not be using the draws for anything."""
+        loose = dispersal.profile_origin(*_front(n_sites=8, scatter=400.0, seed=8)[:2])
+        tight = dispersal.profile_origin(*_front(n_sites=8, scatter=5.0, seed=8)[:2])
+        assert tight['share_inside'] < loose['share_inside']
+
+    def test_five_sites_are_refused(self):
+        sites, draws, _origin = _front(n_sites=5)
+        profile = dispersal.profile_origin(sites, draws)
+        assert profile['region'] == []
+        assert str(dispersal.MIN_DISPERSAL_SITES) in profile['refused']
+
+    def test_a_site_in_two_places_refuses_the_profile(self):
+        sites, draws, _origin = _front(n_sites=8)
+        sites.append(dispersal.SiteSpec(
+            element_id='bad', name='Mixed', parameter_id='bbad',
+            basis='boundary', refusal='two places in one phase'))
+        assert dispersal.profile_origin(
+            sites, draws)['refused'] == 'two places in one phase'
+
+    def test_the_grid_widens_rather_than_exploding(self):
+        """
+        A continental spread at one degree would be tens of thousands of
+        candidates, to locate the maximum of a surface that is flat where it
+        matters. The step widens instead, and says that it did.
+        """
+        sites, draws, _origin = _front(n_sites=8)
+        for index, site in enumerate(sites):
+            site.latitude = -40.0 + 12.0 * index
+            site.longitude = -60.0 + 15.0 * index
+        profile = dispersal.profile_origin(sites, draws)
+
+        assert profile['candidates'] <= dispersal.MAX_ORIGIN_CANDIDATES
+        assert profile['step_deg'] > dispersal.ORIGIN_GRID_DEG
+
+    def test_it_looks_outside_the_sites_own_box(self):
+        """
+        A front's origin is very often outside the excavated area -- that is
+        usually the whole question -- so a grid clipped to the sites could not
+        find it.
+        """
+        sites, draws, _origin = _front(n_sites=8)
+        profile = dispersal.profile_origin(sites, draws)
+        west = min(s.longitude for s in sites)
+        assert any(p['lon'] < west for p in profile['region'])

@@ -384,11 +384,41 @@ export interface TrendFit {
   degenerate_draws?: number
 }
 
-/** Both spatial models, side by side. */
+/**
+ * Where the front could have started, as a surface rather than a point.
+ *
+ * A REGION deliberately. The profile is nearly flat along the front's own
+ * axis — sliding the origin backwards along the line of travel and adjusting
+ * t₀ to match fits almost as well — which is a real property of the model, so
+ * the peak is not a location and reporting it as one would be false
+ * precision.
+ */
+export interface OriginProfile {
+  n_sites: number
+  min_sites: number
+  refused: string | null
+  /** Grid spacing actually used; widens for a continental spread. */
+  step_deg: number | null
+  candidates: number
+  /** The peak of something broad — not "the origin". */
+  peak: { lat: number; lon: number } | null
+  region: Array<{ lat: number; lon: number; support: number }>
+  /** The likelihood-ratio contour the region is drawn at. */
+  cutoff: number
+  /**
+   * Share of the searched grid inside the region. Near 1 means the data do
+   * not locate an origin at all — a finding, and the thing a single
+   * best-guess marker would have hidden.
+   */
+  share_inside?: number
+}
+
+/** The spatial models, side by side. */
 export interface DispersalSection {
   /** Null when no origin was placed: there is nothing to measure a front from. */
   wave: DispersalFit | null
   trend: TrendFit | null
+  origin_profile?: OriginProfile | null
 }
 
 export interface DispersalFit {

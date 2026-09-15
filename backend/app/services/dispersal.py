@@ -827,3 +827,169 @@ def _round_step(raw: float) -> float:
         if raw <= multiple * magnitude:
             return multiple * magnitude
     return 10.0 * magnitude
+
+
+# --------------------------------------------------------------------------
+# Profiling the origin (§6.4, mode 2)
+# --------------------------------------------------------------------------
+
+# How coarse the candidate grid is, in degrees. One degree is about 111 km
+# north-south, which is the right order for a question whose answer is a
+# REGION: a finer grid would compute a more precise location for a maximum
+# that is not precisely located, and invite exactly the false precision this
+# mode exists to avoid.
+ORIGIN_GRID_DEG = 1.0
+
+# How far outside the sites' own bounding box to look, in degrees. A front's
+# origin is very often outside the excavated area -- that is usually the whole
+# question -- so a grid clipped to the sites could not find it.
+ORIGIN_MARGIN_DEG = 6.0
+
+# Most candidates to evaluate. A global dataset would otherwise generate tens
+# of thousands of them; past this the step widens instead, and the step that
+# was actually used is reported.
+MAX_ORIGIN_CANDIDATES = 2500
+
+# The support contour the reported region is drawn at.
+#
+# 1/8 of the peak, which is the conventional "strong evidence" cut on a
+# likelihood ratio and is deliberately NOT a confidence region: this is a
+# profile over an assumed model, not a posterior, and calling it 95% would
+# claim a coverage property nothing here has established.
+ORIGIN_SUPPORT_CUTOFF = 0.125
+
+
+def _ols_per_draw(distances: np.ndarray,
+                  ages: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    (slope, intercept, residual sum of squares), one per draw.
+
+    Closed form rather than lstsq per draw: the design is the same for every
+    draw because the sites do not move, so this is one pass of arithmetic
+    where a loop would be thousands of decompositions of one matrix.
+    """
+    centred = distances - distances.mean()
+    denominator = float((centred ** 2).sum())
+    mean_t = ages.mean(axis=1)
+    slope = (ages - mean_t[:, None]) @ centred / denominator
+    intercept = mean_t - slope * distances.mean()
+    fitted = intercept[:, None] + slope[:, None] * distances[None, :]
+    return slope, intercept, ((ages - fitted) ** 2).sum(axis=1)
+
+
+def profile_origin(sites: Sequence[SiteSpec], draws: Dict[str, np.ndarray],
+                   step_deg: float = ORIGIN_GRID_DEG) -> Dict:
+    """
+    Where the front could have started, as a surface rather than a point.
+
+    Mode 2 of §6.4, and the answer to the objection the whole feature invites:
+    a wave of advance fitted from a PLACED origin tests somebody's hypothesis,
+    and this asks what the data would have said without one. For every
+    candidate origin on a coarse grid, fit the wave and keep how badly it fits;
+    the output is the whole surface.
+
+    **A region, deliberately, and not a best guess.** The profile is nearly
+    flat along the front's own axis -- moving the origin backwards along the
+    line of travel and adjusting t0 to match fits almost exactly as well, which
+    is a real property of the model and not a defect of the arithmetic. So the
+    peak of this surface is not a location, and reporting it as one would be
+    the false precision the mode exists to avoid. What is reported is the
+    contour, with the peak named as the peak of something broad.
+
+    Support is a likelihood ratio against the best candidate. For Gaussian
+    residuals the profile log-likelihood at a candidate is -n/2 * log(RSS) with
+    the scale concentrated out, averaged over draws -- so the chronological
+    uncertainty is inside the surface rather than applied to it afterwards.
+    """
+    usable = [s for s in sites if s.usable and s.parameter_id in draws]
+    refused_sites = [s for s in sites if s.refusal]
+
+    def block(**extra) -> Dict:
+        base = {
+            'n_sites': len(usable),
+            'min_sites': MIN_DISPERSAL_SITES,
+            'refused': None,
+            'step_deg': None,
+            'candidates': 0,
+            'peak': None,
+            'region': [],
+            'cutoff': ORIGIN_SUPPORT_CUTOFF,
+        }
+        base.update(extra)
+        return base
+
+    if refused_sites:
+        return block(refused=refused_sites[0].refusal)
+    if len(usable) < MIN_DISPERSAL_SITES:
+        return block(refused=(
+            f'Profiling an origin needs at least {MIN_DISPERSAL_SITES} sites '
+            f'and this model has {len(usable)}. With fewer, every candidate '
+            'origin fits about as well as every other and the surface says '
+            'nothing.'))
+
+    lats = np.array([s.latitude for s in usable], dtype=float)
+    lons = np.array([s.longitude for s in usable], dtype=float)
+    ages = np.column_stack([np.asarray(draws[s.parameter_id], dtype=float)
+                            for s in usable])
+    n_sites = len(usable)
+
+    # Widen the step rather than evaluate more candidates: a finer grid over a
+    # continental spread would be a lot of arithmetic to locate the maximum of
+    # a surface that is flat where it matters.
+    step = float(step_deg)
+    while True:
+        lat_axis = np.arange(lats.min() - ORIGIN_MARGIN_DEG,
+                             lats.max() + ORIGIN_MARGIN_DEG + step / 2, step)
+        lon_axis = np.arange(lons.min() - ORIGIN_MARGIN_DEG,
+                             lons.max() + ORIGIN_MARGIN_DEG + step / 2, step)
+        lat_axis = lat_axis[(lat_axis >= -90.0) & (lat_axis <= 90.0)]
+        if lat_axis.size * lon_axis.size <= MAX_ORIGIN_CANDIDATES:
+            break
+        step *= 2.0
+
+    scores: List[Tuple[float, float, float]] = []
+    for lat in lat_axis:
+        for lon in lon_axis:
+            wrapped = (float(lon) + 180.0) % 360.0 - 180.0
+            distances = np.array(
+                [haversine_km(float(lat), wrapped, s.latitude, s.longitude)
+                 for s in usable], dtype=float)
+            if len(np.unique(np.round(distances, 6))) < MIN_DISTINCT_DISTANCES:
+                # Sites on one circle around this candidate: no gradient to
+                # estimate, so it is not a candidate at all rather than a
+                # candidate that fits badly.
+                continue
+            _slope, _intercept, rss = _ols_per_draw(distances, ages)
+            # Concentrated-out scale, averaged over draws. Guarded because a
+            # perfect fit on a synthetic front really does give RSS = 0.
+            score = float(np.mean(-0.5 * n_sites * np.log(np.maximum(rss, 1e-12))))
+            scores.append((float(lat), wrapped, score))
+
+    if not scores:
+        return block(step_deg=step, refused=(
+            'No candidate origin gave the sites distinct enough distances for '
+            'a front to be fitted from it.'))
+
+    best = max(score for _lat, _lon, score in scores)
+    region = [{
+        'lat': lat,
+        'lon': lon,
+        # Likelihood ratio against the best candidate, in (0, 1].
+        'support': float(math.exp(min(0.0, score - best))),
+    } for lat, lon, score in scores]
+    inside = [point for point in region
+              if point['support'] >= ORIGIN_SUPPORT_CUTOFF]
+    peak = max(region, key=lambda point: point['support'])
+
+    return block(
+        step_deg=step,
+        candidates=len(region),
+        # Named as the peak of the region rather than as "the origin": see the
+        # docstring for why this surface has no single location in it.
+        peak={'lat': peak['lat'], 'lon': peak['lon']},
+        region=inside,
+        # How much of the searched grid survives the cutoff. Near 1 the data
+        # do not locate an origin at all, which is a finding and is exactly
+        # what a single best-guess marker would have hidden.
+        share_inside=(len(inside) / len(region)),
+    )

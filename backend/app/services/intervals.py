@@ -810,12 +810,13 @@ def _dispersal_section(sites, draws: Dict[str, np.ndarray],
     """
     The two spatial models, side by side.
 
-    Both are always computed when either is, because they answer different
+    All three are computed when any is, because they answer different
     questions off the same draws and comparing them is the point: a tidy wave
-    from an assumed origin together with a trend pointing somewhere else means
-    the ORIGIN is wrong, which is a finding neither model makes alone. The
-    trend costs one more pseudo-inverse, so there is no reason to make the
-    reader ask for it separately.
+    from an assumed origin, together with a trend pointing somewhere else and a
+    profile whose region does not contain the pin, says the ORIGIN is wrong --
+    which is a finding no one of them makes alone. None of the three costs
+    more than a fraction of a second once the draws exist, so there is no
+    reason to make the reader ask for them separately.
     """
     from app.services import dispersal as dispersal_service
     origin = spec.get('origin')
@@ -825,6 +826,10 @@ def _dispersal_section(sites, draws: Dict[str, np.ndarray],
         'wave': (dispersal_service.fit_wave(sites, draws, origin)
                  if origin is not None else None),
         'trend': dispersal_service.fit_trend(sites, draws),
+        # Always computed, origin or not. With a pin it is the check on the
+        # pin; without one it is the only thing here that has anything to say
+        # about where the front started.
+        'origin_profile': dispersal_service.profile_origin(sites, draws),
     }
 
 

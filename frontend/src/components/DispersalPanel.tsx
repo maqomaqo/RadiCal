@@ -42,7 +42,13 @@ import {
   type DateFormat,
 } from '@/utils/dateFormat'
 import { arrivalAges, compassPoint, frontLine, speedText } from '@/utils/dispersalFigure'
-import type { DispersalFit, DispersalSection, TrendFit } from '@/types'
+import type {
+  DispersalFit,
+  DispersalSection,
+  DispersalSite,
+  OriginProfile,
+  TrendFit,
+} from '@/types'
 
 interface Props {
   section: DispersalSection
@@ -52,7 +58,7 @@ interface Props {
 }
 
 export default function DispersalPanel({ section, dateFormat, tiles = false }: Props) {
-  const { wave, trend } = section
+  const { wave, trend, origin_profile: profile } = section
   return (
     <Stack spacing={3}>
       {/* The trend first, deliberately. It assumes no origin, so it is the
@@ -60,11 +66,21 @@ export default function DispersalPanel({ section, dateFormat, tiles = false }: P
           meets the wave first has already accepted somebody's origin before
           seeing whether the dates point that way at all. */}
       {trend && <TrendCard trend={trend} tiles={tiles} />}
+      {profile && (
+        <OriginProfileCard
+          profile={profile}
+          wave={wave}
+          // The sites, for scale: a region of candidate origins is unreadable
+          // without the excavations it was derived from beside it.
+          sites={(trend?.sites || wave?.sites || [])}
+          tiles={tiles}
+        />
+      )}
       {wave && <WaveCard fit={wave} dateFormat={dateFormat} tiles={tiles} />}
       {!wave && trend && !trend.refused && (
         <Alert severity="info">
           No origin was placed, so no front <strong>speed from a point</strong> was
-          fitted — only the trend above, which assumes none. Place an origin on the
+          fitted — only the models above, which assume none. Place an origin on the
           map and re-run to add a wave of advance measured from it.
         </Alert>
       )}
@@ -448,6 +464,141 @@ function TrendCard({ trend, tiles }: { trend: TrendFit; tiles: boolean }) {
             median surface. On a plane they are straight, parallel and evenly spaced — so
             a curved front, or one that speeds up, is a model this does not fit.
           </Typography>
+        </>
+      )}
+    </Paper>
+  )
+}
+
+/**
+ * Where the front could have started, asked of the data rather than assumed.
+ *
+ * WHY THIS IS A REGION AND NOT A PIN. The profile is nearly flat along the
+ * front's own axis: sliding the origin backwards along the line of travel and
+ * adjusting t₀ to match fits almost exactly as well. That is a real property
+ * of the model, not a defect of the arithmetic, so a single best-guess marker
+ * would be a confident answer to a question the data do not settle — the
+ * exact failure this whole feature is most exposed to.
+ *
+ * WHY IT SITS BETWEEN THE TREND AND THE WAVE. It is the check on the pin. A
+ * reader who has just seen the trend and is about to read a speed measured
+ * from somebody's origin should first see whether the data put the origin
+ * anywhere near it.
+ */
+function OriginProfileCard({ profile, wave, sites, tiles }: {
+  profile: OriginProfile
+  wave: DispersalFit | null
+  sites: DispersalSite[]
+  tiles: boolean
+}) {
+  const placedOutside =
+    wave && profile.region.length > 0 && profile.step_deg
+      ? !profile.region.some(
+          (cell) =>
+            Math.abs(cell.lat - wave.origin.lat) <= profile.step_deg! &&
+            Math.abs(cell.lon - wave.origin.lon) <= profile.step_deg!
+        )
+      : false
+
+  const broad = (profile.share_inside ?? 0) > 0.5
+
+  return (
+    <Paper sx={{ p: 3 }}>
+      <Stack direction="row" alignItems="baseline" spacing={1} sx={{ mb: 0.5 }}>
+        <Typography variant="h6" component="h2">
+          Where it could have started
+        </Typography>
+        <Typography variant="body2" color="text.secondary">
+          profiled, not assumed
+        </Typography>
+      </Stack>
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 2, maxWidth: '74ch' }}>
+        Every position on a coarse grid tried as an origin, and how well a front from
+        each one fits. The shaded cells are those within{' '}
+        {(profile.cutoff * 100).toFixed(0)}% of the best — a support contour, not a
+        confidence region: this is a profile over an assumed model, and calling it 95%
+        would claim a coverage property nothing here has established.
+      </Typography>
+
+      {profile.refused ? (
+        <Alert severity="info">{profile.refused}</Alert>
+      ) : (
+        <>
+          <Box sx={{ mb: 2 }}>
+            <SiteMap
+              points={sites
+                .filter((s) => s.latitude !== null && s.longitude !== null && !s.refusal)
+                .map((s) => ({
+                  id: s.element_id,
+                  name: s.name,
+                  latitude: s.latitude as number,
+                  longitude: s.longitude as number,
+                }))}
+              region={profile.region}
+              regionStepDeg={profile.step_deg || 1}
+              origin={wave ? { latitude: wave.origin.lat, longitude: wave.origin.lon } : null}
+              tiles={tiles}
+              height={380}
+              exportName="origin-profile"
+            />
+          </Box>
+
+          <Stack
+            direction={{ xs: 'column', sm: 'row' }}
+            spacing={3}
+            sx={{ mb: 2 }}
+            divider={<Box sx={{ borderLeft: 1, borderColor: 'divider' }} />}
+          >
+            {profile.peak && (
+              <Box>
+                <Typography variant="overline" color="text.secondary" display="block">
+                  Best-fitting cell
+                </Typography>
+                <Typography variant="h5" component="p">
+                  {profile.peak.lat.toFixed(1)}, {profile.peak.lon.toFixed(1)}
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  the peak of something broad
+                </Typography>
+              </Box>
+            )}
+            <Box>
+              <Typography variant="overline" color="text.secondary" display="block">
+                Region
+              </Typography>
+              <Typography variant="h5" component="p">
+                {profile.region.length.toLocaleString()}
+                <Typography variant="body1" component="span" color="text.secondary">
+                  {' '}of {profile.candidates.toLocaleString()} cells
+                </Typography>
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                on a {profile.step_deg}° grid
+              </Typography>
+            </Box>
+          </Stack>
+
+          {/* The finding a best-guess marker would have hidden. */}
+          {broad && (
+            <Alert severity="warning" sx={{ mb: 2 }}>
+              The region covers{' '}
+              <strong>{Math.round((profile.share_inside ?? 0) * 100)}%</strong> of the
+              grid searched: these dates do <strong>not</strong> locate an origin. That
+              is the expected shape when a front is sampled along one axis — sliding the
+              start backwards along the line of travel fits just as well — and it is a
+              result, not a failure of the search.
+            </Alert>
+          )}
+
+          {placedOutside && (
+            <Alert severity="warning" sx={{ mb: 2 }}>
+              The origin used for the wave of advance below — {wave!.origin.lat.toFixed(3)},{' '}
+              {wave!.origin.lon.toFixed(3)} — falls <strong>outside</strong> this region.
+              The speed reported there is still the speed from that point, correctly
+              computed; what this says is that the dates fit a front from somewhere else
+              considerably better.
+            </Alert>
+          )}
         </>
       )}
     </Paper>

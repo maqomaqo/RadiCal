@@ -1450,7 +1450,7 @@ sequential arrival ramp, the front, the origin; the speed block; the residual ta
 caveats in the panel. Origin placement reuses 2b's pin. *Done when* a Neolithic-scale synthetic
 lands near 1 km/yr in the UI (§10 landmark).
 
-### Features 7–9 — **7 done 2026-09-15**
+### Features 7–9 — **7–8 done 2026-09-15**
 
 **7.** `fit_trend(sites, draws)` in `dispersal.py`: Lambert azimuthal at the centroid, per-draw
 plane fit, speed and azimuth with circular mean/interval; isochrons on `SiteMap`. **8.** Origin
@@ -1487,6 +1487,29 @@ Verified in Chromium on a real solve of a north-east front: trend **0.681 km/yr 
 49°–61°, R = 0.999**, against a wave of **0.688 km/yr** from a placed origin — the two models
 agreeing to within 1%, which is the cross-check having both on the page buys. Isochrons run NW–SE,
 perpendicular to the advance. Still zero external requests.
+
+Three things in 8:
+
+- **It is computed whether or not an origin was placed, and it is the check on the pin.** With a
+  pin, the profile says whether the data put the origin anywhere near it — so the card sits
+  *between* the trend and the wave, where a reader meets it before reading a speed measured from
+  somebody's assumption. Without one it is the only thing in the section with anything to say about
+  where the front began.
+- **The cutoff is a support contour and is not called a confidence region.** 1/8 of the peak, the
+  conventional likelihood-ratio cut. This is a profile over an assumed model, not a posterior, and
+  labelling it 95% would claim a coverage property nothing here has established — the §6.3 coverage
+  test measures the interval on *v*, not this.
+- **`share_inside` is reported because the honest answer is often "nowhere in particular".** The
+  surface is nearly flat along the front's own axis: sliding the origin backwards along the line of
+  travel and adjusting *t₀* to match fits almost as well. On a **transect** the region covers ~50%
+  of the grid searched, and the panel says so in as many words; on a **two-dimensional site layout**
+  the same code gives 15 cells of 240 (6%). That contrast is the feature working, and a single
+  best-guess marker would have shown the same confident pin in both cases.
+
+Rendered, the region is a diagonal band running south-west from the sites — down-axis from a
+north-east front, which is the degeneracy above made visible. `SiteMap` now frames on *everything*
+drawn rather than on the site marks alone: the profile map has a region and no marks of its own,
+and the first render put a 15-cell region on a map of the whole world.
 
 ### What this sequence does not schedule
 

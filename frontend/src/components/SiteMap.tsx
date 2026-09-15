@@ -159,6 +159,18 @@ interface SiteMapProps {
    * themselves were a quantity.
    */
   isochrons?: Array<{ age: number; points: Array<{ latitude: number; longitude: number }> }>
+  /**
+   * A likelihood region: candidate positions with a support in (0, 1].
+   *
+   * Drawn as translucent square cells rather than as a contour, because that
+   * is what it IS -- a coarse grid of candidates, each evaluated -- and a
+   * smooth contour drawn through them would imply a resolution the grid does
+   * not have. Under everything else, since it is the backdrop a reader checks
+   * the marks against.
+   */
+  region?: Array<{ lat: number; lon: number; support: number }>
+  /** What one region cell spans, in degrees, so the cells read as the grid. */
+  regionStepDeg?: number
 }
 
 /**
@@ -194,6 +206,8 @@ export default function SiteMap({
   front,
   origin,
   isochrons,
+  region,
+  regionStepDeg = 1,
 }: SiteMapProps) {
   const plot = usePlotColors()
   const plotFont = usePlotFont()
@@ -207,8 +221,20 @@ export default function SiteMap({
 
   const { sites, missing, frame } = useMemo(() => {
     const grouped = groupIntoSites(points)
-    return { sites: grouped, missing: unplaced(points), frame: frameFor(grouped) }
-  }, [points])
+    // Framed on EVERYTHING drawn, not only on the sites. A figure whose
+    // content is a likelihood region and no marks at all -- the origin profile
+    // is exactly that -- would otherwise fall back to the whole globe, which
+    // is what a first render showed: a 15-cell region rendered as a smudge
+    // over western Europe on a world map.
+    const framing = [
+      ...grouped,
+      ...(region || []).map((cell) => ({ latitude: cell.lat, longitude: cell.lon })),
+      ...(front || []),
+      ...(isochrons || []).flatMap((line) => line.points),
+      ...(origin ? [origin] : []),
+    ] as MapSite[]
+    return { sites: grouped, missing: unplaced(points), frame: frameFor(framing) }
+  }, [points, region, front, isochrons, origin])
 
   const traces = useMemo(() => {
     // Split by selection rather than coloured per mark, so the two sets are
@@ -240,8 +266,34 @@ export default function SiteMap({
       'scattermap' | 'scattergeo'
     const list: unknown[] = []
 
-    // Isochrons first of all, so every mark and every other line sits over
-    // them: they are the surface the rest is drawn on.
+    // The likelihood region underneath everything: it is the backdrop the
+    // marks are read against, and drawn over them it would bury them.
+    if (region && region.length > 0) {
+      const last = VALUE_RAMP.length - 1
+      list.push({
+        type: geoType,
+        mode: 'markers' as const,
+        name: 'Origin region',
+        lat: region.map((cell) => cell.lat),
+        lon: region.map((cell) => cell.lon),
+        text: region.map((cell) => `support ${cell.support.toFixed(2)}`),
+        marker: {
+          // Square, and sized to the grid step, so the cells read as the
+          // coarse grid this is rather than as a set of observations.
+          symbol: tiles ? undefined : ('square' as const),
+          size: Math.max(8, 14 * regionStepDeg),
+          color: region.map((cell) => cell.support),
+          colorscale: VALUE_RAMP.map((hex, i) => [i / last, hex]),
+          cmin: 0,
+          cmax: 1,
+          opacity: 0.45,
+          line: { width: 0 },
+        },
+        hovertemplate: '%{text}<br>%{lat:.1f}, %{lon:.1f}<extra></extra>',
+      })
+    }
+
+    // Isochrons next, so every mark and every other line sits over them.
     for (const line of isochrons || []) {
       if (line.points.length < 2) continue
       const [from, to] = [line.points[0], line.points[line.points.length - 1]]
@@ -351,7 +403,8 @@ export default function SiteMap({
     }
 
     return list
-  }, [sites, selected, plot, tiles, values, valueLabel, front, origin, isochrons])
+  }, [sites, selected, plot, tiles, values, valueLabel, front, origin, isochrons,
+      region, regionStepDeg])
 
   /**
    * Clicks are taken in the CAPTURE phase, on a native listener, and both
