@@ -16,7 +16,7 @@
  * anchored to its button. Both keep the selection on screen while it is
  * edited, where a modal would cover it.
  */
-import { useMemo, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import {
   Box,
   Button,
@@ -24,6 +24,7 @@ import {
   Menu,
   MenuItem,
   Popover,
+  type PopoverActions,
   Stack,
   Tab,
   Tabs,
@@ -87,6 +88,24 @@ export default function SampleSelectionBar({
 }: Props) {
   const [curveAnchor, setCurveAnchor] = useState<HTMLElement | null>(null)
   const [deltaAnchor, setDeltaAnchor] = useState<HTMLElement | null>(null)
+  // The popover fixes its top edge once, when it opens, and MUI moves it
+  // again only on a window resize. Its content is anything but fixed: the
+  // derived tab is several times taller than the typed one, and it grows
+  // again as a lookup returns and the point list appears. Without this, a
+  // popover opened on the short tab ran off the bottom of the window once
+  // the tall one was chosen, with Apply below the fold and no way to scroll
+  // to it. So the content is watched, and every change in its size asks the
+  // popover to re-place itself -- which it does by moving up, and past that
+  // by scrolling inside its own paper.
+  const deltaActions = useRef<PopoverActions | null>(null)
+  const deltaResize = useRef<ResizeObserver | null>(null)
+  const watchDeltaContent = useCallback((node: HTMLElement | null) => {
+    deltaResize.current?.disconnect()
+    deltaResize.current = null
+    if (!node || typeof ResizeObserver === 'undefined') return
+    deltaResize.current = new ResizeObserver(() => deltaActions.current?.updatePosition())
+    deltaResize.current.observe(node)
+  }, [])
   const [deltaR, setDeltaR] = useState('')
   const [deltaRError, setDeltaRError] = useState('')
   // Typed or derived. Typing is first because it is what works without a
@@ -299,7 +318,9 @@ export default function SampleSelectionBar({
         open={Boolean(deltaAnchor)}
         onClose={closeDelta}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+        action={deltaActions}
       >
+        <Box ref={watchDeltaContent}>
         <Tabs
           value={deltaTab}
           onChange={(_event, value) => setDeltaTab(value)}
@@ -392,6 +413,7 @@ export default function SampleSelectionBar({
           )}
         </Box>
         )}
+        </Box>
       </Popover>
     </Box>
   )
