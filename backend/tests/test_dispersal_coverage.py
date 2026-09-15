@@ -131,9 +131,9 @@ def _covered_exact(seed):
     """True when this front's 95% interval contains the true speed."""
     root, measurements = _simulate(seed)
     solved = ec.solve(measurements, root, ec.layout(root, measurements),
-                      num_samples=200, dispersal_origin=ORIGIN,
+                      num_samples=200, dispersal={'origin': ORIGIN},
                       interval_draws=4000)
-    fit = solved['intervals']['dispersal']
+    fit = solved['intervals']['dispersal']['wave']
     if fit['refused'] is not None:  # pragma: no cover - would fail the test
         return None
     low, high = fit['speed']['hpd_95']
@@ -143,8 +143,8 @@ def _covered_exact(seed):
 def _covered_sampled(seed):
     root, measurements = _simulate(seed)
     solved = gibbs.solve(measurements, root, sweeps=4000, num_samples=200,
-                         dispersal_origin=ORIGIN, interval_draws=4000)
-    fit = solved['intervals']['dispersal']
+                         dispersal={'origin': ORIGIN}, interval_draws=4000)
+    fit = solved['intervals']['dispersal']['wave']
     if fit['refused'] is not None:  # pragma: no cover - would fail the test
         return None
     low, high = fit['speed']['hpd_95']
@@ -231,8 +231,8 @@ class TestTheSimulationIsWorthTrusting:
         """
         root, measurements = _simulate(0)
         fit = ec.solve(measurements, root, ec.layout(root, measurements),
-                       num_samples=200, dispersal_origin=ORIGIN,
-                       interval_draws=4000)['intervals']['dispersal']
+                       num_samples=200, dispersal={'origin': ORIGIN},
+                       interval_draws=4000)['intervals']['dispersal']['wave']
 
         low, high = fit['speed']['hpd_95']
         assert low <= TRUE_SPEED <= high
@@ -246,7 +246,7 @@ class TestTheSimulationIsWorthTrusting:
         """
         root, measurements = _simulate(0)
         solved = ec.solve(measurements, root, ec.layout(root, measurements),
-                          num_samples=200, dispersal_origin=ORIGIN,
+                          num_samples=200, dispersal={'origin': ORIGIN},
                           interval_draws=4000)
 
         # Site 0's opening Boundary against its own oldest date, in cal BP,
