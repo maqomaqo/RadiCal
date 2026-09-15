@@ -183,6 +183,44 @@ class TestMigration:
             measurements, groups, [], self._new_id())
         assert linearized
 
+    def test_unrelated_contexts_keep_the_order_they_arrived_in(self):
+        """
+        With no relationships every context has indegree zero, so the
+        tie-break decides the whole order -- and a Sequence ASSERTS that
+        order. Broken on context id, which is a random uuid, eight sites
+        deployed west to east came back as a Sequence claiming 5 before 3
+        before 4: a model contradicting its own dates, which the solver then
+        refused as unsolvable. The caller's order is the analyst's.
+        """
+        names = [f"Site {i}" for i in range(8)]
+        # Ids deliberately sort the OPPOSITE way to the given order, so an id
+        # tie-break cannot pass this by luck.
+        groups = [{"id": f"z{7 - i}-{n}", "name": n} for i, n in enumerate(names)]
+        measurements = [{"id": f"m{i}", "group_id": g["id"]}
+                        for i, g in enumerate(groups)]
+
+        root, _linearized, _gb = migrate_from_relationships(
+            measurements, groups, [], self._new_id())
+
+        phases = [c["name"] for c in root["children"] if c["element_type"] == "phase"]
+        assert phases == names
+
+    def test_relationships_still_outrank_the_arrival_order(self):
+        """The tie-break is only a tie-break: a stated relationship wins."""
+        groups = [{"id": "g1", "name": "Upper"}, {"id": "g2", "name": "Lower"}]
+        measurements = [{"id": "a", "group_id": "g1"}, {"id": "b", "group_id": "g2"}]
+        relationships = [{"from_sample_id": "g1", "to_sample_id": "g2",
+                          "relationship": "above", "from_type": "group",
+                          "to_type": "group"}]
+
+        root, _linearized, _gb = migrate_from_relationships(
+            measurements, groups, relationships, self._new_id())
+
+        # g1 arrived first but is stratigraphically above, so g2 is older and
+        # comes first regardless.
+        assert [c["name"] for c in root["children"]
+                if c["element_type"] == "phase"] == ["Lower", "Upper"]
+
 
 class TestFlattenStructure:
     """
