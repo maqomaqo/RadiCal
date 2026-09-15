@@ -8,6 +8,7 @@ import { CONTEXT_PALETTE } from '@/theme/diagramColors'
 import { usePlotColors, usePlotFont } from '@/theme/plotColors'
 import { downloadPlotPng } from '@/utils/downloadPlot'
 import {
+  fitFrameToAspect,
   frameFor,
   geoProjectionOf,
   groupIntoSites,
@@ -42,6 +43,24 @@ const TOPOJSON_URL = '/geo/'
  * fetched once per page load and cached by the browser thereafter.
  */
 const GEO_RESOLUTION = 50
+
+/**
+ * How far the pointer may travel between going down and the click for that
+ * click to count as placing a pin rather than as the end of a pan.
+ *
+ * Dragging is always on -- see the layout's `dragmode` -- so in edit mode a
+ * click and a pan start the same way, and the only thing that tells them apart
+ * is whether the pointer moved. A few pixels of slop, since nobody's hand is
+ * perfectly still on a mouse button.
+ */
+const CLICK_SLOP_PX = 4
+
+/**
+ * The tallest the map may be, as a fraction of the viewport, so a landscape
+ * figure on a wide window still leaves room for its caption and, in the
+ * placing dialog, the typed boxes under it.
+ */
+const MAX_HEIGHT = '65vh'
 
 /**
  * The basemap could not say where the click landed -- distinct from "that
@@ -132,7 +151,14 @@ interface SiteMapProps {
    * once, behind a notice that says what the request gives away.
    */
   tiles?: boolean
-  /** Height of the plot area in pixels. */
+  /**
+   * The SHORTEST the map is allowed to be, in pixels.
+   *
+   * Not its height. The map fills the width it is given and takes a landscape
+   * 16:9 from that, capped at MAX_HEIGHT of the viewport so it never pushes
+   * its own caption off screen; this is the floor for the narrow case, where
+   * 16:9 of a phone's width is a strip too short to read.
+   */
   height?: number
   /** Used to name the downloaded PNG. */
   exportName?: string
@@ -222,7 +248,7 @@ export default function SiteMap({
   editable = false,
   onPlace,
   tiles = false,
-  height = 420,
+  height = 320,
   exportName = 'site-map',
   values,
   valueLabel,
@@ -260,6 +286,22 @@ export default function SiteMap({
     ] as MapSite[]
     return { sites: grouped, missing: unplaced(points), frame: frameFor(framing) }
   }, [points, region, front, links, isochrons, origin])
+
+  // In edit mode the window is fixed at what it opened on. Every click moves
+  // the preview pin, which moves the frame, and re-framing on each one threw
+  // the reader's own zoom away just after they had used it to aim: the map
+  // opens on the collection, and from then on the view is theirs.
+  const openingFrame = useRef(frame)
+  const dataFrame = editable ? openingFrame.current : frame
+
+  // The box's width over its height, measured, so the frame can be widened to
+  // fill it -- see fitFrameToAspect. Starts at the CSS aspect the box is
+  // given below and is corrected by the observer on first layout.
+  const [aspect, setAspect] = useState(16 / 9)
+  const viewFrame = useMemo(
+    () => (dataFrame ? fitFrameToAspect(dataFrame, aspect) : null),
+    [dataFrame, aspect],
+  )
 
   const traces = useMemo(() => {
     // Split by selection rather than coloured per mark, so the two sets are
@@ -475,7 +517,25 @@ export default function SiteMap({
     const container = plotBox.current
     if (!editable || !onPlace || !container) return
 
+    // Where the pointer went down, so the click that ends a pan can be told
+    // from one that places a pin. Null between gestures.
+    let downAt: { x: number; y: number } | null = null
+    const down = (event: PointerEvent) => {
+      downAt = event.button === 0 ? { x: event.clientX, y: event.clientY } : null
+    }
+
     const handle = (event: MouseEvent) => {
+      const start = downAt
+      downAt = null
+      if (!start) return
+      if (
+        Math.abs(event.clientX - start.x) > CLICK_SLOP_PX ||
+        Math.abs(event.clientY - start.y) > CLICK_SLOP_PX
+      ) {
+        // The pointer moved: that was a pan, and it ends where the reader let
+        // go of the mouse, which is not where they want a date placed.
+        return
+      }
       const place = tiles
         ? placeFromTiledMap(graphDiv.current, event)
         : placeFromOfflineMap(graphDiv.current, container, event)
@@ -493,9 +553,35 @@ export default function SiteMap({
       onPlace(roundPlacement(place.latitude), roundPlacement(place.longitude))
     }
 
+    container.addEventListener('pointerdown', down, true)
     container.addEventListener('click', handle, true)
-    return () => container.removeEventListener('click', handle, true)
+    return () => {
+      container.removeEventListener('pointerdown', down, true)
+      container.removeEventListener('click', handle, true)
+    }
   }, [editable, onPlace, tiles])
+
+  /**
+   * Resize the plot when its BOX changes size, not only when the window does.
+   *
+   * Plotly's own `responsive` config listens to the window alone, and the box
+   * changes size without it: the dialog it sits in opens at its full width
+   * after the first paint, a panel beside it collapses, the drawer closes.
+   * Each of those left the map drawn at its old size inside a box that had
+   * moved on, until the next window resize happened to fix it.
+   */
+  useEffect(() => {
+    const container = plotBox.current
+    if (!container || typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver((entries) => {
+      const { width, height: tall } = entries[0].contentRect
+      if (width > 0 && tall > 0) setAspect(width / tall)
+      const gd = graphDiv.current as HTMLElement | null
+      if (gd && gd.isConnected) (Plotly as { Plots: { resize(gd: HTMLElement): void } }).Plots.resize(gd)
+    })
+    observer.observe(container)
+    return () => observer.disconnect()
+  }, [])
 
   const layout = useMemo(() => {
     const common = {
@@ -503,10 +589,17 @@ export default function SiteMap({
       paper_bgcolor: plot.surface,
       font: plotFont,
       showlegend: false,
-      // dragmode false in edit mode: a click that also pans puts the pin down
-      // a few degrees from where the reader let go of the mouse.
-      dragmode: editable ? (false as const) : ('pan' as const),
+      // Pan in every mode, edit included. Placing a pin at site scale needs
+      // a zoomed-in map, and the click that ends a pan is kept from placing
+      // anything by the pointer-slop check in the click handler above.
+      dragmode: 'pan' as const,
       autosize: true,
+      // The reader's zoom and pan survive a re-render. Without this every new
+      // trace array -- a hover colour, a preview pin -- redrew the map at the
+      // frame it opened on. Keyed on the DATA frame, not the fitted one, so a
+      // genuinely new window -- which in read-only mode means new data --
+      // reframes, and a resize does not.
+      uirevision: JSON.stringify(dataFrame),
     }
 
     if (tiles) {
@@ -518,15 +611,15 @@ export default function SiteMap({
           // the square of the earth on screen to a third party, which is why
           // this branch is reached only for a project that has said yes.
           style: 'open-street-map',
-          center: frame
+          center: viewFrame
             ? {
-                lat: (frame.lat[0] + frame.lat[1]) / 2,
-                lon: (frame.lon[0] + frame.lon[1]) / 2,
+                lat: (viewFrame.lat[0] + viewFrame.lat[1]) / 2,
+                lon: (viewFrame.lon[0] + viewFrame.lon[1]) / 2,
               }
             : { lat: 20, lon: 0 },
           // A tiled map takes a centre and a zoom where the offline one takes
           // two ranges, so the same frame has to be restated.
-          zoom: frame ? zoomForFrame(frame) : 1,
+          zoom: viewFrame ? zoomForFrame(viewFrame) : 1,
         },
       }
     }
@@ -554,12 +647,12 @@ export default function SiteMap({
         lakecolor: plot.grid,
         showframe: false,
         bgcolor: plot.surface,
-        ...(frame
-          ? { lonaxis: { range: frame.lon }, lataxis: { range: frame.lat } }
+        ...(viewFrame
+          ? { lonaxis: { range: viewFrame.lon }, lataxis: { range: viewFrame.lat } }
           : {}),
       },
     }
-  }, [plot, plotFont, frame, editable, tiles])
+  }, [plot, plotFont, viewFrame, dataFrame, tiles])
 
   return (
     <Box>
@@ -571,6 +664,17 @@ export default function SiteMap({
           p: 0,
           overflow: 'hidden',
           cursor: editable ? 'crosshair' : 'default',
+          // Landscape, and as wide as it is given: a map is the one figure
+          // whose subject is wider than it is tall, and at a fixed 380px in a
+          // 1200px column it was a strip. Floored for narrow screens and
+          // capped against the viewport -- see the `height` prop.
+          width: '100%',
+          aspectRatio: '16 / 9',
+          minHeight: height,
+          maxHeight: MAX_HEIGHT,
+          // The plot is absolutely sized to this box rather than the reverse,
+          // so Plotly's autosize measures a box whose size the box decided.
+          position: 'relative',
         }}
       >
         <Plot
@@ -579,7 +683,8 @@ export default function SiteMap({
           config={{
             displayModeBar: false,
             responsive: true,
-            scrollZoom: !editable,
+            // Wheel zoom in every mode, for the same reason dragmode is pan.
+            scrollZoom: true,
             // Served from this app. Without it Plotly fetches the world from
             // cdn.plot.ly -- see TOPOJSON_URL above.
             topojsonURL: TOPOJSON_URL,
@@ -591,7 +696,7 @@ export default function SiteMap({
             graphDiv.current = gd
           }}
           useResizeHandler
-          style={{ width: '100%', height: `${height}px` }}
+          style={{ position: 'absolute', inset: 0 }}
         />
       </Paper>
 
@@ -600,10 +705,10 @@ export default function SiteMap({
           {cannotPlace
             ? 'This map cannot read a click on this version of the plotting library. Type the position instead.'
             : editable
-              ? 'Click the map to place every selected date at that position.'
+              ? 'Click the map to place every selected date at that position. Drag to pan and scroll to zoom.'
               : tiles
-                ? 'Basemap tiles are on for this project, so the tile server is told which area is on screen.'
-                : 'Coastlines are drawn from data this app serves itself: no tiles are requested.'}
+                ? 'Drag to pan and scroll to zoom. Basemap tiles are on for this project, so the tile server is told which area is on screen.'
+                : 'Drag to pan and scroll to zoom. Coastlines are drawn from data this app serves itself: no tiles are requested.'}
         </Typography>
         {/* The app's own download control, as on every other figure: Plotly's
             modebar renders anchors with no href, role or accessible name, none

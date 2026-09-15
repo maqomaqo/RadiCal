@@ -115,8 +115,10 @@ export default function PlaceOnMapDialog({
     setLongitude(String(lon))
   }
 
+  // lg rather than md: the map is the dialog, and at md it was a 900px strip on
+  // a desktop screen with room for twice that.
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
+    <Dialog open={open} onClose={onClose} maxWidth="lg" fullWidth>
       <DialogTitle>
         {title ?? `Place ${count} date${count === 1 ? '' : 's'} on the map`}
       </DialogTitle>

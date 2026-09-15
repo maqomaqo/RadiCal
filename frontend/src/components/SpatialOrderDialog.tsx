@@ -74,8 +74,10 @@ export default function SpatialOrderDialog({
     (m) => m.latitude != null && m.longitude != null,
   ).length
 
+  // lg rather than md: the map is the dialog, and at md it was a 900px strip on
+  // a desktop screen with room for twice that.
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
+    <Dialog open={open} onClose={onClose} maxWidth="lg" fullWidth>
       <DialogTitle>Propose an order from the map</DialogTitle>
       <DialogContent dividers>
         {loading && <CircularProgress size={24} />}

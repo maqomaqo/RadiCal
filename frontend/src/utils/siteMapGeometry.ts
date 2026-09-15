@@ -271,17 +271,140 @@ function span(values: number[], limit: number): [number, number] {
 }
 
 /**
+ * The longitude window, worked out on the circle rather than on the line.
+ *
+ * Longitude wraps, and a min/max over the raw values does not know it: sites
+ * from the Bismarcks (150 E) to Samoa (172 W) span 38 degrees of the Pacific
+ * and 322 degrees of everything else, and min/max picks the everything else
+ * -- the whole world, with the sites at its two edges. So the window is the
+ * arc that leaves out the LARGEST gap between neighbouring sites, whichever
+ * side of the antimeridian that gap falls on.
+ *
+ * A window that crosses the antimeridian is expressed as one that runs past
+ * 180, since Plotly rotates the projection to the range's centre and draws
+ * straight across the dateline (see fitFrameToAspect). It is normalised so
+ * the centre lies within a turn of zero, and can never exceed a full turn.
+ */
+function lonSpan(values: number[]): [number, number] {
+  const sorted = [...new Set(values)].sort((a, b) => a - b)
+  // Start with the gap that crosses the antimeridian: from the easternmost
+  // site round to the westernmost. If that is the largest, the window is the
+  // ordinary min-to-max and nothing wraps.
+  let low = sorted[0]
+  let high = sorted[sorted.length - 1]
+  let largest = low + 360 - high
+  for (let i = 1; i < sorted.length; i++) {
+    const gap = sorted[i] - sorted[i - 1]
+    if (gap > largest) {
+      largest = gap
+      // The window leaves this gap out: it runs east from the site after the
+      // gap, across the antimeridian, to the site before it.
+      low = sorted[i]
+      high = sorted[i - 1] + 360
+    }
+  }
+  const padded = Math.min(
+    180,
+    Math.max((high - low) * PADDING, (MINIMUM_SPAN - (high - low)) / 2, 0),
+  )
+  low -= padded
+  high += padded
+  const turn = Math.round((low + high) / 2 / 360) * 360
+  return [low - turn, high - turn]
+}
+
+/**
  * The window to frame the placed sites in, or null when nothing is placed --
  * in which case the caller shows the whole world, since there is nothing to
  * zoom to and an arbitrary starting view would be a guess.
  *
- * Ranges are clamped to the real world: a site at latitude 89 must not open a
- * map running to 91, which Plotly draws as an empty band above the pole.
+ * Latitude is clamped to the real world: a site at latitude 89 must not open
+ * a map running to 91, which Plotly draws as an empty band above the pole.
+ * Longitude is not, on purpose -- see lonSpan.
  */
 export function frameFor(sites: MapSite[]): MapFrame | null {
   if (sites.length === 0) return null
   return {
-    lon: span(sites.map((s) => s.longitude), 180),
+    lon: lonSpan(sites.map((s) => s.longitude)),
     lat: span(sites.map((s) => s.latitude), 90),
   }
+}
+
+/**
+ * The Natural Earth projection's scale, since that is what the offline map is
+ * drawn in: how wide a radian of longitude draws at a latitude, and how far up
+ * the page a latitude sits. The polynomial is the projection's definition
+ * (Šavrič et al. 2011), as d3-geo carries it and as Plotly draws it.
+ */
+function naturalEarthWidth(phi: number): number {
+  const p2 = phi * phi
+  const p4 = p2 * p2
+  return 0.8707 - 0.131979 * p2 + p4 * (-0.013791 + p4 * (0.003971 * p2 - 0.001529 * p4))
+}
+
+function naturalEarthHeight(phi: number): number {
+  const p2 = phi * phi
+  const p4 = p2 * p2
+  return phi * (1.007226 + p2 * (0.015085 + p4 * (-0.044475 + 0.028874 * p2 - 0.005916 * p4)))
+}
+
+/** d/dφ of naturalEarthHeight: how tall a radian of latitude draws at φ. */
+function naturalEarthSlope(phi: number): number {
+  const p2 = phi * phi
+  const p4 = p2 * p2
+  const p6 = p4 * p2
+  const p8 = p4 * p4
+  return (
+    1.007226 +
+    3 * 0.015085 * p2 -
+    7 * 0.044475 * p6 +
+    9 * 0.028874 * p8 -
+    11 * 0.005916 * p8 * p2
+  )
+}
+
+const RADIANS = Math.PI / 180
+
+/**
+ * The frame widened, or heightened, to fill a box of the given aspect
+ * (width over height).
+ *
+ * Plotly fits the two ranges into whatever box it is given and letterboxes
+ * the rest, so a north-south run of sites in a landscape map drew as a strip
+ * of sea down the middle of a white panel. The sites are still framed; the
+ * blank is filled with more map on either side, which is what a reader would
+ * have panned to see anyway.
+ *
+ * Measured in the Natural Earth projection the offline map draws in, where a
+ * degree of longitude is narrower than one of latitude everywhere -- by
+ * 0.87 at the equator and more towards the poles -- rather than by the
+ * cosine a cylindrical map would use, which left a strip of letterbox on
+ * either side. The tiled map takes only this frame's centre and a zoom from
+ * its width, for which the same figure is close enough.
+ *
+ * Longitude is allowed past 180: Plotly rotates the projection to the
+ * range's centre and draws across the antimeridian, which is exactly what a
+ * Pacific frame needs -- clamping at 180 left the box letterboxed on the
+ * dateline side (confirmed in the browser with a range of [-205, -95]).
+ * Latitude has no such wrap, so a window that would run past a pole is
+ * shifted back towards the equator instead, and the sites stay in view
+ * though no longer centred.
+ */
+export function fitFrameToAspect(frame: MapFrame, aspect: number): MapFrame {
+  if (!Number.isFinite(aspect) || aspect <= 0) return frame
+  const midLat = (frame.lat[0] + frame.lat[1]) / 2
+  const midLon = (frame.lon[0] + frame.lon[1]) / 2
+  const width = (frame.lon[1] - frame.lon[0]) * RADIANS * naturalEarthWidth(midLat * RADIANS)
+  const height =
+    naturalEarthHeight(frame.lat[1] * RADIANS) - naturalEarthHeight(frame.lat[0] * RADIANS)
+  if (width < aspect * height) {
+    const half = Math.min(
+      180,
+      ((aspect * height) / naturalEarthWidth(midLat * RADIANS) / RADIANS) / 2,
+    )
+    return { lon: [midLon - half, midLon + half], lat: frame.lat }
+  }
+  const half = Math.min(90, (width / aspect / naturalEarthSlope(midLat * RADIANS) / RADIANS) / 2)
+  const shift = Math.max(0, midLat + half - 90) - Math.max(0, -90 - (midLat - half))
+  return { lon: frame.lon, lat: [midLat - half - shift, midLat + half - shift] }
 }

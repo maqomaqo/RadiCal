@@ -9,6 +9,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  fitFrameToAspect,
   frameFor,
   geoProjectionOf,
   groupIntoSites,
@@ -114,12 +115,106 @@ describe('frameFor', () => {
     expect(frame.lon[1]).toBeGreaterThan(2)
   })
 
-  it('never runs off the earth', () => {
+  it('never runs past a pole', () => {
     // A site near the pole must not open a map reaching to 91, which draws as
     // an empty band above the top of the world.
     const frame = frameFor(groupIntoSites([point('A', 89.5, 179.5)]))!
     expect(frame.lat[1]).toBeLessThanOrEqual(90)
-    expect(frame.lon[1]).toBeLessThanOrEqual(180)
+  })
+
+  it('frames sites either side of the antimeridian as one window across it', () => {
+    // Bismarcks to Samoa is 38 degrees of Pacific. A min/max over raw
+    // longitudes framed the other 322 degrees, with the sites at the two
+    // edges of a world map.
+    const frame = frameFor(
+      groupIntoSites([point('A', -4, 150), point('B', -14, -172), point('C', -18, 178)]),
+    )!
+    const width = frame.lon[1] - frame.lon[0]
+    expect(width).toBeLessThan(60)
+    expect(width).toBeGreaterThan(38)
+    // Expressed as running past 180, centred on the Pacific.
+    expect(frame.lon[0]).toBeLessThan(150)
+    expect(frame.lon[1]).toBeGreaterThan(188)
+    expect((frame.lon[0] + frame.lon[1]) / 2).toBeCloseTo(169, 0)
+  })
+
+  it('does not wrap a spread that merely reaches the antimeridian', () => {
+    const frame = frameFor(groupIntoSites([point('A', 40, 170), point('B', 40, 178)]))!
+    expect(frame.lon[0]).toBeLessThan(170)
+    expect(frame.lon[1]).toBeGreaterThan(178)
+    expect(frame.lon[1] - frame.lon[0]).toBeLessThan(20)
+  })
+
+  it('opens on the whole world for sites spread evenly around it', () => {
+    const frame = frameFor(
+      groupIntoSites([point('A', 0, -150), point('B', 0, -30), point('C', 0, 90)]),
+    )!
+    expect(frame.lon[1] - frame.lon[0]).toBeLessThanOrEqual(360)
+    expect(frame.lon[1] - frame.lon[0]).toBeGreaterThan(240)
+  })
+})
+
+describe('fitFrameToAspect', () => {
+  it('widens a tall frame to fill a landscape box', () => {
+    // Ten degrees of latitude in a 2:1 box needs twenty of longitude on a
+    // square grid, and more than that here: Natural Earth draws a degree of
+    // longitude at the equator 0.87 as wide as one of latitude. The sites
+    // stay centred and the latitude range is untouched.
+    const fitted = fitFrameToAspect({ lon: [-3, 3], lat: [-5, 5] }, 2)
+    expect(fitted.lat).toEqual([-5, 5])
+    expect(fitted.lon[0]).toBeCloseTo(-fitted.lon[1])
+    expect(fitted.lon[1]).toBeGreaterThan(10)
+    expect(fitted.lon[1]).toBeLessThan(13)
+  })
+
+  it('heightens a wide frame to fill a tall box', () => {
+    const fitted = fitFrameToAspect({ lon: [-10, 10], lat: [-1, 1] }, 1)
+    expect(fitted.lon).toEqual([-10, 10])
+    expect(fitted.lat[0]).toBeCloseTo(-fitted.lat[1])
+    // Twenty degrees of longitude draw 0.87 as wide, so a square box needs a
+    // little under twenty of latitude.
+    expect(fitted.lat[1]).toBeGreaterThan(8)
+    expect(fitted.lat[1]).toBeLessThan(10)
+  })
+
+  it('widens more away from the equator, where longitude draws narrower', () => {
+    const equator = fitFrameToAspect({ lon: [-1, 1], lat: [-5, 5] }, 1)
+    const north = fitFrameToAspect({ lon: [-1, 1], lat: [55, 65] }, 1)
+    expect(north.lon[1] - north.lon[0]).toBeGreaterThan(equator.lon[1] - equator.lon[0])
+  })
+
+  it('runs past the antimeridian rather than letterboxing a Pacific frame', () => {
+    // Plotly rotates to the range's centre and draws across the dateline, so
+    // a frame that is widened past 180 is a wider map, not an error.
+    const fitted = fitFrameToAspect({ lon: [170, 180], lat: [-30, -10] }, 3)
+    expect(fitted.lon[0]).toBeLessThan(170)
+    expect(fitted.lon[1]).toBeGreaterThan(180)
+    expect((fitted.lon[0] + fitted.lon[1]) / 2).toBeCloseTo(175)
+  })
+
+  it('never asks for more than the whole earth', () => {
+    const fitted = fitFrameToAspect({ lon: [170, 180], lat: [-80, 80] }, 40)
+    expect(fitted.lon[1] - fitted.lon[0]).toBeCloseTo(360)
+    expect(fitted.lat).toEqual([-80, 80])
+  })
+
+  it('shifts a window off a pole instead of running past it', () => {
+    // A wide frame near the pole in a tall box wants latitude it cannot
+    // have: the window is moved towards the equator and keeps its height.
+    const fitted = fitFrameToAspect({ lon: [-40, 40], lat: [80, 85] }, 1)
+    expect(fitted.lat[1]).toBe(90)
+    expect(fitted.lat[0]).toBeLessThan(80)
+    expect(fitted.lat[0]).toBeGreaterThan(-90)
+  })
+
+  it('leaves a frame that already fits alone', () => {
+    // 20 by 10 degrees at the equator draws at 0.87 * 2 = 1.74 to 1; a box
+    // of exactly that aspect needs nothing changed.
+    const frame = { lon: [-10, 10] as [number, number], lat: [-5, 5] as [number, number] }
+    const fitted = fitFrameToAspect(frame, 1.74)
+    expect(fitted.lon[0]).toBeCloseTo(-10, 0)
+    expect(fitted.lat[0]).toBeCloseTo(-5, 0)
+    expect(fitFrameToAspect(frame, NaN)).toBe(frame)
   })
 })
 
