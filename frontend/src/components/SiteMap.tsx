@@ -171,6 +171,20 @@ interface SiteMapProps {
   region?: Array<{ lat: number; lon: number; support: number }>
   /** What one region cell spans, in degrees, so the cells read as the grid. */
   regionStepDeg?: number
+  /**
+   * Individual segments, each of which is a real link between two places --
+   * the edges of a spanning tree.
+   *
+   * Deliberately NOT `front`, which is one polyline. A WALK of a tree visits
+   * every node once but jumps between branches to do it, so drawing the visit
+   * order as a polyline puts a line between two sites the tree never joined
+   * and the figure claims an adjacency that does not exist. Segments cannot
+   * make that mistake.
+   */
+  links?: Array<{
+    from: { latitude: number; longitude: number }
+    to: { latitude: number; longitude: number }
+  }>
 }
 
 /**
@@ -208,6 +222,7 @@ export default function SiteMap({
   isochrons,
   region,
   regionStepDeg = 1,
+  links,
 }: SiteMapProps) {
   const plot = usePlotColors()
   const plotFont = usePlotFont()
@@ -230,11 +245,12 @@ export default function SiteMap({
       ...grouped,
       ...(region || []).map((cell) => ({ latitude: cell.lat, longitude: cell.lon })),
       ...(front || []),
+      ...(links || []).flatMap((link) => [link.from, link.to]),
       ...(isochrons || []).flatMap((line) => line.points),
       ...(origin ? [origin] : []),
     ] as MapSite[]
     return { sites: grouped, missing: unplaced(points), frame: frameFor(framing) }
-  }, [points, region, front, isochrons, origin])
+  }, [points, region, front, links, isochrons, origin])
 
   const traces = useMemo(() => {
     // Split by selection rather than coloured per mark, so the two sets are
@@ -317,6 +333,22 @@ export default function SiteMap({
         text: ['', `${Math.round(line.age)}`, ''],
         textposition: 'top center' as const,
         textfont: { size: 10, color: plot.axis },
+        hoverinfo: 'skip' as const,
+      })
+    }
+
+    // Spanning-tree links, under the marks they join.
+    if (links && links.length > 0) {
+      list.push({
+        type: geoType,
+        mode: 'lines' as const,
+        name: 'Links',
+        // One trace with nulls between segments: Plotly breaks the line at a
+        // null, so the whole tree draws in one pass without joining the end
+        // of one edge to the start of the next.
+        lat: links.flatMap((link) => [link.from.latitude, link.to.latitude, null]),
+        lon: links.flatMap((link) => [link.from.longitude, link.to.longitude, null]),
+        line: { color: plot.posteriorLine, width: 1.5 },
         hoverinfo: 'skip' as const,
       })
     }
@@ -404,7 +436,7 @@ export default function SiteMap({
 
     return list
   }, [sites, selected, plot, tiles, values, valueLabel, front, origin, isochrons,
-      region, regionStepDeg])
+      region, regionStepDeg, links])
 
   /**
    * Clicks are taken in the CAPTURE phase, on a native listener, and both

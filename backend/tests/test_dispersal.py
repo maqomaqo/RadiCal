@@ -817,3 +817,107 @@ class TestProfilingAnOrigin:
         profile = dispersal.profile_origin(sites, draws)
         west = min(s.longitude for s in sites)
         assert any(p['lon'] < west for p in profile['region'])
+
+
+# --------------------------------------------------------------------------
+# Model 3: a spatial order, proposed
+# --------------------------------------------------------------------------
+
+def _placed(*coords):
+    return [dispersal.SiteSpec(
+        element_id=f'e{i}', name=f'Site {i}', parameter_id=f'b{i}',
+        basis='boundary', latitude=lat, longitude=lon)
+        for i, (lat, lon) in enumerate(coords)]
+
+
+class TestProposingASpatialOrder:
+    """
+    §6.7. The cheapest of the three models and the one that must be most
+    careful about what it claims: a spanning tree is spatial adjacency, not
+    chronology.
+    """
+
+    def test_it_needs_no_draws_at_all(self):
+        """A question about positions, not about ages -- which is why it can
+        be offered while a model is still being written, before there is
+        anything to run."""
+        sites = _placed((50.0, 0.0), (50.0, 1.0), (50.0, 2.0))
+        assert dispersal.propose_sequence(sites)['order']
+
+    def test_a_line_of_sites_comes_back_in_order(self):
+        sites = _placed((50.0, 0.0), (50.0, 1.0), (50.0, 2.0), (50.0, 3.0))
+        proposal = dispersal.propose_sequence(sites, origin=(50.0, -1.0))
+        assert [o['name'] for o in proposal['order']] == [
+            'Site 0', 'Site 1', 'Site 2', 'Site 3']
+
+    def test_the_origin_decides_which_end_it_starts_from(self):
+        sites = _placed((50.0, 0.0), (50.0, 1.0), (50.0, 2.0), (50.0, 3.0))
+        from_east = dispersal.propose_sequence(sites, origin=(50.0, 9.0))
+        assert [o['name'] for o in from_east['order']] == [
+            'Site 3', 'Site 2', 'Site 1', 'Site 0']
+
+    def test_with_no_origin_it_starts_at_an_end_of_the_longest_path(self):
+        """
+        Found rather than assumed. Starting at whichever site happened to be
+        listed first would put the walk in the middle of the arrangement and
+        produce an order that doubles back.
+        """
+        sites = _placed((50.0, 2.0), (50.0, 0.0), (50.0, 1.0), (50.0, 3.0))
+        names = [o['name'] for o in dispersal.propose_sequence(sites)['order']]
+        # Site 1 is the westernmost and Site 3 the easternmost; the walk has
+        # to begin at one of them, not at Site 0 in the middle.
+        assert names[0] in ('Site 1', 'Site 3')
+        assert names[-1] in ('Site 1', 'Site 3')
+
+    def test_the_tree_is_minimum_not_merely_connected(self):
+        """
+        Four sites on a square: the MST takes three sides and never the
+        diagonal, which is longer than any of them.
+        """
+        sites = _placed((50.0, 0.0), (50.0, 1.0), (51.0, 0.0), (51.0, 1.0))
+        proposal = dispersal.propose_sequence(sites)
+        assert len(proposal['edges']) == 3
+        longest_side = max(e['km'] for e in proposal['edges'])
+        diagonal = haversine_km(50.0, 0.0, 51.0, 1.0)
+        assert longest_side < diagonal
+
+    def test_every_site_appears_exactly_once(self):
+        sites = _placed((50.0, 0.0), (51.0, 1.0), (49.0, 2.0),
+                        (52.0, 0.5), (50.5, 3.0), (48.0, 1.5))
+        order = dispersal.propose_sequence(sites)['order']
+        ids = [o['element_id'] for o in order]
+        assert sorted(ids) == sorted(s.element_id for s in sites)
+        assert len(ids) == len(set(ids))
+
+    def test_it_carries_the_tree_it_read_the_order_off(self):
+        """So the map can draw what the proposal was derived from, rather than
+        only the conclusion."""
+        sites = _placed((50.0, 0.0), (50.0, 1.0), (50.0, 2.0))
+        proposal = dispersal.propose_sequence(sites)
+        assert len(proposal['edges']) == len(sites) - 1
+        assert proposal['total_km'] == pytest.approx(
+            sum(e['km'] for e in proposal['edges']))
+        for edge in proposal['edges']:
+            assert edge['from'] != edge['to']
+
+    def test_one_site_is_refused(self):
+        proposal = dispersal.propose_sequence(_placed((50.0, 0.0)))
+        assert proposal['order'] == []
+        assert 'two placed sites' in proposal['refused']
+
+    def test_a_site_in_two_places_refuses_the_proposal(self):
+        sites = _placed((50.0, 0.0), (50.0, 1.0))
+        sites.append(dispersal.SiteSpec(
+            element_id='bad', name='Mixed', parameter_id='bbad',
+            basis='boundary', refusal='two places in one phase'))
+        assert dispersal.propose_sequence(
+            sites)['refused'] == 'two places in one phase'
+
+    def test_unplaced_sites_are_left_out_rather_than_guessed_at(self):
+        sites = _placed((50.0, 0.0), (50.0, 1.0))
+        sites.append(dispersal.SiteSpec(
+            element_id='nowhere', name='Unplaced', parameter_id='bn',
+            basis='boundary'))
+        proposal = dispersal.propose_sequence(sites)
+        assert [o['name'] for o in proposal['order']] == ['Site 0', 'Site 1']
+        assert proposal['n_sites'] == 2

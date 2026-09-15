@@ -1087,12 +1087,14 @@ else changes the schema.
 Operations within a feature run in order. Features 1–2 and 3 are independent and can interleave;
 4 waits for both; 6 waits for 1–2 and for the three §13 decisions marked below.
 
-*Features 1–6 are done (2026-09-15) apart from op 3d, which op 0 still gates. Alembic head is
-`b7c4e0a13d92`. What op 0 still buys is the
+*Every feature in this plan is done (2026-09-15) apart from op 3d, which op 0 still gates. Alembic
+head is `b7c4e0a13d92`. What op 0 still buys is the
 BUNDLED snapshot — a fresh install with a working lookup and no network, and two installs agreeing
 on what they compute; until then the lookup runs on a snapshot somebody ingested, which feature 5's
 card is now the way to get. §13's three open decisions for feature 6 were settled on 2026-09-14,
-all three as proposed. Features 7–9 are next and each waits only on 6d, which is in.*
+all three as proposed. What is left in §13 is items 2, 5 and 6: the first two were taken as written
+and shipped that way, and 6 (a per-species habit correction) still needs a published source the
+database itself does not contain.*
 
 ### Op 0 — the permission request *(human; start now, longest lead time)*
 
@@ -1450,7 +1452,7 @@ sequential arrival ramp, the front, the origin; the speed block; the residual ta
 caveats in the panel. Origin placement reuses 2b's pin. *Done when* a Neolithic-scale synthetic
 lands near 1 km/yr in the UI (§10 landmark).
 
-### Features 7–9 — **7–8 done 2026-09-15**
+### Features 7–9 — **done 2026-09-15**
 
 **7.** `fit_trend(sites, draws)` in `dispersal.py`: Lambert azimuthal at the centroid, per-draw
 plane fit, speed and azimuth with circular mean/interval; isochrons on `SiteMap`. **8.** Origin
@@ -1510,6 +1512,37 @@ Rendered, the region is a diagonal band running south-west from the sites — do
 north-east front, which is the degeneracy above made visible. `SiteMap` now frames on *everything*
 drawn rather than on the site marks alone: the profile map has a region and no marks of its own,
 and the first render put a 15-cell region on a map of the whole world.
+
+Three things in 9:
+
+- **It is the one spatial model with no solver run behind it**, so it gets an endpoint of its own —
+  `POST /api/dispersal/propose-sequence`, taking the DRAFT tree and measurements from the request
+  rather than an analysis id. An order is a question about positions, and the answer is the same
+  before a model is solved as after; that is exactly what lets it be offered in the tree editor,
+  where there is a draft and no results at all.
+- **Accepting permutes, it does not rebuild.** `utils/spatialOrder.reorderToProposal` moves the
+  named elements among the positions they already occupy, so every Boundary, Hiatus and unproposed
+  element stays where the analyst put it. A spanning tree is a claim about which sites are adjacent,
+  not about how the model should be structured, and rewriting the brackets on the strength of it
+  would apply far more than was proposed. It returns the *same* tree by reference when nothing
+  would move, which is how the dialog tells an already-agreeing proposal from one worth applying —
+  and says so rather than offering a no-op button.
+- **The map draws the TREE, not the walk.** The first render drew the visit order as one polyline,
+  which put a line between two sites nothing joined: a walk of a tree visits every node once but
+  jumps between branches to do it. `SiteMap` gained `links` — independent segments, each a real
+  adjacency — precisely because a polyline cannot express that and a figure that claims a
+  non-existent adjacency is worse than no figure. The order itself is the numbered list.
+
+`SpatialOrderDialog` is loaded with `React.lazy`. It carries a map, so it carries Plotly: about a
+megabyte the editor does not need until the button is pressed, and a module whose UMD wrapper reads
+`self` at the top level, which is undefined in Node — importing it eagerly put Plotly in
+`ModelTreeEditor`'s module graph and broke that file's unit tests, which never render anything.
+
+Verified in Chromium against a real proposal over six European sites: the dialog leads with *a
+spanning tree is spatial adjacency, not chronology*, draws the branching tree, lists the order, and
+on **Apply** the model went from `b0 p0 b1 p1 b2 p2 b3 p3 b4 p4 b5 p5 b6` to
+`b0 p2 b1 p0 b2 p1 b3 p4 b4 p3 b5 p5 b6` — the phases permuted into the proposed order with every
+boundary untouched. Zero external requests.
 
 ### What this sequence does not schedule
 

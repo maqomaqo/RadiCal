@@ -993,3 +993,148 @@ def profile_origin(sites: Sequence[SiteSpec], draws: Dict[str, np.ndarray],
         # what a single best-guess marker would have hidden.
         share_inside=(len(inside) / len(region)),
     )
+
+
+# --------------------------------------------------------------------------
+# Model 3 -- a spatial order, offered as a PROPOSAL (§6.7)
+# --------------------------------------------------------------------------
+
+def _minimum_spanning_tree(sites: Sequence[SiteSpec]) -> List[Tuple[int, int, float]]:
+    """
+    Prim's algorithm over great-circle distance: the shortest set of links that
+    joins every site to every other.
+
+    Great-circle rather than planar for the reason everything else here is --
+    a degree of longitude is a third as long at 70 degrees north as at the
+    equator, so a planar tree would link Norwegian sites by a measure that
+    means something different from the one it used in Iberia.
+    """
+    n = len(sites)
+    reached = {0}
+    edges: List[Tuple[int, int, float]] = []
+    # Cheapest known link from the reached set to each unreached site.
+    best = {j: (haversine_km(sites[0].latitude, sites[0].longitude,
+                             sites[j].latitude, sites[j].longitude), 0)
+            for j in range(1, n)}
+
+    while len(reached) < n:
+        j = min(best, key=lambda k: best[k][0])
+        distance, i = best.pop(j)
+        edges.append((i, j, distance))
+        reached.add(j)
+        for k in list(best):
+            step = haversine_km(sites[j].latitude, sites[j].longitude,
+                                sites[k].latitude, sites[k].longitude)
+            if step < best[k][0]:
+                best[k] = (step, j)
+    return edges
+
+
+def _farthest_from(start: int, neighbours: Dict[int, List[Tuple[int, float]]]) -> Tuple[int, float]:
+    """The tree node farthest from `start`, by summed edge length."""
+    seen, stack, farthest, best = {start}, [(start, 0.0)], start, 0.0
+    while stack:
+        node, travelled = stack.pop()
+        if travelled > best:
+            farthest, best = node, travelled
+        for other, step in neighbours[node]:
+            if other not in seen:
+                seen.add(other)
+                stack.append((other, travelled + step))
+    return farthest, best
+
+
+def propose_sequence(sites: Sequence[SiteSpec],
+                     origin: Optional[Tuple[float, float]] = None) -> Dict:
+    """
+    An order for the sites, read off a minimum spanning tree.
+
+    **This is a proposal and nothing else.** A spanning tree is SPATIAL
+    ADJACENCY, not chronology. Asserting this order as a Sequence asserts that
+    everything at one site predates everything at the next, which is a strong
+    claim the dates may refute -- and that is exactly its value: accepting it
+    makes the claim TESTABLE. Run the model, read the agreement indices, and
+    the sites that do not fit the spatial order announce themselves.
+
+    So nothing here applies anything. It needs no draws and no solver run,
+    because it is a question about positions rather than about ages -- which
+    is also why it can be offered while a model is still being written, before
+    there is anything to run.
+
+    The walk starts at the site nearest the origin where one is given. Without
+    one it starts at an end of the tree's longest path, which is the natural
+    start of a linear arrangement and is found rather than assumed.
+    """
+    usable = [s for s in sites if s.usable]
+    refused_sites = [s for s in sites if s.refusal]
+
+    def block(**extra) -> Dict:
+        base = {
+            'order': [],
+            'edges': [],
+            'refused': None,
+            'n_sites': len(usable),
+            'total_km': None,
+            'rooted_at': None,
+            'origin': ({'lat': float(origin[0]), 'lon': float(origin[1])}
+                       if origin else None),
+        }
+        base.update(extra)
+        return base
+
+    if refused_sites:
+        return block(refused=refused_sites[0].refusal)
+    if len(usable) < 2:
+        return block(refused=(
+            'A spatial order needs at least two placed sites. Add coordinates '
+            'to the dates, or place them on the map.'))
+
+    edges = _minimum_spanning_tree(usable)
+    neighbours: Dict[int, List[Tuple[int, float]]] = {i: [] for i in range(len(usable))}
+    for i, j, distance in edges:
+        neighbours[i].append((j, distance))
+        neighbours[j].append((i, distance))
+
+    if origin is not None:
+        root = min(range(len(usable)),
+                   key=lambda i: haversine_km(origin[0], origin[1],
+                                              usable[i].latitude, usable[i].longitude))
+    else:
+        # An end of the tree's diameter: the two-pass trick, farthest from
+        # anywhere, then farthest from that.
+        root, _ = _farthest_from(_farthest_from(0, neighbours)[0], neighbours)
+
+    # Depth-first from the root, nearest branch first, so the order follows the
+    # tree outwards rather than jumping between limbs.
+    order: List[int] = []
+    seen = {root}
+    stack = [root]
+    while stack:
+        node = stack.pop()
+        order.append(node)
+        # Reversed because a stack pops last-in first: pushing farthest first
+        # leaves the nearest on top.
+        for other, _step in sorted(neighbours[node], key=lambda pair: -pair[1]):
+            if other not in seen:
+                seen.add(other)
+                stack.append(other)
+
+    return block(
+        order=[{
+            'element_id': usable[i].element_id,
+            'name': usable[i].name,
+            'latitude': usable[i].latitude,
+            'longitude': usable[i].longitude,
+        } for i in order],
+        # The tree itself, so the map can draw what the order was read off
+        # rather than only the order.
+        edges=[{
+            'from': usable[i].element_id,
+            'to': usable[j].element_id,
+            'from_point': {'latitude': usable[i].latitude, 'longitude': usable[i].longitude},
+            'to_point': {'latitude': usable[j].latitude, 'longitude': usable[j].longitude},
+            'km': distance,
+        } for i, j, distance in edges],
+        total_km=float(sum(distance for _i, _j, distance in edges)),
+        rooted_at=usable[root].element_id,
+    )
