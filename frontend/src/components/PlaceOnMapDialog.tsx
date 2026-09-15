@@ -41,6 +41,19 @@ interface Props {
   /** The project's basemap-tiles setting, passed straight to the map. */
   tiles?: boolean
   busy?: boolean
+  /**
+   * What is being placed, when it is not the selected dates.
+   *
+   * The dialog's own copy counts dates and says the position is written to
+   * every one of them, which is right in the collection and wrong anywhere
+   * else. A dispersal ORIGIN is one point and no date at all -- reusing this
+   * without saying so produced a dialog headed "Place 0 dates on the map",
+   * which is how this prop came to exist.
+   */
+  title?: string
+  helper?: string
+  /** What the button that removes the position says. */
+  clearLabel?: string
 }
 
 const inRange = (value: number, limit: number) =>
@@ -55,6 +68,9 @@ export default function PlaceOnMapDialog({
   onClear,
   tiles = false,
   busy = false,
+  title,
+  helper,
+  clearLabel,
 }: Props) {
   // The pending position, as text, because these boxes are also where someone
   // pastes a coordinate out of a site record -- which is the accurate route,
@@ -102,12 +118,16 @@ export default function PlaceOnMapDialog({
   return (
     <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
       <DialogTitle>
-        Place {count} date{count === 1 ? '' : 's'} on the map
+        {title ?? `Place ${count} date${count === 1 ? '' : 's'} on the map`}
       </DialogTitle>
       <DialogContent>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-          Click the map, or type the position. It is written to every selected date — dates from
-          one site share a coordinate, which is why this is one edit rather than {count}.
+          {helper ?? (
+            <>
+              Click the map, or type the position. It is written to every selected date — dates
+              from one site share a coordinate, which is why this is one edit rather than {count}.
+            </>
+          )}
           {tiles
             ? ' Basemap tiles are on for this project: panning here tells the tile server which area you are looking at.'
             : ' The basemap is the offline one, which is accurate to about a kilometre. Paste a recorded position for anything finer.'}
@@ -168,7 +188,7 @@ export default function PlaceOnMapDialog({
           </Alert>
         )}
 
-        {alreadyPlaced > 0 && (
+        {alreadyPlaced > 0 && title === undefined && (
           <Alert severity="info" sx={{ mt: 2 }}>
             {alreadyPlaced} of the {count} selected date{alreadyPlaced === 1 ? ' is' : 's are'}{' '}
             already placed. Applying moves {alreadyPlaced === 1 ? 'it' : 'them'}.
@@ -184,10 +204,10 @@ export default function PlaceOnMapDialog({
             onClear()
             onClose()
           }}
-          disabled={busy || alreadyPlaced === 0}
+          disabled={busy || (clearLabel === undefined && alreadyPlaced === 0)}
           sx={{ mr: 'auto' }}
         >
-          Remove position
+          {clearLabel ?? 'Remove position'}
         </Button>
         <Button onClick={onClose} disabled={busy}>
           Cancel

@@ -2262,6 +2262,13 @@ export default function NewAnalysis() {
           longitude: m.longitude ?? null,
         }))}
         selectedIds={[]}
+        title="Place the dispersal origin"
+        helper={
+          'Click the map, or type the position. This is where the front is hypothesised to have '
+          + 'started — it is not written to any date, and moving it moves the speed measured from '
+          + 'it. The dates are drawn for scale.'
+        }
+        clearLabel="Remove the origin"
         onApply={(latitude, longitude) => {
           setMcmc({ dispersal_origin: { lat: latitude, lon: longitude } })
           setOriginDialogOpen(false)

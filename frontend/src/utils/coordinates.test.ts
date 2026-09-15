@@ -47,3 +47,25 @@ describe('the precision options', () => {
     }
   })
 })
+
+describe('formatPosition', () => {
+  it('does not print a float artefact where somebody typed a number', () => {
+    // 1.4 * 3 is 4.199999999999999 in binary floating point, and the dates
+    // table showed exactly that for a site entered at 4.2.
+    expect(formatPosition(50, 1.4 * 3)).toBe('50, 4.2')
+  })
+
+  it('keeps whole degrees whole', () => {
+    expect(formatPosition(50, 0)).toBe('50, 0')
+  })
+
+  it('keeps precision a coordinate can actually carry', () => {
+    // Six decimals is about 11 cm; nothing real is lost.
+    expect(formatPosition(54.123456, -5.654321)).toBe('54.123456, -5.654321')
+  })
+
+  it('is still null when either half is missing', () => {
+    expect(formatPosition(50, null)).toBeNull()
+    expect(formatPosition(null, 1)).toBeNull()
+  })
+})
