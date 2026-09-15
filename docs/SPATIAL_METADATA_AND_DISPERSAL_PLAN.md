@@ -1359,15 +1359,20 @@ takes each place's earliest dated event — decided once on the draws' median, n
 per-draw minimum is biased low and would let the representative date change between draws — and
 labels it `basis='earliest_dated_event'` so no panel can show it as an arrival time.
 
+**Measured coverage (2026-09-15).** The exact path: **94.5% of 200 simulated fronts** had the true
+speed inside their 95% interval, against a nominal 95% and a band of 90.4–99.6%. The sampled path:
+**92.5% of 40 fronts**, which is one front either side of nominal at that count. So the interval
+this feature reports means approximately what it says — which is the claim §11.4 doubted, and the
+only way to have settled it. Re-run with `RADICAL_COVERAGE_FRONTS=200
+RADICAL_COVERAGE_SAMPLED_FRONTS=40`; about 13 minutes across four cores.
+
 Three notes on 6c, which is the operation that changed most in the writing:
 
 - **It runs in the ordinary suite, not behind a deselection.** The plan said "marked slow", and it
   is — `pytest.ini` registers the marker — but the marker deselects nothing. A coverage test nobody
   runs is a coverage test nobody can rely on, and this is the *only* check that can retire §11.4.
   Size is tuned by `RADICAL_COVERAGE_FRONTS` instead: 32 by default (about a minute across four
-  cores) and 200 for the recorded figure. *[The 200-front measurement is still running as this is
-  written; its number lands here when it does. At 32 fronts the exact path sits inside the band and
-  the sampled path is not grossly miscalibrated.]*
+  cores) and 200 for the recorded figure.
 - **The tolerance is binomial, not a typed-in number.** Coverage is a proportion, so the band is
   three standard errors either side of 0.95 and scales with the number of fronts — ±4.6 points at
   200, ±11.6 at 32. Seeds are fixed, so a failure is a real change in the pipeline and never a

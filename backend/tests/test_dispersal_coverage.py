@@ -33,9 +33,14 @@ same answer every time, and a failure here is a real change in the pipeline.
 Cost
 ----
 One front is about four seconds, so the default 32 is the most that belongs in
-an ordinary suite run. `RADICAL_COVERAGE_FRONTS=200 pytest
-tests/test_dispersal_coverage.py` is the figure the plan asks for, and what the
-measured coverage was when it last ran is recorded in the plan's feature entry
+an ordinary suite run. `RADICAL_COVERAGE_FRONTS=200
+RADICAL_COVERAGE_SAMPLED_FRONTS=40 pytest tests/test_dispersal_coverage.py -s`
+is the figure the plan asks for, and takes about thirteen minutes across four
+cores.
+
+Measured 2026-09-15: the exact path covered **94.5% of 200 fronts** and the
+sampled path **92.5% of 40**, both against a nominal 95%. That is the number
+this file exists to produce, and it is recorded in the plan's feature entry
 beside the wiggle-match and age-depth ones.
 """
 import math
