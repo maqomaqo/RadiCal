@@ -280,7 +280,15 @@ export default function SiteMap({
 
     const geoType = (tiles ? 'scattermap' : 'scattergeo') as
       'scattermap' | 'scattergeo'
-    const list: unknown[] = []
+    // Always one geo trace, even with nothing to draw. The subplot exists
+    // because a trace asks for it: given zero traces Plotly draws its default
+    // cartesian grid, and the placing dialog opened on that -- a collection
+    // with nothing placed yet had no trace, so no basemap, no projection, and
+    // every click reported as unreadable. This is the ordinary first state
+    // of that dialog, not an edge case.
+    const list: unknown[] = [
+      { type: geoType, mode: 'markers' as const, lat: [], lon: [], hoverinfo: 'skip' as const },
+    ]
 
     // The likelihood region underneath everything: it is the backdrop the
     // marks are read against, and drawn over them it would bury them.
