@@ -1363,7 +1363,10 @@ labels it `basis='earliest_dated_event'` so no panel can show it as an arrival t
 
 **Measured coverage (2026-09-15).** The exact path: **94.5% of 200 simulated fronts** had the true
 speed inside their 95% interval, against a nominal 95% and a band of 90.4–99.6%. The sampled path:
-**92.5% of 40 fronts**, which is one front either side of nominal at that count. So the interval
+**92.5% of 40 fronts**, which is one front either side of nominal at that count. *Re-measured after
+features 7–9 and identical to the digit — the seeds are fixed, so identical figures mean those
+features left the wave-of-advance path bit-for-bit unchanged, which is what they were supposed to
+do.* So the interval
 this feature reports means approximately what it says — which is the claim §11.4 doubted, and the
 only way to have settled it. Re-run with `RADICAL_COVERAGE_FRONTS=200
 RADICAL_COVERAGE_SAMPLED_FRONTS=40`; about 13 minutes across four cores.

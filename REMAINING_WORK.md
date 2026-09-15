@@ -199,7 +199,8 @@ Three numbers worth keeping from it:
 - **The dispersal interval is calibrated.** `tests/test_dispersal_coverage.py`
   simulates whole fronts through IntCal20 and a solver and asks whether the
   reported 95% interval contains the speed the data were built from: **94.5% of
-  200 fronts** on the exact path, **92.5% of 40** on the sampled one. That is
+  200 fronts** on the exact path, **92.5% of 40** on the sampled one — re-measured after the
+  dispersal models were finished and identical to the digit. That is
   the claim risk 11.4 doubted — *OLS on autocorrelated residuals with an assumed
   origin will always return a tidy v* — and a simulation was the only way to
   settle it. Rendered in the UI, a Neolithic-scale synthetic front reads
