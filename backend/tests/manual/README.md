@@ -192,6 +192,28 @@ difference, not a sampling one: OxCal applies span-prior corrections
 that this app does not, and their effect should grow with group size, which
 matches the pattern. Worth settling if single large phases matter.
 
+## `calib_regioncalc`: the marine reservoir weighted mean
+
+`calib_regioncalc.py` checks `services/reservoir.combine` against calib.org's
+own `regioncalc.php`, which is the reference implementation for the formula
+the Delta-R lookup derives its values with. Twenty random sets of 2-8 points,
+one request each, paused between.
+
+**Run 2026-09-14: 20/20 exact integer match**, on both the mean and its
+uncertainty, over sets whose reported uncertainties span 22 to 447 years.
+
+Why it matters more than an ordinary formula test: the app derives a Delta-R
+locally, from a mirror, precisely so that a site's coordinates never reach
+calib.org. That is only defensible if the number it derives is the one their
+page would print -- otherwise the app has quietly forked the reference and a
+reviewer checking a published date against calib.org would find a different
+answer. The three published cases asserted in `tests/test_reservoir.py` pin
+the discriminating cases; this pins the general agreement.
+
+It reaches the network, so it stays out of the suite: `regioncalc.php` is a
+courtesy interface on somebody else's host, and running it on every test run
+would be an abuse of it.
+
 ## If you write another cross-check
 
 Two traps, both found the hard way:

@@ -30,6 +30,8 @@ import {
   ListItemIcon,
   ListItemText,
   Divider,
+  FormControlLabel,
+  Switch,
 } from '@mui/material'
 import EditIcon from '@mui/icons-material/Edit'
 import MoreVertIcon from '@mui/icons-material/MoreVert'
@@ -53,6 +55,8 @@ import StatusStrip, { statusSummary } from '@/components/StatusStrip'
 import type { StatusCounts } from '@/components/StatusStrip'
 import { relativeTime, absoluteTime } from '@/utils/serverTime'
 import { analysisTypeLabel } from '@/utils/analysisTypes'
+import { COORDINATE_PRECISION_OPTIONS } from '@/utils/coordinates'
+import type { CoordinatePrecision } from '@/utils/coordinates'
 
 interface AnalysisSummary {
   id: string
@@ -73,6 +77,15 @@ interface ProjectDetailData {
   last_activity: string | null
   /** Dates in the project's reusable collection, not the count deployed into analyses. */
   samples_count: number
+  /**
+   * How precisely this project's coordinates may LEAVE the app -- 'full', or
+   * the size of the cell they are rounded into ('0.01', '0.1', '1'). It
+   * governs every export and every rendered figure and nothing else; what is
+   * stored, and what this page shows, stays full precision.
+   */
+  coordinate_precision: CoordinatePrecision
+  /** Whether the map may fetch raster basemap tiles. Off by default. */
+  map_tiles_enabled: boolean
   analyses: AnalysisSummary[]
 }
 
@@ -113,6 +126,8 @@ export default function ProjectDetail() {
   const [editOpen, setEditOpen] = useState(false)
   const [editName, setEditName] = useState('')
   const [editDescription, setEditDescription] = useState('')
+  const [editPrecision, setEditPrecision] = useState<CoordinatePrecision>('full')
+  const [editTiles, setEditTiles] = useState(false)
   const [saving, setSaving] = useState(false)
 
   const [deleteProjectOpen, setDeleteProjectOpen] = useState(false)
@@ -237,6 +252,11 @@ export default function ProjectDetail() {
               null
             ),
             samples_count: 0,
+            // No project row, so no project settings either. The defaults
+            // stand in: "Unassigned" has no collection to place, and nothing
+            // reads these here.
+            coordinate_precision: 'full',
+            map_tiles_enabled: false,
             analyses: items,
           })
         } else {
@@ -266,6 +286,8 @@ export default function ProjectDetail() {
     if (!project) return
     setEditName(project.name)
     setEditDescription(project.description || '')
+    setEditPrecision(project.coordinate_precision || 'full')
+    setEditTiles(project.map_tiles_enabled)
     setEditOpen(true)
   }
 
@@ -276,7 +298,12 @@ export default function ProjectDetail() {
       const response = await fetch(`/api/projects/${project.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: editName.trim(), description: editDescription.trim() || null }),
+        body: JSON.stringify({
+          name: editName.trim(),
+          description: editDescription.trim() || null,
+          coordinate_precision: editPrecision,
+          map_tiles_enabled: editTiles,
+        }),
       })
       const data = await response.json()
       if (data.success) {
@@ -736,7 +763,7 @@ export default function ProjectDetail() {
               different criteria. Deployed dates are copies, so editing one here never alters an
               analysis already created from it.
             </Typography>
-            <ProjectSampleTable projectId={project.id} />
+            <ProjectSampleTable projectId={project.id} mapTilesEnabled={project.map_tiles_enabled} />
           </Box>
         ) : analysesCount === 0 ? (
           <Box sx={{ px: 3, py: 7, textAlign: 'center' }}>
@@ -938,7 +965,7 @@ export default function ProjectDetail() {
       </Menu>
 
       <Dialog open={editOpen} onClose={() => setEditOpen(false)} fullWidth maxWidth="sm">
-        <DialogTitle>Edit Project</DialogTitle>
+        <DialogTitle>Project Settings</DialogTitle>
         <DialogContent>
           <TextField
             fullWidth
@@ -955,6 +982,52 @@ export default function ProjectDetail() {
             value={editDescription}
             onChange={(e) => setEditDescription(e.target.value)}
           />
+          <Typography variant="subtitle2" sx={{ mt: 3 }}>
+            Coordinates
+          </Typography>
+          <TextField
+            select
+            fullWidth
+            label="Precision in exports and figures"
+            value={editPrecision}
+            onChange={(e) => setEditPrecision(e.target.value as CoordinatePrecision)}
+            sx={{ mt: 1 }}
+            helperText={
+              editPrecision === 'full'
+                ? 'Positions leave this project exactly as they were entered.'
+                : 'Positions are rounded on the way out. What is stored here does not change, and this page still shows the full value.'
+            }
+          >
+            {COORDINATE_PRECISION_OPTIONS.map((option) => (
+              <MenuItem key={option.value} value={option.value}>
+                {option.label}
+              </MenuItem>
+            ))}
+          </TextField>
+
+          <FormControlLabel
+            sx={{ mt: 2 }}
+            control={
+              <Switch
+                checked={editTiles}
+                onChange={(e) => setEditTiles(e.target.checked)}
+              />
+            }
+            label="Show a basemap with streets and satellite detail"
+          />
+          {/* The notice says what the request gives away, and says it BEFORE
+              the switch is thrown rather than in a footnote afterwards. That
+              ordering is the point: defaulting to tiles and mentioning it
+              later would be the same disclosure with better manners. */}
+          <Alert severity={editTiles ? 'warning' : 'info'} sx={{ mt: 1 }}>
+            The map draws its coastlines from data this app serves itself, and asks nothing of
+            anyone. Turning this on fetches map images from OpenStreetMap instead, which tells
+            their servers which patch of ground is on screen each time someone opens or pans the
+            map — not the coordinates themselves, but enough to locate a site. Worth it to drop a
+            pin on a field boundary; not worth it to look at a distribution. It also needs the
+            internet: on an installation that cannot reach OpenStreetMap, leave this off, because
+            the tiled map has no offline state to fall back to.
+          </Alert>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setEditOpen(false)}>Cancel</Button>

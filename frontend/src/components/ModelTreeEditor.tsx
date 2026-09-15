@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Box,
   Paper,
@@ -47,6 +47,7 @@ import { useElementTypeColors, type ElementTypeColor } from '@/theme/diagramColo
 import type { ModelElement, ElementType, ElementParams, MatrixMeasurement } from '@/types'
 import SortDatesButton from '@/components/SortDatesButton'
 import ConfirmDialog from '@/components/ConfirmDialog'
+import { reorderToProposal } from '@/utils/spatialOrder'
 import GuideBand from '@/components/GuideBand'
 import type { MeasurementSortKey } from '@/utils/sortMeasurements'
 // Lives in utils because the starting structure built there (see
@@ -692,6 +693,17 @@ function DropIndicator({ depth, label }: { depth: number; label: string }) {
     </Box>
   )
 }
+
+/**
+ * Loaded on demand, and that is load-bearing twice over.
+ *
+ * It carries a map, so it carries Plotly -- about a megabyte the editor does
+ * not need until somebody presses the button, and a module whose UMD wrapper
+ * reads `self` at the top level, which is not defined in Node. Importing it
+ * eagerly put Plotly in the editor's own module graph and broke this file's
+ * unit tests, which never render anything.
+ */
+const SpatialOrderDialog = lazy(() => import('@/components/SpatialOrderDialog'))
 
 interface Props {
   tree: ModelElement
@@ -1621,6 +1633,9 @@ export default function ModelTreeEditor({
   // The element awaiting a delete confirmation, held by id rather than by node
   // so it cannot go stale against a tree that changed underneath it.
   const [pendingRemoval, setPendingRemoval] = useState<string | null>(null)
+  // Whether the spatial-order proposal is open. A PROPOSAL and nothing else:
+  // see SpatialOrderDialog for why it is never applied on its own.
+  const [spatialOrderOpen, setSpatialOrderOpen] = useState(false)
   // Containers whose children are hidden. Ids rather than nodes, so a tree
   // edit cannot leave this pointing at something that no longer exists.
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
@@ -1908,6 +1923,22 @@ export default function ModelTreeEditor({
     const built =
       type === 'wiggle_sequence' ? wiggleMatchTree(ids) : depositionSequenceTree(ids)
     onChange(built.tree, built.assignments)
+  }
+
+  /**
+   * Apply a proposed spatial order: permute the named elements into it.
+   *
+   * Through the same `remember()` undo the presets use, because this changes
+   * the model and the analyst should be able to take it back after seeing what
+   * it looks like. The permutation itself is utils/spatialOrder, which leaves
+   * every Boundary where it was -- a spanning tree is a claim about which
+   * sites are adjacent, not about how the model should be structured.
+   */
+  const applySpatialOrder = (orderedIds: string[]) => {
+    const next = reorderToProposal(tree, orderedIds)
+    if (next === tree) return
+    remember()
+    onChange(next, assignments)
   }
 
   const assign = (sampleId: string, elementId: string) => {
@@ -2269,6 +2300,19 @@ export default function ModelTreeEditor({
             one timber, which is a tax with no payoff.
 
             They REPLACE the model, so they are confirmed like a deletion. */}
+        {/* A PROPOSAL, unlike every other button here: it opens a dialog that
+            shows the order and says plainly that spatial adjacency is not
+            chronology, and nothing changes unless the analyst accepts. */}
+        <Tooltip title="Read an order off the sites' positions — a minimum spanning tree walked from one end — and offer it for you to accept or reject">
+          <Button
+            size="small"
+            startIcon={<AutoFixHighIcon />}
+            onClick={() => setSpatialOrderOpen(true)}
+            sx={{ minHeight: 44, flexShrink: 0 }}
+          >
+            Propose an order from the map
+          </Button>
+        </Tooltip>
         <Tooltip title="Replace the model with a single wiggle-matched series holding every date — one timber, one core sample, one varve sequence">
           <Button
             size="small"
@@ -2290,6 +2334,30 @@ export default function ModelTreeEditor({
           </Button>
         </Tooltip>
       </Box>
+
+      {/* Mounted only once asked for, so the lazy chunk is fetched on the
+          click rather than with the page. */}
+      {spatialOrderOpen && (
+        <Suspense fallback={null}>
+          <SpatialOrderDialog
+            open
+            tree={tree}
+            // With the phase assignment MERGED IN. The draft keeps
+            // `assignments` beside the measurements rather than on them, so a
+            // date here carries a position but no element_id -- and
+            // derive_sites groups dates by element_id, so every date would
+            // look unassigned and the proposal would refuse for having no
+            // placed sites, on a model where every date is placed. Found by
+            // driving the real app.
+            measurements={measurements.map((m) => ({
+              ...m,
+              element_id: assignments[m.id] || m.element_id || m.group_id || null,
+            }))}
+            onClose={() => setSpatialOrderOpen(false)}
+            onApply={applySpatialOrder}
+          />
+        </Suspense>
+      )}
 
       <ConfirmDialog
         open={pendingPreset !== null}

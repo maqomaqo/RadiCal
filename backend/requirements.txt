@@ -20,6 +20,12 @@ PyJWT==2.8.0
 # Backs pydantic's EmailStr, which api/auth.py uses to reject an address that
 # cannot exist before it becomes a row.
 email-validator==2.1.0
+# The ONE outbound HTTP client in the app, used by exactly one module:
+# services/reservoir_ingest.py, which mirrors the marine reservoir database
+# when a person asks it to. It was already here transitively; declared
+# explicitly now that something imports it by name, so that a transitive
+# dependency dropping it cannot take the ingest with it.
+requests==2.34.2
 aiofiles==23.2.1
 python-dotenv==1.0.0
 cors==1.0.1

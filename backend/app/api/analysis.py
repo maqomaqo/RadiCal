@@ -338,6 +338,9 @@ def _sample_row(
         curve_id=measurement.curve_id,
         delta_r=measurement.delta_r,
         delta_r_error=measurement.delta_r_error,
+        delta_r_source=getattr(measurement, 'delta_r_source', None),
+        latitude=getattr(measurement, 'latitude', None),
+        longitude=getattr(measurement, 'longitude', None),
         outlier_prior=getattr(measurement, 'outlier_prior', 0.0),
         outlier_model=getattr(measurement, 'outlier_model', None),
         reservoir_age=measurement.reservoir_age,
@@ -450,6 +453,31 @@ def _run_wiggle_match(
     # input and is reported as one above.
 
 
+def _dispersal_spec(bayesian_config: Dict) -> Optional[Dict]:
+    """
+    What the stored config asks of services/dispersal.py, or None.
+
+    Read from the stored config rather than the request, so a RERUN fits the
+    same front from the same point: an origin that changed between a run and
+    its rerun would change the speed without changing anything about the
+    dates, which is exactly the kind of silent drift a rerun exists to rule
+    out.
+
+    An origin is OPTIONAL here where the wave-of-advance model requires one.
+    A trend surface assumes no origin at all -- that is what makes it the right
+    first look at a dataset, before a hypothesis has been imposed on it -- so
+    asking for dispersal without placing a pin is a legitimate request for the
+    trend alone, not an incomplete one. An origin left behind by a config the
+    analyst later switched off is still not a request: the flag decides.
+    """
+    if not bayesian_config.get('estimate_dispersal'):
+        return None
+    origin = bayesian_config.get('dispersal_origin') or {}
+    lat, lon = origin.get('lat'), origin.get('lon')
+    placed = None if lat is None or lon is None else (float(lat), float(lon))
+    return {'origin': placed}
+
+
 def _run_bayesian(
     measurements: List[Dict],
     model_tree: Dict,
@@ -504,6 +532,7 @@ def _run_bayesian(
     """
     requested = bayesian_config.get('solver') or 'auto'
     estimate_durations = bool(bayesian_config.get('estimate_durations'))
+    dispersal_spec = _dispersal_spec(bayesian_config)
 
     # Refused here as well as at the request schema, because a rerun comes
     # from the database rather than from a request and has to be held to the
@@ -558,6 +587,7 @@ def _run_bayesian(
             num_samples=bayesian_config.get('mcmc_samples', 2000),
             uniform_span_prior=bayesian_config.get('uniform_span_prior', True),
             estimate_durations=estimate_durations,
+            dispersal=dispersal_spec,
         )
         agreement_service.attach(solved['measurements'], measurements)
         return solved['measurements'], solved['boundaries'], {
@@ -576,6 +606,7 @@ def _run_bayesian(
         num_samples=bayesian_config.get('mcmc_samples', 2000),
         uniform_span_prior=bayesian_config.get('uniform_span_prior', True),
         estimate_durations=estimate_durations,
+        dispersal=dispersal_spec,
         on_progress=on_progress,
         # Independent chains in parallel processes, pooled; see
         # gibbs.solve_chains for what the extra chains are for.
@@ -777,6 +808,9 @@ def calibrate_single(measurement: CalibrateRequest, db: Session = Depends(get_db
             # correction the first run made.
             delta_r=measurement.delta_r,
             delta_r_error=measurement.delta_r_error,
+            delta_r_source=measurement.delta_r_source,
+            latitude=measurement.latitude,
+            longitude=measurement.longitude,
             reservoir_age=measurement.reservoir_age,
             depth_cm=measurement.depth_cm,
             location=measurement.location,
@@ -1335,6 +1369,13 @@ def get_analysis(analysis_id: str, db: Session = Depends(get_db),
                     "curve_id": s.curve_id,
                     "delta_r": s.delta_r,
                     "delta_r_error": s.delta_r_error,
+                    # Same reason again: a derived offset that lost its
+                    # derivation is an offset nobody can account for.
+                    "delta_r_source": s.delta_r_source,
+                    # Same reason: left out here, a date would be unplaced by
+                    # the next edit of the analysis it belongs to.
+                    "latitude": s.latitude,
+                    "longitude": s.longitude,
                     # Same reason: omitted here, an outlier setting would be
                     # switched off by editing the analysis.
                     "outlier_prior": s.outlier_prior,
@@ -1636,6 +1677,12 @@ def _rerun_analysis(analysis: Analysis, db: Session,
                 'delta_r': s.delta_r,
                 'delta_r_error': s.delta_r_error,
                 'element_id': s.element_id or s.group_id,
+                # Where the date is. Carried for services/dispersal.py, which
+                # derives a site's position from the dates inside it -- so a
+                # run that dropped these would report "no coordinates" on a
+                # collection that has them.
+                'latitude': s.latitude,
+                'longitude': s.longitude,
                 'tpq_age_bp': s.tpq_age_bp,
                 'taq_age_bp': s.taq_age_bp,
                 'outlier_prior': s.outlier_prior,

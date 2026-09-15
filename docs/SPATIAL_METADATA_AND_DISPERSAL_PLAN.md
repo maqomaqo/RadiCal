@@ -92,8 +92,15 @@ Three consequences the design has to carry:
 ### 2.2 The encoding is mixed, per row
 
 The same response contains correctly-encoded UTF-8 (`Håkansson`) and raw cp1252 bytes
-(`Thyborøn` arriving as `Thybor\xf8n`). **54 of 2060 rows** fail a strict UTF-8 decode. Decoding the
-whole document as cp1252 breaks the other kind.
+(`Thyborøn` arriving as `Thybor\xf8n`). **60 fields across 2060 rows** fail a strict UTF-8 decode,
+every one of them valid cp1252. Decoding the whole document as cp1252 breaks the other kind.
+
+*[corrected 2026-09-14, from a capture]* This said **54**, measured on 2026-09-06. Re-fetched and
+counted on 2026-09-14 it is **60** — one field per affected row, all Danish and Norwegian place
+names, all decoding cleanly under cp1252 with none failing both. The direction of the drift is the
+thing to note rather than the number: the source is still being edited, and edits are still
+arriving in mixed encodings, so this is a property to keep counting rather than one that was
+measured once. The ingest report carries the count for exactly that reason.
 
 The ingest therefore decodes **per field**: UTF-8 strict, falling back to cp1252 on that field
 alone. A field that fails both is stored verbatim as bytes-escaped text and counted in the ingest
@@ -201,8 +208,11 @@ sediment or rock, and migratory animals may not represent the region they were f
 questions decide how the app should act on that: is the field usable, is the bias real, and does it
 change the answer.
 
-**The field is dirty.** `taxa.feeding` holds **25 distinct spellings** across 2060 rows for what is
-really six or seven classes — case variants (`Deposit`/`deposit`, `Suspension`/`suspension`), a
+**The field is dirty.** `taxa.feeding` holds **26 distinct spellings** across 2060 rows for what is
+really six or seven classes *[corrected 2026-09-14: 25 as first measured, 26 in the capture — the
+extra is `'\xa0deposit'`, a deposit feeder behind a non-breaking space. It folds in with the rest
+because Python's `str.strip()` counts U+00A0 as whitespace, which is luck rather than design, so
+`services/reservoir.py` has a test saying so out loud]* — case variants (`Deposit`/`deposit`, `Suspension`/`suspension`), a
 synonym (`filter` = suspension), a literal string `NULL`, and — the one that matters —
 **values truncated at 16 characters** by the source column width:
 
@@ -222,6 +232,11 @@ into either side of the thing they were hedging about. Normalised (raw string re
 | grazer | 86 | `herbivore`, `Herbivore`, `browser`, `Algal Grazer`, `commensalism` |
 | migratory | 86 | `migratory` |
 | ambiguous | 13 | the five truncated compounds above |
+
+*[confirmed 2026-09-14]* `services/reservoir.py`'s table was written from this section's prose
+before the source was reachable. Run against all 2060 rows of the capture it reproduces **every one
+of these seven counts exactly**, with no spelling left unrecognised — so the fold above is not
+just plausible, it is the one the database supports.
 
 **The bias is real, and it is a population bias, not a per-sample offset.** Comparing raw class
 means is worthless — between-region variation swamps everything — so the test is *paired*: each
@@ -809,10 +824,18 @@ completes a task and can defend the result afterwards.
 `frontend/node_modules`). *[rev. 2026-09-14]* `scattermap` (MapLibre) rather than `scattermapbox`,
 which 2.35 deprecates; both are in the bundle. One `SiteMap` component covers every surface here:
 
-- **Default basemap is `scattergeo`**: coastlines, country outlines and graticule rendered from
-  data inside the bundle. **No network request, no tile server, no leak** (§4.5 rule 4), and it
-  works in an air-gapped install. Adequate to regional scale, which is the scale every figure in
-  Part C is drawn at.
+- **Default basemap is `scattergeo`**: coastlines and country outlines, **no network request, no
+  tile server, no leak** (§4.5 rule 4), working in an air-gapped install. Adequate to regional
+  scale, which is the scale every figure in Part C is drawn at.
+
+  *[corrected 2026-09-14, op 2a]* This was written as "rendered from data inside the bundle",
+  **and that is false**. `plotly.js-dist-min` ships the `scattergeo` renderer and none of the
+  geometry: left alone it fetches `https://cdn.plot.ly/world_110m.json` at render time, and where
+  that request cannot be made `Plotly.newPlot` **rejects** — the map does not degrade to a blank
+  basemap, it does not appear. Verified in Chromium against the 2.35.3 bundle. The property above
+  is therefore something the app must *do*, not something it gets: `world_110m.json` (278 KB,
+  Natural Earth via Plotly, MIT) is served from `frontend/public/geo/` and `config.topojsonURL`
+  points at it. See `public/geo/README.md` for provenance and how to refresh it.
 - **Tiles are opt-in per project** (`scattermap`, `open-street-map`; `projects.map_tiles_enabled`), for the one job the offline
   map cannot do: dropping a pin at site precision. Enabled once, behind a notice naming what a tile
   request discloses.
@@ -989,13 +1012,13 @@ neighbourhood; a result an order of magnitude away is a bug, not a discovery.
 | # | Risk | Likelihood | Impact | Mitigation |
 |---|---|---|---|---|
 | 11.1 | **Redistribution permission.** The bundled snapshot redistributes Reimer & Reimer's compilation. Their About page asks that original authors be cited and gives a contact. | medium | high — blocks the bundle | Email p.j.reimer@qub.ac.uk before shipping it. If declined, fall back to "no bundle, user runs the ingest" (§5.3 already supports it unchanged); only the shipped CSV goes away. |
-| 11.2 | **calib.org changes or disappears.** Apache 2.4.61 / PHP 5.6.40, HTML scraping, no API, no versioning. | medium | low | The mirror is the mitigation. A broken ingest breaks *refresh*, never *analysis*. The parser fails loudly on an unexpected table shape rather than importing garbage. |
+| 11.2 | **calib.org changes or disappears.** Apache 2.4.61 / PHP 5.6.40, HTML scraping, no API, no versioning. | medium | low | The mirror is the mitigation. A broken ingest breaks *refresh*, never *analysis*. The parser must fail loudly on an unexpected table shape rather than importing garbage. *[2026-09-14: written and tested. `extract_records` checks the response's header row against `EXPECTED_COLUMNS` and refuses anything else, and the ingest cross-checks the page's declared row count against the rows parsed.]* |
 | 11.3 | **A derived ΔR is trusted more than it deserves.** §2.4 says the floor is ~84 yr, §2.5 says the answer moves with N, §2.7 says it can move 465 yr with feeding habit. | **high** | high | The number never appears without its σ, its N, its nearest-point distance, its point list with habits, and the suspension-only counterfactual (§7.3). This is a UI obligation, not a documentation one. |
 | 11.8 | **Alert fatigue defeats the habit warning.** A prompt that fires on 61% of lookups is dismissed reflexively, including on the 4% where it mattered. | high *if prompted* | high | §5.4.1: never prompt on presence. Show the counterfactual always, warn only above the settled **35 yr** threshold (~11% of lookups). Worth re-measuring against real usage once the feature has been in hand for a while. |
 | 11.4 | **A dispersal fit that is confident and wrong.** OLS on autocorrelated residuals with an assumed origin will always return a tidy *v*. | **high** | high | §6.6 residuals, §6.8 disclosures in the panel, and the §10 coverage test run before the feature ships. Consider refusing to report *v* below a minimum site count (~6) rather than fitting 3 points and printing an interval. |
 | 11.5 | **A coordinate leaks.** | low | severe and irreversible | §4.5: local-only lookup, offline default basemap, opt-in tiles, export precision control. |
 | 11.6 | **Site derivation surprises the user** — a Phase holding dates from two sites (§6.2). | medium | medium | Refuse and name both coordinates and the distance between them, rather than using the centroid. |
-| 11.7 | **The mixed-encoding rows regress** on a future ingest (§2.2). | low | low | Fixture test on the raw bytes; the ingest report counts fallbacks, so a jump is visible. |
+| 11.7 | **The mixed-encoding rows regress** on a future ingest (§2.2). | low | low | Fixture test on the raw bytes; the ingest report counts fallbacks, so a jump is visible. *[2026-09-14: the fixture IS a capture — 85 rows of the source's own bytes, carrying all 60 fields that need a fallback. The count went 54 → 60 between two measurements eight days apart, which is the drift this row was written about.]* |
 
 ---
 
@@ -1017,23 +1040,29 @@ upstream ever wants only that. Item 6 no longer needs one (§6.3).
 
 ## 13. Open decisions
 
-1. **A `sites` table, or derived sites?** (§4.1, §6.2) Derived is planned *(§14 keeps it; revisit
-   at op 6a, not before)*, because the model tree
-   and the date collection already express what a site is, and a `Site` entity would fork the schema
-   much further. A first-class entity would be tidier for Part C and would give a site one
-   coordinate instead of *n* equal ones. Decide before item 6, not before item 1 — the derived
-   design does not block it.
+1. ~~**A `sites` table, or derived sites?**~~ **Decided 2026-09-14: derived**, as planned. The model
+   tree and the date collection already express what a site is, and a `Site` entity would fork the
+   schema much further for no gain feature 6 needs. A first-class entity would be tidier and would
+   give a site one coordinate instead of *n* equal ones, and it would make §11.6 structurally
+   impossible rather than caught by a threshold — that is the cost accepted here, and op 6a's
+   descent rule is what pays it. Revisit if a second Part C model wants a site to carry anything
+   of its own.
 2. **Where does the ΔR snapshot live in the UI?** It behaves like a calibration curve (versioned,
    immutable, citable), which argues for the Curves page. It is used from the date collection, which
    argues for the project. Currently planned: managed on Curves, used from the collection.
-3. **Minimum site count for a dispersal fit.** §11.4 suggests refusing below ~6. Needs a number
-   chosen deliberately rather than defaulted. *§14 op 6a proposes 6 as `MIN_DISPERSAL_SITES`, with
-   the reasoning beside it; it is the one number in op 6 to confirm before coding.*
-4. **Does dispersal belong to an analysis or to a project?** Planned as an analysis (it consumes the
-   run's joint draws, §6.3). But a dispersal question usually spans several analyses of one region,
-   which the current model has no place for. A project-level dispersal built from several analyses'
-   stored boundaries would have to fall back to marginals (§3.2) and lose the joint structure —
-   which may be an acceptable trade, and is not decided.
+3. ~~**Minimum site count for a dispersal fit.**~~ **Decided 2026-09-14: 6**, as
+   `MIN_DISPERSAL_SITES`. The reasoning, now in the constant's own comment: OLS through three points
+   returns a slope, a speed and an interval, all tidy and none worth anything, because with *n* − 2
+   = 1 residual degree of freedom there is nothing left with which the data could contradict the
+   line. Six is where the residual table starts being able to say *this is not a front* — which is
+   the diagnostic §6.6 leans on, and the reason the number is a refusal rather than a warning.
+4. ~~**Does dispersal belong to an analysis or to a project?**~~ **Decided 2026-09-14:
+   per-analysis**, as planned — it consumes the run's joint draws (§6.3). A dispersal question
+   usually spans several analyses of one region, which the current model still has no place for;
+   that is the known cost. A project-level fit built from several analyses' stored boundaries would
+   have to fall back to marginals (§3.2) and lose the joint structure between sites, which is
+   precisely what makes this estimator better than regressing point estimates — so the trade was
+   refused rather than accepted.
 5. **Coordinate precision default.** Planned as `full`. An argument exists for defaulting to `0.01°`
    and making full precision the deliberate choice. *§14 op 1 ships `full`: an export that silently
    rounds is a surprise, and a project owner choosing to round is the deliberate act.*
@@ -1058,6 +1087,15 @@ else changes the schema.
 Operations within a feature run in order. Features 1–2 and 3 are independent and can interleave;
 4 waits for both; 6 waits for 1–2 and for the three §13 decisions marked below.
 
+*Every feature in this plan is done (2026-09-15) apart from op 3d, which op 0 still gates. Alembic
+head is `b7c4e0a13d92`. What op 0 still buys is the
+BUNDLED snapshot — a fresh install with a working lookup and no network, and two installs agreeing
+on what they compute; until then the lookup runs on a snapshot somebody ingested, which feature 5's
+card is now the way to get. §13's three open decisions for feature 6 were settled on 2026-09-14,
+all three as proposed. What is left in §13 is items 2, 5 and 6: the first two were taken as written
+and shipped that way, and 6 (a per-species habit correction) still needs a published source the
+database itself does not contain.*
+
 ### Op 0 — the permission request *(human; start now, longest lead time)*
 
 Email p.j.reimer@qub.ac.uk asking to redistribute the Marine20 reservoir compilation as a bundled
@@ -1065,7 +1103,28 @@ snapshot, citing Reimer & Reimer 2001 and naming the app. Blocks **only op 3d** 
 Every other operation proceeds; if the answer is no, op 3d is dropped and the ingest (op 3c) is the
 whole story, unchanged. *The app cannot send this; a person does.*
 
-### Feature 1 — coordinates (§4)
+### Feature 1 — coordinates (§4) — **done 2026-09-14**
+
+Shipped in five commits rather than six: 1b and 1c share the bulk-update and deploy paths in
+`api/project_samples.py` and could not be usefully split. Three things were done differently from
+the text below, each for a reason found in the code:
+
+- **1b lands on `ProjectSampleBulkUpdate`, not `ProjectSampleBulkInput`.** The line reference
+  (`:285`) and feature 2b's "place on map writes the whole selection" both point at the
+  apply-one-value-across-a-selection path; `ProjectSampleBulkInput` is a list of
+  `ProjectSampleInput` and inherits the rule already. The both-or-neither check is a schema rule
+  there and a **merged-row** rule on the single-date PATCH, where a request carrying only a
+  longitude is legitimately correcting one half of a complete position.
+- **1d also refuses a decimal comma.** `_number` strips thousands separators, so `5,6` would have
+  been read as 56 — in range for a longitude, fifty degrees out, silent. Same failure class as DMS,
+  and a European locale's Excel writes exactly that.
+- **1e appends Latitude/Longitude to `CSV_HEADER` rather than filing them after `Curve`.** Every
+  column before them has held its position since the export existed. Also pulled forward from 1f:
+  `coordinate_precision` had to become *settable* (`schemas/project.py`'s Literal, which is what
+  keeps it to the four values the exporter can apply) for 1e's guarantee to mean anything.
+
+1f put the precision selector in the existing project dialog, retitled *Project Settings*, rather
+than adding a second dialog beside it.
 
 **1a. Schema.** `backend/app/models.py`: `latitude`, `longitude` (Float, nullable) on
 `ProjectSample` and `RadiocarbonSample`, beside `delta_r`/`delta_r_error` and in their voice;
@@ -1102,7 +1161,29 @@ tiles switch. `ProjectSampleTable.test.ts`,
 `columnPreferences.test.ts` extended. *Done when* a coordinate typed in the table survives export,
 edit-in-spreadsheet, and re-import.
 
-### Feature 2 — the map (§7.1–7.2)
+### Feature 2 — the map (§7.1–7.2) — **done 2026-09-14**
+
+Three commits, one per op. Four things were done differently from the text below:
+
+- **The offline basemap needed a vendored topojson.** §7.1's "no network request" was not a
+  property of `scattergeo`; it is now a property of this app. See the correction in §7.1.
+- **Clicks are taken in the capture phase.** `plotly_click` on a geo subplot fires only when a
+  MARK is hit, so the public API cannot answer where an empty-map click landed, and Plotly's own
+  drag rect stops a bubble-phase handler over the whole drawn map. Built the obvious way this
+  feature would have looked finished and worked only in the letterbox margin. The internals it
+  reads instead (`_fullLayout.geo._subplot.projection`, and MapLibre's `unproject` for tiles) are
+  behind guarded accessors that return null rather than throw, so a Plotly upgrade costs the
+  click and not the screen.
+- **Pins are not individually draggable** (§7.2 asked for it). A pin is a position, every date at
+  it shares that position, and the editing unit is the selection — so dragging one would have to
+  rewrite dates that may not be selected. Clicking again moves the selection's pin: the same
+  gesture, with a scope that can be stated.
+- **Placement is a dialog**, breaking `SampleSelectionBar`'s rule that a bulk edit keeps the
+  selection on screen. A map needs the space, and the other sites it shows are worth more than
+  the rows it covers.
+
+Also: `parsePastedDates` moved to `utils/pastedDates.ts`, because `ProjectSampleTable` now reaches
+Plotly through the map dialog and its test died on the import.
 
 **2a. `SiteMap.tsx`.** One component on `scattergeo`, `displayModeBar: false`, `usePlotFont`,
 `plotColors`, the app-drawn Download PNG at `PNG_EXPORT_SCALE` via `utils/plotExport.ts`. Props:
@@ -1116,7 +1197,33 @@ click writes the same `{latitude, longitude}` to the whole selection through the
 once per project behind the notice naming what a tile request discloses (§4.5 rule 4). *Done when*
 the network tab shows no request until the switch is on.
 
-### Feature 3 — the ΔR mirror (§5.2–5.3)
+### Feature 3 — the ΔR mirror (§5.2–5.3) — **3a–3c done; 3d still gated on op 0**
+
+*2026-09-14.* Built in two passes. The first assumed calib.org was unreachable — https to it is
+blocked — and left the fetch unwritten behind a documented seam. **Plain http reaches it**, so the
+second pass captured the real response and finished the job.
+
+What the capture changed:
+
+- `fetch_records` and `extract_records` are **written against the real interface**:
+  `POST http://calib.org/marine/query/query.php` with `query=SOURCE_QUERY`, which answered 200 with
+  2060 records. One session GET and one query, as §5.3 requires.
+- **The fixture is real** — 28 KB of the source's own bytes, 85 rows chosen to carry all 60 cp1252
+  fields, four correct-UTF-8 rows, all 26 feeding spellings and three rows with no uncertainty.
+  The whole 1.0 MB response is not committed; nothing in the rest of it is exercised by a test.
+- **Two of §2's numbers were stale** and are corrected in place: 60 fields fail strict UTF-8 rather
+  than 54, and there are 26 feeding spellings rather than 25.
+- **§2.7's fold is confirmed.** `services/reservoir.py`'s table, written from the prose before the
+  source was reachable, reproduces all seven class counts exactly across all 2060 rows with nothing
+  unrecognised.
+
+Additions the plan did not call for, each forced by the code: `in_use()` matches the
+`delta_r_source` JSON as text, because SQLite and PostgreSQL disagree about JSON operators and a
+check that silently returned zero on one of them would let a cited snapshot be deleted; the
+snapshot list reports `has_bundled`, because until op 0 is answered a fresh install has no lookup
+at all; the ingest cross-checks the page's own `N records` line against the rows parsed, since a
+mirror quietly missing forty measurements gives quietly wrong averages; and `requests` is now a
+declared dependency rather than a transitive one.
 
 **3a. Schema.** `MarineReservoirSnapshot` (with `created_by`, §5.2 rev.) and `MarineReservoirPoint`
 in `models.py`; `delta_r_source` (JSON, nullable) on both sample tables, since it is this feature's
@@ -1143,7 +1250,30 @@ private snapshot invisible to another account (mirror `test_curve_privacy.py`).
 **3d. Bundled snapshot** *(gated on op 0)*: `calibration_data/marine_reservoir_2026-05-11.csv`,
 193 KB, produced by 3b's parser and committed with its hash recorded in the registry.
 
-### Feature 4 — the lookup (§5.4–5.5, §7.3)
+### Feature 4 — the lookup (§5.4–5.5, §7.3) — **done 2026-09-14**
+
+All four ops. The arithmetic is confirmed twice over: the three §2.3 cases are asserted to the
+printed integer, and `tests/manual/calib_regioncalc.py` was run once against calib.org's own
+calculator — **20/20 exact on both integers**, over sets whose uncertainties span 22 to 447 years.
+4d's acceptance figure is now an assertion rather than a note: **Strangford Lough at N=5 reads
+−209 ± 44**, read off the captured database through extract, decode, normalise, nearest and
+combine.
+
+Two things the code decided that the plan did not:
+
+- **`FAR_NEAREST_KM = 100`**, the distance at which the panel flags how far the nearest point is.
+  §2.6 required the distance to be shown and said Tampa's is 163 km, but named no threshold. 100 km
+  is about where a local offset stops being local; it is one named constant with its reasoning
+  beside it, like `FEEDING_SHIFT_WARN_YEARS`.
+- **A selection spanning two positions is refused, not averaged.** §7.3 assumed the selection has a
+  position; it does not say what to do when the ticked dates disagree about it. A centroid of two
+  sites is a place neither of them is, so the panel says so and asks for one site at a time.
+
+**A bug in op 3b, surfaced by running the ingest against all 2060 rows for the first time** (op 4a
+needed them): three rows carry a longitude outside ±180 — the Chatham Islands at 183.5, Fiji at
+−181 — and the validation refused them, rejecting the whole fetch over three good rows. Longitude
+is modular and 183.5 has exactly one reading, so it is now wrapped and counted; latitude has no
+such identity and 91 is still refused.
 
 **4a. `services/reservoir.py`.** `nearest(lat, lon, n, snapshot_id, *, max_km)` by haversine
 (R = 6371.0088); `combine(points)` implementing §2.3 exactly; `lookup(...)` returning
@@ -1170,15 +1300,133 @@ the counterfactual line, the ≥ 35 yr warning, the one preset, the snapshot id.
 three fields to the selection through 4c. *Done when* Strangford Lough at N=5 reads −209 ± 44 in
 the UI and the stored `delta_r_source` reproduces it.
 
-### Feature 5 — freshness (§5.6)
+### Feature 5 — freshness (§5.6) — **done 2026-09-14**
+
+Two things were done differently from the text below:
+
+- **The line lives in its own card, not in the curve list.** `ReservoirSnapshotCard.tsx`, mounted
+  under the curves table. A snapshot is the same *kind* of thing as a calibration curve — versioned
+  reference data an already-published result depends on, immutable once stored, citable by id — but
+  it is not one, and only marine dates ever touch it. Weaving it into the list would have made it
+  read as a curve. It carries three states the list has no room for: nothing mirrored, mirrored and
+  current, mirrored and behind.
+- **The probe is a second query, not a parse of the big one.** `FRESHNESS_QUERY` is `select
+  count(*), max(last_changed) from details` against the same Generalized Query endpoint, and
+  `extract_freshness` reads the single aggregate row. It costs 2.2 KB measured against calib.org,
+  versus about a megabyte for the records. `_query` is now shared by `fetch_records` and
+  `fetch_freshness`; that was the whole of the backend change beyond the route, since the ingest
+  the button calls is op 3c's `POST /reservoir/snapshots`, unchanged.
+
+Nothing in the card reaches calib.org on mount. Opening the page is one local request for the
+snapshot list; asking calib.org what it holds is a button, and re-ingesting is a second button.
+The reason is not politeness about somebody's server: a ΔR that changed because a remote database
+changed, underneath an analysis already published, is exactly the failure a frozen snapshot exists
+to prevent, so refreshing has to be a decision a person takes at a moment they chose.
 
 **5a.** `GET /api/reservoir/freshness` (auth, explicit, the 2 KB probe) and one line plus the
 ingest button on `Curves.tsx`, in the register the curve list already uses.
 
-### Feature 6 — wave of advance (§6.2–6.4, §6.6, §7.4)
+### Feature 6 — wave of advance (§6.2–6.4, §6.6, §7.4) — **done 2026-09-15**
 
-*Confirm before 6a:* §13.1 stays derived; §13.3 `MIN_DISPERSAL_SITES = 6`; §13.4 stays
-per-analysis.
+*Confirmed 2026-09-14, all three as proposed:* §13.1 stays derived; §13.3 `MIN_DISPERSAL_SITES = 6`;
+§13.4 stays per-analysis.
+
+Three things in 6a were settled in the code rather than by the text above:
+
+- **"A site per opening Boundary" needed a descent rule.** Taken literally it gives a Sequence of
+  three phases at one place three sites, tripling that place's weight in the regression while adding
+  no information. `derive_sites` instead walks outermost-first and descends only where a candidate's
+  dates scatter beyond `SITE_SCATTER_KM` — so a region modelled as one Sequence of site-Sequences
+  splits into its sites, and a site modelled as a Sequence of Phases does not. The threshold
+  therefore does **two** jobs: higher up it separates places, and at the bottom of the descent,
+  where there is no structure left to split, it reports §11.6's modelling error. That is why the
+  refusal reads the way it does only in the second position.
+- **A wrapper is not a site.** A root Sequence containing one site Sequence is coherent at the root,
+  but the root's opening Boundary is the start of the *model* — older than the site's own, and a
+  different parameter, so dating the site by it reports an arrival earlier than the model says.
+  The walk descends past a single covering child *when that child opens on a different Boundary*.
+  The second condition is load-bearing: a named Sequence holding one anonymous Phase shares its
+  opening Boundary, so they are the same arrival, and the element the analyst named is the one to
+  report.
+- **`intervals.summarise` could not report a speed as written.** Its bin width floors at five
+  *years* (`_reporting_step`), and a front whose whole posterior spans a quarter of a km/yr came
+  back in a single bin with an HPD of nonsense. `summarise` and `_step_for` gained a `base_step`
+  override, used by nothing but the speed; every quantity actually measured in years is untouched
+  and they all stay on one grid. `_band` also became public as `calendar_band`, because *t₀* is a
+  calendar age in exactly its sense and reporting it in the duration grammar would tell the UI not
+  to format it as a date.
+
+Also in 6a rather than later: `derive_sites_from_dates`, §6.2's group-calibration fallback. It
+takes each place's earliest dated event — decided once on the draws' median, not per draw, since a
+per-draw minimum is biased low and would let the representative date change between draws — and
+labels it `basis='earliest_dated_event'` so no panel can show it as an arrival time.
+
+**Measured coverage (2026-09-15).** The exact path: **94.5% of 200 simulated fronts** had the true
+speed inside their 95% interval, against a nominal 95% and a band of 90.4–99.6%. The sampled path:
+**92.5% of 40 fronts**, which is one front either side of nominal at that count. *Re-measured after
+features 7–9 and identical to the digit — the seeds are fixed, so identical figures mean those
+features left the wave-of-advance path bit-for-bit unchanged, which is what they were supposed to
+do.* So the interval
+this feature reports means approximately what it says — which is the claim §11.4 doubted, and the
+only way to have settled it. Re-run with `RADICAL_COVERAGE_FRONTS=200
+RADICAL_COVERAGE_SAMPLED_FRONTS=40`; about 13 minutes across four cores.
+
+Three notes on 6c, which is the operation that changed most in the writing:
+
+- **It runs in the ordinary suite, not behind a deselection.** The plan said "marked slow", and it
+  is — `pytest.ini` registers the marker — but the marker deselects nothing. A coverage test nobody
+  runs is a coverage test nobody can rely on, and this is the *only* check that can retire §11.4.
+  Size is tuned by `RADICAL_COVERAGE_FRONTS` instead: 32 by default (about a minute across four
+  cores) and 200 for the recorded figure.
+- **The tolerance is binomial, not a typed-in number.** Coverage is a proportion, so the band is
+  three standard errors either side of 0.95 and scales with the number of fronts — ±4.6 points at
+  200, ±11.6 at 32. Seeds are fixed, so a failure is a real change in the pipeline and never a
+  flake, and the band is against *simulation* noise rather than run-to-run noise.
+- **The exact solver carries it, not `solve_chains`.** An eight-phase chain model is exactly
+  solvable, so `auto` integrates it — the path the test should exercise is the path production
+  takes. The sampled path gets its own smaller run (12 fronts by default) checked for gross
+  miscalibration rather than to the tight band, because a Gibbs front costs several times an exact
+  one and `test_intervals.py` already cross-checks the two solvers against each other.
+
+Two guards sit beside the coverage figure, because a coverage test can pass either because the
+pipeline is calibrated or because the simulation is too easy to fail: one requires the interval to
+*exclude* a speed twice the truth (an interval wide enough to contain anything would score 100%),
+and one requires each site's opening Boundary to sit older than its own oldest date — the §6.2
+premise the whole estimator rests on, and if the simulation ever stopped satisfying it the naive
+estimator would work too and the file would be testing nothing anybody disputes.
+
+On 6d: the `SiteMap` gained `values`/`valueLabel`, `front` and `origin` rather than growing a
+second map component. The ramp is `CONTEXT_PALETTE` as a Plotly colorscale — one hue at graded
+strength, §7.4's rule and the Harris matrix's — and it *supersedes* the selection colouring while
+set, since two colour meanings on one figure is one too many. The front is drawn first so it lies
+under the marks it was fitted to, and the origin last so it is never hidden. The panel's arithmetic
+lives in `utils/dispersalFigure.ts` (`arrivalAges`, `frontLine`, `speedText`) for the reason
+`siteMapGeometry.ts` is separate from `SiteMap`: it has right and wrong answers and should be
+testable without rendering. `arrivalAges` *reconstructs* each site's age from what the fit reported
+— t₀, the speed, the site's distance and its residual — rather than recomputing it from
+coordinates, so the ramp on the map and the residual table are the same two numbers and cannot
+drift apart. The panel is mounted with tiles **off**: `Results.tsx` has no project loaded, and the
+offline basemap is the private default. Passing a project's tile setting through is the one thing
+left if that is ever wanted.
+
+Two notes on 6b:
+
+- **The flag is an origin, not a boolean, everywhere below the schema.** `intervals.report` and
+  both solvers take `dispersal_origin`, because a front speed is meaningless without the point it
+  was measured from and a pair of parameters that can disagree is a pair that eventually will.
+  `BayesianConfigInput` keeps both — `estimate_dispersal` is what the analyst toggles — and a
+  `model_validator` refuses the combination that has no meaning. `api/analysis._dispersal_origin`
+  collapses the two back into one for the solvers, and returns None when the flag is off *even
+  where an origin is still stored*: a rerun reads the saved config, and an origin left behind by a
+  fit the analyst switched off is not a request.
+- **`measurement_dicts` gained `latitude`/`longitude`.** Without them `derive_sites` saw no
+  coordinates on a real run and every fit refused for having nothing to place — the one wiring
+  failure that unit tests against the solvers could not have caught, so it has an API-level test
+  that asserts six sites came back from a saved analysis.
+
+`derive_sites_from_dates` is reachable through `report_dates(..., dispersal_origin=...)` but the
+group-calibration request does not offer it yet; that is a schema addition on
+`GroupCalibrationRequest` and not in feature 6's path.
 
 **6a. `services/dispersal.py`.** `derive_sites(root, measurements)`: a site per opening Boundary,
 centroid of its dates' coordinates, refusal above `SITE_SCATTER_KM = 5` naming both coordinates and
@@ -1207,12 +1455,97 @@ sequential arrival ramp, the front, the origin; the speed block; the residual ta
 caveats in the panel. Origin placement reuses 2b's pin. *Done when* a Neolithic-scale synthetic
 lands near 1 km/yr in the UI (§10 landmark).
 
-### Features 7–9
+### Features 7–9 — **done 2026-09-15**
 
 **7.** `fit_trend(sites, draws)` in `dispersal.py`: Lambert azimuthal at the centroid, per-draw
 plane fit, speed and azimuth with circular mean/interval; isochrons on `SiteMap`. **8.** Origin
 profile over a ~1° grid, rendered as a likelihood region. **9.** MST walk → proposed Sequence in
 `ModelTreeEditor.tsx`, accept/reject, never applied. Each waits on 6d and is one commit.
+
+Four things in 7 that the text above did not settle:
+
+- **A rank check is not enough to catch a transect.** A line of sites along a MERIDIAN is exactly
+  rank-deficient and would be caught; a line along a PARALLEL is not, because a parallel is a curve
+  in this projection — so the design matrix has full rank and the cross-gradient is estimated from
+  the curvature of the map rather than from anything anybody excavated. It looks like an answer.
+  `MIN_TREND_ASPECT = 0.05` refuses on the SHAPE of the layout instead, measured by SVD: a 480 km
+  transect along a parallel at 50°N scores 0.013 and a deliberately squat 2×6 grid scores 0.29, so
+  the threshold sits in a wide empty gap and is not a judgement call. **This was found by a test I
+  wrote expecting it to pass.**
+- **The origin became optional, and `estimate_dispersal` alone now means the trend.** §6.5 says the
+  trend surface assumes no origin, and that this is what makes it the right first look at a
+  dataset — so op 6b's rule that a dispersal request needs a pin was wrong as soon as feature 7
+  existed. The schema validator is gone; `_dispersal_spec` returns `{'origin': None}` for the flag
+  alone, and `intervals.report` takes a `dispersal` spec rather than an origin. An origin buys the
+  wave IN ADDITION, and both models are always computed when either is: they answer different
+  questions off the same draws, and a tidy wave with a trend pointing elsewhere means the ORIGIN is
+  wrong, which is a finding neither makes alone. `Analysis.intervals.dispersal` is therefore
+  `{wave, trend}` rather than one fit.
+- **The trend is rendered FIRST, above the wave.** It is the look at the data with no hypothesis in
+  it, and a reader who meets the wave first has already accepted somebody's origin before seeing
+  whether the dates point that way at all.
+- **Isochrons are labelled at their midpoint, not at an end.** They are drawn past the sites on
+  purpose, so the ends are the part of the figure most likely to be clipped — which is what the
+  first browser render showed, with "6100" cut off at the frame edge.
+
+Verified in Chromium on a real solve of a north-east front: trend **0.681 km/yr at 54° (NE), 95%
+49°–61°, R = 0.999**, against a wave of **0.688 km/yr** from a placed origin — the two models
+agreeing to within 1%, which is the cross-check having both on the page buys. Isochrons run NW–SE,
+perpendicular to the advance. Still zero external requests.
+
+Three things in 8:
+
+- **It is computed whether or not an origin was placed, and it is the check on the pin.** With a
+  pin, the profile says whether the data put the origin anywhere near it — so the card sits
+  *between* the trend and the wave, where a reader meets it before reading a speed measured from
+  somebody's assumption. Without one it is the only thing in the section with anything to say about
+  where the front began.
+- **The cutoff is a support contour and is not called a confidence region.** 1/8 of the peak, the
+  conventional likelihood-ratio cut. This is a profile over an assumed model, not a posterior, and
+  labelling it 95% would claim a coverage property nothing here has established — the §6.3 coverage
+  test measures the interval on *v*, not this.
+- **`share_inside` is reported because the honest answer is often "nowhere in particular".** The
+  surface is nearly flat along the front's own axis: sliding the origin backwards along the line of
+  travel and adjusting *t₀* to match fits almost as well. On a **transect** the region covers ~50%
+  of the grid searched, and the panel says so in as many words; on a **two-dimensional site layout**
+  the same code gives 15 cells of 240 (6%). That contrast is the feature working, and a single
+  best-guess marker would have shown the same confident pin in both cases.
+
+Rendered, the region is a diagonal band running south-west from the sites — down-axis from a
+north-east front, which is the degeneracy above made visible. `SiteMap` now frames on *everything*
+drawn rather than on the site marks alone: the profile map has a region and no marks of its own,
+and the first render put a 15-cell region on a map of the whole world.
+
+Three things in 9:
+
+- **It is the one spatial model with no solver run behind it**, so it gets an endpoint of its own —
+  `POST /api/dispersal/propose-sequence`, taking the DRAFT tree and measurements from the request
+  rather than an analysis id. An order is a question about positions, and the answer is the same
+  before a model is solved as after; that is exactly what lets it be offered in the tree editor,
+  where there is a draft and no results at all.
+- **Accepting permutes, it does not rebuild.** `utils/spatialOrder.reorderToProposal` moves the
+  named elements among the positions they already occupy, so every Boundary, Hiatus and unproposed
+  element stays where the analyst put it. A spanning tree is a claim about which sites are adjacent,
+  not about how the model should be structured, and rewriting the brackets on the strength of it
+  would apply far more than was proposed. It returns the *same* tree by reference when nothing
+  would move, which is how the dialog tells an already-agreeing proposal from one worth applying —
+  and says so rather than offering a no-op button.
+- **The map draws the TREE, not the walk.** The first render drew the visit order as one polyline,
+  which put a line between two sites nothing joined: a walk of a tree visits every node once but
+  jumps between branches to do it. `SiteMap` gained `links` — independent segments, each a real
+  adjacency — precisely because a polyline cannot express that and a figure that claims a
+  non-existent adjacency is worse than no figure. The order itself is the numbered list.
+
+`SpatialOrderDialog` is loaded with `React.lazy`. It carries a map, so it carries Plotly: about a
+megabyte the editor does not need until the button is pressed, and a module whose UMD wrapper reads
+`self` at the top level, which is undefined in Node — importing it eagerly put Plotly in
+`ModelTreeEditor`'s module graph and broke that file's unit tests, which never render anything.
+
+Verified in Chromium against a real proposal over six European sites: the dialog leads with *a
+spanning tree is spatial adjacency, not chronology*, draws the branching tree, lists the order, and
+on **Apply** the model went from `b0 p0 b1 p1 b2 p2 b3 p3 b4 p4 b5 p5 b6` to
+`b0 p2 b1 p0 b2 p1 b3 p4 b4 p3 b5 p5 b6` — the phases permuted into the proposed order with every
+boundary untouched. Zero external requests.
 
 ### What this sequence does not schedule
 

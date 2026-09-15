@@ -2,7 +2,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 import os
-from app.api import auth, curves, analysis, results, projects, project_samples, imports, jobs
+from app.api import (auth, curves, analysis, results, projects, project_samples,
+                     imports, jobs, reservoir, dispersal)
 from app.database import init_db
 
 load_dotenv()
@@ -56,6 +57,8 @@ app.include_router(projects.router, prefix="/api", tags=["projects"])
 app.include_router(project_samples.router, prefix="/api", tags=["project dates"])
 app.include_router(imports.router, prefix="/api", tags=["import"])
 app.include_router(jobs.router, prefix="/api", tags=["jobs"])
+app.include_router(reservoir.router, prefix="/api", tags=["marine reservoir"])
+app.include_router(dispersal.router, prefix="/api", tags=["dispersal"])
 
 # A deployment signing tokens with the published development secret is a
 # deployment where anyone holding this source can mint a token for any

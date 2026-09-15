@@ -37,17 +37,26 @@ import ViewColumnIcon from '@mui/icons-material/ViewColumn'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import ImportDatesDialog, { type ImportPreview } from '@/components/ImportDatesDialog'
 import SampleSelectionBar, { type DeltaRValue } from '@/components/SampleSelectionBar'
+import PlaceOnMapDialog from '@/components/PlaceOnMapDialog'
 import { formatApiError } from '@/utils/apiError'
 import { useNotify } from '@/contexts/NotificationContext'
 import { curveLabel, curveOptions } from '@/api/curves'
 import { useCurves } from '@/hooks/useCurves'
-import { deltaRErrorMissing, isMarineMeasurement } from '@/components/MeasurementFields'
+import {
+  coordinateHalfMissing,
+  deltaRErrorMissing,
+  isMarineMeasurement,
+} from '@/components/MeasurementFields'
 import {
   columnVisible,
   loadColumnOverrides,
   saveColumnOverrides,
   type ColumnOverrides,
 } from '@/utils/columnPreferences'
+import { formatPosition } from '@/utils/coordinates'
+// Pure, and deliberately not defined here: this file reaches Plotly through
+// the map dialog, so anything a Node test needs has to live outside it.
+import { parsePastedDates } from '@/utils/pastedDates'
 
 // A date in the PROJECT's collection (backend models.ProjectSample), entered
 // once and deployed into as many analyses as needed. Deploying COPIES these
@@ -62,6 +71,12 @@ export interface ProjectSample {
   curve_id: string
   delta_r: number | null
   delta_r_error: number | null
+  /**
+   * Where a derived ΔR came from, or null for one somebody typed. Null is an
+   * answer rather than a gap: the app saying it does not know, not the app
+   * having forgotten.
+   */
+  delta_r_source: Record<string, unknown> | null
   /** Superseded by delta_r, but still carried on older and imported rows. */
   reservoir_age: number | null
   depth_cm: number | null
@@ -71,6 +86,11 @@ export interface ProjectSample {
   // timber it came from -- not of any one analysis.
   ring_offset: number | null
   ring_offset_error: number | null
+  // Where the sample came from, in WGS84 decimal degrees. Always the stored
+  // value: the project's coordinate_precision governs what leaves in an export
+  // or a figure, not what its own owner reads back in the table.
+  latitude: number | null
+  longitude: number | null
   location: string | null
   default_context_name: string | null
   tpq_age_bp: number | null
@@ -114,6 +134,8 @@ type DraftForm = {
   depth_cm: string
   ring_offset: string
   ring_offset_error: string
+  latitude: string
+  longitude: string
   location: string
   notes: string
 }
@@ -133,6 +155,8 @@ const EMPTY_FORM: DraftForm = {
   depth_cm: '',
   ring_offset: '',
   ring_offset_error: '',
+  latitude: '',
+  longitude: '',
   location: '',
   notes: '',
 }
@@ -153,6 +177,8 @@ function toForm(s: ProjectSample): DraftForm {
     depth_cm: s.depth_cm == null ? '' : String(s.depth_cm),
     ring_offset: s.ring_offset == null ? '' : String(s.ring_offset),
     ring_offset_error: s.ring_offset_error == null ? '' : String(s.ring_offset_error),
+    latitude: s.latitude == null ? '' : String(s.latitude),
+    longitude: s.longitude == null ? '' : String(s.longitude),
     location: s.location ?? '',
     notes: s.notes ?? '',
   }
@@ -181,76 +207,11 @@ function formToPayload(form: DraftForm) {
     depth_cm: numOrNull(form.depth_cm),
     ring_offset: numOrNull(form.ring_offset),
     ring_offset_error: numOrNull(form.ring_offset_error),
+    latitude: numOrNull(form.latitude),
+    longitude: numOrNull(form.longitude),
     location: form.location.trim() || null,
     notes: form.notes.trim() || null,
   }
-}
-
-/**
- * Parse the bulk-paste textarea: one date per line, comma or tab separated, as
- * `name, age, error[, material[, context[, curve]]]`. Forgiving, since this is
- * for pasting a column range out of a spreadsheet or lab report -- blank lines
- * are skipped and a malformed one is reported by number rather than dropped.
- * Curve is optional and defaults to IntCal20, most batches being a single
- * terrestrial curve.
- *
- * `validCurveIds` is passed in so this stays pure while the curves come from
- * the backend registry. An empty set accepts any curve id and leaves rejection
- * to the backend, which is right when the curve list could not be loaded:
- * refusing every line would blame the paste for a failed request.
- */
-export function parsePastedDates(
-  text: string,
-  validCurveIds: Set<string>
-): { rows: ReturnType<typeof formToPayload>[]; errors: string[] } {
-  const rows: ReturnType<typeof formToPayload>[] = []
-  const errors: string[] = []
-
-  text.split(/\r?\n/).forEach((rawLine, index) => {
-    const line = rawLine.trim()
-    if (!line) return
-    const parts = line.split(/[\t,;]/).map((p) => p.trim())
-    const [name, age, error, material, context, curve] = parts
-    if (!name || !age || !error) {
-      errors.push(`Line ${index + 1}: expected at least "name, age, error"`)
-      return
-    }
-    if (!Number.isFinite(Number(age)) || !Number.isFinite(Number(error))) {
-      errors.push(`Line ${index + 1}: age and error must be numbers`)
-      return
-    }
-    const curveId = curve ? curve.toLowerCase() : 'intcal20'
-    if (validCurveIds.size > 0 && !validCurveIds.has(curveId)) {
-      errors.push(
-        `Line ${index + 1}: unknown curve "${curve}" (expected ` +
-          `${[...validCurveIds].join(', ')})`
-      )
-      return
-    }
-    rows.push({
-      sample_name: name,
-      age_bp: Number(age),
-      error_1sigma: Number(error),
-      material_type: material || 'unknown',
-      curve_id: curveId,
-      default_context_name: context || null,
-      tpq_age_bp: null,
-      taq_age_bp: null,
-      // The paste format carries name, age, error, material, context and
-      // curve; everything else a date can hold is set afterwards, in the row's
-      // own dialog.
-      delta_r: null,
-      delta_r_error: null,
-      reservoir_age: null,
-      depth_cm: null,
-      ring_offset: null,
-      ring_offset_error: null,
-      location: null,
-      notes: null,
-    })
-  })
-
-  return { rows, errors }
 }
 
 /**
@@ -300,9 +261,15 @@ function limitsLabel(sample: ProjectSample): string {
 
 interface Props {
   projectId: string
+  /**
+   * Whether this project has turned basemap tiles on. Passed down rather than
+   * fetched here: the flag belongs to the project, and the page that owns the
+   * project has it already.
+   */
+  mapTilesEnabled?: boolean
 }
 
-export default function ProjectSampleTable({ projectId }: Props) {
+export default function ProjectSampleTable({ projectId, mapTilesEnabled = false }: Props) {
   const navigate = useNavigate()
   const notify = useNotify()
   const { curves, loading: curvesLoading, error: curvesError } = useCurves()
@@ -310,6 +277,7 @@ export default function ProjectSampleTable({ projectId }: Props) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [placeOpen, setPlaceOpen] = useState(false)
 
   const [formOpen, setFormOpen] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -387,6 +355,10 @@ export default function ProjectSampleTable({ projectId }: Props) {
     }
     if (deltaRErrorIncomplete) {
       setFormError('A ΔR needs its 1σ error, or clear both to apply no correction.')
+      return
+    }
+    if (coordinateIncomplete) {
+      setFormError('A position needs both a latitude and a longitude, or neither.')
       return
     }
     setFormError(null)
@@ -481,6 +453,8 @@ export default function ProjectSampleTable({ projectId }: Props) {
             depth_cm: d.depth_cm,
             ring_offset: d.ring_offset,
             ring_offset_error: d.ring_offset_error,
+            latitude: d.latitude,
+            longitude: d.longitude,
             location: d.location,
             notes: d.notes,
           })),
@@ -600,6 +574,39 @@ export default function ProjectSampleTable({ projectId }: Props) {
           : { message: applied }
       },
       'Could not apply ΔR',
+    )
+
+  /**
+   * One position across the whole selection -- the map's Apply, and its
+   * Remove.
+   *
+   * Through the same bulk PATCH ΔR goes through, but it reaches every date
+   * rather than the marine ones: where a sample came from is a fact about the
+   * place, not about the material. Null for both halves unplaces them; the
+   * endpoint refuses one without the other, as it should.
+   */
+  const handlePlaceSelection = (
+    latitude: number | null,
+    longitude: number | null,
+  ) =>
+    runBulk(
+      () =>
+        fetch(`/api/projects/${projectId}/samples`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sample_ids: [...selected], latitude, longitude }),
+        }),
+      (data) => {
+        const n = data.updated_count
+        const dates = `${n} date${n === 1 ? '' : 's'}`
+        return {
+          message:
+            latitude === null
+              ? `Position removed from ${dates}`
+              : `${dates} placed at ${latitude}, ${longitude}`,
+        }
+      },
+      'Could not place the selected dates',
     )
 
   const handleBulkDelete = async () => {
@@ -759,6 +766,16 @@ export default function ProjectSampleTable({ projectId }: Props) {
         render: (s) => (s.depth_cm == null ? muted('—') : s.depth_cm),
       },
       {
+        id: 'position',
+        label: 'Position',
+        auto: anyOf((s) => s.latitude != null),
+        populated: anyOf((s) => s.latitude != null),
+        numeric: true,
+        headTitle:
+          'Where the date came from, in WGS84 decimal degrees. Shown at full precision here; exports and figures follow the project’s coordinate precision setting.',
+        render: (s) => formatPosition(s.latitude, s.longitude) ?? muted('—'),
+      },
+      {
         id: 'ring_offset',
         label: 'Gap',
         auto: anyOf((s) => s.ring_offset != null),
@@ -845,6 +862,13 @@ export default function ProjectSampleTable({ projectId }: Props) {
   const deltaRErrorIncomplete = deltaRErrorMissing({
     delta_r: numOrNull(form.delta_r),
     delta_r_error: numOrNull(form.delta_r_error),
+  })
+  // And the same rule again for the coordinate: the API refuses half a
+  // position, so the form says which box is empty rather than letting the
+  // save come back a 422.
+  const coordinateIncomplete = coordinateHalfMissing({
+    latitude: numOrNull(form.latitude),
+    longitude: numOrNull(form.longitude),
   })
 
   const resetColumns = () => {
@@ -1007,9 +1031,29 @@ export default function ProjectSampleTable({ projectId }: Props) {
           }}
           onAssignCurve={handleAssignCurve}
           onAssignDeltaR={handleAssignDeltaR}
+          onPlaceOnMap={() => setPlaceOpen(true)}
           onDelete={() => setBulkDeleteOpen(true)}
         />
       )}
+
+      <PlaceOnMapDialog
+        open={placeOpen}
+        onClose={() => setPlaceOpen(false)}
+        // The WHOLE collection, not just the ticked rows: a pin means little
+        // without the other sites around it, and seeing them is how someone
+        // notices they are about to place a date in the wrong bay.
+        points={samples.map((s) => ({
+          id: s.id,
+          name: s.sample_name,
+          latitude: s.latitude,
+          longitude: s.longitude,
+        }))}
+        selectedIds={[...selected]}
+        onApply={(latitude, longitude) => handlePlaceSelection(latitude, longitude)}
+        onClear={() => handlePlaceSelection(null, null)}
+        tiles={mapTilesEnabled}
+        busy={bulkBusy}
+      />
 
       {error && (
         <Alert severity="error" sx={{ mb: 2 }}>
@@ -1282,6 +1326,28 @@ export default function ProjectSampleTable({ projectId }: Props) {
               value={form.location}
               inputProps={{ maxLength: 500 }}
               onChange={(e) => setForm({ ...form, location: e.target.value })}
+            />
+            <TextField
+              label="Latitude"
+              type="number"
+              value={form.latitude}
+              inputProps={{ min: -90, max: 90, step: 'any' }}
+              onChange={(e) => setForm({ ...form, latitude: e.target.value })}
+              error={coordinateIncomplete && form.latitude.trim() === ''}
+              helperText="Decimal degrees, WGS84. Minus for south."
+            />
+            <TextField
+              label="Longitude"
+              type="number"
+              value={form.longitude}
+              inputProps={{ min: -180, max: 180, step: 'any' }}
+              onChange={(e) => setForm({ ...form, longitude: e.target.value })}
+              error={coordinateIncomplete && form.longitude.trim() === ''}
+              helperText={
+                coordinateIncomplete
+                  ? 'A position needs both halves'
+                  : 'Minus for west. Degrees and minutes are not read.'
+              }
             />
             <TextField
               label="Depth (cm)"

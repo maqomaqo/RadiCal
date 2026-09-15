@@ -35,8 +35,30 @@ revisions of this file understated parts of it.
 - **Marine reservoir offsets** — per-date ΔR and its error, on both a project
   collection entry and an analysis sample (`delta_r`/`delta_r_error` in
   `models.py`), joined in quadrature so a poorly known offset widens the
-  measurement rather than only shifting it. Entered by hand; deriving it from
-  coordinates is Open #4.
+  measurement rather than only shifting it. Entered by hand, or **derived from
+  the date's coordinates** against a local mirror of the CHRONO/calib.org
+  Marine20 database (`services/reservoir.py`): an inverse-variance weighted
+  mean of the nearest N measurements, with σ the larger of the internal error
+  and the scatter, agreeing 20/20 with calib.org's own `regioncalc.php`. The
+  lookup runs against a frozen, hash-verified snapshot on this installation, so
+  a site's coordinates never leave it, and a derived value carries its
+  provenance — cleared the moment anybody edits the number by hand.
+- **Site coordinates, and one map** — WGS84 decimal degrees on a collection
+  entry and an analysis sample, refused in DMS or with a decimal comma rather
+  than silently misread. The map (`components/SiteMap.tsx`) is drawn on
+  `scattergeo` over a topojson the app serves itself, so it makes **no network
+  request at all**; raster tiles are opt-in per project behind a notice saying
+  what the request gives away, because a tile request names the square of the
+  earth on screen. Coordinates are stored at full precision and rounded only on
+  export, at a precision the project owner chooses.
+- **Wave of advance** (`services/dispersal.py`) — how fast the thing being
+  dated moved, and when it set out. A site's arrival is the posterior of the
+  Boundary that *opens* it, never its oldest date, which is a *terminus ante
+  quem* and late by however hard the site was dug; the fit is per joint draw,
+  so the chronological uncertainty is inside the interval rather than bolted
+  on. Refused below six sites, and a front running the other way is reported as
+  a negative speed rather than flipped. Its coverage is measured, not asserted:
+  see Open #4.
 - **Multi-range HPD reporting** — disjoint calendar-age ranges with per-range
   probabilities, on both the direct-calibration and MCMC paths.
 - **Bayesian chronological model** — calibration-curve-aware likelihood,
@@ -152,11 +174,8 @@ deriving a marine date's ΔR from those coordinates against the CHRONO/calib.org
 Marine20 reservoir database; and inferring dispersal — timing, pace, direction —
 from dated sites in space.
 
-Nothing of it is built. ΔR itself already exists as a hand-entered field (see
-*What's Actually Working*), which is the seam the lookup would fill; there are
-no coordinate columns anywhere in `models.py`. The plan is **written for a
-fork** and says so — its §12 names the three files that would conflict on a
-merge back.
+The plan is **written for a fork** and says so — its §12 names the three files
+that would conflict on a merge back.
 
 **In execution from 2026-09-14.** The plan was reviewed against the code that
 day: the measurements stand, and four things that landed after it was written
@@ -164,10 +183,40 @@ day: the measurements stand, and four things that landed after it was written
 Gibbs chains, Plotly's `scattermap`) are corrected inline, marked *[rev.
 2026-09-14]*. Its new §14 is the operation sequence — nineteen numbered
 operations across the nine features, two migrations (ops 1a and 3a, from head
-`f3b81c60d5a7`), each op naming its files, tests and done-condition. The one
-operation the app cannot do is op 0, the redistribution-permission email to
-the database's maintainer, which gates only the bundled snapshot. This entry
-moves to Done feature by feature, starting with coordinates.
+`f3b81c60d5a7`), each op naming its files, tests and done-condition.
+
+**Features 1–6 are built (2026-09-14/15).** Coordinates on a date with
+precision-controlled export; the offline `SiteMap` and click-to-place;
+the CHRONO mirror as an immutable, hash-verified snapshot versioned like a
+calibration curve; the ΔR lookup, validated 20/20 against calib.org's own
+`regioncalc.php`; the freshness probe; and the wave of advance. Alembic head
+is `b7c4e0a13d92`.
+
+Three numbers worth keeping from it:
+
+- **Strangford Lough at N=5 reads −209 ± 44**, which is the plan's own
+  acceptance figure, asserted end to end.
+- **The dispersal interval is calibrated.** `tests/test_dispersal_coverage.py`
+  simulates whole fronts through IntCal20 and a solver and asks whether the
+  reported 95% interval contains the speed the data were built from: **94.5% of
+  200 fronts** on the exact path, **92.5% of 40** on the sampled one — re-measured after the
+  dispersal models were finished and identical to the digit. That is
+  the claim risk 11.4 doubted — *OLS on autocorrelated residuals with an assumed
+  origin will always return a tidy v* — and a simulation was the only way to
+  settle it. Rendered in the UI, a Neolithic-scale synthetic front reads
+  **0.948 km/yr, 95% 0.800–1.12**.
+- **The mixed-encoding row count drifted 54 → 60** between two measurements
+  eight days apart, which is exactly the drift risk 11.7 was written about. The
+  fixture is a capture of the source's own bytes, so it stays measurable.
+
+**What is not built.** Op 3d, the bundled snapshot CSV, is gated on op 0 — the
+redistribution-permission email to the database's maintainer, which the app
+cannot send. Until it is answered a fresh install has no lookup until somebody
+runs the ingest, which feature 5's card on the Curves page is the way to do.
+Features 7–9 (trend surface and isochrons, inferred origin as a likelihood
+region, MST-proposed Sequence) are unstarted; each waits only on 6d, which is
+in. Regional kriging (§5.7) and over-water distance (§9) stay deferred by
+design.
 
 ---
 

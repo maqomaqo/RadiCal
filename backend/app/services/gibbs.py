@@ -2178,6 +2178,7 @@ def solve(measurements: List[Dict], root: Dict, sweeps: int = DEFAULT_SWEEPS,
           target_convergence: float = TARGET_CONVERGENCE,
           max_sweeps: Optional[int] = None,
           estimate_durations: bool = False,
+          dispersal: Optional[Dict] = None,
           interval_draws: int = intervals.DEFAULT_DRAWS,
           on_progress: Optional[Callable[[Dict], bool]] = None,
           chains: int = 1) -> Dict:
@@ -2204,6 +2205,9 @@ def solve(measurements: List[Dict], root: Dict, sweeps: int = DEFAULT_SWEEPS,
     for the same reasons, plus one here: those states are an MCMC chain rather
     than independent draws, so a duration read off them converges more slowly
     than the marginals beside it and the run is not extended on its account.
+
+    `dispersal` asks for the spatial section and takes the same joint states,
+    with the same MCMC qualification on everything read off them.
     """
     model = Model(measurements, root, grid=grid,
                   uniform_span_prior=uniform_span_prior)
@@ -2212,7 +2216,11 @@ def solve(measurements: List[Dict], root: Dict, sweeps: int = DEFAULT_SWEEPS,
     # and the accumulation rate between one level and the next -- so it is not
     # something an analyst should have to opt into to get an answer at all.
     # Phase durations stay opt-in, being a modelling claim of their own.
-    wants_draws = estimate_durations or bool(model.depositions)
+    # ...and so does a dispersal fit, for the same reason and independently of
+    # the other two: a front's speed is a function of many modelled ages at
+    # once, and asking for it is not asking for phase durations.
+    wants_draws = (estimate_durations or bool(model.depositions)
+                   or dispersal is not None)
     if chains > 1:
         chain = solve_chains(
             measurements, root, chains=chains, sweeps=sweeps, seed=seed,
@@ -2312,5 +2320,6 @@ def solve(measurements: List[Dict], root: Dict, sweeps: int = DEFAULT_SWEEPS,
                  for column, param in enumerate(chain['draw_params'])}
         results['intervals'] = intervals.report(
             measurements=measurements, root=root, draws=joint,
-            independent=False, durations=estimate_durations)
+            independent=False, durations=estimate_durations,
+            dispersal=dispersal)
     return results

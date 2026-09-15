@@ -1,9 +1,14 @@
 // The bulk-paste parser. Its curve column is checked against the ids the
 // backend registry offers, passed in rather than hardcoded, which is what
 // makes the two agree.
+//
+// Moved here from beside ProjectSampleTable when that component gained the map
+// dialog: importing the component now pulls in Plotly, whose UMD wrapper reads
+// `self` at module scope, and this file died on the import rather than on an
+// assertion. The parser is pure, so the fix was to move the parser.
 import { describe, expect, it } from 'vitest'
 
-import { parsePastedDates } from './ProjectSampleTable'
+import { parsePastedDates } from '@/utils/pastedDates'
 
 const VALID = new Set(['intcal20', 'shcal20', 'marine20'])
 
@@ -47,5 +52,16 @@ describe('parsePastedDates', () => {
     expect(rows.map((r) => r.sample_name)).toEqual(['S1', 'S3'])
     expect(errors).toHaveLength(1)
     expect(errors[0]).toContain('Line 2')
+  })
+})
+
+describe('a pasted date is unplaced', () => {
+  it('carries null coordinates rather than omitting them', () => {
+    // The paste format is name, age, error, material, context, curve -- there
+    // is no position in it. The keys are still written, because a row that
+    // omits them is a row the table's own types no longer describe.
+    const { rows } = parsePastedDates('OxA-1234, 3000, 25', VALID)
+    expect(rows[0].latitude).toBeNull()
+    expect(rows[0].longitude).toBeNull()
   })
 })

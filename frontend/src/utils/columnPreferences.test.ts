@@ -48,3 +48,15 @@ describe('parseColumnOverrides', () => {
     expect(parseColumnOverrides('"notes"')).toEqual({})
   })
 })
+
+describe('the position column', () => {
+  it('follows the data until the reader says otherwise', () => {
+    // The rule every optional column here follows, checked on the newest one:
+    // a collection that gains its first placed date gains the column unasked,
+    // and a reader who turned it off keeps it off.
+    expect(columnVisible({}, 'position', false)).toBe(false)
+    expect(columnVisible({}, 'position', true)).toBe(true)
+    expect(columnVisible({ position: false }, 'position', true)).toBe(false)
+    expect(columnVisible({ position: true }, 'position', false)).toBe(true)
+  })
+})

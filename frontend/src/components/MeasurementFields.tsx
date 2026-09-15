@@ -100,6 +100,18 @@ export function deltaRErrorMissing(m: MeasurementDraft): boolean {
   return m.delta_r != null && m.delta_r_error == null
 }
 
+/**
+ * Whether one half of a coordinate has been entered without the other.
+ *
+ * The same shape as deltaRErrorMissing above, and the same reason: the API
+ * refuses half a position, because a date that looks placed but is not would
+ * drop silently out of every map and every distance drawn from it. Caught in
+ * the form so the reader sees which box to fill rather than a 422.
+ */
+export function coordinateHalfMissing(m: MeasurementDraft): boolean {
+  return (m.latitude == null) !== (m.longitude == null)
+}
+
 export default function MeasurementFields({
   value,
   onChange,
@@ -111,6 +123,7 @@ export default function MeasurementFields({
   const set = (patch: MeasurementDraft) => onChange({ ...value, ...patch })
   const marine = isMarineMeasurement(value, curves)
   const missingError = deltaRErrorMissing(value)
+  const coordinateMissing = coordinateHalfMissing(value)
   const outlierOn = (value.outlier_prior ?? 0) > 0
 
   // The curves this sample type can actually be calibrated against. Falls
@@ -343,6 +356,38 @@ export default function MeasurementFields({
           </Typography>
         </Box>
       )}
+
+      <Box sx={{ display: 'flex', gap: 1, mb: 2 }}>
+        <TextField
+          type="number"
+          label="Latitude"
+          value={value.latitude ?? ''}
+          onChange={(e) =>
+            set({ latitude: e.target.value === '' ? null : parseFloat(e.target.value) })
+          }
+          size="small"
+          sx={{ flex: 1 }}
+          inputProps={{ min: -90, max: 90, step: 'any' }}
+          error={coordinateMissing && value.latitude == null}
+        />
+        <TextField
+          type="number"
+          label="Longitude"
+          value={value.longitude ?? ''}
+          onChange={(e) =>
+            set({ longitude: e.target.value === '' ? null : parseFloat(e.target.value) })
+          }
+          size="small"
+          sx={{ flex: 1 }}
+          inputProps={{ min: -180, max: 180, step: 'any' }}
+          error={coordinateMissing && value.longitude == null}
+        />
+      </Box>
+      <Typography variant="caption" color="textSecondary" sx={{ display: 'block', mt: -1.5, mb: 2 }}>
+        {coordinateMissing
+          ? 'A position needs both halves. Fill the other, or clear this one.'
+          : 'Decimal degrees, WGS84 — minus for south and west. Degrees and minutes are not read.'}
+      </Typography>
 
       {showOutlier && (
         <Box sx={{ mb: 2 }}>

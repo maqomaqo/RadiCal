@@ -150,6 +150,13 @@ export interface DraftMeasurement extends MatrixMeasurement {
   // of blanking them -- dates deployed from a project collection arrive
   // with these already filled in.
   reservoir_age?: number | null
+  // Where the sample came from, in WGS84 decimal degrees. Carried through the
+  // draft for the same reason as reservoir_age above -- a date deployed from a
+  // collection arrives placed, and an edit that dropped these would unplace it
+  // -- and the two are one fact: the API refuses a latitude without its
+  // longitude, as it refuses a ΔR without its error.
+  latitude?: number | null
+  longitude?: number | null
   location?: string | null
   notes?: string | null
   // Stratigraphic phase/group this sample belongs to, if any -- must
@@ -290,11 +297,162 @@ export interface AgeDepthRecord {
   accumulation: AccumulationStep[]
 }
 
+// --- wave of advance ---
+//
+// Mirrors services/dispersal.py. A speed here is km/yr and t0 is a CALENDAR
+// age, which is why the two take different shapes: t0 carries the calendar key
+// names (median/band_68/band_95, as AgeDepthLevel does) so it can be formatted
+// BC/AD, and the speed carries the duration names so it cannot be.
+
+export interface DispersalSite {
+  element_id: string
+  name: string
+  // The parameter carrying this site's arrival: an opening Boundary, or --
+  // for a group calibration -- its earliest dated event.
+  parameter_id: string
+  // 'boundary' is an arrival estimate. 'earliest_dated_event' is NOT: it is a
+  // terminus ante quem, and the panel must say so wherever it shows one.
+  basis: 'boundary' | 'earliest_dated_event'
+  latitude: number | null
+  longitude: number | null
+  date_ids: string[]
+  // Largest distance between any two of the site's dates, in km.
+  scatter_km: number | null
+  // Why this site could not be used, in the user's words. Null when it could.
+  refusal: string | null
+}
+
+export interface DispersalResidual {
+  element_id: string
+  name: string
+  distance_km: number
+  // Signed years. POSITIVE means the site is OLDER than the front predicts --
+  // the thing arrived there before the line says it should have.
+  residual_years: number
+  residual_sd: number
+}
+
+export interface DispersalResidualPlain {
+  element_id: string
+  name: string
+  residual_years: number
+  residual_sd: number
+}
+
+/** A direction, summarised on the circle rather than as a number. */
+export interface CircularSummary {
+  mean_deg: number
+  /** Bearings, so 350–10 is a twenty-degree interval and not a 340-degree one. */
+  hpd_95_deg: [number, number]
+  /** How wide that interval actually is, which the pair above does not show. */
+  width_deg: number
+  /**
+   * R, the mean resultant length, in [0, 1]. Near zero the draws point every
+   * which way and the mean direction is an artefact of the arithmetic — so
+   * this is what tells "north, confidently" from "north, meaninglessly".
+   */
+  concentration: number
+}
+
+/** One line of equal arrival age across the fitted surface. */
+export interface Isochron {
+  age: number
+  points: Array<{ latitude: number; longitude: number }>
+}
+
+/**
+ * Model 2: a plane through arrival age against position.
+ *
+ * Assumes NO origin, which is what makes it the right first look at a dataset
+ * — before a hypothesis has been imposed on it. Where the wave answers "how
+ * fast did it move away from here", this answers "is there a gradient at all,
+ * and which way does it point".
+ */
+export interface TrendFit {
+  sites: DispersalSite[]
+  n_sites: number
+  min_sites: number
+  refused: string | null
+  speed: DurationSummary | null
+  azimuth: CircularSummary | null
+  /** The projection centre the plane was fitted in. */
+  centre: { lat: number; lon: number } | null
+  isochrons: Isochron[]
+  residuals: DispersalResidualPlain[]
+  basis: 'boundary' | 'earliest_dated_event' | null
+  draws?: number
+  degenerate_draws?: number
+}
+
+/**
+ * Where the front could have started, as a surface rather than a point.
+ *
+ * A REGION deliberately. The profile is nearly flat along the front's own
+ * axis — sliding the origin backwards along the line of travel and adjusting
+ * t₀ to match fits almost as well — which is a real property of the model, so
+ * the peak is not a location and reporting it as one would be false
+ * precision.
+ */
+export interface OriginProfile {
+  n_sites: number
+  min_sites: number
+  refused: string | null
+  /** Grid spacing actually used; widens for a continental spread. */
+  step_deg: number | null
+  candidates: number
+  /** The peak of something broad — not "the origin". */
+  peak: { lat: number; lon: number } | null
+  region: Array<{ lat: number; lon: number; support: number }>
+  /** The likelihood-ratio contour the region is drawn at. */
+  cutoff: number
+  /**
+   * Share of the searched grid inside the region. Near 1 means the data do
+   * not locate an origin at all — a finding, and the thing a single
+   * best-guess marker would have hidden.
+   */
+  share_inside?: number
+}
+
+/** The spatial models, side by side. */
+export interface DispersalSection {
+  /** Null when no origin was placed: there is nothing to measure a front from. */
+  wave: DispersalFit | null
+  trend: TrendFit | null
+  origin_profile?: OriginProfile | null
+}
+
+export interface DispersalFit {
+  origin: { lat: number; lon: number }
+  sites: DispersalSite[]
+  // Sites that actually went into the fit, which is not sites.length.
+  n_sites: number
+  min_sites: number
+  // Set when no speed was reported, and says why. A refusal is a result: the
+  // rest of the analysis is unaffected.
+  refused: string | null
+  // km/yr. Negative means the far sites are OLDER than the near ones -- a
+  // finding about the origin, not an error to be hidden behind an absolute.
+  speed: DurationSummary | null
+  // Calendar age at the origin, cal BP.
+  t0: { median: number; mean: number; band_68: [number, number]; band_95: [number, number] } | null
+  residuals: DispersalResidual[]
+  basis: 'boundary' | 'earliest_dated_event' | null
+  distances?: number[]
+  draws?: number
+  // Draws whose slope was exactly zero -- an infinite speed, excluded from the
+  // summary. Reported so "one draw" and "most of them" are distinguishable.
+  degenerate_draws?: number
+}
+
 export interface IntervalsBlock {
   durations: DurationRecord[]
   differences: DifferenceRecord[]
   // One entry per deposition sequence in the model; empty otherwise.
   age_depth?: AgeDepthRecord[]
+  // NULL means the fit was not asked for, which the page reads as an offer to
+  // re-run. A fit that was asked for and refused is a section whose models
+  // carry `refused`, which is a different thing.
+  dispersal?: DispersalSection | null
   // How many joint draws these were estimated from, and whether those draws
   // were independent (the exact solver, or a group calibration) or an MCMC
   // chain, where the effective count is smaller than the count.

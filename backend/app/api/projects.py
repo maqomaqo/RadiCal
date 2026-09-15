@@ -14,6 +14,22 @@ from typing import Dict, Optional
 router = APIRouter()
 
 
+def _project_settings(payload: Dict, project: Project) -> Dict:
+    """
+    The two coordinate settings, added to a single project's payload.
+
+    Carried on every view of one project rather than fetched separately,
+    because the page that shows a coordinate is the page that has to say at
+    what precision it will leave and whether the map may fetch tiles. Left off
+    the project LIST, which shows neither.
+    """
+    return {
+        **payload,
+        "coordinate_precision": project.coordinate_precision or 'full',
+        "map_tiles_enabled": bool(project.map_tiles_enabled),
+    }
+
+
 @router.post("/projects")
 def create_project(
     project: ProjectCreate,
@@ -32,7 +48,7 @@ def create_project(
 
     return {
         "success": True,
-        "data": {
+        "data": _project_settings({
             "id": new_project.id,
             "name": new_project.name,
             "description": new_project.description,
@@ -42,7 +58,7 @@ def create_project(
             "analyses_count": 0,
             "status_counts": {"completed": 0, "running": 0, "failed": 0, "pending": 0},
             "samples_count": 0,
-        },
+        }, new_project),
     }
 
 
@@ -174,7 +190,7 @@ def get_project(
 
     return {
         "success": True,
-        "data": {
+        "data": _project_settings({
             "id": project.id,
             "name": project.name,
             "description": project.description,
@@ -193,7 +209,7 @@ def get_project(
                 }
                 for a in analyses
             ],
-        },
+        }, project),
     }
 
 
@@ -204,7 +220,16 @@ def update_project(
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ):
-    """Rename a project or edit its description."""
+    """
+    Rename a project, edit its description, or change one of its two
+    coordinate settings.
+
+    The settings are not metadata. `coordinate_precision` decides how
+    precisely this project's positions may leave the app in an export or a
+    figure, and `map_tiles_enabled` whether the map may ask a third-party tile
+    server for imagery of them. The schema's Literal is what keeps the first
+    to the four values the exporter can actually apply.
+    """
     project = owned_or_404(
         db.query(Project).filter(Project.id == project_id).first(),
         user, 'That project')
@@ -215,19 +240,23 @@ def update_project(
         project.name = updates.name.strip()
     if updates.description is not None:
         project.description = updates.description
+    if updates.coordinate_precision is not None:
+        project.coordinate_precision = updates.coordinate_precision
+    if updates.map_tiles_enabled is not None:
+        project.map_tiles_enabled = updates.map_tiles_enabled
 
     db.commit()
     db.refresh(project)
 
     return {
         "success": True,
-        "data": {
+        "data": _project_settings({
             "id": project.id,
             "name": project.name,
             "description": project.description,
             "created_at": project.created_at.isoformat(),
             "updated_at": project.updated_at.isoformat(),
-        },
+        }, project),
     }
 
 

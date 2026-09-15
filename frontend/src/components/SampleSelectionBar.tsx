@@ -16,7 +16,7 @@
  * anchored to its button. Both keep the selection on screen while it is
  * edited, where a modal would cover it.
  */
-import { useMemo, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import {
   Box,
   Button,
@@ -24,7 +24,10 @@ import {
   Menu,
   MenuItem,
   Popover,
+  type PopoverActions,
   Stack,
+  Tab,
+  Tabs,
   TextField,
   Tooltip,
   Typography,
@@ -36,14 +39,23 @@ import DeleteIcon from '@mui/icons-material/Delete'
 import RocketLaunchIcon from '@mui/icons-material/RocketLaunch'
 import TimelineIcon from '@mui/icons-material/Timeline'
 import WavesIcon from '@mui/icons-material/Waves'
+import PlaceIcon from '@mui/icons-material/Place'
 
 import { curveOptions, type CurveSpec } from '@/api/curves'
 import { isMarineMeasurement } from '@/components/MeasurementFields'
+import DeltaRLookupPanel from '@/components/DeltaRLookupPanel'
+import type { DeltaRLookupValue } from '@/components/DeltaRLookupPanel'
 import type { ProjectSample } from '@/components/ProjectSampleTable'
 
 export interface DeltaRValue {
   delta_r: number | null
   delta_r_error: number | null
+  /**
+   * Where a derived offset came from. Absent for a typed one, and its
+   * ABSENCE is what clears any derivation already stored -- see §5.5:
+   * provenance that survives a hand edit is a lie about the number beside it.
+   */
+  delta_r_source?: Record<string, unknown>
 }
 
 interface Props {
@@ -54,6 +66,12 @@ interface Props {
   onDeploy: () => void
   onAssignCurve: (curveId: string) => void
   onAssignDeltaR: (value: DeltaRValue) => void
+  /**
+   * Opens the map. Unlike the two edits beside it this one is a dialog and is
+   * therefore owned by the caller -- see PlaceOnMapDialog for why a map cannot
+   * keep the selection on screen the way a popover does.
+   */
+  onPlaceOnMap: () => void
   onDelete: () => void
 }
 
@@ -65,12 +83,35 @@ export default function SampleSelectionBar({
   onDeploy,
   onAssignCurve,
   onAssignDeltaR,
+  onPlaceOnMap,
   onDelete,
 }: Props) {
   const [curveAnchor, setCurveAnchor] = useState<HTMLElement | null>(null)
   const [deltaAnchor, setDeltaAnchor] = useState<HTMLElement | null>(null)
+  // The popover fixes its top edge once, when it opens, and MUI moves it
+  // again only on a window resize. Its content is anything but fixed: the
+  // derived tab is several times taller than the typed one, and it grows
+  // again as a lookup returns and the point list appears. Without this, a
+  // popover opened on the short tab ran off the bottom of the window once
+  // the tall one was chosen, with Apply below the fold and no way to scroll
+  // to it. So the content is watched, and every change in its size asks the
+  // popover to re-place itself -- which it does by moving up, and past that
+  // by scrolling inside its own paper.
+  const deltaActions = useRef<PopoverActions | null>(null)
+  const deltaResize = useRef<ResizeObserver | null>(null)
+  const watchDeltaContent = useCallback((node: HTMLElement | null) => {
+    deltaResize.current?.disconnect()
+    deltaResize.current = null
+    if (!node || typeof ResizeObserver === 'undefined') return
+    deltaResize.current = new ResizeObserver(() => deltaActions.current?.updatePosition())
+    deltaResize.current.observe(node)
+  }, [])
   const [deltaR, setDeltaR] = useState('')
   const [deltaRError, setDeltaRError] = useState('')
+  // Typed or derived. Typing is first because it is what works without a
+  // reservoir database ingested, and because a date whose position is not
+  // recorded has nothing to derive from.
+  const [deltaTab, setDeltaTab] = useState<'typed' | 'derived'>('typed')
 
   const count = selected.length
 
@@ -104,18 +145,40 @@ export default function SampleSelectionBar({
       Number.isFinite(deltaRErrorNumber) &&
       deltaRErrorNumber >= 0)
 
+  // Keeping the ΔR popover on screen as it grows. See the Popover below.
+  const popoverAction = useRef<{ updatePosition: () => void } | null>(null)
+  const observer = useRef<ResizeObserver | null>(null)
+  const popoverPaper = useCallback((node: HTMLElement | null) => {
+    observer.current?.disconnect()
+    if (!node || typeof ResizeObserver === 'undefined') return
+    observer.current = new ResizeObserver(() => popoverAction.current?.updatePosition())
+    observer.current.observe(node)
+  }, [])
+
   const closeDelta = () => {
     setDeltaAnchor(null)
     setDeltaR('')
     setDeltaRError('')
+    setDeltaTab('typed')
   }
 
   const applyDeltaR = () => {
+    // No delta_r_source: this is a number somebody typed, and sending none is
+    // what clears a derivation that no longer describes it.
     onAssignDeltaR(
       clearing
         ? { delta_r: null, delta_r_error: null }
         : { delta_r: deltaRNumber, delta_r_error: deltaRErrorNumber },
     )
+    closeDelta()
+  }
+
+  const applyDerivedDeltaR = (value: DeltaRLookupValue) => {
+    onAssignDeltaR({
+      delta_r: value.delta_r,
+      delta_r_error: value.delta_r_error,
+      delta_r_source: value.delta_r_source,
+    })
     closeDelta()
   }
 
@@ -174,6 +237,18 @@ export default function SampleSelectionBar({
         disabled={busy}
       >
         Set ΔR
+      </Button>
+      {/* Beside ΔR because it is the same kind of edit: one value that
+          belongs to a PLACE rather than to a measurement, so it lands on the
+          whole selection at once. */}
+      <Button
+        size="small"
+        variant="outlined"
+        startIcon={<PlaceIcon />}
+        onClick={onPlaceOnMap}
+        disabled={busy}
+      >
+        Place on map
       </Button>
 
       <Box sx={{ flexGrow: 1 }} />
@@ -253,7 +328,44 @@ export default function SampleSelectionBar({
         open={Boolean(deltaAnchor)}
         onClose={closeDelta}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+        // MUI positions a popover ONCE, when it opens. This one grows after
+        // that: the lookup tab fetches, and ten point rows and a
+        // counterfactual arrive into a paper that was measured while it still
+        // held a two-field form. Measured in the real app, that is 709px of
+        // popover opening at y=629 on a 1200px viewport -- so Cancel and Apply
+        // sit 138px below the fold, with nothing to scroll, because the paper
+        // had already grown to fit. The buttons were simply unreachable.
+        //
+        // `action.updatePosition()` re-runs MUI's own clamp, which moves the
+        // paper up so it fits. A ResizeObserver drives it, rather than the two
+        // components coordinating: anything that changes the height -- the tab,
+        // the fetch, excluding a point, the suspension-only toggle -- is the
+        // same event to a box that got taller.
+        action={popoverAction}
+        slotProps={{ paper: { ref: popoverPaper, sx: { maxHeight: 'calc(100vh - 32px)' } } }}
       >
+        <Box ref={watchDeltaContent}>
+        <Tabs
+          value={deltaTab}
+          onChange={(_event, value) => setDeltaTab(value)}
+          variant="fullWidth"
+          sx={{ borderBottom: 1, borderColor: 'divider' }}
+        >
+          <Tab value="typed" label="Enter a value" />
+          {/* Second, not first: it needs a reservoir database ingested and a
+              position on the dates, and neither is guaranteed. */}
+          <Tab value="derived" label="Derive from position" />
+        </Tabs>
+
+        {deltaTab === 'derived' ? (
+          <DeltaRLookupPanel
+            dates={selected}
+            marineCount={marineCount}
+            onApply={applyDerivedDeltaR}
+            onCancel={closeDelta}
+            busy={busy}
+          />
+        ) : (
         <Box sx={{ p: 2, width: 320 }}>
           <Typography variant="subtitle2" gutterBottom>
             Local reservoir offset
@@ -323,6 +435,8 @@ export default function SampleSelectionBar({
               None of the selected dates is marine, so there is nothing to apply this to.
             </Typography>
           )}
+        </Box>
+        )}
         </Box>
       </Popover>
     </Box>
