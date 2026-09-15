@@ -1087,12 +1087,12 @@ else changes the schema.
 Operations within a feature run in order. Features 1–2 and 3 are independent and can interleave;
 4 waits for both; 6 waits for 1–2 and for the three §13 decisions marked below.
 
-*Features 1–5 are done (2026-09-14) apart from op 3d, which op 0 still gates, and feature 6 is
-under way: 6a is in, 6b–6d are next. Alembic head is `b7c4e0a13d92`. What op 0 still buys is the
+*Features 1–6 are done (2026-09-15) apart from op 3d, which op 0 still gates. Alembic head is
+`b7c4e0a13d92`. What op 0 still buys is the
 BUNDLED snapshot — a fresh install with a working lookup and no network, and two installs agreeing
 on what they compute; until then the lookup runs on a snapshot somebody ingested, which feature 5's
 card is now the way to get. §13's three open decisions for feature 6 were settled on 2026-09-14,
-all three as proposed.*
+all three as proposed. Features 7–9 are next and each waits only on 6d, which is in.*
 
 ### Op 0 — the permission request *(human; start now, longest lead time)*
 
@@ -1324,7 +1324,7 @@ to prevent, so refreshing has to be a decision a person takes at a moment they c
 **5a.** `GET /api/reservoir/freshness` (auth, explicit, the 2 KB probe) and one line plus the
 ingest button on `Curves.tsx`, in the register the curve list already uses.
 
-### Feature 6 — wave of advance (§6.2–6.4, §6.6, §7.4) — **6a–6b done 2026-09-14**
+### Feature 6 — wave of advance (§6.2–6.4, §6.6, §7.4) — **done 2026-09-15**
 
 *Confirmed 2026-09-14, all three as proposed:* §13.1 stays derived; §13.3 `MIN_DISPERSAL_SITES = 6`;
 §13.4 stays per-analysis.
@@ -1358,6 +1358,46 @@ Also in 6a rather than later: `derive_sites_from_dates`, §6.2's group-calibrati
 takes each place's earliest dated event — decided once on the draws' median, not per draw, since a
 per-draw minimum is biased low and would let the representative date change between draws — and
 labels it `basis='earliest_dated_event'` so no panel can show it as an arrival time.
+
+Three notes on 6c, which is the operation that changed most in the writing:
+
+- **It runs in the ordinary suite, not behind a deselection.** The plan said "marked slow", and it
+  is — `pytest.ini` registers the marker — but the marker deselects nothing. A coverage test nobody
+  runs is a coverage test nobody can rely on, and this is the *only* check that can retire §11.4.
+  Size is tuned by `RADICAL_COVERAGE_FRONTS` instead: 32 by default (about a minute across four
+  cores) and 200 for the recorded figure. *[The 200-front measurement is still running as this is
+  written; its number lands here when it does. At 32 fronts the exact path sits inside the band and
+  the sampled path is not grossly miscalibrated.]*
+- **The tolerance is binomial, not a typed-in number.** Coverage is a proportion, so the band is
+  three standard errors either side of 0.95 and scales with the number of fronts — ±4.6 points at
+  200, ±11.6 at 32. Seeds are fixed, so a failure is a real change in the pipeline and never a
+  flake, and the band is against *simulation* noise rather than run-to-run noise.
+- **The exact solver carries it, not `solve_chains`.** An eight-phase chain model is exactly
+  solvable, so `auto` integrates it — the path the test should exercise is the path production
+  takes. The sampled path gets its own smaller run (12 fronts by default) checked for gross
+  miscalibration rather than to the tight band, because a Gibbs front costs several times an exact
+  one and `test_intervals.py` already cross-checks the two solvers against each other.
+
+Two guards sit beside the coverage figure, because a coverage test can pass either because the
+pipeline is calibrated or because the simulation is too easy to fail: one requires the interval to
+*exclude* a speed twice the truth (an interval wide enough to contain anything would score 100%),
+and one requires each site's opening Boundary to sit older than its own oldest date — the §6.2
+premise the whole estimator rests on, and if the simulation ever stopped satisfying it the naive
+estimator would work too and the file would be testing nothing anybody disputes.
+
+On 6d: the `SiteMap` gained `values`/`valueLabel`, `front` and `origin` rather than growing a
+second map component. The ramp is `CONTEXT_PALETTE` as a Plotly colorscale — one hue at graded
+strength, §7.4's rule and the Harris matrix's — and it *supersedes* the selection colouring while
+set, since two colour meanings on one figure is one too many. The front is drawn first so it lies
+under the marks it was fitted to, and the origin last so it is never hidden. The panel's arithmetic
+lives in `utils/dispersalFigure.ts` (`arrivalAges`, `frontLine`, `speedText`) for the reason
+`siteMapGeometry.ts` is separate from `SiteMap`: it has right and wrong answers and should be
+testable without rendering. `arrivalAges` *reconstructs* each site's age from what the fit reported
+— t₀, the speed, the site's distance and its residual — rather than recomputing it from
+coordinates, so the ramp on the map and the residual table are the same two numbers and cannot
+drift apart. The panel is mounted with tiles **off**: `Results.tsx` has no project loaded, and the
+offline basemap is the private default. Passing a project's tile setting through is the one thing
+left if that is ever wanted.
 
 Two notes on 6b:
 

@@ -4,6 +4,7 @@ import DownloadIcon from '@mui/icons-material/Download'
 import Plotly from 'plotly.js-dist-min'
 import createPlotlyComponent from 'react-plotly.js/factory'
 
+import { CONTEXT_PALETTE } from '@/theme/diagramColors'
 import { usePlotColors, usePlotFont } from '@/theme/plotColors'
 import { downloadPlotPng } from '@/utils/downloadPlot'
 import {
@@ -76,6 +77,26 @@ function placeFromTiledMap(graphDiv: unknown, event: MouseEvent): Placement {
   return latLonFromMapPoint(map, event.clientX - box.left, event.clientY - box.top)
 }
 
+/**
+ * The ramp a quantity is drawn on: the Harris matrix's context hue, extended
+ * at the pale end.
+ *
+ * CONTEXT_PALETTE alone was tried first and does not work here, for a reason
+ * that only showed up in a browser. Its six steps span #35826e to #04372a --
+ * a lightness range deliberately kept narrow so every step clears 4.5:1 on
+ * white while carrying a 10px label. On labelled boxes that is right. On 12px
+ * marks with no label it is not: the whole range renders as eight dots of
+ * approximately one green, and a reader cannot see the wave that is the point
+ * of the figure.
+ *
+ * So the two pale anchors are the SAME hue (164 degrees) continued past where
+ * a labelled box could go, since nothing is written on a mark and the contrast
+ * floor that shaped the original ramp does not apply. It stays one hue at
+ * graded strength, which is the rule; it is not added to CONTEXT_PALETTE,
+ * because the matrix's steps are constrained by something this is not.
+ */
+const VALUE_RAMP = ['#e3f1ec', '#b4d9cd', ...CONTEXT_PALETTE]
+
 interface SiteMapProps {
   /** Every date the map is about, placed or not. */
   points: MapPoint[]
@@ -106,6 +127,29 @@ interface SiteMapProps {
   height?: number
   /** Used to name the downloaded PNG. */
   exportName?: string
+  /**
+   * A quantity per point id, drawn as graded strength of ONE hue rather than
+   * as a categorical palette -- the same rule the Harris matrix follows, and
+   * for the same reason: an arrival age is a quantity, and a set of unrelated
+   * hues would say these sites are different KINDS of thing.
+   *
+   * Supersedes the selected/unselected split while it is set: two
+   * simultaneous colour meanings on one figure is one too many.
+   */
+  values?: Record<string, number>
+  /** What the colour bar is measuring. Required to mean anything by `values`. */
+  valueLabel?: string
+  /**
+   * A line drawn over the marks -- the fitted front, in the dispersal panel.
+   * Ordered; drawn as given, with no interpolation of its own.
+   */
+  front?: Array<{ latitude: number; longitude: number }>
+  /**
+   * A single distinguished position: where a front is hypothesised to have
+   * started. Marked differently from a site because it is not one -- nothing
+   * was excavated there, and it is an assumption rather than an observation.
+   */
+  origin?: { latitude: number; longitude: number } | null
 }
 
 /**
@@ -136,6 +180,10 @@ export default function SiteMap({
   tiles = false,
   height = 420,
   exportName = 'site-map',
+  values,
+  valueLabel,
+  front,
+  origin,
 }: SiteMapProps) {
   const plot = usePlotColors()
   const plotFont = usePlotFont()
@@ -178,15 +226,93 @@ export default function SiteMap({
       hovertemplate: '%{text}<br>%{lat:.4f}, %{lon:.4f}<extra></extra>',
     })
 
-    const chosen = sites.filter(isSelected)
-    const rest = sites.filter((site) => !isSelected(site))
-    const list = []
-    if (rest.length > 0) list.push(build(rest, 'Placed', plot.mean, 9))
-    // Drawn after, so a selected pin is never hidden under an unselected one
-    // sitting at the same place on screen.
-    if (chosen.length > 0) list.push(build(chosen, 'Selected', plot.posteriorLine, 13))
+    const geoType = (tiles ? 'scattermap' : 'scattergeo') as
+      'scattermap' | 'scattergeo'
+    const list: unknown[] = []
+
+    // The front first, so it lies UNDER the marks it was fitted to. A line
+    // drawn over a site would hide the observation behind the model.
+    if (front && front.length > 1) {
+      list.push({
+        type: geoType,
+        mode: 'lines' as const,
+        name: 'Fitted front',
+        lat: front.map((p) => p.latitude),
+        lon: front.map((p) => p.longitude),
+        line: { color: plot.posteriorLine, width: 2, dash: 'dot' },
+        hoverinfo: 'skip' as const,
+      })
+    }
+
+    if (values) {
+      // Graded strength of one hue. See the `values` prop for why this
+      // replaces the selection colouring rather than joining it.
+      const valueOf = (site: MapSite) => {
+        for (const id of site.ids) {
+          if (values[id] !== undefined) return values[id]
+        }
+        return null
+      }
+      const graded = sites.filter((site) => valueOf(site) !== null)
+      if (graded.length > 0) {
+        const last = VALUE_RAMP.length - 1
+        list.push({
+          type: geoType,
+          mode: 'markers' as const,
+          name: valueLabel || 'Value',
+          lat: graded.map((s) => s.latitude),
+          lon: graded.map((s) => s.longitude),
+          text: graded.map(siteLabel),
+          marker: {
+            size: 12,
+            color: graded.map((s) => valueOf(s) as number),
+            colorscale: VALUE_RAMP.map((hex, i) => [i / last, hex]),
+            // Reversed so the OLDEST arrival is the strongest shade: the
+            // front starts dark and fades as it spreads, which is the way
+            // round a reader already expects a wave to be drawn.
+            reversescale: false,
+            line: { color: plot.surface, width: 1.5 },
+            colorbar: {
+              title: { text: valueLabel || '', side: 'right' as const },
+              thickness: 12,
+              len: 0.8,
+              outlinewidth: 0,
+            },
+          },
+          hovertemplate: '%{text}<br>%{marker.color:.0f}<extra></extra>',
+        })
+      }
+    } else {
+      const chosen = sites.filter(isSelected)
+      const rest = sites.filter((site) => !isSelected(site))
+      if (rest.length > 0) list.push(build(rest, 'Placed', plot.mean, 9))
+      // Drawn after, so a selected pin is never hidden under an unselected one
+      // sitting at the same place on screen.
+      if (chosen.length > 0) list.push(build(chosen, 'Selected', plot.posteriorLine, 13))
+    }
+
+    // Last, so it is never hidden: it is the assumption the whole figure is
+    // measured from, and a reader who cannot find it cannot read the rest.
+    if (origin) {
+      list.push({
+        type: geoType,
+        mode: 'markers' as const,
+        name: 'Origin',
+        lat: [origin.latitude],
+        lon: [origin.longitude],
+        text: ['Assumed origin'],
+        marker: {
+          size: 15,
+          color: plot.surface,
+          symbol: tiles ? undefined : ('x' as const),
+          line: { color: plot.posteriorLine, width: 3 },
+        },
+        hovertemplate: '%{text}<br>%{lat:.4f}, %{lon:.4f}<extra></extra>',
+      })
+    }
+
     return list
-  }, [sites, selected, plot, tiles])
+  }, [sites, selected, plot, tiles, values, valueLabel, front, origin])
 
   /**
    * Clicks are taken in the CAPTURE phase, on a native listener, and both

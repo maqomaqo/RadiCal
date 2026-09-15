@@ -297,11 +297,73 @@ export interface AgeDepthRecord {
   accumulation: AccumulationStep[]
 }
 
+// --- wave of advance ---
+//
+// Mirrors services/dispersal.py. A speed here is km/yr and t0 is a CALENDAR
+// age, which is why the two take different shapes: t0 carries the calendar key
+// names (median/band_68/band_95, as AgeDepthLevel does) so it can be formatted
+// BC/AD, and the speed carries the duration names so it cannot be.
+
+export interface DispersalSite {
+  element_id: string
+  name: string
+  // The parameter carrying this site's arrival: an opening Boundary, or --
+  // for a group calibration -- its earliest dated event.
+  parameter_id: string
+  // 'boundary' is an arrival estimate. 'earliest_dated_event' is NOT: it is a
+  // terminus ante quem, and the panel must say so wherever it shows one.
+  basis: 'boundary' | 'earliest_dated_event'
+  latitude: number | null
+  longitude: number | null
+  date_ids: string[]
+  // Largest distance between any two of the site's dates, in km.
+  scatter_km: number | null
+  // Why this site could not be used, in the user's words. Null when it could.
+  refusal: string | null
+}
+
+export interface DispersalResidual {
+  element_id: string
+  name: string
+  distance_km: number
+  // Signed years. POSITIVE means the site is OLDER than the front predicts --
+  // the thing arrived there before the line says it should have.
+  residual_years: number
+  residual_sd: number
+}
+
+export interface DispersalFit {
+  origin: { lat: number; lon: number }
+  sites: DispersalSite[]
+  // Sites that actually went into the fit, which is not sites.length.
+  n_sites: number
+  min_sites: number
+  // Set when no speed was reported, and says why. A refusal is a result: the
+  // rest of the analysis is unaffected.
+  refused: string | null
+  // km/yr. Negative means the far sites are OLDER than the near ones -- a
+  // finding about the origin, not an error to be hidden behind an absolute.
+  speed: DurationSummary | null
+  // Calendar age at the origin, cal BP.
+  t0: { median: number; mean: number; band_68: [number, number]; band_95: [number, number] } | null
+  residuals: DispersalResidual[]
+  basis: 'boundary' | 'earliest_dated_event' | null
+  distances?: number[]
+  draws?: number
+  // Draws whose slope was exactly zero -- an infinite speed, excluded from the
+  // summary. Reported so "one draw" and "most of them" are distinguishable.
+  degenerate_draws?: number
+}
+
 export interface IntervalsBlock {
   durations: DurationRecord[]
   differences: DifferenceRecord[]
   // One entry per deposition sequence in the model; empty otherwise.
   age_depth?: AgeDepthRecord[]
+  // NULL means the fit was not asked for, which the page reads as an offer to
+  // re-run. A fit that was asked for and refused is an object with `refused`
+  // set, which is a different thing.
+  dispersal?: DispersalFit | null
   // How many joint draws these were estimated from, and whether those draws
   // were independent (the exact solver, or a group calibration) or an MCMC
   // chain, where the effective count is smaller than the count.
