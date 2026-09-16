@@ -472,6 +472,23 @@ class TestModelTreeApi:
         # The shared transition is a single element carrying one posterior.
         assert boundaries[1]["posterior"]["posterior_mean"] > 0
 
+    def test_get_strips_raw_samples_from_boundary_posteriors(self, client):
+        # The draws stay in the database but never reach the client: with
+        # 138 boundaries they were 10 MB of the response, and the edit page
+        # re-serialised them to sessionStorage on every keystroke.
+        analysis_id = self._analysis(client)
+        data = client.get(f"/api/analysis/{analysis_id}").json()["data"]
+
+        def walk(element):
+            yield element
+            for child in element.get("children") or []:
+                yield from walk(child)
+
+        posteriors = [e["posterior"] for e in walk(data["model_tree"]) if e.get("posterior")]
+        assert posteriors
+        assert all("posterior_samples" not in p for p in posteriors)
+        assert all("probability_distribution" in p for p in posteriors)
+
     def test_put_replaces_the_tree_and_clears_results(self, client):
         analysis_id = self._analysis(client)
         data = client.get(f"/api/analysis/{analysis_id}").json()["data"]

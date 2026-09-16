@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import {
   Container,
   Box,
@@ -28,21 +28,13 @@ import {
   Accordion,
   AccordionSummary,
   AccordionDetails,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
 } from '@mui/material'
-import { visuallyHidden } from '@mui/utils'
 import { useNavigate, useSearchParams, useParams, useLocation } from 'react-router-dom'
-import DeleteIcon from '@mui/icons-material/Delete'
-import EditIcon from '@mui/icons-material/Edit'
 import AddIcon from '@mui/icons-material/Add'
 import AccountTreeIcon from '@mui/icons-material/AccountTree'
 import PlaceIcon from '@mui/icons-material/Place'
 import PlaceOnMapDialog from '@/components/PlaceOnMapDialog'
+import DraftMeasurementTable, { type DraftColumns } from '@/components/DraftMeasurementTable'
 import UploadFileIcon from '@mui/icons-material/UploadFile'
 import LibraryAddIcon from '@mui/icons-material/LibraryAdd'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
@@ -61,7 +53,6 @@ import MeasurementFields, {
 import { useCurves } from '@/hooks/useCurves'
 // The registry's own name for a curve, so this table and every other curve
 // label in the app say the same thing about the same id.
-import { curveLabel } from '@/api/curves'
 import type { ProjectSample } from '@/components/ProjectSampleTable'
 import {
   DateFormat,
@@ -502,28 +493,36 @@ export default function NewAnalysis() {
     }
   }
 
-  const { olderYounger: draftOlderYounger } = expandRelationships(measurements, groups, relationships)
-  const cycle = findCycle(draftOlderYounger.map((e) => ({ from: e.from, to: e.to })))
-  // Same rules the backend enforces, so an unbuildable model structure is
-  // caught here rather than coming back as a 422 after a submit.
-  const treeProblems = modelTree
-    ? validateTree(modelTree, elementAssignments, measurements)
-    : []
-  const cycleLabels = (cycle || []).map((id) => {
-    const m = measurements.find((mm) => mm.id === id)
-    if (m) return m.sample_name
-    const g = groups.find((gg) => gg.id === id)
-    return g ? g.name : id
-  })
-
-  // Summary for the Model Structure card. For a tree-authored model the
-  // counts and validity come from the tree, as the diagram's do, rather than
-  // from the groups/relationships arrays, which stay empty for such a draft.
-  //
-  // summariseTree counts what the MODEL asserts -- one per adjacent pair of
-  // children in each Sequence -- not the cross-product edges, which would
-  // report 175 for a model asserting 39.
-  const structureSummary = modelTree ? summariseTree(modelTree) : null
+  // Everything derived from the draft's STRUCTURE is memoised on the store
+  // values it reads. None of it changes when the name or a setting above the
+  // table is typed in, and on an 800-date draft expanding every ordering
+  // relationship into date-pairs, checking the result for a cycle and
+  // validating the tree were being redone on every keystroke.
+  const { cycle, treeProblems, cycleLabels, structureSummary } = useMemo(() => {
+    const { olderYounger } = expandRelationships(measurements, groups, relationships)
+    const cycle = findCycle(olderYounger.map((e) => ({ from: e.from, to: e.to })))
+    // Same rules the backend enforces, so an unbuildable model structure is
+    // caught here rather than coming back as a 422 after a submit.
+    const treeProblems = modelTree
+      ? validateTree(modelTree, elementAssignments, measurements)
+      : []
+    const cycleLabels = (cycle || []).map((id) => {
+      const m = measurements.find((mm) => mm.id === id)
+      if (m) return m.sample_name
+      const g = groups.find((gg) => gg.id === id)
+      return g ? g.name : id
+    })
+    // Summary for the Model Structure card. For a tree-authored model the
+    // counts and validity come from the tree, as the diagram's do, rather
+    // than from the groups/relationships arrays, which stay empty for such a
+    // draft.
+    //
+    // summariseTree counts what the MODEL asserts -- one per adjacent pair of
+    // children in each Sequence -- not the cross-product edges, which would
+    // report 175 for a model asserting 39.
+    const structureSummary = modelTree ? summariseTree(modelTree) : null
+    return { cycle, treeProblems, cycleLabels, structureSummary }
+  }, [measurements, groups, relationships, modelTree, elementAssignments])
   const structurePhaseCount = structureSummary ? structureSummary.phaseCount : groups.length
   const structureRelationshipCount = structureSummary
     ? structureSummary.orderingCount
@@ -580,6 +579,25 @@ export default function NewAnalysis() {
   // are readable without opening anything.
   const showGapColumn = measurements.some((m) => m.ring_offset != null)
   const showDepthColumn = measurements.some((m) => m.depth_cm != null)
+  // One object, memoised on the flags, so the table's memo sees the same
+  // props until a column actually appears or disappears.
+  const draftColumns = useMemo<DraftColumns>(
+    () => ({
+      material: showMaterialColumn,
+      context: showContextColumn,
+      deltaR: showDeltaRColumn,
+      gap: showGapColumn,
+      depth: showDepthColumn,
+      outlier: showOutlierColumn,
+    }),
+    [showMaterialColumn, showContextColumn, showDeltaRColumn, showGapColumn,
+     showDepthColumn, showOutlierColumn],
+  )
+  // Stable, so the memoised rows keep their memo -- see DraftMeasurementTable.
+  const beginEditing = useCallback(
+    (m: Measurement) => setEditing({ id: m.id, draft: { ...m }, applyToPhase: false }),
+    [],
+  )
 
   /**
    * The element type a date is assigned to, or null.
@@ -1887,178 +1905,14 @@ export default function NewAnalysis() {
         {measurements.length === 0 ? (
           <Typography color="textSecondary">No measurements added yet</Typography>
         ) : (
-          // A table, not the card grid this used to be. These rows are the
-          // rows the results table will show, and the one thing a reader does
-          // with a list of freshly typed dates is scan the ages down a column
-          // for a transposed digit -- which a 3-wide grid of cards makes
-          // impossible. Follows the house pattern from Results.tsx: full
-          // width, numeric columns nowrap and tabular-nums, and the label
-          // column at width 1% so the surplus goes to the columns carrying
-          // numbers instead of pooling behind the names.
-          <TableContainer>
-            <Table
-              size="small"
-              sx={{
-                fontVariantNumeric: 'tabular-nums',
-                '& thead th': { backgroundColor: 'background.muted' },
-                '& tbody td:first-of-type, & thead th:first-of-type': { whiteSpace: 'nowrap' },
-              }}
-            >
-              <caption style={visuallyHidden}>
-                The dates in this analysis, in the order they will be submitted.
-              </caption>
-              <TableHead>
-                <TableRow>
-                  <TableCell sx={{ width: '1%' }}>Sample</TableCell>
-                  <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
-                    Age (BP)
-                  </TableCell>
-                  <TableCell sx={{ whiteSpace: 'nowrap' }}>Curve</TableCell>
-                  {showMaterialColumn && <TableCell>Material</TableCell>}
-                  {showContextColumn && <TableCell>Context</TableCell>}
-                  {showDeltaRColumn && (
-                    <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
-                      ΔR (yr)
-                    </TableCell>
-                  )}
-                  {showGapColumn && (
-                    <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
-                      Gap
-                    </TableCell>
-                  )}
-                  {showDepthColumn && (
-                    <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
-                      Depth (cm)
-                    </TableCell>
-                  )}
-                  {showOutlierColumn && <TableCell sx={{ whiteSpace: 'nowrap' }}>Outlier</TableCell>}
-                  <TableCell align="right" sx={{ width: '1%' }}>
-                    <Box component="span" sx={visuallyHidden}>
-                      Actions
-                    </Box>
-                  </TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {measurements.map((m) => (
-                  <TableRow key={m.id} hover>
-                    <TableCell>
-                      {/* The results table's own verdict, carried onto the row
-                          the reader was sent here to edit. Arriving from "Edit
-                          analysis" they know a date was flagged and not which
-                          one, and the table naming it is a page behind them.
-                          Same rule and same words as that table, from
-                          utils/diagnostics.
-
-                          Left as it was found once the date is changed, with
-                          the tooltip saying which run it came from: a note that
-                          vanished on the first keystroke would disappear
-                          exactly when it was being acted on. */}
-                      <Stack direction="row" spacing={1} alignItems="center">
-                        <Typography variant="body2" sx={{ fontWeight: 500 }}>
-                          {m.sample_name}
-                        </Typography>
-                        {lastRunConcerns[m.id] && (
-                          <Tooltip
-                            title={`${concernTitle(lastRunConcerns[m.id])} From the last run of this analysis.`}
-                            describeChild
-                          >
-                            <Chip
-                              size="small"
-                              tabIndex={0}
-                              color={lastRunConcerns[m.id].level === 'suspect' ? 'error' : 'warning'}
-                              variant={
-                                lastRunConcerns[m.id].level === 'suspect' ? 'filled' : 'outlined'
-                              }
-                              label={lastRunConcerns[m.id].level === 'suspect' ? 'Suspect' : 'Check'}
-                            />
-                          </Tooltip>
-                        )}
-                      </Stack>
-                    </TableCell>
-                    {/* nowrap so a value and its error never break across two
-                        lines and stop reading as one measurement. */}
-                    <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
-                      {m.age_bp} ± {m.error_1sigma}
-                    </TableCell>
-                    <TableCell sx={{ whiteSpace: 'nowrap' }}>
-                      {curveLabel(curves, m.curve_id)}
-                    </TableCell>
-                    {showMaterialColumn && (
-                      <TableCell>
-                        {m.material_type && m.material_type !== 'unknown' ? m.material_type : '—'}
-                      </TableCell>
-                    )}
-                    {/* The context the date arrived filed under. Shown so it is
-                        visible that it survived the trip from the collection --
-                        it is what the Model Structure page builds its starting
-                        phases from, and a grouping that silently vanished used
-                        to have to be re-created from memory. */}
-                    {showContextColumn && (
-                      <TableCell>{m.default_context_name || '—'}</TableCell>
-                    )}
-                    {/* ΔR and the outlier settings both CHANGE the answer, so
-                        they stay visible without opening anything. */}
-                    {showDeltaRColumn && (
-                      <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
-                        {m.delta_r != null ? `${m.delta_r} ± ${m.delta_r_error ?? 0}` : '—'}
-                      </TableCell>
-                    )}
-                    {/* The gap carries its own uncertainty where the
-                        separation was measured rather than counted, and the
-                        two read as one figure, so they share a cell as ΔR
-                        does. */}
-                    {showGapColumn && (
-                      <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
-                        {m.ring_offset == null
-                          ? '—'
-                          : m.ring_offset_error
-                            ? `${m.ring_offset} ± ${m.ring_offset_error}`
-                            : m.ring_offset}
-                      </TableCell>
-                    )}
-                    {showDepthColumn && (
-                      <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
-                        {m.depth_cm ?? '—'}
-                      </TableCell>
-                    )}
-                    {showOutlierColumn && (
-                      <TableCell sx={{ whiteSpace: 'nowrap' }}>
-                        {(m.outlier_prior ?? 0) > 0
-                          ? `${m.outlier_model === 'charcoal' ? 'charcoal' : 'general'} ${
-                              Math.round((m.outlier_prior ?? 0) * 1000) / 10
-                            }%`
-                          : '—'}
-                      </TableCell>
-                    )}
-                    <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
-                      <Tooltip title={`Edit ${m.sample_name}`}>
-                        <IconButton
-                          size="small"
-                          aria-label={`Edit ${m.sample_name}`}
-                          onClick={() =>
-                            setEditing({ id: m.id, draft: { ...m }, applyToPhase: false })
-                          }
-                        >
-                          <EditIcon fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
-                      <Tooltip title={`Delete ${m.sample_name}`}>
-                        <IconButton
-                          size="small"
-                          aria-label={`Delete ${m.sample_name}`}
-                          onClick={() => removeMeasurement(m.id)}
-                          sx={{ '&:hover, &:focus-visible': { color: 'error.main' } }}
-                        >
-                          <DeleteIcon fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </TableContainer>
+          <DraftMeasurementTable
+            measurements={measurements}
+            curves={curves}
+            concerns={lastRunConcerns}
+            columns={draftColumns}
+            onEdit={beginEditing}
+            onRemove={removeMeasurement}
+          />
         )}
       </Box></Paper>
 
