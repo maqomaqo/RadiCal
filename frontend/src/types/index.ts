@@ -410,6 +410,11 @@ export interface OriginProfile {
   /** Grid spacing actually used; widens for a continental spread. */
   step_deg: number | null
   candidates: number
+  /**
+   * Grid cells left unscored because the sites get OLDER with distance from
+   * them: where the front went, not where it could have started.
+   */
+  candidates_ahead?: number
   /** The peak of something broad — not "the origin". */
   peak: { lat: number; lon: number } | null
   region: Array<{ lat: number; lon: number; support: number }>

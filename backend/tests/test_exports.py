@@ -308,13 +308,21 @@ class TestJsonStructure:
         assert posterior["probability_distribution"], "kept, so a consumer can plot the transition"
         assert "posterior_samples" not in posterior
 
-        # Non-vacuous: the stored value this was trimmed from does carry the
-        # chain (GET /api/analysis/{id} returns the column as stored).
-        stored = client.get(f"/api/analysis/{analysis_id}").json()["data"]["model_tree"]
-        stored_boundary = next(
-            c for c in stored["children"] if c["element_type"] == "boundary" and c["posterior"]
-        )
-        assert "posterior_samples" in stored_boundary["posterior"]
+        # Non-vacuous: the stored column this was trimmed from does carry the
+        # chain. Read from the database, since GET /api/analysis/{id} now
+        # strips it too (see analysis._tree_for_client).
+        from app.database import SessionLocal
+        from app.models import ModelElement
+        db = SessionLocal()
+        try:
+            stored = next(
+                row for row in db.query(ModelElement)
+                .filter(ModelElement.analysis_id == analysis_id).all()
+                if row.element_type == "boundary" and row.posterior
+            )
+            assert "posterior_samples" in stored.posterior
+        finally:
+            db.close()
 
     def test_headings_carry_their_limiters_but_no_result(self, client):
         analysis_id = self._structured(client)

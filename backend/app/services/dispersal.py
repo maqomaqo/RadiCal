@@ -247,6 +247,31 @@ def _scatter(points: Sequence[Tuple[float, float]]) -> Tuple[float, Optional[Tup
     return worst, pair
 
 
+def _lon_extent(lons: Sequence[float]) -> Tuple[float, float]:
+    """
+    (west, east) edges of the shortest arc of longitude holding every value.
+
+    Worked out on the circle, not the line. Longitude wraps, and min/max on
+    raw values does not know it: Fiji at 178 and Easter Island at -109 span
+    73 degrees of Pacific and 287 of everything else, and min/max picks the
+    everything else. So the arc kept is the one leaving out the LARGEST gap
+    between neighbouring values, whichever side of the antimeridian that gap
+    falls on. The east edge may exceed 180 when the arc crosses it; callers
+    wrap individual longitudes as they use them.
+    """
+    ordered = sorted(set(float(v) for v in lons))
+    if len(ordered) == 1:
+        return ordered[0], ordered[0]
+    west, east = ordered[0], ordered[-1]
+    largest = west + 360.0 - east
+    for i in range(1, len(ordered)):
+        gap = ordered[i] - ordered[i - 1]
+        if gap > largest:
+            largest = gap
+            west, east = ordered[i], ordered[i - 1] + 360.0
+    return west, east
+
+
 def _centroid(points: Sequence[Tuple[float, float]]) -> Tuple[float, float]:
     """
     Mean position on the sphere, via unit vectors.
@@ -814,27 +839,48 @@ def _isochrons(a: float, b: float, c: float,
     step = _round_step((high - low) / ISOCHRON_COUNT)
     first = math.ceil(low / step) * step
 
-    # Half-length of each drawn line: enough to cross the sites, plus a margin
-    # so the lines do not stop exactly at the outermost marker.
-    reach = 1.25 * max(float(np.hypot(x - x.mean(), y - y.mean()).max()), 1.0)
+    # Where along each line to draw it: the sites' own extent in the line's
+    # direction, plus a margin so the lines do not stop exactly at the
+    # outermost marker. Along the LINE, not the sites' radius from their
+    # centroid: a spread 5000 km long and 1000 km wide would otherwise draw
+    # every isochron 12,500 km long, most of it far from anything dated.
     along = np.array([-c, b]) / math.sqrt(gradient_sq)
+    positions = x * along[0] + y * along[1]
+    extent = float(positions.max() - positions.min())
+    margin = 0.125 * max(extent, 1.0)
+    start, stop = float(positions.min()) - margin, float(positions.max()) + margin
+
+    # A polyline, not two endpoints. The line is straight in the projection's
+    # plane, and a map drawing a great circle between two far-apart endpoints
+    # would put it somewhere else; sampled every few hundred kilometres the
+    # map follows the surface the fit was made on. Odd, so the middle sample
+    # is a point the map can hang the label from.
+    samples = max(9, 2 * int(extent / ISOCHRON_SAMPLE_KM) + 1)
+    if samples % 2 == 0:
+        samples += 1
 
     lines = []
     age = first
     while age <= high and len(lines) < ISOCHRON_COUNT + 1:
         # The point on this isochron closest to the projection's origin.
         base = np.array([b, c]) * (age - a) / gradient_sq
-        points = [base - reach * along, base + reach * along]
         lines.append({
             'age': float(age),
             'points': [
                 {'latitude': lat, 'longitude': lon}
-                for lat, lon in (_unproject(float(p[0]), float(p[1]), centre)
-                                 for p in points)
+                for lat, lon in (
+                    _unproject(float(p[0]), float(p[1]), centre)
+                    for p in (base + t * along
+                              for t in np.linspace(start, stop, samples))
+                )
             ],
         })
         age += step
     return lines
+
+
+# How far apart, at most, the points along a drawn isochron are.
+ISOCHRON_SAMPLE_KM = 250.0
 
 
 def _round_step(raw: float) -> float:
@@ -924,6 +970,17 @@ def profile_origin(sites: Sequence[SiteSpec], draws: Dict[str, np.ndarray],
     residuals the profile log-likelihood at a candidate is -n/2 * log(RSS) with
     the scale concentrated out, averaged over draws -- so the chronological
     uncertainty is inside the surface rather than applied to it afterwards.
+
+    **Only candidates the front runs AWAY from are candidates.** A straight
+    line through age against distance fits exactly as well from a point the
+    front ran towards -- the sites get older with distance from it instead of
+    younger, and least squares does not care which -- so without this rule
+    the surface has a second lobe where the front ENDED, as good as the one
+    where it started. On a Polynesian model that second lobe was the whole
+    reported region: off Central America, north-east of the sites, for a
+    front the trend surface said advanced north-east. A candidate whose
+    median-draw slope is not negative is where the front went, not where it
+    could have started, and is left out; how many were is reported.
     """
     usable = [s for s in sites if s.usable and s.parameter_id in draws]
     refused_sites = [s for s in sites if s.refusal]
@@ -935,6 +992,7 @@ def profile_origin(sites: Sequence[SiteSpec], draws: Dict[str, np.ndarray],
             'refused': None,
             'step_deg': None,
             'candidates': 0,
+            'candidates_ahead': 0,
             'peak': None,
             'region': [],
             'cutoff': ORIGIN_SUPPORT_CUTOFF,
@@ -957,6 +1015,12 @@ def profile_origin(sites: Sequence[SiteSpec], draws: Dict[str, np.ndarray],
                             for s in usable])
     n_sites = len(usable)
 
+    # The sites' longitude span on the circle: min/max would send a Pacific
+    # dataset's grid the long way round the world, and it did -- a Polynesian
+    # model was profiled over the Indian Ocean, where an origin twelve
+    # thousand kilometres behind the front fits about as well as anything.
+    west, east = _lon_extent(lons)
+
     # Widen the step rather than evaluate more candidates: a finer grid over a
     # continental spread would be a lot of arithmetic to locate the maximum of
     # a surface that is flat where it matters.
@@ -964,14 +1028,15 @@ def profile_origin(sites: Sequence[SiteSpec], draws: Dict[str, np.ndarray],
     while True:
         lat_axis = np.arange(lats.min() - ORIGIN_MARGIN_DEG,
                              lats.max() + ORIGIN_MARGIN_DEG + step / 2, step)
-        lon_axis = np.arange(lons.min() - ORIGIN_MARGIN_DEG,
-                             lons.max() + ORIGIN_MARGIN_DEG + step / 2, step)
+        lon_axis = np.arange(west - ORIGIN_MARGIN_DEG,
+                             east + ORIGIN_MARGIN_DEG + step / 2, step)
         lat_axis = lat_axis[(lat_axis >= -90.0) & (lat_axis <= 90.0)]
         if lat_axis.size * lon_axis.size <= MAX_ORIGIN_CANDIDATES:
             break
         step *= 2.0
 
     scores: List[Tuple[float, float, float]] = []
+    ahead = 0
     for lat in lat_axis:
         for lon in lon_axis:
             wrapped = (float(lon) + 180.0) % 360.0 - 180.0
@@ -983,16 +1048,25 @@ def profile_origin(sites: Sequence[SiteSpec], draws: Dict[str, np.ndarray],
                 # estimate, so it is not a candidate at all rather than a
                 # candidate that fits badly.
                 continue
-            _slope, _intercept, rss = _ols_per_draw(distances, ages)
+            slope, _intercept, rss = _ols_per_draw(distances, ages)
+            if float(np.median(slope)) >= 0.0:
+                # Sites get older with distance from here: this is where the
+                # front went, not where it started. See the docstring.
+                ahead += 1
+                continue
             # Concentrated-out scale, averaged over draws. Guarded because a
             # perfect fit on a synthetic front really does give RSS = 0.
             score = float(np.mean(-0.5 * n_sites * np.log(np.maximum(rss, 1e-12))))
             scores.append((float(lat), wrapped, score))
 
     if not scores:
-        return block(step_deg=step, refused=(
+        return block(step_deg=step, candidates_ahead=ahead, refused=(
             'No candidate origin gave the sites distinct enough distances for '
-            'a front to be fitted from it.'))
+            'a front to be fitted from it.' if ahead == 0 else
+            'From every candidate on the grid the sites get older with '
+            'distance, so none is somewhere the front could have started: '
+            'whatever gradient these dates carry runs towards the grid, not '
+            'away from any point on it.'))
 
     best = max(score for _lat, _lon, score in scores)
     region = [{
@@ -1008,6 +1082,10 @@ def profile_origin(sites: Sequence[SiteSpec], draws: Dict[str, np.ndarray],
     return block(
         step_deg=step,
         candidates=len(region),
+        # Grid cells the front would have run TOWARDS, which are not
+        # candidates for its start and were not scored. Reported so the panel
+        # can say how much of the grid the search actually covered.
+        candidates_ahead=ahead,
         # Named as the peak of the region rather than as "the origin": see the
         # docstring for why this surface has no single location in it.
         peak={'lat': peak['lat'], 'lon': peak['lon']},

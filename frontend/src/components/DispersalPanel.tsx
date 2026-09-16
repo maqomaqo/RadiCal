@@ -574,6 +574,15 @@ function OriginProfileCard({ profile, wave, sites, tiles }: {
               </Typography>
               <Typography variant="body2" color="text.secondary">
                 on a {profile.step_deg}° grid
+                {/* Said here, beside the count it qualifies: "94 of 416
+                    cells" on a grid of 1,058 needs the other 642 accounted
+                    for, and they are the cells the front ran towards. */}
+                {(profile.candidates_ahead ?? 0) > 0 && (
+                  <>
+                    ; {profile.candidates_ahead!.toLocaleString()} more were where the front
+                    went, not where it started, and were not scored
+                  </>
+                )}
               </Typography>
             </Box>
           </Stack>

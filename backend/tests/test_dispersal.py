@@ -700,13 +700,40 @@ class TestIsochrons:
         lines = dispersal.fit_trend(sites, draws)['isochrons']
         assert len(lines) <= dispersal.ISOCHRON_COUNT + 1
 
-    def test_each_is_a_pair_of_coordinates_the_map_can_draw(self):
+    def test_each_is_a_polyline_of_coordinates_the_map_can_draw(self):
+        """
+        Several points, and an odd number of them: the line is straight in
+        the projection's plane, not on the globe, so a map given only its two
+        ends would draw a great circle somewhere else; and the middle sample
+        is where the map hangs the label.
+        """
         sites, draws = _grid(90.0)
         for line in dispersal.fit_trend(sites, draws)['isochrons']:
-            assert len(line['points']) == 2
+            assert len(line['points']) >= 9
+            assert len(line['points']) % 2 == 1
             for point in line['points']:
                 assert -90 <= point['latitude'] <= 90
                 assert -180 <= point['longitude'] <= 180
+
+    def test_they_are_no_longer_than_the_sites_in_their_own_direction(self):
+        """
+        Sized by the sites' extent ALONG the line, with a small margin, rather
+        than by their radius from the centroid -- a long, narrow spread would
+        otherwise draw each isochron many times longer than anything dated.
+        """
+        # A 2-wide by 12-long grid heading east, so the front is short
+        # east-west and the isochrons (north-south) should be short too.
+        sites, draws = _grid(90.0, rows=2, cols=12, spacing_km=80.0)
+        line = dispersal.fit_trend(sites, draws)['isochrons'][0]
+        first, last = line['points'][0], line['points'][-1]
+        length_km = dispersal.haversine_km(first['latitude'], first['longitude'],
+                                          last['latitude'], last['longitude'])
+        # The sites span 80 km north-south. The fitted gradient is not exactly
+        # east -- a parallel curves in the projection -- so the line's
+        # direction picks up a little of the 880 km east-west extent too; but
+        # it stays a few hundred kilometres, against the ~1,200 km the old
+        # radius rule drew here.
+        assert 80.0 <= length_km <= 300.0
 
     def test_they_run_across_the_front_not_along_it(self):
         """
@@ -716,7 +743,7 @@ class TestIsochrons:
         """
         sites, draws = _grid(90.0)   # front heads east
         line = dispersal.fit_trend(sites, draws)['isochrons'][0]
-        first, second = line['points']
+        first, second = line['points'][0], line['points'][-1]
         # So the line should run north-south: much more change in latitude
         # than in longitude.
         assert abs(first['latitude'] - second['latitude']) > 1.0
@@ -727,6 +754,22 @@ class TestIsochrons:
         for key in draws:
             draws[key] = np.full(200, 6000.0)
         assert dispersal.fit_trend(sites, draws)['isochrons'] == []
+
+
+class TestLongitudeExtent:
+
+    def test_an_ordinary_spread_is_min_to_max(self):
+        assert dispersal._lon_extent([-10.0, 2.0, 15.0]) == (-10.0, 15.0)
+
+    def test_a_spread_across_the_antimeridian_is_the_short_way_round(self):
+        # Fiji to Easter Island is 73 degrees of Pacific, not 287 of the rest.
+        west, east = dispersal._lon_extent([178.0, -172.0, -140.0, -109.0])
+        assert west == 178.0
+        assert east == pytest.approx(251.0)
+        assert east - west == pytest.approx(73.0)
+
+    def test_a_single_value_has_no_width(self):
+        assert dispersal._lon_extent([5.0, 5.0]) == (5.0, 5.0)
 
 
 class TestUnprojecting:
@@ -778,10 +821,17 @@ class TestProfilingAnOrigin:
         sites, draws, _origin = _front(n_sites=8, scatter=60.0, seed=4)
         region = dispersal.profile_origin(sites, draws)['region']
 
-        # The front runs due east along latitude zero.
-        along = max(p['lon'] for p in region) - min(p['lon'] for p in region)
-        across = max(p['lat'] for p in region) - min(p['lat'] for p in region)
-        assert along > across
+        # The front runs due east along latitude zero from (0, 0). Sliding
+        # the origin backwards -- west -- fits as well all the way to the
+        # grid's edge, so the region reaches that edge; and it never gets
+        # ahead of the first site, which would be sliding it FORWARDS.
+        westernmost = min(s.longitude for s in sites) - dispersal.ORIGIN_MARGIN_DEG
+        assert min(p['lon'] for p in region) <= westernmost + 1.0
+        assert max(p['lon'] for p in region) <= min(s.longitude for s in sites)
+        # And it is a band along the axis rather than a blob around the
+        # origin: the cells on the axis itself all survive.
+        on_axis = [p for p in region if abs(p['lat']) < 1e-9]
+        assert len(on_axis) >= 4
 
     def test_it_says_how_much_of_the_grid_survived(self):
         """
@@ -819,6 +869,46 @@ class TestProfilingAnOrigin:
         profile = dispersal.profile_origin(sites, draws)
         assert profile['region'] == []
         assert str(dispersal.MIN_DISPERSAL_SITES) in profile['refused']
+
+    def test_where_the_front_went_is_not_where_it_could_have_started(self):
+        """
+        The synthetic front runs east from (0, 0). A candidate east of the
+        last site fits the same straight line with the sign flipped -- the
+        sites get older with distance from it -- and least squares cannot
+        tell the two apart. Only the search can, and it must: on a real
+        model the reported region was entirely that second lobe.
+        """
+        sites, draws, origin = _front(n_sites=8, scatter=60.0, seed=4)
+        profile = dispersal.profile_origin(sites, draws)
+        easternmost = max(s.longitude for s in sites)
+        assert profile['region']
+        assert all(p['lon'] < easternmost for p in profile['region'])
+        assert profile['candidates_ahead'] > 0
+        # The excluded cells were searched, not silently dropped from the
+        # count the panel shows.
+        assert profile['candidates'] + profile['candidates_ahead'] > profile['candidates']
+
+    def test_a_pacific_dataset_is_searched_across_the_antimeridian_not_around_the_world(self):
+        """
+        The grid is the sites' longitude span on the CIRCLE. Min/max on raw
+        longitudes sent a Polynesian model's grid from 70 E round to 126 W --
+        the Indian Ocean and the Americas, everything but the Pacific -- and
+        an origin twelve thousand kilometres behind the front fit about as
+        well as anything.
+        """
+        sites, draws, _origin = _front(n_sites=8, seed=2)
+        # Move the synthetic front onto the antimeridian.
+        shifted = [dispersal.SiteSpec(
+            element_id=s.element_id, name=s.name, parameter_id=s.parameter_id,
+            basis=s.basis, latitude=s.latitude,
+            longitude=((s.longitude + 180.0 + 180.0) % 360.0) - 180.0)
+            for s in sites]
+        profile = dispersal.profile_origin(shifted, draws)
+        assert profile['region']
+        lons = [p['lon'] for p in profile['region']]
+        # Every candidate is near the dateline, on one side or the other.
+        assert all(abs(abs(lon) - 180.0) <= 30.0 for lon in lons)
+        assert any(lon > 0 for lon in lons) and any(lon < 0 for lon in lons)
 
     def test_a_site_in_two_places_refuses_the_profile(self):
         sites, draws, _origin = _front(n_sites=8)

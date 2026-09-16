@@ -371,25 +371,27 @@ export default function SiteMap({
     // Isochrons next, so every mark and every other line sits over them.
     for (const line of isochrons || []) {
       if (line.points.length < 2) continue
-      const [from, to] = [line.points[0], line.points[line.points.length - 1]]
-      // Labelled at the MIDDLE, not at an end. The ends are where the lines
-      // run off the frame -- an isochron is drawn past the sites on purpose --
-      // so an end label is the one part of the figure most likely to be
-      // clipped, which is what a first render showed. The middle is inside the
-      // site cluster by construction.
-      const middle = {
-        latitude: (from.latitude + to.latitude) / 2,
-        longitude: (from.longitude + to.longitude) / 2,
-      }
+      // Labelled at the MIDDLE point, not at an end. The ends are where the
+      // lines run off the frame -- an isochron is drawn past the sites on
+      // purpose -- so an end label is the one part of the figure most likely
+      // to be clipped, which is what a first render showed. The middle is
+      // inside the site cluster by construction.
+      //
+      // The middle POINT the server sent, not the mean of the endpoints. A
+      // mean of two longitudes either side of the antimeridian lands on the
+      // far side of the world -- 167 and -91 average to 38, the Indian Ocean
+      // -- and drawing the line through it sent every isochron on a
+      // Polynesian map out across Asia and back.
+      const middle = Math.floor(line.points.length / 2)
       list.push({
         type: geoType,
         mode: 'lines+text' as const,
         name: `${Math.round(line.age)}`,
-        lat: [from.latitude, middle.latitude, to.latitude],
-        lon: [from.longitude, middle.longitude, to.longitude],
+        lat: line.points.map((p) => p.latitude),
+        lon: line.points.map((p) => p.longitude),
         line: { color: plot.axis, width: 1 },
         // One caption per line: a line captioned twice reads as two.
-        text: ['', `${Math.round(line.age)}`, ''],
+        text: line.points.map((_p, i) => (i === middle ? `${Math.round(line.age)}` : '')),
         textposition: 'top center' as const,
         textfont: { size: 10, color: plot.axis },
         hoverinfo: 'skip' as const,
