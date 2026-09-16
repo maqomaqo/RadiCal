@@ -178,6 +178,36 @@ screen says how many it adopted.
 See [`docs/INSTALLATION.md`](docs/INSTALLATION.md) for running the frontend and backend outside
 Docker, and for troubleshooting.
 
+### Running the published image
+
+Every push to `main` publishes a ready-built image, `ghcr.io/maqomaqo/radical:latest`, that
+contains the backend, the built frontend and the calibration curves in one container (built by
+[`.github/workflows/publish-image.yml`](.github/workflows/publish-image.yml) from the root
+[`Dockerfile`](Dockerfile), for both amd64 and arm64). It needs only a PostgreSQL database and a
+signing key:
+
+```bash
+export RADICAL_SECRET_KEY=$(python3 -c "import secrets; print(secrets.token_urlsafe(48))")
+docker compose -f docker-compose.prod.yml up -d
+
+# Everything, frontend and API, on http://localhost:8000
+```
+
+or, against a database you already have:
+
+```bash
+docker run -d -p 8000:8000 \
+  -e DATABASE_URL=postgresql://user:password@db-host:5432/radical \
+  -e RADICAL_SECRET_KEY=... \
+  -v radical_uploads:/app/uploads \
+  ghcr.io/maqomaqo/radical:latest
+```
+
+The image runs as `RADICAL_ENV=production` and refuses to start without `RADICAL_SECRET_KEY` (see
+[Accounts](#accounts)). The repository is private, so pulling needs a
+[GitHub token with `read:packages`](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry#authenticating-to-the-container-registry)
+unless the package is made public in its settings.
+
 ### Accounts
 
 Every project and analysis belongs to one account and is visible to nobody else. There is no

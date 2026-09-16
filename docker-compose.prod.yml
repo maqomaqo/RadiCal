@@ -1,0 +1,46 @@
+# RadiCal from the published image, with its database.
+#
+#   docker compose -f docker-compose.prod.yml up -d
+#
+# then open http://localhost:8000. Nothing is built here: the image on
+# ghcr.io already contains the backend, the built frontend and the
+# calibration curves. Contrast docker-compose.yml, which builds from source
+# and bind-mounts it for development.
+#
+# Set RADICAL_SECRET_KEY before this is reachable by anyone but you: the image
+# runs with RADICAL_ENV=production, and the backend refuses to start in that
+# mode without a real signing key (see .env.example for how to make one).
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-radiocarbon}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
+      POSTGRES_DB: ${POSTGRES_DB:-radiocarbon_db}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-radiocarbon} -d ${POSTGRES_DB:-radiocarbon_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  radical:
+    image: ghcr.io/maqomaqo/radical:latest
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-radiocarbon}:${POSTGRES_PASSWORD:-password}@postgres:5432/${POSTGRES_DB:-radiocarbon_db}
+      RADICAL_ENV: ${RADICAL_ENV:-production}
+      RADICAL_SECRET_KEY: ${RADICAL_SECRET_KEY:?set RADICAL_SECRET_KEY in .env or the environment}
+    volumes:
+      - uploads:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  uploads:

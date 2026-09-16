@@ -1,0 +1,21 @@
+# Build context for the root Dockerfile. Everything the stages COPY is listed
+# explicitly there; this keeps the rest of the checkout, and the heavy bits
+# in particular, out of the daemon's upload.
+**/node_modules
+**/dist
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/.venv
+**/venv
+.git
+.github
+.claude
+.impeccable
+uploads
+backend/uploads
+postgres_data
+docs
+*.md
+.env
+.env.*

@@ -1,5 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
 import os
 from app.api import (auth, curves, analysis, results, projects, project_samples,
@@ -73,6 +75,12 @@ try:
             "the built-in development key. Fine locally; set a real one before "
             "this is reachable by anyone else."
         )
+except RuntimeError:
+    # secret_key() refusing: RADICAL_ENV says this is a real deployment and
+    # no key is set. Stopping here, with that message as the last thing in
+    # the log, beats a container that reports healthy and then answers every
+    # sign-in with a 500.
+    raise
 except Exception as e:
     print(f"⚠ Warning: could not check the signing key: {e}")
 
@@ -81,13 +89,39 @@ except Exception as e:
 async def health_check():
     return {"status": "ok", "version": "0.1.0"}
 
-@app.get("/")
-async def root():
-    return {
-        "message": "RadiCal API",
-        "docs": "/docs",
-        "health": "/api/health"
-    }
+# The built frontend, when this is the published image (the root Dockerfile
+# puts `vite build`'s output at /app/static). Registered last so every /api
+# route, and FastAPI's own /docs and /openapi.json, are matched first; the
+# catch-all then hands any path the frontend owns to index.html, which is
+# what BrowserRouter needs for a deep link or a reload on /projects/42. In
+# the development stack there is no static/ directory, the frontend is Vite's
+# dev server, and "/" stays the API's own front page.
+STATIC_DIR = os.path.abspath(
+    os.getenv("RADICAL_STATIC_DIR",
+              os.path.join(os.path.dirname(os.path.dirname(__file__)), "static"))
+)
+
+if os.path.isdir(STATIC_DIR):
+    app.mount("/assets", StaticFiles(directory=os.path.join(STATIC_DIR, "assets")),
+              name="assets")
+
+    @app.get("/{path:path}", include_in_schema=False)
+    async def frontend(path: str):
+        candidate = os.path.abspath(os.path.join(STATIC_DIR, path))
+        # abspath resolved any ".."; anything that escaped STATIC_DIR is
+        # simply not a file the frontend has, so it gets the app shell.
+        if (candidate.startswith(STATIC_DIR + os.sep)
+                and os.path.isfile(candidate)):
+            return FileResponse(candidate)
+        return FileResponse(os.path.join(STATIC_DIR, "index.html"))
+else:
+    @app.get("/")
+    async def root():
+        return {
+            "message": "RadiCal API",
+            "docs": "/docs",
+            "health": "/api/health"
+        }
 
 if __name__ == "__main__":
     import uvicorn
