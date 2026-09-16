@@ -57,6 +57,8 @@ import { formatPosition } from '@/utils/coordinates'
 // Pure, and deliberately not defined here: this file reaches Plotly through
 // the map dialog, so anything a Node test needs has to live outside it.
 import { parsePastedDates } from '@/utils/pastedDates'
+import { sortSamples, type SortKey } from '@/utils/sampleSort'
+import { rangeBetween } from '@/utils/sampleSelection'
 
 // A date in the PROJECT's collection (backend models.ProjectSample), entered
 // once and deployed into as many analyses as needed. Deploying COPIES these
@@ -212,21 +214,6 @@ function formToPayload(form: DraftForm) {
     location: form.location.trim() || null,
     notes: form.notes.trim() || null,
   }
-}
-
-/**
- * What the collection table can be ordered by. Display only: the collection is
- * a store, not a sequence -- an analysis owns the order its own dates are
- * modelled in, which is what `SortDatesButton` edits elsewhere. Nothing here
- * is written back.
- */
-type SortKey = 'sample_name' | 'age_bp' | 'error_1sigma' | 'default_context_name'
-
-function compareSamples(a: ProjectSample, b: ProjectSample, key: SortKey): number {
-  if (key === 'age_bp' || key === 'error_1sigma') return a[key] - b[key]
-  // Numeric collation so a lab code ending in 7 sorts before one ending in 12,
-  // which is the whole reason anyone sorts a list of lab codes.
-  return (a[key] ?? '').localeCompare(b[key] ?? '', undefined, { numeric: true })
 }
 
 /**
@@ -545,13 +532,19 @@ export default function ProjectSampleTable({ projectId, mapTilesEnabled = false 
       'Could not set the curve',
     )
 
-  const handleAssignDeltaR = (value: DeltaRValue) =>
-    runBulk(
+  /**
+   * A ΔR on the selection -- or on the selection widened to its site, which
+   * is the selection bar's to decide and to name. The rows it lands on
+   * become the selection afterwards, so what changed is on screen as a set
+   * of ticked rows rather than only as a count in a toast.
+   */
+  const handleAssignDeltaR = async (value: DeltaRValue, targetIds: string[]) => {
+    const ok = await runBulk(
       () =>
         fetch(`/api/projects/${projectId}/samples`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ sample_ids: [...selected], ...value }),
+          body: JSON.stringify({ sample_ids: targetIds, ...value }),
         }),
       (data) => {
         if (value.delta_r === null) {
@@ -575,6 +568,9 @@ export default function ProjectSampleTable({ projectId, mapTilesEnabled = false 
       },
       'Could not apply ΔR',
     )
+    if (ok && targetIds.length !== selected.size) setSelected(new Set(targetIds))
+    return ok
+  }
 
   /**
    * One position across the whole selection -- the map's Apply, and its
@@ -657,14 +653,6 @@ export default function ProjectSampleTable({ projectId, mapTilesEnabled = false 
       setDeploying(false)
     }
   }
-
-  const toggle = (id: string) =>
-    setSelected((prev) => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
 
   const allSelected = samples.length > 0 && selected.size === samples.length
 
@@ -771,6 +759,10 @@ export default function ProjectSampleTable({ projectId, mapTilesEnabled = false 
         auto: anyOf((s) => s.latitude != null),
         populated: anyOf((s) => s.latitude != null),
         numeric: true,
+        // Sortable because a sort by position is how a site is found in a
+        // collection from many: every date at one coordinate lands in one
+        // run of rows, and a shift-click down that run selects the site.
+        sortKey: 'position',
         headTitle:
           'Where the date came from, in WGS84 decimal degrees. Shown at full precision here; exports and figures follow the project’s coordinate precision setting.',
         render: (s) => formatPosition(s.latitude, s.longitude) ?? muted('—'),
@@ -796,6 +788,7 @@ export default function ProjectSampleTable({ projectId, mapTilesEnabled = false 
         label: 'Location',
         auto: anyOf((s) => !!s.location),
         populated: anyOf((s) => !!s.location),
+        sortKey: 'location',
         render: (s) => s.location || muted('—'),
       },
       {
@@ -879,11 +872,30 @@ export default function ProjectSampleTable({ projectId, mapTilesEnabled = false 
 
   const [sortKey, setSortKey] = useState<SortKey | null>(null)
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
-  const sorted = useMemo(() => {
-    if (!sortKey) return samples
-    const factor = sortDir === 'asc' ? 1 : -1
-    return [...samples].sort((a, b) => factor * compareSamples(a, b, sortKey))
-  }, [samples, sortKey, sortDir])
+  const sorted = useMemo(() => sortSamples(samples, sortKey, sortDir), [samples, sortKey, sortDir])
+
+  // The row last ticked without shift held. A shift-click ticks every row
+  // between it and the clicked one, in the order the table is showing --
+  // so sorting by position or location and shift-clicking the ends of a run
+  // selects a site, where before it was one tick per date.
+  const [anchorId, setAnchorId] = useState<string | null>(null)
+
+  const toggle = (id: string, extend: boolean) => {
+    const range = extend && anchorId ? rangeBetween(sorted.map((s) => s.id), anchorId, id) : []
+    if (range.length === 0) setAnchorId(id)
+    setSelected((prev) => {
+      const next = new Set(prev)
+      // The whole range takes the state the clicked row is changing TO:
+      // shift-clicking into an unticked row ticks the run, and into a ticked
+      // one unticks it.
+      const on = !prev.has(id)
+      for (const rowId of range.length > 0 ? range : [id]) {
+        if (on) next.add(rowId)
+        else next.delete(rowId)
+      }
+      return next
+    })
+  }
 
   const sortBy = (key: SortKey) => {
     if (sortKey === key) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
@@ -897,7 +909,8 @@ export default function ProjectSampleTable({ projectId, mapTilesEnabled = false 
     key: SortKey,
     label: string,
     align: 'left' | 'right' = 'left',
-    cellKey?: string
+    cellKey?: string,
+    title?: string
   ) => (
     <TableCell
       key={cellKey}
@@ -905,13 +918,18 @@ export default function ProjectSampleTable({ projectId, mapTilesEnabled = false 
       sortDirection={sortKey === key ? sortDir : false}
       sx={{ backgroundColor: 'background.muted', whiteSpace: 'nowrap' }}
     >
-      <TableSortLabel
-        active={sortKey === key}
-        direction={sortKey === key ? sortDir : 'asc'}
-        onClick={() => sortBy(key)}
-      >
-        {label}
-      </TableSortLabel>
+      {/* describeChild: the tooltip describes the button rather than naming
+          it, so the column keeps its own name for a screen reader and for
+          anything looking for a button called "Position". */}
+      <Tooltip title={title ?? ''} describeChild>
+        <TableSortLabel
+          active={sortKey === key}
+          direction={sortKey === key ? sortDir : 'asc'}
+          onClick={() => sortBy(key)}
+        >
+          {label}
+        </TableSortLabel>
+      </Tooltip>
     </TableCell>
   )
 
@@ -1022,6 +1040,7 @@ export default function ProjectSampleTable({ projectId, mapTilesEnabled = false 
       {selected.size > 0 && (
         <SampleSelectionBar
           selected={samples.filter((s) => selected.has(s.id))}
+          collection={samples}
           curves={curves}
           busy={bulkBusy}
           onClear={() => setSelected(new Set())}
@@ -1086,14 +1105,16 @@ export default function ProjectSampleTable({ projectId, mapTilesEnabled = false 
             <TableHead>
               <TableRow>
                 <TableCell padding="checkbox" sx={headCell}>
-                  <Checkbox
-                    checked={allSelected}
-                    indeterminate={selected.size > 0 && !allSelected}
-                    onChange={() =>
-                      setSelected(allSelected ? new Set() : new Set(samples.map((s) => s.id)))
-                    }
-                    inputProps={{ 'aria-label': 'Select all dates' }}
-                  />
+                  <Tooltip title="Select all. Shift-click a row to select every row between it and the last one ticked.">
+                    <Checkbox
+                      checked={allSelected}
+                      indeterminate={selected.size > 0 && !allSelected}
+                      onChange={() =>
+                        setSelected(allSelected ? new Set() : new Set(samples.map((s) => s.id)))
+                      }
+                      inputProps={{ 'aria-label': 'Select all dates' }}
+                    />
+                  </Tooltip>
                 </TableCell>
                 {sortableHead('sample_name', 'Name')}
                 {sortableHead('age_bp', 'Age BP', 'right')}
@@ -1101,7 +1122,13 @@ export default function ProjectSampleTable({ projectId, mapTilesEnabled = false 
                 <TableCell sx={headCell}>Curve</TableCell>
                 {visibleColumns.map((column) =>
                   column.sortKey ? (
-                    sortableHead(column.sortKey, column.label, column.align ?? 'left', column.id)
+                    sortableHead(
+                      column.sortKey,
+                      column.label,
+                      column.align ?? 'left',
+                      column.id,
+                      column.headTitle
+                    )
                   ) : (
                     <TableCell key={column.id} align={column.align ?? 'left'} sx={headCell}>
                       {column.headTitle ? (
@@ -1123,7 +1150,9 @@ export default function ProjectSampleTable({ projectId, mapTilesEnabled = false 
                     <TableCell padding="checkbox">
                       <Checkbox
                         checked={selected.has(s.id)}
-                        onChange={() => toggle(s.id)}
+                        // The change event of a checkbox is its click, so the
+                        // modifier is on the native event.
+                        onChange={(e) => toggle(s.id, (e.nativeEvent as MouseEvent).shiftKey)}
                         inputProps={{ 'aria-label': `Select ${s.sample_name}` }}
                       />
                     </TableCell>
