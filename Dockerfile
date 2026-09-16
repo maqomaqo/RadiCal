@@ -19,6 +19,11 @@ WORKDIR /build
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
 COPY frontend/ ./
+# The bundle is ~6 MB before minification, with source maps; terser over that
+# blows through node's default heap on a GitHub runner, which is shared with
+# the arm64 stage building alongside. Local builds only pass because a laptop
+# gives node a bigger default.
+ENV NODE_OPTIONS=--max-old-space-size=4096
 RUN npm run build
 
 # ---- Backend dependencies -------------------------------------------------
