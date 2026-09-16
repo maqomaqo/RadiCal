@@ -66,8 +66,9 @@ from app.services import intervals
 from app.services.calibration import SIGMA_2
 from app.services.reservoir import EARTH_RADIUS_KM, haversine_km
 
-# How far two dates in one site may sit apart before the app refuses to treat
-# them as one place.
+# How far a date may sit from the first date of its site and still be grouped
+# with it -- the RADIUS the grouping rules use, here (derive_sites_from_dates)
+# and in the frontend's "Group dates into sites" (utils/siteGrouping.ts).
 #
 # Five kilometres is a generous reading of "the same site" -- it is a large
 # multiple of any excavation -- and the point of the number is not precision
@@ -77,6 +78,16 @@ from app.services.reservoir import EARTH_RADIUS_KM, haversine_km
 # excavated. So the app refuses and names both coordinates and the distance,
 # rather than producing a centroid nobody asked for.
 SITE_SCATTER_KM = 5.0
+
+# How far apart two dates in one Phase may be before that refusal.
+#
+# The DIAMETER, not the radius: a group the rule above builds has every member
+# within SITE_SCATTER_KM of its first member, so two members on opposite
+# sides of it can be twice that apart -- and were. "Group dates into sites"
+# at 5 km built an Anakena phase whose dates were 5.3 km apart, and this check
+# at 5 km then refused the phase the app itself had just built. The two
+# figures have to agree, and this is the one derived from the other.
+SITE_SPREAD_LIMIT_KM = 2 * SITE_SCATTER_KM
 
 # Sites below which no speed is reported at all.
 #
@@ -319,7 +330,7 @@ def derive_sites(root: Optional[Dict], measurements: List[Dict]) -> List[SiteSpe
             return
 
         spread, pair = _scatter([p for _id, p in placed])
-        if spread > SITE_SCATTER_KM:
+        if spread > SITE_SPREAD_LIMIT_KM:
             if descendable:
                 for child in descendable:
                     consider(child)

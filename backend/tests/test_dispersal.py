@@ -193,6 +193,42 @@ class TestDerivingSites:
         # Centroid, so between the two.
         assert 56.15 < site.latitude < 56.19
 
+    def test_a_phase_the_grouping_rule_can_build_is_never_refused(self):
+        """
+        Grouping joins a date to a site when it is within SITE_SCATTER_KM of
+        the site's FIRST date, so two later members can sit almost twice
+        that apart. Refusing such a phase would refuse what the app's own
+        "Group dates into sites" builds -- which it did, at Anakena, 5.3 km.
+        """
+        root = _sequence('root', [
+            _boundary('b0'), _phase('p0', 'Anakena'), _boundary('b1')])
+        # ~4.4 km north and ~4.4 km south of the first date: each inside the
+        # radius of it, and ~8.9 km from each other.
+        measurements = [
+            _date('d1', 'p0', 56.1500, 10.2000),
+            _date('d2', 'p0', 56.1900, 10.2000),
+            _date('d3', 'p0', 56.1100, 10.2000),
+        ]
+
+        site = dispersal.derive_sites(root, measurements)[0]
+        assert site.usable, site.refusal
+        assert dispersal.SITE_SCATTER_KM < site.scatter_km <= dispersal.SITE_SPREAD_LIMIT_KM
+
+    def test_a_site_astride_the_antimeridian_is_one_site(self):
+        """Longitudes 179.98 and -179.98 are a few kilometres apart, not the
+        width of the world; the distance and the centroid both know it."""
+        root = _sequence('root', [
+            _boundary('b0'), _phase('p0', 'Dateline'), _boundary('b1')])
+        measurements = [
+            _date('d1', 'p0', -16.5000, 179.9800),
+            _date('d2', 'p0', -16.5000, -179.9800),
+        ]
+
+        site = dispersal.derive_sites(root, measurements)[0]
+        assert site.usable, site.refusal
+        assert site.scatter_km < 5
+        assert abs(abs(site.longitude) - 180) < 0.05
+
     def test_a_site_with_no_coordinates_is_not_a_refusal(self):
         """A model that never had coordinates is not an error. It is a model
         this feature has nothing to say about, and it must not manufacture a

@@ -47,9 +47,10 @@ export interface SiteGroupingDate {
 }
 
 /**
- * Two dates this close are at one place. The same figure as the server's
- * SITE_SCATTER_KM, and it has to be: a group built here wider than the
- * server's threshold would be refused there as two sites in one phase.
+ * A date this close to a group's first member joins the group. The same
+ * figure as the server's SITE_SCATTER_KM, and it has to be: the server
+ * refuses a phase whose dates are more than twice this apart -- the widest a
+ * group built by this rule can be -- as two sites in one phase.
  */
 export const SITE_RADIUS_KM = 5
 
