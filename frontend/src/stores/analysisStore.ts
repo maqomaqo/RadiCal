@@ -39,6 +39,16 @@ export interface McmcConfig {
   // BayesianConfigInput.estimate_durations: a duration is a claim about a
   // phase's extent the analyst makes, not one the app makes for them.
   estimate_durations: boolean
+  // Also fit the spatial models: a trend surface through arrival age against
+  // position, and where the front could have started. Off by default for the
+  // same reason durations are -- OLS on spatially autocorrelated residuals
+  // returns a tidy speed whether or not the dates describe a front, so it has
+  // to be a claim somebody made.
+  estimate_dispersal: boolean
+  // Where the front is hypothesised to have started. OPTIONAL: without it the
+  // trend surface and the origin profile still run, and both assume no origin.
+  // Placing a pin adds the wave of advance, which is measured FROM somewhere.
+  dispersal_origin: { lat: number; lon: number } | null
 }
 
 // How many posterior samples a result CARRIES, not how long the sampler runs:
@@ -51,6 +61,8 @@ export const DEFAULT_MCMC: McmcConfig = {
   mcmc_chains: 4,
   uniform_span_prior: true,
   estimate_durations: false,
+  estimate_dispersal: false,
+  dispersal_origin: null,
 }
 
 interface AnalysisDraftState {

@@ -310,9 +310,10 @@ in `running` and the UI polling forever. This is what makes C tolerable rather t
 - `ProjectDetail`'s "Re-run All" becomes one job with `{completed, total}`; the client-side
   fan-out for the unassigned pseudo-project can now become one job too, since a job needs no
   project id.
-- Polling stops on `completed`/`failed`/`cancelled`, on unmount, and after a ceiling
-  (`MAX_SWEEPS` at the slowest measured rate ≈ 5 min, so 10 min) so a dead backend does not
-  leave a tab polling forever.
+- Polling stops on `completed`/`failed`/`cancelled`, on unmount, and after 10 min WITHOUT AN
+  ANSWER so a dead backend does not leave a tab polling forever. The window is measured from
+  the last successful poll, not the start of the run: a ceiling on the run's length froze the
+  display at 10 min on an 800-date model that went on to finish at 21.
 
 ### 4.7 Tests
 

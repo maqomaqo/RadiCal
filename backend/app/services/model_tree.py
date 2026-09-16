@@ -1163,7 +1163,22 @@ def migrate_from_relationships(
         if a and b and a != b:
             context_edges.add((a, b))
 
-    # Topological order, oldest first.
+    # Topological order, oldest first, with ties broken by the order the
+    # CALLER gave the contexts in.
+    #
+    # That tie-break is the whole of this paragraph's subtlety. Sorting the
+    # queue by context id instead makes the result deterministic and
+    # meaningless: ids are random uuids, so a deploy with no relationships yet
+    # -- where every context has indegree zero and the tie-break decides
+    # everything -- came out in uuid order. Eight sites deployed west to east
+    # arrived as a Sequence claiming 5 before 3 before 4, which is not merely
+    # untidy: a Sequence ASSERTS that order, so the model contradicted its own
+    # dates and the solver refused it as unsolvable.
+    #
+    # The caller's order is the one the analyst chose -- the deploy carries the
+    # collection's order into `groups`, and the collection is arranged
+    # deliberately. Using it keeps the sort just as deterministic.
+    rank = {gid: index for index, gid in enumerate(group_ids)}
     indeg = {gid: 0 for gid in group_ids}
     adj = defaultdict(list)
     for a, b in context_edges:
@@ -1171,14 +1186,19 @@ def migrate_from_relationships(
         indeg[b] = indeg.get(b, 0) + 1
 
     ordered: List[str] = []
-    queue = sorted([g for g in group_ids if indeg.get(g, 0) == 0])
+    queue = sorted([g for g in group_ids if indeg.get(g, 0) == 0],
+                   key=lambda gid: rank.get(gid, len(rank)))
     while queue:
         node = queue.pop(0)
         ordered.append(node)
-        for nxt in sorted(adj[node]):
+        for nxt in sorted(adj[node], key=lambda gid: rank.get(gid, len(rank))):
             indeg[nxt] -= 1
             if indeg[nxt] == 0:
                 queue.append(nxt)
+        # Re-sorted because a node released later can rank before one already
+        # waiting: a plain append would let arrival time outrank the analyst's
+        # order.
+        queue.sort(key=lambda gid: rank.get(gid, len(rank)))
     # Anything left was in a cycle; append it so no context is silently lost.
     leftover = [g for g in group_ids if g not in ordered]
     ordered.extend(leftover)

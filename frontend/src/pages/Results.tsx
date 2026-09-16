@@ -61,6 +61,7 @@ import DurationsPanel from '@/components/DurationsPanel'
 import { modelCanReportIntervals } from '@/utils/intervalsAvailable'
 import WiggleMatchPanel from '@/components/WiggleMatchPanel'
 import AgeDepthPanel from '@/components/AgeDepthPanel'
+import DispersalPanel from '@/components/DispersalPanel'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import GuideBand from '@/components/GuideBand'
 import { formatApiError } from '@/utils/apiError'
@@ -1264,6 +1265,14 @@ export default function Results() {
   // several ages at once and so lives with the durations, not on the elements.
   const ageDepthRecords = useMemo(
     () => analysis?.intervals?.age_depth || [],
+    [analysis]
+  )
+
+  // Both spatial models, or null when neither was asked for. Read the same
+  // way age_depth is, and NULL means the same thing it means there: the run
+  // was not asked, rather than there being nothing to report.
+  const dispersalSection = useMemo(
+    () => analysis?.intervals?.dispersal || null,
     [analysis]
   )
 
@@ -2832,6 +2841,20 @@ export default function Results() {
           />
         </Box>
       ))}
+
+      {/* A wave of advance, before the table for the same reason the age-depth
+          band is: the map IS the answer, and a column of per-site arrival ages
+          answers a different question.
+
+          Tiles stay off here even for a project that has opted into them --
+          this page has no project loaded, and the offline basemap is the
+          private default. Passing the project's setting through is the one
+          thing left to do if that is ever wanted. */}
+      {dispersalSection && (
+        <Box sx={{ mb: 3 }}>
+          <DispersalPanel section={dispersalSection} dateFormat={dateFormat} />
+        </Box>
+      )}
 
       {/* Model Structure -- read-only view of the groups/relationships/TPQ-TAQ
           this bayesian analysis actually used, if any. Doubles as the

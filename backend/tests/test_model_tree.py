@@ -183,6 +183,44 @@ class TestMigration:
             measurements, groups, [], self._new_id())
         assert linearized
 
+    def test_unrelated_contexts_keep_the_order_they_arrived_in(self):
+        """
+        With no relationships every context has indegree zero, so the
+        tie-break decides the whole order -- and a Sequence ASSERTS that
+        order. Broken on context id, which is a random uuid, eight sites
+        deployed west to east came back as a Sequence claiming 5 before 3
+        before 4: a model contradicting its own dates, which the solver then
+        refused as unsolvable. The caller's order is the analyst's.
+        """
+        names = [f"Site {i}" for i in range(8)]
+        # Ids deliberately sort the OPPOSITE way to the given order, so an id
+        # tie-break cannot pass this by luck.
+        groups = [{"id": f"z{7 - i}-{n}", "name": n} for i, n in enumerate(names)]
+        measurements = [{"id": f"m{i}", "group_id": g["id"]}
+                        for i, g in enumerate(groups)]
+
+        root, _linearized, _gb = migrate_from_relationships(
+            measurements, groups, [], self._new_id())
+
+        phases = [c["name"] for c in root["children"] if c["element_type"] == "phase"]
+        assert phases == names
+
+    def test_relationships_still_outrank_the_arrival_order(self):
+        """The tie-break is only a tie-break: a stated relationship wins."""
+        groups = [{"id": "g1", "name": "Upper"}, {"id": "g2", "name": "Lower"}]
+        measurements = [{"id": "a", "group_id": "g1"}, {"id": "b", "group_id": "g2"}]
+        relationships = [{"from_sample_id": "g1", "to_sample_id": "g2",
+                          "relationship": "above", "from_type": "group",
+                          "to_type": "group"}]
+
+        root, _linearized, _gb = migrate_from_relationships(
+            measurements, groups, relationships, self._new_id())
+
+        # g1 arrived first but is stratigraphically above, so g2 is older and
+        # comes first regardless.
+        assert [c["name"] for c in root["children"]
+                if c["element_type"] == "phase"] == ["Lower", "Upper"]
+
 
 class TestFlattenStructure:
     """
@@ -380,7 +418,11 @@ class TestCsvExport:
         # is judging.
         assert header.index('Agreement %') == modelled + 1
         assert header.index('Outlier %') == modelled + 2
-        assert len(header) == 20
+        # The eighteen columns this export has always had, plus Latitude and
+        # Longitude, which were APPENDED so that nothing already here moved.
+        # Counted so a column duplicated rather than repurposed still shows up.
+        assert len(header) == 22
+        assert header[-2:] == ['Latitude', 'Longitude']
 
         by_name = {r[4]: r for r in data}
         # Every date reports one, formatted like the other HPD columns.
@@ -429,6 +471,23 @@ class TestModelTreeApi:
         assert all(b["posterior"] is not None for b in boundaries)
         # The shared transition is a single element carrying one posterior.
         assert boundaries[1]["posterior"]["posterior_mean"] > 0
+
+    def test_get_strips_raw_samples_from_boundary_posteriors(self, client):
+        # The draws stay in the database but never reach the client: with
+        # 138 boundaries they were 10 MB of the response, and the edit page
+        # re-serialised them to sessionStorage on every keystroke.
+        analysis_id = self._analysis(client)
+        data = client.get(f"/api/analysis/{analysis_id}").json()["data"]
+
+        def walk(element):
+            yield element
+            for child in element.get("children") or []:
+                yield from walk(child)
+
+        posteriors = [e["posterior"] for e in walk(data["model_tree"]) if e.get("posterior")]
+        assert posteriors
+        assert all("posterior_samples" not in p for p in posteriors)
+        assert all("probability_distribution" in p for p in posteriors)
 
     def test_put_replaces_the_tree_and_clears_results(self, client):
         analysis_id = self._analysis(client)

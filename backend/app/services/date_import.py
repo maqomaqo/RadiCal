@@ -172,6 +172,13 @@ COLUMN_ALIASES: Dict[str, tuple] = {
         'ring_offset_error', 'ring_error', 'gap_error', 'offset_error',
         'ring_offset_sd', 'gap_sd',
     ),
+    # WGS84 decimal degrees, and only that. Degrees-and-minutes in any
+    # spelling is refused by _coordinate rather than parsed -- see there.
+    'latitude': ('latitude', 'lat', 'y', 'dec_lat', 'decimal_latitude', 'lat_dd'),
+    'longitude': (
+        'longitude', 'lon', 'long', 'lng', 'x', 'dec_long',
+        'decimal_longitude', 'lon_dd',
+    ),
     'location': ('location', 'site', 'site_name'),
     'notes': ('notes', 'note', 'comment', 'comments', 'remarks'),
     # Not imported, only recognised, so re-importing the app's results export
@@ -335,6 +342,58 @@ def _curve(value: str, line: int, errors: List[str], owner_id: str) -> Optional[
         "for one it does."
     )
     return None
+
+
+# A coordinate cell written in degrees and minutes, in the spellings people
+# actually use: a degree/minute/second mark of any kind, the words themselves,
+# a compass letter attached to the number at either end, or two or more
+# whitespace-separated numbers in one cell.
+_DMS_MARKS = re.compile(r"[°º'′\"″]|\b(?:deg|degs|degrees|min|mins|sec|secs)\b",
+                        re.IGNORECASE)
+_COMPASS = re.compile(r"^[NSEW]\s*[-+.\d]|[-.\d]\s*[NSEW]$", re.IGNORECASE)
+_TWO_NUMBERS = re.compile(r"^[-+]?[\d.]+(?:\s+[-+]?[\d.]+)+$")
+
+
+def _coordinate(value: str, field_name: str, line: int,
+                errors: List[str]) -> Optional[float]:
+    """
+    A coordinate cell, in WGS84 decimal degrees and nothing else.
+
+    Degrees-minutes-seconds is REFUSED, not parsed, and this is the whole
+    reason the function exists rather than _number being called directly.
+    Reading 54°30' as 54.30 is a 30-arc-minute error -- about 55 km -- and
+    nothing downstream would catch it: the value is in range, plots on the
+    map, and is simply in the wrong place. The importer's standing rule
+    applies, which is to fail naming itself rather than read a construct as
+    the nearest thing implemented.
+
+    A decimal comma is refused for the same reason. _number strips thousands
+    separators, so '5,6' would arrive as 56 -- in range for a longitude, out
+    by fifty degrees, and silent.
+    """
+    text = _clean(value)
+    if not text:
+        return None
+
+    wanted = (f"Give {field_name} in decimal degrees, with a point and a "
+              "leading minus for south and west -- 54.5 and -5.6, not "
+              "54°30'N and 5°36'W.")
+
+    if _DMS_MARKS.search(text) or _COMPASS.search(text) or _TWO_NUMBERS.match(text):
+        errors.append(
+            f"Row {line}: {field_name} '{text}' is in degrees and minutes. "
+            + wanted
+        )
+        return None
+
+    if ',' in text:
+        errors.append(
+            f"Row {line}: {field_name} '{text}' uses a comma as its decimal "
+            f"mark. {wanted}"
+        )
+        return None
+
+    return _number(text, field_name, line, errors)
 
 
 def _phase_name(value: str) -> Optional[str]:
@@ -551,6 +610,8 @@ def _row_to_date(values: Dict[str, Any], line: int, errors: List[str],
         'sample_type': sample_type,
         'delta_r': _number(values.get('delta_r'), 'delta R', line, errors),
         'delta_r_error': _number(values.get('delta_r_error'), 'delta R error', line, errors),
+        'latitude': _coordinate(values.get('latitude'), 'latitude', line, errors),
+        'longitude': _coordinate(values.get('longitude'), 'longitude', line, errors),
         'tpq_age_bp': _number(values.get('tpq_age_bp'), 'TPQ', line, errors),
         'taq_age_bp': _number(values.get('taq_age_bp'), 'TAQ', line, errors),
         'depth_cm': _number(values.get('depth_cm'), 'depth', line, errors),
@@ -620,6 +681,25 @@ def _validate_dates(result: ImportResult) -> None:
                 result.errors.append(f"'{label}': {field_name} -- {error['msg']}")
         name = (date.get('sample_name') or '').strip().lower()
         duplicate_names[name] = duplicate_names.get(name, 0) + 1
+
+    null_island = [
+        date.get('sample_name') or f'row {index + 1}'
+        for index, date in enumerate(result.dates)
+        if date.get('latitude') == 0 and date.get('longitude') == 0
+    ]
+    if null_island:
+        # Not an error: (0, 0) is a real position, and somebody working in the
+        # Gulf of Guinea has to be able to say so. But it is far more often
+        # what a spreadsheet leaves behind when a coordinate column is filled
+        # down over empty cells, and a date silently placed 600 km off Ghana
+        # would distort every map and every distance drawn from the file.
+        result.warnings.append(
+            'These dates are at latitude 0, longitude 0: '
+            + ', '.join(null_island)
+            + '. That is a real place in the Gulf of Guinea, but it is usually '
+            'an empty spreadsheet cell -- check the file before relying on '
+            'the positions.'
+        )
 
     repeated = sorted(n for n, count in duplicate_names.items() if count > 1 and n)
     if repeated:
@@ -726,16 +806,21 @@ def _tree_from_phases(result: ImportResult) -> None:
 TEMPLATE_COLUMNS = [
     'sample_name', 'age_bp', 'error_1sigma', 'material_type', 'curve_id',
     'phase', 'delta_r', 'delta_r_error', 'outlier_model', 'outlier_prior',
-    'tpq_age_bp', 'taq_age_bp', 'notes',
+    'tpq_age_bp', 'taq_age_bp', 'latitude', 'longitude', 'notes',
 ]
 
 TEMPLATE_ROWS = [
     ['Wk-51189', '685', '25', 'charcoal', 'shcal20', 'Fire Feature J',
-     '', '', 'general', '0.05', '', '', 'short-lived twig'],
+     '', '', 'general', '0.05', '', '', '', '', 'short-lived twig'],
     ['Wk-50104', '842', '21', 'charcoal', 'shcal20', 'Fire Feature J',
-     '', '', 'charcoal', '1.0', '', '', 'old wood -- declared residual'],
+     '', '', 'charcoal', '1.0', '', '', '', '', 'old wood -- declared residual'],
+    # Placed as well as corrected: this row is the one a reader copies when
+    # they have a marine date, so it shows the coordinate in the form the
+    # importer accepts -- decimal degrees, minus for west -- beside the offset
+    # that a coordinate will one day be able to look up.
     ['NZ-7756', '970', '47', 'marine shell', 'marine20', 'Midden 1',
-     '-7', '45', 'general', '0.05', '', '', 'delta_r needs its error'],
+     '-7', '45', 'general', '0.05', '', '', '-45.8742', '170.5036',
+     'delta_r needs its error; decimal degrees only'],
 ]
 
 
@@ -745,7 +830,8 @@ def template_csv() -> str:
 
     The three example rows each show something the column list alone cannot: a
     plain terrestrial date, a date DECLARED residual at charcoal prior 1.0, and
-    a marine date whose delta_r carries its required uncertainty.
+    a marine date whose delta_r carries its required uncertainty and whose
+    position is written the one way the importer reads.
     """
     output = io.StringIO()
     writer = csv.writer(output)

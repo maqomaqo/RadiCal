@@ -142,7 +142,7 @@ class TestJsonExport:
         assert "samples_by_id" not in payload
         assert set(payload) == {
             "id", "name", "analysis_type", "status", "created_at", "project_id",
-            "results", "structure", "intervals",
+            "results", "structure", "intervals", "coordinate_precision",
         }
 
     def test_agrees_with_the_csv_on_the_dates(self, client):
@@ -308,13 +308,21 @@ class TestJsonStructure:
         assert posterior["probability_distribution"], "kept, so a consumer can plot the transition"
         assert "posterior_samples" not in posterior
 
-        # Non-vacuous: the stored value this was trimmed from does carry the
-        # chain (GET /api/analysis/{id} returns the column as stored).
-        stored = client.get(f"/api/analysis/{analysis_id}").json()["data"]["model_tree"]
-        stored_boundary = next(
-            c for c in stored["children"] if c["element_type"] == "boundary" and c["posterior"]
-        )
-        assert "posterior_samples" in stored_boundary["posterior"]
+        # Non-vacuous: the stored column this was trimmed from does carry the
+        # chain. Read from the database, since GET /api/analysis/{id} now
+        # strips it too (see analysis._tree_for_client).
+        from app.database import SessionLocal
+        from app.models import ModelElement
+        db = SessionLocal()
+        try:
+            stored = next(
+                row for row in db.query(ModelElement)
+                .filter(ModelElement.analysis_id == analysis_id).all()
+                if row.element_type == "boundary" and row.posterior
+            )
+            assert "posterior_samples" in stored.posterior
+        finally:
+            db.close()
 
     def test_headings_carry_their_limiters_but_no_result(self, client):
         analysis_id = self._structured(client)
@@ -699,3 +707,205 @@ class TestUnmodelledRangesOnTheAnalysisPayload:
         analysis_id = _calibration(client)
         row = client.get(f"/api/analysis/{analysis_id}").json()["data"]["results"][0]
         assert row["unmodelled_hpd_ranges"] is None
+
+
+class TestCoordinatePrecisionOnExports:
+    """
+    Where a date came from, and how precisely it is allowed to leave.
+
+    Site coordinates are restricted data under many heritage bodies',
+    landowners' and Indigenous data-governance frameworks. Full precision is
+    what is STORED; a project's `coordinate_precision` decides what appears in
+    a download or a figure. The rule is applied once, in the assembly all
+    three exports are built from, so the interesting tests here are the ones
+    that check it cannot be got round: that nothing below the declared
+    precision reaches ANY of the three files, and that two exports of the same
+    project agree digit for digit.
+    """
+
+    # 54.567891 rounds to 54.57 / 54.6 / 55; -5.6312 to -5.63 / -5.6 / -6.
+    LATITUDE = 54.567891
+    LONGITUDE = -5.6312
+
+    def _placed(self, client, precision='full', latitude=None, longitude=None):
+        """A saved calibration in a project with a declared precision."""
+        pid = client.post(
+            "/api/projects", json={"name": f"Precision {precision}"}
+        ).json()["data"]["id"]
+        if precision != 'full':
+            response = client.patch(
+                f"/api/projects/{pid}", json={"coordinate_precision": precision})
+            assert response.status_code == 200, response.text
+        analysis_id = _calibration(
+            client,
+            project_id=pid,
+            latitude=self.LATITUDE if latitude is None else latitude,
+            longitude=self.LONGITUDE if longitude is None else longitude,
+        )
+        return pid, analysis_id
+
+    def _csv_position(self, client, analysis_id):
+        header, rows = _csv_rows(client, analysis_id)
+        lat, lon = header.index('Latitude'), header.index('Longitude')
+        return [(row[lat], row[lon]) for row in rows if row[lat]]
+
+    # --- the rounding itself
+
+    def test_full_precision_is_the_value_itself(self):
+        from app.api.results import _rounded_coordinate
+        assert _rounded_coordinate(54.567891, 'full') == 54.567891
+
+    def test_nothing_to_round_stays_nothing(self):
+        from app.api.results import _rounded_coordinate
+        assert _rounded_coordinate(None, '0.01') is None
+
+    def test_each_precision_rounds_where_it_says(self):
+        from app.api.results import _rounded_coordinate
+        assert _rounded_coordinate(54.567891, '0.01') == 54.57
+        assert _rounded_coordinate(54.567891, '0.1') == 54.6
+        assert _rounded_coordinate(54.567891, '1') == 55
+        assert _rounded_coordinate(-5.6312, '0.01') == -5.63
+        assert _rounded_coordinate(-5.6312, '1') == -6
+
+    def test_a_half_goes_to_even(self):
+        """
+        Round-half-to-even on the decimal the user typed, not on its binary
+        approximation: round(0.125, 2) is a coin toss across platforms and
+        Decimal is not. Always rounding half up would also walk a whole
+        dataset one step in one direction.
+        """
+        from app.api.results import _rounded_coordinate
+        assert _rounded_coordinate(54.125, '0.01') == 54.12
+        assert _rounded_coordinate(54.135, '0.01') == 54.14
+        assert _rounded_coordinate(54.25, '0.1') == 54.2
+        assert _rounded_coordinate(54.35, '0.1') == 54.4
+
+    def test_the_storable_precisions_are_the_ones_the_exporter_applies(self):
+        """
+        The schema's Literal and the exporter's table are two lists of the
+        same four values. A precision that could be stored but not applied
+        would silently export at full.
+        """
+        from typing import get_args
+        from app.api.results import COORDINATE_PRECISIONS
+        from app.schemas.project import CoordinatePrecision
+
+        assert set(get_args(CoordinatePrecision)) == set(COORDINATE_PRECISIONS)
+
+    def test_an_unstorable_precision_is_refused(self, client):
+        pid = client.post("/api/projects", json={"name": "Bad precision"}).json()["data"]["id"]
+        assert client.patch(
+            f"/api/projects/{pid}", json={"coordinate_precision": "0.001"}
+        ).status_code == 422
+
+    # --- the three downloads
+
+    def test_the_csv_carries_the_position(self, client):
+        _, analysis_id = self._placed(client)
+        assert self._csv_position(client, analysis_id) == [
+            (str(self.LATITUDE), str(self.LONGITUDE))]
+
+    def test_the_csv_rounds_to_the_declared_precision(self, client):
+        _, analysis_id = self._placed(client, '0.01')
+        assert self._csv_position(client, analysis_id) == [('54.57', '-5.63')]
+
+    def test_nothing_below_the_precision_leaks_into_the_csv(self, client):
+        _, analysis_id = self._placed(client, '0.1')
+        body = client.get(f"/api/results/{analysis_id}/export/csv").text
+        assert '54.567891' not in body
+        assert '-5.6312' not in body
+        assert '54.6' in body
+
+    def test_nothing_below_the_precision_leaks_into_the_json(self, client):
+        _, analysis_id = self._placed(client, '0.1')
+        data = client.get(f"/api/results/{analysis_id}/export/json").json()["data"]
+        row = data["results"][0]
+        assert (row["latitude"], row["longitude"]) == (54.6, -5.6)
+        assert data["coordinate_precision"] == '0.1'
+
+    def test_nothing_below_the_precision_leaks_into_the_pdf(self, client):
+        from tests.test_pdf_report import pdf_text
+
+        _, analysis_id = self._placed(client, '0.1')
+        text = pdf_text(client.get(f"/api/results/{analysis_id}/pdf").content)
+        assert '54.567891' not in text
+        assert '54.6' in text
+        assert 'rounded to the nearest 0.1' in text
+
+    def test_a_full_precision_report_says_so_rather_than_nothing(self, client):
+        from tests.test_pdf_report import pdf_text
+
+        _, analysis_id = self._placed(client)
+        text = pdf_text(client.get(f"/api/results/{analysis_id}/pdf").content)
+        assert 'precision they were recorded' in text
+
+    def test_a_report_of_unplaced_dates_has_no_position_column(self, client):
+        from tests.test_pdf_report import pdf_text
+
+        analysis_id = _calibration(client)
+        text = pdf_text(client.get(f"/api/results/{analysis_id}/pdf").content)
+        assert 'WGS84' not in text
+
+    def test_the_three_downloads_agree(self, client):
+        _, analysis_id = self._placed(client, '0.01')
+        csv_position = self._csv_position(client, analysis_id)[0]
+        row = client.get(
+            f"/api/results/{analysis_id}/export/json").json()["data"]["results"][0]
+
+        assert csv_position == (str(row["latitude"]), str(row["longitude"]))
+
+    def test_two_exports_of_one_project_agree_digit_for_digit(self, client):
+        """The reason rounding is Decimal-based and applied in one place: a
+        position that moved between two downloads of the same project would
+        be indistinguishable from a corrected one."""
+        _, analysis_id = self._placed(client, '0.01')
+        first = client.get(f"/api/results/{analysis_id}/export/csv").text
+        second = client.get(f"/api/results/{analysis_id}/export/csv").text
+        assert first == second
+
+    def test_an_analysis_with_no_project_exports_at_full_precision(self, client):
+        analysis_id = _calibration(
+            client, latitude=self.LATITUDE, longitude=self.LONGITUDE)
+        assert self._csv_position(client, analysis_id) == [
+            (str(self.LATITUDE), str(self.LONGITUDE))]
+
+    def test_an_unplaced_date_leaves_the_columns_blank(self, client):
+        analysis_id = _calibration(client)
+        header, rows = _csv_rows(client, analysis_id)
+        lat = header.index('Latitude')
+        assert all(row[lat] == '' for row in rows)
+
+    # --- the round trip
+
+    def test_an_exported_table_imports_back_with_its_position(self, client):
+        """
+        The app's own results export is an accepted import format, so a table
+        can be exported, corrected in a spreadsheet and read back. At full
+        precision the position has to survive that intact.
+        """
+        from app.services import curve_registry
+        from app.services.date_import import parse_csv
+
+        _, analysis_id = self._placed(client)
+        body = client.get(f"/api/results/{analysis_id}/export/csv").text
+
+        result = parse_csv(body, curve_registry.SCOPE_ANY)
+        assert result.ok, result.errors
+        placed = [d for d in result.dates if d['latitude'] is not None]
+        assert len(placed) == 1
+        assert (placed[0]['latitude'], placed[0]['longitude']) == (
+            self.LATITUDE, self.LONGITUDE)
+
+    def test_a_rounded_export_imports_back_as_the_rounded_value(self, client):
+        """Not as the original. Rounding for export is a real loss, and a
+        round trip through a shared file must not quietly restore it."""
+        from app.services import curve_registry
+        from app.services.date_import import parse_csv
+
+        _, analysis_id = self._placed(client, '0.1')
+        body = client.get(f"/api/results/{analysis_id}/export/csv").text
+
+        result = parse_csv(body, curve_registry.SCOPE_ANY)
+        assert result.ok, result.errors
+        placed = [d for d in result.dates if d['latitude'] is not None]
+        assert (placed[0]['latitude'], placed[0]['longitude']) == (54.6, -5.6)

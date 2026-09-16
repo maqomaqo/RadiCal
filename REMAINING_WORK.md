@@ -35,8 +35,30 @@ revisions of this file understated parts of it.
 - **Marine reservoir offsets** — per-date ΔR and its error, on both a project
   collection entry and an analysis sample (`delta_r`/`delta_r_error` in
   `models.py`), joined in quadrature so a poorly known offset widens the
-  measurement rather than only shifting it. Entered by hand; deriving it from
-  coordinates is Open #5.
+  measurement rather than only shifting it. Entered by hand, or **derived from
+  the date's coordinates** against a local mirror of the CHRONO/calib.org
+  Marine20 database (`services/reservoir.py`): an inverse-variance weighted
+  mean of the nearest N measurements, with σ the larger of the internal error
+  and the scatter, agreeing 20/20 with calib.org's own `regioncalc.php`. The
+  lookup runs against a frozen, hash-verified snapshot on this installation, so
+  a site's coordinates never leave it, and a derived value carries its
+  provenance — cleared the moment anybody edits the number by hand.
+- **Site coordinates, and one map** — WGS84 decimal degrees on a collection
+  entry and an analysis sample, refused in DMS or with a decimal comma rather
+  than silently misread. The map (`components/SiteMap.tsx`) is drawn on
+  `scattergeo` over a topojson the app serves itself, so it makes **no network
+  request at all**; raster tiles are opt-in per project behind a notice saying
+  what the request gives away, because a tile request names the square of the
+  earth on screen. Coordinates are stored at full precision and rounded only on
+  export, at a precision the project owner chooses.
+- **Wave of advance** (`services/dispersal.py`) — how fast the thing being
+  dated moved, and when it set out. A site's arrival is the posterior of the
+  Boundary that *opens* it, never its oldest date, which is a *terminus ante
+  quem* and late by however hard the site was dug; the fit is per joint draw,
+  so the chronological uncertainty is inside the interval rather than bolted
+  on. Refused below six sites, and a front running the other way is reported as
+  a negative speed rather than flipped. Its coverage is measured, not asserted:
+  see Open #4.
 - **Multi-range HPD reporting** — disjoint calendar-age ranges with per-range
   probabilities, on both the direct-calibration and MCMC paths.
 - **Bayesian chronological model** — calibration-curve-aware likelihood,
@@ -100,42 +122,17 @@ revisions of this file understated parts of it.
 
 # Open Work
 
-**Nothing is high priority, and there are no known bugs.** Every gap this file
-has carried under that heading is closed, and so is authentication -- the item
-that used to be described here as the one that stops being elective the moment
-this is not a single-user tool. What is left is genuinely elective.
-
-## Priority: MEDIUM
-
-### 1. Legacy calibration distributions are stored in the old units
-- **Current:** `CalibrationCurve.get_display_distribution` returns a probability
-  DENSITY (integrating to 1 over calendar years) rather than the per-point
-  masses it used to, so the series can be plotted against a calendar axis and
-  compared with a modelled posterior. Rows written before that change still hold
-  masses in `RadiocarbonResult.probability_distribution` — only for plain and
-  group calibrations; a Bayesian analysis's distribution comes from
-  `exact_chain._plottable` and was always a density.
-- **Impact:** Low, and bounded. The plot's y-axis auto-scales, so the shape is
-  identical and only the axis numbers differ. The reported HPD ranges are
-  computed on the full curve grid from the masses and never touched this series.
-  The one real effect is the client-side confidence re-selection in
-  `utils/hpd.ts`, which weights each point by the calendar width it stands for:
-  correct for a density, slightly off for a legacy mass array, and only where
-  the window spans one of the curve's resolution changes (IntCal20/SHCal20 step
-  1, 5, 10, 20 years in different ranges).
-- **Needed:** either a one-off backfill, or nothing — re-running an analysis
-  regenerates it. Deliberately not done as part of the fix: rewriting stored
-  results is a bigger call than correcting what gets written next.
-- Cheaper than when this was written: a backfill is now an ordinary Alembic
-  migration with somewhere to live (see Done #5). Note that Done #11 leaves
-  stored results out of step in the same way and for the same reason, so the two
-  backfills are one job if either is ever done.
-
----
+**Nothing is high or medium priority, and there are no known bugs.** Every gap
+this file has carried under those headings is closed, and so is authentication
+-- the item that used to be described here as the one that stops being elective
+the moment this is not a single-user tool. The last MEDIUM item, legacy
+distribution units in stored results, closed on 2026-09-14 by checking the
+database and finding no such rows (Done #21). What is left is genuinely
+elective.
 
 ## Priority: LOW
 
-### 2. Phase-duration priors and custom priors
+### 1. Phase-duration priors and custom priors
 *Reduced 2026-08-20.* This was "Advanced Bayesian features", listing four
 things, and two of them have since been built: **outlier detection** as OxCal's
 own General and Charcoal models with a sampled shared offset scale
@@ -152,7 +149,7 @@ the reporting makes this easier to judge, though: a user-specified duration
 prior is worth something exactly where the reported duration comes back far
 wider than the archaeology allows.
 
-### 3. `ProjectSample` has no per-analysis provenance link
+### 2. `ProjectSample` has no per-analysis provenance link
 Deploy copies values deliberately (see the snapshot decision), but nothing
 records *which* collection entry an analysis sample came from, so there is no
 "this analysis is using an outdated version of this date" indicator. Adding a
@@ -161,13 +158,13 @@ snapshot guarantee — and, since Alembic landed, adding the column is a migrati
 rather than an entry on a hand-maintained list. (No such column exists;
 confirmed 2026-09-07.)
 
-### 4. Wiggle matching and age-depth modelling — **delivered**
+### 3. Wiggle matching and age-depth modelling — **delivered**
 *Added 2026-09-02, delivered 2026-09-09.* Moved to Done #20. What is left of it
 is one deliberate limitation, recorded there: a wiggle match must be the whole
 model, and one nested inside a larger structure is refused by name rather than
 approximated.
 
-### 5. Spatial metadata, ΔR lookup, and dispersal modelling
+### 4. Spatial metadata, ΔR lookup, and dispersal modelling
 *Added 2026-09-07*, from a plan committed the day before and not previously
 listed here. Planned in
 [`docs/SPATIAL_METADATA_AND_DISPERSAL_PLAN.md`](docs/SPATIAL_METADATA_AND_DISPERSAL_PLAN.md),
@@ -177,12 +174,49 @@ deriving a marine date's ΔR from those coordinates against the CHRONO/calib.org
 Marine20 reservoir database; and inferring dispersal — timing, pace, direction —
 from dated sites in space.
 
-Nothing of it is built. ΔR itself already exists as a hand-entered field (see
-*What's Actually Working*), which is the seam the lookup would fill; there are
-no coordinate columns anywhere in `models.py`. Note that the plan is **written
-for a fork** and says so — its §12 names the three files that would conflict on
-a merge back — so treat it as scoped work someone may do elsewhere rather than
-as a queued item here.
+The plan is **written for a fork** and says so — its §12 names the three files
+that would conflict on a merge back.
+
+**In execution from 2026-09-14.** The plan was reviewed against the code that
+day: the measurements stand, and four things that landed after it was written
+(users and ownership, age-depth as a section of `Analysis.intervals`, parallel
+Gibbs chains, Plotly's `scattermap`) are corrected inline, marked *[rev.
+2026-09-14]*. Its new §14 is the operation sequence — nineteen numbered
+operations across the nine features, two migrations (ops 1a and 3a, from head
+`f3b81c60d5a7`), each op naming its files, tests and done-condition.
+
+**Features 1–6 are built (2026-09-14/15).** Coordinates on a date with
+precision-controlled export; the offline `SiteMap` and click-to-place;
+the CHRONO mirror as an immutable, hash-verified snapshot versioned like a
+calibration curve; the ΔR lookup, validated 20/20 against calib.org's own
+`regioncalc.php`; the freshness probe; and the wave of advance. Alembic head
+is `b7c4e0a13d92`.
+
+Three numbers worth keeping from it:
+
+- **Strangford Lough at N=5 reads −209 ± 44**, which is the plan's own
+  acceptance figure, asserted end to end.
+- **The dispersal interval is calibrated.** `tests/test_dispersal_coverage.py`
+  simulates whole fronts through IntCal20 and a solver and asks whether the
+  reported 95% interval contains the speed the data were built from: **94.5% of
+  200 fronts** on the exact path, **92.5% of 40** on the sampled one — re-measured after the
+  dispersal models were finished and identical to the digit. That is
+  the claim risk 11.4 doubted — *OLS on autocorrelated residuals with an assumed
+  origin will always return a tidy v* — and a simulation was the only way to
+  settle it. Rendered in the UI, a Neolithic-scale synthetic front reads
+  **0.948 km/yr, 95% 0.800–1.12**.
+- **The mixed-encoding row count drifted 54 → 60** between two measurements
+  eight days apart, which is exactly the drift risk 11.7 was written about. The
+  fixture is a capture of the source's own bytes, so it stays measurable.
+
+**What is not built.** Op 3d, the bundled snapshot CSV, is gated on op 0 — the
+redistribution-permission email to the database's maintainer, which the app
+cannot send. Until it is answered a fresh install has no lookup until somebody
+runs the ingest, which feature 5's card on the Curves page is the way to do.
+Features 7–9 (trend surface and isochrons, inferred origin as a likelihood
+region, MST-proposed Sequence) are unstarted; each waits only on 6d, which is
+in. Regional kriging (§5.7) and over-water distance (§9) stay deferred by
+design.
 
 ---
 
@@ -496,9 +530,13 @@ plot palette.
 
 Two consequences worth knowing:
 
-- **Stored results keep their old numbers until re-run.** The same call Open #1
-  makes about the legacy distribution units: rewriting stored results is a
-  bigger decision than correcting what gets written next. A Bayesian analysis's
+- **Stored results keep their old numbers until re-run.** The same call the
+  legacy-distribution-units note made (now Done #21): rewriting stored results
+  is a bigger decision than correcting what gets written next. Closed out on
+  2026-09-14: the four analyses (50 results) that predated this fix were
+  re-run in place through `_rerun_analysis`, and the two plain calibrations
+  were checked row by row against a fresh calibration. Nothing stored now
+  predates it. A Bayesian analysis's
   unmodelled column is derived at read time and so updates immediately, while
   its modelled ranges do not — so an analysis that has not been re-run since is
   internally a few years out of step. Re-running it fixes it.
@@ -918,6 +956,53 @@ S12.1 -- the same standard `agreement.py` holds `Amodel` to), and a sapwood
 allowance is not modelled (S12.3).
 
 
+### 21. ~~Legacy calibration distributions are stored in the old units~~
+**Closed 2026-09-14 by checking, not by backfilling.** Carried as the last
+MEDIUM item since 2026-08-14, when `CalibrationCurve.get_display_distribution`
+started returning a probability density (integrating to 1 over calendar years)
+instead of per-point masses, and rows written before that change were assumed
+to still hold masses in `RadiocarbonResult.probability_distribution`. The note
+weighed a one-off backfill against leaving them, and chose to leave them.
+
+The question was moot. The live database's oldest `analysis_results` row is
+dated 2026-08-22, eight days after the change; 0 of 422 stored results predate
+it. Nothing was written in the old units, so there is nothing to backfill or to
+delete. The only client-side thing that cared, the calendar-width weighting in
+`utils/hpd.ts`, has therefore only ever seen densities.
+
+The original note is kept above in Done #11's cross-reference, because the
+sigma change of 2026-08-25 makes the same call about stored results and that
+one was not moot: four analyses (50 results) predated it. They were re-run
+the same day, which is the tool for it -- a migration is still the wrong one
+for a few years' difference in HPD endpoints.
+
+The removed text, for the record:
+
+> **1. Legacy calibration distributions are stored in the old units**
+> - **Current:** `CalibrationCurve.get_display_distribution` returns a probability
+>   DENSITY (integrating to 1 over calendar years) rather than the per-point
+>   masses it used to, so the series can be plotted against a calendar axis and
+>   compared with a modelled posterior. Rows written before that change still hold
+>   masses in `RadiocarbonResult.probability_distribution` — only for plain and
+>   group calibrations; a Bayesian analysis's distribution comes from
+>   `exact_chain._plottable` and was always a density.
+> - **Impact:** Low, and bounded. The plot's y-axis auto-scales, so the shape is
+>   identical and only the axis numbers differ. The reported HPD ranges are
+>   computed on the full curve grid from the masses and never touched this series.
+>   The one real effect is the client-side confidence re-selection in
+>   `utils/hpd.ts`, which weights each point by the calendar width it stands for:
+>   correct for a density, slightly off for a legacy mass array, and only where
+>   the window spans one of the curve's resolution changes (IntCal20/SHCal20 step
+>   1, 5, 10, 20 years in different ranges).
+> - **Needed:** either a one-off backfill, or nothing — re-running an analysis
+>   regenerates it. Deliberately not done as part of the fix: rewriting stored
+>   results is a bigger call than correcting what gets written next.
+> - Cheaper than when this was written: a backfill is now an ordinary Alembic
+>   migration with somewhere to live (see Done #5). Note that Done #11 leaves
+>   stored results out of step in the same way and for the same reason, so the two
+>   backfills are one job if either is ever done.
+
+
 ## Testing & QA
 
 - **Backend: 899 tests** in `backend/tests/`, across 29 files — 898 pass and
@@ -1095,7 +1180,7 @@ allowance is not modelled (S12.3).
 
 ---
 
-*Status, 2026-09-09: calibration and Bayesian math correct and tested (including
+*Status, 2026-09-14: calibration and Bayesian math correct and tested (including
 OxCal-style Boundaries, both outlier models, durations and differences from the
 joint posterior, wiggle matching in closed form and age-depth modelling against
 a Poisson deposition process); project management, date collections, deploy,
@@ -1103,8 +1188,9 @@ duplicate/edit, re-run and side-by-side comparison working end to end; a long
 run is queued, reports progress and can be stopped; the schema is versioned; the
 user manual ships inside the app; and every project and analysis now belongs to
 an account and is private to it. **Every HIGH and MEDIUM item this file has ever
-carried is closed.** What remains is four elective items, of which one is a
-planned but unbuilt feature — spatial metadata/ΔR/dispersal (Open #5, and written
+carried is closed** -- the last MEDIUM one, on 2026-09-14, by finding the
+database had never held the rows it worried about. What remains is four
+elective items, of which one is a planned but unbuilt feature — spatial metadata/ΔR/dispersal (Open #4, and written
 for a fork).*
 
 *The one thing to do before this is reachable by anyone else: set

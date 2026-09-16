@@ -92,6 +92,19 @@ class MeasurementInput(BaseModel):
     # sample YOUNGER than it would uncorrected. Supersedes `reservoir_age`.
     delta_r: Optional[float] = Field(default=None, ge=-5000, le=5000)
     delta_r_error: Optional[float] = Field(default=None, ge=0, le=5000)
+    # Where a looked-up ΔR came from. Carried through the draft for the same
+    # reason the coordinates are: an edit resubmits whatever it holds, so a
+    # derivation missing here is a derivation deleted by editing the analysis
+    # it belongs to. Null means hand-entered, which is the honest answer.
+    delta_r_source: Optional[Dict[str, Any]] = None
+
+    # Where the sample came from, in WGS84 decimal degrees. The bounds are the
+    # real ones, not sanity checks: there is no latitude of 91. Degrees and
+    # minutes are not accepted in any spelling -- the importer refuses such a
+    # cell by name rather than guessing whether 54.30 means 54.5 or 54.3.
+    latitude: Optional[float] = Field(default=None, ge=-90, le=90)
+    longitude: Optional[float] = Field(default=None, ge=-180, le=180)
+
     reservoir_age: Optional[float] = Field(default=None, ge=-500, le=2000)
     depth_cm: Optional[float] = Field(default=None, ge=0, le=10000)
 
@@ -168,6 +181,24 @@ class MeasurementInput(BaseModel):
             )
         return self
 
+    @model_validator(mode="after")
+    def _coordinates_come_in_pairs(self):
+        """
+        Half a coordinate is not a usable fact, for the same reason half a
+        Delta-R is not: nothing downstream can do anything with a latitude
+        whose longitude is missing, and a date that looks located but is not
+        would quietly drop out of every map and every distance the app
+        computes. Refused at the door instead.
+        """
+        if (self.latitude is None) != (self.longitude is None):
+            missing = 'longitude' if self.longitude is None else 'latitude'
+            raise ValueError(
+                f"{missing} is required when the other half of the coordinate "
+                "is given -- a position needs both, and a half-located date "
+                "would be silently dropped from anything that uses one"
+            )
+        return self
+
 
 class CalibrateRequest(MeasurementInput):
     """Request body for POST /analysis/calibrate."""
@@ -213,6 +244,12 @@ class ProjectSampleUpdate(BaseModel):
     reservoir_age: Optional[float] = Field(default=None, ge=-500, le=2000)
     delta_r: Optional[float] = Field(default=None, ge=-5000, le=5000)
     delta_r_error: Optional[float] = Field(default=None, ge=0, le=5000)
+    # Like the TPQ/TAQ pair above, the both-or-neither rule cannot live here --
+    # a PATCH may legitimately carry only a longitude, correcting a typo in one
+    # half of a coordinate that is already complete. It is applied to the
+    # MERGED row in api/project_samples.update_project_sample.
+    latitude: Optional[float] = Field(default=None, ge=-90, le=90)
+    longitude: Optional[float] = Field(default=None, ge=-180, le=180)
     depth_cm: Optional[float] = Field(default=None, ge=0, le=10000)
     # See MeasurementInput for the sign convention.
     ring_offset: Optional[float] = Field(default=None, ge=-50000, le=50000)
@@ -245,9 +282,9 @@ class ProjectSampleBulkInput(BaseModel):
 class ProjectSampleBulkUpdate(BaseModel):
     """
     PATCH body for applying one value across a selection of a project's
-    dates -- the calibration curve, or a Delta-R shared by everything from
-    one site or water body, since Delta-R is per-provenance rather than
-    per-date.
+    dates -- the calibration curve, a Delta-R shared by everything from one
+    site or water body, or the coordinate those dates share, all of which are
+    per-provenance rather than per-date.
 
     Whether a field was SENT matters, not whether it is null: `delta_r: null`
     clears the offset, omitting the key leaves it alone. Pydantic records that
@@ -258,6 +295,20 @@ class ProjectSampleBulkUpdate(BaseModel):
     curve_id: Optional[str] = None
     delta_r: Optional[float] = Field(default=None, ge=-5000, le=5000)
     delta_r_error: Optional[float] = Field(default=None, ge=0, le=5000)
+    # Dates from one site share a position, which is why placing a pin writes
+    # one coordinate across a whole selection rather than n times over.
+    latitude: Optional[float] = Field(default=None, ge=-90, le=90)
+    longitude: Optional[float] = Field(default=None, ge=-180, le=180)
+
+    # Where a looked-up ΔR came from, as api/reservoir.lookup_delta_r returned
+    # it. Only meaningful alongside a delta_r in the same request: sent on its
+    # own it would attach a derivation to a number it did not derive.
+    #
+    # Its absence is load-bearing. A delta_r arriving WITHOUT one is a hand
+    # edit, and the endpoint clears any provenance already stored -- see
+    # api/project_samples.bulk_update_project_samples. Provenance that
+    # survived an edit would be a lie about the number beside it.
+    delta_r_source: Optional[dict] = None
 
     @field_validator('curve_id')
     @classmethod
@@ -275,9 +326,11 @@ class ProjectSampleBulkUpdate(BaseModel):
 
     @model_validator(mode="after")
     def _something_to_do(self):
-        if not ({'curve_id', 'delta_r', 'delta_r_error'} & self.model_fields_set):
+        if not ({'curve_id', 'delta_r', 'delta_r_error',
+                 'latitude', 'longitude'} & self.model_fields_set):
             raise ValueError(
-                "nothing to apply -- send curve_id, delta_r, or both"
+                "nothing to apply -- send curve_id, delta_r, a coordinate, "
+                "or any combination of them"
             )
         return self
 
@@ -300,6 +353,51 @@ class ProjectSampleBulkUpdate(BaseModel):
             raise ValueError(
                 "delta_r_error cannot be set on its own -- send the offset it "
                 "belongs to"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _provenance_belongs_to_an_offset(self):
+        """
+        A derivation with no derived value attached to it describes nothing.
+
+        Refused rather than ignored, because the mistake it catches is the
+        expensive one: provenance applied on its own would sit beside whatever
+        ΔR happened to already be there and claim to explain it.
+        """
+        sent = self.model_fields_set
+        if 'delta_r_source' in sent and self.delta_r_source is not None:
+            if 'delta_r' not in sent or self.delta_r is None:
+                raise ValueError(
+                    "delta_r_source cannot be sent without the delta_r it "
+                    "describes -- a derivation with no derived value beside "
+                    "it would claim to explain whatever was already there")
+        return self
+
+    @model_validator(mode="after")
+    def _coordinates_come_in_pairs(self):
+        """
+        Same rule as MeasurementInput's, applied across a whole selection --
+        and here it CAN be a schema check rather than a merged-row one, because
+        a bulk update writes a position onto every date in the selection rather
+        than correcting one that is already there. Sending one half would
+        half-locate every date it touched.
+
+        Clearing is symmetrical: `latitude: null, longitude: null` unplaces the
+        selection, and null in only one of them is still half a coordinate.
+        """
+        sent = self.model_fields_set
+        if ('latitude' in sent) != ('longitude' in sent):
+            missing = 'longitude' if 'longitude' not in sent else 'latitude'
+            raise ValueError(
+                f"{missing} is required when the other half of the coordinate "
+                "is given -- a bulk update writes a position onto every date "
+                "in the selection, and half of one is not a position"
+            )
+        if 'latitude' in sent and (self.latitude is None) != (self.longitude is None):
+            raise ValueError(
+                "a coordinate is cleared as a pair -- send both latitude and "
+                "longitude as null, or neither"
             )
         return self
 
@@ -415,6 +513,18 @@ class RelationshipInput(BaseModel):
     relationship: Literal["above", "below", "equal"]
 
 
+class DispersalOrigin(BaseModel):
+    """
+    Where a wave of advance is hypothesised to have started.
+
+    Both halves required, unlike a sample's coordinates: a date with half a
+    position is a half-entered date, but an origin with half a position is not
+    an origin at all -- there is nothing to measure a distance from.
+    """
+    lat: float = Field(..., ge=-90, le=90)
+    lon: float = Field(..., ge=-180, le=180)
+
+
 class BayesianConfigInput(BaseModel):
     # Which solver to use.
     #
@@ -459,6 +569,27 @@ class BayesianConfigInput(BaseModel):
     # modelling assumption to make. These are also the only figures here
     # carrying Monte Carlo error, since they can only be read off JOINT draws.
     estimate_durations: bool = False
+    # Also fit the spatial models: how fast the thing being dated moved across
+    # the landscape, and which way (services/dispersal.py).
+    #
+    # Opt-in for the durations reason and one more. OLS on spatially
+    # autocorrelated residuals will always return a tidy speed with a tidy
+    # interval, whether or not the dates describe a front at all, so this must
+    # be a claim somebody made deliberately rather than a number that appears
+    # beside every analysis with coordinates on it.
+    estimate_dispersal: bool = False
+    # Where the front is hypothesised to have started.
+    #
+    # OPTIONAL, and what it buys is a second model rather than a complete one.
+    # The trend surface assumes no origin -- that is exactly what makes it the
+    # right first look at a dataset, before a hypothesis has been imposed on
+    # it -- so a dispersal request with no pin is a request for the trend
+    # alone, not a half-finished one. Placing a pin adds the wave of advance,
+    # which IS measured from somewhere: moving the origin moves its speed, and
+    # an app that picked one silently would be inventing the hypothesis rather
+    # than testing it. Inferring the origin from the data is a separate thing
+    # again, with a separate output -- a likelihood surface, not a point.
+    dispersal_origin: Optional[DispersalOrigin] = None
 
 
 class GroupCalibrationRequest(BaseModel):

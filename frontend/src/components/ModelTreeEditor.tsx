@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Box,
   Paper,
@@ -25,6 +25,7 @@ import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh'
 import DragIndicatorIcon from '@mui/icons-material/DragIndicator'
 import ChevronRightIcon from '@mui/icons-material/ChevronRight'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
+import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown'
 import UndoIcon from '@mui/icons-material/Undo'
 import {
   DndContext,
@@ -47,6 +48,9 @@ import { useElementTypeColors, type ElementTypeColor } from '@/theme/diagramColo
 import type { ModelElement, ElementType, ElementParams, MatrixMeasurement } from '@/types'
 import SortDatesButton from '@/components/SortDatesButton'
 import ConfirmDialog from '@/components/ConfirmDialog'
+import { reorderToProposal } from '@/utils/spatialOrder'
+import { groupingPreview, siteModelTree } from '@/utils/siteGrouping'
+import type { SiteGroupingKey } from '@/utils/siteGrouping'
 import GuideBand from '@/components/GuideBand'
 import type { MeasurementSortKey } from '@/utils/sortMeasurements'
 // Lives in utils because the starting structure built there (see
@@ -235,6 +239,79 @@ function walk(
 function cloneTree(root: ModelElement): ModelElement {
   return JSON.parse(JSON.stringify(root))
 }
+
+/**
+ * The tree with ONE element changed, sharing everything else with the tree
+ * it came from.
+ *
+ * cloneTree copies every element, which is right for an edit that touches
+ * many of them but wrong for a keystroke in a name field: with every element
+ * a new object, every row's memo fails and all 275 rows of an 800-date model
+ * re-render per character. Copying only the path from the root to the edited
+ * element leaves every other row holding the same element it held before, so
+ * only the edited row redraws.
+ *
+ * `mutate` receives a shallow copy, so it may assign the copy's own fields
+ * but must not reach into a nested object and change it in place -- that
+ * object is still shared with the previous tree.
+ */
+function updateElement(
+  root: ModelElement,
+  id: string,
+  mutate: (copy: ModelElement) => void
+): ModelElement {
+  const rec = (el: ModelElement): ModelElement => {
+    if (el.id === id) {
+      const copy = { ...el }
+      mutate(copy)
+      return copy
+    }
+    const kids = el.children || []
+    for (let i = 0; i < kids.length; i++) {
+      const next = rec(kids[i])
+      if (next !== kids[i]) {
+        const children = [...kids]
+        children[i] = next
+        return { ...el, children }
+      }
+    }
+    return el
+  }
+  return rec(root)
+}
+
+/**
+ * A callback whose identity never changes but which always calls the latest
+ * version of `fn`.
+ *
+ * The row callbacks close over the current tree and assignments, so they are
+ * new functions on every render -- and passed straight to a memoised row they
+ * would defeat the memo on every one of them. Routed through a ref, the row
+ * holds one function for its whole life and still reaches the current state.
+ */
+function useEvent<A extends unknown[], R>(fn: (...args: A) => R): (...args: A) => R {
+  const ref = useRef(fn)
+  ref.current = fn
+  return useCallback((...args: A) => ref.current(...args), [])
+}
+
+/**
+ * The same array as last time when nothing in it changed, so a consumer
+ * memoised on it -- dnd-kit's SortableContext, which re-renders every
+ * sortable row when its items array is a new object -- sees no change.
+ */
+function useStableArray<T>(next: T[]): T[] {
+  const ref = useRef(next)
+  const prev = ref.current
+  if (prev.length !== next.length || prev.some((v, i) => v !== next[i])) ref.current = next
+  return ref.current
+}
+
+/** dnd-kit's sorting strategy: none. See the SortableContext below. */
+const NO_STRATEGY = () => null
+
+const POINTER_SENSOR_OPTIONS = { activationConstraint: { distance: 6 } }
+const KEYBOARD_SENSOR_OPTIONS = { coordinateGetter: sortableKeyboardCoordinates }
 
 function findParent(root: ModelElement, id: string): ModelElement | null {
   let found: ModelElement | null = null
@@ -693,6 +770,17 @@ function DropIndicator({ depth, label }: { depth: number; label: string }) {
   )
 }
 
+/**
+ * Loaded on demand, and that is load-bearing twice over.
+ *
+ * It carries a map, so it carries Plotly -- about a megabyte the editor does
+ * not need until somebody presses the button, and a module whose UMD wrapper
+ * reads `self` at the top level, which is not defined in Node. Importing it
+ * eagerly put Plotly in the editor's own module graph and broke this file's
+ * unit tests, which never render anything.
+ */
+const SpatialOrderDialog = lazy(() => import('@/components/SpatialOrderDialog'))
+
 interface Props {
   tree: ModelElement
   measurements: MatrixMeasurement[]
@@ -1103,18 +1191,14 @@ function ElementDates({
   element,
   dates,
   childCount,
-  rootTree,
-  assignments,
-  onAssign,
+  onOpenPhaseMenu,
   onSetOrdinate,
   onOpenRingHelper,
 }: {
   element: ModelElement
   dates: MatrixMeasurement[]
   childCount: number
-  rootTree: ModelElement
-  assignments: Record<string, string>
-  onAssign: (measurementId: string, elementId: string) => void
+  onOpenPhaseMenu: (measurementId: string, anchor: HTMLElement) => void
   onSetOrdinate?: (measurementId: string, patch: Partial<MatrixMeasurement>) => void
   onOpenRingHelper?: (elementId: string) => void
 }) {
@@ -1168,11 +1252,13 @@ function ElementDates({
             <Typography variant="body2" sx={{ fontVariantNumeric: 'tabular-nums', minWidth: 200 }}>
               {m.sample_name} — {m.age_bp} ± {m.error_1sigma ?? '?'} BP
             </Typography>
-            <PhaseSelect
-              tree={rootTree}
-              value={m.id in assignments ? assignments[m.id] : ''}
-              onChange={(next) => onAssign(m.id, next)}
-              label={`Phase for ${m.sample_name}`}
+            {/* The dates listed under an element are, by construction, the
+                ones assigned to it, so the control's label is this element's
+                own name and needs no lookup. */}
+            <PhaseButton
+              label={element.name || TYPE_LABEL[type]}
+              ariaLabel={`Phase for ${m.sample_name}`}
+              onOpen={(anchor) => onOpenPhaseMenu(m.id, anchor)}
             />
             {onSetOrdinate && (
               <OrdinateField
@@ -1227,43 +1313,66 @@ export function orderedForHolder(
  * The one control that moves a date between phases, so the row list and the
  * unassigned panel cannot drift into two different pickers.
  *
- * Options show their path when a name is not unique; showing it on every
- * option would bury the name most models never need disambiguated.
+ * A button that opens ONE menu owned by the editor, not a Select per date.
+ * A Select carries its whole option list as React children and MUI walks
+ * them on every render to find the selected one; with 800 dates and 70
+ * phases that was 56,000 option elements rebuilt per keystroke, and the
+ * single largest cost on the page. The menu itself is PhaseMenu below,
+ * rendered once and pointed at whichever date's button was pressed.
  */
-function PhaseSelect({
-  tree,
-  value,
-  onChange,
+function PhaseButton({
   label,
+  ariaLabel,
+  onOpen,
 }: {
-  tree: ModelElement
-  value: string
-  onChange: (next: string) => void
   label: string
+  ariaLabel: string
+  onOpen: (anchor: HTMLElement) => void
 }) {
-  const options = phaseOptions(tree)
+  return (
+    <Button
+      size="small"
+      variant="outlined"
+      color="inherit"
+      endIcon={<ArrowDropDownIcon />}
+      aria-label={ariaLabel}
+      aria-haspopup="listbox"
+      onClick={(e) => onOpen(e.currentTarget)}
+      sx={{
+        minWidth: 220,
+        justifyContent: 'space-between',
+        textTransform: 'none',
+        fontWeight: 400,
+        color: 'text.primary',
+        borderColor: 'divider',
+      }}
+    >
+      {label}
+    </Button>
+  )
+}
+
+/** One phase choice as the shared menu lists it. */
+interface PhaseChoice {
+  id: string
+  label: string
+}
+
+/**
+ * The options the phase menu offers, with a path prefixed wherever a name
+ * is not unique; showing it on every option would bury the name most models
+ * never need disambiguated. Computed once per tree in the editor, not once
+ * per date.
+ */
+function phaseChoicesFor(root: ModelElement): PhaseChoice[] {
+  const options = phaseOptions(root)
   const duplicated = new Set(
     options.map((o) => o.name).filter((name, i, all) => all.indexOf(name) !== i)
   )
-  return (
-    <Select
-      size="small"
-      displayEmpty
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      inputProps={{ 'aria-label': label }}
-      sx={{ minWidth: 220 }}
-    >
-      <MenuItem value="">
-        <em>Unassigned</em>
-      </MenuItem>
-      {options.map((p) => (
-        <MenuItem key={p.id} value={p.id}>
-          {duplicated.has(p.name) ? `${p.path} › ${p.name}` : p.name}
-        </MenuItem>
-      ))}
-    </Select>
-  )
+  return options.map((p) => ({
+    id: p.id,
+    label: duplicated.has(p.name) ? `${p.path} › ${p.name}` : p.name,
+  }))
 }
 
 interface RowActionsProps {
@@ -1343,10 +1452,8 @@ interface TreeRowProps {
   node: FlatNode
   typeColor: Record<ElementType, ElementTypeColor>
   dates: MatrixMeasurement[]
-  /** The whole tree, for the in-row phase picker's options. */
-  rootTree: ModelElement
-  assignments: Record<string, string>
-  onAssign: (measurementId: string, elementId: string) => void
+  /** Open the shared phase menu for one of this row's dates. */
+  onOpenPhaseMenu: (measurementId: string, anchor: HTMLElement) => void
   /** Children this row holds, so a collapsed container can say what it hides. */
   childCount: number
   /** Everything under this row at any depth, counted for the collapsed summary. */
@@ -1384,13 +1491,41 @@ interface TreeRowProps {
   onDelete: (id: string) => void
 }
 
-function TreeRow({
+/**
+ * Two rows are the same row when their element is the same object -- see
+ * updateElement, which keeps it so for every element an edit did not touch --
+ * at the same depth, under ancestors that would draw the same guides and say
+ * the same name; and when everything else they were handed is unchanged.
+ */
+function sameRow(prev: TreeRowProps, next: TreeRowProps): boolean {
+  if (prev.node.element !== next.node.element || prev.node.depth !== next.node.depth) return false
+  const a = prev.node.ancestors
+  const b = next.node.ancestors
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    if (a[i].id !== b[i].id || a[i].element_type !== b[i].element_type || a[i].name !== b[i].name) {
+      return false
+    }
+  }
+  for (const key of Object.keys(next) as Array<keyof TreeRowProps>) {
+    if (key === 'node') continue
+    if (key === 'indicator') {
+      const p = prev.indicator
+      const n = next.indicator
+      if ((p === null) !== (n === null)) return false
+      if (p && n && (p.depth !== n.depth || p.label !== n.label)) return false
+      continue
+    }
+    if (prev[key] !== next[key]) return false
+  }
+  return true
+}
+
+const TreeRow = memo(function TreeRow({
   node,
   typeColor,
   dates,
-  rootTree,
-  assignments,
-  onAssign,
+  onOpenPhaseMenu,
   childCount,
   hiddenDescendants,
   isCollapsed,
@@ -1589,9 +1724,7 @@ function TreeRow({
             element={element}
             dates={dates}
             childCount={childCount}
-            rootTree={rootTree}
-            assignments={assignments}
-            onAssign={onAssign}
+            onOpenPhaseMenu={onOpenPhaseMenu}
             onSetOrdinate={onSetOrdinate}
             onOpenRingHelper={onOpenRingHelper}
           />
@@ -1600,7 +1733,7 @@ function TreeRow({
       </Box>
     </Box>
   )
-}
+}, sameRow)
 
 export default function ModelTreeEditor({
   tree,
@@ -1611,6 +1744,11 @@ export default function ModelTreeEditor({
   onSetOrdinate,
 }: Props) {
   const [addMenu, setAddMenu] = useState<{ anchor: HTMLElement; targetId: string } | null>(null)
+  // The one phase picker, and which date it is open for. See PhaseButton.
+  const [phaseMenu, setPhaseMenu] = useState<{ anchor: HTMLElement; measurementId: string } | null>(
+    null
+  )
+  const phaseChoices = useMemo(() => phaseChoicesFor(tree), [tree])
   // The wiggle match whose ring-number converter is open, by element id.
   const [ringHelperFor, setRingHelperFor] = useState<string | null>(null)
   // A preset awaiting confirmation. Presets REPLACE the model, so they are
@@ -1621,6 +1759,13 @@ export default function ModelTreeEditor({
   // The element awaiting a delete confirmation, held by id rather than by node
   // so it cannot go stale against a tree that changed underneath it.
   const [pendingRemoval, setPendingRemoval] = useState<string | null>(null)
+  // Whether the spatial-order proposal is open. A PROPOSAL and nothing else:
+  // see SpatialOrderDialog for why it is never applied on its own.
+  const [spatialOrderOpen, setSpatialOrderOpen] = useState(false)
+  // The "group into sites" menu, and the key awaiting confirmation. Grouping
+  // REPLACES the model, as the presets do, so it is confirmed the same way.
+  const [groupMenu, setGroupMenu] = useState<HTMLElement | null>(null)
+  const [pendingGrouping, setPendingGrouping] = useState<SiteGroupingKey | null>(null)
   // Containers whose children are hidden. Ids rather than nodes, so a tree
   // edit cannot leave this pointing at something that no longer exists.
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
@@ -1666,9 +1811,13 @@ export default function ModelTreeEditor({
   const lastOverIdRef = useRef<string | null>(null)
   const typeColor = useElementTypeColors()
 
+  // Module-level option objects, not literals: useSensor memoises on its
+  // options, so a fresh object each render is a fresh sensor, a fresh
+  // DndContext value, and a re-render of every useSortable row in the
+  // outline -- which is every row, on every keystroke.
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+    useSensor(PointerSensor, POINTER_SENSOR_OPTIONS),
+    useSensor(KeyboardSensor, KEYBOARD_SENSOR_OPTIONS)
   )
 
   // One pass over the dates, grouped by the element they sit in, instead of a
@@ -1879,27 +2028,31 @@ export default function ModelTreeEditor({
     })
   }
 
+  // The three per-field edits go through updateElement rather than update:
+  // they are the ones fired per keystroke, and the ones where copying the
+  // whole tree cost every row a re-render.
   const rename = (id: string, name: string) => {
-    update((draft) => {
-      const el = findElement(draft, id)
-      if (el) el.name = name
-    })
+    onChange(updateElement(tree, id, (el) => { el.name = name }), assignments)
   }
 
   const setLimit = (id: string, field: 'tpq_age_bp' | 'taq_age_bp', value: string) => {
-    update((draft) => {
-      const el = findElement(draft, id)
-      if (el) el[field] = value.trim() === '' ? null : Number(value)
-    })
+    onChange(
+      updateElement(tree, id, (el) => {
+        el[field] = value.trim() === '' ? null : Number(value)
+      }),
+      assignments
+    )
   }
 
   // Merged rather than replaced: a control edits one setting and must leave
   // the rest of that element's params where they were.
   const setParam = (id: string, patch: ElementParams) => {
-    update((draft) => {
-      const el = findElement(draft, id)
-      if (el) el.params = { ...(el.params || {}), ...patch }
-    })
+    onChange(
+      updateElement(tree, id, (el) => {
+        el.params = { ...(el.params || {}), ...patch }
+      }),
+      assignments
+    )
   }
 
   const applyPreset = (type: 'wiggle_sequence' | 'deposition_sequence') => {
@@ -1908,6 +2061,53 @@ export default function ModelTreeEditor({
     const built =
       type === 'wiggle_sequence' ? wiggleMatchTree(ids) : depositionSequenceTree(ids)
     onChange(built.tree, built.assignments)
+  }
+
+  /**
+   * Replace the model with one site per distinct value of a column the dates
+   * carry -- a bracketed Sequence each, so the dispersal models can read them
+   * as sites. See utils/siteGrouping for the shape and why it is that one.
+   */
+  const applyGrouping = (by: SiteGroupingKey) => {
+    remember()
+    const built = siteModelTree(measurements, by)
+    onChange(built.tree, built.assignments)
+  }
+
+  // What each key would make of these dates, so the menu can say before the
+  // model is replaced -- and so a key with nothing to group on is disabled
+  // rather than offered and then producing one phase of unassigned dates.
+  const groupingOptions = useMemo(
+    () =>
+      (
+        [
+          ['location', 'Location'],
+          ['context', 'Context'],
+          ['position', 'Position (within 5 km)'],
+        ] as Array<[SiteGroupingKey, string]>
+      ).map(([key, label]) => ({ key, label, ...groupingPreview(measurements, key) })),
+    [measurements],
+  )
+  const groupingLabel: Record<SiteGroupingKey, string> = {
+    location: 'location',
+    context: 'context',
+    position: 'position',
+  }
+
+  /**
+   * Apply a proposed spatial order: permute the named elements into it.
+   *
+   * Through the same `remember()` undo the presets use, because this changes
+   * the model and the analyst should be able to take it back after seeing what
+   * it looks like. The permutation itself is utils/spatialOrder, which leaves
+   * every Boundary where it was -- a spanning tree is a claim about which
+   * sites are adjacent, not about how the model should be structured.
+   */
+  const applySpatialOrder = (orderedIds: string[]) => {
+    const next = reorderToProposal(tree, orderedIds)
+    if (next === tree) return
+    remember()
+    onChange(next, assignments)
   }
 
   const assign = (sampleId: string, elementId: string) => {
@@ -2139,6 +2339,30 @@ export default function ModelTreeEditor({
     [tree, assignments, measurements]
   )
 
+  // Every callback a row is handed, made stable -- see useEvent. The rows are
+  // memoised (sameRow), and one fresh function among their props is enough to
+  // re-render all of them.
+  const rowToggleCollapsed = useEvent(toggleCollapsed)
+  const rowRename = useEvent(rename)
+  const rowSetParam = useEvent(setParam)
+  const rowSetOrdinate = useEvent(
+    (measurementId: string, patch: Partial<MatrixMeasurement>) => onSetOrdinate?.(measurementId, patch)
+  )
+  const rowSetLimit = useEvent(setLimit)
+  const rowOpenLimiters = useEvent(showLimiters)
+  const rowMoveUp = useEvent((id: string) => move(id, -1))
+  const rowMoveDown = useEvent((id: string) => move(id, 1))
+  const rowIndent = useEvent((id: string) => renest(id, 1))
+  const rowOutdent = useEvent((id: string) => renest(id, -1))
+  const rowAdd = useEvent((id: string, e: React.MouseEvent<HTMLElement>) =>
+    setAddMenu({ anchor: e.currentTarget, targetId: id })
+  )
+  const rowDelete = useEvent(requestRemove)
+  const rowOpenPhaseMenu = useEvent((measurementId: string, anchor: HTMLElement) =>
+    setPhaseMenu({ anchor, measurementId })
+  )
+  const sortableIds = useStableArray(flat.map((n) => n.id))
+
   return (
     <Box ref={rootRef}>
       {/* Everything this page is READ from, on the band the diagram tab
@@ -2269,6 +2493,60 @@ export default function ModelTreeEditor({
             one timber, which is a tax with no payoff.
 
             They REPLACE the model, so they are confirmed like a deletion. */}
+        {/* The dispersal models read the tree as a set of sites, one per
+            Boundary-opened element, and the one starting phase every analysis
+            begins with is none. This builds that structure from a column the
+            dates already carry, which is what makes the map proposal beside
+            it answerable. It REPLACES the model, so it is confirmed like the
+            presets below. */}
+        <Tooltip title="Replace the model with one bracketed Sequence per site, sites read off a column the dates carry — their location, their context, or their coordinates">
+          <Button
+            size="small"
+            startIcon={<AutoFixHighIcon />}
+            onClick={(e) => setGroupMenu(e.currentTarget)}
+            disabled={measurements.length === 0}
+            sx={{ minHeight: 44, flexShrink: 0 }}
+          >
+            Group dates into sites
+          </Button>
+        </Tooltip>
+        <Menu open={!!groupMenu} anchorEl={groupMenu} onClose={() => setGroupMenu(null)}>
+          {groupingOptions.map((option) => (
+            <MenuItem
+              key={option.key}
+              disabled={option.sites === 0}
+              onClick={() => {
+                setGroupMenu(null)
+                setPendingGrouping(option.key)
+              }}
+            >
+              <Box>
+                <Typography variant="body2">By {option.label.toLowerCase()}</Typography>
+                <Typography variant="caption" color="text.secondary">
+                  {option.sites === 0
+                    ? 'No date carries one'
+                    : `${option.sites} site${option.sites === 1 ? '' : 's'}` +
+                      (option.unassigned > 0
+                        ? `, ${option.unassigned} date${option.unassigned === 1 ? '' : 's'} without one`
+                        : '')}
+                </Typography>
+              </Box>
+            </MenuItem>
+          ))}
+        </Menu>
+        {/* A PROPOSAL, unlike every other button here: it opens a dialog that
+            shows the order and says plainly that spatial adjacency is not
+            chronology, and nothing changes unless the analyst accepts. */}
+        <Tooltip title="Read an order off the sites' positions — a minimum spanning tree walked from one end — and offer it for you to accept or reject">
+          <Button
+            size="small"
+            startIcon={<AutoFixHighIcon />}
+            onClick={() => setSpatialOrderOpen(true)}
+            sx={{ minHeight: 44, flexShrink: 0 }}
+          >
+            Propose an order from the map
+          </Button>
+        </Tooltip>
         <Tooltip title="Replace the model with a single wiggle-matched series holding every date — one timber, one core sample, one varve sequence">
           <Button
             size="small"
@@ -2291,6 +2569,30 @@ export default function ModelTreeEditor({
         </Tooltip>
       </Box>
 
+      {/* Mounted only once asked for, so the lazy chunk is fetched on the
+          click rather than with the page. */}
+      {spatialOrderOpen && (
+        <Suspense fallback={null}>
+          <SpatialOrderDialog
+            open
+            tree={tree}
+            // With the phase assignment MERGED IN. The draft keeps
+            // `assignments` beside the measurements rather than on them, so a
+            // date here carries a position but no element_id -- and
+            // derive_sites groups dates by element_id, so every date would
+            // look unassigned and the proposal would refuse for having no
+            // placed sites, on a model where every date is placed. Found by
+            // driving the real app.
+            measurements={measurements.map((m) => ({
+              ...m,
+              element_id: assignments[m.id] || m.element_id || m.group_id || null,
+            }))}
+            onClose={() => setSpatialOrderOpen(false)}
+            onApply={applySpatialOrder}
+          />
+        </Suspense>
+      )}
+
       <ConfirmDialog
         open={pendingPreset !== null}
         title={
@@ -2308,6 +2610,36 @@ export default function ModelTreeEditor({
         onConfirm={() => {
           if (pendingPreset) applyPreset(pendingPreset)
           setPendingPreset(null)
+        }}
+      />
+
+      <ConfirmDialog
+        open={pendingGrouping !== null}
+        title={`Group the dates into sites by ${pendingGrouping ? groupingLabel[pendingGrouping] : ''}?`}
+        message={
+          pendingGrouping
+            ? (() => {
+                const option = groupingOptions.find((o) => o.key === pendingGrouping)!
+                return (
+                  `Every date goes into a Sequence for its ${groupingLabel[pendingGrouping]} — ` +
+                  `${option.sites} site${option.sites === 1 ? '' : 's'}, each bracketed by its own ` +
+                  `start and end Boundary, inside one unordered phase — and the rest of the structure ` +
+                  `is discarded. No order between the sites is asserted; propose one from the map ` +
+                  `afterwards if you want it.` +
+                  (option.unassigned > 0
+                    ? ` ${option.unassigned} date${option.unassigned === 1 ? ' has' : 's have'} no ` +
+                      `${groupingLabel[pendingGrouping]} and will sit in an unassigned phase beside the sites.`
+                    : '') +
+                  ' Undo restores what is there now.'
+                )
+              })()
+            : ''
+        }
+        confirmLabel="Replace"
+        onCancel={() => setPendingGrouping(null)}
+        onConfirm={() => {
+          if (pendingGrouping) applyGrouping(pendingGrouping)
+          setPendingGrouping(null)
         }}
       />
 
@@ -2363,9 +2695,7 @@ export default function ModelTreeEditor({
             element={tree}
             dates={datesIn(tree.id)}
             childCount={(tree.children || []).length}
-            rootTree={tree}
-            assignments={assignments}
-            onAssign={assign}
+            onOpenPhaseMenu={rowOpenPhaseMenu}
             onSetOrdinate={onSetOrdinate}
             onOpenRingHelper={setRingHelperFor}
           />
@@ -2383,7 +2713,7 @@ export default function ModelTreeEditor({
         {/* A no-op strategy: dnd-kit still tracks which row the pointer is
             over, but applies no transform, so nothing shifts under the
             cursor mid-drag. */}
-        <SortableContext items={flat.map((n) => n.id)} strategy={() => null}>
+        <SortableContext items={sortableIds} strategy={NO_STRATEGY}>
           {/* A list, not role="tree". A treeitem is expected to be a single
               focusable unit named by its own content; these rows each hold a
               name field, two number fields and up to five buttons, so calling
@@ -2401,13 +2731,11 @@ export default function ModelTreeEditor({
               <TreeRow
                 key={node.id}
                 node={node}
-                rootTree={tree}
-                assignments={assignments}
-                onAssign={assign}
+                onOpenPhaseMenu={rowOpenPhaseMenu}
                 childCount={(node.element.children || []).length}
                 hiddenDescendants={hiddenCount.get(node.id) ?? 0}
                 isCollapsed={collapsed.has(node.id)}
-                onToggleCollapsed={toggleCollapsed}
+                onToggleCollapsed={rowToggleCollapsed}
                 typeColor={typeColor}
                 dates={datesIn(node.id)}
                 canMoveUp={index > 0}
@@ -2419,20 +2747,20 @@ export default function ModelTreeEditor({
                 }
                 isDropTarget={!!projection && projection.parentId === node.id}
                 isDragged={draggedIds.has(node.id)}
-                onRename={rename}
-                onSetParam={setParam}
-                onSetOrdinate={onSetOrdinate}
+                onRename={rowRename}
+                onSetParam={rowSetParam}
+                onSetOrdinate={onSetOrdinate ? rowSetOrdinate : undefined}
                 onOpenRingHelper={setRingHelperFor}
-                onSetLimit={setLimit}
+                onSetLimit={rowSetLimit}
                 limitersOpen={openLimiters.has(node.id)}
-                onOpenLimiters={showLimiters}
-                onMoveUp={(id) => move(id, -1)}
-                onMoveDown={(id) => move(id, 1)}
-                onIndent={(id) => renest(id, 1)}
-                onOutdent={(id) => renest(id, -1)}
+                onOpenLimiters={rowOpenLimiters}
+                onMoveUp={rowMoveUp}
+                onMoveDown={rowMoveDown}
+                onIndent={rowIndent}
+                onOutdent={rowOutdent}
                 isDragActive={activeId !== null}
-                onAdd={(id, e) => setAddMenu({ anchor: e.currentTarget, targetId: id })}
-                onDelete={requestRemove}
+                onAdd={rowAdd}
+                onDelete={rowDelete}
               />
             )
           })}
@@ -2515,16 +2843,42 @@ export default function ModelTreeEditor({
               <Typography variant="body2" sx={{ minWidth: 220, fontVariantNumeric: 'tabular-nums' }}>
                 {m.sample_name} — {m.age_bp} ± {m.error_1sigma ?? '?'} BP
               </Typography>
-              <PhaseSelect
-                tree={tree}
-                value={assignments[m.id] || ''}
-                onChange={(next) => assign(m.id, next)}
-                label={`Phase for ${m.sample_name}`}
+              <PhaseButton
+                label="Unassigned"
+                ariaLabel={`Phase for ${m.sample_name}`}
+                onOpen={(anchor) => setPhaseMenu({ anchor, measurementId: m.id })}
               />
             </Box>
           ))
         )}
       </Paper>
+
+      {/* The phase picker, rendered once for every date on the page -- see
+          PhaseButton for why it is not a Select per date. */}
+      <Menu
+        open={phaseMenu !== null}
+        anchorEl={phaseMenu?.anchor ?? null}
+        onClose={() => setPhaseMenu(null)}
+        MenuListProps={{ role: 'listbox', dense: true }}
+      >
+        {[{ id: '', label: 'Unassigned' }, ...phaseChoices].map((choice) => {
+          const current = phaseMenu ? assignments[phaseMenu.measurementId] || '' : ''
+          return (
+            <MenuItem
+              key={choice.id || '__unassigned'}
+              role="option"
+              selected={choice.id === current}
+              aria-selected={choice.id === current}
+              onClick={() => {
+                if (phaseMenu) assign(phaseMenu.measurementId, choice.id)
+                setPhaseMenu(null)
+              }}
+            >
+              {choice.id ? choice.label : <em>{choice.label}</em>}
+            </MenuItem>
+          )
+        })}
+      </Menu>
 
       {/* The converter, rendered once for the whole outline rather than per
           row: only one series can be being converted at a time, and a dialog

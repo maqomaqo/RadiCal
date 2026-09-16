@@ -777,7 +777,29 @@ def _display_row(row: Dict, date_format: str) -> Dict:
                     if result.get('outlier_probability') is not None else ''),
         'tpq': _age_text(row.get('tpq_age_bp'), date_format),
         'taq': _age_text(row.get('taq_age_bp'), date_format),
+        # Already rounded to the project's declared precision by
+        # api/results._gather_export_rows -- printed here, never rounded here,
+        # so there is one place the rule lives and one place to check it.
+        'position': _position_text(result),
     }
+
+
+def _position_text(result: Optional[Dict]) -> str:
+    """
+    A date's position as one cell, "54.5, -5.6", which is how a coordinate is
+    written when it is read rather than computed -- and one column narrower
+    than splitting it, on a page that is already spending its width on HPDs.
+
+    Printed as the number itself, so the figure in the report is the figure in
+    the CSV beside it; what precision it was rounded to is stated once, in the
+    method note, rather than implied by trailing zeros here.
+    """
+    if not result:
+        return ''
+    latitude, longitude = result.get('latitude'), result.get('longitude')
+    if latitude is None or longitude is None:
+        return ''
+    return f"{latitude}, {longitude}"
 
 
 def _columns(
@@ -811,6 +833,11 @@ def _columns(
         columns.append(('median', 'Median', 1.2))
     columns.append(('hpd68', '68.3% HPD', 2.6))
     columns.append(('hpd95', '95.4% HPD', 2.6))
+    # Only where the run has positions to print, by the same rule as every
+    # other optional column here -- and a report of unplaced dates should not
+    # advertise a column for something the project has chosen not to record.
+    if _has_any(result_rows, 'latitude'):
+        columns.append(('position', 'Position', 1.8))
     if _has_any(result_rows, 'agreement_index'):
         columns.append(('agreement', 'Agree %', 1.2))
     if _has_any(result_rows, 'outlier_probability'):
@@ -884,6 +911,7 @@ def render_report(
     intervals: Optional[Dict] = None,
     project_name: Optional[str] = None,
     date_format: Optional[str] = None,
+    coordinate_precision: str = 'full',
 ) -> bytes:
     """
     A completed analysis as a PDF, returned as bytes.
@@ -899,6 +927,12 @@ def render_report(
     describes. None when the run was not asked for them, in which case the
     report simply has no such section -- an empty one would read as "nothing
     lasted any time", which is not what a missing option means.
+
+    `coordinate_precision` is the project's setting, and is used only to SAY
+    what it is: the positions in `rows` have already been rounded to it by
+    api/results._gather_export_rows, which is deliberately the one place that
+    can be done. A report that printed a rounded position without saying so
+    would be read as the site's recorded location.
 
     `distributions` maps sample id to that date's posterior series, and is
     passed separately because the shared assembly deliberately leaves it
@@ -985,6 +1019,18 @@ def render_report(
         "own share of the probability rather than being collapsed into a single span.",
         styles['note'],
     ))
+
+    if _has_any(result_rows, 'latitude'):
+        rounded = coordinate_precision != 'full'
+        story.append(Paragraph(
+            "Positions are WGS84 decimal degrees. "
+            + (f"They have been rounded to the nearest {coordinate_precision}"
+               " degree for this report, at the project's setting, and are not "
+               "the recorded site locations."
+               if rounded else
+               "They are given at the precision they were recorded."),
+            styles['note'],
+        ))
 
     # --- results table
     story.append(Paragraph('Results', styles['heading']))

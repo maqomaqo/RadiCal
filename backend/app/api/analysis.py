@@ -172,6 +172,36 @@ def _iter_tree(element: Dict):
         yield from _iter_tree(child)
 
 
+def _tree_for_client(root: Optional[Dict]) -> Optional[Dict]:
+    """
+    The tree as the frontend should receive it: every element's posterior
+    without its raw `posterior_samples`.
+
+    The samples are kept in the database, where they cost nothing to leave,
+    but sent to the client they cost a great deal. On an 800-date model with
+    138 boundaries they were 10 MB of a 10.8 MB response -- and the frontend
+    keeps the tree in its draft store, which mirrors itself to sessionStorage
+    on every change, so those 10 MB were re-serialised on every keystroke on
+    the edit page (60 ms a character). Nothing on the client reads them; the
+    per-sample results already have theirs stripped for the same reason
+    (see the run response below, and results._posterior_summary).
+
+    A copy, not an edit in place: the tree handed in may be about to be
+    persisted, and the database keeps the samples.
+    """
+    if root is None:
+        return None
+    out = {k: v for k, v in root.items() if k not in ('posterior', 'children')}
+    posterior = root.get('posterior')
+    if posterior is not None:
+        out['posterior'] = {k: v for k, v in posterior.items() if k != 'posterior_samples'}
+    elif 'posterior' in root:
+        out['posterior'] = None
+    if root.get('children') is not None:
+        out['children'] = [_tree_for_client(child) for child in root['children']]
+    return out
+
+
 def _relabel_tree(root: Dict, id_map: Dict[str, str],
                   sample_map: Optional[Dict[str, str]] = None) -> None:
     """
@@ -338,6 +368,9 @@ def _sample_row(
         curve_id=measurement.curve_id,
         delta_r=measurement.delta_r,
         delta_r_error=measurement.delta_r_error,
+        delta_r_source=getattr(measurement, 'delta_r_source', None),
+        latitude=getattr(measurement, 'latitude', None),
+        longitude=getattr(measurement, 'longitude', None),
         outlier_prior=getattr(measurement, 'outlier_prior', 0.0),
         outlier_model=getattr(measurement, 'outlier_model', None),
         reservoir_age=measurement.reservoir_age,
@@ -450,6 +483,31 @@ def _run_wiggle_match(
     # input and is reported as one above.
 
 
+def _dispersal_spec(bayesian_config: Dict) -> Optional[Dict]:
+    """
+    What the stored config asks of services/dispersal.py, or None.
+
+    Read from the stored config rather than the request, so a RERUN fits the
+    same front from the same point: an origin that changed between a run and
+    its rerun would change the speed without changing anything about the
+    dates, which is exactly the kind of silent drift a rerun exists to rule
+    out.
+
+    An origin is OPTIONAL here where the wave-of-advance model requires one.
+    A trend surface assumes no origin at all -- that is what makes it the right
+    first look at a dataset, before a hypothesis has been imposed on it -- so
+    asking for dispersal without placing a pin is a legitimate request for the
+    trend alone, not an incomplete one. An origin left behind by a config the
+    analyst later switched off is still not a request: the flag decides.
+    """
+    if not bayesian_config.get('estimate_dispersal'):
+        return None
+    origin = bayesian_config.get('dispersal_origin') or {}
+    lat, lon = origin.get('lat'), origin.get('lon')
+    placed = None if lat is None or lon is None else (float(lat), float(lon))
+    return {'origin': placed}
+
+
 def _run_bayesian(
     measurements: List[Dict],
     model_tree: Dict,
@@ -504,6 +562,7 @@ def _run_bayesian(
     """
     requested = bayesian_config.get('solver') or 'auto'
     estimate_durations = bool(bayesian_config.get('estimate_durations'))
+    dispersal_spec = _dispersal_spec(bayesian_config)
 
     # Refused here as well as at the request schema, because a rerun comes
     # from the database rather than from a request and has to be held to the
@@ -558,6 +617,7 @@ def _run_bayesian(
             num_samples=bayesian_config.get('mcmc_samples', 2000),
             uniform_span_prior=bayesian_config.get('uniform_span_prior', True),
             estimate_durations=estimate_durations,
+            dispersal=dispersal_spec,
         )
         agreement_service.attach(solved['measurements'], measurements)
         return solved['measurements'], solved['boundaries'], {
@@ -576,6 +636,7 @@ def _run_bayesian(
         num_samples=bayesian_config.get('mcmc_samples', 2000),
         uniform_span_prior=bayesian_config.get('uniform_span_prior', True),
         estimate_durations=estimate_durations,
+        dispersal=dispersal_spec,
         on_progress=on_progress,
         # Independent chains in parallel processes, pooled; see
         # gibbs.solve_chains for what the extra chains are for.
@@ -777,6 +838,9 @@ def calibrate_single(measurement: CalibrateRequest, db: Session = Depends(get_db
             # correction the first run made.
             delta_r=measurement.delta_r,
             delta_r_error=measurement.delta_r_error,
+            delta_r_source=measurement.delta_r_source,
+            latitude=measurement.latitude,
+            longitude=measurement.longitude,
             reservoir_age=measurement.reservoir_age,
             depth_cm=measurement.depth_cm,
             location=measurement.location,
@@ -1312,7 +1376,7 @@ def get_analysis(analysis_id: str, db: Session = Depends(get_db),
             # the analysis has been run, as do a wiggle match and an undated
             # level; `params` carries the settings belonging to one kind of
             # element (see model_tree.ELEMENT_PARAMS).
-            "model_tree": model_tree,
+            "model_tree": _tree_for_client(model_tree),
             # True when the relationship graph could not be expressed as a
             # tree and was flattened into one order -- strictly MORE
             # constrained than what it came from, so worth checking.
@@ -1335,6 +1399,13 @@ def get_analysis(analysis_id: str, db: Session = Depends(get_db),
                     "curve_id": s.curve_id,
                     "delta_r": s.delta_r,
                     "delta_r_error": s.delta_r_error,
+                    # Same reason again: a derived offset that lost its
+                    # derivation is an offset nobody can account for.
+                    "delta_r_source": s.delta_r_source,
+                    # Same reason: left out here, a date would be unplaced by
+                    # the next edit of the analysis it belongs to.
+                    "latitude": s.latitude,
+                    "longitude": s.longitude,
                     # Same reason: omitted here, an outlier setting would be
                     # switched off by editing the analysis.
                     "outlier_prior": s.outlier_prior,
@@ -1636,6 +1707,12 @@ def _rerun_analysis(analysis: Analysis, db: Session,
                 'delta_r': s.delta_r,
                 'delta_r_error': s.delta_r_error,
                 'element_id': s.element_id or s.group_id,
+                # Where the date is. Carried for services/dispersal.py, which
+                # derives a site's position from the dates inside it -- so a
+                # run that dropped these would report "no coordinates" on a
+                # collection that has them.
+                'latitude': s.latitude,
+                'longitude': s.longitude,
                 'tpq_age_bp': s.tpq_age_bp,
                 'taq_age_bp': s.taq_age_bp,
                 'outlier_prior': s.outlier_prior,
@@ -1871,7 +1948,11 @@ def replace_model_tree(analysis_id: str, payload: Dict, db: Session = Depends(ge
     rows = db.query(ModelElement).filter(ModelElement.analysis_id == analysis_id).all()
     return {
         "success": True,
-        "data": {"id": analysis.id, "status": analysis.status, "model_tree": rows_to_tree(rows)},
+        "data": {
+            "id": analysis.id,
+            "status": analysis.status,
+            "model_tree": _tree_for_client(rows_to_tree(rows)),
+        },
     }
 
 

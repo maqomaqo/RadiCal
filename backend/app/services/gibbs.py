@@ -1207,9 +1207,30 @@ class Model:
             preferred[boundary_id] = (int(np.mean(neighbours)) if neighbours
                                       else self.M // 2)
 
+        # The youngest cell each parameter may take and still leave room for
+        # everything that must be YOUNGER than it: one cell per link of the
+        # longest chain below, from wherever that chain's own windows floor
+        # it. Without this look-ahead the walk placed a date at its likelihood
+        # mode even when that was the youngest cell of the grid -- a marine
+        # shell at 620 BP peaks at 1950 -- and the End boundary below it then
+        # had no cell to go to. Found on a regional model's youngest atoll.
+        floor: Dict[str, int] = {}
+
+        def compute_floor(param: str) -> int:
+            if param in floor:
+                return floor[param]
+            value = self.window[param][0]
+            for younger in self.above[param]:
+                value = max(value, 1 + compute_floor(younger))
+            floor[param] = value
+            return value
+
+        for param in self.params:
+            compute_floor(param)
+
         index: Dict[str, int] = {}
         for param in sorted(self.params, key=lambda p: depth[p]):
-            lo, hi = self.window[param]
+            lo, hi = floor[param], self.window[param][1]
             for older in self.below[param]:
                 hi = min(hi, index[older] - 1)
             if hi < lo:
@@ -2178,6 +2199,7 @@ def solve(measurements: List[Dict], root: Dict, sweeps: int = DEFAULT_SWEEPS,
           target_convergence: float = TARGET_CONVERGENCE,
           max_sweeps: Optional[int] = None,
           estimate_durations: bool = False,
+          dispersal: Optional[Dict] = None,
           interval_draws: int = intervals.DEFAULT_DRAWS,
           on_progress: Optional[Callable[[Dict], bool]] = None,
           chains: int = 1) -> Dict:
@@ -2204,6 +2226,9 @@ def solve(measurements: List[Dict], root: Dict, sweeps: int = DEFAULT_SWEEPS,
     for the same reasons, plus one here: those states are an MCMC chain rather
     than independent draws, so a duration read off them converges more slowly
     than the marginals beside it and the run is not extended on its account.
+
+    `dispersal` asks for the spatial section and takes the same joint states,
+    with the same MCMC qualification on everything read off them.
     """
     model = Model(measurements, root, grid=grid,
                   uniform_span_prior=uniform_span_prior)
@@ -2212,7 +2237,11 @@ def solve(measurements: List[Dict], root: Dict, sweeps: int = DEFAULT_SWEEPS,
     # and the accumulation rate between one level and the next -- so it is not
     # something an analyst should have to opt into to get an answer at all.
     # Phase durations stay opt-in, being a modelling claim of their own.
-    wants_draws = estimate_durations or bool(model.depositions)
+    # ...and so does a dispersal fit, for the same reason and independently of
+    # the other two: a front's speed is a function of many modelled ages at
+    # once, and asking for it is not asking for phase durations.
+    wants_draws = (estimate_durations or bool(model.depositions)
+                   or dispersal is not None)
     if chains > 1:
         chain = solve_chains(
             measurements, root, chains=chains, sweeps=sweeps, seed=seed,
@@ -2312,5 +2341,6 @@ def solve(measurements: List[Dict], root: Dict, sweeps: int = DEFAULT_SWEEPS,
                  for column, param in enumerate(chain['draw_params'])}
         results['intervals'] = intervals.report(
             measurements=measurements, root=root, draws=joint,
-            independent=False, durations=estimate_durations)
+            independent=False, durations=estimate_durations,
+            dispersal=dispersal)
     return results

@@ -13,10 +13,15 @@ import { getJob, isFinished, latestJobFor, type Job } from '../api/jobs'
 const POLL_INTERVAL_MS = 1000
 
 /**
- * A run at the sampler's cap takes about five minutes on the largest model
- * measured. Ten is the point at which the more likely explanation is that the
- * backend went away, and a tab left open should stop asking rather than poll
- * an unreachable server until it is closed.
+ * How long polls may keep FAILING before a tab left open stops asking: past
+ * this the more likely explanation is that the backend went away, and there
+ * is no point polling an unreachable server until the tab is closed.
+ *
+ * Measured from the last poll that answered, not from when polling began. A
+ * job that is still answering is not unreachable however long it runs -- an
+ * 800-date model at four chains takes twenty minutes and more -- and a limit
+ * on the run's length froze the display mid-run while the job went on to
+ * finish behind it.
  */
 const GIVE_UP_AFTER_MS = 10 * 60 * 1000
 
@@ -49,7 +54,8 @@ export function useJob(
 ): UseJob {
   const [job, setJob] = useState<Job | null>(null)
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const startedAt = useRef<number>(Date.now())
+  // When a poll last got an answer; the give-up window is measured from here.
+  const lastAnswer = useRef<number>(Date.now())
   // Held in a ref so a caller passing an inline arrow function does not
   // restart the poll on every render.
   const finishedCallback = useRef(onFinished)
@@ -69,6 +75,7 @@ export function useJob(
   const poll = useCallback(async () => {
     try {
       const next = jobId ? await getJob(jobId) : targetId ? await latestJobFor(targetId) : null
+      lastAnswer.current = Date.now()
       if (next) {
         setJob(next)
         if (isFinished(next.state)) {
@@ -90,7 +97,7 @@ export function useJob(
       // A failed poll is not a failed run: the next tick tries again, and the
       // give-up window below bounds how long that goes on.
     }
-    if (Date.now() - startedAt.current > GIVE_UP_AFTER_MS) {
+    if (Date.now() - lastAnswer.current > GIVE_UP_AFTER_MS) {
       stop()
       return
     }
@@ -99,7 +106,7 @@ export function useJob(
 
   useEffect(() => {
     if (!jobId && !targetId) return
-    startedAt.current = Date.now()
+    lastAnswer.current = Date.now()
     alreadyFinished.current = false
     sawActive.current = false
     poll()

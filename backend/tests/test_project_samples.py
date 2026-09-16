@@ -92,6 +92,61 @@ class TestProjectSampleCrud:
         )
         assert response.status_code == 422
 
+    def test_a_date_keeps_the_coordinate_it_was_added_with(self, client):
+        pid = _make_project(client)
+        _add_dates(client, pid, [_date("OxA-1", latitude=54.5, longitude=-5.6)])
+
+        item = client.get(f"/api/projects/{pid}/samples").json()["data"]["items"][0]
+        assert (item["latitude"], item["longitude"]) == (54.5, -5.6)
+
+    def test_adding_half_a_coordinate_is_refused(self, client):
+        pid = _make_project(client)
+        assert client.post(
+            f"/api/projects/{pid}/samples", json={"samples": [_date(latitude=54.5)]}
+        ).status_code == 422
+
+    def test_one_half_of_a_coordinate_can_be_corrected_on_its_own(self, client):
+        """
+        A PATCH carrying only a longitude is fixing a typo in a position that
+        is already complete, so the both-or-neither rule has to be applied to
+        the MERGED row rather than to the request -- the same reason the
+        TPQ/TAQ ordering check lives in the endpoint.
+        """
+        pid = _make_project(client)
+        sample_id = _add_dates(
+            client, pid, [_date(latitude=54.5, longitude=-5.6)])[0]["id"]
+
+        response = client.patch(
+            f"/api/projects/{pid}/samples/{sample_id}", json={"longitude": -5.7})
+        assert response.status_code == 200, response.text
+        assert response.json()["data"]["longitude"] == -5.7
+        assert response.json()["data"]["latitude"] == 54.5
+
+    def test_an_edit_cannot_leave_half_a_coordinate_behind(self, client):
+        pid = _make_project(client)
+        sample_id = _add_dates(
+            client, pid, [_date(latitude=54.5, longitude=-5.6)])[0]["id"]
+
+        response = client.patch(
+            f"/api/projects/{pid}/samples/{sample_id}", json={"longitude": None})
+        assert response.status_code == 422
+        assert "longitude" in response.text
+
+        # And the refusal rolled back rather than half-applying.
+        item = client.get(f"/api/projects/{pid}/samples").json()["data"]["items"][0]
+        assert (item["latitude"], item["longitude"]) == (54.5, -5.6)
+
+    def test_a_coordinate_is_cleared_as_a_pair(self, client):
+        pid = _make_project(client)
+        sample_id = _add_dates(
+            client, pid, [_date(latitude=54.5, longitude=-5.6)])[0]["id"]
+
+        response = client.patch(f"/api/projects/{pid}/samples/{sample_id}",
+                                json={"latitude": None, "longitude": None})
+        assert response.status_code == 200, response.text
+        assert response.json()["data"]["latitude"] is None
+        assert response.json()["data"]["longitude"] is None
+
 
 class TestDeploy:
     def test_deploy_creates_pending_analysis_with_copies(self, client):
@@ -441,6 +496,104 @@ class TestBulkUpdate:
         assert "marine20" in curves, "a bulk edit reached an already-deployed analysis"
 
 
+class TestBulkCoordinates:
+    """
+    PATCH /projects/{id}/samples carrying a position -- the path "place on
+    map" writes through, since dates from one site share a coordinate.
+
+    The rule that separates it from delta_r beside it: a position is a fact
+    about the PLACE, so it lands on the whole selection rather than on the
+    marine half of it.
+    """
+
+    def _mixed(self, client, tag):
+        pid = _make_project(client, f"Coords {tag}")
+        ids = [d["id"] for d in _add_dates(client, pid, [
+            _date(f"{tag}-M1", 3000, sample_type="marine", curve_id="marine20",
+                  material_type="shell"),
+            _date(f"{tag}-T1", 3200),
+        ])]
+        return pid, ids
+
+    def test_a_position_reaches_every_date_in_the_selection(self, client):
+        pid, ids = self._mixed(client, "all")
+        response = client.patch(
+            f"/api/projects/{pid}/samples",
+            json={"sample_ids": ids, "latitude": 54.5, "longitude": -5.6})
+        assert response.status_code == 200, response.text
+        data = response.json()["data"]
+        assert (data["updated_count"], data["skipped_count"]) == (2, 0)
+        for item in data["items"]:
+            assert (item["latitude"], item["longitude"]) == (54.5, -5.6)
+
+    def test_a_terrestrial_date_is_placed_even_when_the_offset_skips_it(self, client):
+        """
+        One request carrying both. The offset is wrong for a terrestrial date
+        and is skipped, but the position is not -- so the terrestrial date is
+        reported as skipped for the offset AND still gets its coordinate.
+        """
+        pid, ids = self._mixed(client, "both")
+        response = client.patch(
+            f"/api/projects/{pid}/samples",
+            json={"sample_ids": ids, "delta_r": -120, "delta_r_error": 40,
+                  "latitude": 54.5, "longitude": -5.6})
+        assert response.status_code == 200, response.text
+        data = response.json()["data"]
+        assert data["skipped_count"] == 1, "the offset should still skip the terrestrial date"
+        assert data["updated_count"] == 2, "but the position reached both"
+
+        by_name = {s["sample_name"]: s for s in data["items"]}
+        assert by_name["both-T1"]["delta_r"] is None
+        assert by_name["both-T1"]["latitude"] == 54.5
+        assert by_name["both-M1"]["delta_r"] == -120
+
+    @pytest.mark.parametrize("half", [{"latitude": 54.5}, {"longitude": -5.6}])
+    def test_half_a_position_is_refused(self, client, half):
+        """Here the rule CAN live on the schema, unlike the single-date PATCH:
+        a bulk update writes a position onto dates rather than correcting one,
+        so half of one would half-locate everything it touched."""
+        pid, ids = self._mixed(client, f"half{'lat' if 'latitude' in half else 'lon'}")
+        response = client.patch(f"/api/projects/{pid}/samples",
+                                json={"sample_ids": ids, **half})
+        assert response.status_code == 422
+
+    def test_a_null_pair_unplaces_the_selection(self, client):
+        pid, ids = self._mixed(client, "clear")
+        client.patch(f"/api/projects/{pid}/samples",
+                     json={"sample_ids": ids, "latitude": 54.5, "longitude": -5.6})
+
+        response = client.patch(f"/api/projects/{pid}/samples",
+                                json={"sample_ids": ids, "latitude": None,
+                                      "longitude": None})
+        assert response.status_code == 200, response.text
+        for item in response.json()["data"]["items"]:
+            assert item["latitude"] is None
+            assert item["longitude"] is None
+
+    def test_clearing_only_one_half_is_refused(self, client):
+        pid, ids = self._mixed(client, "halfclear")
+        client.patch(f"/api/projects/{pid}/samples",
+                     json={"sample_ids": ids, "latitude": 54.5, "longitude": -5.6})
+
+        response = client.patch(f"/api/projects/{pid}/samples",
+                                json={"sample_ids": ids, "latitude": None,
+                                      "longitude": -5.6})
+        assert response.status_code == 422
+
+    def test_omitting_the_coordinate_leaves_it_alone(self, client):
+        """The distinction the endpoint reads from model_fields_set: a
+        curve-only request must not unplace a selection that was placed."""
+        pid, ids = self._mixed(client, "keep")
+        client.patch(f"/api/projects/{pid}/samples",
+                     json={"sample_ids": ids, "latitude": 54.5, "longitude": -5.6})
+
+        response = client.patch(f"/api/projects/{pid}/samples",
+                                json={"sample_ids": ids, "curve_id": "intcal20"})
+        assert response.status_code == 200
+        for item in response.json()["data"]["items"]:
+            assert (item["latitude"], item["longitude"]) == (54.5, -5.6)
+
+
 class TestDeltaRTravelsWithADeployedDate:
     def test_a_deployed_date_arrives_already_corrected(self, client):
         """
@@ -464,6 +617,156 @@ class TestDeltaRTravelsWithADeployedDate:
             f"/api/analysis/{deployed['id']}").json()["data"]["measurements"][0]
         assert measurement["delta_r"] == -95
         assert measurement["delta_r_error"] == 30
+
+    def test_a_deployed_date_arrives_still_placed(self, client):
+        """
+        Same rule for the coordinate: where a sample came from is a property
+        of the collection entry, and an analysis that lost it on the way in
+        could not be mapped and could not be used for dispersal -- while the
+        coordinate would still be sitting in the collection it came from,
+        which is the confusing way for it to fail.
+        """
+        pid = _make_project(client, "Coordinate deploy")
+        ids = [d["id"] for d in _add_dates(client, pid, [
+            _date("CD-1", 3000, latitude=54.5, longitude=-5.6),
+        ])]
+
+        deployed = client.post(f"/api/projects/{pid}/deploy",
+                               json={"name": "Carried", "sample_ids": ids}).json()["data"]
+        measurement = client.get(
+            f"/api/analysis/{deployed['id']}").json()["data"]["measurements"][0]
+        assert (measurement["latitude"], measurement["longitude"]) == (54.5, -5.6)
+
+
+class TestDeltaRProvenance:
+    """
+    Where a ΔR came from, and the rule that keeps it honest.
+
+    NULL means hand-entered, which is not the same as unknown: it is the app
+    saying it does not know, rather than the app having forgotten. The rule
+    worth testing is the clearing one -- a derivation that survived a hand edit
+    would sit beside a number it did not produce and claim to explain it, which
+    is worse than no record at all.
+    """
+
+    SOURCE = {
+        'method': 'nearest_n',
+        'snapshot_id': 'calib-marine20-2026-05-11',
+        'centre': {'lat': 54.5, 'lon': -5.6},
+        'n': 2,
+        'map_nos': [995, 992],
+        'nearest_km': 0.0,
+    }
+
+    def _marine(self, client, tag):
+        pid = _make_project(client, f'Provenance {tag}')
+        ids = [d['id'] for d in _add_dates(client, pid, [
+            _date(f'{tag}-M1', 3000, sample_type='marine', curve_id='marine20',
+                  material_type='shell'),
+        ])]
+        return pid, ids
+
+    def _apply_lookup(self, client, pid, ids):
+        response = client.patch(f'/api/projects/{pid}/samples', json={
+            'sample_ids': ids,
+            'delta_r': -239, 'delta_r_error': 20,
+            'delta_r_source': self.SOURCE,
+        })
+        assert response.status_code == 200, response.text
+        return response.json()['data']['items'][0]
+
+    def test_a_derived_offset_carries_its_derivation(self, client):
+        pid, ids = self._marine(client, 'carry')
+        item = self._apply_lookup(client, pid, ids)
+        assert item['delta_r'] == -239
+        assert item['delta_r_source']['map_nos'] == [995, 992]
+        assert item['delta_r_source']['snapshot_id'] == 'calib-marine20-2026-05-11'
+
+    def test_a_hand_edited_offset_clears_it(self, client):
+        """
+        The load-bearing one. The same bulk endpoint, without a source: that
+        is somebody typing a number, and the record of a derivation that did
+        not produce it has to go.
+        """
+        pid, ids = self._marine(client, 'clear')
+        self._apply_lookup(client, pid, ids)
+
+        response = client.patch(f'/api/projects/{pid}/samples', json={
+            'sample_ids': ids, 'delta_r': -100, 'delta_r_error': 40})
+        assert response.status_code == 200, response.text
+        item = response.json()['data']['items'][0]
+        assert item['delta_r'] == -100
+        assert item['delta_r_source'] is None
+
+    def test_clearing_the_offset_clears_the_derivation_too(self, client):
+        pid, ids = self._marine(client, 'null')
+        self._apply_lookup(client, pid, ids)
+
+        response = client.patch(f'/api/projects/{pid}/samples',
+                                json={'sample_ids': ids, 'delta_r': None})
+        assert response.status_code == 200
+        item = response.json()['data']['items'][0]
+        assert item['delta_r'] is None
+        assert item['delta_r_source'] is None
+
+    def test_editing_one_date_by_hand_clears_its_derivation(self, client):
+        """The single-date form has no way to send a derivation -- deriving is
+        the lookup's job -- so touching either half clears it."""
+        pid, ids = self._marine(client, 'single')
+        self._apply_lookup(client, pid, ids)
+
+        response = client.patch(f'/api/projects/{pid}/samples/{ids[0]}',
+                                json={'delta_r': -150})
+        assert response.status_code == 200, response.text
+        assert response.json()['data']['delta_r_source'] is None
+
+    def test_an_edit_that_does_not_touch_the_offset_leaves_it_alone(self, client):
+        """A renamed date has not had its ΔR re-derived."""
+        pid, ids = self._marine(client, 'untouched')
+        self._apply_lookup(client, pid, ids)
+
+        response = client.patch(f'/api/projects/{pid}/samples/{ids[0]}',
+                                json={'sample_name': 'Renamed'})
+        assert response.status_code == 200
+        assert response.json()['data']['delta_r_source'] is not None
+
+    def test_a_curve_only_bulk_edit_leaves_it_alone(self, client):
+        pid, ids = self._marine(client, 'curveonly')
+        self._apply_lookup(client, pid, ids)
+
+        response = client.patch(f'/api/projects/{pid}/samples',
+                                json={'sample_ids': ids, 'curve_id': 'marine20'})
+        assert response.status_code == 200
+        assert response.json()['data']['items'][0]['delta_r_source'] is not None
+
+    def test_a_derivation_without_an_offset_is_refused(self, client):
+        """It would sit beside whatever ΔR was already there and claim to
+        explain it."""
+        pid, ids = self._marine(client, 'orphan')
+        response = client.patch(f'/api/projects/{pid}/samples', json={
+            'sample_ids': ids, 'delta_r_source': self.SOURCE})
+        assert response.status_code == 422
+
+    def test_deploying_carries_the_derivation_into_the_analysis(self, client):
+        """A deployed date whose ΔR kept its value but lost its derivation
+        would be an offset nobody could account for."""
+        pid, ids = self._marine(client, 'deploy')
+        self._apply_lookup(client, pid, ids)
+
+        deployed = client.post(f'/api/projects/{pid}/deploy',
+                               json={'name': 'Carried', 'sample_ids': ids}).json()['data']
+        measurement = client.get(
+            f"/api/analysis/{deployed['id']}").json()['data']['measurements'][0]
+        assert measurement['delta_r'] == -239
+        assert measurement['delta_r_source']['map_nos'] == [995, 992]
+
+    def test_a_hand_entered_offset_has_none_from_the_start(self, client):
+        """NULL is the honest answer for a number the app did not derive."""
+        pid = _make_project(client, 'Provenance none')
+        item = _add_dates(client, pid, [
+            _date('HAND', 3000, sample_type='marine', curve_id='marine20',
+                  delta_r=-95, delta_r_error=30)])[0]
+        assert item['delta_r_source'] is None
 
 
 class TestBulkDelete:

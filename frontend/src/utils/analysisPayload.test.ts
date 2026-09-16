@@ -97,3 +97,50 @@ describe('buildInputsPayload', () => {
     expect(buildInputsPayload(draft({ projectId: '' })).project_id).toBeNull()
   })
 })
+
+describe('the dispersal settings reach the run', () => {
+  // This is the wiring that was missing: the solver path, the API and the
+  // results panel were all built while nothing in the UI could turn dispersal
+  // on, so the feature was unreachable. These assert the whole trip from the
+  // draft store to bayesian_config.
+
+  it('carries the flag and the origin', () => {
+    const payload = buildInputsPayload(draft({
+      mcmc: {
+        solver: 'auto',
+        estimate_dispersal: true,
+        dispersal_origin: { lat: 50.5, lon: -1.25 },
+      },
+    }))
+    expect(payload.bayesian_config).toMatchObject({
+      estimate_dispersal: true,
+      dispersal_origin: { lat: 50.5, lon: -1.25 },
+    })
+  })
+
+  it('carries the flag with no origin, which asks for the origin-free models', () => {
+    // Not an incomplete request: the trend surface and the origin profile both
+    // assume no origin, and that is what makes them the first look at a
+    // dataset. A pin adds the wave of advance on top.
+    const payload = buildInputsPayload(draft({
+      mcmc: { solver: 'auto', estimate_dispersal: true, dispersal_origin: null },
+    }))
+    expect(payload.bayesian_config).toMatchObject({
+      estimate_dispersal: true,
+      dispersal_origin: null,
+    })
+  })
+
+  it('leaves an origin behind without asking for anything', () => {
+    // The backend's _dispersal_spec reads the flag, not the pin, so a stale
+    // origin from a fit the analyst switched off must not re-enable it.
+    const payload = buildInputsPayload(draft({
+      mcmc: {
+        solver: 'auto',
+        estimate_dispersal: false,
+        dispersal_origin: { lat: 50.5, lon: -1.25 },
+      },
+    }))
+    expect(payload.bayesian_config).toMatchObject({ estimate_dispersal: false })
+  })
+})

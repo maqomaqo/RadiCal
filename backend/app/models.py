@@ -65,6 +65,28 @@ class Project(Base):
     # safe direction for a column that should never be null again.
     owner_id = Column(String, ForeignKey('users.id'), nullable=True, index=True)
 
+    # How precisely this project's coordinates are allowed to LEAVE the app:
+    # 'full' (default), or the size of the cell they are rounded into --
+    # '0.01' (about 1.1 km), '0.1' (about 11 km), '1'. It applies to every
+    # export and every rendered figure and to nothing else; the stored values
+    # stay full precision. Held as the bare number rather than '0.01 degrees'
+    # so the rounding can read it; the degree sign is the UI's business.
+    #
+    # Site coordinates are restricted data for many heritage bodies,
+    # landowners and Indigenous data-governance frameworks, and this is the
+    # control that makes an export shareable. Defaulting to 'full' rather than
+    # a rounded value is deliberate: an export that silently moved a site by a
+    # kilometre would be the worse surprise, and rounding is then the owner's
+    # deliberate act.
+    coordinate_precision = Column(String, nullable=False, default='full')
+
+    # Whether the map may fetch raster basemap tiles. Off by default, per
+    # project, because a tile request tells a third-party tile server which
+    # square of the earth someone is looking at -- the one disclosure the
+    # offline basemap avoids. Defaulting to tiles and mentioning it in a
+    # footnote would be the same disclosure with better manners.
+    map_tiles_enabled = Column(Boolean, nullable=False, default=False)
+
     analyses = relationship('Analysis', back_populates='project')
     samples = relationship('ProjectSample', back_populates='project', cascade='all, delete-orphan')
 
@@ -102,6 +124,27 @@ class ProjectSample(Base):
     # dates from one site share a value -- hence the bulk edit in the UI.
     delta_r = Column(Float, nullable=True)
     delta_r_error = Column(Float, nullable=True)
+
+    # Where the sample came from, in WGS84 decimal degrees. The pair is the
+    # unit: schemas.ProjectSampleInput refuses half of it, for the reason
+    # delta_r_error is refused without delta_r. Stored at full precision
+    # whatever the project's coordinate_precision says -- that setting governs
+    # what LEAVES the app, and degrading data at rest cannot be undone.
+    latitude = Column(Float, nullable=True)   # -90..90
+    longitude = Column(Float, nullable=True)  # -180..180
+
+    # How this date's Delta-R was arrived at, when it came from the reservoir
+    # lookup rather than being typed in: the snapshot id, the method, the map
+    # numbers used, what was excluded and why, and the counterfactual the
+    # lookup computes instead of asking the user a question. Provenance rather
+    # than input -- nothing recalculates from it -- and it is what lets a
+    # reviewer reproduce the number from calib.org's own page.
+    #
+    # One JSON column rather than a dozen nullable ones, following
+    # analyses.solver and model_elements.params: nothing queries across its
+    # keys and it is read whole. Null for a Delta-R somebody entered by hand,
+    # which is the honest answer -- the app does not know where that came from.
+    delta_r_source = Column(JSON, nullable=True)
 
     depth_cm = Column(Float, nullable=True)
 
@@ -203,6 +246,124 @@ class StoredCalibrationCurve(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class MarineReservoirSnapshot(Base):
+    """
+    One fetch of the CHRONO/calib.org marine reservoir database, frozen.
+
+    A local mirror, and not an optimisation. Deriving a marine date's Delta-R
+    from its coordinates means asking "what are the reservoir measurements
+    near HERE", and asking that of calib.org at analysis time would send a
+    site's position to a third party on every lookup -- the disclosure
+    projects.coordinate_precision and map_tiles_enabled exist to control.
+    A mirror is what makes the lookup possible without it. See
+    docs/SPATIAL_METADATA_AND_DISPERSAL_PLAN.md §5.
+
+    The rules are StoredCalibrationCurve's rules, for the same reason: a
+    published result must not move underneath the person who published it.
+
+    - A snapshot's numbers NEVER change. A newer table is a new snapshot, not
+      an edit to this one.
+    - `content_sha256` is verified on load, and a snapshot that does not hash
+      to its recorded value refuses to serve rather than quietly serving
+      different numbers.
+    - A snapshot named by any stored `delta_r_source` cannot be deleted. It
+      can be superseded.
+
+    Two kinds, split the way the curves are split. The BUNDLED snapshot is a
+    file in calibration_data/, install-wide and ownerless, so a fresh install
+    has a working lookup with no network and two installs of one version agree
+    on what they compute. An INGESTED snapshot is a row with `created_by`,
+    private to the account that ran the ingest -- a curve rule applied for the
+    curve reason.
+    """
+    __tablename__ = "marine_reservoir_snapshots"
+
+    # Source and its own last_changed, e.g. 'calib-marine20-2026-05-11'. The
+    # primary key because it is what a date's delta_r_source names, and it has
+    # to stay resolvable for as long as any analysis cites it.
+    id = Column(String, primary_key=True)
+
+    source = Column(String, nullable=False)
+    fetched_at = Column(DateTime, default=datetime.utcnow)
+    # max(details.last_changed) across the rows at fetch time: what the SOURCE
+    # says about its own currency, as distinct from when we happened to ask.
+    # The pair is what makes "is this stale?" answerable without re-fetching.
+    source_last_changed = Column(DateTime, nullable=True)
+    record_count = Column(Integer, nullable=False)
+
+    # sha256 over the normalised rows, as StoredCalibrationCurve does it.
+    content_sha256 = Column(String, nullable=False)
+
+    # Reimer & Reimer 2001, Radiocarbon 43:461-3. Carried on the row rather
+    # than assumed by the code, so a snapshot from any other source cites that
+    # source instead.
+    citation = Column(String, nullable=True)
+    note = Column(String, nullable=True)
+
+    # Who ingested it, and therefore who can see it. Null for the bundled
+    # snapshot, which belongs to the install -- see the class docstring.
+    created_by = Column(String, ForeignKey('users.id'), nullable=True, index=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    points = relationship(
+        'MarineReservoirPoint',
+        back_populates='snapshot',
+        cascade='all, delete-orphan',
+    )
+
+
+class MarineReservoirPoint(Base):
+    """
+    One reservoir measurement in a snapshot: a place, a Delta-R, and enough
+    about what was measured to decide whether it belongs in an average.
+
+    `map_no` is the source's own identifier for the point, kept because it is
+    what calib.org's own page is queried by -- a provenance record naming five
+    map numbers can be checked against the site by anyone, which is the
+    property that makes a private mirror acceptable in the first place.
+    """
+    __tablename__ = "marine_reservoir_points"
+
+    snapshot_id = Column(
+        String, ForeignKey('marine_reservoir_snapshots.id'), primary_key=True)
+    map_no = Column(Integer, primary_key=True)
+
+    latitude = Column(Float, nullable=False)
+    longitude = Column(Float, nullable=False)
+
+    delta_r = Column(Float, nullable=True)
+    # Nullable, and that is the source's shape rather than an oversight: some
+    # rows carry no uncertainty at all. A weighted mean cannot use those, so
+    # the lookup excludes them and says how many it excluded.
+    delta_r_error = Column(Float, nullable=True)
+
+    reference = Column(String, nullable=True)
+    locality = Column(String, nullable=True)
+    subregion = Column(String, nullable=True)
+    notes = Column(String, nullable=True)
+
+    c14_age = Column(Float, nullable=True)
+    c14_error = Column(Float, nullable=True)
+    lab_id = Column(String, nullable=True)
+    collection_year = Column(Integer, nullable=True)
+    reservoir_age = Column(Float, nullable=True)
+
+    genus = Column(String, nullable=True)
+    species = Column(String, nullable=True)
+    # The NORMALISED feeding class -- one of services/reservoir.FEEDING_CLASSES
+    # -- because the source field holds 25 spellings of about seven things.
+    feeding = Column(String, nullable=True)
+    # And the source's own string, verbatim, beside it. Kept because the
+    # normalisation is a judgement: five of those spellings are compound
+    # descriptions truncated at sixteen characters by the source's column
+    # width, and a reader checking why one became 'ambiguous' needs to see
+    # what it actually said.
+    feeding_raw = Column(String, nullable=True)
+
+    snapshot = relationship('MarineReservoirSnapshot', back_populates='points')
+
+
 class Analysis(Base):
     """Represents a complete radiocarbon analysis"""
     __tablename__ = "analyses"
@@ -277,6 +438,26 @@ class RadiocarbonSample(Base):
     # see schemas.MeasurementInput.delta_r for the sign convention.
     delta_r = Column(Float, nullable=True)
     delta_r_error = Column(Float, nullable=True)
+    # Where the sample came from, in WGS84 decimal degrees -- same field pair
+    # as on ProjectSample, so deploying stays a field-for-field copy. No
+    # elevation, no coordinate uncertainty and no CRS column: a file carrying
+    # any of those is refused by name rather than assumed (services/date_import).
+    latitude = Column(Float, nullable=True)   # -90..90
+    longitude = Column(Float, nullable=True)  # -180..180
+
+    # How this date's Delta-R was arrived at, when it came from the reservoir
+    # lookup rather than being typed in: the snapshot id, the method, the map
+    # numbers used, what was excluded and why, and the counterfactual the
+    # lookup computes instead of asking the user a question. Provenance rather
+    # than input -- nothing recalculates from it -- and it is what lets a
+    # reviewer reproduce the number from calib.org's own page.
+    #
+    # One JSON column rather than a dozen nullable ones, following
+    # analyses.solver and model_elements.params: nothing queries across its
+    # keys and it is read whole. Null for a Delta-R somebody entered by hand,
+    # which is the honest answer -- the app does not know where that came from.
+    delta_r_source = Column(JSON, nullable=True)
+
     # Prior probability this date does not belong to the population being
     # modelled (OxCal's Outlier()). Persisted, not just applied: a rerun
     # rebuilds the model from these rows, so leaving it off would silently
