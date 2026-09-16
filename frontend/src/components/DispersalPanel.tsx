@@ -342,7 +342,21 @@ function WaveCard({ fit, dateFormat, tiles }: {
 }
 
 /**
- * The trend surface: is there a gradient at all, and which way does it point.
+ * The regional gradient: is there a gradient at all, and which way does it
+ * point.
+ *
+ * Headed "Regional gradient" rather than "Trend surface", the term the
+ * literature uses for this fit. A reader who does not know that convention
+ * reads "surface" and expects contours shaped by the data, and this is a
+ * PLANE -- one direction and one speed for the whole region -- whose
+ * isochrons are straight and evenly spaced whatever the dates did. The name
+ * says what the figure shows: the average.
+ *
+ * The map earns its place by showing the one thing that is spatial and not in
+ * the numbers: where the plane fails. Each site is coloured by its residual,
+ * early or late against the plane, so a front that curved or slowed reads as
+ * a patch of one colour -- which is the finding, and which a table of
+ * residuals makes the reader reconstruct from names.
  *
  * DRAWN FIRST, and that ordering is the argument. This model assumes no
  * origin, so it is the look at the data with no hypothesis in it — and a
@@ -361,12 +375,18 @@ function TrendCard({ trend, tiles }: { trend: TrendFit; tiles: boolean }) {
     latitude: site.latitude as number,
     longitude: site.longitude as number,
   }))
+  // Signed, in years: positive is a site OLDER than the plane predicts, the
+  // same convention as the wave of advance's residual table.
+  const residualByElement: Record<string, number> = {}
+  for (const residual of trend.residuals) {
+    residualByElement[residual.element_id] = residual.residual_years
+  }
 
   return (
     <Paper sx={{ p: 3 }}>
       <Stack direction="row" alignItems="baseline" spacing={1} sx={{ mb: 0.5 }}>
         <Typography variant="h6" component="h2">
-          Trend surface
+          Regional gradient
         </Typography>
         <Typography variant="body2" color="text.secondary">
           no origin assumed
@@ -375,7 +395,9 @@ function TrendCard({ trend, tiles }: { trend: TrendFit; tiles: boolean }) {
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2, maxWidth: '74ch' }}>
         A plane fitted through arrival age against position, per draw, in an equal-area
         projection centred on these sites. It asks whether there is a gradient at all and
-        which way it points — without being told where anything started.
+        which way it points — without being told where anything started — and gives one
+        direction and one speed for the whole region: the average, not the shape of the
+        front.
       </Typography>
 
       {trend.refused ? (
@@ -385,10 +407,13 @@ function TrendCard({ trend, tiles }: { trend: TrendFit; tiles: boolean }) {
           <Box sx={{ mb: 2 }}>
             <SiteMap
               points={points}
+              values={residualByElement}
+              valueLabel="Residual (yr, + early)"
+              valueScale="signed"
               isochrons={trend.isochrons}
               tiles={tiles}
               height={380}
-              exportName="trend-surface"
+              exportName="regional-gradient"
             />
           </Box>
 
@@ -460,9 +485,14 @@ function TrendCard({ trend, tiles }: { trend: TrendFit; tiles: boolean }) {
           )}
 
           <Typography variant="caption" color="text.secondary" display="block">
-            Isochrons are lines of equal arrival age on the fitted plane, drawn from the
-            median surface. On a plane they are straight, parallel and evenly spaced — so
-            a curved front, or one that speeds up, is a model this does not fit.
+            The lines are isochrons of the fitted plane, from the median surface. A plane
+            has one gradient everywhere, so its isochrons are always straight, parallel and
+            evenly spaced: they show the region's average direction and speed, not the
+            shape of the front. Each site is coloured by how far it departs from the plane
+            — early (older than the plane predicts) or late — so a front that curved,
+            slowed or sped up shows here as a patch of neighbouring sites all one colour.
+            That pattern is the finding; a front the plane describes has residuals that
+            look like noise.
           </Typography>
         </>
       )}

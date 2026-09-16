@@ -175,6 +175,17 @@ interface SiteMapProps {
   /** What the colour bar is measuring. Required to mean anything by `values`. */
   valueLabel?: string
   /**
+   * How `values` are coloured. `graded` (the default) is one hue at graded
+   * strength, for a quantity that runs from less to more. `signed` is for a
+   * quantity with a meaningful zero and two directions -- a residual, early
+   * or late -- drawn as the two hues this app already uses for those
+   * directions (the primary for early, the ink for late) meeting at a pale
+   * neutral, on a range symmetric about zero so equal departures either way
+   * read equally strong. Still not a categorical palette: it is one axis
+   * with a sign, and the sign is what the second hue carries.
+   */
+  valueScale?: 'graded' | 'signed'
+  /**
    * A line drawn over the marks -- the fitted front, in the dispersal panel.
    * Ordered; drawn as given, with no interpolation of its own.
    */
@@ -252,6 +263,7 @@ export default function SiteMap({
   exportName = 'site-map',
   values,
   valueLabel,
+  valueScale = 'graded',
   front,
   origin,
   isochrons,
@@ -440,6 +452,23 @@ export default function SiteMap({
       const graded = sites.filter((site) => valueOf(site) !== null)
       if (graded.length > 0) {
         const last = VALUE_RAMP.length - 1
+        const magnitudes = graded.map((s) => Math.abs(valueOf(s) as number))
+        const reach = Math.max(...magnitudes, 1)
+        // See the `valueScale` prop. The neutral is the value ramp's palest
+        // step, so a site at zero reads as "on the surface" rather than as a
+        // third colour.
+        const scale =
+          valueScale === 'signed'
+            ? {
+                colorscale: [
+                  [0, plot.mean],
+                  [0.5, VALUE_RAMP[0]],
+                  [1, plot.posteriorLine],
+                ] as Array<[number, string]>,
+                cmin: -reach,
+                cmax: reach,
+              }
+            : { colorscale: VALUE_RAMP.map((hex, i) => [i / last, hex]) }
         list.push({
           type: geoType,
           mode: 'markers' as const,
@@ -450,7 +479,7 @@ export default function SiteMap({
           marker: {
             size: 12,
             color: graded.map((s) => valueOf(s) as number),
-            colorscale: VALUE_RAMP.map((hex, i) => [i / last, hex]),
+            ...scale,
             // Reversed so the OLDEST arrival is the strongest shade: the
             // front starts dark and fades as it spreads, which is the way
             // round a reader already expects a wave to be drawn.
@@ -463,7 +492,10 @@ export default function SiteMap({
               outlinewidth: 0,
             },
           },
-          hovertemplate: '%{text}<br>%{marker.color:.0f}<extra></extra>',
+          hovertemplate:
+            valueScale === 'signed'
+              ? '%{text}<br>%{marker.color:+.0f} yr<extra></extra>'
+              : '%{text}<br>%{marker.color:.0f}<extra></extra>',
         })
       }
     } else {
@@ -496,7 +528,7 @@ export default function SiteMap({
     }
 
     return list
-  }, [sites, selected, plot, tiles, values, valueLabel, front, origin, isochrons,
+  }, [sites, selected, plot, tiles, values, valueLabel, valueScale, front, origin, isochrons,
       region, regionStepDeg, links])
 
   /**

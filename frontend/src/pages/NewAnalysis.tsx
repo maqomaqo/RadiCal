@@ -1461,7 +1461,7 @@ export default function NewAnalysis() {
                         <FormHelperText sx={{ mt: 0.5, ml: 0 }}>
                           {mcmc.dispersal_origin
                             ? 'Adds a wave of advance measured from this point, beside the models that assume no origin.'
-                            : 'Optional. Without one you get the trend surface and a profile of where the front could have started, both of which assume no origin. Placing a pin adds a front speed measured from it.'}
+                            : 'Optional. Without one you get the regional gradient and a profile of where the front could have started, both of which assume no origin. Placing a pin adds a front speed measured from it.'}
                         </FormHelperText>
                       </Box>
                     )}
