@@ -495,8 +495,8 @@ member's age is that plus its own gap. RadiCal solves it in closed form: no samp
 converge, and none of the Monte Carlo qualifications the other solvers carry. The Results page
 labels it **Wiggle match**.
 
-**Building one.** On the Model Structure page, **Make it a wiggle match** puts every date into one
-series. Then give each date its gap — or press **Set gaps from ring numbers** and enter the ring
+**Building one.** On the Model Structure page, **Build from data › Make it a wiggle match** puts every
+date into one series. Then give each date its gap — or press **Set gaps from ring numbers** and enter the ring
 number each sample came from, counting outwards from the pith. The app does the subtraction, which
 is where the sign usually goes wrong.
 
@@ -547,8 +547,8 @@ levels carries its own prior rather than being left uniform. This one *is* sampl
 coupled to each other by the deposition rate rather than only through their Boundaries, so it goes
 to the MH/Gibbs solver, and the Results page says so.
 
-**Building one.** **Make it an age-depth model** on the Model Structure page puts every date into
-one deposition sequence; each then needs its depth. Add an **Undated level** to the sequence and
+**Building one.** **Build from data › Make it an age-depth model** on the Model Structure page puts
+every date into one deposition sequence; each then needs its depth. Add an **Undated level** to the sequence and
 give it a depth to ask "how old was this level" where nothing was dated — a tephra, a pollen
 horizon, the base of a feature.
 

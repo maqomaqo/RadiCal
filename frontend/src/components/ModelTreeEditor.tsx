@@ -1,4 +1,17 @@
-import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  createContext,
+  lazy,
+  memo,
+  startTransition,
+  Suspense,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react'
 import {
   Box,
   Paper,
@@ -16,6 +29,8 @@ import {
   Accordion,
   AccordionSummary,
   AccordionDetails,
+  Divider,
+  ListSubheader,
 } from '@mui/material'
 import AddIcon from '@mui/icons-material/Add'
 import DeleteIcon from '@mui/icons-material/Delete'
@@ -191,6 +206,14 @@ const GUTTER_INSET = INDENT_PX / 2
 // 44px height.
 const HIT_TARGET = { width: 44, height: 44, minWidth: 44, flexShrink: 0, my: '-10px' } as const
 
+// How many problems the alert lists before summarising the rest.
+const SHOWN_PROBLEMS = 6
+
+// How many rows the outline mounts before yielding, and how many more it
+// adds per step after that -- see renderLimit.
+const FIRST_PAINT_ROWS = 40
+const MOUNT_CHUNK_ROWS = 60
+
 // One shared empty array, so rows with no dates are handed the same reference
 // every render rather than a fresh literal that defeats memoisation downstream.
 const EMPTY_DATES: MatrixMeasurement[] = []
@@ -238,6 +261,45 @@ function walk(
 
 function cloneTree(root: ModelElement): ModelElement {
   return JSON.parse(JSON.stringify(root))
+}
+
+/** Every element in the tree, by id. */
+function indexTree(root: ModelElement): Map<string, ModelElement> {
+  const byId = new Map<string, ModelElement>()
+  walk(root, null, (el) => byId.set(el.id, el))
+  return byId
+}
+
+/**
+ * `next` with every element an edit did not touch swapped back for the
+ * object it was before, so a memoised row holding it sees no change.
+ *
+ * The structural edits -- move, add, delete, drop, bracket -- all build their
+ * result by copying, and a copy is a new object for every element whether
+ * or not it changed. On an 800-date model that made a one-row move re-render
+ * all 275 rows, at about 600ms a keypress. An element is taken back
+ * unchanged when its own fields match and each child, after the same
+ * treatment, is the very object it held before; the path from the root to
+ * the edit is what remains new, which is exactly the set of rows that need
+ * to redraw.
+ */
+function reuseUnchanged(next: ModelElement, before: Map<string, ModelElement>): ModelElement {
+  const children = (next.children || []).map((child) => reuseUnchanged(child, before))
+  const original = before.get(next.id)
+  if (original) {
+    const originalChildren = original.children || []
+    const same =
+      originalChildren.length === children.length &&
+      children.every((child, i) => child === originalChildren[i]) &&
+      original.name === next.name &&
+      original.element_type === next.element_type &&
+      original.tpq_age_bp === next.tpq_age_bp &&
+      original.taq_age_bp === next.taq_age_bp &&
+      (original.params === next.params ||
+        JSON.stringify(original.params ?? null) === JSON.stringify(next.params ?? null))
+    if (same) return original
+  }
+  return { ...next, children }
 }
 
 /**
@@ -678,7 +740,7 @@ function applyProjection(
 
   const { rest, insertIndexInRest } = projection
   const newFlat = [...rest.slice(0, insertIndexInRest), ...subtree, ...rest.slice(insertIndexInRest)]
-  return rebuildFromFlat(tree, newFlat)
+  return reuseUnchanged(rebuildFromFlat(tree, newFlat), indexTree(tree))
 }
 
 /** Projects a drag and applies it in one step. Returns null if the drop
@@ -1238,10 +1300,13 @@ function ElementDates({
         </Stack>
       )}
       {dates.length === 0 ? (
-        <Typography variant="caption" color="textSecondary">
+        <Typography variant="caption" color="text.secondary">
+          {/* Two routes in, because the list below is often empty: a model
+              built from a preset has every date placed already, and the
+              only way into a new phase is out of another. */}
           {type === 'phase'
-            ? 'No dates in this phase yet — add them from the unassigned list below.'
-            : 'No dates in this sequence yet — add them from the unassigned list below.'}
+            ? 'No dates in this phase yet — assign them from the unassigned list below, or move them here from another phase.'
+            : 'No dates in this sequence yet — assign them from the unassigned list below, or move them here from another phase.'}
         </Typography>
       ) : (
         ordered.map((m) => (
@@ -1398,6 +1463,8 @@ function RowActions({
   onDelete,
 }: RowActionsProps) {
   const canContain = acceptsChildren(element.element_type)
+  // A cleared name field must not leave "Delete null" on the button.
+  const label = element.name || TYPE_LABEL[element.element_type]
   // These arrows move THIS element among its siblings, so what they mean
   // depends on the container it sits in, not on what it is. Inside a Sequence
   // that is a claim about time and says so; inside a Phase -- which is the
@@ -1428,16 +1495,16 @@ function RowActions({
         </span>
       </Tooltip>
       {canContain && (
-        <Tooltip title={`Add inside ${element.name}`}>
-          <IconButton size="small" aria-label={`Add inside ${element.name}`} onClick={onAdd} sx={HIT_TARGET}>
+        <Tooltip title={`Add inside ${label}`}>
+          <IconButton size="small" aria-label={`Add inside ${label}`} onClick={onAdd} sx={HIT_TARGET}>
             <AddIcon fontSize="small" />
           </IconButton>
         </Tooltip>
       )}
-      <Tooltip title={`Delete ${element.name}`}>
+      <Tooltip title={`Delete ${label}`}>
         <IconButton
           size="small"
-          aria-label={`Delete ${element.name}`}
+          aria-label={`Delete ${label}`}
           onClick={onDelete}
           sx={{ ...HIT_TARGET, '&:hover, &:focus-visible': { color: 'error.main' } }}
         >
@@ -1445,6 +1512,142 @@ function RowActions({
         </IconButton>
       </Tooltip>
     </Box>
+  )
+}
+
+/**
+ * What a row's drag handle takes from dnd-kit, handed down by SortableRow.
+ *
+ * dnd-kit publishes its state through React context, and every hook that
+ * reads it re-renders its component on every change: each pointer move of a
+ * drag, and every row mounting or unmounting, which is what a collapse is.
+ * A row that called useSortable itself was therefore redrawn -- name field,
+ * six tooltips, every date under it -- hundreds of times per drag, and all
+ * 275 of them together whenever one collapsed. The hook now lives in a shell
+ * the size of one Box, and the row body is memoised on its data alone; only
+ * the handle, which actually needs the listeners, reads this.
+ */
+interface HandleBinding {
+  attributes: ReturnType<typeof useSortable>['attributes']
+  listeners: ReturnType<typeof useSortable>['listeners']
+  /** A dnd-kit keyboard drag is in progress, so the sensor owns the arrow keys. */
+  isDragActive: boolean
+}
+
+const HandleContext = createContext<HandleBinding>({
+  attributes: {} as HandleBinding['attributes'],
+  listeners: undefined,
+  isDragActive: false,
+})
+
+/**
+ * The droppable element of one row: registers with dnd-kit, and nothing
+ * else. `children` is the row body, created by the editor -- so when only
+ * dnd-kit's context changes, the element handed here is the same object as
+ * last time and React reuses the body without rendering it.
+ */
+function SortableRow({
+  id,
+  level,
+  ariaLabel,
+  children,
+}: {
+  id: string
+  level: number
+  ariaLabel: string
+  children: ReactNode
+}) {
+  const { attributes, listeners, setNodeRef, active } = useSortable({ id })
+  const isDragActive = active !== null
+  const binding = useMemo(
+    () => ({ attributes, listeners, isDragActive }),
+    [attributes, listeners, isDragActive]
+  )
+  return (
+    // The row gap lives INSIDE this box as padding, not as a margin above it,
+    // so the ancestor guides drawn down its left edge meet the guides of the
+    // row above and read as continuous lines rather than a dashed ladder.
+    <Box
+      ref={setNodeRef}
+      role="listitem"
+      // The nesting level, which the outline otherwise expresses only as a
+      // left margin -- a purely visual cue that reaches nobody using a screen
+      // reader. aria-level is 1-based and `depth` already starts at 1 for the
+      // root's direct children.
+      aria-level={level}
+      aria-label={ariaLabel}
+      sx={{ position: 'relative', pt: 1 }}
+    >
+      <HandleContext.Provider value={binding}>{children}</HandleContext.Provider>
+    </Box>
+  )
+}
+
+interface DragHandleProps {
+  id: string
+  name: string
+  canMoveUp: boolean
+  canMoveDown: boolean
+  onMoveUp: (id: string) => void
+  onMoveDown: (id: string) => void
+  onIndent: (id: string) => boolean
+  onOutdent: (id: string) => boolean
+}
+
+function DragHandle({
+  id,
+  name,
+  canMoveUp,
+  canMoveDown,
+  onMoveUp,
+  onMoveDown,
+  onIndent,
+  onOutdent,
+}: DragHandleProps) {
+  const { attributes, listeners, isDragActive } = useContext(HandleContext)
+  return (
+    <Tooltip title={`Reorder ${name} — drag, or use the arrow keys`}>
+      <Box
+        {...attributes}
+        {...listeners}
+        onKeyDown={(e) => {
+          // Only before a dnd-kit keyboard drag has been activated with
+          // Space/Enter -- once it has, the sensor owns the arrow keys
+          // and this would fight it for the same gesture.
+          if (isDragActive) return
+          const handled: Record<string, () => boolean | void> = {
+            ArrowLeft: () => onOutdent(id),
+            ArrowRight: () => onIndent(id),
+            ArrowUp: () => canMoveUp && (onMoveUp(id), true),
+            ArrowDown: () => canMoveDown && (onMoveDown(id), true),
+          }
+          const action = handled[e.key]
+          if (!action) return
+          e.preventDefault()
+          action()
+        }}
+        aria-label={`Reorder ${name}. Arrow up and down move it among its neighbours; arrow left and right change how deeply it is nested.`}
+        sx={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          color: 'text.secondary',
+          cursor: 'grab',
+          touchAction: 'none',
+          // The affordance the header names as the way to re-nest, and
+          // it was a bare 20px glyph -- the smallest target in the app.
+          ...HIT_TARGET,
+          borderRadius: 1,
+          '&:active': { cursor: 'grabbing' },
+          '&:focus-visible': {
+            outline: (theme) => `2px solid ${theme.palette.primary.main}`,
+            outlineOffset: 2,
+          },
+        }}
+      >
+        <DragIndicatorIcon fontSize="small" />
+      </Box>
+    </Tooltip>
   )
 }
 
@@ -1485,8 +1688,6 @@ interface TreeRowProps {
   onMoveDown: (id: string) => void
   onIndent: (id: string) => boolean
   onOutdent: (id: string) => boolean
-  /** A dnd-kit keyboard drag is in progress, so the sensor owns the arrow keys. */
-  isDragActive: boolean
   onAdd: (id: string, e: React.MouseEvent<HTMLElement>) => void
   onDelete: (id: string) => void
 }
@@ -1546,17 +1747,15 @@ const TreeRow = memo(function TreeRow({
   onMoveDown,
   onIndent,
   onOutdent,
-  isDragActive,
   onAdd,
   onDelete,
 }: TreeRowProps) {
   // No transform and no transition: the outline holds still for the whole drag
   // (see the note at the top of this file) and the indicator does the talking.
-  // useSortable still registers this row as a drop target and gives the handle
-  // its keyboard support.
-  const { attributes, listeners, setNodeRef } = useSortable({ id: node.id })
+  // The dnd-kit registration lives in SortableRow, outside this memo.
   const { element, depth } = node
   const canContain = acceptsChildren(element.element_type)
+  const label = element.name || TYPE_LABEL[element.element_type]
   // The direct parent is the last ancestor; it decides what this row's move
   // arrows are actually claiming.
   const parentOrders = ordersChildren(node.ancestors[node.ancestors.length - 1])
@@ -1566,23 +1765,7 @@ const TreeRow = memo(function TreeRow({
   const collapsibleCount = childCount + dates.length
 
   return (
-    // The row gap lives INSIDE this box as padding, not as a margin above it,
-    // so the ancestor guides drawn down its left edge meet the guides of the
-    // row above and read as continuous lines rather than a dashed ladder.
-    <Box
-      ref={setNodeRef}
-      role="listitem"
-      // The nesting level, which the outline otherwise expresses only as a
-      // left margin -- a purely visual cue that reaches nobody using a screen
-      // reader. aria-level is 1-based and `depth` already starts at 1 for the
-      // root's direct children.
-      aria-level={depth}
-      aria-label={`${TYPE_LABEL[element.element_type]} ${element.name || ''}, level ${depth}, inside ${
-        node.ancestors[node.ancestors.length - 1].name ||
-        TYPE_LABEL[node.ancestors[node.ancestors.length - 1].element_type]
-      }`}
-      sx={{ position: 'relative', pt: 1 }}
-    >
+    <>
       {indicator && <DropIndicator depth={indicator.depth} label={indicator.label} />}
       {/* One guide per level this row is nested under, in that container's own
           hue: solid where the container orders its children, dashed where it
@@ -1617,45 +1800,16 @@ const TreeRow = memo(function TreeRow({
         }}
       >
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-          <Tooltip title={`Reorder ${element.name} — drag, or use the arrow keys`}>
-            <Box
-              {...attributes}
-              {...listeners}
-              onKeyDown={(e) => {
-                // Only before a dnd-kit keyboard drag has been activated with
-                // Space/Enter -- once it has, the sensor owns the arrow keys
-                // and this would fight it for the same gesture.
-                if (isDragActive) return
-                const handled: Record<string, () => boolean | void> = {
-                  ArrowLeft: () => onOutdent(node.id),
-                  ArrowRight: () => onIndent(node.id),
-                  ArrowUp: () => canMoveUp && (onMoveUp(node.id), true),
-                  ArrowDown: () => canMoveDown && (onMoveDown(node.id), true),
-                }
-                const action = handled[e.key]
-                if (!action) return
-                e.preventDefault()
-                action()
-              }}
-              aria-label={`Reorder ${element.name}. Arrow up and down move it among its neighbours; arrow left and right change how deeply it is nested.`}
-              sx={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: 'text.secondary',
-                cursor: 'grab',
-                touchAction: 'none',
-                // The affordance the header names as the way to re-nest, and
-                // it was a bare 20px glyph -- the smallest target in the app.
-                ...HIT_TARGET,
-                borderRadius: 1,
-                '&:active': { cursor: 'grabbing' },
-                '&:focus-visible': { outline: (theme) => `2px solid ${theme.palette.primary.main}`, outlineOffset: 2 },
-              }}
-            >
-              <DragIndicatorIcon fontSize="small" />
-            </Box>
-          </Tooltip>
+          <DragHandle
+            id={node.id}
+            name={label}
+            canMoveUp={canMoveUp}
+            canMoveDown={canMoveDown}
+            onMoveUp={onMoveUp}
+            onMoveDown={onMoveDown}
+            onIndent={onIndent}
+            onOutdent={onOutdent}
+          />
           {/* Only a container can hide anything, and a leaf reserves nothing
               for the chevron it will never have: a Boundary or Hiatus row has
               one fewer control, so it starts one control earlier rather than
@@ -1667,10 +1821,10 @@ const TreeRow = memo(function TreeRow({
               spacer never addressed, where "Sequence" and "Phase" differ by
               20px and pushed every name field to a different x. */}
           {canContain && collapsibleCount > 0 ? (
-            <Tooltip title={isCollapsed ? `Show ${collapsibleCount} inside ${element.name}` : `Hide what is inside ${element.name}`}>
+            <Tooltip title={isCollapsed ? `Show ${collapsibleCount} inside ${label}` : `Hide what is inside ${label}`}>
               <IconButton
                 size="small"
-                aria-label={isCollapsed ? `Expand ${element.name}` : `Collapse ${element.name}`}
+                aria-label={isCollapsed ? `Expand ${label}` : `Collapse ${label}`}
                 aria-expanded={!isCollapsed}
                 onClick={() => onToggleCollapsed(node.id)}
                 sx={HIT_TARGET}
@@ -1731,7 +1885,7 @@ const TreeRow = memo(function TreeRow({
         )}
       </Paper>
       </Box>
-    </Box>
+    </>
   )
 }, sameRow)
 
@@ -1762,9 +1916,10 @@ export default function ModelTreeEditor({
   // Whether the spatial-order proposal is open. A PROPOSAL and nothing else:
   // see SpatialOrderDialog for why it is never applied on its own.
   const [spatialOrderOpen, setSpatialOrderOpen] = useState(false)
-  // The "group into sites" menu, and the key awaiting confirmation. Grouping
-  // REPLACES the model, as the presets do, so it is confirmed the same way.
-  const [groupMenu, setGroupMenu] = useState<HTMLElement | null>(null)
+  // The "build from data" menu, and the grouping key awaiting confirmation.
+  // Grouping REPLACES the model, as the presets do, so it is confirmed the
+  // same way.
+  const [buildMenu, setBuildMenu] = useState<HTMLElement | null>(null)
   const [pendingGrouping, setPendingGrouping] = useState<SiteGroupingKey | null>(null)
   // Containers whose children are hidden. Ids rather than nodes, so a tree
   // edit cannot leave this pointing at something that no longer exists.
@@ -1867,31 +2022,39 @@ export default function ModelTreeEditor({
     setOpenLimiters((open) => new Set(open).add(id))
   }
 
+  /**
+   * An edit that may touch any number of elements, applied to a full copy
+   * -- then every element it left alone is swapped back for the original
+   * (reuseUnchanged), so only the rows it actually changed redraw.
+   */
   const update = (mutate: (draft: ModelElement) => void) => {
     const draft = cloneTree(tree)
     mutate(draft)
-    onChange(draft, assignments)
+    onChange(reuseUnchanged(draft, indexTree(tree)), assignments)
   }
 
   const addChild = (parentId: string, type: ElementType) => {
     remember()
-    update((draft) => {
-      const parent = findElement(draft, parentId)
-      if (!parent) return
-      parent.children = parent.children || []
-      parent.children.push({
-        id: newElementId(),
-        element_type: type,
-        name: TYPE_LABEL[type],
-        // Only the ordinate-bearing sequences start with settings; every
-        // other type's params are empty, and model_tree.element_params fills
-        // in whatever a stored element does not carry.
-        params: DEFAULT_PARAMS[type] ?? null,
-        tpq_age_bp: null,
-        taq_age_bp: null,
-        children: [],
-      })
-    })
+    onChange(
+      updateElement(tree, parentId, (parent) => {
+        parent.children = [
+          ...(parent.children || []),
+          {
+            id: newElementId(),
+            element_type: type,
+            name: TYPE_LABEL[type],
+            // Only the ordinate-bearing sequences start with settings; every
+            // other type's params are empty, and model_tree.element_params
+            // fills in whatever a stored element does not carry.
+            params: DEFAULT_PARAMS[type] ?? null,
+            tpq_age_bp: null,
+            taq_age_bp: null,
+            children: [],
+          },
+        ]
+      }),
+      assignments
+    )
   }
 
   // What deleting this element would actually take with it. Computed once and
@@ -1914,12 +2077,15 @@ export default function ModelTreeEditor({
     if (id === tree.id) return
     remember()
     const { orphaned } = removalImpact(id)
-    const draft = cloneTree(tree)
-    const parent = findParent(draft, id)
-    if (parent) parent.children = (parent.children || []).filter((c) => c.id !== id)
+    const parent = findParent(tree, id)
+    const next = parent
+      ? updateElement(tree, parent.id, (copy) => {
+          copy.children = (copy.children || []).filter((c) => c.id !== id)
+        })
+      : tree
     const nextAssignments = { ...assignments }
     for (const m of orphaned) delete nextAssignments[m.id]
-    onChange(draft, nextAssignments)
+    onChange(next, nextAssignments)
   }
 
   // Deleting a container takes its whole subtree AND drops the phase assignment
@@ -2005,27 +2171,23 @@ export default function ModelTreeEditor({
   }
 
   const move = (id: string, delta: number) => {
+    const parent = findParent(tree, id)
+    if (!parent) return
+    const kids = parent.children || []
+    const index = kids.findIndex((c) => c.id === id)
+    const target = index + delta
+    if (index < 0 || target < 0 || target >= kids.length) return
     remember()
-    const draftAfter = cloneTree(tree)
-    const parentOf = findParent(draftAfter, id)
-    if (parentOf) {
-      const kids = parentOf.children || []
-      const i = kids.findIndex((c) => c.id === id)
-      const j = i + delta
-      if (i >= 0 && j >= 0 && j < kids.length) {
-        ;[kids[i], kids[j]] = [kids[j], kids[i]]
-        setAnnouncement(describePosition(draftAfter, id))
-      }
-    }
-    update((draft) => {
-      const parent = findParent(draft, id)
-      if (!parent) return
-      const kids = parent.children || []
-      const index = kids.findIndex((c) => c.id === id)
-      const next = index + delta
-      if (index < 0 || next < 0 || next >= kids.length) return
-      ;[kids[index], kids[next]] = [kids[next], kids[index]]
+    // Only the parent's path is copied; the two swapped rows keep their own
+    // element objects and redraw because their position among their
+    // siblings changed, not because the tree did.
+    const next = updateElement(tree, parent.id, (copy) => {
+      const swapped = [...kids]
+      ;[swapped[index], swapped[target]] = [swapped[target], swapped[index]]
+      copy.children = swapped
     })
+    setAnnouncement(describePosition(next, id))
+    onChange(next, assignments)
   }
 
   // The three per-field edits go through updateElement rather than update:
@@ -2155,6 +2317,25 @@ export default function ModelTreeEditor({
     [flat, collapsed]
   )
 
+  // The first paint draws the top of the outline; the rest arrives in a
+  // transition, which React renders in slices that yield to input. Mounting
+  // all 275 rows of an 800-date model in one pass held the thread for 1.5s
+  // with nothing on screen; now the first forty are up in a fraction of
+  // that, and the remainder fill in below the fold without blocking a click
+  // on the ones already there. The drag logic reads `flat`, never this list,
+  // so a partially drawn outline cannot lose a row on a drop.
+  //
+  // In chunks rather than all at once: the render of a transition is sliced
+  // but its commit is not, and committing 230 rows in one go was a 750ms
+  // task of its own. A chunk commits in well under 200ms, and the next one
+  // is asked for only once the last is on screen.
+  const [renderLimit, setRenderLimit] = useState(FIRST_PAINT_ROWS)
+  useEffect(() => {
+    if (renderLimit >= flat.length) return
+    startTransition(() => setRenderLimit((limit) => limit + MOUNT_CHUNK_ROWS))
+  }, [renderLimit, flat.length])
+  const rendered = renderLimit >= visible.length ? visible : visible.slice(0, renderLimit)
+
   // How many elements a collapsed container is holding, so its row can say so
   // rather than just hiding them.
   const hiddenCount = useMemo(() => {
@@ -2250,7 +2431,7 @@ export default function ModelTreeEditor({
     // indicator would name a landing place the reader cannot see, and offsets
     // would count rows that are not there.
     collapsedBeforeDragRef.current = collapsed
-    setCollapsed(new Set())
+    if (collapsed.size > 0) setCollapsed(new Set())
     setActiveId(id)
     projectionRef.current = null
     lastOverIdRef.current = null
@@ -2435,7 +2616,7 @@ export default function ModelTreeEditor({
           }}
         >
           <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ minHeight: 44, px: 0 }}>
-            <Typography variant="body2">Click to expand for instructions</Typography>
+            <Typography variant="body2">How to reorder, nest and constrain elements</Typography>
           </AccordionSummary>
           <AccordionDetails sx={{ px: 0, pt: 0 }}>
             <Typography variant="body2" color="text.secondary" paragraph>
@@ -2487,36 +2668,54 @@ export default function ModelTreeEditor({
             Bracket phases with boundaries
           </Button>
         </Tooltip>
-        {/* The two models whose whole structure is one sequence. Both are
-            shortcuts over the same data model rather than second code paths;
-            what they save is hand-building a tree to match eight rings from
-            one timber, which is a tax with no payoff.
+        {/* One menu for everything that derives a structure from what the
+            dates already carry -- a site column, coordinates, ring counts,
+            depths. These were four text buttons in a row, each wearing the
+            same wand icon as the one beside it, so the icon said nothing and
+            the bar wrapped to two lines at tablet width before the model was
+            in view. Each is a rare, whole-model action; together they are
+            one decision, "start from the data", and the menu's captions
+            carry what the tooltips used to.
 
-            They REPLACE the model, so they are confirmed like a deletion. */}
-        {/* The dispersal models read the tree as a set of sites, one per
-            Boundary-opened element, and the one starting phase every analysis
-            begins with is none. This builds that structure from a column the
-            dates already carry, which is what makes the map proposal beside
-            it answerable. It REPLACES the model, so it is confirmed like the
-            presets below. */}
-        <Tooltip title="Replace the model with one bracketed Sequence per site, sites read off a column the dates carry — their location, their context, or their coordinates">
-          <Button
-            size="small"
-            startIcon={<AutoFixHighIcon />}
-            onClick={(e) => setGroupMenu(e.currentTarget)}
-            disabled={measurements.length === 0}
-            sx={{ minHeight: 44, flexShrink: 0 }}
-          >
-            Group dates into sites
-          </Button>
+            Three of the four REPLACE the model and are confirmed like a
+            deletion; the map proposal is the exception, opening a dialog
+            that changes nothing until accepted. */}
+        <Tooltip
+          title={
+            measurements.length === 0
+              ? 'Add dates first — these build a structure from what the dates carry'
+              : 'Build a structure from what the dates carry: a site column, their positions, ring counts or depths'
+          }
+        >
+          <span>
+            <Button
+              size="small"
+              endIcon={<ArrowDropDownIcon />}
+              onClick={(e) => setBuildMenu(e.currentTarget)}
+              disabled={measurements.length === 0}
+              aria-haspopup="menu"
+              aria-expanded={buildMenu ? true : undefined}
+              sx={{ minHeight: 44, flexShrink: 0 }}
+            >
+              Build from data
+            </Button>
+          </span>
         </Tooltip>
-        <Menu open={!!groupMenu} anchorEl={groupMenu} onClose={() => setGroupMenu(null)}>
+        <Menu
+          open={!!buildMenu}
+          anchorEl={buildMenu}
+          onClose={() => setBuildMenu(null)}
+          MenuListProps={{ 'aria-label': 'Build the model from data' }}
+        >
+          <ListSubheader disableSticky sx={{ lineHeight: '32px' }}>
+            Group dates into sites
+          </ListSubheader>
           {groupingOptions.map((option) => (
             <MenuItem
               key={option.key}
               disabled={option.sites === 0}
               onClick={() => {
-                setGroupMenu(null)
+                setBuildMenu(null)
                 setPendingGrouping(option.key)
               }}
             >
@@ -2533,40 +2732,48 @@ export default function ModelTreeEditor({
               </Box>
             </MenuItem>
           ))}
+          <Divider />
+          <MenuItem
+            onClick={() => {
+              setBuildMenu(null)
+              setSpatialOrderOpen(true)
+            }}
+          >
+            <Box>
+              <Typography variant="body2">Propose an order from the map</Typography>
+              <Typography variant="caption" color="text.secondary">
+                Read off the sites' positions, for you to accept or reject
+              </Typography>
+            </Box>
+          </MenuItem>
+          <Divider />
+          <MenuItem
+            onClick={() => {
+              setBuildMenu(null)
+              setPendingPreset('wiggle_sequence')
+            }}
+          >
+            <Box>
+              <Typography variant="body2">Make it a wiggle match</Typography>
+              <Typography variant="caption" color="text.secondary">
+                Every date in one series separated by counted rings or varves
+              </Typography>
+            </Box>
+          </MenuItem>
+          <MenuItem
+            onClick={() => {
+              setBuildMenu(null)
+              setPendingPreset('deposition_sequence')
+            }}
+          >
+            <Box>
+              <Typography variant="body2">Make it an age-depth model</Typography>
+              <Typography variant="caption" color="text.secondary">
+                Every date in one deposition sequence, ordered by depth
+              </Typography>
+            </Box>
+          </MenuItem>
         </Menu>
-        {/* A PROPOSAL, unlike every other button here: it opens a dialog that
-            shows the order and says plainly that spatial adjacency is not
-            chronology, and nothing changes unless the analyst accepts. */}
-        <Tooltip title="Read an order off the sites' positions — a minimum spanning tree walked from one end — and offer it for you to accept or reject">
-          <Button
-            size="small"
-            startIcon={<AutoFixHighIcon />}
-            onClick={() => setSpatialOrderOpen(true)}
-            sx={{ minHeight: 44, flexShrink: 0 }}
-          >
-            Propose an order from the map
-          </Button>
-        </Tooltip>
-        <Tooltip title="Replace the model with a single wiggle-matched series holding every date — one timber, one core sample, one varve sequence">
-          <Button
-            size="small"
-            startIcon={<AutoFixHighIcon />}
-            onClick={() => setPendingPreset('wiggle_sequence')}
-            sx={{ minHeight: 44, flexShrink: 0 }}
-          >
-            Make it a wiggle match
-          </Button>
-        </Tooltip>
-        <Tooltip title="Replace the model with a single deposition sequence holding every date, ordered by the depths they were taken from">
-          <Button
-            size="small"
-            startIcon={<AutoFixHighIcon />}
-            onClick={() => setPendingPreset('deposition_sequence')}
-            sx={{ minHeight: 44, flexShrink: 0 }}
-          >
-            Make it an age-depth model
-          </Button>
-        </Tooltip>
       </Box>
 
       {/* Mounted only once asked for, so the lazy chunk is fetched on the
@@ -2643,11 +2850,21 @@ export default function ModelTreeEditor({
         }}
       />
 
+      {/* error, not warning: every line here blocks Save, and the page says
+          so in error red beside the button -- one fact was wearing two
+          colours. Capped, because deleting a phase that held thirty dates
+          produced thirty near-identical lines and pushed the outline the
+          reader needs to fix them below the fold. */}
       {problems.length > 0 && (
-        <Alert severity="warning" sx={{ mb: 2 }}>
-          {problems.map((p, i) => (
+        <Alert severity="error" sx={{ mb: 2 }}>
+          {problems.slice(0, SHOWN_PROBLEMS).map((p, i) => (
             <div key={i}>{p}</div>
           ))}
+          {problems.length > SHOWN_PROBLEMS && (
+            <Typography variant="body2" sx={{ mt: 0.5, fontWeight: 500 }}>
+              and {problems.length - SHOWN_PROBLEMS} more
+            </Typography>
+          )}
         </Alert>
       )}
 
@@ -2672,10 +2889,10 @@ export default function ModelTreeEditor({
               limitersOpen={openLimiters.has(tree.id)}
               onOpenLimiters={() => showLimiters(tree.id)}
             />
-            <Tooltip title={`Add inside ${tree.name}`}>
+            <Tooltip title={`Add inside ${tree.name || TYPE_LABEL[tree.element_type]}`}>
               <IconButton
                 size="small"
-                aria-label={`Add inside ${tree.name}`}
+                aria-label={`Add inside ${tree.name || TYPE_LABEL[tree.element_type]}`}
                 onClick={(e) => setAddMenu({ anchor: e.currentTarget, targetId: tree.id })}
                 // Right-aligned, the way RowActions aligns itself on every
                 // other row. Left where it fell, this button sat immediately
@@ -2723,13 +2940,21 @@ export default function ModelTreeEditor({
               a left margin, so assistive technology heard a flat run of text
               fields with no depth at all. */}
           <Box role="list" aria-label="Model structure outline">
-          {visible.map((node) => {
+          {rendered.map((node) => {
             const parent = parentMap.get(node.id)
             const siblings = parent?.children || []
             const index = siblings.findIndex((s) => s.id === node.id)
+            const container = node.ancestors[node.ancestors.length - 1]
             return (
-              <TreeRow
+              <SortableRow
                 key={node.id}
+                id={node.id}
+                level={node.depth}
+                ariaLabel={`${TYPE_LABEL[node.element.element_type]} ${node.element.name || ''}, level ${
+                  node.depth
+                }, inside ${container.name || TYPE_LABEL[container.element_type]}`}
+              >
+              <TreeRow
                 node={node}
                 onOpenPhaseMenu={rowOpenPhaseMenu}
                 childCount={(node.element.children || []).length}
@@ -2758,10 +2983,10 @@ export default function ModelTreeEditor({
                 onMoveDown={rowMoveDown}
                 onIndent={rowIndent}
                 onOutdent={rowOutdent}
-                isDragActive={activeId !== null}
                 onAdd={rowAdd}
                 onDelete={rowDelete}
               />
+              </SortableRow>
             )
           })}
           </Box>

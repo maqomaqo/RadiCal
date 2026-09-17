@@ -11,7 +11,7 @@
 // Two flows share this page: a saved analysis edits its stored tree through
 // PUT /analysis/:id/model-tree, and a new one edits a draft tree held in
 // stores/analysisStore.ts that is submitted with the analysis.
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
   Container,
@@ -267,9 +267,13 @@ export default function Stratigraphy() {
   // The rules the backend enforces (services/model_tree.validate_tree), run
   // here so an invalid structure cannot be submitted. The editor shows what is
   // wrong; this stops Save.
-  const structureProblems = activeTree
-    ? validateTree(activeTree, activeAssignments, activeMeasurements)
-    : []
+  //
+  // Memoised: it walks every element and every date, and this page renders
+  // on each keystroke in a name field.
+  const structureProblems = useMemo(
+    () => (activeTree ? validateTree(activeTree, activeAssignments, activeMeasurements) : []),
+    [activeTree, activeAssignments, activeMeasurements]
+  )
 
   const saveStructure = async () => {
     if (!editRouteId || !modelTree || structureProblems.length > 0) return

@@ -94,7 +94,7 @@ export default function SpatialOrderDialog({
                 </strong>
                 , so this is the model's structure rather than the data: the dates sit in a
                 phase no Boundary of its own opens. Close this and use{' '}
-                <em>Group dates into sites</em>, which builds one bracketed Sequence per
+                <em>Build from data › Group dates into sites</em>, which builds one bracketed Sequence per
                 location, context or position.
               </Typography>
             )}
