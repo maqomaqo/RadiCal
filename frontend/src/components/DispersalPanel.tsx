@@ -586,6 +586,9 @@ function OriginProfileCard({ profile, wave, sites, tiles }: {
               </Typography>
               <Typography variant="body2" color="text.secondary">
                 on a {profile.step_deg}° grid
+                {profile.reach_km != null && (
+                  <> within {Math.round(profile.reach_km).toLocaleString()} km of a site</>
+                )}
                 {/* Said here, beside the count it qualifies: "94 of 416
                     cells" on a grid of 1,058 needs the other 642 accounted
                     for, and they are the cells the front ran towards. */}
@@ -598,6 +601,23 @@ function OriginProfileCard({ profile, wave, sites, tiles }: {
               </Typography>
             </Box>
           </Stack>
+
+          {/* Said before the broad-region notice, because it is the more
+              specific of the two: a peak on the rim is what a monotone ridge
+              looks like, and a monotone ridge is the plane-wave degeneracy
+              the next notice explains. */}
+          {profile.peak_at_reach && (
+            <Alert severity="info" sx={{ mb: 2 }}>
+              The best-fitting cell is on the <strong>edge</strong> of the searched zone,
+              {profile.reach_km != null && (
+                <> {Math.round(profile.reach_km).toLocaleString()} km from the nearest site,</>
+              )}{' '}
+              so the fit was still improving where the search stopped. From far enough
+              back any origin fits a plane wave about as well, which is what this usually
+              means: the dates constrain the direction the front came from, not how far
+              back it started.
+            </Alert>
+          )}
 
           {/* The finding a best-guess marker would have hidden. */}
           {broad && (

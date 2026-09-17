@@ -409,6 +409,18 @@ export interface OriginProfile {
   refused: string | null
   /** Grid spacing actually used; widens for a continental spread. */
   step_deg: number | null
+  /**
+   * How far beyond the nearest site the search reached, in km. The zone is
+   * a disc of this radius around every site, joined into one piece — not a
+   * box around all of them, whose corners were the cells furthest from
+   * everything and won for it.
+   */
+  reach_km?: number | null
+  /**
+   * Whether the best cell sits on the zone's rim: the surface was still
+   * rising where the search stopped.
+   */
+  peak_at_reach?: boolean
   candidates: number
   /**
    * Grid cells left unscored because the sites get OLDER with distance from

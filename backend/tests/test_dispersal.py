@@ -823,11 +823,16 @@ class TestProfilingAnOrigin:
 
         # The front runs due east along latitude zero from (0, 0). Sliding
         # the origin backwards -- west -- fits as well all the way to the
-        # grid's edge, so the region reaches that edge; and it never gets
+        # zone's edge, so the region reaches that edge; and it never gets
         # ahead of the first site, which would be sliding it FORWARDS.
-        westernmost = min(s.longitude for s in sites) - dispersal.ORIGIN_MARGIN_DEG
-        assert min(p['lon'] for p in region) <= westernmost + 1.0
-        assert max(p['lon'] for p in region) <= min(s.longitude for s in sites)
+        reach_deg = dispersal.ORIGIN_REACH_KM / dispersal.KM_PER_DEG_LAT
+        westernmost = min(s.longitude for s in sites) - reach_deg
+        # Within one cell of the reach: the last whole-degree cell inside it.
+        assert min(p['lon'] for p in region) <= westernmost + 1.0 + 1e-9
+        # Within a cell of the first site: a whole-degree cell half a degree
+        # past it still sees the sites get younger with distance, on this
+        # much scatter, and is not "ahead" in any sense the search can tell.
+        assert max(p['lon'] for p in region) <= min(s.longitude for s in sites) + 1.0
         # And it is a band along the axis rather than a blob around the
         # origin: the cells on the axis itself all survive.
         on_axis = [p for p in region if abs(p['lat']) < 1e-9]
@@ -896,7 +901,9 @@ class TestProfilingAnOrigin:
         an origin twelve thousand kilometres behind the front fit about as
         well as anything.
         """
-        sites, draws, _origin = _front(n_sites=8, seed=2)
+        # Scattered, so the region is a band along the axis rather than the
+        # single perfect cell an exact front gives, and has two sides to be on.
+        sites, draws, _origin = _front(n_sites=8, scatter=60.0, seed=2)
         # Move the synthetic front onto the antimeridian.
         shifted = [dispersal.SiteSpec(
             element_id=s.element_id, name=s.name, parameter_id=s.parameter_id,
@@ -932,6 +939,54 @@ class TestProfilingAnOrigin:
 
         assert profile['candidates'] <= dispersal.MAX_ORIGIN_CANDIDATES
         assert profile['step_deg'] > dispersal.ORIGIN_GRID_DEG
+
+    def test_the_zone_is_discs_around_the_sites_not_a_box_around_them(self):
+        """
+        A rectangle's corners are the cells furthest from every site, and on a
+        surface that keeps rising away from the front the furthest cell wins by
+        construction: on a real model the region sat in the bottom-left corner
+        of the box for no better reason. So no searched cell may be further
+        from its nearest site than the reach.
+        """
+        sites, draws, _origin = _front(n_sites=8, scatter=60.0, seed=4)
+        profile = dispersal.profile_origin(sites, draws)
+        reach = profile['reach_km']
+        assert reach == pytest.approx(dispersal.ORIGIN_REACH_KM)
+        for cell in profile['region']:
+            nearest = min(haversine_km(cell['lat'], cell['lon'], s.latitude, s.longitude)
+                          for s in sites)
+            assert nearest <= reach + 1.0
+        # And the box's corner -- the reach out in BOTH directions from the
+        # westernmost site -- is not in it: a disc has no corner.
+        reach_deg = reach / dispersal.KM_PER_DEG_LAT
+        corner = (0.0 - reach_deg, min(s.longitude for s in sites) - reach_deg)
+        assert not any(abs(p['lat'] - corner[0]) < 0.5 and abs(p['lon'] - corner[1]) < 0.5
+                       for p in profile['region'])
+
+    def test_the_reach_grows_until_the_discs_join(self):
+        """
+        Two clusters far apart would otherwise be searched as two islands
+        with nothing between them, where the origin of a front that ran from
+        one to the other most plausibly lies.
+        """
+        sites, draws, _origin = _front(n_sites=8, scatter=60.0, seed=4)
+        # Pull the last four sites 20 degrees east: a 2,000 km gap.
+        for site in sites[4:]:
+            site.longitude += 20.0
+        profile = dispersal.profile_origin(sites, draws)
+        gap = haversine_km(0.0, sites[3].longitude, 0.0, sites[4].longitude)
+        assert profile['reach_km'] == pytest.approx(gap / 2.0 + dispersal.ORIGIN_NECK_KM)
+        assert profile['reach_km'] > dispersal.ORIGIN_REACH_KM
+
+    def test_a_peak_on_the_rim_is_said_to_be(self):
+        """
+        The synthetic front's surface rises all the way back along its axis,
+        so its best cell is on the zone's edge -- and that is reported, since
+        it means the search stopped where the surface was still rising.
+        """
+        sites, draws, _origin = _front(n_sites=8, scatter=60.0, seed=4)
+        profile = dispersal.profile_origin(sites, draws)
+        assert profile['peak_at_reach'] is True
 
     def test_it_looks_outside_the_sites_own_box(self):
         """

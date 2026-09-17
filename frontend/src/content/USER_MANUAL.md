@@ -713,7 +713,12 @@ that were sampled together — and the Results page shows them above the results
   circular 95% interval, and drawn as **isochrons** on the map. It is the look at the data with no
   hypothesis in it, which is why it comes first.
 - **Where it could have started**: the wave-of-advance fit profiled over a grid of candidate
-  origins, rendered as a region on the map rather than a point with false precision.
+  origins, rendered as a region on the map rather than a point with false precision. The grid
+  covers everywhere within about 700 km of a dated site — a disc around each, widened until the
+  discs join into one zone — rather than a box around all of them, whose far corners were the
+  cells furthest from everything and tended to win for it. If the best cell sits on the edge of
+  the zone the panel says so: the fit was still improving where the search stopped, which usually
+  means the dates fix the direction the front came from but not how far back it started.
 - **Wave of advance** from a placed origin — `t = t₀ − d / v` per draw — reported as **front
   speed**, **arrival at the origin**, and the number of sites. Optional: press **Place an origin**
   under the switch to drop a pin (with the dates on the map for context) and the fit is added
