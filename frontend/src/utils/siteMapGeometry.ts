@@ -140,6 +140,42 @@ export function geoProjectionOf(graphDiv: unknown): GeoProjection | null {
 export interface MapLibreMap {
   unproject(point: [number, number]): { lat: number; lng: number } | null | undefined
   getContainer(): Element | null | undefined
+  hasImage?(id: string): boolean
+  addImage?(id: string, image: { width: number; height: number; data: Uint8Array }): void
+}
+
+/**
+ * The icon name plotly's scattermap puts on every text label -- `{symbol}-15`
+ * with an empty symbol -- and, finding no such image, fetches from unpkg.com.
+ * See preventIconFetch.
+ */
+export const PLOTLY_TEXT_ICON = '-15'
+
+/**
+ * Register a blank image under the name plotly's text layer asks for, so
+ * the map never reports it missing and plotly never goes to unpkg for it.
+ *
+ * plotly 2.35's scattermap draws text on a MapLibre symbol layer whose
+ * icon-image is `{symbol}-15`; a text-only trace has no symbol, so the
+ * layer asks for an image called `-15`, and plotly's styleimagemissing
+ * handler answers by fetching `https://unpkg.com/maki@2.1.0/icons/-15.svg`
+ * -- a request to a third party that fails on CORS and would draw nothing
+ * if it succeeded. The handler is inside plotly and cannot be unhooked, but
+ * it only fires for an image the map does not have. A 1x1 transparent
+ * pixel under that name is enough; it is never drawn at any visible size.
+ *
+ * Idempotent, and safe against an upgrade that removes the methods: it
+ * does nothing rather than throw.
+ */
+export function preventIconFetch(map: MapLibreMap): boolean {
+  if (typeof map.hasImage !== 'function' || typeof map.addImage !== 'function') return false
+  try {
+    if (map.hasImage(PLOTLY_TEXT_ICON)) return true
+    map.addImage(PLOTLY_TEXT_ICON, { width: 1, height: 1, data: new Uint8Array(4) })
+    return true
+  } catch {
+    return false
+  }
 }
 
 /** The MapLibre map behind a tiled basemap, or null. */

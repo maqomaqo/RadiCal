@@ -525,9 +525,6 @@ function OriginProfileCard({ profile, wave, sites, tiles }: {
         <Typography variant="h6" component="h2">
           Where it could have started
         </Typography>
-        <Typography variant="body2" color="text.secondary">
-          profiled, not assumed
-        </Typography>
       </Stack>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2, maxWidth: '74ch' }}>
         Every position on a coarse grid tried as an origin, and how well each one fits as a starting point for the front.

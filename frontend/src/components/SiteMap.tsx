@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { CSSProperties } from 'react'
 import { Box, Button, Paper, Typography } from '@mui/material'
 import DownloadIcon from '@mui/icons-material/Download'
 import Plotly from 'plotly.js-dist-min'
-import createPlotlyComponent from 'react-plotly.js/factory'
 
 import { useTileServerReachable } from '@/hooks/useTileServer'
 import { CONTEXT_PALETTE } from '@/theme/diagramColors'
@@ -16,6 +16,7 @@ import {
   latLonFromMapPoint,
   latLonFromPoint,
   mapLibreOf,
+  preventIconFetch,
   roundPlacement,
   siteLabel,
   unplaced,
@@ -24,7 +25,71 @@ import {
 } from '@/utils/siteMapGeometry'
 import type { MapPoint, MapSite } from '@/utils/siteMapGeometry'
 
-const Plot = createPlotlyComponent(Plotly)
+/**
+ * The map's own binding to Plotly, in place of react-plotly.js.
+ *
+ * react-plotly.js queues every Plotly.react on one promise chain per
+ * component instance, and purges the div when the instance unmounts. Under
+ * React's StrictMode -- development only, but that is where the app is
+ * tested -- a mount is immediately followed by a simulated unmount and
+ * remount of the SAME instance. The first Plotly.react has by then created
+ * its MapLibre map and is waiting for that map to load; the purge removes
+ * the map, so it never does, and the remount's Plotly.react queues behind
+ * a promise that will never settle. The result was a tiled map that drew
+ * nothing, about three times in four, and only on a page whose maps mount
+ * from a fetch rather than a click. The offline map never showed it
+ * because a geo subplot draws synchronously.
+ *
+ * So: no chain. Each render calls Plotly.react on the div and forgets the
+ * promise, other than to report the graph div once it is drawn; the purge
+ * on unmount is the only other thing that touches the div. A Plotly.react
+ * abandoned by a purge is left to hang, harmlessly.
+ */
+function PlotlyFigure({
+  data,
+  layout,
+  config,
+  onDrawn,
+  style,
+}: {
+  data: unknown[]
+  layout: Record<string, unknown>
+  config: Record<string, unknown>
+  /** Called with the graph div each time Plotly has finished drawing it. */
+  onDrawn: (graphDiv: HTMLElement) => void
+  style?: CSSProperties
+}) {
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    let current = true
+    const plotly = Plotly as {
+      react(gd: HTMLElement, data: unknown[], layout: unknown, config: unknown): Promise<unknown>
+    }
+    plotly
+      .react(el, data, layout, config)
+      .then(() => {
+        if (current) onDrawn(el)
+      })
+      // A rejection here is a plot that could not be drawn; the caption
+      // under the map already covers the one cause a reader can act on.
+      .catch(() => {})
+    return () => {
+      current = false
+    }
+  }, [data, layout, config, onDrawn])
+
+  useEffect(() => {
+    const el = ref.current
+    return () => {
+      if (el) (Plotly as { purge(gd: HTMLElement): void }).purge(el)
+    }
+  }, [])
+
+  return <div ref={ref} style={style} />
+}
 
 /**
  * Where the basemap geometry is served from -- this app, not a CDN.
@@ -145,6 +210,9 @@ const VALUE_RAMP = ['#8fcdb7', '#6cb59d', ...CONTEXT_PALETTE]
  * on the figure has the same edge whatever value it carries.
  */
 const VALUE_MARK_OUTLINE = { width: 1, color: 'axis' as const }
+
+/** How wide a value mark is drawn, before its outline. */
+const VALUE_MARK_SIZE = 12
 
 interface SiteMapProps {
   /** Every date the map is about, placed or not. */
@@ -551,6 +619,26 @@ export default function SiteMap({
                 cmax: reach,
               }
             : { colorscale: VALUE_RAMP.map((hex, i) => [i / last, hex]) }
+        if (tiles) {
+          // The outline, as a disc UNDER each mark. scattermap has no
+          // marker.line -- MapLibre's circle layer takes no stroke through
+          // plotly -- so the ink edge the offline map draws in one trace is
+          // drawn here in two: an ink disc one outline-width larger on every
+          // side, then the coloured mark over it. Same size, same
+          // positions, so they cannot drift apart.
+          list.push({
+            type: geoType,
+            mode: 'markers' as const,
+            name: 'Outline',
+            lat: graded.map((s) => s.latitude),
+            lon: graded.map((s) => s.longitude),
+            marker: {
+              size: VALUE_MARK_SIZE + 2 * VALUE_MARK_OUTLINE.width,
+              color: plot[VALUE_MARK_OUTLINE.color],
+            },
+            hoverinfo: 'skip' as const,
+          })
+        }
         list.push({
           type: geoType,
           mode: 'markers' as const,
@@ -559,7 +647,7 @@ export default function SiteMap({
           lon: graded.map((s) => s.longitude),
           text: graded.map(siteLabel),
           marker: {
-            size: 12,
+            size: VALUE_MARK_SIZE,
             color: graded.map((s) => valueOf(s) as number),
             ...scale,
             // Reversed so the OLDEST arrival is the strongest shade: the
@@ -592,6 +680,20 @@ export default function SiteMap({
     // Last, so it is never hidden: it is the assumption the whole figure is
     // measured from, and a reader who cannot find it cannot read the rest.
     if (origin) {
+      if (tiles) {
+        // The ring, as a disc under the mark -- scattermap has no
+        // marker.line, as above. Without it the origin was a white dot on a
+        // cream basemap: the one mark the figure is measured from, invisible.
+        list.push({
+          type: geoType,
+          mode: 'markers' as const,
+          name: 'Origin ring',
+          lat: [origin.latitude],
+          lon: [origin.longitude],
+          marker: { size: 15 + 2 * 3, color: plot.posteriorLine },
+          hoverinfo: 'skip' as const,
+        })
+      }
       list.push({
         type: geoType,
         mode: 'markers' as const,
@@ -699,6 +801,55 @@ export default function SiteMap({
     return () => observer.disconnect()
   }, [])
 
+  /**
+   * Register plotly's text-label icon on the tiled map as soon as the map
+   * exists -- see preventIconFetch for what this stops.
+   *
+   * Polled from here rather than done in onInitialized alone, because
+   * onInitialized is too late about half the time: plotly's promise settles
+   * on the map's next render, and the request for the icon comes from the
+   * worker that lays the labels out, which can be before or after that
+   * render. The map object itself exists from the moment Plotly.react is
+   * called -- a microtask after mount -- so a frame-by-frame look for it
+   * catches it before its style has loaded, let alone before any label.
+   */
+  useEffect(() => {
+    if (!tiles) return
+    let frame = 0
+    let tries = 0
+    const look = () => {
+      const gd = plotBox.current?.querySelector('.js-plotly-plot')
+      const map = mapLibreOf(gd)
+      if (map && preventIconFetch(map)) return
+      // Ten seconds of frames, then give up: the plot has failed for some
+      // other reason and there is nothing here to register on.
+      if (++tries < 600) frame = requestAnimationFrame(look)
+    }
+    frame = requestAnimationFrame(look)
+    return () => cancelAnimationFrame(frame)
+  }, [tiles])
+
+  const config = useMemo(
+    () => ({
+      displayModeBar: false,
+      responsive: true,
+      // Wheel zoom in every mode, for the same reason dragmode is pan.
+      scrollZoom: true,
+      // Served from this app. Without it Plotly fetches the world from
+      // cdn.plot.ly -- see TOPOJSON_URL above.
+      topojsonURL: TOPOJSON_URL,
+    }),
+    [],
+  )
+
+  const onDrawn = useCallback((gd: HTMLElement) => {
+    graphDiv.current = gd
+    // Belt and braces for the frame loop above: idempotent, and covers a
+    // map it somehow missed.
+    const map = mapLibreOf(gd)
+    if (map) preventIconFetch(map)
+  }, [])
+
   const layout = useMemo(() => {
     const common = {
       margin: { l: 0, r: 0, t: 0, b: 0 },
@@ -793,30 +944,18 @@ export default function SiteMap({
           position: 'relative',
         }}
       >
-        {!deciding && <Plot
-          // A fresh plot when the basemap changes kind, rather than asking
-          // Plotly.react to turn a geo subplot into a MapLibre one in place.
-          key={tiles ? 'tiled' : 'offline'}
-          data={traces}
-          layout={layout}
-          config={{
-            displayModeBar: false,
-            responsive: true,
-            // Wheel zoom in every mode, for the same reason dragmode is pan.
-            scrollZoom: true,
-            // Served from this app. Without it Plotly fetches the world from
-            // cdn.plot.ly -- see TOPOJSON_URL above.
-            topojsonURL: TOPOJSON_URL,
-          }}
-          onInitialized={(_figure: unknown, gd: unknown) => {
-            graphDiv.current = gd
-          }}
-          onUpdate={(_figure: unknown, gd: unknown) => {
-            graphDiv.current = gd
-          }}
-          useResizeHandler
-          style={{ position: 'absolute', inset: 0 }}
-        />}
+        {!deciding && (
+          <PlotlyFigure
+            // A fresh plot when the basemap changes kind, rather than asking
+            // Plotly.react to turn a geo subplot into a MapLibre one in place.
+            key={tiles ? 'tiled' : 'offline'}
+            data={traces}
+            layout={layout}
+            config={config}
+            onDrawn={onDrawn}
+            style={{ position: 'absolute', inset: 0 }}
+          />
+        )}
       </Paper>
 
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 0.5 }}>
