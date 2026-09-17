@@ -18,8 +18,12 @@ export function useTileServerReachable(wanted: boolean): Reachability {
 
   useEffect(() => {
     if (!wanted) return
+    // Subscribed BEFORE asking, so a verdict that comes back at once -- the
+    // browser already knows it is offline -- still has a listener, and the
+    // monitor knows something is waiting on the retry it then schedules.
+    const unsubscribe = tileServerMonitor.subscribe(setVerdict)
     setVerdict(tileServerMonitor.check())
-    return tileServerMonitor.subscribe(setVerdict)
+    return unsubscribe
   }, [wanted])
 
   return wanted ? verdict : null

@@ -18,8 +18,28 @@ export const PROBE_TILE_URL = 'https://tile.openstreetmap.org/0/0/0.png'
  * How long to wait for the probe tile before concluding the server is out
  * of reach. Long enough for a slow connection to deliver a 10 kB image,
  * short enough that an offline user is not looking at a blank box for it.
+ *
+ * Measured by the browser's timer, which is NOT wall-clock time when the
+ * page is busy: on a results page with eight hundred dates the main thread
+ * is drawing the stacked plot for ten seconds or more, and the timer's
+ * callback and the tile's load event both wait for it. Which of the two
+ * runs first afterwards is not promised, so when the timer wins it checks
+ * whether the tile has in fact arrived before calling the server
+ * unreachable -- see probeTileServer. Without that check the first view of
+ * a large analysis fell back to the offline map about half the time and a
+ * refresh, with the plot's data cached, did not.
  */
 export const PROBE_TIMEOUT_MS = 4000
+
+/**
+ * How soon to ask again after a NEGATIVE verdict, then how much longer each
+ * time. A wrong "unreachable" is the expensive mistake -- every map on the
+ * page draws the wrong basemap for the verdict's whole life -- and a real
+ * one costs nothing to confirm, so a negative is re-checked a few times
+ * while anything is still listening, and then left alone until the browser
+ * reports the connection back.
+ */
+export const RETRY_AFTER_MS = [5_000, 15_000, 45_000]
 
 /**
  * How long a verdict is trusted before the next map to mount asks again.
@@ -58,7 +78,12 @@ export function probeTileServer(
       image.src = ''
       resolve(ok)
     }
-    const timer = setTimeout(() => settle(false), timeoutMs)
+    const timer = setTimeout(() => {
+      // The timer ran late if the page was busy, and the tile may have
+      // landed in the meantime with its load event still queued behind
+      // this. A complete image with a size is a tile that arrived.
+      settle(Boolean(image.complete && image.naturalWidth > 0))
+    }, timeoutMs)
     image.onload = () => settle(true)
     image.onerror = () => settle(false)
     // A cache-buster, so a tile the browser cached last week does not vouch
@@ -84,10 +109,14 @@ class TileServerMonitor {
   private listeners = new Set<Listener>()
   private listeningToWindow = false
 
+  private retryTimer: ReturnType<typeof setTimeout> | null = null
+  private retriesMade = 0
+
   constructor(
     private readonly probe: () => Promise<boolean> = () => probeTileServer(),
     private readonly ttlMs: number = VERDICT_TTL_MS,
     private readonly now: () => number = () => Date.now(),
+    private readonly retryAfterMs: readonly number[] = RETRY_AFTER_MS,
   ) {}
 
   /** The current verdict; null until the first probe has answered. */
@@ -104,23 +133,27 @@ class TileServerMonitor {
   check(): Reachability {
     this.attachToWindow()
     const stale = this.verdict === null || this.now() - this.decidedAt > this.ttlMs
-    if (stale && !this.inflight) {
-      // The browser knows it is offline before any request could: skip the
-      // wait and say so. Only the negative is trusted -- `onLine` true
-      // means a network interface is up, not that anything answers on it.
-      if (typeof navigator !== 'undefined' && navigator.onLine === false) {
-        this.decide(false)
-      } else {
-        this.inflight = this.probe()
-          .then((ok) => ok, () => false)
-          .then((ok) => {
-            this.inflight = null
-            this.decide(ok)
-            return ok
-          })
-      }
-    }
+    if (stale && !this.inflight) this.ask()
     return this.verdict
+  }
+
+  /** Probe now, whatever the verdict in hand. */
+  private ask(): void {
+    if (this.inflight) return
+    // The browser knows it is offline before any request could: skip the
+    // wait and say so. Only the negative is trusted -- `onLine` true means
+    // a network interface is up, not that anything answers on it.
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      this.decide(false)
+      return
+    }
+    this.inflight = this.probe()
+      .then((ok) => ok, () => false)
+      .then((ok) => {
+        this.inflight = null
+        this.decide(ok)
+        return ok
+      })
   }
 
   /** Subscribe to verdict changes. Returns the unsubscribe. */
@@ -135,6 +168,8 @@ class TileServerMonitor {
   invalidate(): void {
     this.verdict = null
     this.decidedAt = 0
+    this.retriesMade = 0
+    this.cancelRetry()
     this.notify()
   }
 
@@ -142,6 +177,35 @@ class TileServerMonitor {
     this.verdict = ok
     this.decidedAt = this.now()
     this.notify()
+    if (ok) {
+      this.retriesMade = 0
+      this.cancelRetry()
+    } else {
+      this.scheduleRetry()
+    }
+  }
+
+  /**
+   * After a negative, ask again on the RETRY_AFTER_MS schedule while
+   * anything is listening. A map that fell back is subscribed, so a wrong
+   * verdict is corrected under it; an empty page asks nothing.
+   */
+  private scheduleRetry(): void {
+    this.cancelRetry()
+    const wait = this.retryAfterMs[this.retriesMade]
+    if (wait === undefined || this.listeners.size === 0) return
+    this.retryTimer = setTimeout(() => {
+      this.retryTimer = null
+      this.retriesMade += 1
+      if (this.listeners.size > 0) this.ask()
+    }, wait)
+  }
+
+  private cancelRetry(): void {
+    if (this.retryTimer !== null) {
+      clearTimeout(this.retryTimer)
+      this.retryTimer = null
+    }
   }
 
   private notify(): void {

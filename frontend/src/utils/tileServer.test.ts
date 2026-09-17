@@ -78,6 +78,60 @@ describe('TileServerMonitor', () => {
     expect(probe).toHaveBeenCalledTimes(2)
   })
 
+  it('asks again after a negative while something is listening, then gives up', async () => {
+    vi.useFakeTimers()
+    try {
+      const probe = vi.fn(() => Promise.resolve(false))
+      const monitor = new TileServerMonitor(probe, 60_000, () => Date.now(), [100, 200])
+      const off = monitor.subscribe(() => {})
+      monitor.check()
+      await vi.advanceTimersByTimeAsync(0)
+      expect(probe).toHaveBeenCalledTimes(1)
+      expect(monitor.current()).toBe(false)
+
+      await vi.advanceTimersByTimeAsync(100)
+      expect(probe).toHaveBeenCalledTimes(2)
+      await vi.advanceTimersByTimeAsync(200)
+      expect(probe).toHaveBeenCalledTimes(3)
+      // The schedule is spent: no fourth ask, however long it waits.
+      await vi.advanceTimersByTimeAsync(10_000)
+      expect(probe).toHaveBeenCalledTimes(3)
+      off()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('corrects a wrong negative under the maps that fell back', async () => {
+    vi.useFakeTimers()
+    try {
+      let answer = false
+      const monitor = new TileServerMonitor(() => Promise.resolve(answer), 60_000, () => Date.now(), [50])
+      const seen: Array<boolean | null> = []
+      monitor.subscribe((v) => seen.push(v))
+      monitor.check()
+      await vi.advanceTimersByTimeAsync(0)
+      answer = true
+      await vi.advanceTimersByTimeAsync(50)
+      expect(seen).toEqual([false, true])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('does not retry into an empty room', async () => {
+    vi.useFakeTimers()
+    try {
+      const probe = vi.fn(() => Promise.resolve(false))
+      const monitor = new TileServerMonitor(probe, 60_000, () => Date.now(), [50])
+      monitor.check()
+      await vi.advanceTimersByTimeAsync(1_000)
+      expect(probe).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('stops telling a listener that unsubscribed', async () => {
     const monitor = new TileServerMonitor(() => Promise.resolve(true), 60_000, () => 0)
     const listener = vi.fn()
@@ -91,11 +145,15 @@ describe('TileServerMonitor', () => {
 
 describe('probeTileServer', () => {
   // A stand-in for Image that lets the test decide how the load ends.
-  function fakeImage(outcome: 'load' | 'error' | 'hang') {
+  function fakeImage(outcome: 'load' | 'error' | 'hang' | 'landed-silently') {
     const requested: string[] = []
     class FakeImage {
       onload: (() => void) | null = null
       onerror: (() => void) | null = null
+      // What a real Image reports once its bytes are in, whether or not
+      // its load event has been delivered yet.
+      complete = false
+      naturalWidth = 0
       private _src = ''
       get src() {
         return this._src
@@ -106,6 +164,12 @@ describe('probeTileServer', () => {
         requested.push(value)
         if (outcome === 'load') queueMicrotask(() => this.onload?.())
         if (outcome === 'error') queueMicrotask(() => this.onerror?.())
+        // The bytes arrive but the event never gets to run before the
+        // timer does -- a page whose main thread was busy drawing.
+        if (outcome === 'landed-silently') {
+          this.complete = true
+          this.naturalWidth = 256
+        }
       }
     }
     return { FakeImage: FakeImage as unknown as typeof Image, requested }
@@ -130,6 +194,18 @@ describe('probeTileServer', () => {
       const result = probeTileServer('https://x/0/0/0.png', 50, FakeImage)
       await vi.advanceTimersByTimeAsync(60)
       await expect(result).resolves.toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('is true when the tile landed while the page was too busy to hear it', async () => {
+    vi.useFakeTimers()
+    try {
+      const { FakeImage } = fakeImage('landed-silently')
+      const result = probeTileServer('https://x/0/0/0.png', 50, FakeImage)
+      await vi.advanceTimersByTimeAsync(60)
+      await expect(result).resolves.toBe(true)
     } finally {
       vi.useRealTimers()
     }

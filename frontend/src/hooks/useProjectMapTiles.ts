@@ -1,4 +1,4 @@
-import { useEffect, useReducer } from 'react'
+import { useEffect, useReducer, useState } from 'react'
 
 /**
  * Settings read once per project and shared by every page that asks. A
@@ -17,12 +17,14 @@ function fetchMapTilesEnabled(projectId: string): Promise<boolean> {
   const request = fetch(`/api/projects/${projectId}`)
     .then((r) => r.json())
     .then((data) => {
-      const enabled = !!(data?.success && data.data?.map_tiles_enabled)
+      if (!data?.success) throw new Error('project not read')
+      const enabled = !!data.data?.map_tiles_enabled
       cache.set(projectId, enabled)
       return enabled
     })
     // Off on any failure: the private basemap is the default, and a project
-    // that cannot be read has not said yes to anything.
+    // that cannot be read has not said yes to anything. Not CACHED, though:
+    // a failure is about this moment, and the next page to ask should ask.
     .catch(() => false)
     .finally(() => {
       inflight.delete(projectId)
@@ -56,17 +58,25 @@ export function useProjectMapTiles(projectId: string | null | undefined): boolea
   // start one render behind, and that render is a map drawn on the wrong
   // basemap.
   const [, rerender] = useReducer((n: number) => n + 1, 0)
+  // A read that failed, so the map draws the private default rather than
+  // waiting forever for an answer that is not coming.
+  const [failedFor, setFailedFor] = useState<string | null>(null)
 
   useEffect(() => {
     if (!projectId || cache.has(projectId)) return
     let active = true
     fetchMapTilesEnabled(projectId).then(() => {
-      if (active) rerender()
+      if (!active) return
+      if (!cache.has(projectId)) setFailedFor(projectId)
+      rerender()
     })
     return () => {
       active = false
     }
   }, [projectId])
 
-  return projectId ? cache.get(projectId) ?? null : false
+  if (!projectId) return false
+  const known = cache.get(projectId)
+  if (known !== undefined) return known
+  return failedFor === projectId ? false : null
 }
