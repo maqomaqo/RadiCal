@@ -7,18 +7,20 @@
 3. [Adding Measurements](#adding-measurements)
 4. [Importing Dates from a File](#importing-dates-from-a-file)
 5. [Calibration Curves](#calibration-curves)
-6. [Model Structure (Bayesian only)](#model-structure-bayesian-only)
-7. [Running an Analysis](#running-an-analysis)
-8. [Viewing Results](#viewing-results)
-9. [Durations and Differences](#durations-and-differences)
-10. [Wiggle Matching](#wiggle-matching)
-11. [Age-Depth Modelling](#age-depth-modelling)
-12. [Exporting Data](#exporting-data)
-13. [Projects and Date Collections](#projects-and-date-collections)
-14. [Comparing Analyses](#comparing-analyses)
-15. [Best Practices](#best-practices)
-16. [Appendix A: Mathematical Methods](#appendix-a-mathematical-methods)
-17. [Bibliography](#bibliography)
+6. [Marine Reservoir Offsets](#marine-reservoir-offsets)
+7. [Model Structure (Bayesian only)](#model-structure-bayesian-only)
+8. [Running an Analysis](#running-an-analysis)
+9. [Viewing Results](#viewing-results)
+10. [Durations and Differences](#durations-and-differences)
+11. [Wiggle Matching](#wiggle-matching)
+12. [Age-Depth Modelling](#age-depth-modelling)
+13. [Geographic Analysis](#geographic-analysis)
+14. [Exporting Data](#exporting-data)
+15. [Projects and Date Collections](#projects-and-date-collections)
+16. [Comparing Analyses](#comparing-analyses)
+17. [Best Practices](#best-practices)
+18. [Appendix A: Mathematical Methods](#appendix-a-mathematical-methods)
+19. [Bibliography](#bibliography)
 
 ## Getting Started
 
@@ -247,6 +249,73 @@ years while the drop at its start is 103; at the ±15 of the best AMS work, 312 
 gap between those two places is far larger than variation in laboratory accuracy. So, where you are on the curve 
 matters more than what you pay for the measurement. **Export profile** saves the whole
 curve's profile as CSV; **Export this window** saves the visible stretch of the curve itself.
+
+## Marine Reservoir Offsets
+
+A marine sample calibrates against Marine20, which already models the *global* average offset of
+the surface ocean from the atmosphere. **ΔR** is the *local* deviation from that average — the
+part a global curve cannot know — and it is entered as a value with its own 1σ uncertainty, both in
+¹⁴C years. RadiCal takes a ΔR in three ways.
+
+**Typed.** On the measurement form, a Marine sample type shows the ΔR and ± fields; in a project's
+date collection, tick the dates and press **Set ΔR › Enter a value** to write one value to all of
+them at once. Leave both fields empty to clear the offset, and a marine date with none set
+calibrates as ΔR = 0 — the collection's ΔR column says **none set** on exactly those dates so they
+are not mistaken for corrected ones.
+
+**Imported.** An OxCal file's `Delta_R(...)` comes across with the dates it applies to (see
+[Importing Dates from a File](#importing-dates-from-a-file)); a CSV can carry `delta_r` and
+`delta_r_error` columns.
+
+**Derived from position.** A date that has coordinates (see
+[Geographic Analysis](#geographic-analysis)) can have its ΔR read off the published reservoir
+measurements nearest to it, the way calib.org's Marine Reservoir Correction Database does it — and
+to the same printed integer, because the app reproduces that page's own combination rule rather
+than calling it (see [A.15](#a15-deriving-a-reservoir-offset-from-position)).
+
+### The reservoir database
+
+The measurements come from Reimer & Reimer's Marine Reservoir Correction Database, mirrored on
+this installation as a **snapshot** — frozen once stored and citable by id, like a calibration
+curve, so a published date keeps meaning what it said even after the source database grows.
+Nothing is shipped with the app: on the **Curves** page, under the curves, the **Marine reservoir
+database** card says what is mirrored. **Check calib.org** asks the source what it currently holds
+(one small request), and **Fetch the database** — or **Fetch a new snapshot** when a mirror already
+exists — brings it down (about a megabyte). Neither happens on its own. Fetching a newer snapshot
+adds it beside the old one; dates that cite the old one go on citing it.
+
+### Deriving a value
+
+In a project's date collection, select the dates from **one site** — they must all be placed, and
+at the same coordinate, since a centroid of two sites is a place neither of them is — and press
+**Set ΔR › Derive from position**. The panel shows:
+
+- **The value**, large, as `ΔR ± σ` from *N* points, with the database it came from.
+- **Nearest points: N.** The weighted mean is taken over the *N* reservoir measurements nearest the
+  site, and it moves with *N* — somewhere like Callao it moves by nearly 200 years across the
+  slider's range. Slide it before accepting a number; the default of 10 is calib.org's own.
+- **The distance to the nearest measurement**, always, and the farthest one used. Beyond 100 km
+  the line turns amber: the value is then a regional average rather than a local offset, and
+  worth saying so in print.
+- **The point list**: each measurement's distance, ΔR, feeding habit and locality. Untick a point
+  to leave it out; a point with no published uncertainty cannot be weighted and is shown struck
+  through rather than silently dropped, so a nearest-10 that is really a nearest-9 says so.
+- **Feeding habit.** Deposit feeders can take up old carbon from sediment, carnivores sit about
+  35 years older than nearby suspension feeders, and a migratory animal may not have lived where
+  it was found. Those three habits are marked in the list, and one line under the value gives
+  the counterfactual — *Suspension feeders only (7 of 10): −188 ± 61* — as a link that swaps the
+  value over. When the two differ by more than a published ΔR typically claims for itself, the
+  panel says so as a warning, because which set you use is then a decision rather than a
+  detail. Grazers and unknown habits are not marked: measured against the suspension pool they
+  are indistinguishable from it.
+- **Apply to.** Where the selection can be widened, choose whether the value lands on the selected
+  dates only, every date at the same named location, or every date within a distance of one. Only
+  marine dates take it; terrestrial ones in the target are skipped and the button says how many.
+
+**Apply** writes the rounded value and uncertainty to the dates, together with a record of how it
+was derived — the snapshot id, the centre, *N*, the points used and excluded, and the
+suspension-only alternative — so a derived offset never loses its derivation. It then travels with
+the date into every analysis it is deployed to.
 
 ## Model Structure (Bayesian only)
 
@@ -568,6 +637,113 @@ between each pair of levels, in years per unit depth. Both are read off *joint* 
 posterior, for the same reason durations are: a rate is a function of two ages at once, and pairing
 their separate posteriors gives an answer wrong in shape rather than merely in scale. Undated levels
 are drawn with hollow markers, so it is visible which points carry a measurement.
+
+## Geographic Analysis
+
+Dates can carry the position they came from, and once they do, three things follow: a reservoir
+offset can be derived from where a marine sample is ([Marine Reservoir Offsets](#marine-reservoir-offsets)),
+a model can be built one site at a time, and a Bayesian run can ask whether the dated sites
+describe something *moving* across the landscape.
+
+### Placing dates
+
+A position is a **latitude** and **longitude** in decimal degrees, WGS84, minus for south and
+west. Degrees and minutes are not read. Enter both halves or neither — a date that looks placed
+but is not would be worse than one that is plainly unplaced.
+
+- **On the measurement form**, the two fields sit beside depth.
+- **From a file**, a CSV with `latitude`/`longitude` columns (`lat`/`lon`, `x`/`y` and the
+  common lab spellings are recognised).
+- **On the map.** In a project's date collection, tick the dates from one site and press **Place
+  on map**: click the map, or type the position, and it is written to every selected date — dates
+  from one site share a coordinate, which is why this is one edit rather than many. A click is
+  rounded to about ten metres. Sorting the collection by **Position** puts every date at one
+  coordinate in one run of rows, which is how a site is selected from a collection of many.
+
+**The basemap is drawn by the app itself**, from coastline data it serves, and asks nothing of
+anyone. It is accurate to about a kilometre; paste a recorded position for anything finer. A
+project can instead turn on **Show a basemap with streets and satellite detail** (Edit Project),
+which fetches map images from OpenStreetMap — that tells their servers which patch of ground is
+on screen each time the map is opened or panned: not the coordinates, but enough to locate a site.
+Worth it to drop a pin on a field boundary; not worth it to look at a distribution, and it needs
+the internet. The same dialog sets the project's **coordinate precision** — full, or rounded to
+0.01°, 0.1° or 1° (about 1, 11 or 110 km) — which governs what leaves in exports and figures.
+What is stored does not change, and the project's own table still shows the full value.
+
+### Sites
+
+For the models below, a **site** is an element opened by its own Boundary — a Sequence bracketed
+by a start and an end, one per place — whose dates carry coordinates. Its position is the centroid
+of its dates', and its arrival time is the posterior of the Boundary that opens it, not its oldest
+date: you almost never excavate the genuinely first thing at a site, so the oldest date is a
+*terminus ante quem* for arrival and a front regressed on oldest dates is late everywhere, by an
+amount that varies with how hard each site was dug.
+
+Placed dates sitting in the one starting phase every analysis begins with are therefore *not*
+sites, and a run would refuse them. On the Model Structure page, **Build from data › Group dates
+into sites** replaces the model with one bracketed Sequence per site, read off a column the dates
+already carry — their **location** name, their **context**, or their **position** (dates within
+5 km of one another). The menu says how many sites each key would make and how many dates carry
+none; those go into an unassigned phase beside the sites. No order between the sites is asserted.
+
+A Phase whose dates are more than 10 km apart is **refused** by name rather than averaged: two sites
+in one phase is a modelling error, and quietly placing the phase in the field between them would
+report a front that passed through somewhere nobody excavated.
+
+### Proposing an order from the map
+
+**Build from data › Propose an order from the map** builds a minimum spanning tree over the sites
+by great-circle distance, walks it from one end, and shows the resulting order on the map beside
+the model — as a **proposal** you accept or reject, never applied on its own. A spanning tree is
+spatial adjacency, not chronology: accepting it asserts that everything in one site predates
+everything in the next, which is a strong claim the data may refute. Its value is that accepting
+it makes that claim *testable* — run the model and the sites that do not fit the spatial order
+announce themselves in the agreement indices. Undo restores the previous structure.
+
+### Spatial dispersal
+
+On the New Analysis page, once the dates are placed, the Bayesian solver settings offer **Spatial
+dispersal**. Off by default: a straight line through dated points returns a speed whether or not
+there is a front. With it on, the run fits three things off the same *joint* posterior draws that
+durations use — a speed is a function of many modelled ages at once, so it has to be read off draws
+that were sampled together — and the Results page shows them above the results table, map first.
+
+- **Regional gradient**, no origin assumed. A plane `t = a + b·x + c·y` fitted per draw in a local
+  equal-area projection, reported as a **speed** in km/yr and a **direction of advance** with a
+  circular 95% interval, and drawn as **isochrons** on the map. It is the look at the data with no
+  hypothesis in it, which is why it comes first.
+- **Where it could have started**: the wave-of-advance fit profiled over a grid of candidate
+  origins, rendered as a region on the map rather than a point with false precision.
+- **Wave of advance** from a placed origin — `t = t₀ − d / v` per draw — reported as **front
+  speed**, **arrival at the origin**, and the number of sites. Optional: press **Place an origin**
+  under the switch to drop a pin (with the dates on the map for context) and the fit is added
+  beside the two that assume none. A negative speed is reported as negative: either the front ran
+  the other way, the origin is not where it started, or these dates do not describe a front at
+  all. Nothing flips a sign to make the answer look like a dispersal.
+
+**Residuals are the finding.** Every site is coloured on the map by how far it departs from the
+fit, and the wave of advance lists them in a table beside it: the signed residual in years —
+positive means the site is *older* than the front predicts (**early**), negative *later*
+(**late**) — sorted by magnitude. A plane's isochrons are always straight, parallel and evenly
+spaced, so a front that curved, slowed or sped up shows as a patch of neighbouring sites all one
+colour rather than in the lines. A single early outlier is where the
+interesting archaeology usually is: a leapfrog, a maritime route, a redeposited sample, or a wrong
+date. A fit that reported only a speed and an interval would hide it.
+
+**Refusals.** Each fit needs at least **six** sites; with fewer, a line through them returns a
+tidy speed with nothing left over for the data to contradict, so the number is withheld rather than
+shown with a caveat. A trend surface also needs sites spread in two directions — for a transect,
+place an origin and read the wave of advance instead — and a wave of advance needs the sites at
+more than a few distinct distances from its origin. Each refusal names its reason on the panel.
+
+**What the estimate is not.** Fitting per draw propagates the uncertainty in the *ages*. It does
+not propagate uncertainty in the origin, in the coordinates, or in the assumption that these sites
+are the front rather than the excavated subset of it; residuals are assumed independent when
+neighbouring sites in fact share whatever the model is missing, so the interval on the speed is
+optimistic in the way an OLS interval on autocorrelated data always is; and it is a plug-in
+Monte Carlo estimator, not a hierarchical model. The panel says all of this beside the number. For
+a group calibration, which has no model and so no Boundaries, sites are dated by their **earliest
+dated event** and labelled exactly that, with the bias named on the panel.
 
 ## Exporting Data
 
@@ -1274,8 +1450,78 @@ a factor that nothing on screen would reveal.
 the reason and with the qualification A.9 gives. The bands are quantiles rather than HPD regions:
 an envelope has to nest, and two HPD regions on a multi-peaked posterior need not.
 
+### A.15 Deriving a reservoir offset from position
+
+For a site at `(φ, λ)`, the *N* reservoir measurements nearest it by great-circle distance are
+taken from the snapshot, less any with no published uncertainty and any the user excluded, and
+combined as calib.org's Marine Reservoir Correction Database combines them:
+
+```
+w_i       =  1 / σ_i²
+ΔR        =  Σ w_i ΔR_i / Σ w_i
+internal  =  1 / √(Σ w_i)
+scatter   =  √( Σ w_i (ΔR_i − ΔR)² / Σ w_i  ×  n / (n − 1) )      [ 0 when n = 1 ]
+σ         =  max(internal, scatter)
+```
+
+The reported uncertainty is the *larger* of the weighted uncertainty in the mean and the weighted
+standard deviation of the points (Bevington 1969), not the two in quadrature — the rule was
+confirmed against the source's own page to the printed integer, and it is what lets a derived value
+be reproduced from calib.org by a reviewer. Both are rounded to whole years on apply.
+
+The same combination is run a second time over the suspension feeders alone, and the difference
+between the two is what the panel reports as the effect of feeding habit. Measured across the
+database, deposit feeders, carnivores and migratory animals sit some 35–55 years older than the
+suspension feeders near them; grazers and unknown habits do not differ from them at any radius, so
+they are neither marked nor excluded.
+
+### A.16 Spatial dispersal
+
+Sites are the elements of [A.5](#a5-the-bayesian-model) opened by their own Boundary, at the
+centroid of their dates' coordinates; a site's arrival age is that Boundary's posterior. All three
+fits are made **per joint draw** and pooled, so the chronological uncertainty is inside the
+estimate rather than bolted on afterwards, for the reason [A.9](#a9-durations-and-differences)
+gives.
+
+**Wave of advance.** For site *i* at great-circle distance `d_i` from an origin,
+
+```
+t_i  =  t₀ − d_i / v  +  ε_i
+```
+
+fitted by ordinary least squares on each draw, keeping `v = −1 / slope` and `t₀`. Older is a
+larger cal BP, so a front spreading outwards has ages that fall with distance and `v > 0`; a rising
+slope is reported as a negative speed. The *J* values of `v` and `t₀` are summarised as any
+duration is — median and 68.3% / 95.4% HPD — and each site's residual `t_i − (t₀ − d_i / v)` is
+reported in years with its own spread over draws.
+
+**Trend surface.** In a Lambert azimuthal equal-area projection centred on the sites' centroid
+(chosen by the data, so high latitudes are not distorted by a global default),
+
+```
+t_i  =  a + b·x_i + c·y_i
+```
+
+per draw; speed is `1 / √(b² + c²)` and the direction of advance is the azimuth of the gradient,
+pooled with a circular mean and a circular 95% interval, since a direction near due north cannot be
+averaged as a number. Isochrons are contours of the median plane.
+
+**Origin profile.** The wave-of-advance fit is repeated over a grid of candidate origins at roughly
+one degree across the sites' bounding box plus a margin, keeping the residual sum of squares per
+candidate per draw; the result is drawn as a likelihood region.
+
+**Refusals.** Fewer than six sites, sites at too few distinct distances from the origin, or sites
+too close to a straight line for a plane to be determined (measured as the ratio of the singular
+values of the centred site coordinates), each withhold the fit and say why. Residuals are treated as
+independent; spatial autocorrelation is not modelled, and the interval on `v` is optimistic to that
+extent. Distances are great-circle.
+
 ## Bibliography
 
+- Ammerman, A. J., and Cavalli-Sforza, L. L. (1971). Measuring the rate of spread of early farming
+  in Europe. *Man* 6(4), 674–688.
+- Bevington, P. R. (1969). *Data Reduction and Error Analysis for the Physical Sciences*. New York:
+  McGraw-Hill.
 - Bronk Ramsey, C. (1995). Radiocarbon calibration and analysis of stratigraphy: the OxCal program.
   *Radiocarbon* 37(2), 425–430.
 - Bronk Ramsey, C. (1998). Probability and dating. *Radiocarbon* 40(1), 461–474.
@@ -1318,6 +1564,8 @@ an envelope has to nest, and two HPD regions on a multi-peaked posterior need no
   1087–1092.
 - Nicholls, G., and Jones, M. (2001). Radiocarbon dating with temporal order constraints. *Journal of
   the Royal Statistical Society Series C (Applied Statistics)* 50(4), 503–521.
+- Reimer, P. J., and Reimer, R. W. (2001). A marine reservoir correction database and on-line
+  interface. *Radiocarbon* 43(2A), 461–463.
 - Reimer, P. J., Austin, W. E. N., Bard, E., Bayliss, A., Blackwell, P. G., Bronk Ramsey, C., et al.
   (2020). The IntCal20 Northern Hemisphere radiocarbon age calibration curve (0–55 cal kBP).
   *Radiocarbon* 62(4), 725–757.
