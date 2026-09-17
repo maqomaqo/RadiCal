@@ -18,6 +18,11 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-radiocarbon}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
       POSTGRES_DB: ${POSTGRES_DB:-radiocarbon_db}
+      # A subdirectory, not the mount point itself: Apple's container runtime
+      # (Davit) mounts a named volume as an ext4 image, which carries a
+      # lost+found directory, and initdb refuses a data directory that is
+      # not empty. Docker does not mind either way.
+      PGDATA: /var/lib/postgresql/data/pgdata
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
