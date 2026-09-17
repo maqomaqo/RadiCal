@@ -640,7 +640,7 @@ are drawn with hollow markers, so it is visible which points carry a measurement
 
 ## Geographic Analysis
 
-Dates can carry the position they came from, and once they do, three things follow: a reservoir
+Dates can carry the position they came from, and this allows three things: a reservoir
 offset can be derived from where a marine sample is ([Marine Reservoir Offsets](#marine-reservoir-offsets)),
 a model can be built one site at a time, and a Bayesian run can ask whether the dated sites
 describe something *moving* across the landscape.
@@ -648,25 +648,26 @@ describe something *moving* across the landscape.
 ### Placing dates
 
 A position is a **latitude** and **longitude** in decimal degrees, WGS84, minus for south and
-west. Degrees and minutes are not read. Enter both halves or neither — a date that looks placed
-but is not would be worse than one that is plainly unplaced.
+west. Degrees and minutes are not read. Enter both halves or leave empty, do not enter just one side.
 
 - **On the measurement form**, the two fields sit beside depth.
 - **From a file**, a CSV with `latitude`/`longitude` columns (`lat`/`lon`, `x`/`y` and the
   common lab spellings are recognised).
 - **On the map.** In a project's date collection, tick the dates from one site and press **Place
   on map**: click the map, or type the position, and it is written to every selected date — dates
-  from one site share a coordinate, which is why this is one edit rather than many. A click is
+  from one site share a coordinate. A click is
   rounded to about ten metres. Sorting the collection by **Position** puts every date at one
-  coordinate in one run of rows, which is how a site is selected from a collection of many.
+  coordinate in one run of rows.
 
-**The basemap is drawn by the app itself**, from coastline data it serves, and asks nothing of
-anyone. It is accurate to about a kilometre; paste a recorded position for anything finer. A
+**The basemap is drawn by the app itself**, from stored coarse coastline data. It is accurate to about a kilometre; paste a recorded position for anything finer. A
 project can instead turn on **Show a basemap with streets and satellite detail** (Edit Project),
-which fetches map images from OpenStreetMap — that tells their servers which patch of ground is
-on screen each time the map is opened or panned: not the coordinates, but enough to locate a site.
-Worth it to drop a pin on a field boundary; not worth it to look at a distribution, and it needs
-the internet. The same dialog sets the project's **coordinate precision** — full, or rounded to
+which fetches map images from OpenStreetMap for every map the project appears in — placing dates,
+placing a dispersal origin, the spatial-order proposal and the dispersal results alike. That
+tells OpenStreetMap's servers which patch of ground is on screen: not the coordinates, but enough
+to locate a site. Worth it to drop a pin precisely; think twice for a restricted site. It needs
+the internet: when OpenStreetMap cannot be reached the map falls back to the app's own coastlines
+and says so under the map, and goes back to OpenStreetMap once there is a connection again.
+The same dialog sets the project's **coordinate precision** — full, or rounded to
 0.01°, 0.1° or 1° (about 1, 11 or 110 km) — which governs what leaves in exports and figures.
 What is stored does not change, and the project's own table still shows the full value.
 
@@ -676,8 +677,7 @@ For the models below, a **site** is an element opened by its own Boundary — a 
 by a start and an end, one per place — whose dates carry coordinates. Its position is the centroid
 of its dates', and its arrival time is the posterior of the Boundary that opens it, not its oldest
 date: you almost never excavate the genuinely first thing at a site, so the oldest date is a
-*terminus ante quem* for arrival and a front regressed on oldest dates is late everywhere, by an
-amount that varies with how hard each site was dug.
+*terminus ante quem* for arrival.
 
 Placed dates sitting in the one starting phase every analysis begins with are therefore *not*
 sites, and a run would refuse them. On the Model Structure page, **Build from data › Group dates

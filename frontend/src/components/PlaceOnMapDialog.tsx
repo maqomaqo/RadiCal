@@ -39,7 +39,7 @@ interface Props {
   /** Remove the position from the selection: both halves, or neither. */
   onClear: () => void
   /** The project's basemap-tiles setting, passed straight to the map. */
-  tiles?: boolean
+  tiles?: boolean | null
   busy?: boolean
   /**
    * What is being placed, when it is not the selected dates.

@@ -51,6 +51,7 @@ import MeasurementFields, {
   isMarineMeasurement,
 } from '@/components/MeasurementFields'
 import { useCurves } from '@/hooks/useCurves'
+import { useProjectMapTiles } from '@/hooks/useProjectMapTiles'
 // The registry's own name for a curve, so this table and every other curve
 // label in the app say the same thing about the same id.
 import type { ProjectSample } from '@/components/ProjectSampleTable'
@@ -171,6 +172,9 @@ export default function NewAnalysis() {
     loadFromAnalysis,
     reset: resetDraft,
   } = useAnalysisDraftStore()
+  // The assigned project's basemap setting, so the origin is placed on the
+  // same map its dates were.
+  const mapTiles = useProjectMapTiles(projectId || null)
   // Which curve a date is on decides whether a reservoir offset applies (see
   // isMarineMeasurement). The request is shared with MeasurementFields', so
   // reading it here costs nothing.
@@ -2108,6 +2112,7 @@ export default function NewAnalysis() {
       <PlaceOnMapDialog
         open={originDialogOpen}
         onClose={() => setOriginDialogOpen(false)}
+        tiles={mapTiles}
         points={measurements.map((m) => ({
           id: m.id,
           name: m.sample_name,

@@ -187,6 +187,23 @@ export function latLonFromMapPoint(
 }
 
 /**
+ * A longitude moved by whole turns to within half a turn of `centre`.
+ *
+ * For LINES on the tiled map. The offline map rotates its projection to the
+ * frame's centre, so a segment from 170 to -170 is drawn the short way
+ * across the dateline. MapLibre keeps the world's seam at 180 and draws that
+ * same segment the long way round -- 340 degrees across every ocean but the
+ * one it belongs to, which is what a Pacific spanning tree looked like on
+ * tiles. MapLibre accepts a longitude past 180 and draws it in the adjacent
+ * copy of the world, so a Pacific frame's -170 becomes 190 and the segment
+ * is 20 degrees again. Marks are left alone: a point has no long way round,
+ * and its hover should show the longitude the reader typed.
+ */
+export function unwrapLongitude(longitude: number, centre: number): number {
+  return longitude + 360 * Math.round((centre - longitude) / 360)
+}
+
+/**
  * A starting zoom for the tiled map from the window the offline one would
  * open on.
  *

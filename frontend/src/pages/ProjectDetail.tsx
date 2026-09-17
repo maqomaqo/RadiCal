@@ -50,6 +50,7 @@ import ProjectSampleTable from '@/components/ProjectSampleTable'
 import JobProgress from '@/components/JobProgress'
 import { cancelJob } from '@/api/jobs'
 import { useJob } from '@/hooks/useJob'
+import { rememberProjectMapTiles } from '@/hooks/useProjectMapTiles'
 import { MAX_COMPARED_RUNS } from '@/theme/compareColors'
 import StatusStrip, { statusSummary } from '@/components/StatusStrip'
 import type { StatusCounts } from '@/components/StatusStrip'
@@ -271,6 +272,9 @@ export default function ProjectDetail() {
         const data = await response.json()
         if (data.success) {
           setProject(data.data)
+          // So the results and model-structure pages, which draw this
+          // project's maps without loading the project, need not fetch it.
+          rememberProjectMapTiles(data.data.id, !!data.data.map_tiles_enabled)
         } else {
           setError('Failed to load project')
         }
@@ -1021,12 +1025,12 @@ export default function ProjectDetail() {
               later would be the same disclosure with better manners. */}
           <Alert severity={editTiles ? 'warning' : 'info'} sx={{ mt: 1 }}>
             The map draws its coastlines from data this app serves itself, and asks nothing of
-            anyone. Turning this on fetches map images from OpenStreetMap instead, which tells
-            their servers which patch of ground is on screen each time someone opens or pans the
-            map — not the coordinates themselves, but enough to locate a site. Worth it to drop a
-            pin on a field boundary; not worth it to look at a distribution. It also needs the
-            internet: on an installation that cannot reach OpenStreetMap, leave this off, because
-            the tiled map has no offline state to fall back to.
+            anyone. Turning this on fetches map images from OpenStreetMap instead — on every map
+            this project appears in, placing and results alike — which tells their servers which
+            patch of ground is on screen each time someone opens or pans a map: not the coordinates
+            themselves, but enough to locate a site. Worth it to drop a pin on a field boundary;
+            think twice for a restricted site. It needs the internet: when OpenStreetMap cannot be
+            reached, the map falls back to the app's own coastlines and says so.
           </Alert>
         </DialogContent>
         <DialogActions>

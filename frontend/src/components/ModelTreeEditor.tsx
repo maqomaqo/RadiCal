@@ -867,6 +867,11 @@ interface Props {
    * to the draft cannot let a user build either one here.
    */
   onSetOrdinate?: (measurementId: string, patch: Partial<MatrixMeasurement>) => void
+  /**
+   * The project's basemap-tiles setting, for the one map this editor can
+   * open -- the spatial-order proposal's.
+   */
+  tiles?: boolean | null
 }
 
 /**
@@ -1896,6 +1901,7 @@ export default function ModelTreeEditor({
   onChange,
   onSortDates,
   onSetOrdinate,
+  tiles = false,
 }: Props) {
   const [addMenu, setAddMenu] = useState<{ anchor: HTMLElement; targetId: string } | null>(null)
   // The one phase picker, and which date it is open for. See PhaseButton.
@@ -2796,6 +2802,7 @@ export default function ModelTreeEditor({
             }))}
             onClose={() => setSpatialOrderOpen(false)}
             onApply={applySpatialOrder}
+            tiles={tiles}
           />
         </Suspense>
       )}

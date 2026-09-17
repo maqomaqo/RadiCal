@@ -28,6 +28,7 @@ import {
 } from '@mui/material'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import { useAnalysisDraftStore } from '@/stores/analysisStore'
+import { useProjectMapTiles } from '@/hooks/useProjectMapTiles'
 import type { ModelElement, MatrixMeasurement } from '@/types'
 import HarrisMatrixDiagram from '@/components/HarrisMatrixDiagram'
 import ModelTreeEditor, { validateTree } from '@/components/ModelTreeEditor'
@@ -53,6 +54,7 @@ export default function Stratigraphy() {
     elementAssignments: draftAssignments,
     setModelTree: setDraftTree,
     editingAnalysisId,
+    projectId: draftProjectId,
   } = useAnalysisDraftStore()
 
   // Reached either as /new-analysis/model-structure (building a new analysis)
@@ -99,6 +101,11 @@ export default function Stratigraphy() {
   // is no structure to write to, so what is built here belongs to the unsaved
   // edit -- see the Save block below.
   const [savedType, setSavedType] = useState<string | null>(null)
+  // Which project's basemap setting the spatial-order map draws under: the
+  // draft's project, or -- editing a saved analysis with no draft of it --
+  // the project the analysis is filed under.
+  const [savedProjectId, setSavedProjectId] = useState<string | null>(null)
+  const mapTiles = useProjectMapTiles(draftProjectId || savedProjectId)
 
   // For a NEW analysis the tree lives in the draft store, starting as the
   // smallest complete model -- a site-wide Sequence bracketed by boundaries --
@@ -131,6 +138,7 @@ export default function Stratigraphy() {
         }
         setLinearized(!!data.data.model_tree_linearized)
         setSavedType(data.data.analysis_type || null)
+        setSavedProjectId(data.data.project_id || null)
         const saved: MatrixMeasurement[] = data.data.measurements || []
         setSavedMeasurements(saved)
         // When the draft holds this analysis, its tree and assignments are
@@ -383,6 +391,7 @@ export default function Stratigraphy() {
                 onChange={(nextTree, nextAssignments) => setDraftTree(nextTree, nextAssignments)}
                 onSortDates={canSortDates ? sortDates : undefined}
                 onSetOrdinate={canSetOrdinates ? setOrdinate : undefined}
+                tiles={mapTiles}
               />
             ) : (
               <Alert severity="info">No dates yet — add them on the New Analysis page first.</Alert>
@@ -404,6 +413,7 @@ export default function Stratigraphy() {
                 assignments={assignments}
                 onSortDates={canSortDates ? sortDates : undefined}
                 onSetOrdinate={canSetOrdinates ? setOrdinate : undefined}
+                tiles={mapTiles}
                 onChange={(nextTree, nextAssignments) => {
                   setModelTree(nextTree)
                   setAssignments(nextAssignments)

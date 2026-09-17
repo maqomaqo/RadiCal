@@ -19,6 +19,7 @@ import {
   roundPlacement,
   siteLabel,
   unplaced,
+  unwrapLongitude,
   zoomForFrame,
 } from './siteMapGeometry'
 import type { GeoProjection, MapLibreMap, MapPoint } from './siteMapGeometry'
@@ -373,5 +374,27 @@ describe('zoomForFrame', () => {
     const z = zoomForFrame({ lon: [5, 5], lat: [5, 5] })
     expect(Number.isFinite(z)).toBe(true)
     expect(z).toBeLessThanOrEqual(12)
+  })
+})
+
+describe('unwrapLongitude', () => {
+  it('leaves a longitude within half a turn of the centre alone', () => {
+    expect(unwrapLongitude(10, 0)).toBe(10)
+    expect(unwrapLongitude(-170, -160)).toBe(-170)
+  })
+
+  it('carries a longitude across the dateline towards a Pacific centre', () => {
+    // A frame centred on 180: the American side of the Pacific comes round
+    // to sit east of it rather than a world away to the west.
+    expect(unwrapLongitude(-170, 180)).toBe(190)
+    expect(unwrapLongitude(170, 180)).toBe(170)
+    // And the other way, for a frame the framing normalised to -180.
+    expect(unwrapLongitude(170, -180)).toBe(-190)
+  })
+
+  it('is a whole number of turns, so the point is the same place', () => {
+    for (const [lon, centre] of [[-170, 180], [170, -180], [5, 400], [-5, -400]]) {
+      expect(Number.isInteger((unwrapLongitude(lon, centre) - lon) / 360)).toBe(true)
+    }
   })
 })

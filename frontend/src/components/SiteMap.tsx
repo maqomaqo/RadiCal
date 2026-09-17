@@ -4,6 +4,7 @@ import DownloadIcon from '@mui/icons-material/Download'
 import Plotly from 'plotly.js-dist-min'
 import createPlotlyComponent from 'react-plotly.js/factory'
 
+import { useTileServerReachable } from '@/hooks/useTileServer'
 import { CONTEXT_PALETTE } from '@/theme/diagramColors'
 import { usePlotColors, usePlotFont } from '@/theme/plotColors'
 import { downloadPlotPng } from '@/utils/downloadPlot'
@@ -18,6 +19,7 @@ import {
   roundPlacement,
   siteLabel,
   unplaced,
+  unwrapLongitude,
   zoomForFrame,
 } from '@/utils/siteMapGeometry'
 import type { MapPoint, MapSite } from '@/utils/siteMapGeometry'
@@ -149,8 +151,17 @@ interface SiteMapProps {
    * being looked at, which for a restricted site is the disclosure everything
    * else here exists to prevent. Turning it on is a per-project decision made
    * once, behind a notice that says what the request gives away.
+   *
+   * A wish, not a guarantee: when the tile server cannot be reached -- no
+   * internet, or a network that blocks it -- the map falls back to the
+   * offline basemap and says so in its caption, rather than drawing the
+   * marks on the blank grey square MapLibre leaves when its tiles fail.
+   *
+   * Null means the project's answer is still on its way (see
+   * useProjectMapTiles), and the map waits for it rather than draw one
+   * basemap and then swap it for the other.
    */
-  tiles?: boolean
+  tiles?: boolean | null
   /**
    * The SHORTEST the map is allowed to be, in pixels.
    *
@@ -258,7 +269,7 @@ export default function SiteMap({
   selectedIds = [],
   editable = false,
   onPlace,
-  tiles = false,
+  tiles: tilesWanted = false,
   height = 320,
   exportName = 'site-map',
   values,
@@ -275,6 +286,15 @@ export default function SiteMap({
   const plotFont = usePlotFont()
   const plotBox = useRef<HTMLDivElement>(null)
   const graphDiv = useRef<unknown>(null)
+  // Tiles are drawn only once the tile server has answered a probe. Until
+  // it has, nothing is drawn: drawing the offline map and then replacing it
+  // a moment later is a flash of coastline for every map on a connected
+  // installation, and the wait is one small image. Not probed at all when
+  // the project has not asked for tiles.
+  const reachable = useTileServerReachable(tilesWanted === true)
+  const tiles = tilesWanted === true && reachable === true
+  const deciding = tilesWanted === null || (tilesWanted === true && reachable === null)
+  const fellBack = tilesWanted === true && reachable === false
   // Null until the first click tells us. Not an error state on its own: it
   // only matters in edit mode, and the map is read-only by default.
   const [cannotPlace, setCannotPlace] = useState(false)
@@ -316,6 +336,12 @@ export default function SiteMap({
   )
 
   const traces = useMemo(() => {
+    // Every LINE's longitudes, brought within half a turn of the frame's
+    // centre on the tiled map -- see unwrapLongitude for why the offline
+    // map needs nothing of the kind.
+    const centre = dataFrame ? (dataFrame.lon[0] + dataFrame.lon[1]) / 2 : 0
+    const lineLon = (longitude: number) => (tiles ? unwrapLongitude(longitude, centre) : longitude)
+
     // Split by selection rather than coloured per mark, so the two sets are
     // separate traces and Plotly can hover them independently. A site counts
     // as selected when ANY date on it is: the pin is the position, and a
@@ -400,7 +426,7 @@ export default function SiteMap({
         mode: 'lines+text' as const,
         name: `${Math.round(line.age)}`,
         lat: line.points.map((p) => p.latitude),
-        lon: line.points.map((p) => p.longitude),
+        lon: line.points.map((p) => lineLon(p.longitude)),
         line: { color: plot.axis, width: 1 },
         // One caption per line: a line captioned twice reads as two.
         text: line.points.map((_p, i) => (i === middle ? `${Math.round(line.age)}` : '')),
@@ -420,7 +446,7 @@ export default function SiteMap({
         // null, so the whole tree draws in one pass without joining the end
         // of one edge to the start of the next.
         lat: links.flatMap((link) => [link.from.latitude, link.to.latitude, null]),
-        lon: links.flatMap((link) => [link.from.longitude, link.to.longitude, null]),
+        lon: links.flatMap((link) => [lineLon(link.from.longitude), lineLon(link.to.longitude), null]),
         line: { color: plot.posteriorLine, width: 1.5 },
         hoverinfo: 'skip' as const,
       })
@@ -434,7 +460,7 @@ export default function SiteMap({
         mode: 'lines' as const,
         name: 'Fitted front',
         lat: front.map((p) => p.latitude),
-        lon: front.map((p) => p.longitude),
+        lon: front.map((p) => lineLon(p.longitude)),
         line: { color: plot.posteriorLine, width: 2, dash: 'dot' },
         hoverinfo: 'skip' as const,
       })
@@ -529,7 +555,7 @@ export default function SiteMap({
 
     return list
   }, [sites, selected, plot, tiles, values, valueLabel, valueScale, front, origin, isochrons,
-      region, regionStepDeg, links])
+      region, regionStepDeg, links, dataFrame])
 
   /**
    * Clicks are taken in the CAPTURE phase, on a native listener, and both
@@ -711,7 +737,10 @@ export default function SiteMap({
           position: 'relative',
         }}
       >
-        <Plot
+        {!deciding && <Plot
+          // A fresh plot when the basemap changes kind, rather than asking
+          // Plotly.react to turn a geo subplot into a MapLibre one in place.
+          key={tiles ? 'tiled' : 'offline'}
           data={traces}
           layout={layout}
           config={{
@@ -731,18 +760,29 @@ export default function SiteMap({
           }}
           useResizeHandler
           style={{ position: 'absolute', inset: 0 }}
-        />
+        />}
       </Paper>
 
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 0.5 }}>
         <Typography variant="caption" color="textSecondary" sx={{ flex: 1 }}>
           {cannotPlace
             ? 'This map cannot read a click on this version of the plotting library. Type the position instead.'
-            : editable
-              ? 'Click the map to place every selected date at that position. Drag to pan and scroll to zoom.'
-              : tiles
-                ? 'Drag to pan and scroll to zoom. Basemap tiles are on for this project, so the tile server is told which area is on screen.'
-                : 'Drag to pan and scroll to zoom. Coastlines are drawn from data this app serves itself: no tiles are requested.'}
+            : deciding
+              ? tilesWanted === null
+                ? 'Loading the map…'
+                : 'Checking whether OpenStreetMap can be reached…'
+              : [
+                  editable
+                    ? 'Click the map to place every selected date at that position. Drag to pan and scroll to zoom.'
+                    : 'Drag to pan and scroll to zoom.',
+                  fellBack
+                    ? 'OpenStreetMap could not be reached, so coastlines are drawn from data this app serves itself; it is used again once there is a connection.'
+                    : tiles
+                      ? 'Basemap tiles are on for this project, so the tile server is told which area is on screen.'
+                      : editable
+                        ? ''
+                        : 'Coastlines are drawn from data this app serves itself: no tiles are requested.',
+                ].filter(Boolean).join(' ')}
         </Typography>
         {/* The app's own download control, as on every other figure: Plotly's
             modebar renders anchors with no href, role or accessible name, none

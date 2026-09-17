@@ -54,7 +54,7 @@ interface Props {
   section: DispersalSection
   dateFormat: DateFormat
   /** Drawn on the project's tiled basemap when it has opted into one. */
-  tiles?: boolean
+  tiles?: boolean | null
 }
 
 export default function DispersalPanel({ section, dateFormat, tiles = false }: Props) {
@@ -91,7 +91,7 @@ export default function DispersalPanel({ section, dateFormat, tiles = false }: P
 function WaveCard({ fit, dateFormat, tiles }: {
   fit: DispersalFit
   dateFormat: DateFormat
-  tiles: boolean
+  tiles: boolean | null
 }) {
   const plot = usePlotColors()
 
@@ -365,7 +365,7 @@ function WaveCard({ fit, dateFormat, tiles }: {
  * disagree, the finding is usually about the origin rather than about either
  * fit, and that is only visible if both are on the page.
  */
-function TrendCard({ trend, tiles }: { trend: TrendFit; tiles: boolean }) {
+function TrendCard({ trend, tiles }: { trend: TrendFit; tiles: boolean | null }) {
   const placed = trend.sites.filter(
     (s) => s.latitude !== null && s.longitude !== null && !s.refusal
   )
@@ -506,7 +506,7 @@ function OriginProfileCard({ profile, wave, sites, tiles }: {
   profile: OriginProfile
   wave: DispersalFit | null
   sites: DispersalSite[]
-  tiles: boolean
+  tiles: boolean | null
 }) {
   const placedOutside =
     wave && profile.region.length > 0 && profile.step_deg

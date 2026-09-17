@@ -73,6 +73,7 @@ import {
 } from '@/utils/columnPreferences'
 import { useNotify } from '@/contexts/NotificationContext'
 import { useCurves } from '@/hooks/useCurves'
+import { useProjectMapTiles } from '@/hooks/useProjectMapTiles'
 import { analysisTypeLabel } from '@/utils/analysisTypes'
 import { flattenStructure } from '@/utils/stratigraphy'
 import type { StructureRow } from '@/utils/stratigraphy'
@@ -940,6 +941,9 @@ export default function Results() {
   const navigate = useNavigate()
   const notify = useNotify()
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null)
+  // The project's basemap setting, for the dispersal maps. Read separately
+  // because the analysis payload carries its project's id and name only.
+  const mapTiles = useProjectMapTiles(analysis?.project_id)
   // "Gone" and "unreachable" get different copy and different offers: a Try
   // again button on a deleted analysis just fetches the same 404 back.
   const [missing, setMissing] = useState(false)
@@ -2846,13 +2850,12 @@ export default function Results() {
           band is: the map IS the answer, and a column of per-site arrival ages
           answers a different question.
 
-          Tiles stay off here even for a project that has opted into them --
-          this page has no project loaded, and the offline basemap is the
-          private default. Passing the project's setting through is the one
-          thing left to do if that is ever wanted. */}
+          Drawn on the project's basemap: a project that has opted into tiles
+          gets them here as it does when placing, and one filed nowhere gets
+          the private default. */}
       {dispersalSection && (
         <Box sx={{ mb: 3 }}>
-          <DispersalPanel section={dispersalSection} dateFormat={dateFormat} />
+          <DispersalPanel section={dispersalSection} dateFormat={dateFormat} tiles={mapTiles} />
         </Box>
       )}
 

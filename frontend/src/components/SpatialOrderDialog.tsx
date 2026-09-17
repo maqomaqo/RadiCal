@@ -41,10 +41,12 @@ interface Props {
   onClose: () => void
   /** Called with the proposed element ids, in order, only if the user accepts. */
   onApply: (orderedIds: string[]) => void
+  /** The project's basemap-tiles setting, passed straight to the map. */
+  tiles?: boolean | null
 }
 
 export default function SpatialOrderDialog({
-  open, tree, measurements, onClose, onApply,
+  open, tree, measurements, onClose, onApply, tiles = false,
 }: Props) {
   const [proposal, setProposal] = useState<SequenceProposal | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -113,6 +115,7 @@ export default function SpatialOrderDialog({
             </Alert>
 
             <SiteMap
+              tiles={tiles}
               points={proposal.order.map((site) => ({
                 id: site.element_id,
                 name: site.name,
