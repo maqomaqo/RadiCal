@@ -124,8 +124,27 @@ function placeFromTiledMap(graphDiv: unknown, event: MouseEvent): Placement {
  * floor that shaped the original ramp does not apply. It stays one hue at
  * graded strength, which is the rule; it is not added to CONTEXT_PALETTE,
  * because the matrix's steps are constrained by something this is not.
+ *
+ * Not continued as far as it first was, though. The first pair were #e3f1ec
+ * and #b4d9cd -- 1.2:1 and 1.5:1 against white -- and on a basemap whose
+ * land is white or OpenStreetMap's cream, the youngest sites simply were not
+ * there. These sit at 1.8:1 and 2.4:1: still plainly the pale end of the
+ * same green, but a mark at the pale end is a mark. The rest of the pop
+ * comes from the outline -- see VALUE_MARK_OUTLINE.
  */
-const VALUE_RAMP = ['#e3f1ec', '#b4d9cd', ...CONTEXT_PALETTE]
+const VALUE_RAMP = ['#8fcdb7', '#6cb59d', ...CONTEXT_PALETTE]
+
+/**
+ * How the marks that carry a value are outlined.
+ *
+ * The plain pins take a white halo, which separates two solid dark marks
+ * that overlap. A pale mark on a pale basemap gets nothing from a white
+ * halo, and on OpenStreetMap's cream land it vanished into it, halo and all;
+ * a thin ink edge is what makes a pale fill read as a filled shape rather
+ * than as a faint stain. Ink, not the mark's own hue darkened, so every mark
+ * on the figure has the same edge whatever value it carries.
+ */
+const VALUE_MARK_OUTLINE = { width: 1, color: 'axis' as const }
 
 interface SiteMapProps {
   /** Every date the map is about, placed or not. */
@@ -189,8 +208,8 @@ interface SiteMapProps {
    * How `values` are coloured. `graded` (the default) is one hue at graded
    * strength, for a quantity that runs from less to more. `signed` is for a
    * quantity with a meaningful zero and two directions -- a residual, early
-   * or late -- drawn as the two hues this app already uses for those
-   * directions (the primary for early, the ink for late) meeting at a pale
+   * or late -- drawn as the two hues this app uses for those directions
+   * (see PlotColors.residualEarly and residualLate) meeting at a pale
    * neutral, on a range symmetric about zero so equal departures either way
    * read equally strong. Still not a categorical palette: it is one axis
    * with a sign, and the sign is what the second hue carries.
@@ -421,17 +440,50 @@ export default function SiteMap({
       // -- and drawing the line through it sent every isochron on a
       // Polynesian map out across Asia and back.
       const middle = Math.floor(line.points.length / 2)
+      const label = `${Math.round(line.age)}`
+      const textfont = { size: 10, color: plot.axis }
+      if (tiles) {
+        // Two traces on the tiled map where the offline one takes one. A
+        // `lines+text` trace has no marker, and plotly 2.35's scattermap
+        // works its label offset out from the marker size all the same --
+        // NaN, which MapLibre rejects, and the rejection takes the WHOLE map
+        // with it: every trace, not just the label. So the line goes in
+        // unlabelled and the label rides on a one-point marker trace whose
+        // marker is there only to be measured, drawn at zero opacity.
+        list.push({
+          type: geoType,
+          mode: 'lines' as const,
+          name: label,
+          lat: line.points.map((p) => p.latitude),
+          lon: line.points.map((p) => lineLon(p.longitude)),
+          line: { color: plot.axis, width: 1 },
+          hoverinfo: 'skip' as const,
+        })
+        list.push({
+          type: geoType,
+          mode: 'markers+text' as const,
+          name: label,
+          lat: [line.points[middle].latitude],
+          lon: [lineLon(line.points[middle].longitude)],
+          text: [label],
+          textposition: 'top center' as const,
+          textfont,
+          marker: { size: 6, opacity: 0 },
+          hoverinfo: 'skip' as const,
+        })
+        continue
+      }
       list.push({
         type: geoType,
         mode: 'lines+text' as const,
-        name: `${Math.round(line.age)}`,
+        name: label,
         lat: line.points.map((p) => p.latitude),
-        lon: line.points.map((p) => lineLon(p.longitude)),
+        lon: line.points.map((p) => p.longitude),
         line: { color: plot.axis, width: 1 },
         // One caption per line: a line captioned twice reads as two.
-        text: line.points.map((_p, i) => (i === middle ? `${Math.round(line.age)}` : '')),
+        text: line.points.map((_p, i) => (i === middle ? label : '')),
         textposition: 'top center' as const,
-        textfont: { size: 10, color: plot.axis },
+        textfont,
         hoverinfo: 'skip' as const,
       })
     }
@@ -480,16 +532,20 @@ export default function SiteMap({
         const last = VALUE_RAMP.length - 1
         const magnitudes = graded.map((s) => Math.abs(valueOf(s) as number))
         const reach = Math.max(...magnitudes, 1)
-        // See the `valueScale` prop. The neutral is the value ramp's palest
-        // step, so a site at zero reads as "on the surface" rather than as a
-        // third colour.
+        // See the `valueScale` prop. The neutral at zero is a pale warm
+        // grey -- the app's surface tinted with its own ink -- so a site the
+        // front predicts exactly reads as "on the surface" rather than as a
+        // third colour, and so it is a neutral on the tiled basemap too,
+        // where the ramp's own pale green would have been a fourth.
         const scale =
           valueScale === 'signed'
             ? {
                 colorscale: [
-                  [0, plot.mean],
-                  [0.5, VALUE_RAMP[0]],
-                  [1, plot.posteriorLine],
+                  [0, plot.residualLate],
+                  // WARM_INK at 13% over white, flattened: Plotly's colour
+                  // bar cannot composite an rgba stop.
+                  [0.5, '#e3e2e2'],
+                  [1, plot.residualEarly],
                 ] as Array<[number, string]>,
                 cmin: -reach,
                 cmax: reach,
@@ -510,7 +566,7 @@ export default function SiteMap({
             // front starts dark and fades as it spreads, which is the way
             // round a reader already expects a wave to be drawn.
             reversescale: false,
-            line: { color: plot.surface, width: 1.5 },
+            line: { color: plot[VALUE_MARK_OUTLINE.color], width: VALUE_MARK_OUTLINE.width },
             colorbar: {
               title: { text: valueLabel || '', side: 'right' as const },
               thickness: 12,

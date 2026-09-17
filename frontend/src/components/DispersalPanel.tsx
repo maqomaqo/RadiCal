@@ -283,9 +283,9 @@ function WaveCard({ fit, dateFormat, tiles }: {
                               label={residual.residual_years > 0 ? 'early' : 'late'}
                               sx={{
                                 borderColor:
-                                  residual.residual_years > 0 ? plot.posteriorLine : plot.mean,
+                                  residual.residual_years > 0 ? plot.residualEarly : plot.residualLate,
                                 color:
-                                  residual.residual_years > 0 ? plot.posteriorLine : plot.mean,
+                                  residual.residual_years > 0 ? plot.residualEarly : plot.residualLate,
                               }}
                             />
                           </Tooltip>
