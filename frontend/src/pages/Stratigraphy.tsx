@@ -306,7 +306,7 @@ export default function Stratigraphy() {
     return (
       <Container maxWidth="md" sx={{ py: 4 }}>
         <Alert severity="warning" sx={{ mb: 2 }}>
-          No measurements yet -- add measurements on the New Analysis page first.
+          No dates yet — add them on the New Analysis page first.
         </Alert>
         <Button startIcon={<ArrowBackIcon />} variant="outlined" onClick={() => navigate(backPath, { state: backState })}>
           Back to New Analysis
@@ -343,7 +343,7 @@ export default function Stratigraphy() {
           here too. */}
       <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 2 }}>
         <Tab value="structure" label="Editor" />
-        <Tab value="diagram" label="Matrix Diagram" />
+        <Tab value="diagram" label="Matrix diagram" />
       </Tabs>
 
       {/* One shell for both flows. The draft and the saved analysis used to
@@ -385,7 +385,7 @@ export default function Stratigraphy() {
                 onSetOrdinate={canSetOrdinates ? setOrdinate : undefined}
               />
             ) : (
-              <Alert severity="info">Add some dates on the New Analysis page first.</Alert>
+              <Alert severity="info">No dates yet — add them on the New Analysis page first.</Alert>
             )
           ) : loadingStructure ? (
             // A shape, not the word "Loading" -- the rows that are coming are
@@ -463,8 +463,7 @@ export default function Stratigraphy() {
             </>
           ) : (
             <Alert severity="info">
-              This analysis has no dates yet, so there is nothing to build a structure around. Add
-              some on the Edit Analysis page first.
+              No dates yet — add them on the Edit Analysis page first.
             </Alert>
           )}
           </Paper>
@@ -475,10 +474,9 @@ export default function Stratigraphy() {
               page separate what is read from what is worked in identically. */}
           <GuideBand>
             <Typography variant="body2" color="textSecondary">
-              This diagram shows the structure of your model as a stratigraphic matrix. A Phase
-              holding dates is a context - its known temporal relationships are shown via vertical
-              order (younger above older), and unknown relationships by horizontal position. A Boundary is a labelled
-              rule across the groups it divides.
+              A Phase holding dates is a context. Known temporal relationships run vertically —
+              younger above older — and unknown ones sit side by side. A Boundary is a labelled rule
+              across the groups it divides.
             </Typography>
           </GuideBand>
           <HarrisMatrixDiagram
@@ -491,7 +489,7 @@ export default function Stratigraphy() {
 
       <Box sx={{ mt: 4 }}>
         <Button startIcon={<ArrowBackIcon />} variant="contained" onClick={() => navigate(backPath, { state: backState })}>
-          Back to New Analysis
+          {editRouteId ? 'Back to Edit Analysis' : 'Back to New Analysis'}
         </Button>
       </Box>
 

@@ -42,7 +42,7 @@ import DriveFileMoveIcon from '@mui/icons-material/DriveFileMove'
 import ReplayIcon from '@mui/icons-material/Replay'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import CompareArrowsIcon from '@mui/icons-material/CompareArrows'
-import { formatApiError } from '@/utils/apiError'
+import { formatApiError, describeFetchError } from '@/utils/apiError'
 import { useNotify } from '@/contexts/NotificationContext'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import AssignProjectDialog from '@/components/AssignProjectDialog'
@@ -310,10 +310,10 @@ export default function ProjectDetail() {
         setEditOpen(false)
         fetchProject(project.id)
       } else {
-        notify('Failed to update project: ' + formatApiError(data))
+        notify('Could not update project: ' + formatApiError(data))
       }
     } catch (err) {
-      notify('Error updating project: ' + (err as Error).message)
+      notify('Could not update project: ' + describeFetchError(err))
     } finally {
       setSaving(false)
     }
@@ -328,10 +328,10 @@ export default function ProjectDetail() {
       if (data.success) {
         navigate('/projects')
       } else {
-        notify('Failed to delete project: ' + formatApiError(data))
+        notify('Could not delete project: ' + formatApiError(data))
       }
     } catch (err) {
-      notify('Error deleting project: ' + (err as Error).message)
+      notify('Could not delete project: ' + describeFetchError(err))
     } finally {
       setDeletingProject(false)
     }
@@ -347,10 +347,10 @@ export default function ProjectDetail() {
         setDeleteAnalysisTarget(null)
         fetchProject(project.id)
       } else {
-        notify('Failed to delete analysis: ' + formatApiError(data))
+        notify('Could not delete analysis: ' + formatApiError(data))
       }
     } catch (err) {
-      notify('Error deleting analysis: ' + (err as Error).message)
+      notify('Could not delete analysis: ' + describeFetchError(err))
     } finally {
       setDeletingAnalysis(false)
     }
@@ -366,10 +366,10 @@ export default function ProjectDetail() {
       if (data.success) {
         navigate(`/analysis/${data.data.id}/edit`)
       } else {
-        notify('Failed to duplicate analysis: ' + formatApiError(data))
+        notify('Could not duplicate analysis: ' + formatApiError(data))
       }
     } catch (err) {
-      notify('Error duplicating analysis: ' + (err as Error).message)
+      notify('Could not duplicate analysis: ' + describeFetchError(err))
     } finally {
       setDuplicating(false)
     }
@@ -389,10 +389,10 @@ export default function ProjectDetail() {
         setJobId(data.data.job_id ?? null)
         fetchProject(project.id)
       } else {
-        notify('Failed to rerun analysis: ' + formatApiError(data))
+        notify('Could not re-run analysis: ' + formatApiError(data))
       }
     } catch (err) {
-      notify('Error rerunning analysis: ' + (err as Error).message)
+      notify('Could not re-run analysis: ' + describeFetchError(err))
     } finally {
       setRerunningOne(false)
     }
@@ -432,13 +432,13 @@ export default function ProjectDetail() {
         if (data.success) {
           setJobId(data.data.job_id ?? null)
         } else {
-          notify('Failed to rerun project: ' + formatApiError(data))
+          notify('Could not re-run project: ' + formatApiError(data))
         }
       }
       setRerunAllOpen(false)
       fetchProject(project.id)
     } catch (err) {
-      notify('Error rerunning project: ' + (err as Error).message)
+      notify('Could not re-run project: ' + describeFetchError(err))
     } finally {
       setRerunningAll(false)
     }
@@ -650,7 +650,7 @@ export default function ProjectDetail() {
           </Button>
           {analysesCount > 0 && (
             <Button variant="outlined" startIcon={<ReplayIcon />} onClick={() => setRerunAllOpen(true)}>
-              Re-run All
+              Re-run all
             </Button>
           )}
         </Box>
@@ -965,11 +965,11 @@ export default function ProjectDetail() {
       </Menu>
 
       <Dialog open={editOpen} onClose={() => setEditOpen(false)} fullWidth maxWidth="sm">
-        <DialogTitle>Project Settings</DialogTitle>
+        <DialogTitle>Project settings</DialogTitle>
         <DialogContent>
           <TextField
             fullWidth
-            label="Project Name"
+            label="Project name"
             value={editName}
             onChange={(e) => setEditName(e.target.value)}
             sx={{ mt: 1, mb: 2 }}
@@ -1040,7 +1040,7 @@ export default function ProjectDetail() {
       <ConfirmDialog
         open={deleteProjectOpen}
         title="Delete project?"
-        message={`Delete "${project.name}"? Its analyses will be kept and moved to Unassigned -- only the project itself is removed.`}
+        message={`Delete "${project.name}"? Its analyses will be kept and moved to Unassigned — only the project itself is removed.`}
         confirmLabel="Delete"
         danger
         loading={deletingProject}
@@ -1081,7 +1081,7 @@ export default function ProjectDetail() {
         open={rerunAllOpen}
         title="Re-run all analyses?"
         message={`Recompute results for all ${project.analyses.length} analyses in ${isUnassigned ? 'the unassigned list' : `"${project.name}"`} from their existing inputs, replacing their current results. This can't be undone and may take a while.`}
-        confirmLabel="Re-run All"
+        confirmLabel="Re-run all"
         loading={rerunningAll}
         onConfirm={handleRerunAll}
         onCancel={() => setRerunAllOpen(false)}

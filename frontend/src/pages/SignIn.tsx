@@ -48,7 +48,7 @@ export default function SignIn() {
         await signIn(email, password)
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'That did not work.')
+      setError(err instanceof Error ? err.message : 'Sign-in did not work. Check the email and password and try again.')
     } finally {
       setBusy(false)
     }

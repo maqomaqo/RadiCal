@@ -190,9 +190,7 @@ export default function Curves() {
               Calibration Curves
             </Typography>
              <Typography color="text.secondary" sx={{ maxWidth: '64ch' }}>
-              Explore and manage calibration curves here. Three come supplied, and you can import or mix your own. Data below is derived from reading the curve itself.
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
+              Three curves come supplied; import or mix your own. Everything in the table is measured from the curve file itself.
             </Typography>
           </Box>
           <Stack direction="row" spacing={1}>

@@ -38,7 +38,7 @@ import ConfirmDialog from '@/components/ConfirmDialog'
 import ImportDatesDialog, { type ImportPreview } from '@/components/ImportDatesDialog'
 import SampleSelectionBar, { type DeltaRValue } from '@/components/SampleSelectionBar'
 import PlaceOnMapDialog from '@/components/PlaceOnMapDialog'
-import { formatApiError } from '@/utils/apiError'
+import { formatApiError, describeFetchError } from '@/utils/apiError'
 import { useNotify } from '@/contexts/NotificationContext'
 import { curveLabel, curveOptions } from '@/api/curves'
 import { useCurves } from '@/hooks/useCurves'
@@ -367,10 +367,10 @@ export default function ProjectSampleTable({ projectId, mapTilesEnabled = false 
         setFormOpen(false)
         fetchSamples()
       } else {
-        notify('Failed to save date: ' + formatApiError(data))
+        notify('Could not save date: ' + formatApiError(data))
       }
     } catch (err) {
-      notify('Error saving date: ' + (err as Error).message)
+      notify('Could not save date: ' + describeFetchError(err))
     } finally {
       setSaving(false)
     }
@@ -403,10 +403,10 @@ export default function ProjectSampleTable({ projectId, mapTilesEnabled = false 
         setPasteText('')
         fetchSamples()
       } else {
-        notify('Failed to add dates: ' + formatApiError(data))
+        notify('Could not add dates: ' + formatApiError(data))
       }
     } catch (err) {
-      notify('Error adding dates: ' + (err as Error).message)
+      notify('Could not add dates: ' + describeFetchError(err))
     } finally {
       setSaving(false)
     }
@@ -453,10 +453,10 @@ export default function ProjectSampleTable({ projectId, mapTilesEnabled = false 
         notify(`Added ${data.data.items.length} date${data.data.items.length === 1 ? '' : 's'} to the collection.`)
         fetchSamples()
       } else {
-        notify('Failed to import dates: ' + formatApiError(data))
+        notify('Could not import dates: ' + formatApiError(data))
       }
     } catch (err) {
-      notify('Error importing dates: ' + (err as Error).message)
+      notify('Could not import dates: ' + describeFetchError(err))
     } finally {
       setImporting(false)
     }
@@ -472,10 +472,10 @@ export default function ProjectSampleTable({ projectId, mapTilesEnabled = false 
         setDeleteTarget(null)
         fetchSamples()
       } else {
-        notify('Failed to delete date: ' + formatApiError(data))
+        notify('Could not delete date: ' + formatApiError(data))
       }
     } catch (err) {
-      notify('Error deleting date: ' + (err as Error).message)
+      notify('Could not delete date: ' + describeFetchError(err))
     } finally {
       setDeleting(false)
     }
@@ -645,10 +645,10 @@ export default function ProjectSampleTable({ projectId, mapTilesEnabled = false 
         // differently each time.
         navigate(`/analysis/${data.data.id}/edit`)
       } else {
-        notify('Failed to deploy dates: ' + formatApiError(data))
+        notify('Could not deploy dates: ' + formatApiError(data))
       }
     } catch (err) {
-      notify('Error deploying dates: ' + (err as Error).message)
+      notify('Could not deploy dates: ' + describeFetchError(err))
     } finally {
       setDeploying(false)
     }
@@ -1238,19 +1238,19 @@ export default function ProjectSampleTable({ projectId, mapTilesEnabled = false 
           )}
           <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2, mt: 1 }}>
             <TextField
-              label="Sample Name / Lab Code"
+              label="Sample name or lab code"
               value={form.sample_name}
               onChange={(e) => setForm({ ...form, sample_name: e.target.value })}
               sx={{ gridColumn: '1 / -1' }}
             />
             <TextField
-              label="Age BP"
+              label="Age (BP)"
               type="number"
               value={form.age_bp}
               onChange={(e) => setForm({ ...form, age_bp: e.target.value })}
             />
             <TextField
-              label="1σ Error"
+              label="1σ error (yr)"
               type="number"
               value={form.error_1sigma}
               onChange={(e) => setForm({ ...form, error_1sigma: e.target.value })}
@@ -1262,7 +1262,7 @@ export default function ProjectSampleTable({ projectId, mapTilesEnabled = false 
             />
             <TextField
               select
-              label="Calibration Curve"
+              label="Curve"
               value={form.curve_id}
               disabled={curvesLoading}
               error={!!curvesError}
@@ -1276,7 +1276,7 @@ export default function ProjectSampleTable({ projectId, mapTilesEnabled = false 
               ))}
             </TextField>
             <TextField
-              label="Default Context"
+              label="Default context"
               helperText="Pre-fills a context on deploy; overridable per analysis"
               value={form.default_context_name}
               onChange={(e) => setForm({ ...form, default_context_name: e.target.value })}
@@ -1476,7 +1476,7 @@ export default function ProjectSampleTable({ projectId, mapTilesEnabled = false 
           <TextField
             fullWidth
             autoFocus
-            label="Analysis Name"
+            label="Analysis name"
             value={deployName}
             onChange={(e) => setDeployName(e.target.value)}
             placeholder="e.g. Phase model A"
@@ -1500,13 +1500,13 @@ export default function ProjectSampleTable({ projectId, mapTilesEnabled = false 
 
       <ConfirmDialog
         open={bulkDeleteOpen}
-        title={`Remove ${selected.size} date${selected.size === 1 ? '' : 's'} from collection?`}
+        title={`Remove ${selected.size} date${selected.size === 1 ? '' : 's'} from the collection?`}
         message={
           `Removes ${selected.size === 1 ? 'this date' : 'these dates'} from this project's date ` +
           `collection. Analyses already deployed from ${selected.size === 1 ? 'it' : 'them'} keep ` +
           'their own copies and are unaffected.'
         }
-        confirmLabel="Delete"
+        confirmLabel="Remove"
         danger
         loading={bulkBusy}
         onConfirm={handleBulkDelete}
@@ -1515,7 +1515,7 @@ export default function ProjectSampleTable({ projectId, mapTilesEnabled = false 
 
       <ConfirmDialog
         open={!!deleteTarget}
-        title="Remove date from collection?"
+        title="Remove date from the collection?"
         message={
           deleteTarget
             ? `Remove "${deleteTarget.sample_name}" from this project's date collection? Analyses already deployed from it keep their own copies and are unaffected.`

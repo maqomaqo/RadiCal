@@ -649,8 +649,7 @@ export default function CompareResults() {
               Model differences
             </Typography>
             <Typography variant="body2" color="textSecondary" sx={{ mb: 2, maxWidth: '72ch' }}>
-              The stored settings for each analysis. A field
-              marked ± indicates a difference.
+              The stored settings of each analysis. A row marked ± differs between runs.
             </Typography>
             <ModelDiffPanel
               runs={runs.map((run) => ({ id: run.id, name: run.name }))}
@@ -671,8 +670,8 @@ export default function CompareResults() {
               Findings
             </Typography>
             <Typography variant="body2" color="textSecondary" sx={{ mb: 2, maxWidth: '72ch' }}>
-              A comparison of where the models put each transition on the calendar, their estimation of the duration of each 
-              phase, and time span of dates in a phase.
+              Where each model puts its transitions, how long it makes each phase last, and the span of
+              the dated events within it.
             </Typography>
             <DerivedQuantitiesPanel
               runs={runs.map((run) => ({ id: run.id, name: run.name }))}
@@ -688,7 +687,8 @@ export default function CompareResults() {
               Date agreement changes
             </Typography>
             <Typography variant="body2" color="textSecondary" sx={{ mb: 2, maxWidth: '72ch' }}>
-              This plot shows how far a date has been shifted in the compared model. Check to see if a model that produced a tighter estimate has had to move its dates further from their original calibration.
+              How far each date moved under the compared model. A model that gave a tighter estimate
+              may have bought it by pulling dates further from their own calibration.
             </Typography>
             <AgreementScatter
               runs={runs.map((run) => ({ id: run.id, name: run.name }))}

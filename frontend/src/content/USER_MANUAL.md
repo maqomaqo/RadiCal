@@ -4,7 +4,7 @@
 
 1. [Getting Started](#getting-started)
 2. [Creating an Analysis](#creating-an-analysis)
-3. [Adding Measurements](#adding-measurements)
+3. [Adding Dates](#adding-dates)
 4. [Importing Dates from a File](#importing-dates-from-a-file)
 5. [Calibration Curves](#calibration-curves)
 6. [Marine Reservoir Offsets](#marine-reservoir-offsets)
@@ -33,8 +33,8 @@ below, and a Run Analysis button at the bottom.
 
 ## Creating an Analysis
 
-- **Analysis Name**: required.
-- **Analysis Type**:
+- **Analysis name**: required.
+- **Analysis type**:
   - **Single Calibration**: one date, calibrated on its own. Has an extra "Save this analysis"
     toggle: switch it off to run a quick test (the result is shown right there on the page) without
     creating anything in a project or the analysis list.
@@ -45,18 +45,18 @@ below, and a Run Analysis button at the bottom.
 - **Project**: optional. Assigning a project makes that project's own date collection available to
   pull from (see [Projects and Date Collections](#projects-and-date-collections)), and adds this
   analysis to the project's list.
-- **Result Date Format**: how calendar ages are displayed (e.g. cal BP, BC/AD). This only changes
+- **Result date format**: how calendar ages are displayed (e.g. cal BP, BC/AD). This only changes
   the labelling; the underlying calibration is unaffected.
 
-## Adding Measurements
+## Adding Dates
 
-Each date needs, at minimum, a **Sample Name**, **Age (BP)** and **1σ Error**. Also available:
+Each date needs, at minimum, a **Sample name**, **Age (BP)** and **1σ error**. Also available:
 
 - **Material**: free text (charcoal, bone, shell, etc.).
-- **Sample Type**: Terrestrial or Marine. Marine samples get an extra **ΔR** (local reservoir
+- **Sample type**: Terrestrial or Marine. Marine samples get an extra **ΔR** (local reservoir
   offset) field with its own 1σ error; both are required together, since they're combined in
   quadrature with the measurement's own uncertainty.
-- **Calibration Curve**: IntCal20 (Northern Hemisphere terrestrial), SHCal20 (Southern Hemisphere
+- **Curve**: IntCal20 (Northern Hemisphere terrestrial), SHCal20 (Southern Hemisphere
   terrestrial), Marine20, and any curve you have imported or mixed yourself. Selecting Marine
   switches to a marine curve, since marine carbon calibrated against a terrestrial curve is wrong
   by centuries. See [Calibration Curves](#calibration-curves).
@@ -326,8 +326,8 @@ TPQ (terminus post quem, a maximum age) and TAQ (terminus ante quem, a minimum a
 limiters can be set on a date or on a whole Phase.
 
 Reached via **Specify Model Structure** / **Edit Model Structure**, which has an **Editor** tab for
-building the tree and a **Matrix Diagram** tab showing it drawn. The Results page renders
-the same diagram for a completed analysis, and the Posterior Distributions plots follow its order.
+building the tree and a **Matrix diagram** tab showing it drawn. The Results page renders
+the same diagram for a completed analysis, and the Posterior distributions plots follow its order.
 
 ### Reading the Model diagram
 
@@ -348,7 +348,7 @@ the Editor tab and the diagram follows. **Oldest is at the bottom** as in a stra
 Nothing in the diagram is draggable. Position carries meaning here (a context sits centred beneath
 the group that contains it), so it is laid out rather than arranged by hand.
 
-**Model Settings**, on the New Analysis form itself:
+**Model settings**, on the New Analysis form itself:
 - **Solver**: Automatic (recommended: exact integration where the model allows it, sampling
   otherwise), Exact solver only (fast, but only works on chain-shaped models), or MH/Gibbs (works on all models, uses the same MCMC sampling method as OxCal throughout). See
   [Choosing a solver](#choosing-a-solver) for when to override Automatic and what it costs.
@@ -464,10 +464,10 @@ The mathematics behind both solvers is in [A.6 Solvers](#a6-solvers).
 
 ## Viewing Results
 
-- **Results Summary**: one row per date (and, for a Bayesian model, per Boundary), in the model's
+- **Results summary**: one row per date (and, for a Bayesian model, per Boundary), in the model's
   own structure order. Columns: the date's unconstrained ("unmodelled") calibration, its modelled
   posterior HPD range at the confidence you've selected, and diagnostics.
-- **HPD Confidence**: 68.3%, 95.4%, or 99.7%, the two-sided normal coverages of 1, 2 and 3
+- **HPD confidence**: 68.3%, 95.4%, or 99.7%, the two-sided normal coverages of 1, 2 and 3
   standard deviations, which is what "1 sigma" means and what OxCal reports against. These are
   the exact coverages (68.269%, 95.450%, 99.730%), not the labels rounded back into the
   calculation. The level is the threshold an HPD region is accumulated to, so the digits move
@@ -480,7 +480,7 @@ The mathematics behind both solvers is in [A.6 Solvers](#a6-solvers).
   so in one line rather than showing an empty table.
 - **Model Structure**: a summary (phase and ordering-relationship counts) and, for a Bayesian
   analysis, the read-only Harris matrix diagram of the constraints actually used.
-- **Posterior Distributions**: Plotly charts, oldest first:
+- **Posterior distributions**: Plotly charts, oldest first:
   - **Stacked** (default): every date (and Boundary) as one row each, sharing a single calendar
     axis, so overlap between dates is directly visible. Each row is scaled to its own peak, so
     heights compare precision, not probability.
@@ -492,7 +492,7 @@ The mathematics behind both solvers is in [A.6 Solvers](#a6-solvers).
 
 ## Durations and Differences
 
-Off by default, and turned on before the run: under **Model Settings** for a Bayesian analysis
+Off by default, and turned on before the run: under **Model settings** for a Bayesian analysis
 (**Durations and differences**) or **Reporting** for a Group Calibration (**Differences between
 dates**). To add it to an analysis that has already run, **Edit** it, turn the option on, and run it
 again; **Re-run** on its own reuses the settings the analysis was saved with.
@@ -793,7 +793,7 @@ the same result page). Ticking two or more finished analyses and pressing **Comp
 side by side; see [Comparing Analyses](#comparing-analyses). 
 
 Deploying dates from a collection always creates a **Bayesian** analysis and opens its editor, but
-by changing the Analysis Type you can instead do a group calibration. Choosing Single
+by changing the analysis type you can instead do a group calibration. Choosing Single
 Calibration for more than one date automatically stores it as a group calibration, since a single calibration is
 one date on its own.
 
@@ -807,7 +807,7 @@ tick is the reference**: every shift and every ratio on the page is measured aga
 other runs are what is being held up to it. The comparison is an ordinary URL, so it can be
 bookmarked or sent to a colleague.
 
-**Reporting format** and **HPD Confidence** are set once at the top and apply to every panel . A comparison whose
+**Reporting format** and **HPD confidence** are set once at the top and apply to every panel . A comparison whose
 runs used **different calibration curves** is allowed but captioned: it is a real question to ask,
 but then the shift measures the curve rather than the model. It is best to keep all other things equal in such a comparison.
 This is also true for comparing things like Delta_R values, or even the choice of solver. The Exact Solver will produce slightly 

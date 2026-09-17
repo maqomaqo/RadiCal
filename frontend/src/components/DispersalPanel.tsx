@@ -393,11 +393,8 @@ function TrendCard({ trend, tiles }: { trend: TrendFit; tiles: boolean }) {
         </Typography>
       </Stack>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2, maxWidth: '74ch' }}>
-        A plane fitted through arrival age against position, per draw, in an equal-area
-        projection centred on these sites. It asks whether there is a gradient at all and
-        which way it points — without being told where anything started — and gives one
-        direction and one speed for the whole region: the average, not the shape of the
-        front.
+        A plane fitted through arrival age against position, in an equal-area
+        projection. The lines are isochrons that show average direction and speed, not the shape of the front. Each site is coloured by how much earlier or later arrival occurred than predicted by the average. A front that curved, slowed or sped up shows as a patch of neighbouring sites all one colour.
       </Typography>
 
       {trend.refused ? (
@@ -484,16 +481,6 @@ function TrendCard({ trend, tiles }: { trend: TrendFit; tiles: boolean }) {
             </Alert>
           )}
 
-          <Typography variant="caption" color="text.secondary" display="block">
-            The lines are isochrons of the fitted plane, from the median surface. A plane
-            has one gradient everywhere, so its isochrons are always straight, parallel and
-            evenly spaced: they show the region's average direction and speed, not the
-            shape of the front. Each site is coloured by how far it departs from the plane
-            — early (older than the plane predicts) or late — so a front that curved,
-            slowed or sped up shows here as a patch of neighbouring sites all one colour.
-            That pattern is the finding; a front the plane describes has residuals that
-            look like noise.
-          </Typography>
         </>
       )}
     </Paper>
@@ -543,11 +530,9 @@ function OriginProfileCard({ profile, wave, sites, tiles }: {
         </Typography>
       </Stack>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2, maxWidth: '74ch' }}>
-        Every position on a coarse grid tried as an origin, and how well a front from
-        each one fits. The shaded cells are those within{' '}
-        {(profile.cutoff * 100).toFixed(0)}% of the best — a support contour, not a
-        confidence region: this is a profile over an assumed model, and calling it 95%
-        would claim a coverage property nothing here has established.
+        Every position on a coarse grid tried as an origin, and how well each one fits as a starting point for the front.
+        The shaded cells are those within{' '}
+        {(profile.cutoff * 100).toFixed(0)}% of the best.
       </Typography>
 
       {profile.refused ? (

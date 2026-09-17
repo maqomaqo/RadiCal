@@ -426,7 +426,7 @@ export default function HarrisMatrixDiagram({
       </Box>
 
       <Typography variant="caption" color="textSecondary" sx={{ display: 'block', mt: 1 }}>
-        The temporal ordering of the model following similar principles to a stratigraphic matrix, oldest events at the bottom.
+        Read as a stratigraphic matrix: oldest at the bottom.
       </Typography>
     </Box>
   )

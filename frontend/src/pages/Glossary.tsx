@@ -344,8 +344,8 @@ export default function Glossary() {
               Glossary
             </Typography>
             <Typography color="text.secondary" sx={{ mt: 1.5, maxWidth: '68ch' }}>
-              The vocabulary RadiCal uses is standard in the literature. Knowing it
-              will enable you to read the output and everyone else&rsquo;s papers.
+              The vocabulary RadiCal uses is standard in the literature. Knowing it lets
+              you read the output here, and everyone else&rsquo;s papers.
             </Typography>
           </Box>
           <Button
