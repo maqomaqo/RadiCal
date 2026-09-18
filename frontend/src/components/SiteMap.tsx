@@ -6,6 +6,7 @@ import Plotly from 'plotly.js-dist-min'
 
 import { useTileServerReachable } from '@/hooks/useTileServer'
 import { CONTEXT_PALETTE } from '@/theme/diagramColors'
+import { quietOsmStyle } from '@/theme/basemapStyle'
 import { usePlotColors, usePlotFont } from '@/theme/plotColors'
 import { downloadPlotPng } from '@/utils/downloadPlot'
 import {
@@ -873,11 +874,12 @@ export default function SiteMap({
       return {
         ...common,
         map: {
-          // open-street-map, which needs no access token. The style name is
-          // also the disclosure: choosing it is what sends a request naming
-          // the square of the earth on screen to a third party, which is why
-          // this branch is reached only for a project that has said yes.
-          style: 'open-street-map',
+          // OpenStreetMap's tiles, which need no access token, drawn quiet
+          // -- see quietOsmStyle. The tile request is the disclosure:
+          // choosing this is what sends a request naming the square of the
+          // earth on screen to a third party, which is why this branch is
+          // reached only for a project that has said yes.
+          style: quietOsmStyle({ surface: plot.surface }),
           center: viewFrame
             ? {
                 lat: (viewFrame.lat[0] + viewFrame.lat[1]) / 2,
