@@ -17,6 +17,7 @@ import {
   groupIntoSites,
   latLonFromMapPoint,
   latLonFromPoint,
+  densifyGreatCircle,
   mapLibreOf,
   preventIconFetch,
   roundPlacement,
@@ -586,12 +587,16 @@ export default function SiteMap({
     // The front next, so it lies UNDER the marks it was fitted to. A line
     // drawn over a site would hide the observation behind the model.
     if (front && front.length > 1) {
+      // Two points on the offline map, which draws the great circle between
+      // them itself; the same arc as vertices on the tiled map, which would
+      // otherwise draw a straight line in Mercator -- see densifyGreatCircle.
+      const path = tiles ? densifyGreatCircle(front) : front
       list.push({
         type: geoType,
         mode: 'lines' as const,
         name: 'Fitted front',
-        lat: front.map((p) => p.latitude),
-        lon: front.map((p) => lineLon(p.longitude)),
+        lat: path.map((p) => p.latitude),
+        lon: path.map((p) => lineLon(p.longitude)),
         line: { color: plot.posteriorLine, width: 2, dash: 'dot' },
         hoverinfo: 'skip' as const,
       })

@@ -239,6 +239,95 @@ export function unwrapLongitude(longitude: number, centre: number): number {
   return longitude + 360 * Math.round((centre - longitude) / 360)
 }
 
+/** A vertex of a line on the map, in degrees. */
+export interface LinePoint {
+  latitude: number
+  longitude: number
+}
+
+/**
+ * How many pieces the longest great-circle segment is cut into on the
+ * tiled map. Sixty-four is smooth at any zoom a whole front is visible at;
+ * a segment that would not curve is not cut at all (see densifyGreatCircle).
+ */
+export const GREAT_CIRCLE_STEPS = 64
+
+/**
+ * A polyline redrawn so that every segment follows the great circle
+ * between its ends, for the tiled map.
+ *
+ * The offline map does this for nothing: Plotly hands a scattergeo line to
+ * d3-geo, which resamples each segment along the great circle before
+ * projecting, so a two-point front from Fiji to Chile is drawn as the
+ * shortest path on the sphere -- which is what the wave model fitted,
+ * since its distances are great-circle kilometres. MapLibre joins the same
+ * two points with a straight line in Web Mercator, which is a path the
+ * model never measured and, across an ocean, a visibly different one. So
+ * the tiled map is given the points d3 would have made.
+ *
+ * Spherical linear interpolation, so the steps are even in arc length.
+ * Segments shorter than a degree are left as they are -- the curve is
+ * invisible and the vertices would only be weight -- which is why the
+ * densely sampled isochrons and the short spanning-tree links cost nothing
+ * to pass through here.
+ */
+export function densifyGreatCircle(
+  points: LinePoint[],
+  steps: number = GREAT_CIRCLE_STEPS,
+): LinePoint[] {
+  if (points.length < 2) return points
+  const out: LinePoint[] = [points[0]]
+  for (let i = 1; i < points.length; i++) {
+    const a = points[i - 1]
+    const b = points[i]
+    const va = toVector(a)
+    const vb = toVector(b)
+    const angle = Math.acos(Math.max(-1, Math.min(1, dot(va, vb))))
+    if (angle < 1 * RADIANS || angle > Math.PI - 1e-9) {
+      // Too short to curve, or antipodal, where no single great circle is
+      // the shortest and any arc is a guess: a straight join is honest.
+      out.push(b)
+      continue
+    }
+    const n = Math.max(1, Math.round((angle / Math.PI) * steps * 2))
+    const sinAngle = Math.sin(angle)
+    for (let k = 1; k <= n; k++) {
+      const t = k / n
+      const wa = Math.sin((1 - t) * angle) / sinAngle
+      const wb = Math.sin(t * angle) / sinAngle
+      out.push(
+        k === n
+          ? b
+          : fromVector([
+              wa * va[0] + wb * vb[0],
+              wa * va[1] + wb * vb[1],
+              wa * va[2] + wb * vb[2],
+            ]),
+      )
+    }
+  }
+  return out
+}
+
+type Vector = [number, number, number]
+
+function toVector(p: LinePoint): Vector {
+  const lat = p.latitude * RADIANS
+  const lon = p.longitude * RADIANS
+  return [Math.cos(lat) * Math.cos(lon), Math.cos(lat) * Math.sin(lon), Math.sin(lat)]
+}
+
+function fromVector(v: Vector): LinePoint {
+  return {
+    latitude: Math.atan2(v[2], Math.hypot(v[0], v[1])) / RADIANS,
+    longitude: Math.atan2(v[1], v[0]) / RADIANS,
+  }
+}
+
+function dot(a: Vector, b: Vector): number {
+  return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+}
+
 /**
  * A starting zoom for the tiled map from the window the offline one would
  * open on.
