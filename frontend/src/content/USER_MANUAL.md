@@ -659,17 +659,37 @@ west. Degrees and minutes are not read. Enter both halves or leave empty, do not
   rounded to about ten metres. Sorting the collection by **Position** puts every date at one
   coordinate in one run of rows.
 
-**The basemap is drawn by the app itself**, from stored coarse coastline data. It is accurate to about a kilometre; paste a recorded position for anything finer. A
-project can instead turn on **Show a basemap with streets and satellite detail** (Edit Project),
-which fetches map tiles from OpenFreeMap (a light-grey map drawn from OpenStreetMap data) for every map the project appears in — placing dates,
-placing a dispersal origin, the spatial-order proposal and the dispersal results alike. That
-tells OpenFreeMap's server which patch of ground is on screen: not the coordinates, but enough
-to locate a site. Worth it to drop a pin precisely; think twice for a restricted site. It needs
-the internet: when OpenFreeMap cannot be reached the map falls back to the app's own coastlines
-and says so under the map, and goes back to OpenFreeMap once there is a connection again. On a
-project that has turned tiles on, a switch under each map flips between the two basemaps; it applies
-to every map and is remembered by the browser.
-The same dialog sets the project's **coordinate precision** — full, or rounded to
+### Basemaps
+
+Every map in the app — placing dates, placing a dispersal origin, the spatial-order proposal and
+the dispersal results — is drawn on one of two basemaps.
+
+**The offline basemap is drawn by the app itself**, from coastline data it serves, and asks
+nothing of anyone: no request leaves the browser. It is accurate to about a kilometre; paste a
+recorded position for anything finer. This is the default for every project.
+
+**The tiled basemap** is turned on per project with **Show a basemap with coastlines, rivers and
+place names** (Edit Project). It is [OpenFreeMap](https://openfreemap.org)'s *Positron* — a
+light-grey map drawn from OpenStreetMap data, with land one colour and the sea another, place
+names in quiet grey, and roads only when zoomed close — trimmed of road names, airports and
+vegetation fills so that an island is always an island and nothing on the map competes with the
+marks drawn over it. Panning or zooming it tells OpenFreeMap's server which patch of ground is on
+screen: not the coordinates of any date, but enough to locate a site. Worth it to drop a pin on a
+field boundary; think twice for a restricted site. OpenFreeMap needs no account or key and every
+request goes to that one host.
+
+Once a project has turned tiles on, a small **OpenFreeMap** switch sits under each of its maps.
+It flips between the two basemaps, applies to every map at once, and is remembered by the browser,
+so a reader who prefers the offline map keeps it. Projects that have not turned tiles on show no
+switch: the setting in Edit Project is where that decision is made.
+
+The tiled basemap needs the internet. Before it is drawn the app checks that OpenFreeMap can be
+reached; if it cannot, the map falls back to the offline basemap and says so underneath, then
+checks again a few times and switches to tiles as soon as the server answers. Lines on the tiled
+map — the fitted front, isochrons and spanning-tree links — are drawn along great circles, as the
+offline map draws them, so the same figure reads the same way on either.
+
+The Edit Project dialog also sets the project's **coordinate precision** — full, or rounded to
 0.01°, 0.1° or 1° (about 1, 11 or 110 km) — which governs what leaves in exports and figures.
 What is stored does not change, and the project's own table still shows the full value.
 
@@ -729,9 +749,9 @@ that were sampled together — and the Results page shows them above the results
   all. Nothing flips a sign to make the answer look like a dispersal.
 
 **Residuals are the finding.** Every site is coloured on the map by how far it departs from the
-fit, and the wave of advance lists them in a table beside it: the signed residual in years —
-positive means the site is *older* than the front predicts (**early**), negative *later*
-(**late**) — sorted by magnitude. A plane's isochrons are always straight, parallel and evenly
+fit — orange where it is early, blue-grey where it is late, pale near zero — and the wave of
+advance lists them in a table beside it: the signed residual in years — positive means the site
+is *older* than the front predicts (**early**), negative *later* (**late**) — sorted by magnitude. A plane's isochrons are always straight, parallel and evenly
 spaced, so a front that curved, slowed or sped up shows as a patch of neighbouring sites all one
 colour rather than in the lines. A single early outlier is where the
 interesting archaeology usually is: a leapfrog, a maritime route, a redeposited sample, or a wrong
@@ -1514,8 +1534,14 @@ pooled with a circular mean and a circular 95% interval, since a direction near 
 averaged as a number. Isochrons are contours of the median plane.
 
 **Origin profile.** The wave-of-advance fit is repeated over a grid of candidate origins at roughly
-one degree across the sites' bounding box plus a margin, keeping the residual sum of squares per
-candidate per draw; the result is drawn as a likelihood region.
+one degree, keeping the residual sum of squares per candidate per draw; the result is drawn as a
+likelihood region. The grid is the union of a disc around every site — 700 km, or half the longest
+link of the sites' minimum spanning tree plus 150 km, whichever is larger, so the discs always join
+into one zone — cut to whole-degree cells; a rectangle around the sites was tried first, and its
+corners, being the cells furthest from every site, won on a surface that rises away from the front.
+Candidates from which the sites get *older* with distance are where the front went, not where it
+started, and are not scored; their number is reported. The report also says when the best cell
+lies on the zone's rim, meaning the fit was still improving where the search stopped.
 
 **Refusals.** Fewer than six sites, sites at too few distinct distances from the origin, or sites
 too close to a straight line for a plane to be determined (measured as the ratio of the singular
