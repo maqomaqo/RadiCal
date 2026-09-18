@@ -46,3 +46,19 @@ export function formatApiError(data: unknown): string {
     return String(data)
   }
 }
+
+/**
+ * What to tell the reader when fetch itself rejected.
+ *
+ * The browser's own message -- "Failed to fetch", "Load failed",
+ * "NetworkError when attempting to fetch resource" -- names an API rather
+ * than a problem. The reader needs to know it is the connection, not their
+ * data; anything else is passed through as it came.
+ */
+export function describeFetchError(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err)
+  if (/failed to fetch|load failed|networkerror|network request failed/i.test(message)) {
+    return 'the server could not be reached. It may be down, or your connection may have dropped.'
+  }
+  return message
+}

@@ -39,7 +39,7 @@ interface Props {
   /** Remove the position from the selection: both halves, or neither. */
   onClear: () => void
   /** The project's basemap-tiles setting, passed straight to the map. */
-  tiles?: boolean
+  tiles?: boolean | null
   busy?: boolean
   /**
    * What is being placed, when it is not the selected dates.
@@ -130,9 +130,8 @@ export default function PlaceOnMapDialog({
               from one site share a coordinate, which is why this is one edit rather than {count}.
             </>
           )}
-          {tiles
-            ? ' Basemap tiles are on for this project: panning here tells the tile server which area you are looking at.'
-            : ' The basemap is the offline one, which is accurate to about a kilometre. Paste a recorded position for anything finer.'}
+          {!tiles &&
+            ' The basemap is the offline one, which is accurate to about a kilometre. Paste a recorded position for anything finer.'}
         </Typography>
 
         <SiteMap

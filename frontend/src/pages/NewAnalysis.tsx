@@ -51,6 +51,7 @@ import MeasurementFields, {
   isMarineMeasurement,
 } from '@/components/MeasurementFields'
 import { useCurves } from '@/hooks/useCurves'
+import { useProjectMapTiles } from '@/hooks/useProjectMapTiles'
 // The registry's own name for a curve, so this table and every other curve
 // label in the app say the same thing about the same id.
 import type { ProjectSample } from '@/components/ProjectSampleTable'
@@ -61,7 +62,7 @@ import {
   saveDateFormatPreference,
 } from '@/utils/dateFormat'
 import { concernFor, concernTitle, type Concern } from '@/utils/diagnostics'
-import { formatApiError } from '@/utils/apiError'
+import { formatApiError, describeFetchError } from '@/utils/apiError'
 import { buildInputsPayload } from '@/utils/analysisPayload'
 import { useNotify } from '@/contexts/NotificationContext'
 import { useAnalysisDraftStore, DEFAULT_MCMC } from '@/stores/analysisStore'
@@ -171,6 +172,9 @@ export default function NewAnalysis() {
     loadFromAnalysis,
     reset: resetDraft,
   } = useAnalysisDraftStore()
+  // The assigned project's basemap setting, so the origin is placed on the
+  // same map its dates were.
+  const mapTiles = useProjectMapTiles(projectId || null)
   // Which curve a date is on decides whether a reservoir offset applies (see
   // isMarineMeasurement). The request is shared with MeasurementFields', so
   // reading it here costs nothing.
@@ -344,7 +348,7 @@ export default function NewAnalysis() {
         const data = await response.json()
         if (cancelled) return
         if (!data.success) {
-          notify('Failed to load analysis: ' + formatApiError(data))
+          notify('Could not load analysis: ' + formatApiError(data))
           navigate('/projects')
           return
         }
@@ -457,7 +461,7 @@ export default function NewAnalysis() {
         // default over whatever the analysis was set to.
         setDateFormat(loadDateFormatPreference(editRouteId))
       } catch (err) {
-        if (!cancelled) notify('Error loading analysis: ' + (err as Error).message)
+        if (!cancelled) notify('Could not load analysis: ' + describeFetchError(err))
       } finally {
         if (!cancelled) setLoadingExisting(false)
       }
@@ -484,10 +488,10 @@ export default function NewAnalysis() {
         setNewProjectDialogOpen(false)
         fetchProjects()
       } else {
-        notify('Failed to create project: ' + formatApiError(data))
+        notify('Could not create project: ' + formatApiError(data))
       }
     } catch (error) {
-      notify('Error creating project: ' + (error as Error).message)
+      notify('Could not create project: ' + describeFetchError(error))
     } finally {
       setCreatingProject(false)
     }
@@ -791,7 +795,7 @@ export default function NewAnalysis() {
       if (refreshed) setProjectSamples(refreshed)
       return { added: data.data.items.length, skipped }
     } catch (err) {
-      notify('Error adding dates to the collection: ' + (err as Error).message)
+      notify('Could not add dates to the collection: ' + describeFetchError(err))
       return null
     }
   }
@@ -891,9 +895,9 @@ export default function NewAnalysis() {
     // them were required -- so the reader had to guess that Material and
     // Curve were optional and Age was not.
     const missing = [
-      !currentMeasurement.sample_name && 'Sample Name',
+      !currentMeasurement.sample_name && 'Sample name',
       currentMeasurement.age_bp === undefined && 'Age (BP)',
-      currentMeasurement.error_1sigma === undefined && '1σ Error',
+      currentMeasurement.error_1sigma === undefined && '1σ error',
     ].filter(Boolean) as string[]
     if (missing.length > 0) {
       setAddMeasurementError(
@@ -905,7 +909,7 @@ export default function NewAnalysis() {
     }
     if (missingDeltaRError) {
       setAddMeasurementError(
-        'A ΔR reservoir offset needs its 1σ error -- the two are combined, so an offset on its own would understate the uncertainty of the date.'
+        'A ΔR reservoir offset needs its 1σ error — the two are combined, so an offset on its own would understate the uncertainty of the date.'
       )
       return
     }
@@ -1089,7 +1093,7 @@ export default function NewAnalysis() {
     if (!isEditing && analysisType === 'calibration' && measurements.length > 1) {
       setRunError(
         `A single calibration is one date, and this has ${measurements.length}. ` +
-          'Switch Analysis Type to Group Calibration to calibrate them all separately, ' +
+          'Switch the analysis type to Group Calibration to calibrate them all separately, ' +
           'or remove the dates you do not want.'
       )
       return
@@ -1245,9 +1249,7 @@ export default function NewAnalysis() {
       </Typography>
       {isEditing && (
         <Alert severity="info" sx={{ mb: 2 }}>
-          Editing a saved analysis. Run Analysis replaces its inputs and re-runs it, replacing its
-          current results. To change only the name or the project, use Save Details at the bottom of
-          the page -- it keeps the existing results.
+          Editing a saved analysis. Run Analysis replaces its inputs and its current results.
         </Alert>
       )}
 
@@ -1255,14 +1257,14 @@ export default function NewAnalysis() {
         <Grid item xs={12} md={6}>
           <Paper sx={{ p: 3 }}>
             <Typography variant="h5" component="h2" gutterBottom>
-              Analysis Settings
+              Analysis settings
             </Typography>
 
             <Box sx={{ mb: 2 }}>
               <TextField
                 fullWidth
                 required
-                label="Analysis Name"
+                label="Analysis name"
                 value={analysisName}
                 onChange={(e) => setAnalysisName(e.target.value)}
                 placeholder="e.g., Site XYZ - Phase 1"
@@ -1271,11 +1273,11 @@ export default function NewAnalysis() {
 
             <Box sx={{ mb: 3 }}>
               <FormControl fullWidth>
-                <InputLabel id="analysis-type-label">Analysis Type</InputLabel>
+                <InputLabel id="analysis-type-label">Analysis type</InputLabel>
                 <Select
             labelId="analysis-type-label"
                   value={analysisType}
-                  label="Analysis Type"
+                  label="Analysis type"
                   onChange={(e) => setAnalysisType(e.target.value as 'calibration' | 'group_calibration' | 'bayesian')}
                 >
                   <MenuItem value="calibration">Single Calibration</MenuItem>
@@ -1333,11 +1335,11 @@ export default function NewAnalysis() {
 
             <Box sx={{ mb: 3 }}>
               <FormControl fullWidth>
-                <InputLabel id="date-format-label">Result Date Format</InputLabel>
+                <InputLabel id="date-format-label">Result date format</InputLabel>
                 <Select
             labelId="date-format-label"
                   value={dateFormat}
-                  label="Result Date Format"
+                  label="Result date format"
                   onChange={(e) => setDateFormat(e.target.value as DateFormat)}
                 >
                   {DATE_FORMAT_OPTIONS.map((option) => (
@@ -1357,7 +1359,7 @@ export default function NewAnalysis() {
             {analysisType === 'bayesian' && (
               <Box sx={{ mb: 2 }}>
                 <Typography variant="subtitle2" component="h3" gutterBottom>
-                  Model Settings
+                  Model settings
                 </Typography>
                 {/* Solver override. Automatic is right almost always -- exact
                     integration has no sampler to converge and no calibration
@@ -1541,7 +1543,7 @@ export default function NewAnalysis() {
         <Grid item xs={12} md={6}>
           <Paper sx={{ p: 3 }}>
             <Typography variant="h5" component="h2" gutterBottom>
-              Add Measurement
+              Add Date
             </Typography>
 
             {addMeasurementError && (
@@ -1573,8 +1575,8 @@ export default function NewAnalysis() {
                 Import from a File
               </Button>
               <Typography variant="caption" color="textSecondary" sx={{ display: 'block', mt: 0.5 }}>
-                A spreadsheet of dates (.csv), or an OxCal model (.oxcal) with its structure. Or
-                fill in the fields below to add a single date.
+                A spreadsheet of dates (.csv), or an OxCal model (.oxcal) with its structure — or
+                fill in the fields below to add one date.
               </Typography>
             </Box>
 
@@ -1585,7 +1587,7 @@ export default function NewAnalysis() {
             />
 
             <Button variant="outlined" onClick={handleAddMeasurement} fullWidth>
-              Add Measurement
+              Add Date
             </Button>
           </Paper>
         </Grid>
@@ -1826,7 +1828,7 @@ export default function NewAnalysis() {
           justifyContent="space-between"
           sx={{ mb: 1 }}
         >
-          <Typography variant="h5" component="h2">Measurements ({measurements.length})</Typography>
+          <Typography variant="h5" component="h2">Dates ({measurements.length})</Typography>
           <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
             {/* Ordering the dates here orders them everywhere downstream --
                 inside each phase of the model, in the results table, and in the
@@ -1903,7 +1905,7 @@ export default function NewAnalysis() {
           </Alert>
         )}
         {measurements.length === 0 ? (
-          <Typography color="textSecondary">No measurements added yet</Typography>
+          <Typography color="textSecondary">No dates added yet</Typography>
         ) : (
           <DraftMeasurementTable
             measurements={measurements}
@@ -1944,7 +1946,7 @@ export default function NewAnalysis() {
                       />
                     </>
                   )}
-                  {structureInvalid && <Chip size="small" color="error" label="Invalid -- fix before running" />}
+                  {structureInvalid && <Chip size="small" color="error" label="Invalid — fix before running" />}
                 </Stack>
                 <Typography variant="body2" color="textSecondary">
                   {seriesIsTheModel ? (
@@ -1955,8 +1957,9 @@ export default function NewAnalysis() {
                     </>
                   ) : (
                     <>
-                      Build the model as nested Sequences and Phases with Boundaries placed where you
-                      want them, then assign each date to a Phase. A Bayesian analysis needs this structure to constrain the dates. Calibrating them independently is what Group Calibration does.
+                      Nested Sequences and Phases, with Boundaries where you want them and each
+                      date assigned to a Phase. This structure is what constrains the dates; to
+                      calibrate them independently instead, use Group Calibration.
                     </>
                   )}
                 </Typography>
@@ -2085,7 +2088,7 @@ export default function NewAnalysis() {
         <DialogContent>
           <TextField
             fullWidth
-            label="Project Name"
+            label="Project name"
             value={newProjectName}
             onChange={(e) => setNewProjectName(e.target.value)}
             sx={{ mt: 1 }}
@@ -2109,6 +2112,7 @@ export default function NewAnalysis() {
       <PlaceOnMapDialog
         open={originDialogOpen}
         onClose={() => setOriginDialogOpen(false)}
+        tiles={mapTiles}
         points={measurements.map((m) => ({
           id: m.id,
           name: m.sample_name,

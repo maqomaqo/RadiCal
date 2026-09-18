@@ -11,7 +11,7 @@
 // Two flows share this page: a saved analysis edits its stored tree through
 // PUT /analysis/:id/model-tree, and a new one edits a draft tree held in
 // stores/analysisStore.ts that is submitted with the analysis.
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
   Container,
@@ -28,6 +28,7 @@ import {
 } from '@mui/material'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import { useAnalysisDraftStore } from '@/stores/analysisStore'
+import { useProjectMapTiles } from '@/hooks/useProjectMapTiles'
 import type { ModelElement, MatrixMeasurement } from '@/types'
 import HarrisMatrixDiagram from '@/components/HarrisMatrixDiagram'
 import ModelTreeEditor, { validateTree } from '@/components/ModelTreeEditor'
@@ -53,6 +54,7 @@ export default function Stratigraphy() {
     elementAssignments: draftAssignments,
     setModelTree: setDraftTree,
     editingAnalysisId,
+    projectId: draftProjectId,
   } = useAnalysisDraftStore()
 
   // Reached either as /new-analysis/model-structure (building a new analysis)
@@ -99,6 +101,11 @@ export default function Stratigraphy() {
   // is no structure to write to, so what is built here belongs to the unsaved
   // edit -- see the Save block below.
   const [savedType, setSavedType] = useState<string | null>(null)
+  // Which project's basemap setting the spatial-order map draws under: the
+  // draft's project, or -- editing a saved analysis with no draft of it --
+  // the project the analysis is filed under.
+  const [savedProjectId, setSavedProjectId] = useState<string | null>(null)
+  const mapTiles = useProjectMapTiles(draftProjectId || savedProjectId)
 
   // For a NEW analysis the tree lives in the draft store, starting as the
   // smallest complete model -- a site-wide Sequence bracketed by boundaries --
@@ -131,6 +138,7 @@ export default function Stratigraphy() {
         }
         setLinearized(!!data.data.model_tree_linearized)
         setSavedType(data.data.analysis_type || null)
+        setSavedProjectId(data.data.project_id || null)
         const saved: MatrixMeasurement[] = data.data.measurements || []
         setSavedMeasurements(saved)
         // When the draft holds this analysis, its tree and assignments are
@@ -267,9 +275,13 @@ export default function Stratigraphy() {
   // The rules the backend enforces (services/model_tree.validate_tree), run
   // here so an invalid structure cannot be submitted. The editor shows what is
   // wrong; this stops Save.
-  const structureProblems = activeTree
-    ? validateTree(activeTree, activeAssignments, activeMeasurements)
-    : []
+  //
+  // Memoised: it walks every element and every date, and this page renders
+  // on each keystroke in a name field.
+  const structureProblems = useMemo(
+    () => (activeTree ? validateTree(activeTree, activeAssignments, activeMeasurements) : []),
+    [activeTree, activeAssignments, activeMeasurements]
+  )
 
   const saveStructure = async () => {
     if (!editRouteId || !modelTree || structureProblems.length > 0) return
@@ -302,7 +314,7 @@ export default function Stratigraphy() {
     return (
       <Container maxWidth="md" sx={{ py: 4 }}>
         <Alert severity="warning" sx={{ mb: 2 }}>
-          No measurements yet -- add measurements on the New Analysis page first.
+          No dates yet — add them on the New Analysis page first.
         </Alert>
         <Button startIcon={<ArrowBackIcon />} variant="outlined" onClick={() => navigate(backPath, { state: backState })}>
           Back to New Analysis
@@ -339,7 +351,7 @@ export default function Stratigraphy() {
           here too. */}
       <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 2 }}>
         <Tab value="structure" label="Editor" />
-        <Tab value="diagram" label="Matrix Diagram" />
+        <Tab value="diagram" label="Matrix diagram" />
       </Tabs>
 
       {/* One shell for both flows. The draft and the saved analysis used to
@@ -379,9 +391,10 @@ export default function Stratigraphy() {
                 onChange={(nextTree, nextAssignments) => setDraftTree(nextTree, nextAssignments)}
                 onSortDates={canSortDates ? sortDates : undefined}
                 onSetOrdinate={canSetOrdinates ? setOrdinate : undefined}
+                tiles={mapTiles}
               />
             ) : (
-              <Alert severity="info">Add some dates on the New Analysis page first.</Alert>
+              <Alert severity="info">No dates yet — add them on the New Analysis page first.</Alert>
             )
           ) : loadingStructure ? (
             // A shape, not the word "Loading" -- the rows that are coming are
@@ -400,6 +413,7 @@ export default function Stratigraphy() {
                 assignments={assignments}
                 onSortDates={canSortDates ? sortDates : undefined}
                 onSetOrdinate={canSetOrdinates ? setOrdinate : undefined}
+                tiles={mapTiles}
                 onChange={(nextTree, nextAssignments) => {
                   setModelTree(nextTree)
                   setAssignments(nextAssignments)
@@ -459,8 +473,7 @@ export default function Stratigraphy() {
             </>
           ) : (
             <Alert severity="info">
-              This analysis has no dates yet, so there is nothing to build a structure around. Add
-              some on the Edit Analysis page first.
+              No dates yet — add them on the Edit Analysis page first.
             </Alert>
           )}
           </Paper>
@@ -471,10 +484,9 @@ export default function Stratigraphy() {
               page separate what is read from what is worked in identically. */}
           <GuideBand>
             <Typography variant="body2" color="textSecondary">
-              This diagram shows the structure of your model as a stratigraphic matrix. A Phase
-              holding dates is a context - its known temporal relationships are shown via vertical
-              order (younger above older), and unknown relationships by horizontal position. A Boundary is a labelled
-              rule across the groups it divides.
+              A Phase holding dates is a context. Known temporal relationships run vertically —
+              younger above older — and unknown ones sit side by side. A Boundary is a labelled rule
+              across the groups it divides.
             </Typography>
           </GuideBand>
           <HarrisMatrixDiagram
@@ -487,7 +499,7 @@ export default function Stratigraphy() {
 
       <Box sx={{ mt: 4 }}>
         <Button startIcon={<ArrowBackIcon />} variant="contained" onClick={() => navigate(backPath, { state: backState })}>
-          Back to New Analysis
+          {editRouteId ? 'Back to Edit Analysis' : 'Back to New Analysis'}
         </Button>
       </Box>
 

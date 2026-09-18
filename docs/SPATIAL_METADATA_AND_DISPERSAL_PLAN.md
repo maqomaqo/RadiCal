@@ -751,8 +751,10 @@ such; there is no absolute value taken and no sign flipped to make the answer lo
 **The origin.** Two modes, in this order:
 
 1. **Placed.** The user drops a pin. Honest, and usually what a hypothesis actually says.
-2. **Inferred.** Profile the fit over a coarse grid of candidate origins (≈1° over the sites'
-   bounding box plus a margin), keeping the residual sum of squares per candidate per draw. The
+2. **Inferred.** Profile the fit over a coarse grid of candidate origins (≈1°, over the union of
+   a ~700 km disc around every site, the radius grown until the discs join — a box plus a margin
+   was tried first, and its corners won by being furthest from everything), keeping the residual
+   sum of squares per candidate per draw. The
    output is a *surface*, rendered as a likelihood region on the map, not a point with false
    precision. Cheap: a few thousand candidates × a linear fit is milliseconds, and it is the mode
    that answers "where does this look like it started" without being told.

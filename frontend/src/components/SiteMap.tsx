@@ -1,10 +1,13 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { Box, Button, Paper, Typography } from '@mui/material'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { CSSProperties } from 'react'
+import { Box, Button, FormControlLabel, Paper, Switch, Typography } from '@mui/material'
 import DownloadIcon from '@mui/icons-material/Download'
 import Plotly from 'plotly.js-dist-min'
-import createPlotlyComponent from 'react-plotly.js/factory'
 
+import { useBasemapPreference } from '@/hooks/useBasemapPreference'
+import { useTileServerReachable } from '@/hooks/useTileServer'
 import { CONTEXT_PALETTE } from '@/theme/diagramColors'
+import { BASEMAP_PROVIDER, BASEMAP_TEXT_FONT, loadedBasemapStyle } from '@/theme/basemapStyle'
 import { usePlotColors, usePlotFont } from '@/theme/plotColors'
 import { downloadPlotPng } from '@/utils/downloadPlot'
 import {
@@ -14,15 +17,82 @@ import {
   groupIntoSites,
   latLonFromMapPoint,
   latLonFromPoint,
+  densifyGreatCircle,
   mapLibreOf,
+  preventIconFetch,
   roundPlacement,
   siteLabel,
   unplaced,
+  unwrapLongitude,
   zoomForFrame,
 } from '@/utils/siteMapGeometry'
 import type { MapPoint, MapSite } from '@/utils/siteMapGeometry'
 
-const Plot = createPlotlyComponent(Plotly)
+/**
+ * The map's own binding to Plotly, in place of react-plotly.js.
+ *
+ * react-plotly.js queues every Plotly.react on one promise chain per
+ * component instance, and purges the div when the instance unmounts. Under
+ * React's StrictMode -- development only, but that is where the app is
+ * tested -- a mount is immediately followed by a simulated unmount and
+ * remount of the SAME instance. The first Plotly.react has by then created
+ * its MapLibre map and is waiting for that map to load; the purge removes
+ * the map, so it never does, and the remount's Plotly.react queues behind
+ * a promise that will never settle. The result was a tiled map that drew
+ * nothing, about three times in four, and only on a page whose maps mount
+ * from a fetch rather than a click. The offline map never showed it
+ * because a geo subplot draws synchronously.
+ *
+ * So: no chain. Each render calls Plotly.react on the div and forgets the
+ * promise, other than to report the graph div once it is drawn; the purge
+ * on unmount is the only other thing that touches the div. A Plotly.react
+ * abandoned by a purge is left to hang, harmlessly.
+ */
+function PlotlyFigure({
+  data,
+  layout,
+  config,
+  onDrawn,
+  style,
+}: {
+  data: unknown[]
+  layout: Record<string, unknown>
+  config: Record<string, unknown>
+  /** Called with the graph div each time Plotly has finished drawing it. */
+  onDrawn: (graphDiv: HTMLElement) => void
+  style?: CSSProperties
+}) {
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    let current = true
+    const plotly = Plotly as {
+      react(gd: HTMLElement, data: unknown[], layout: unknown, config: unknown): Promise<unknown>
+    }
+    plotly
+      .react(el, data, layout, config)
+      .then(() => {
+        if (current) onDrawn(el)
+      })
+      // A rejection here is a plot that could not be drawn; the caption
+      // under the map already covers the one cause a reader can act on.
+      .catch(() => {})
+    return () => {
+      current = false
+    }
+  }, [data, layout, config, onDrawn])
+
+  useEffect(() => {
+    const el = ref.current
+    return () => {
+      if (el) (Plotly as { purge(gd: HTMLElement): void }).purge(el)
+    }
+  }, [])
+
+  return <div ref={ref} style={style} />
+}
 
 /**
  * Where the basemap geometry is served from -- this app, not a CDN.
@@ -122,8 +192,30 @@ function placeFromTiledMap(graphDiv: unknown, event: MouseEvent): Placement {
  * floor that shaped the original ramp does not apply. It stays one hue at
  * graded strength, which is the rule; it is not added to CONTEXT_PALETTE,
  * because the matrix's steps are constrained by something this is not.
+ *
+ * Not continued as far as it first was, though. The first pair were #e3f1ec
+ * and #b4d9cd -- 1.2:1 and 1.5:1 against white -- and on a basemap whose
+ * land is white or a tile's pale grey, the youngest sites simply were not
+ * there. These sit at 1.8:1 and 2.4:1: still plainly the pale end of the
+ * same green, but a mark at the pale end is a mark. The rest of the pop
+ * comes from the outline -- see VALUE_MARK_OUTLINE.
  */
-const VALUE_RAMP = ['#e3f1ec', '#b4d9cd', ...CONTEXT_PALETTE]
+const VALUE_RAMP = ['#8fcdb7', '#6cb59d', ...CONTEXT_PALETTE]
+
+/**
+ * How the marks that carry a value are outlined.
+ *
+ * The plain pins take a white halo, which separates two solid dark marks
+ * that overlap. A pale mark on a pale basemap gets nothing from a white
+ * halo, and on a tile's pale land it vanished into it, halo and all;
+ * a thin ink edge is what makes a pale fill read as a filled shape rather
+ * than as a faint stain. Ink, not the mark's own hue darkened, so every mark
+ * on the figure has the same edge whatever value it carries.
+ */
+const VALUE_MARK_OUTLINE = { width: 1, color: 'axis' as const }
+
+/** How wide a value mark is drawn, before its outline. */
+const VALUE_MARK_SIZE = 12
 
 interface SiteMapProps {
   /** Every date the map is about, placed or not. */
@@ -149,8 +241,17 @@ interface SiteMapProps {
    * being looked at, which for a restricted site is the disclosure everything
    * else here exists to prevent. Turning it on is a per-project decision made
    * once, behind a notice that says what the request gives away.
+   *
+   * A wish, not a guarantee: when the tile server cannot be reached -- no
+   * internet, or a network that blocks it -- the map falls back to the
+   * offline basemap and says so in its caption, rather than drawing the
+   * marks on the blank grey square MapLibre leaves when its tiles fail.
+   *
+   * Null means the project's answer is still on its way (see
+   * useProjectMapTiles), and the map waits for it rather than draw one
+   * basemap and then swap it for the other.
    */
-  tiles?: boolean
+  tiles?: boolean | null
   /**
    * The SHORTEST the map is allowed to be, in pixels.
    *
@@ -178,8 +279,8 @@ interface SiteMapProps {
    * How `values` are coloured. `graded` (the default) is one hue at graded
    * strength, for a quantity that runs from less to more. `signed` is for a
    * quantity with a meaningful zero and two directions -- a residual, early
-   * or late -- drawn as the two hues this app already uses for those
-   * directions (the primary for early, the ink for late) meeting at a pale
+   * or late -- drawn as the two hues this app uses for those directions
+   * (see PlotColors.residualEarly and residualLate) meeting at a pale
    * neutral, on a range symmetric about zero so equal departures either way
    * read equally strong. Still not a categorical palette: it is one axis
    * with a sign, and the sign is what the second hue carries.
@@ -258,7 +359,7 @@ export default function SiteMap({
   selectedIds = [],
   editable = false,
   onPlace,
-  tiles = false,
+  tiles: tilesWanted = false,
   height = 320,
   exportName = 'site-map',
   values,
@@ -275,6 +376,22 @@ export default function SiteMap({
   const plotFont = usePlotFont()
   const plotBox = useRef<HTMLDivElement>(null)
   const graphDiv = useRef<unknown>(null)
+  // Tiles are drawn only once the tile server has answered a probe. Until
+  // it has, nothing is drawn: drawing the offline map and then replacing it
+  // a moment later is a flash of coastline for every map on a connected
+  // installation, and the wait is one small image. Not probed at all when
+  // the project has not asked for tiles.
+  // The project allows tiles AND the reader has not switched them off --
+  // see useBasemapPreference for why those are two different things.
+  const [preferTiles, setPreferTiles] = useBasemapPreference()
+  const wantTiles = tilesWanted === true && preferTiles
+  const reachable = useTileServerReachable(wantTiles)
+  // The style arrives with a positive verdict -- the probe fetches it -- so
+  // this is a guard, not a second wait.
+  const basemapStyle = reachable === true ? loadedBasemapStyle() : null
+  const tiles = wantTiles && reachable === true && basemapStyle !== null
+  const deciding = tilesWanted === null || (wantTiles && reachable === null)
+  const fellBack = wantTiles && reachable === false
   // Null until the first click tells us. Not an error state on its own: it
   // only matters in edit mode, and the map is read-only by default.
   const [cannotPlace, setCannotPlace] = useState(false)
@@ -316,6 +433,12 @@ export default function SiteMap({
   )
 
   const traces = useMemo(() => {
+    // Every LINE's longitudes, brought within half a turn of the frame's
+    // centre on the tiled map -- see unwrapLongitude for why the offline
+    // map needs nothing of the kind.
+    const centre = dataFrame ? (dataFrame.lon[0] + dataFrame.lon[1]) / 2 : 0
+    const lineLon = (longitude: number) => (tiles ? unwrapLongitude(longitude, centre) : longitude)
+
     // Split by selection rather than coloured per mark, so the two sets are
     // separate traces and Plotly can hover them independently. A site counts
     // as selected when ANY date on it is: the pin is the position, and a
@@ -395,17 +518,52 @@ export default function SiteMap({
       // -- and drawing the line through it sent every isochron on a
       // Polynesian map out across Asia and back.
       const middle = Math.floor(line.points.length / 2)
+      const label = `${Math.round(line.age)}`
+      const textfont = { size: 10, color: plot.axis }
+      if (tiles) {
+        // Two traces on the tiled map where the offline one takes one. A
+        // `lines+text` trace has no marker, and plotly 2.35's scattermap
+        // works its label offset out from the marker size all the same --
+        // NaN, which MapLibre rejects, and the rejection takes the WHOLE map
+        // with it: every trace, not just the label. So the line goes in
+        // unlabelled and the label rides on a one-point marker trace whose
+        // marker is there only to be measured, drawn at zero opacity.
+        list.push({
+          type: geoType,
+          mode: 'lines' as const,
+          name: label,
+          lat: line.points.map((p) => p.latitude),
+          lon: line.points.map((p) => lineLon(p.longitude)),
+          line: { color: plot.axis, width: 1 },
+          hoverinfo: 'skip' as const,
+        })
+        list.push({
+          type: geoType,
+          mode: 'markers+text' as const,
+          name: label,
+          lat: [line.points[middle].latitude],
+          lon: [lineLon(line.points[middle].longitude)],
+          text: [label],
+          textposition: 'top center' as const,
+          // A face the basemap host serves glyphs for: MapLibre draws no
+          // text it has no glyphs for, and says so only in the console.
+          textfont: { ...textfont, family: BASEMAP_TEXT_FONT },
+          marker: { size: 6, opacity: 0 },
+          hoverinfo: 'skip' as const,
+        })
+        continue
+      }
       list.push({
         type: geoType,
         mode: 'lines+text' as const,
-        name: `${Math.round(line.age)}`,
+        name: label,
         lat: line.points.map((p) => p.latitude),
         lon: line.points.map((p) => p.longitude),
         line: { color: plot.axis, width: 1 },
         // One caption per line: a line captioned twice reads as two.
-        text: line.points.map((_p, i) => (i === middle ? `${Math.round(line.age)}` : '')),
+        text: line.points.map((_p, i) => (i === middle ? label : '')),
         textposition: 'top center' as const,
-        textfont: { size: 10, color: plot.axis },
+        textfont,
         hoverinfo: 'skip' as const,
       })
     }
@@ -420,7 +578,7 @@ export default function SiteMap({
         // null, so the whole tree draws in one pass without joining the end
         // of one edge to the start of the next.
         lat: links.flatMap((link) => [link.from.latitude, link.to.latitude, null]),
-        lon: links.flatMap((link) => [link.from.longitude, link.to.longitude, null]),
+        lon: links.flatMap((link) => [lineLon(link.from.longitude), lineLon(link.to.longitude), null]),
         line: { color: plot.posteriorLine, width: 1.5 },
         hoverinfo: 'skip' as const,
       })
@@ -429,12 +587,16 @@ export default function SiteMap({
     // The front next, so it lies UNDER the marks it was fitted to. A line
     // drawn over a site would hide the observation behind the model.
     if (front && front.length > 1) {
+      // Two points on the offline map, which draws the great circle between
+      // them itself; the same arc as vertices on the tiled map, which would
+      // otherwise draw a straight line in Mercator -- see densifyGreatCircle.
+      const path = tiles ? densifyGreatCircle(front) : front
       list.push({
         type: geoType,
         mode: 'lines' as const,
         name: 'Fitted front',
-        lat: front.map((p) => p.latitude),
-        lon: front.map((p) => p.longitude),
+        lat: path.map((p) => p.latitude),
+        lon: path.map((p) => lineLon(p.longitude)),
         line: { color: plot.posteriorLine, width: 2, dash: 'dot' },
         hoverinfo: 'skip' as const,
       })
@@ -454,21 +616,45 @@ export default function SiteMap({
         const last = VALUE_RAMP.length - 1
         const magnitudes = graded.map((s) => Math.abs(valueOf(s) as number))
         const reach = Math.max(...magnitudes, 1)
-        // See the `valueScale` prop. The neutral is the value ramp's palest
-        // step, so a site at zero reads as "on the surface" rather than as a
-        // third colour.
+        // See the `valueScale` prop. The neutral at zero is a pale warm
+        // grey -- the app's surface tinted with its own ink -- so a site the
+        // front predicts exactly reads as "on the surface" rather than as a
+        // third colour, and so it is a neutral on the tiled basemap too,
+        // where the ramp's own pale green would have been a fourth.
         const scale =
           valueScale === 'signed'
             ? {
                 colorscale: [
-                  [0, plot.mean],
-                  [0.5, VALUE_RAMP[0]],
-                  [1, plot.posteriorLine],
+                  [0, plot.residualLate],
+                  // WARM_INK at 13% over white, flattened: Plotly's colour
+                  // bar cannot composite an rgba stop.
+                  [0.5, '#e3e2e2'],
+                  [1, plot.residualEarly],
                 ] as Array<[number, string]>,
                 cmin: -reach,
                 cmax: reach,
               }
             : { colorscale: VALUE_RAMP.map((hex, i) => [i / last, hex]) }
+        if (tiles) {
+          // The outline, as a disc UNDER each mark. scattermap has no
+          // marker.line -- MapLibre's circle layer takes no stroke through
+          // plotly -- so the ink edge the offline map draws in one trace is
+          // drawn here in two: an ink disc one outline-width larger on every
+          // side, then the coloured mark over it. Same size, same
+          // positions, so they cannot drift apart.
+          list.push({
+            type: geoType,
+            mode: 'markers' as const,
+            name: 'Outline',
+            lat: graded.map((s) => s.latitude),
+            lon: graded.map((s) => s.longitude),
+            marker: {
+              size: VALUE_MARK_SIZE + 2 * VALUE_MARK_OUTLINE.width,
+              color: plot[VALUE_MARK_OUTLINE.color],
+            },
+            hoverinfo: 'skip' as const,
+          })
+        }
         list.push({
           type: geoType,
           mode: 'markers' as const,
@@ -477,14 +663,14 @@ export default function SiteMap({
           lon: graded.map((s) => s.longitude),
           text: graded.map(siteLabel),
           marker: {
-            size: 12,
+            size: VALUE_MARK_SIZE,
             color: graded.map((s) => valueOf(s) as number),
             ...scale,
             // Reversed so the OLDEST arrival is the strongest shade: the
             // front starts dark and fades as it spreads, which is the way
             // round a reader already expects a wave to be drawn.
             reversescale: false,
-            line: { color: plot.surface, width: 1.5 },
+            line: { color: plot[VALUE_MARK_OUTLINE.color], width: VALUE_MARK_OUTLINE.width },
             colorbar: {
               title: { text: valueLabel || '', side: 'right' as const },
               thickness: 12,
@@ -510,6 +696,20 @@ export default function SiteMap({
     // Last, so it is never hidden: it is the assumption the whole figure is
     // measured from, and a reader who cannot find it cannot read the rest.
     if (origin) {
+      if (tiles) {
+        // The ring, as a disc under the mark -- scattermap has no
+        // marker.line, as above. Without it the origin was a white dot on a
+        // cream basemap: the one mark the figure is measured from, invisible.
+        list.push({
+          type: geoType,
+          mode: 'markers' as const,
+          name: 'Origin ring',
+          lat: [origin.latitude],
+          lon: [origin.longitude],
+          marker: { size: 15 + 2 * 3, color: plot.posteriorLine },
+          hoverinfo: 'skip' as const,
+        })
+      }
       list.push({
         type: geoType,
         mode: 'markers' as const,
@@ -529,7 +729,7 @@ export default function SiteMap({
 
     return list
   }, [sites, selected, plot, tiles, values, valueLabel, valueScale, front, origin, isochrons,
-      region, regionStepDeg, links])
+      region, regionStepDeg, links, dataFrame])
 
   /**
    * Clicks are taken in the CAPTURE phase, on a native listener, and both
@@ -617,6 +817,55 @@ export default function SiteMap({
     return () => observer.disconnect()
   }, [])
 
+  /**
+   * Register plotly's text-label icon on the tiled map as soon as the map
+   * exists -- see preventIconFetch for what this stops.
+   *
+   * Polled from here rather than done in onInitialized alone, because
+   * onInitialized is too late about half the time: plotly's promise settles
+   * on the map's next render, and the request for the icon comes from the
+   * worker that lays the labels out, which can be before or after that
+   * render. The map object itself exists from the moment Plotly.react is
+   * called -- a microtask after mount -- so a frame-by-frame look for it
+   * catches it before its style has loaded, let alone before any label.
+   */
+  useEffect(() => {
+    if (!tiles) return
+    let frame = 0
+    let tries = 0
+    const look = () => {
+      const gd = plotBox.current?.querySelector('.js-plotly-plot')
+      const map = mapLibreOf(gd)
+      if (map && preventIconFetch(map)) return
+      // Ten seconds of frames, then give up: the plot has failed for some
+      // other reason and there is nothing here to register on.
+      if (++tries < 600) frame = requestAnimationFrame(look)
+    }
+    frame = requestAnimationFrame(look)
+    return () => cancelAnimationFrame(frame)
+  }, [tiles])
+
+  const config = useMemo(
+    () => ({
+      displayModeBar: false,
+      responsive: true,
+      // Wheel zoom in every mode, for the same reason dragmode is pan.
+      scrollZoom: true,
+      // Served from this app. Without it Plotly fetches the world from
+      // cdn.plot.ly -- see TOPOJSON_URL above.
+      topojsonURL: TOPOJSON_URL,
+    }),
+    [],
+  )
+
+  const onDrawn = useCallback((gd: HTMLElement) => {
+    graphDiv.current = gd
+    // Belt and braces for the frame loop above: idempotent, and covers a
+    // map it somehow missed.
+    const map = mapLibreOf(gd)
+    if (map) preventIconFetch(map)
+  }, [])
+
   const layout = useMemo(() => {
     const common = {
       margin: { l: 0, r: 0, t: 0, b: 0 },
@@ -640,11 +889,12 @@ export default function SiteMap({
       return {
         ...common,
         map: {
-          // open-street-map, which needs no access token. The style name is
-          // also the disclosure: choosing it is what sends a request naming
-          // the square of the earth on screen to a third party, which is why
-          // this branch is reached only for a project that has said yes.
-          style: 'open-street-map',
+          // Positron from OpenFreeMap, trimmed -- see theme/basemapStyle.ts.
+          // The tile request is the disclosure: choosing this is what sends
+          // a request naming the square of the earth on screen to a third
+          // party, which is why this branch is reached only for a project
+          // that has said yes.
+          style: basemapStyle,
           center: viewFrame
             ? {
                 lat: (viewFrame.lat[0] + viewFrame.lat[1]) / 2,
@@ -686,7 +936,7 @@ export default function SiteMap({
           : {}),
       },
     }
-  }, [plot, plotFont, viewFrame, dataFrame, tiles])
+  }, [plot, plotFont, viewFrame, dataFrame, tiles, basemapStyle])
 
   return (
     <Box>
@@ -711,39 +961,56 @@ export default function SiteMap({
           position: 'relative',
         }}
       >
-        <Plot
-          data={traces}
-          layout={layout}
-          config={{
-            displayModeBar: false,
-            responsive: true,
-            // Wheel zoom in every mode, for the same reason dragmode is pan.
-            scrollZoom: true,
-            // Served from this app. Without it Plotly fetches the world from
-            // cdn.plot.ly -- see TOPOJSON_URL above.
-            topojsonURL: TOPOJSON_URL,
-          }}
-          onInitialized={(_figure: unknown, gd: unknown) => {
-            graphDiv.current = gd
-          }}
-          onUpdate={(_figure: unknown, gd: unknown) => {
-            graphDiv.current = gd
-          }}
-          useResizeHandler
-          style={{ position: 'absolute', inset: 0 }}
-        />
+        {!deciding && (
+          <PlotlyFigure
+            // A fresh plot when the basemap changes kind, rather than asking
+            // Plotly.react to turn a geo subplot into a MapLibre one in place.
+            key={tiles ? 'tiled' : 'offline'}
+            data={traces}
+            layout={layout}
+            config={config}
+            onDrawn={onDrawn}
+            style={{ position: 'absolute', inset: 0 }}
+          />
+        )}
       </Paper>
 
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 0.5 }}>
         <Typography variant="caption" color="textSecondary" sx={{ flex: 1 }}>
           {cannotPlace
             ? 'This map cannot read a click on this version of the plotting library. Type the position instead.'
-            : editable
-              ? 'Click the map to place every selected date at that position. Drag to pan and scroll to zoom.'
-              : tiles
-                ? 'Drag to pan and scroll to zoom. Basemap tiles are on for this project, so the tile server is told which area is on screen.'
-                : 'Drag to pan and scroll to zoom. Coastlines are drawn from data this app serves itself: no tiles are requested.'}
+            : deciding
+              ? tilesWanted === null
+                ? 'Loading the map…'
+                : `Checking whether ${BASEMAP_PROVIDER} can be reached…`
+              : [
+                  editable
+                    ? 'Click the map to place every selected date at that position. Drag to pan and scroll to zoom.'
+                    : 'Drag to pan and scroll to zoom.',
+                  // Which basemap is drawn is said only when it is not the
+                  // one asked for: the switch beside this says the rest.
+                  fellBack
+                    ? `${BASEMAP_PROVIDER} could not be reached, so coastlines are drawn from data this app serves itself; it is used again once there is a connection.`
+                    : '',
+                ].filter(Boolean).join(' ')}
         </Typography>
+        {/* Only where the project allows tiles. A project that has not opted
+            in gets no switch, since the opt-in is the privacy decision and
+            this is not the place it is made. */}
+        {tilesWanted === true && (
+          <FormControlLabel
+            control={
+              <Switch
+                size="small"
+                checked={preferTiles}
+                onChange={(event) => setPreferTiles(event.target.checked)}
+              />
+            }
+            label={BASEMAP_PROVIDER}
+            slotProps={{ typography: { variant: 'caption', color: 'text.secondary' } }}
+            sx={{ mr: 0.5, whiteSpace: 'nowrap' }}
+          />
+        )}
         {/* The app's own download control, as on every other figure: Plotly's
             modebar renders anchors with no href, role or accessible name, none
             of which can take focus. */}

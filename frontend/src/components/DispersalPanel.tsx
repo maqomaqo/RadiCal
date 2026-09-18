@@ -54,7 +54,7 @@ interface Props {
   section: DispersalSection
   dateFormat: DateFormat
   /** Drawn on the project's tiled basemap when it has opted into one. */
-  tiles?: boolean
+  tiles?: boolean | null
 }
 
 export default function DispersalPanel({ section, dateFormat, tiles = false }: Props) {
@@ -91,7 +91,7 @@ export default function DispersalPanel({ section, dateFormat, tiles = false }: P
 function WaveCard({ fit, dateFormat, tiles }: {
   fit: DispersalFit
   dateFormat: DateFormat
-  tiles: boolean
+  tiles: boolean | null
 }) {
   const plot = usePlotColors()
 
@@ -283,9 +283,9 @@ function WaveCard({ fit, dateFormat, tiles }: {
                               label={residual.residual_years > 0 ? 'early' : 'late'}
                               sx={{
                                 borderColor:
-                                  residual.residual_years > 0 ? plot.posteriorLine : plot.mean,
+                                  residual.residual_years > 0 ? plot.residualEarly : plot.residualLate,
                                 color:
-                                  residual.residual_years > 0 ? plot.posteriorLine : plot.mean,
+                                  residual.residual_years > 0 ? plot.residualEarly : plot.residualLate,
                               }}
                             />
                           </Tooltip>
@@ -365,7 +365,7 @@ function WaveCard({ fit, dateFormat, tiles }: {
  * disagree, the finding is usually about the origin rather than about either
  * fit, and that is only visible if both are on the page.
  */
-function TrendCard({ trend, tiles }: { trend: TrendFit; tiles: boolean }) {
+function TrendCard({ trend, tiles }: { trend: TrendFit; tiles: boolean | null }) {
   const placed = trend.sites.filter(
     (s) => s.latitude !== null && s.longitude !== null && !s.refusal
   )
@@ -393,11 +393,8 @@ function TrendCard({ trend, tiles }: { trend: TrendFit; tiles: boolean }) {
         </Typography>
       </Stack>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2, maxWidth: '74ch' }}>
-        A plane fitted through arrival age against position, per draw, in an equal-area
-        projection centred on these sites. It asks whether there is a gradient at all and
-        which way it points — without being told where anything started — and gives one
-        direction and one speed for the whole region: the average, not the shape of the
-        front.
+        A plane fitted through arrival age against position, in an equal-area
+        projection. The lines are isochrons that show average direction and speed, not the shape of the front. Each site is coloured by how much earlier or later arrival occurred than predicted by the average. A front that curved, slowed or sped up shows as a patch of neighbouring sites all one colour.
       </Typography>
 
       {trend.refused ? (
@@ -484,16 +481,6 @@ function TrendCard({ trend, tiles }: { trend: TrendFit; tiles: boolean }) {
             </Alert>
           )}
 
-          <Typography variant="caption" color="text.secondary" display="block">
-            The lines are isochrons of the fitted plane, from the median surface. A plane
-            has one gradient everywhere, so its isochrons are always straight, parallel and
-            evenly spaced: they show the region's average direction and speed, not the
-            shape of the front. Each site is coloured by how far it departs from the plane
-            — early (older than the plane predicts) or late — so a front that curved,
-            slowed or sped up shows here as a patch of neighbouring sites all one colour.
-            That pattern is the finding; a front the plane describes has residuals that
-            look like noise.
-          </Typography>
         </>
       )}
     </Paper>
@@ -519,7 +506,7 @@ function OriginProfileCard({ profile, wave, sites, tiles }: {
   profile: OriginProfile
   wave: DispersalFit | null
   sites: DispersalSite[]
-  tiles: boolean
+  tiles: boolean | null
 }) {
   const placedOutside =
     wave && profile.region.length > 0 && profile.step_deg
@@ -538,16 +525,11 @@ function OriginProfileCard({ profile, wave, sites, tiles }: {
         <Typography variant="h6" component="h2">
           Where it could have started
         </Typography>
-        <Typography variant="body2" color="text.secondary">
-          profiled, not assumed
-        </Typography>
       </Stack>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2, maxWidth: '74ch' }}>
-        Every position on a coarse grid tried as an origin, and how well a front from
-        each one fits. The shaded cells are those within{' '}
-        {(profile.cutoff * 100).toFixed(0)}% of the best — a support contour, not a
-        confidence region: this is a profile over an assumed model, and calling it 95%
-        would claim a coverage property nothing here has established.
+        Every position on a coarse grid tried as an origin, and how well each one fits as a starting point for the front.
+        The shaded cells are those within{' '}
+        {(profile.cutoff * 100).toFixed(0)}% of the best.
       </Typography>
 
       {profile.refused ? (
@@ -604,6 +586,9 @@ function OriginProfileCard({ profile, wave, sites, tiles }: {
               </Typography>
               <Typography variant="body2" color="text.secondary">
                 on a {profile.step_deg}° grid
+                {profile.reach_km != null && (
+                  <> within {Math.round(profile.reach_km).toLocaleString()} km of a site</>
+                )}
                 {/* Said here, beside the count it qualifies: "94 of 416
                     cells" on a grid of 1,058 needs the other 642 accounted
                     for, and they are the cells the front ran towards. */}
@@ -616,6 +601,23 @@ function OriginProfileCard({ profile, wave, sites, tiles }: {
               </Typography>
             </Box>
           </Stack>
+
+          {/* Said before the broad-region notice, because it is the more
+              specific of the two: a peak on the rim is what a monotone ridge
+              looks like, and a monotone ridge is the plane-wave degeneracy
+              the next notice explains. */}
+          {profile.peak_at_reach && (
+            <Alert severity="info" sx={{ mb: 2 }}>
+              The best-fitting cell is on the <strong>edge</strong> of the searched zone,
+              {profile.reach_km != null && (
+                <> {Math.round(profile.reach_km).toLocaleString()} km from the nearest site,</>
+              )}{' '}
+              so the fit was still improving where the search stopped. From far enough
+              back any origin fits a plane wave about as well, which is what this usually
+              means: the dates constrain the direction the front came from, not how far
+              back it started.
+            </Alert>
+          )}
 
           {/* The finding a best-guess marker would have hidden. */}
           {broad && (

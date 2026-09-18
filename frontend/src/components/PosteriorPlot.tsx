@@ -367,7 +367,7 @@ export default function PosteriorPlot({
       {pointEstimates && (showMean || showMedian) && (
         <Box sx={{ mt: 2, p: 1, backgroundColor: 'background.muted', borderRadius: 1 }}>
           <Typography variant="body2" color="textSecondary" gutterBottom>
-            <strong>Point Estimates:</strong>
+            <strong>Point estimates:</strong>
           </Typography>
           {showMean && (
             <Typography variant="body2">

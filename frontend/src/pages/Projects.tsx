@@ -23,7 +23,7 @@ import InboxIcon from '@mui/icons-material/Inbox'
 import DeleteIcon from '@mui/icons-material/Delete'
 import SearchIcon from '@mui/icons-material/Search'
 import ChevronRightIcon from '@mui/icons-material/ChevronRight'
-import { formatApiError } from '@/utils/apiError'
+import { formatApiError, describeFetchError } from '@/utils/apiError'
 import { useNotify } from '@/contexts/NotificationContext'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import StatusStrip, { statusSummary } from '@/components/StatusStrip'
@@ -309,10 +309,10 @@ export default function Projects() {
         setNewDescription('')
         fetchProjects()
       } else {
-        notify('Failed to create project: ' + formatApiError(data))
+        notify('Could not create project: ' + formatApiError(data))
       }
     } catch (error) {
-      notify('Error creating project: ' + (error as Error).message)
+      notify('Could not create project: ' + describeFetchError(error))
     } finally {
       setCreating(false)
     }
@@ -328,10 +328,10 @@ export default function Projects() {
         setDeleteTarget(null)
         fetchProjects()
       } else {
-        notify('Failed to delete project: ' + formatApiError(data))
+        notify('Could not delete project: ' + formatApiError(data))
       }
     } catch (error) {
-      notify('Error deleting project: ' + (error as Error).message)
+      notify('Could not delete project: ' + describeFetchError(error))
     } finally {
       setDeleting(false)
     }
@@ -489,7 +489,7 @@ export default function Projects() {
         <DialogContent>
           <TextField
             fullWidth
-            label="Project Name"
+            label="Project name"
             value={newName}
             onChange={(e) => setNewName(e.target.value)}
             sx={{ mt: 1, mb: 2 }}
@@ -516,7 +516,7 @@ export default function Projects() {
         title="Delete project?"
         message={
           deleteTarget
-            ? `Delete "${deleteTarget.name}"? Its ${deleteTarget.analyses_count} analyses will be kept and moved to Unassigned -- only the project itself is removed.`
+            ? `Delete "${deleteTarget.name}"? Its ${deleteTarget.analyses_count} analyses will be kept and moved to Unassigned — only the project itself is removed.`
             : ''
         }
         confirmLabel="Delete"

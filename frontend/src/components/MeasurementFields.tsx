@@ -145,7 +145,7 @@ export default function MeasurementFields({
         <TextField
           fullWidth
           required
-          label="Sample Name"
+          label="Sample name"
           value={value.sample_name || ''}
           onChange={(e) => set({ sample_name: e.target.value })}
           size="small"
@@ -186,7 +186,7 @@ export default function MeasurementFields({
           required
           // The unit was the one thing this label left implicit, while its own
           // sibling ΔR field names it. Both are radiocarbon years.
-          label="1σ Error (yr)"
+          label="1σ error (yr)"
           value={value.error_1sigma ?? ''}
           onChange={(e) =>
             set({ error_1sigma: e.target.value === '' ? undefined : parseFloat(e.target.value) })
@@ -199,11 +199,11 @@ export default function MeasurementFields({
 
       <Box sx={{ display: 'flex', gap: 1, mb: 2 }}>
         <FormControl size="small" sx={{ flex: 1 }}>
-          <InputLabel id="sample-type-label">Sample Type</InputLabel>
+          <InputLabel id="sample-type-label">Sample type</InputLabel>
           <Select
             labelId="sample-type-label"
             value={value.sample_type || 'terrestrial'}
-            label="Sample Type"
+            label="Sample type"
             onChange={(e) => {
               const sampleType = e.target.value as 'terrestrial' | 'marine'
               set({
@@ -287,7 +287,7 @@ export default function MeasurementFields({
             />
           </Box>
           <Typography variant="caption" color="textSecondary">
-            Local marine reservoir offset from the global average the curve already models --
+            Local marine reservoir offset from the global average the curve already models —
             not a whole reservoir age. Leave blank to apply no correction.
           </Typography>
         </Box>

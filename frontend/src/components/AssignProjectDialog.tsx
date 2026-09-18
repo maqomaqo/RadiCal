@@ -10,7 +10,7 @@ import {
   Select,
   MenuItem,
 } from '@mui/material'
-import { formatApiError } from '@/utils/apiError'
+import { formatApiError, describeFetchError } from '@/utils/apiError'
 import { useNotify } from '@/contexts/NotificationContext'
 
 interface ProjectOption {
@@ -67,10 +67,10 @@ export default function AssignProjectDialog({
         onAssigned(data.data.project_id, data.data.project_name)
         onClose()
       } else {
-        notify('Failed to assign project: ' + formatApiError(data))
+        notify('Could not assign project: ' + formatApiError(data))
       }
     } catch (err) {
-      notify('Error assigning project: ' + (err as Error).message)
+      notify('Could not assign project: ' + describeFetchError(err))
     } finally {
       setSaving(false)
     }
@@ -78,7 +78,7 @@ export default function AssignProjectDialog({
 
   return (
     <Dialog open={open} onClose={saving ? undefined : onClose} maxWidth="xs" fullWidth>
-      <DialogTitle>Assign to Project</DialogTitle>
+      <DialogTitle>Assign to project</DialogTitle>
       <DialogContent>
         <FormControl fullWidth sx={{ mt: 1 }}>
           <InputLabel>Project</InputLabel>

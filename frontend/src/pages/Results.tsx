@@ -64,7 +64,7 @@ import AgeDepthPanel from '@/components/AgeDepthPanel'
 import DispersalPanel from '@/components/DispersalPanel'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import GuideBand from '@/components/GuideBand'
-import { formatApiError } from '@/utils/apiError'
+import { formatApiError, describeFetchError } from '@/utils/apiError'
 import {
   columnVisible,
   loadResultColumnOverrides,
@@ -73,6 +73,7 @@ import {
 } from '@/utils/columnPreferences'
 import { useNotify } from '@/contexts/NotificationContext'
 import { useCurves } from '@/hooks/useCurves'
+import { useProjectMapTiles } from '@/hooks/useProjectMapTiles'
 import { analysisTypeLabel } from '@/utils/analysisTypes'
 import { flattenStructure } from '@/utils/stratigraphy'
 import type { StructureRow } from '@/utils/stratigraphy'
@@ -940,6 +941,9 @@ export default function Results() {
   const navigate = useNavigate()
   const notify = useNotify()
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null)
+  // The project's basemap setting, for the dispersal maps. Read separately
+  // because the analysis payload carries its project's id and name only.
+  const mapTiles = useProjectMapTiles(analysis?.project_id)
   // "Gone" and "unreachable" get different copy and different offers: a Try
   // again button on a deleted analysis just fetches the same 404 back.
   const [missing, setMissing] = useState(false)
@@ -1074,7 +1078,7 @@ export default function Results() {
       // fetch itself rejected, so there is no response to quote. The
       // browser's own "Failed to fetch" names an API rather than a problem;
       // the reader needs to know it is the connection, not their data.
-      setError('Could not reach the server. It may be down, or your connection may have dropped.')
+      setError('Could not load this analysis: ' + describeFetchError(new TypeError('Failed to fetch')))
     } finally {
       setLoading(false)
     }
@@ -1171,10 +1175,10 @@ export default function Results() {
       if (data.success) {
         navigate(analysis?.project_id ? `/projects/${analysis.project_id}` : '/projects')
       } else {
-        notify('Failed to delete analysis: ' + formatApiError(data))
+        notify('Could not delete analysis: ' + formatApiError(data))
       }
     } catch (err) {
-      notify('Error deleting analysis: ' + (err as Error).message)
+      notify('Could not delete analysis: ' + describeFetchError(err))
     } finally {
       setDeleting(false)
     }
@@ -1191,10 +1195,10 @@ export default function Results() {
       if (data.success) {
         navigate(`/analysis/${data.data.id}/edit`)
       } else {
-        notify('Failed to duplicate analysis: ' + formatApiError(data))
+        notify('Could not duplicate analysis: ' + formatApiError(data))
       }
     } catch (err) {
-      notify('Error duplicating analysis: ' + (err as Error).message)
+      notify('Could not duplicate analysis: ' + describeFetchError(err))
     } finally {
       setDuplicating(false)
     }
@@ -1213,10 +1217,10 @@ export default function Results() {
         setJobId(data.data.job_id ?? null)
         fetchAnalysis(analysisId)
       } else {
-        notify('Failed to rerun analysis: ' + formatApiError(data))
+        notify('Could not re-run analysis: ' + formatApiError(data))
       }
     } catch (err) {
-      notify('Error rerunning analysis: ' + (err as Error).message)
+      notify('Could not re-run analysis: ' + describeFetchError(err))
     } finally {
       setRerunning(false)
     }
@@ -1839,7 +1843,7 @@ export default function Results() {
         <Tooltip
           describeChild
           title={
-            'The posterior was integrated exactly on a calendar grid -- no sampler, ' +
+            'The posterior was integrated exactly on a calendar grid — no sampler, ' +
             'so nothing to converge and no calibration lobe to miss.' +
             (analysis.solver.implicit_boundaries
               ? ` ${analysis.solver.implicit_boundaries} implied transition(s) were supplied to make the model solvable this way.`
@@ -1853,8 +1857,8 @@ export default function Results() {
       solverChip = (
         <Tooltip
           title={
-            'A wiggle match has one free parameter -- the calendar age at the ' +
-            'series reference point -- so it was solved in closed form. There ' +
+            'A wiggle match has one free parameter — the calendar age at the ' +
+            'series reference point — so it was solved in closed form. There ' +
             'is no sampler, nothing to converge, and no calibration lobe to miss.'
           }
         >
@@ -2232,10 +2236,10 @@ export default function Results() {
       {boundaryRows.length === 0 && contextsWithModeledSpan.length > 0 && (
         <Paper sx={{ p: 3, mb: 3 }}>
           <Typography variant="h6" component="h2" gutterBottom>
-            Context Spans
+            Context spans
           </Typography>
           <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
-            Modelled start and end date of each context (OxCal-style Boundary parameters) --
+            Modelled start and end date of each context (OxCal-style Boundary parameters) —
             these may extend beyond the oldest/youngest dated sample, since the dated samples
             are treated as a partial sample of the context's true duration.
           </Typography>
@@ -2252,12 +2256,12 @@ export default function Results() {
                     a mean in one table and not the other. */}
                 <TableRow sx={{ backgroundColor: 'background.muted' }}>
                   <TableCell>Context</TableCell>
-                  {showMean && <TableCell align="right">Start Mean</TableCell>}
-                  {showMedian && <TableCell align="right">Start Median</TableCell>}
-                  <TableCell align="right">Modelled Start ({CONFIDENCE_LABEL} span)</TableCell>
-                  {showMean && <TableCell align="right">End Mean</TableCell>}
-                  {showMedian && <TableCell align="right">End Median</TableCell>}
-                  <TableCell align="right">Modelled End ({CONFIDENCE_LABEL} span)</TableCell>
+                  {showMean && <TableCell align="right">Start mean</TableCell>}
+                  {showMedian && <TableCell align="right">Start median</TableCell>}
+                  <TableCell align="right">Modelled start ({CONFIDENCE_LABEL} span)</TableCell>
+                  {showMean && <TableCell align="right">End mean</TableCell>}
+                  {showMedian && <TableCell align="right">End median</TableCell>}
+                  <TableCell align="right">Modelled end ({CONFIDENCE_LABEL} span)</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -2317,7 +2321,7 @@ export default function Results() {
           }}
         >
           <Typography variant="h6" component="h2">
-            Results Summary
+            Results summary
           </Typography>
           <Stack direction="row" spacing={1}>
             <Button startIcon={<DownloadIcon />} onClick={handleExportCSV} variant="outlined">
@@ -2363,12 +2367,12 @@ export default function Results() {
                   value -- "cal BP (years before 1950), combobox" -- with
                   nothing saying what it governs, and voice control had no
                   target to say. */}
-              <InputLabel id="date-format-label">Date Format</InputLabel>
+              <InputLabel id="date-format-label">Date format</InputLabel>
               <Select
                 labelId="date-format-label"
                 id="date-format"
                 value={dateFormat}
-                label="Date Format"
+                label="Date format"
                 onChange={handleDateFormatChange}
               >
                 {DATE_FORMAT_OPTIONS.map((option) => (
@@ -2382,12 +2386,12 @@ export default function Results() {
               {/* The most consequential control on the page: it sets the
                   level every figure here is reported at. It announced
                   "95.4%, combobox" and nothing else. */}
-              <InputLabel id="hpd-confidence-label">HPD Confidence</InputLabel>
+              <InputLabel id="hpd-confidence-label">HPD confidence</InputLabel>
               <Select
                 labelId="hpd-confidence-label"
                 id="hpd-confidence"
                 value={confidence}
-                label="HPD Confidence"
+                label="HPD confidence"
                 onChange={(e) => setConfidence(Number(e.target.value))}
               >
                 {CONFIDENCE_OPTIONS.map((opt) => (
@@ -2510,8 +2514,8 @@ export default function Results() {
                 this banner and said nothing about what to change once it was
                 pressed, which left the reader with a verdict and no move. */}
             <Typography variant="body2" sx={{ mt: 0.5 }}>
-              Suspect dates highlighted in the table below, hover over the chip to see the reason. Edit
-              analysis allows you to change the model, remove the date, or apply an outlier prior.
+              They are highlighted in the table below; hover over a chip for the reason. Edit the
+              analysis to change the model, remove a date, or give it an outlier prior.
             </Typography>
           </Alert>
         )}
@@ -2846,13 +2850,12 @@ export default function Results() {
           band is: the map IS the answer, and a column of per-site arrival ages
           answers a different question.
 
-          Tiles stay off here even for a project that has opted into them --
-          this page has no project loaded, and the offline basemap is the
-          private default. Passing the project's setting through is the one
-          thing left to do if that is ever wanted. */}
+          Drawn on the project's basemap: a project that has opted into tiles
+          gets them here as it does when placing, and one filed nowhere gets
+          the private default. */}
       {dispersalSection && (
         <Box sx={{ mb: 3 }}>
-          <DispersalPanel section={dispersalSection} dateFormat={dateFormat} />
+          <DispersalPanel section={dispersalSection} dateFormat={dateFormat} tiles={mapTiles} />
         </Box>
       )}
 
@@ -2961,7 +2964,7 @@ export default function Results() {
               by the page being resized. */}
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 2 }}>
             <Typography variant="h6" component="h2">
-              Posterior Distributions
+              Posterior distributions
             </Typography>
             <ToggleButtonGroup
               size="small"
@@ -3160,7 +3163,7 @@ export default function Results() {
       <ConfirmDialog
         open={rerunOpen}
         title="Re-run this analysis?"
-        message="Recomputes results from this analysis's existing inputs and replaces its current results. This can't be undone."
+        message={`Recompute results for "${analysis?.name ?? 'this analysis'}" from its existing inputs and replace its current results. This can't be undone.`}
         confirmLabel="Re-run"
         loading={rerunning}
         onConfirm={handleRerun}

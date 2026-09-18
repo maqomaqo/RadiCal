@@ -32,6 +32,22 @@ export interface PlotColors {
   mean: string
   median: string
   /**
+   * The two directions of a residual -- arrived EARLIER than a fitted front
+   * predicts, or LATER -- on the map and in the table beside it.
+   *
+   * Used to be the primary blue and the ink, and on the offline basemap that
+   * read. On OpenStreetMap's tiles it did not: the ocean there is a pale blue, and
+   * an early site drawn in the app's blue sat on it like a wave on water.
+   * So the pair is an orange and a deep teal-blue: opposite ends of the one
+   * axis a colour-blind reader can still tell apart, both clear of the tile
+   * ocean (2.9:1 and 4.4:1 against #aad3df) and of pale land, and both
+   * dark enough to carry the mark's own outline. Neither is an element
+   * hue: the wiggle amber and deposition teal are deliberately NOT reused,
+   * since a site coloured in one would be claiming to be a wiggle match.
+   */
+  residualEarly: string
+  residualLate: string
+  /**
    * Thin rules that project a value across a figure rather than carrying one
    * -- the Curve view's line from a laboratory measurement to where it meets
    * the calibration curve. Stronger than the grid, which it has to be
@@ -126,6 +142,8 @@ export function usePlotColors(): PlotColors {
       hpd68: alpha(PHASE_GREEN, 0.72),
       mean: alpha(INK, 0.85),
       median: alpha(INK, 0.45),
+      residualEarly: '#b85c14',
+      residualLate: '#215f7a',
       guide: alpha(INK, 0.3),
       // Both were pure black at the one call site that drew them, which put a
       // second, cooler grid inside a figure whose every other mark is warm.

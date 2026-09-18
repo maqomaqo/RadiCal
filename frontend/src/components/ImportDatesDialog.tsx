@@ -31,7 +31,7 @@ import {
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import UploadFileIcon from '@mui/icons-material/UploadFile'
 import DownloadIcon from '@mui/icons-material/Download'
-import { formatApiError } from '@/utils/apiError'
+import { formatApiError, describeFetchError } from '@/utils/apiError'
 import { useNotify } from '@/contexts/NotificationContext'
 import type { ModelElement } from '@/types'
 
@@ -205,7 +205,7 @@ export default function ImportDatesDialog({
       }
       setPreview(data.data as ImportPreview)
     } catch (err) {
-      notify('Error reading the file: ' + (err as Error).message)
+      notify('Could not read the file: ' + describeFetchError(err))
     } finally {
       setUploading(false)
     }

@@ -175,7 +175,7 @@ export default function DeltaRLookupPanel({
     return (
       <Box sx={{ p: 2, width: 560 }}>
         <Alert severity="info">
-          There is no marine reservoir database on this installation yet. Ingest one from the
+          There is no marine reservoir database on this installation yet. Fetch one from the
           Curves page, and ΔR can be derived from a date's position instead of typed.
         </Alert>
         <Stack direction="row" justifyContent="flex-end" sx={{ mt: 2 }}>

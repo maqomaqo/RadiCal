@@ -910,10 +910,33 @@ def _round_step(raw: float) -> float:
 # mode exists to avoid.
 ORIGIN_GRID_DEG = 1.0
 
-# How far outside the sites' own bounding box to look, in degrees. A front's
-# origin is very often outside the excavated area -- that is usually the whole
-# question -- so a grid clipped to the sites could not find it.
-ORIGIN_MARGIN_DEG = 6.0
+# How far beyond the nearest site a candidate origin may lie, in kilometres.
+#
+# The searched zone is the union of a disc of this radius around EVERY site,
+# not a rectangle around all of them. A rectangle's corners are the cells
+# furthest from every site, and on a surface that rises away from the front
+# -- which it does, since from far enough back any origin fits a plane wave
+# -- the furthest cell wins by construction: on a Polynesian model the
+# reported region sat in the bottom-left corner of the box for no better
+# reason. A union of discs has no corners, and a site at the edge of the
+# spread gets the same reach as one in the middle.
+#
+# Kilometres rather than degrees, since a degree of longitude is a third as
+# long at 70 north as at the equator. A front's origin is very often outside
+# the excavated area -- that is usually the whole question -- so the reach is
+# generous: about six degrees of latitude.
+ORIGIN_REACH_KM = 700.0
+
+# The zone must also be one piece. Discs of radius r around two sites d apart
+# touch when r = d / 2, so half the longest link of the sites' spanning tree
+# is the least reach that joins every disc to its neighbours; this much more
+# makes the necks wide enough to hold grid cells rather than meet at a point.
+ORIGIN_NECK_KM = 150.0
+
+# One degree of latitude, in kilometres -- the conversion the zone's reach is
+# laid onto the grid's axes with. Longitude is scaled by the cosine of the
+# sites' mid-latitude on top of this.
+KM_PER_DEG_LAT = 111.2
 
 # Most candidates to evaluate. A global dataset would otherwise generate tens
 # of thousands of them; past this the step widens instead, and the step that
@@ -991,6 +1014,7 @@ def profile_origin(sites: Sequence[SiteSpec], draws: Dict[str, np.ndarray],
             'min_sites': MIN_DISPERSAL_SITES,
             'refused': None,
             'step_deg': None,
+            'reach_km': None,
             'candidates': 0,
             'candidates_ahead': 0,
             'peak': None,
@@ -1021,46 +1045,69 @@ def profile_origin(sites: Sequence[SiteSpec], draws: Dict[str, np.ndarray],
     # thousand kilometres behind the front fits about as well as anything.
     west, east = _lon_extent(lons)
 
-    # Widen the step rather than evaluate more candidates: a finer grid over a
-    # continental spread would be a lot of arithmetic to locate the maximum of
-    # a surface that is flat where it matters.
+    # How far from the nearest site the zone extends: the reach, or enough
+    # to make the discs one piece, whichever is more. See ORIGIN_REACH_KM.
+    longest_link = max((d for _i, _j, d in _minimum_spanning_tree(usable)),
+                       default=0.0)
+    reach_km = max(ORIGIN_REACH_KM, longest_link / 2.0 + ORIGIN_NECK_KM)
+
+    # The axes are laid over the sites' bounding box plus the reach, in
+    # degrees at the box's own latitude; the zone is then cut from them cell
+    # by cell. Widen the step rather than evaluate more candidates: a finer
+    # grid over a continental spread would be a lot of arithmetic to locate
+    # the maximum of a surface that is flat where it matters.
+    reach_lat = reach_km / KM_PER_DEG_LAT
+    mid_lat = (lats.min() + lats.max()) / 2.0
+    reach_lon = min(180.0, reach_lat / max(math.cos(math.radians(mid_lat)), 0.1))
     step = float(step_deg)
     while True:
-        lat_axis = np.arange(lats.min() - ORIGIN_MARGIN_DEG,
-                             lats.max() + ORIGIN_MARGIN_DEG + step / 2, step)
-        lon_axis = np.arange(west - ORIGIN_MARGIN_DEG,
-                             east + ORIGIN_MARGIN_DEG + step / 2, step)
+        # Axes snapped to multiples of the step, so the cells sit on whole
+        # degrees whatever the sites' own coordinates are.
+        lat_axis = np.arange(math.floor((lats.min() - reach_lat) / step) * step,
+                             lats.max() + reach_lat + step / 2, step)
+        lon_axis = np.arange(math.floor((west - reach_lon) / step) * step,
+                             east + reach_lon + step / 2, step)
         lat_axis = lat_axis[(lat_axis >= -90.0) & (lat_axis <= 90.0)]
-        if lat_axis.size * lon_axis.size <= MAX_ORIGIN_CANDIDATES:
+        cells: List[Tuple[float, float, np.ndarray]] = []
+        for lat in lat_axis:
+            for lon in lon_axis:
+                wrapped = (float(lon) + 180.0) % 360.0 - 180.0
+                distances = np.array(
+                    [haversine_km(float(lat), wrapped, s.latitude, s.longitude)
+                     for s in usable], dtype=float)
+                if float(distances.min()) <= reach_km:
+                    cells.append((float(lat), wrapped, distances))
+        if len(cells) <= MAX_ORIGIN_CANDIDATES:
             break
         step *= 2.0
 
     scores: List[Tuple[float, float, float]] = []
     ahead = 0
-    for lat in lat_axis:
-        for lon in lon_axis:
-            wrapped = (float(lon) + 180.0) % 360.0 - 180.0
-            distances = np.array(
-                [haversine_km(float(lat), wrapped, s.latitude, s.longitude)
-                 for s in usable], dtype=float)
-            if len(np.unique(np.round(distances, 6))) < MIN_DISTINCT_DISTANCES:
-                # Sites on one circle around this candidate: no gradient to
-                # estimate, so it is not a candidate at all rather than a
-                # candidate that fits badly.
-                continue
-            slope, _intercept, rss = _ols_per_draw(distances, ages)
-            if float(np.median(slope)) >= 0.0:
-                # Sites get older with distance from here: this is where the
-                # front went, not where it started. See the docstring.
-                ahead += 1
-                continue
-            # Concentrated-out scale, averaged over draws. Guarded because a
-            # perfect fit on a synthetic front really does give RSS = 0.
-            score = float(np.mean(-0.5 * n_sites * np.log(np.maximum(rss, 1e-12))))
-            scores.append((float(lat), wrapped, score))
+    # Cells on the zone's rim: within one grid step of the reach. A peak on
+    # the rim means the surface was still rising where the search stopped.
+    rim_km = reach_km - step * KM_PER_DEG_LAT
+    rim: set = set()
+    for lat, wrapped, distances in cells:
+        if float(distances.min()) >= rim_km:
+            rim.add((lat, wrapped))
+        if len(np.unique(np.round(distances, 6))) < MIN_DISTINCT_DISTANCES:
+            # Sites on one circle around this candidate: no gradient to
+            # estimate, so it is not a candidate at all rather than a
+            # candidate that fits badly.
+            continue
+        slope, _intercept, rss = _ols_per_draw(distances, ages)
+        if float(np.median(slope)) >= 0.0:
+            # Sites get older with distance from here: this is where the
+            # front went, not where it started. See the docstring.
+            ahead += 1
+            continue
+        # Concentrated-out scale, averaged over draws. Guarded because a
+        # perfect fit on a synthetic front really does give RSS = 0.
+        score = float(np.mean(-0.5 * n_sites * np.log(np.maximum(rss, 1e-12))))
+        scores.append((lat, wrapped, score))
 
     if not scores:
-        return block(step_deg=step, candidates_ahead=ahead, refused=(
+        return block(step_deg=step, reach_km=reach_km, candidates_ahead=ahead, refused=(
             'No candidate origin gave the sites distinct enough distances for '
             'a front to be fitted from it.' if ahead == 0 else
             'From every candidate on the grid the sites get older with '
@@ -1081,6 +1128,7 @@ def profile_origin(sites: Sequence[SiteSpec], draws: Dict[str, np.ndarray],
 
     return block(
         step_deg=step,
+        reach_km=reach_km,
         candidates=len(region),
         # Grid cells the front would have run TOWARDS, which are not
         # candidates for its start and were not scored. Reported so the panel
@@ -1089,6 +1137,11 @@ def profile_origin(sites: Sequence[SiteSpec], draws: Dict[str, np.ndarray],
         # Named as the peak of the region rather than as "the origin": see the
         # docstring for why this surface has no single location in it.
         peak={'lat': peak['lat'], 'lon': peak['lon']},
+        # Whether the best cell is on the zone's rim, so the surface was still
+        # rising where the search stopped: the origin may lie further out,
+        # or -- the usual case -- the dates fit a plane wave from anywhere
+        # far enough back and do not locate one.
+        peak_at_reach=(peak['lat'], peak['lon']) in rim,
         region=inside,
         # How much of the searched grid survives the cutoff. Near 1 the data
         # do not locate an origin at all, which is a finding and is exactly

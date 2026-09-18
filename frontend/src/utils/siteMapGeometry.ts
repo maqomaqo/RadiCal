@@ -140,6 +140,42 @@ export function geoProjectionOf(graphDiv: unknown): GeoProjection | null {
 export interface MapLibreMap {
   unproject(point: [number, number]): { lat: number; lng: number } | null | undefined
   getContainer(): Element | null | undefined
+  hasImage?(id: string): boolean
+  addImage?(id: string, image: { width: number; height: number; data: Uint8Array }): void
+}
+
+/**
+ * The icon name plotly's scattermap puts on every text label -- `{symbol}-15`
+ * with an empty symbol -- and, finding no such image, fetches from unpkg.com.
+ * See preventIconFetch.
+ */
+export const PLOTLY_TEXT_ICON = '-15'
+
+/**
+ * Register a blank image under the name plotly's text layer asks for, so
+ * the map never reports it missing and plotly never goes to unpkg for it.
+ *
+ * plotly 2.35's scattermap draws text on a MapLibre symbol layer whose
+ * icon-image is `{symbol}-15`; a text-only trace has no symbol, so the
+ * layer asks for an image called `-15`, and plotly's styleimagemissing
+ * handler answers by fetching `https://unpkg.com/maki@2.1.0/icons/-15.svg`
+ * -- a request to a third party that fails on CORS and would draw nothing
+ * if it succeeded. The handler is inside plotly and cannot be unhooked, but
+ * it only fires for an image the map does not have. A 1x1 transparent
+ * pixel under that name is enough; it is never drawn at any visible size.
+ *
+ * Idempotent, and safe against an upgrade that removes the methods: it
+ * does nothing rather than throw.
+ */
+export function preventIconFetch(map: MapLibreMap): boolean {
+  if (typeof map.hasImage !== 'function' || typeof map.addImage !== 'function') return false
+  try {
+    if (map.hasImage(PLOTLY_TEXT_ICON)) return true
+    map.addImage(PLOTLY_TEXT_ICON, { width: 1, height: 1, data: new Uint8Array(4) })
+    return true
+  } catch {
+    return false
+  }
 }
 
 /** The MapLibre map behind a tiled basemap, or null. */
@@ -184,6 +220,112 @@ export function latLonFromMapPoint(
   if (!inverted) return null
   const { lat, lng } = inverted
   return validPlace(lat, lng) ? { latitude: lat, longitude: lng } : null
+}
+
+/**
+ * A longitude moved by whole turns to within half a turn of `centre`.
+ *
+ * For LINES on the tiled map. The offline map rotates its projection to the
+ * frame's centre, so a segment from 170 to -170 is drawn the short way
+ * across the dateline. MapLibre keeps the world's seam at 180 and draws that
+ * same segment the long way round -- 340 degrees across every ocean but the
+ * one it belongs to, which is what a Pacific spanning tree looked like on
+ * tiles. MapLibre accepts a longitude past 180 and draws it in the adjacent
+ * copy of the world, so a Pacific frame's -170 becomes 190 and the segment
+ * is 20 degrees again. Marks are left alone: a point has no long way round,
+ * and its hover should show the longitude the reader typed.
+ */
+export function unwrapLongitude(longitude: number, centre: number): number {
+  return longitude + 360 * Math.round((centre - longitude) / 360)
+}
+
+/** A vertex of a line on the map, in degrees. */
+export interface LinePoint {
+  latitude: number
+  longitude: number
+}
+
+/**
+ * How many pieces the longest great-circle segment is cut into on the
+ * tiled map. Sixty-four is smooth at any zoom a whole front is visible at;
+ * a segment that would not curve is not cut at all (see densifyGreatCircle).
+ */
+export const GREAT_CIRCLE_STEPS = 64
+
+/**
+ * A polyline redrawn so that every segment follows the great circle
+ * between its ends, for the tiled map.
+ *
+ * The offline map does this for nothing: Plotly hands a scattergeo line to
+ * d3-geo, which resamples each segment along the great circle before
+ * projecting, so a two-point front from Fiji to Chile is drawn as the
+ * shortest path on the sphere -- which is what the wave model fitted,
+ * since its distances are great-circle kilometres. MapLibre joins the same
+ * two points with a straight line in Web Mercator, which is a path the
+ * model never measured and, across an ocean, a visibly different one. So
+ * the tiled map is given the points d3 would have made.
+ *
+ * Spherical linear interpolation, so the steps are even in arc length.
+ * Segments shorter than a degree are left as they are -- the curve is
+ * invisible and the vertices would only be weight -- which is why the
+ * densely sampled isochrons and the short spanning-tree links cost nothing
+ * to pass through here.
+ */
+export function densifyGreatCircle(
+  points: LinePoint[],
+  steps: number = GREAT_CIRCLE_STEPS,
+): LinePoint[] {
+  if (points.length < 2) return points
+  const out: LinePoint[] = [points[0]]
+  for (let i = 1; i < points.length; i++) {
+    const a = points[i - 1]
+    const b = points[i]
+    const va = toVector(a)
+    const vb = toVector(b)
+    const angle = Math.acos(Math.max(-1, Math.min(1, dot(va, vb))))
+    if (angle < 1 * RADIANS || angle > Math.PI - 1e-9) {
+      // Too short to curve, or antipodal, where no single great circle is
+      // the shortest and any arc is a guess: a straight join is honest.
+      out.push(b)
+      continue
+    }
+    const n = Math.max(1, Math.round((angle / Math.PI) * steps * 2))
+    const sinAngle = Math.sin(angle)
+    for (let k = 1; k <= n; k++) {
+      const t = k / n
+      const wa = Math.sin((1 - t) * angle) / sinAngle
+      const wb = Math.sin(t * angle) / sinAngle
+      out.push(
+        k === n
+          ? b
+          : fromVector([
+              wa * va[0] + wb * vb[0],
+              wa * va[1] + wb * vb[1],
+              wa * va[2] + wb * vb[2],
+            ]),
+      )
+    }
+  }
+  return out
+}
+
+type Vector = [number, number, number]
+
+function toVector(p: LinePoint): Vector {
+  const lat = p.latitude * RADIANS
+  const lon = p.longitude * RADIANS
+  return [Math.cos(lat) * Math.cos(lon), Math.cos(lat) * Math.sin(lon), Math.sin(lat)]
+}
+
+function fromVector(v: Vector): LinePoint {
+  return {
+    latitude: Math.atan2(v[2], Math.hypot(v[0], v[1])) / RADIANS,
+    longitude: Math.atan2(v[1], v[0]) / RADIANS,
+  }
+}
+
+function dot(a: Vector, b: Vector): number {
+  return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 }
 
 /**

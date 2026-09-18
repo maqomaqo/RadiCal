@@ -42,7 +42,7 @@ import DriveFileMoveIcon from '@mui/icons-material/DriveFileMove'
 import ReplayIcon from '@mui/icons-material/Replay'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import CompareArrowsIcon from '@mui/icons-material/CompareArrows'
-import { formatApiError } from '@/utils/apiError'
+import { formatApiError, describeFetchError } from '@/utils/apiError'
 import { useNotify } from '@/contexts/NotificationContext'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import AssignProjectDialog from '@/components/AssignProjectDialog'
@@ -50,6 +50,7 @@ import ProjectSampleTable from '@/components/ProjectSampleTable'
 import JobProgress from '@/components/JobProgress'
 import { cancelJob } from '@/api/jobs'
 import { useJob } from '@/hooks/useJob'
+import { rememberProjectMapTiles } from '@/hooks/useProjectMapTiles'
 import { MAX_COMPARED_RUNS } from '@/theme/compareColors'
 import StatusStrip, { statusSummary } from '@/components/StatusStrip'
 import type { StatusCounts } from '@/components/StatusStrip'
@@ -271,6 +272,9 @@ export default function ProjectDetail() {
         const data = await response.json()
         if (data.success) {
           setProject(data.data)
+          // So the results and model-structure pages, which draw this
+          // project's maps without loading the project, need not fetch it.
+          rememberProjectMapTiles(data.data.id, !!data.data.map_tiles_enabled)
         } else {
           setError('Failed to load project')
         }
@@ -310,10 +314,10 @@ export default function ProjectDetail() {
         setEditOpen(false)
         fetchProject(project.id)
       } else {
-        notify('Failed to update project: ' + formatApiError(data))
+        notify('Could not update project: ' + formatApiError(data))
       }
     } catch (err) {
-      notify('Error updating project: ' + (err as Error).message)
+      notify('Could not update project: ' + describeFetchError(err))
     } finally {
       setSaving(false)
     }
@@ -328,10 +332,10 @@ export default function ProjectDetail() {
       if (data.success) {
         navigate('/projects')
       } else {
-        notify('Failed to delete project: ' + formatApiError(data))
+        notify('Could not delete project: ' + formatApiError(data))
       }
     } catch (err) {
-      notify('Error deleting project: ' + (err as Error).message)
+      notify('Could not delete project: ' + describeFetchError(err))
     } finally {
       setDeletingProject(false)
     }
@@ -347,10 +351,10 @@ export default function ProjectDetail() {
         setDeleteAnalysisTarget(null)
         fetchProject(project.id)
       } else {
-        notify('Failed to delete analysis: ' + formatApiError(data))
+        notify('Could not delete analysis: ' + formatApiError(data))
       }
     } catch (err) {
-      notify('Error deleting analysis: ' + (err as Error).message)
+      notify('Could not delete analysis: ' + describeFetchError(err))
     } finally {
       setDeletingAnalysis(false)
     }
@@ -366,10 +370,10 @@ export default function ProjectDetail() {
       if (data.success) {
         navigate(`/analysis/${data.data.id}/edit`)
       } else {
-        notify('Failed to duplicate analysis: ' + formatApiError(data))
+        notify('Could not duplicate analysis: ' + formatApiError(data))
       }
     } catch (err) {
-      notify('Error duplicating analysis: ' + (err as Error).message)
+      notify('Could not duplicate analysis: ' + describeFetchError(err))
     } finally {
       setDuplicating(false)
     }
@@ -389,10 +393,10 @@ export default function ProjectDetail() {
         setJobId(data.data.job_id ?? null)
         fetchProject(project.id)
       } else {
-        notify('Failed to rerun analysis: ' + formatApiError(data))
+        notify('Could not re-run analysis: ' + formatApiError(data))
       }
     } catch (err) {
-      notify('Error rerunning analysis: ' + (err as Error).message)
+      notify('Could not re-run analysis: ' + describeFetchError(err))
     } finally {
       setRerunningOne(false)
     }
@@ -432,13 +436,13 @@ export default function ProjectDetail() {
         if (data.success) {
           setJobId(data.data.job_id ?? null)
         } else {
-          notify('Failed to rerun project: ' + formatApiError(data))
+          notify('Could not re-run project: ' + formatApiError(data))
         }
       }
       setRerunAllOpen(false)
       fetchProject(project.id)
     } catch (err) {
-      notify('Error rerunning project: ' + (err as Error).message)
+      notify('Could not re-run project: ' + describeFetchError(err))
     } finally {
       setRerunningAll(false)
     }
@@ -650,7 +654,7 @@ export default function ProjectDetail() {
           </Button>
           {analysesCount > 0 && (
             <Button variant="outlined" startIcon={<ReplayIcon />} onClick={() => setRerunAllOpen(true)}>
-              Re-run All
+              Re-run all
             </Button>
           )}
         </Box>
@@ -965,11 +969,11 @@ export default function ProjectDetail() {
       </Menu>
 
       <Dialog open={editOpen} onClose={() => setEditOpen(false)} fullWidth maxWidth="sm">
-        <DialogTitle>Project Settings</DialogTitle>
+        <DialogTitle>Project settings</DialogTitle>
         <DialogContent>
           <TextField
             fullWidth
-            label="Project Name"
+            label="Project name"
             value={editName}
             onChange={(e) => setEditName(e.target.value)}
             sx={{ mt: 1, mb: 2 }}
@@ -1013,7 +1017,7 @@ export default function ProjectDetail() {
                 onChange={(e) => setEditTiles(e.target.checked)}
               />
             }
-            label="Show a basemap with streets and satellite detail"
+            label="Show a basemap with coastlines, rivers and place names"
           />
           {/* The notice says what the request gives away, and says it BEFORE
               the switch is thrown rather than in a footnote afterwards. That
@@ -1021,12 +1025,12 @@ export default function ProjectDetail() {
               later would be the same disclosure with better manners. */}
           <Alert severity={editTiles ? 'warning' : 'info'} sx={{ mt: 1 }}>
             The map draws its coastlines from data this app serves itself, and asks nothing of
-            anyone. Turning this on fetches map images from OpenStreetMap instead, which tells
-            their servers which patch of ground is on screen each time someone opens or pans the
-            map — not the coordinates themselves, but enough to locate a site. Worth it to drop a
-            pin on a field boundary; not worth it to look at a distribution. It also needs the
-            internet: on an installation that cannot reach OpenStreetMap, leave this off, because
-            the tiled map has no offline state to fall back to.
+            anyone. Turning this on fetches map tiles from OpenFreeMap instead — on every map this
+            project appears in, placing and results alike — which tells their server which patch
+            of ground is on screen each time someone opens or pans a map: not the coordinates
+            themselves, but enough to locate a site. Worth it to drop a pin on a field boundary;
+            think twice for a restricted site. It needs the internet: when OpenFreeMap cannot be
+            reached, the map falls back to the app's own coastlines and says so.
           </Alert>
         </DialogContent>
         <DialogActions>
@@ -1040,7 +1044,7 @@ export default function ProjectDetail() {
       <ConfirmDialog
         open={deleteProjectOpen}
         title="Delete project?"
-        message={`Delete "${project.name}"? Its analyses will be kept and moved to Unassigned -- only the project itself is removed.`}
+        message={`Delete "${project.name}"? Its analyses will be kept and moved to Unassigned — only the project itself is removed.`}
         confirmLabel="Delete"
         danger
         loading={deletingProject}
@@ -1081,7 +1085,7 @@ export default function ProjectDetail() {
         open={rerunAllOpen}
         title="Re-run all analyses?"
         message={`Recompute results for all ${project.analyses.length} analyses in ${isUnassigned ? 'the unassigned list' : `"${project.name}"`} from their existing inputs, replacing their current results. This can't be undone and may take a while.`}
-        confirmLabel="Re-run All"
+        confirmLabel="Re-run all"
         loading={rerunningAll}
         onConfirm={handleRerunAll}
         onCancel={() => setRerunAllOpen(false)}

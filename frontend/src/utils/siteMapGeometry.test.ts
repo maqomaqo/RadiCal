@@ -19,6 +19,8 @@ import {
   roundPlacement,
   siteLabel,
   unplaced,
+  densifyGreatCircle,
+  unwrapLongitude,
   zoomForFrame,
 } from './siteMapGeometry'
 import type { GeoProjection, MapLibreMap, MapPoint } from './siteMapGeometry'
@@ -373,5 +375,72 @@ describe('zoomForFrame', () => {
     const z = zoomForFrame({ lon: [5, 5], lat: [5, 5] })
     expect(Number.isFinite(z)).toBe(true)
     expect(z).toBeLessThanOrEqual(12)
+  })
+})
+
+describe('unwrapLongitude', () => {
+  it('leaves a longitude within half a turn of the centre alone', () => {
+    expect(unwrapLongitude(10, 0)).toBe(10)
+    expect(unwrapLongitude(-170, -160)).toBe(-170)
+  })
+
+  it('carries a longitude across the dateline towards a Pacific centre', () => {
+    // A frame centred on 180: the American side of the Pacific comes round
+    // to sit east of it rather than a world away to the west.
+    expect(unwrapLongitude(-170, 180)).toBe(190)
+    expect(unwrapLongitude(170, 180)).toBe(170)
+    // And the other way, for a frame the framing normalised to -180.
+    expect(unwrapLongitude(170, -180)).toBe(-190)
+  })
+
+  it('is a whole number of turns, so the point is the same place', () => {
+    for (const [lon, centre] of [[-170, 180], [170, -180], [5, 400], [-5, -400]]) {
+      expect(Number.isInteger((unwrapLongitude(lon, centre) - lon) / 360)).toBe(true)
+    }
+  })
+})
+
+describe('densifyGreatCircle', () => {
+  const fiji = { latitude: -17.7, longitude: 178.1 }
+  const chile = { latitude: -33.4, longitude: -70.6 }
+
+  it('keeps the ends and adds vertices between them', () => {
+    const path = densifyGreatCircle([fiji, chile])
+    expect(path[0]).toEqual(fiji)
+    expect(path[path.length - 1]).toEqual(chile)
+    expect(path.length).toBeGreaterThan(30)
+  })
+
+  it('follows the great circle, not the straight line in longitude and latitude', () => {
+    // The geodesic from Fiji to Chile bows south of the straight join: at
+    // its midpoint it is well below the mean of the two latitudes.
+    const path = densifyGreatCircle([fiji, chile])
+    const mid = path[Math.floor(path.length / 2)]
+    const straightMidLat = (fiji.latitude + chile.latitude) / 2
+    expect(mid.latitude).toBeLessThan(straightMidLat - 5)
+  })
+
+  it('leaves a short segment as it was', () => {
+    const a = { latitude: 50, longitude: 0 }
+    const b = { latitude: 50.5, longitude: 0.5 }
+    expect(densifyGreatCircle([a, b])).toEqual([a, b])
+  })
+
+  it('leaves fewer than two points alone', () => {
+    expect(densifyGreatCircle([])).toEqual([])
+    expect(densifyGreatCircle([fiji])).toEqual([fiji])
+  })
+
+  it('stays on the sphere: every vertex is a real place', () => {
+    for (const p of densifyGreatCircle([fiji, chile])) {
+      expect(Math.abs(p.latitude)).toBeLessThanOrEqual(90)
+      expect(Math.abs(p.longitude)).toBeLessThanOrEqual(180)
+    }
+  })
+
+  it('spaces its vertices evenly along the arc', () => {
+    const path = densifyGreatCircle([{ latitude: 0, longitude: 0 }, { latitude: 0, longitude: 90 }])
+    const gaps = path.slice(1).map((p, i) => p.longitude - path[i].longitude)
+    for (const gap of gaps) expect(gap).toBeCloseTo(gaps[0], 6)
   })
 })

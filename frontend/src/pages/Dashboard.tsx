@@ -19,7 +19,7 @@ import ConfirmDialog from '@/components/ConfirmDialog'
 import GuideBand from '@/components/GuideBand'
 import IntervalPlot, { SampleIntervals } from '@/components/IntervalPlot'
 import { useNotify } from '@/contexts/NotificationContext'
-import { formatApiError } from '@/utils/apiError'
+import { formatApiError, describeFetchError } from '@/utils/apiError'
 import { analysisTypeLabel } from '@/utils/analysisTypes'
 import { loadRecentAnalyses, LoadError } from '@/utils/recentAnalyses'
 import { clusterByPeriod } from '@/utils/periodClusters'
@@ -94,10 +94,10 @@ export default function Dashboard() {
         setDeleteTarget(null)
         fetchAnalyses()
       } else {
-        notify('Failed to delete analysis: ' + formatApiError(data))
+        notify('Could not delete analysis: ' + formatApiError(data))
       }
     } catch (err) {
-      notify('Error deleting analysis: ' + (err as Error).message)
+      notify('Could not delete analysis: ' + describeFetchError(err))
     } finally {
       setDeleting(false)
     }
