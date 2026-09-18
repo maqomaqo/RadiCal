@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 import { tileServerMonitor, type Reachability } from '@/utils/tileServer'
 
 /**
- * Whether the OpenStreetMap tile server can be reached, for a map that
+ * Whether the basemap host can be reached, for a map that
  * wants to draw on it.
  *
  * Null while the first probe is out, then true or false; moves with the

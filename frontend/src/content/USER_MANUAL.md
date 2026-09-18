@@ -661,12 +661,12 @@ west. Degrees and minutes are not read. Enter both halves or leave empty, do not
 
 **The basemap is drawn by the app itself**, from stored coarse coastline data. It is accurate to about a kilometre; paste a recorded position for anything finer. A
 project can instead turn on **Show a basemap with streets and satellite detail** (Edit Project),
-which fetches map images from OpenStreetMap for every map the project appears in — placing dates,
+which fetches map tiles from OpenFreeMap (a light-grey map drawn from OpenStreetMap data) for every map the project appears in — placing dates,
 placing a dispersal origin, the spatial-order proposal and the dispersal results alike. That
-tells OpenStreetMap's servers which patch of ground is on screen: not the coordinates, but enough
+tells OpenFreeMap's server which patch of ground is on screen: not the coordinates, but enough
 to locate a site. Worth it to drop a pin precisely; think twice for a restricted site. It needs
-the internet: when OpenStreetMap cannot be reached the map falls back to the app's own coastlines
-and says so under the map, and goes back to OpenStreetMap once there is a connection again.
+the internet: when OpenFreeMap cannot be reached the map falls back to the app's own coastlines
+and says so under the map, and goes back to OpenFreeMap once there is a connection again.
 The same dialog sets the project's **coordinate precision** — full, or rounded to
 0.01°, 0.1° or 1° (about 1, 11 or 110 km) — which governs what leaves in exports and figures.
 What is stored does not change, and the project's own table still shows the full value.

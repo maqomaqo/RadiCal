@@ -1,18 +1,17 @@
-// Whether the tile server can be reached, so a project that has opted into
-// OpenStreetMap still gets a map when there is no internet.
+// Whether the basemap host can be reached, so a project that has opted into
+// the tiled basemap still gets a map when there is no internet.
 //
 // MapLibre does not degrade when its tiles fail: it draws the marks on a
 // blank grey square and says nothing. So before the tiled map is drawn at
-// all, one tile is asked for, and if it does not arrive the map falls back to
-// the offline basemap. The tile asked for is the zoom-0 whole-world tile,
-// which every tiled map requests anyway and which names no place -- so the
-// probe gives away nothing the map itself would not.
+// all, one small tile is asked for and the style is fetched, and if either
+// does not arrive the map falls back to the offline basemap. The tile asked
+// for is a zoom-0 whole-world tile, which names no place -- so the probe
+// gives away nothing the map itself would not.
 
-/**
- * The tile Plotly's `open-street-map` style fetches from; one of the three
- * hosts it round-robins between. Kept in step with plotly.js-dist-min.
- */
-export const PROBE_TILE_URL = 'https://tile.openstreetmap.org/0/0/0.png'
+import { BASEMAP_PROBE_URL, loadBasemapStyle } from '@/theme/basemapStyle'
+
+/** The image the probe asks for. See BASEMAP_PROBE_URL. */
+export const PROBE_TILE_URL = BASEMAP_PROBE_URL
 
 /**
  * How long to wait for the probe tile before concluding the server is out
@@ -53,11 +52,11 @@ export type Reachability = boolean | null
 /**
  * Ask for one tile, resolving to whether it arrived.
  *
- * An Image rather than fetch, deliberately: an image load succeeds only
- * when the server answered with an image it would also serve as a tile, so a
- * 4xx from the tile server -- reachable, but not serving -- counts as
- * unreachable, which is the answer the map needs. A no-cors fetch would call
- * that a success.
+ * An Image rather than fetch, deliberately, and for two reasons. An image
+ * load succeeds only when the server answered with an image, so a 4xx --
+ * reachable, but not serving -- counts as unreachable, which is the answer
+ * the map needs. And an Image can be asked afterwards whether its bytes
+ * came, which is how the timeout survives a busy page (see PROBE_TIMEOUT_MS).
  */
 export function probeTileServer(
   url: string = PROBE_TILE_URL,
@@ -92,6 +91,18 @@ export function probeTileServer(
   })
 }
 
+/**
+ * The whole probe: the tile, then the style. The style is what the map is
+ * drawn on, so a host that serves tiles but not the style is not reachable
+ * in any sense the map can use. Fetched once and kept -- see
+ * loadBasemapStyle -- so only the first probe pays for it.
+ */
+export function probeBasemap(): Promise<boolean> {
+  return probeTileServer().then((ok) =>
+    ok ? loadBasemapStyle().then(() => true, () => false) : false,
+  )
+}
+
 type Listener = (verdict: Reachability) => void
 
 /**
@@ -113,7 +124,7 @@ class TileServerMonitor {
   private retriesMade = 0
 
   constructor(
-    private readonly probe: () => Promise<boolean> = () => probeTileServer(),
+    private readonly probe: () => Promise<boolean> = probeBasemap,
     private readonly ttlMs: number = VERDICT_TTL_MS,
     private readonly now: () => number = () => Date.now(),
     private readonly retryAfterMs: readonly number[] = RETRY_AFTER_MS,

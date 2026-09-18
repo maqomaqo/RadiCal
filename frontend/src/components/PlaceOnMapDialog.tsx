@@ -25,6 +25,7 @@ import {
   Typography,
 } from '@mui/material'
 
+import { BASEMAP_PROVIDER } from '@/theme/basemapStyle'
 import SiteMap from '@/components/SiteMap'
 import { roundPlacement } from '@/utils/siteMapGeometry'
 import type { MapPoint } from '@/utils/siteMapGeometry'
@@ -131,7 +132,7 @@ export default function PlaceOnMapDialog({
             </>
           )}
           {tiles
-            ? ' Basemap tiles are on for this project: panning here tells the tile server which area you are looking at.'
+            ? ` Basemap tiles are on for this project: panning here tells ${BASEMAP_PROVIDER} which area you are looking at.`
             : ' The basemap is the offline one, which is accurate to about a kilometre. Paste a recorded position for anything finer.'}
         </Typography>
 

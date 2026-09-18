@@ -36,7 +36,7 @@ export interface PlotColors {
    * predicts, or LATER -- on the map and in the table beside it.
    *
    * Used to be the primary blue and the ink, and on the offline basemap that
-   * read. On OpenStreetMap it did not: the ocean there is a pale blue, and
+   * read. On OpenStreetMap's tiles it did not: the ocean there is a pale blue, and
    * an early site drawn in the app's blue sat on it like a wave on water.
    * So the pair is an orange and a deep teal-blue: opposite ends of the one
    * axis a colour-blind reader can still tell apart, both clear of the tile

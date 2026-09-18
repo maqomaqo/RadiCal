@@ -6,7 +6,7 @@ import Plotly from 'plotly.js-dist-min'
 
 import { useTileServerReachable } from '@/hooks/useTileServer'
 import { CONTEXT_PALETTE } from '@/theme/diagramColors'
-import { quietOsmStyle } from '@/theme/basemapStyle'
+import { BASEMAP_PROVIDER, BASEMAP_TEXT_FONT, loadedBasemapStyle } from '@/theme/basemapStyle'
 import { usePlotColors, usePlotFont } from '@/theme/plotColors'
 import { downloadPlotPng } from '@/utils/downloadPlot'
 import {
@@ -193,7 +193,7 @@ function placeFromTiledMap(graphDiv: unknown, event: MouseEvent): Placement {
  *
  * Not continued as far as it first was, though. The first pair were #e3f1ec
  * and #b4d9cd -- 1.2:1 and 1.5:1 against white -- and on a basemap whose
- * land is white or OpenStreetMap's cream, the youngest sites simply were not
+ * land is white or a tile's pale grey, the youngest sites simply were not
  * there. These sit at 1.8:1 and 2.4:1: still plainly the pale end of the
  * same green, but a mark at the pale end is a mark. The rest of the pop
  * comes from the outline -- see VALUE_MARK_OUTLINE.
@@ -205,7 +205,7 @@ const VALUE_RAMP = ['#8fcdb7', '#6cb59d', ...CONTEXT_PALETTE]
  *
  * The plain pins take a white halo, which separates two solid dark marks
  * that overlap. A pale mark on a pale basemap gets nothing from a white
- * halo, and on OpenStreetMap's cream land it vanished into it, halo and all;
+ * halo, and on a tile's pale land it vanished into it, halo and all;
  * a thin ink edge is what makes a pale fill read as a filled shape rather
  * than as a faint stain. Ink, not the mark's own hue darkened, so every mark
  * on the figure has the same edge whatever value it carries.
@@ -380,7 +380,10 @@ export default function SiteMap({
   // installation, and the wait is one small image. Not probed at all when
   // the project has not asked for tiles.
   const reachable = useTileServerReachable(tilesWanted === true)
-  const tiles = tilesWanted === true && reachable === true
+  // The style arrives with a positive verdict -- the probe fetches it -- so
+  // this is a guard, not a second wait.
+  const basemapStyle = reachable === true ? loadedBasemapStyle() : null
+  const tiles = tilesWanted === true && reachable === true && basemapStyle !== null
   const deciding = tilesWanted === null || (tilesWanted === true && reachable === null)
   const fellBack = tilesWanted === true && reachable === false
   // Null until the first click tells us. Not an error state on its own: it
@@ -536,7 +539,9 @@ export default function SiteMap({
           lon: [lineLon(line.points[middle].longitude)],
           text: [label],
           textposition: 'top center' as const,
-          textfont,
+          // A face the basemap host serves glyphs for: MapLibre draws no
+          // text it has no glyphs for, and says so only in the console.
+          textfont: { ...textfont, family: BASEMAP_TEXT_FONT },
           marker: { size: 6, opacity: 0 },
           hoverinfo: 'skip' as const,
         })
@@ -874,12 +879,12 @@ export default function SiteMap({
       return {
         ...common,
         map: {
-          // OpenStreetMap's tiles, which need no access token, drawn quiet
-          // -- see quietOsmStyle. The tile request is the disclosure:
-          // choosing this is what sends a request naming the square of the
-          // earth on screen to a third party, which is why this branch is
-          // reached only for a project that has said yes.
-          style: quietOsmStyle({ surface: plot.surface }),
+          // Positron from OpenFreeMap, trimmed -- see theme/basemapStyle.ts.
+          // The tile request is the disclosure: choosing this is what sends
+          // a request naming the square of the earth on screen to a third
+          // party, which is why this branch is reached only for a project
+          // that has said yes.
+          style: basemapStyle,
           center: viewFrame
             ? {
                 lat: (viewFrame.lat[0] + viewFrame.lat[1]) / 2,
@@ -921,7 +926,7 @@ export default function SiteMap({
           : {}),
       },
     }
-  }, [plot, plotFont, viewFrame, dataFrame, tiles])
+  }, [plot, plotFont, viewFrame, dataFrame, tiles, basemapStyle])
 
   return (
     <Box>
@@ -967,15 +972,15 @@ export default function SiteMap({
             : deciding
               ? tilesWanted === null
                 ? 'Loading the map…'
-                : 'Checking whether OpenStreetMap can be reached…'
+                : `Checking whether ${BASEMAP_PROVIDER} can be reached…`
               : [
                   editable
                     ? 'Click the map to place every selected date at that position. Drag to pan and scroll to zoom.'
                     : 'Drag to pan and scroll to zoom.',
                   fellBack
-                    ? 'OpenStreetMap could not be reached, so coastlines are drawn from data this app serves itself; it is used again once there is a connection.'
+                    ? `${BASEMAP_PROVIDER} could not be reached, so coastlines are drawn from data this app serves itself; it is used again once there is a connection.`
                     : tiles
-                      ? 'Basemap tiles are on for this project, so the tile server is told which area is on screen.'
+                      ? `Basemap tiles are on for this project, so ${BASEMAP_PROVIDER} is told which area is on screen.`
                       : editable
                         ? ''
                         : 'Coastlines are drawn from data this app serves itself: no tiles are requested.',

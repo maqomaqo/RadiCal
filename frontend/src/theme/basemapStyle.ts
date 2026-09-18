@@ -1,89 +1,115 @@
 /**
- * The tiled basemap's style: OpenStreetMap's own tiles, quietened.
+ * The tiled basemap: OpenFreeMap's Positron, trimmed.
  *
- * Plotly's built-in `open-street-map` draws the tiles as they come, and as
- * they come they are a street map -- coloured land use, a saturated blue
- * ocean, road casings, labels at every zoom -- drawn to be read on its own.
- * Under a figure it is not on its own: the marks are the figure, and every
- * hue on the tile competes with a hue that means something. The residual
- * map's early/late pair had to be moved off blue because of the ocean alone.
+ * Positron is the light-grey cartography most published site-distribution
+ * maps end up resembling: pale land, a darker grey sea, thin coastlines,
+ * quiet labels, and nothing on it that is a colour -- so the marks are the
+ * only things that are. OpenStreetMap's own raster tiles were tried first,
+ * plain and then desaturated, and failed on the land: OSM paints woodland
+ * and scrub as fills of their own, and a small forested island came out the
+ * colour of the sea around it. A raster tile is a picture; nothing in it
+ * can be turned off. Positron is vector, so what is drawn is decided here.
  *
- * So the same tiles, from the same server, with the same request and the
- * same disclosure, are drawn nearly grey and a little faded over the app's
- * own surface. Coastlines, islands, rivers and the shape of the land all
- * survive -- that is what a basemap is for -- but nothing on it is a colour
- * any more, so the marks are the only things that are. MapLibre applies the
- * paint on the GPU, so this costs nothing over the plain style.
+ * OpenFreeMap (openfreemap.org) serves it from one host, with no key, no
+ * rate limit and no account -- a public-good project over OpenStreetMap
+ * data. CARTO, whose design Positron is, now requires an API key for its
+ * own hosting of the same style, which would have meant a key in every
+ * installation's configuration and a quota to watch.
  *
- * A style OBJECT rather than a name, which is the whole trick: plotly hands
- * an object straight to MapLibre, so any raster paint property is available
- * and no second style source or tile host is involved.
+ * The style is fetched once and tailored before it reaches MapLibre. The
+ * fetch is part of the reachability probe (see utils/tileServer.ts), so a
+ * map is never asked to draw on a style that has not arrived.
  */
 
-/** The tile URL plotly's own `open-street-map` style uses. */
-export const OSM_TILE_URL = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png'
+/** Where the basemap comes from. Every request the tiled map makes goes here. */
+export const BASEMAP_HOST = 'tiles.openfreemap.org'
+
+/** How the provider is named to the reader, in captions and the manual. */
+export const BASEMAP_PROVIDER = 'OpenFreeMap'
+
+const STYLE_URL = `https://${BASEMAP_HOST}/styles/positron`
 
 /**
- * The glyph source MapLibre needs for any text on the map -- the isochron
- * labels. The same one plotly's own styles use; a symbol layer with no
- * glyphs source draws no text at all.
+ * A small raster tile on the same host, for the reachability probe: an
+ * Image load, which the probe can check the arrival of even when the page
+ * was too busy to deliver its load event. The style itself is JSON and
+ * has no such tell.
  */
-const GLYPHS_URL = 'https://fonts.openmaptiles.org/{fontstack}/{range}.pbf'
+export const BASEMAP_PROBE_URL = `https://${BASEMAP_HOST}/natural_earth/ne2sr/0/0/0.png`
 
-export interface QuietBasemapOptions {
-  /** The app's surface colour, showing through the faded tiles. */
-  surface: string
-  /**
-   * How much of the tiles' colour to drain, 0 (as served) to 1 (grey).
-   * Nearly all of it: a trace of hue keeps water reading as water.
-   */
-  desaturate?: number
-  /** How solid the tiles are over the surface, 0 to 1. */
-  opacity?: number
+/**
+ * The font the map's own labels -- the isochron ages -- are set in. One
+ * the host serves glyphs for. Plotly maps any family it does not know
+ * straight through to MapLibre, which is what is wanted here.
+ */
+export const BASEMAP_TEXT_FONT = 'Noto Sans Regular'
+
+/**
+ * Layers dropped from Positron before it is drawn.
+ *
+ * Road names and shields: a figure about sites is not a figure about
+ * roads, and at the zooms a placing dialog reaches they are the loudest
+ * thing on the tile. Airports likewise. Woodland and parks: the two land
+ * fills Positron does keep, and the very thing that made the raster tiles
+ * unusable -- land must be one colour so an island is always an island.
+ */
+const DROPPED_LAYERS = new Set([
+  'highway-name-path',
+  'highway-name-minor',
+  'highway-name-major',
+  'highway-shield-non-us',
+  'highway-shield-us-interstate',
+  'road_shield_us',
+  'airport',
+  'landcover_wood',
+  'park',
+])
+
+type StyleObject = Record<string, unknown> & { layers?: Array<Record<string, unknown>> }
+
+let loaded: StyleObject | null = null
+let loading: Promise<StyleObject> | null = null
+
+/**
+ * Trim a fetched Positron style to what this app draws. Exported for the
+ * test; the app goes through loadBasemapStyle.
+ */
+export function tailorBasemapStyle(style: StyleObject): StyleObject {
+  const layers = (style.layers || []).filter(
+    (layer) => !DROPPED_LAYERS.has(String(layer.id)),
+  )
+  const tailored: StyleObject = { ...style, layers }
+  // With the shield layers gone nothing draws an icon, so the sprite sheet
+  // -- two more requests -- is not needed. Plotly's own text layer names an
+  // icon it does not have either way; see preventIconFetch.
+  delete tailored.sprite
+  return tailored
 }
 
 /**
- * A MapLibre style for the quiet OSM basemap, in the shape plotly passes
- * through untouched.
+ * The tailored style, fetched once per page and shared by every map.
+ * Rejects when the host cannot be reached, which the probe turns into the
+ * offline fallback.
  */
-export function quietOsmStyle({
-  surface,
-  desaturate = 0.85,
-  opacity = 0.7,
-}: QuietBasemapOptions): Record<string, unknown> {
-  return {
-    version: 8,
-    sources: {
-      'osm-tiles': {
-        type: 'raster',
-        tiles: [OSM_TILE_URL],
-        tileSize: 256,
-        attribution:
-          '© <a target="_blank" href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-      },
-    },
-    glyphs: GLYPHS_URL,
-    layers: [
-      {
-        id: 'surface',
-        type: 'background',
-        paint: { 'background-color': surface },
-      },
-      {
-        id: 'osm-tiles',
-        type: 'raster',
-        source: 'osm-tiles',
-        minzoom: 0,
-        maxzoom: 22,
-        paint: {
-          'raster-saturation': -desaturate,
-          'raster-opacity': opacity,
-          // Tiles fade in as they arrive by default; over a figure that is
-          // marks appearing on nothing and then a map sliding in under
-          // them, so they are drawn as soon as they are here.
-          'raster-fade-duration': 0,
-        },
-      },
-    ],
-  }
+export function loadBasemapStyle(fetchImpl: typeof fetch = fetch): Promise<StyleObject> {
+  if (loaded) return Promise.resolve(loaded)
+  if (loading) return loading
+  loading = fetchImpl(STYLE_URL, { mode: 'cors' })
+    .then((response) => {
+      if (!response.ok) throw new Error(`basemap style: HTTP ${response.status}`)
+      return response.json() as Promise<StyleObject>
+    })
+    .then((style) => {
+      loaded = tailorBasemapStyle(style)
+      return loaded
+    })
+    .finally(() => {
+      loading = null
+    })
+  return loading
+}
+
+/** The style if it has been loaded, for a map deciding what to draw now. */
+export function loadedBasemapStyle(): StyleObject | null {
+  return loaded
 }
