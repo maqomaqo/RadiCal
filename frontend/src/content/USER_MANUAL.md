@@ -666,7 +666,9 @@ placing a dispersal origin, the spatial-order proposal and the dispersal results
 tells OpenFreeMap's server which patch of ground is on screen: not the coordinates, but enough
 to locate a site. Worth it to drop a pin precisely; think twice for a restricted site. It needs
 the internet: when OpenFreeMap cannot be reached the map falls back to the app's own coastlines
-and says so under the map, and goes back to OpenFreeMap once there is a connection again.
+and says so under the map, and goes back to OpenFreeMap once there is a connection again. On a
+project that has turned tiles on, a switch under each map flips between the two basemaps; it applies
+to every map and is remembered by the browser.
 The same dialog sets the project's **coordinate precision** — full, or rounded to
 0.01°, 0.1° or 1° (about 1, 11 or 110 km) — which governs what leaves in exports and figures.
 What is stored does not change, and the project's own table still shows the full value.

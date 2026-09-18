@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
-import { Box, Button, Paper, Typography } from '@mui/material'
+import { Box, Button, FormControlLabel, Paper, Switch, Typography } from '@mui/material'
 import DownloadIcon from '@mui/icons-material/Download'
 import Plotly from 'plotly.js-dist-min'
 
+import { useBasemapPreference } from '@/hooks/useBasemapPreference'
 import { useTileServerReachable } from '@/hooks/useTileServer'
 import { CONTEXT_PALETTE } from '@/theme/diagramColors'
 import { BASEMAP_PROVIDER, BASEMAP_TEXT_FONT, loadedBasemapStyle } from '@/theme/basemapStyle'
@@ -379,13 +380,17 @@ export default function SiteMap({
   // a moment later is a flash of coastline for every map on a connected
   // installation, and the wait is one small image. Not probed at all when
   // the project has not asked for tiles.
-  const reachable = useTileServerReachable(tilesWanted === true)
+  // The project allows tiles AND the reader has not switched them off --
+  // see useBasemapPreference for why those are two different things.
+  const [preferTiles, setPreferTiles] = useBasemapPreference()
+  const wantTiles = tilesWanted === true && preferTiles
+  const reachable = useTileServerReachable(wantTiles)
   // The style arrives with a positive verdict -- the probe fetches it -- so
   // this is a guard, not a second wait.
   const basemapStyle = reachable === true ? loadedBasemapStyle() : null
-  const tiles = tilesWanted === true && reachable === true && basemapStyle !== null
-  const deciding = tilesWanted === null || (tilesWanted === true && reachable === null)
-  const fellBack = tilesWanted === true && reachable === false
+  const tiles = wantTiles && reachable === true && basemapStyle !== null
+  const deciding = tilesWanted === null || (wantTiles && reachable === null)
+  const fellBack = wantTiles && reachable === false
   // Null until the first click tells us. Not an error state on its own: it
   // only matters in edit mode, and the map is read-only by default.
   const [cannotPlace, setCannotPlace] = useState(false)
@@ -977,15 +982,30 @@ export default function SiteMap({
                   editable
                     ? 'Click the map to place every selected date at that position. Drag to pan and scroll to zoom.'
                     : 'Drag to pan and scroll to zoom.',
+                  // Which basemap is drawn is said only when it is not the
+                  // one asked for: the switch beside this says the rest.
                   fellBack
                     ? `${BASEMAP_PROVIDER} could not be reached, so coastlines are drawn from data this app serves itself; it is used again once there is a connection.`
-                    : tiles
-                      ? `Basemap tiles are on for this project, so ${BASEMAP_PROVIDER} is told which area is on screen.`
-                      : editable
-                        ? ''
-                        : 'Coastlines are drawn from data this app serves itself: no tiles are requested.',
+                    : '',
                 ].filter(Boolean).join(' ')}
         </Typography>
+        {/* Only where the project allows tiles. A project that has not opted
+            in gets no switch, since the opt-in is the privacy decision and
+            this is not the place it is made. */}
+        {tilesWanted === true && (
+          <FormControlLabel
+            control={
+              <Switch
+                size="small"
+                checked={preferTiles}
+                onChange={(event) => setPreferTiles(event.target.checked)}
+              />
+            }
+            label={BASEMAP_PROVIDER}
+            slotProps={{ typography: { variant: 'caption', color: 'text.secondary' } }}
+            sx={{ mr: 0.5, whiteSpace: 'nowrap' }}
+          />
+        )}
         {/* The app's own download control, as on every other figure: Plotly's
             modebar renders anchors with no href, role or accessible name, none
             of which can take focus. */}
