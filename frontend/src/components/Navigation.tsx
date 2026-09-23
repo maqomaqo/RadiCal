@@ -114,8 +114,10 @@ export default function Navigation() {
           >
             {/* Decorative -- "RadiCal" right after it already names the
                 link, so an alt here would just repeat it for a screen
-                reader. */}
-            <Box component="img" src="/RadiCal.png" alt="" sx={{ width: 36, height: 36 }} />
+                reader. The 72px copy is the 36px box at 2x; the source
+                logo (public/RadiCal.png) is 4267px square and 400 kB, which
+                every page was downloading to draw an icon. */}
+            <Box component="img" src="/RadiCal-72.png" alt="" width={36} height={36} sx={{ width: 36, height: 36 }} />
             RadiCal
           </Typography>
 
