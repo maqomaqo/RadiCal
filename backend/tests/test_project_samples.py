@@ -167,6 +167,26 @@ class TestDeploy:
         assert analysis["project_id"] == pid
         assert sorted(m["sample_name"] for m in analysis["measurements"]) == ["OxA-1", "OxA-2"]
 
+    def test_listings_count_each_analysis_own_dates(self, client):
+        # Both listings count dates with one grouped query rather than by
+        # loading each analysis's rows; two analyses of different sizes in
+        # the same project keep that from passing by coincidence.
+        pid = _make_project(client, name="Counted Site")
+        ids = [c["id"] for c in _add_dates(
+            client, pid, [_date("OxA-1", 3000), _date("OxA-2", 3200), _date("OxA-3", 3400)]
+        )]
+        three = client.post(f"/api/projects/{pid}/deploy",
+                            json={"name": "Three", "sample_ids": ids}).json()["data"]["id"]
+        one = client.post(f"/api/projects/{pid}/deploy",
+                          json={"name": "One", "sample_ids": ids[:1]}).json()["data"]["id"]
+
+        listed = client.get(f"/api/analysis?project_id={pid}").json()["data"]["items"]
+        assert {i["id"]: i["measurements_count"] for i in listed} == {three: 3, one: 1}
+        assert {i["project_name"] for i in listed} == {"Counted Site"}
+
+        project = client.get(f"/api/projects/{pid}").json()["data"]
+        assert {a["id"]: a["measurements_count"] for a in project["analyses"]} == {three: 3, one: 1}
+
     def test_deploy_groups_by_default_context_name(self, client):
         pid = _make_project(client)
         created = _add_dates(client, pid, [

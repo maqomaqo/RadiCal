@@ -1,11 +1,43 @@
 /// <reference types="vitest" />
-import { defineConfig } from 'vite'
+import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import path from 'path'
 
+/**
+ * Fetch the Plotly chunk while the browser is otherwise idle, so the first
+ * page that plots finds it already in cache instead of waiting on 1.3 MB.
+ *
+ * A `<link rel="prefetch">`, not an idle-time `import()`: prefetch only
+ * downloads, at the lowest priority the browser has, and never parses or
+ * runs anything. An `import()` would also evaluate Plotly -- a couple of
+ * hundred milliseconds of main-thread work that could land on someone's
+ * click. `crossorigin` matches how the module is requested later, without
+ * which the cached copy would not be reused. Build-only: the dev server
+ * serves modules unbundled and there is no chunk to name.
+ */
+function prefetchPlotly(): Plugin {
+  return {
+    name: 'radical:prefetch-plotly',
+    apply: 'build',
+    transformIndexHtml(_html, ctx) {
+      const chunk = Object.values(ctx.bundle ?? {}).find(
+        (file) => file.type === 'chunk' && file.name === 'plotly'
+      )
+      if (!chunk) return []
+      return [
+        {
+          tag: 'link',
+          attrs: { rel: 'prefetch', href: `/${chunk.fileName}`, crossorigin: '' },
+          injectTo: 'head',
+        },
+      ]
+    },
+  }
+}
+
 // https://vitejs.dev/config/
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), prefetchPlotly()],
   // Unit tests run in plain node, with no DOM: the only thing under test is
   // utils/harrisLayout.ts, which is deliberately pure data in and data out so
   // that the diagram's geometry can be asserted without rendering it. That
@@ -37,5 +69,24 @@ export default defineConfig({
     outDir: 'dist',
     sourcemap: true,
     minify: 'terser',
+    rollupOptions: {
+      output: {
+        // Plotly is most of the bytes and changes only when its version pin
+        // does, so it gets a chunk of its own: one download shared by every
+        // page that plots, and still cached after a release that touched
+        // nothing but the app's own code.
+        //
+        // Rollup's CommonJS interop helpers are the catch. They are one tiny
+        // module shared by every CommonJS package, Plotly and the entry's
+        // own dependencies alike, and left to itself Rollup files them in
+        // the Plotly chunk -- after which the entry imports (and preloads)
+        // all of Plotly to get two ten-line functions. Given a chunk of their
+        // own they cost one small request instead.
+        manualChunks(id) {
+          if (id.includes('/node_modules/plotly.js-dist-min/')) return 'plotly'
+          if (id.includes('commonjsHelpers')) return 'cjs-helpers'
+        },
+      },
+    },
   },
 })

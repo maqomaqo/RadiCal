@@ -1,5 +1,5 @@
 from sqlalchemy import Column, String, Float, Integer, DateTime, JSON, ForeignKey, Boolean
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import deferred, relationship
 from datetime import datetime
 from app.database import Base
 import uuid
@@ -655,8 +655,13 @@ class AnalysisResult(Base):
     hpd_68_ranges = Column(JSON, nullable=True)
     hpd_95_ranges = Column(JSON, nullable=True)
 
-    # Posterior samples for visualization (stored as JSON array)
-    posterior_samples = Column(JSON, nullable=True)
+    # Posterior samples for visualization (stored as JSON array).
+    #
+    # Deferred: loaded only if something reads the attribute. For a modelled
+    # date this is the solver's raw draws, tens of thousands of floats, and
+    # no page or export sends them -- every query for a result row was
+    # fetching and JSON-parsing them only to discard them.
+    posterior_samples = deferred(Column(JSON, nullable=True))
     probability_distribution = Column(JSON, nullable=True)  # [cal_age, prob] pairs
     
     created_at = Column(DateTime, default=datetime.utcnow)

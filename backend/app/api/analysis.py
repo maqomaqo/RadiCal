@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import JSONResponse
+from sqlalchemy import func
 from sqlalchemy.orm import Session, selectinload
 from app.database import get_db
 from app.schemas.sample import CalibrateRequest, BayesianRequest, GroupCalibrationRequest
@@ -1545,11 +1546,32 @@ def list_analyses(
     total = query.count()
     # Eager-loaded: the serializer reads every result's HPD ranges to build
     # each analysis's calendar span, which would be one SELECT per analysis.
+    # Only the columns it reads, though: a result row also carries the
+    # posterior's full density curve and, for a modelled date, its raw MCMC
+    # draws -- tens of thousands of floats each, parsed from JSON for every
+    # date on the page and then thrown away. The project name is eager for
+    # the same one-SELECT-per-row reason.
     analyses = query.order_by(Analysis.created_at.desc()).options(
-        selectinload(Analysis.results)
+        selectinload(Analysis.results).load_only(
+            AnalysisResult.analysis_id,
+            AnalysisResult.posterior_median,
+            AnalysisResult.hpd_68_ranges,
+            AnalysisResult.hpd_95_ranges,
+        ),
+        selectinload(Analysis.project).load_only(Project.name),
     ).offset(
         (page - 1) * per_page
     ).limit(per_page).all()
+
+    # Counted, not loaded: len(a.measurements) fetched every date of every
+    # analysis on the page, one query per analysis, to report a number.
+    page_ids = [a.id for a in analyses]
+    measurement_counts = dict(
+        db.query(RadiocarbonSample.analysis_id, func.count(RadiocarbonSample.id))
+        .filter(RadiocarbonSample.analysis_id.in_(page_ids))
+        .group_by(RadiocarbonSample.analysis_id)
+        .all()
+    ) if page_ids else {}
 
     return {
         "success": True,
@@ -1561,7 +1583,7 @@ def list_analyses(
                     "analysis_type": a.analysis_type,
                     "status": a.status,
                     "created_at": a.created_at.isoformat(),
-                    "measurements_count": len(a.measurements),
+                    "measurements_count": measurement_counts.get(a.id, 0),
                     "project_id": a.project_id,
                     "project_name": a.project.name if a.project else None,
                     # The calendar answer, so a list shows what each analysis

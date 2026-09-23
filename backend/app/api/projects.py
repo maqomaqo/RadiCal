@@ -3,7 +3,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from app.database import get_db
-from app.models import Project, ProjectSample, Analysis, User
+from app.models import Project, ProjectSample, Analysis, RadiocarbonSample, User
 from app.schemas.project import ProjectCreate, ProjectUpdate
 from app.api.analysis import _rerun_analysis
 from app.api.auth import current_user, owned_or_404
@@ -179,6 +179,15 @@ def get_project(
     # latest of the project's own edit and any of its analyses', because
     # renaming a project is activity too -- so a card and its own page cannot
     # report different numbers for the same project.
+    # One grouped count rather than len(a.measurements) per analysis, which
+    # loaded every date of every analysis in the project to count them.
+    measurement_counts = dict(
+        db.query(RadiocarbonSample.analysis_id, func.count(RadiocarbonSample.id))
+        .filter(RadiocarbonSample.analysis_id.in_([a.id for a in analyses]))
+        .group_by(RadiocarbonSample.analysis_id)
+        .all()
+    ) if analyses else {}
+
     samples_count = (
         db.query(func.count(ProjectSample.id))
         .filter(ProjectSample.project_id == project_id)
@@ -205,7 +214,7 @@ def get_project(
                     "analysis_type": a.analysis_type,
                     "status": a.status,
                     "created_at": a.created_at.isoformat(),
-                    "measurements_count": len(a.measurements),
+                    "measurements_count": measurement_counts.get(a.id, 0),
                 }
                 for a in analyses
             ],

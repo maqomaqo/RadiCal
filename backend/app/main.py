@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
@@ -25,6 +26,15 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Compression, for everything: the built frontend (Plotly alone is 4.5 MB
+# and 1.3 MB gzipped), the offline basemap's topojson (1.7 MB, 0.6 MB), and
+# the API's own JSON, where a results payload is mostly arrays of numbers
+# that shrink severalfold. Level 6 rather than Starlette's default 9: on the
+# Plotly chunk it is within 0.3% of the size for under two thirds of the CPU,
+# and this runs per response. Below a kilobyte the header costs more than it
+# saves.
+app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
 
 # Initialize database
 try:
@@ -101,8 +111,22 @@ STATIC_DIR = os.path.abspath(
               os.path.join(os.path.dirname(os.path.dirname(__file__)), "static"))
 )
 
+class _HashedAssets(StaticFiles):
+    """
+    /assets, cached for good. Every file vite writes there carries a hash of
+    its content in its name, so a given URL can never serve different bytes:
+    a browser that has it need not ask again, and a release that changes a
+    file changes its name, which index.html (never cached, below) points to.
+    """
+
+    def file_response(self, *args, **kwargs):
+        response = super().file_response(*args, **kwargs)
+        response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        return response
+
+
 if os.path.isdir(STATIC_DIR):
-    app.mount("/assets", StaticFiles(directory=os.path.join(STATIC_DIR, "assets")),
+    app.mount("/assets", _HashedAssets(directory=os.path.join(STATIC_DIR, "assets")),
               name="assets")
 
     @app.get("/{path:path}", include_in_schema=False)
@@ -112,8 +136,15 @@ if os.path.isdir(STATIC_DIR):
         # simply not a file the frontend has, so it gets the app shell.
         if (candidate.startswith(STATIC_DIR + os.sep)
                 and os.path.isfile(candidate)):
-            return FileResponse(candidate)
-        return FileResponse(os.path.join(STATIC_DIR, "index.html"))
+            # public/ files keep their names across releases (the logo, the
+            # basemap geometry), so they get a day rather than forever.
+            return FileResponse(candidate,
+                                headers={"Cache-Control": "public, max-age=86400"})
+        # The shell is what names the current release's hashed assets, so it
+        # is revalidated every time: a cached copy would keep loading the
+        # previous release's chunks after a deploy.
+        return FileResponse(os.path.join(STATIC_DIR, "index.html"),
+                            headers={"Cache-Control": "no-cache"})
 else:
     @app.get("/")
     async def root():
