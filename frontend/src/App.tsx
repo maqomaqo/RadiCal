@@ -1,5 +1,6 @@
+import { lazy, Suspense } from 'react'
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom'
-import { CssBaseline, ThemeProvider } from '@mui/material'
+import { Box, CircularProgress, CssBaseline, ThemeProvider } from '@mui/material'
 import { alpha, createTheme } from '@mui/material/styles'
 import { WARM_INK } from '@/theme/diagramColors'
 import { CANVAS, MUTED, PAPER } from '@/theme/surfaces'
@@ -8,17 +9,24 @@ import { AuthProvider, useAuth } from '@/contexts/AuthContext'
 import Navigation from '@/components/Navigation'
 import ErrorBoundary from '@/components/ErrorBoundary'
 import Dashboard from '@/pages/Dashboard'
-import NewAnalysis from '@/pages/NewAnalysis'
-import Stratigraphy from '@/pages/Stratigraphy'
-import Results from '@/pages/Results'
-import Projects from '@/pages/Projects'
-import Curves from '@/pages/Curves'
-import CurveBrowser from '@/pages/CurveBrowser'
-import ProjectDetail from '@/pages/ProjectDetail'
-import CompareResults from '@/pages/CompareResults'
-import Help from '@/pages/Help'
-import Glossary from '@/pages/Glossary'
 import SignIn from '@/pages/SignIn'
+
+// Every page but the two a visit can open on is its own chunk, fetched the
+// first time it is navigated to. Most of them draw with Plotly, which is
+// about 4.5 MB of the bundle on its own; imported eagerly it was in the one
+// file every visit downloaded and parsed before the dashboard -- which draws
+// nothing with it -- could appear. Dashboard and SignIn stay in the entry
+// chunk because one or the other is the first thing on screen.
+const NewAnalysis = lazy(() => import('@/pages/NewAnalysis'))
+const Stratigraphy = lazy(() => import('@/pages/Stratigraphy'))
+const Results = lazy(() => import('@/pages/Results'))
+const Projects = lazy(() => import('@/pages/Projects'))
+const Curves = lazy(() => import('@/pages/Curves'))
+const CurveBrowser = lazy(() => import('@/pages/CurveBrowser'))
+const ProjectDetail = lazy(() => import('@/pages/ProjectDetail'))
+const CompareResults = lazy(() => import('@/pages/CompareResults'))
+const Help = lazy(() => import('@/pages/Help'))
+const Glossary = lazy(() => import('@/pages/Glossary'))
 
 // `background.muted` is ours, not MUI's -- declared so `sx={{ backgroundColor:
 // 'background.muted' }}` resolves and typechecks like any built-in token.
@@ -177,6 +185,15 @@ const theme = createTheme({
   },
 })
 
+/** Shown while a page's chunk is on its way; below the nav, which stays put. */
+function PageLoading() {
+  return (
+    <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }} role="status" aria-label="Loading page">
+      <CircularProgress />
+    </Box>
+  )
+}
+
 /**
  * The routed pages, with a boundary around them.
  *
@@ -193,29 +210,34 @@ function RoutedPages() {
   const location = useLocation()
   return (
     <ErrorBoundary resetKey={location.pathname}>
-      <Routes>
-        <Route path="/" element={<Dashboard />} />
-        <Route path="/new-analysis" element={<NewAnalysis />} />
-        <Route path="/new-analysis/model-structure" element={<Stratigraphy />} />
-        {/* Editing a saved analysis reuses the same two pages as creating
-            one -- NewAnalysis loads the saved inputs into the shared draft
-            store, and Stratigraphy edits them exactly as for a new
-            analysis. See NewAnalysis's edit-mode effect. */}
-        <Route path="/analysis/:analysisId/edit" element={<NewAnalysis />} />
-        <Route path="/analysis/:analysisId/edit/model-structure" element={<Stratigraphy />} />
-        <Route path="/results/:analysisId" element={<Results />} />
-        <Route path="/projects" element={<Projects />} />
-        <Route path="/curves" element={<Curves />} />
-        <Route path="/help" element={<Help />} />
-        <Route path="/help/glossary" element={<Glossary />} />
-        {/* The glossary was the whole of /reference before the manual
-            joined it; anything bookmarked or linked to that path is
-            still asking for the same page. */}
-        <Route path="/reference" element={<Navigate to="/help/glossary" replace />} />
-        <Route path="/curves/:curveId/browse" element={<CurveBrowser />} />
-        <Route path="/projects/:projectId" element={<ProjectDetail />} />
-        <Route path="/projects/:projectId/compare" element={<CompareResults />} />
-      </Routes>
+      {/* Inside the boundary, so a chunk that fails to load (a deploy
+          replaced it mid-visit, the network dropped) gets the same fallback
+          as a page that throws, rather than a blank screen. */}
+      <Suspense fallback={<PageLoading />}>
+        <Routes>
+          <Route path="/" element={<Dashboard />} />
+          <Route path="/new-analysis" element={<NewAnalysis />} />
+          <Route path="/new-analysis/model-structure" element={<Stratigraphy />} />
+          {/* Editing a saved analysis reuses the same two pages as creating
+              one -- NewAnalysis loads the saved inputs into the shared draft
+              store, and Stratigraphy edits them exactly as for a new
+              analysis. See NewAnalysis's edit-mode effect. */}
+          <Route path="/analysis/:analysisId/edit" element={<NewAnalysis />} />
+          <Route path="/analysis/:analysisId/edit/model-structure" element={<Stratigraphy />} />
+          <Route path="/results/:analysisId" element={<Results />} />
+          <Route path="/projects" element={<Projects />} />
+          <Route path="/curves" element={<Curves />} />
+          <Route path="/help" element={<Help />} />
+          <Route path="/help/glossary" element={<Glossary />} />
+          {/* The glossary was the whole of /reference before the manual
+              joined it; anything bookmarked or linked to that path is
+              still asking for the same page. */}
+          <Route path="/reference" element={<Navigate to="/help/glossary" replace />} />
+          <Route path="/curves/:curveId/browse" element={<CurveBrowser />} />
+          <Route path="/projects/:projectId" element={<ProjectDetail />} />
+          <Route path="/projects/:projectId/compare" element={<CompareResults />} />
+        </Routes>
+      </Suspense>
     </ErrorBoundary>
   )
 }

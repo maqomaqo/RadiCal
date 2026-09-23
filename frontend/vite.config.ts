@@ -37,5 +37,24 @@ export default defineConfig({
     outDir: 'dist',
     sourcemap: true,
     minify: 'terser',
+    rollupOptions: {
+      output: {
+        // Plotly is most of the bytes and changes only when its version pin
+        // does, so it gets a chunk of its own: one download shared by every
+        // page that plots, and still cached after a release that touched
+        // nothing but the app's own code.
+        //
+        // Rollup's CommonJS interop helpers are the catch. They are one tiny
+        // module shared by every CommonJS package, Plotly and the entry's
+        // own dependencies alike, and left to itself Rollup files them in
+        // the Plotly chunk -- after which the entry imports (and preloads)
+        // all of Plotly to get two ten-line functions. Given a chunk of their
+        // own they cost one small request instead.
+        manualChunks(id) {
+          if (id.includes('/node_modules/plotly.js-dist-min/')) return 'plotly'
+          if (id.includes('commonjsHelpers')) return 'cjs-helpers'
+        },
+      },
+    },
   },
 })
