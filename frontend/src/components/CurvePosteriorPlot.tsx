@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Alert, Box, Button, CircularProgress, Paper, Typography } from '@mui/material'
 import DownloadIcon from '@mui/icons-material/Download'
-import Plotly from 'plotly.js-dist-min'
-import createPlotlyComponent from 'react-plotly.js/factory'
+import Plot from '@/components/Plot'
+import type { Config, Dash, Data, Layout } from 'plotly.js-dist-min'
 import { fetchCurvePoints, type CurvePoint } from '@/api/curves'
 import { useCurves } from '@/hooks/useCurves'
 import type { StackedSeries } from '@/components/StackedPosteriorPlot'
@@ -31,7 +31,6 @@ import { downloadPlotPng } from '@/utils/downloadPlot'
 
 // Same binding as the other two plots -- see PosteriorPlot for why the factory
 // is bound to the packaged plotly.js rather than a CDN global.
-const Plot = createPlotlyComponent(Plotly)
 
 /**
  * Every date drawn where it actually meets the calibration curve.
@@ -118,7 +117,7 @@ function lobeTraces(
     fillcolor: string
     /** Outline colour. Omit to draw the lobe as a bare fill -- see above. */
     line?: string
-    dash?: string
+    dash?: Dash
     width?: number
     name: string
     legendgroup: string
@@ -143,7 +142,7 @@ function lobeTraces(
     ? { hovertemplate: options.hovertemplate, ...(options.customdata ? { customdata: options.customdata } : {}) }
     : { hoverinfo: 'skip' as const }
 
-  const traces: any[] = [
+  const traces: Data[] = [
     {
       ...shared,
       x: [closeX(0), ...outline.x, closeX(last)],
@@ -198,7 +197,7 @@ function lobeTraces(
 function legendSwatch(options: {
   fillcolor: string
   line?: string
-  dash?: string
+  dash?: Dash
   width?: number
   name: string
   legendgroup: string
@@ -457,7 +456,7 @@ export default function CurvePosteriorPlot({
   }, [lobes, curveIds, curveData, showPrior, window])
 
   const plotData = useMemo(() => {
-    const data: any[] = []
+    const data: Data[] = []
     const legendUsed = new Set<string>()
     const claimLegend = (key: string) => {
       if (legendUsed.has(key)) return false
@@ -628,7 +627,7 @@ export default function CurvePosteriorPlot({
       // Point estimates as a tick inside the date's own lobe, not a rule
       // across the figure: at this density a full-height line per date would
       // be the only thing visible.
-      const marker = (value: number, color: string, dash: string, name: string, key: 'mean' | 'median') =>
+      const marker = (value: number, color: string, dash: Dash, name: string, key: 'mean' | 'median') =>
         data.push({
           x: [value, value],
           y: [base, base + lobeHeight],
@@ -706,7 +705,7 @@ export default function CurvePosteriorPlot({
   const geometry = useMemo(() => curvePlotGeometry(height), [height])
 
   const layout = useMemo(
-    () => ({
+    (): Partial<Layout> => ({
       // As on the other two plots: hiding the modebar does not disable
       // drag-to-box-zoom, which would leave a reader zoomed in with no way out.
       dragmode: false as const,
@@ -742,7 +741,7 @@ export default function CurvePosteriorPlot({
   )
 
   const config = useMemo(
-    () => ({ responsive: true, displayModeBar: false as const, displaylogo: false }),
+    (): Partial<Config> => ({ responsive: true, displayModeBar: false as const, displaylogo: false }),
     []
   )
 

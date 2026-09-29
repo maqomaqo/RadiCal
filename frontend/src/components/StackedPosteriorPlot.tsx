@@ -2,8 +2,8 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Box, Button, Paper, Typography, useMediaQuery, useTheme } from '@mui/material'
 import DownloadIcon from '@mui/icons-material/Download'
 import FitWidthIcon from '@mui/icons-material/SettingsEthernet'
-import Plotly from 'plotly.js-dist-min'
-import createPlotlyComponent from 'react-plotly.js/factory'
+import Plot from '@/components/Plot'
+import type { Annotation, Config, Dash, Data, Layout, Shape } from 'plotly.js-dist-min'
 import {
   DateFormat,
   DEFAULT_DATE_FORMAT,
@@ -23,7 +23,6 @@ import { downloadPlotPng } from '@/utils/downloadPlot'
 
 // Same binding as PosteriorPlot -- see the note there for why the factory is
 // bound to the packaged plotly.js rather than a CDN global.
-const Plot = createPlotlyComponent(Plotly)
 
 /**
  * One row of the stacked plot: a modelled posterior with its HPD region,
@@ -383,7 +382,7 @@ export default function StackedPosteriorPlot({
   )
 
   const plotData = useMemo(() => {
-    const data: any[] = []
+    const data: Data[] = []
     // One legend entry per kind of mark, from whichever row carries it first;
     // otherwise a 15-date model prints 15 identical "95.4% HPD" rows.
     const legendUsed = new Set<string>()
@@ -491,7 +490,7 @@ export default function StackedPosteriorPlot({
 
       // Point estimates as a tick within the row, not a line across the
       // figure: at this density a full-height rule per date is all you see.
-      const marker = (value: number, color: string, dash: string, name: string, key: string) =>
+      const marker = (value: number, color: string, dash: Dash, name: string, key: string) =>
         data.push({
           x: [value, value],
           y: [yBase, yBase + CURVE_HEIGHT],
@@ -560,8 +559,8 @@ export default function StackedPosteriorPlot({
   // the row it starts at, and can tell a Phase from a Sequence by the hue the
   // rest of the app already draws each in.
   const { shapes, annotations } = useMemo(() => {
-    const shapes: any[] = []
-    const annotations: any[] = []
+    const shapes: Partial<Shape>[] = []
+    const annotations: Partial<Annotation>[] = []
 
     groups.forEach((group, order) => {
       const ink = group.kind ? elementTypeColors[group.kind].ink : plot.label
@@ -746,7 +745,7 @@ export default function StackedPosteriorPlot({
   }, [showRuler, groups, geometry])
 
   const layout = useMemo(
-    () => ({
+    (): Partial<Layout> => ({
       // A layout property, not a config one: hiding the modebar does not stop
       // drag-to-box-zoom, which would leave a reader zoomed in with no way out.
       dragmode: false as const,
@@ -809,7 +808,7 @@ export default function StackedPosteriorPlot({
   )
 
   const config = useMemo(
-    () => ({
+    (): Partial<Config> => ({
       responsive: true,
       // No modebar, and the canvas is locked. The bar renders six <a> elements
       // with no href, role or accessible name, none focusable -- 98 of them on

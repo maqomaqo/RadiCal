@@ -1,4 +1,5 @@
 import Plotly from 'plotly.js-dist-min'
+import type { DownloadImgopts, ToImgopts } from 'plotly.js-dist-min'
 
 import { PNG_EXPORT_SCALE, exportFilename } from './plotExport'
 
@@ -31,15 +32,15 @@ export function downloadPlotPng(
 ): void {
   const graph = container?.querySelector<HTMLElement>('.js-plotly-plot')
   if (!graph) return
-  // Cast: plotly.js-dist-min ships no types for downloadImage, and the
-  // project's own d.ts (types/plotly.d.ts) deliberately keeps the surface
-  // narrow rather than restating Plotly's API.
-  const plotly = Plotly as unknown as {
-    downloadImage(gd: HTMLElement, opts: Record<string, unknown>): Promise<string>
-  }
-  void plotly.downloadImage(graph, {
+  // Plotly's declaration of downloadImage's options leaves out `scale`,
+  // though it passes every option through to toImage, which takes one.
+  const options: DownloadImgopts & Pick<ToImgopts, 'scale'> = {
     format: 'png',
+    // Null: the graph's own size, as drawn.
+    width: null,
+    height: null,
     scale: PNG_EXPORT_SCALE,
     filename: exportFilename(filename),
-  })
+  }
+  void Plotly.downloadImage(graph, options)
 }

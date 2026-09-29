@@ -1,8 +1,8 @@
 import { useMemo, useRef } from 'react'
 import { Box, Button, Paper, Typography } from '@mui/material'
 import DownloadIcon from '@mui/icons-material/Download'
-import Plotly from 'plotly.js-dist-min'
-import createPlotlyComponent from 'react-plotly.js/factory'
+import Plot from '@/components/Plot'
+import type { Config, Data, Layout } from 'plotly.js-dist-min'
 import {
   DateFormat,
   DEFAULT_DATE_FORMAT,
@@ -59,7 +59,6 @@ const AXIS_BOTTOM_MARGIN = 0.07
 // mount, Plotly.react (a diffed in-place update) on every data/layout/config
 // change, and purge on unmount. Bound to the plotly.js-dist-min package rather
 // than a CDN global, so the version is pinned by package.json.
-const Plot = createPlotlyComponent(Plotly)
 
 interface PosteriorPlotProps {
   calAges: number[]
@@ -150,7 +149,7 @@ export default function PosteriorPlot({
       return []
     }
 
-    const data: any[] = []
+    const data: Data[] = []
 
     // The unmodelled distribution, first so the posterior draws over it: what
     // shows through is where the model moved the date from its plain
@@ -270,7 +269,7 @@ export default function PosteriorPlot({
   // need guaranteed room below zero, which a range fitted to the tallest trace
   // would shrink away. Floats the curve up and pulls the x-axis down with it;
   // see OUTER_BAR/INNER_BAR/AXIS_BOTTOM_MARGIN for the geometry.
-  const yRange = useMemo(() => {
+  const yRange = useMemo((): [number, number] | null => {
     if (!(peak > 0)) return null
     let top = peak
     if (showPrior && priorDistribution && priorDistribution.length > 0) {
@@ -283,7 +282,7 @@ export default function PosteriorPlot({
   const plotBox = useRef<HTMLDivElement | null>(null)
 
   const layout = useMemo(
-    () => ({
+    (): Partial<Layout> => ({
       // A layout property, not a config one: hiding the modebar does not stop
       // drag-to-box-zoom, which would leave a reader zoomed in with no way out.
       dragmode: false as const,
@@ -319,7 +318,7 @@ export default function PosteriorPlot({
   )
 
   const config = useMemo(
-    () => ({
+    (): Partial<Config> => ({
       responsive: true,
       // No modebar, and the canvas is locked. The bar renders six <a> elements
       // with no href, role or accessible name, none focusable -- 98 of them on

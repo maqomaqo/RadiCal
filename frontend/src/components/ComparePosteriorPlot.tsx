@@ -1,7 +1,6 @@
 import { useMemo } from 'react'
 import { Box, Typography } from '@mui/material'
-import Plotly from 'plotly.js-dist-min'
-import createPlotlyComponent from 'react-plotly.js/factory'
+import Plot from '@/components/Plot'
 import {
   DateFormat,
   calendarAxisTicks,
@@ -14,7 +13,6 @@ import type { RunStyle } from '@/theme/compareColors'
 
 // Bound to the packaged plotly.js rather than a CDN global, as the other plots
 // are -- see PosteriorPlot for why.
-const Plot = createPlotlyComponent(Plotly)
 
 /**
  * The distributions behind one row of the shift plot, drawn over each other.
