@@ -19,7 +19,6 @@ import {
   latLonFromPoint,
   densifyGreatCircle,
   mapLibreOf,
-  preventIconFetch,
   roundPlacement,
   siteLabel,
   unplaced,
@@ -447,7 +446,7 @@ export default function SiteMap({
     const build = (subset: MapSite[], name: string, colour: string, size: number) => ({
       // scattermap is MapLibre's trace and scattergeo the offline one; they
       // take the same lat/lon/marker fields, so only the type changes.
-      // scattermapbox is deprecated in 2.35 and is deliberately not used.
+      // (scattermapbox, the older tiled trace, is gone as of Plotly 4.)
       type: (tiles ? 'scattermap' : 'scattergeo') as 'scattermap' | 'scattergeo',
       mode: 'markers' as const,
       name,
@@ -523,11 +522,14 @@ export default function SiteMap({
       if (tiles) {
         // Two traces on the tiled map where the offline one takes one. A
         // `lines+text` trace has no marker, and plotly 2.35's scattermap
-        // works its label offset out from the marker size all the same --
+        // worked its label offset out from the marker size all the same --
         // NaN, which MapLibre rejects, and the rejection takes the WHOLE map
         // with it: every trace, not just the label. So the line goes in
         // unlabelled and the label rides on a one-point marker trace whose
-        // marker is there only to be measured, drawn at zero opacity.
+        // marker is there only to be measured, drawn at zero opacity. Kept on
+        // Plotly 4 without re-testing whether the bare form is fixed there:
+        // this form renders identically on both, and the failure it avoids
+        // takes the whole map down.
         list.push({
           type: geoType,
           mode: 'lines' as const,
@@ -817,34 +819,6 @@ export default function SiteMap({
     return () => observer.disconnect()
   }, [])
 
-  /**
-   * Register plotly's text-label icon on the tiled map as soon as the map
-   * exists -- see preventIconFetch for what this stops.
-   *
-   * Polled from here rather than done in onInitialized alone, because
-   * onInitialized is too late about half the time: plotly's promise settles
-   * on the map's next render, and the request for the icon comes from the
-   * worker that lays the labels out, which can be before or after that
-   * render. The map object itself exists from the moment Plotly.react is
-   * called -- a microtask after mount -- so a frame-by-frame look for it
-   * catches it before its style has loaded, let alone before any label.
-   */
-  useEffect(() => {
-    if (!tiles) return
-    let frame = 0
-    let tries = 0
-    const look = () => {
-      const gd = plotBox.current?.querySelector('.js-plotly-plot')
-      const map = mapLibreOf(gd)
-      if (map && preventIconFetch(map)) return
-      // Ten seconds of frames, then give up: the plot has failed for some
-      // other reason and there is nothing here to register on.
-      if (++tries < 600) frame = requestAnimationFrame(look)
-    }
-    frame = requestAnimationFrame(look)
-    return () => cancelAnimationFrame(frame)
-  }, [tiles])
-
   const config = useMemo(
     () => ({
       displayModeBar: false,
@@ -860,10 +834,6 @@ export default function SiteMap({
 
   const onDrawn = useCallback((gd: HTMLElement) => {
     graphDiv.current = gd
-    // Belt and braces for the frame loop above: idempotent, and covers a
-    // map it somehow missed.
-    const map = mapLibreOf(gd)
-    if (map) preventIconFetch(map)
   }, [])
 
   const layout = useMemo(() => {
@@ -931,6 +901,10 @@ export default function SiteMap({
         lakecolor: plot.grid,
         showframe: false,
         bgcolor: plot.surface,
+        // Plotly 4 fits a geo subplot to its data unless told not to, which
+        // would override the ranges below -- the frame this component chose,
+        // margins and the reader's own zoom included.
+        fitbounds: false as const,
         ...(viewFrame
           ? { lonaxis: { range: viewFrame.lon }, lataxis: { range: viewFrame.lat } }
           : {}),

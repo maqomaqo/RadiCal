@@ -287,9 +287,10 @@ export default function PosteriorPlot({
       // A layout property, not a config one: hiding the modebar does not stop
       // drag-to-box-zoom, which would leave a reader zoomed in with no way out.
       dragmode: false as const,
-      title: sampleName ? `Posterior Distribution: ${sampleName}` : 'Posterior Distribution',
+      // Plotly 3 dropped a bare string here; a title is an object with text.
+      title: { text: sampleName ? `Posterior Distribution: ${sampleName}` : 'Posterior Distribution' },
       xaxis: {
-        title: calendarAxisTitle(dateFormat),
+        title: { text: calendarAxisTitle(dateFormat) },
         zeroline: false,
         gridcolor: plot.grid,
         // Time runs left to right, oldest to youngest, as a chronology reads.
@@ -302,7 +303,7 @@ export default function PosteriorPlot({
         ...(ticks ? { tickmode: 'array', tickvals: ticks.tickvals, ticktext: ticks.ticktext } : {}),
       },
       yaxis: {
-        title: 'Probability Density',
+        title: { text: 'Probability Density' },
         zeroline: false,
         gridcolor: plot.grid,
         ...(yRange ? { range: yRange, autorange: false } : {}),
