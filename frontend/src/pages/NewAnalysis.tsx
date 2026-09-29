@@ -2006,8 +2006,10 @@ export default function NewAnalysis() {
           bottom: 0,
           zIndex: (theme) => theme.zIndex.appBar - 1,
           mt: 4,
-          mx: -3,
-          px: 3,
+          // Out to the Container's own gutter, which is 16px on a phone and
+          // 24px above -- a flat -3 pushed the bar 8px past a phone's edge.
+          mx: { xs: -2, sm: -3 },
+          px: { xs: 2, sm: 3 },
           py: 2,
           bgcolor: 'background.paper',
           borderTop: 1,

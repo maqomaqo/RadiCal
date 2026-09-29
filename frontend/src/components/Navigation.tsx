@@ -230,7 +230,6 @@ export default function Navigation() {
                 maxWidth: 220,
                 minWidth: 0,
                 px: { xs: 1.25, md: 1.5 },
-                textTransform: 'none',
                 '& .MuiButton-startIcon': { mr: { xs: 0, md: 0.5 }, ml: 0 },
                 '&:hover': { backgroundColor: 'rgba(255,255,255,0.1)' },
               }}

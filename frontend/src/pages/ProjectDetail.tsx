@@ -35,7 +35,6 @@ import {
 } from '@mui/material'
 import EditIcon from '@mui/icons-material/Edit'
 import MoreVertIcon from '@mui/icons-material/MoreVert'
-import ChevronLeftIcon from '@mui/icons-material/ChevronLeft'
 import DeleteIcon from '@mui/icons-material/Delete'
 import AddIcon from '@mui/icons-material/Add'
 import DriveFileMoveIcon from '@mui/icons-material/DriveFileMove'
@@ -55,6 +54,7 @@ import { MAX_COMPARED_RUNS } from '@/theme/compareColors'
 import StatusStrip, { statusSummary } from '@/components/StatusStrip'
 import type { StatusCounts } from '@/components/StatusStrip'
 import { relativeTime, absoluteTime } from '@/utils/serverTime'
+import BackLink from '@/components/BackLink'
 import { analysisTypeLabel } from '@/utils/analysisTypes'
 import { COORDINATE_PRECISION_OPTIONS } from '@/utils/coordinates'
 import type { CoordinatePrecision } from '@/utils/coordinates'
@@ -522,23 +522,7 @@ export default function ProjectDetail() {
         <Box
           sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1.5 }}
         >
-          <Link
-            component={RouterLink}
-            to="/projects"
-            variant="body2"
-            sx={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 0.25,
-              ml: -0.5,
-              color: 'text.secondary',
-              textDecoration: 'none',
-              '&:hover': { color: 'primary.main', textDecoration: 'underline' },
-            }}
-          >
-            <ChevronLeftIcon fontSize="small" />
-            Projects
-          </Link>
+          <BackLink to="/projects">Projects</BackLink>
           {/* Here rather than in the action row below: at phone widths that row
               could not hold a third control and wrapped the menu onto a line of
               its own, and the masthead's own right edge belongs to the measure
@@ -567,7 +551,7 @@ export default function ProjectDetail() {
           }}
         >
           <Box sx={{ flex: '1 1 320px', minWidth: 0 }}>
-            <Typography variant="h1" component="h1" sx={{ fontSize: { xs: '2rem', sm: '2.5rem' } }}>
+            <Typography variant="h1" component="h1">
               {project.name}
             </Typography>
             {project.description && (

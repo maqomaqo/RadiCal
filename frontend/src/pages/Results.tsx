@@ -505,7 +505,7 @@ const NUMERIC_CELL_SX = { whiteSpace: 'nowrap' } as const
    copies of the hex values -- and a copy of a token is a token that can drift.
    theme/surfaces.ts is the one place both these and createTheme read from. */
 
-function stickyNameCell(background: string) {
+function stickyNameCell(background: string, indentPx = 0) {
   return {
     position: 'sticky' as const,
     left: 0,
@@ -514,7 +514,11 @@ function stickyNameCell(background: string) {
     // Capped on phones only: at 375px an uncapped column takes 170px of a
     // 295px container and occludes 88% of the span column at full scroll.
     // Desktop has room and keeps the full name.
-    maxWidth: { xs: 116, sm: 'none' },
+    //
+    // The cap is on the NAME, not the cell: a tree row's indentation is
+    // padding inside the same box, and a flat 116px left a date two levels
+    // down 12px of text -- "W…" for every sample in a Phase.
+    maxWidth: { xs: 116 + indentPx, sm: 'none' },
     overflow: { xs: 'hidden', sm: 'visible' },
     textOverflow: 'ellipsis',
     whiteSpace: { xs: 'nowrap', sm: 'normal' },
@@ -750,7 +754,7 @@ function StructureTableRow({
         title={row.name}
         sx={{
           pl: `${16 + row.depth * CHEVRON_GUTTER_PX}px`,
-          ...stickyNameCell(tint ?? PAPER),
+          ...stickyNameCell(tint ?? PAPER, row.depth * CHEVRON_GUTTER_PX),
         }}
       >
         {/* The disclosure control is the only marker a Sequence/Phase row
@@ -2870,8 +2874,10 @@ export default function Results() {
           one asked before the ranges have been seen. */}
       {analysis.analysis_type === 'bayesian' && analysis.model_tree && (
         <Paper sx={{ p: 3, mb: 3 }}>
+          {/* No glyph beside the heading: it was the only section on the page
+              to carry one, so it read as a different kind of thing from the
+              results and plots around it rather than as one more of them. */}
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <AccountTreeIcon color="action" />
             <Typography variant="h6" component="h2">
               Model Structure used
             </Typography>

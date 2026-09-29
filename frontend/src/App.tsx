@@ -27,6 +27,7 @@ const ProjectDetail = lazy(() => import('@/pages/ProjectDetail'))
 const CompareResults = lazy(() => import('@/pages/CompareResults'))
 const Help = lazy(() => import('@/pages/Help'))
 const Glossary = lazy(() => import('@/pages/Glossary'))
+const NotFound = lazy(() => import('@/pages/NotFound'))
 
 // `background.muted` is ours, not MUI's -- declared so `sx={{ backgroundColor:
 // 'background.muted' }}` resolves and typechecks like any built-in token.
@@ -176,11 +177,32 @@ const theme = createTheme({
         root: { textTransform: 'none' },
       },
     },
+    // The same default reached every Tab and ToggleButton the Button override
+    // above never covered: "ANALYSES (3)" beside a "New Analysis" button, and
+    // "STACKED / INDIVIDUAL / CURVE" above a plot whose every other control is
+    // written in sentence case.
+    MuiTab: {
+      styleOverrides: {
+        root: { textTransform: 'none', fontSize: '0.9375rem' },
+      },
+    },
+    MuiToggleButton: {
+      styleOverrides: {
+        root: { textTransform: 'none' },
+      },
+    },
   },
   shadows: warmShadows,
   typography: {
     fontFamily: 'Roboto, sans-serif',
-    h1: { fontSize: '2.5rem', fontWeight: 600 },
+    // One step down on phones, for every page title at once: at 2.5rem a
+    // two-word title ("Calibration Curves", a long project name) broke onto a
+    // line per word in a 311px column. ProjectDetail used to do this locally.
+    h1: {
+      fontSize: '2.5rem',
+      fontWeight: 600,
+      '@media (max-width:599.95px)': { fontSize: '2rem' },
+    },
     h2: { fontSize: '2rem', fontWeight: 600 },
   },
 })
@@ -236,6 +258,9 @@ function RoutedPages() {
           <Route path="/curves/:curveId/browse" element={<CurveBrowser />} />
           <Route path="/projects/:projectId" element={<ProjectDetail />} />
           <Route path="/projects/:projectId/compare" element={<CompareResults />} />
+          {/* Without this an unknown path rendered an empty canvas under the
+              bar, indistinguishable from a page still loading. */}
+          <Route path="*" element={<NotFound />} />
         </Routes>
       </Suspense>
     </ErrorBoundary>

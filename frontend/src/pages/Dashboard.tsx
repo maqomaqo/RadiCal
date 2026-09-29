@@ -15,6 +15,7 @@ import { Link as RouterLink } from 'react-router-dom'
 import useMediaQuery from '@mui/material/useMediaQuery'
 import type { Theme } from '@mui/material/styles'
 import DeleteIcon from '@mui/icons-material/Delete'
+import ArrowForwardIcon from '@mui/icons-material/ArrowForward'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import GuideBand from '@/components/GuideBand'
 import IntervalPlot, { SampleIntervals } from '@/components/IntervalPlot'
@@ -135,9 +136,10 @@ export default function Dashboard() {
             component={RouterLink}
             to="/projects"
             size="medium"
+            endIcon={<ArrowForwardIcon />}
             sx={{ ml: 'auto', minHeight: 44 }}
           >
-            View all in Projects &rarr;
+            View all in Projects
           </Button>
         )}
       </Box>
@@ -523,7 +525,8 @@ const WAYS_IN = [
     // fresh -- NewAnalysis.tsx otherwise keeps whatever draft is in progress.
     fresh: true,
     title: 'Calibrate a date',
-    action: 'New analysis',
+    // The same words as the app bar and the project page, which start the same thing.
+    action: 'New Analysis',
     body: 'Turn a radiocarbon measurement into a calendar date range, or build a chronological model.',
     primary: true,
   },
@@ -533,7 +536,7 @@ const WAYS_IN = [
     // not a promise the landing page then asks the reader to repeat.
     to: '/projects?new=1',
     title: 'Start a project',
-    action: 'New project',
+    action: 'New Project',
     body: 'Group analyses by site, region, or research question. Upload dates for reuse across different models.',
   },
   {

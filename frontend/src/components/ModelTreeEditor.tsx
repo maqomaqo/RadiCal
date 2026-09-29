@@ -1154,7 +1154,6 @@ function ElementFields({
                 minHeight: 44,
                 color: 'text.secondary',
                 fontWeight: 400,
-                textTransform: 'none',
                 whiteSpace: 'nowrap',
               }}
             >
@@ -1411,7 +1410,6 @@ function PhaseButton({
       sx={{
         minWidth: 220,
         justifyContent: 'space-between',
-        textTransform: 'none',
         fontWeight: 400,
         color: 'text.primary',
         borderColor: 'divider',

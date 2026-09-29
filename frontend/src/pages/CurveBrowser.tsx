@@ -1,16 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Link as RouterLink, useParams } from 'react-router-dom'
+import { useParams } from 'react-router-dom'
 import {
   Alert,
   Box,
-  Breadcrumbs,
   Button,
   Chip,
   CircularProgress,
   Container,
   FormControlLabel,
   LinearProgress,
-  Link,
   MenuItem,
   Paper,
   Stack,
@@ -20,6 +18,7 @@ import {
   Typography,
 } from '@mui/material'
 import Plot from '@/components/Plot'
+import BackLink from '@/components/BackLink'
 import type { Config, Data, Layout, LayoutAxis, PlotMouseEvent, PlotRelayoutEvent } from 'plotly.js-dist-min'
 import DownloadIcon from '@mui/icons-material/Download'
 import CurveScrubber from '@/components/CurveScrubber'
@@ -774,6 +773,9 @@ export default function CurveBrowser() {
   if (error || !window || !extent) {
     return (
       <Container maxWidth="lg" sx={{ py: 4 }}>
+        <Box sx={{ mb: 2 }}>
+          <BackLink to="/curves">Calibration Curves</BackLink>
+        </Box>
         <Alert severity="error">{error ?? 'This curve could not be loaded.'}</Alert>
       </Container>
     )
@@ -783,12 +785,15 @@ export default function CurveBrowser() {
 
   return (
     <Container maxWidth="lg" sx={{ py: 4 }}>
-      <Breadcrumbs sx={{ mb: 2 }}>
-        <Link component={RouterLink} to="/curves" underline="hover" color="inherit">
-          Calibration Curves
-        </Link>
-        <Typography color="text.primary">{spec?.name ?? curveId}</Typography>
-      </Breadcrumbs>
+      {/* The curve's name is the page's h1 -- it was the last crumb of a
+          Breadcrumbs trail, so the page had no heading at all for anything
+          that navigates by them. h2's scale, as Results sets its own. */}
+      <Box sx={{ mb: 2 }}>
+        <BackLink to="/curves">Calibration Curves</BackLink>
+        <Typography variant="h2" component="h1" sx={{ mt: 0.5 }}>
+          {spec?.name ?? curveId}
+        </Typography>
+      </Box>
 
       <Paper sx={{ p: 2, mb: 2 }}>
         <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap alignItems="center">

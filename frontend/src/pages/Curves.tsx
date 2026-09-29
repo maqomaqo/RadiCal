@@ -184,16 +184,18 @@ export default function Curves() {
   return (
     <Container maxWidth="lg" sx={{ py: 4 }}>
       <Paper sx={{ p: 3, mb: 3 }}>
-   <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2, flexWrap: 'wrap', gap: 2 }}>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 2 }}>
           <Box sx={{ flexGrow: 1, minWidth: 260 }}>
             <Typography variant="h1" gutterBottom>
               Calibration Curves
             </Typography>
-             <Typography color="text.secondary" sx={{ maxWidth: '64ch' }}>
+            <Typography color="text.secondary" sx={{ maxWidth: '64ch' }}>
               Three curves come supplied; import or mix your own. Everything in the table is measured from the curve file itself.
             </Typography>
           </Box>
-          <Stack direction="row" spacing={1}>
+          {/* Wraps as a row rather than squeezing: two buttons side by side
+              in a phone's column broke both labels onto two lines each. */}
+          <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ '& .MuiButton-root': { whiteSpace: 'nowrap' } }}>
             <Button variant="outlined" startIcon={<CallMergeIcon />} onClick={() => setMixOpen(true)}>
               New Mixed Curve
             </Button>
@@ -216,7 +218,10 @@ export default function Curves() {
         </Box>
       ) : (
         <TableContainer component={Paper} sx={{ overflowX: 'auto' }}>
-          <Table size="small">
+          {/* A floor, so a phone scrolls the table sideways instead of
+              folding "Northern Hemisphere terrestrial radiocarbon age
+              calibration" into a column one word wide. */}
+          <Table size="small" sx={{ minWidth: 880 }}>
             <TableHead>
               <TableRow>
                 <TableCell>Curve</TableCell>

@@ -1,6 +1,6 @@
-import { Box, Button, Container, Link, Paper, Typography } from '@mui/material'
-import ArrowBackIcon from '@mui/icons-material/ArrowBack'
+import { Box, Container, Link, Paper, Typography } from '@mui/material'
 import { Link as RouterLink } from 'react-router-dom'
+import BackLink from '@/components/BackLink'
 
 /**
  * The domain vocabulary, defined once.
@@ -332,14 +332,12 @@ export default function Glossary() {
         >
           <Box sx={{ flexGrow: 1, minWidth: 260 }}>
             {/* The trail back up: a glossary is usually arrived at from the
-                manual, mid-sentence, and the way back has to be obvious. */}
-            <Link
-              component={RouterLink}
-              to="/help"
-              sx={{ fontSize: '0.875rem', display: 'inline-block', mb: 1 }}
-            >
-              Help
-            </Link>
+                manual, mid-sentence, and the way back has to be obvious. It
+                was also an outlined "User Manual" button on the right, going
+                to the same page -- two controls for one way back. */}
+            <Box sx={{ mb: 1.5 }}>
+              <BackLink to="/help">User Manual</BackLink>
+            </Box>
             <Typography variant="h1" component="h1">
               Glossary
             </Typography>
@@ -348,15 +346,6 @@ export default function Glossary() {
               you read the output here, and everyone else&rsquo;s papers.
             </Typography>
           </Box>
-          <Button
-            component={RouterLink}
-            to="/help"
-            variant="outlined"
-            startIcon={<ArrowBackIcon />}
-            sx={{ flexShrink: 0 }}
-          >
-            User Manual
-          </Button>
         </Box>
       </Paper>
 

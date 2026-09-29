@@ -23,6 +23,7 @@ import ComparePosteriorPlot from '@/components/ComparePosteriorPlot'
 import DerivedQuantitiesPanel from '@/components/DerivedQuantitiesPanel'
 import ModelDiffPanel from '@/components/ModelDiffPanel'
 import ShiftPlot from '@/components/ShiftPlot'
+import BackLink from '@/components/BackLink'
 import { useCurves } from '@/hooks/useCurves'
 import { MAX_COMPARED_RUNS, useRunStyles } from '@/theme/compareColors'
 import {
@@ -45,6 +46,7 @@ import {
 } from '@/utils/dateFormat'
 import { CONFIDENCE_LEVELS, SIGMA_2 } from '@/utils/hpd'
 import { formatApiError } from '@/utils/apiError'
+import { analysisTypeLabel } from '@/utils/analysisTypes'
 import type { IntervalsBlock, MatrixMeasurement, ModelElement } from '@/types'
 
 /**
@@ -82,6 +84,7 @@ interface RunPayload {
   name: string
   analysis_type: string
   status: string
+  project_name?: string | null
   error_message?: string | null
   solver?: {
     method: 'exact' | 'gibbs' | 'smc'
@@ -351,10 +354,15 @@ export default function CompareResults() {
   }
 
   const backLink = projectId ? `/projects/${projectId}` : '/projects'
+  // Named for where it goes. Before the runs load -- or when they fail to --
+  // there is no name to give, and "Project" still says which way is up.
+  const backLabel = projectId
+    ? runs?.find((run) => run.project_name)?.project_name ?? 'Project'
+    : 'Projects'
 
   if (loading) {
     return (
-      <Container sx={{ mt: 4, textAlign: 'center' }}>
+      <Container maxWidth="lg" sx={{ py: 6, display: 'flex', justifyContent: 'center' }}>
         <CircularProgress />
       </Container>
     )
@@ -362,11 +370,11 @@ export default function CompareResults() {
 
   if (error) {
     return (
-      <Container maxWidth="md" sx={{ mt: 4 }}>
+      <Container maxWidth="lg" sx={{ py: 4 }}>
+        <Box sx={{ mb: 2 }}>
+          <BackLink to={backLink}>{backLabel}</BackLink>
+        </Box>
         <Alert severity="error">{error}</Alert>
-        <Button component={RouterLink} to={backLink} sx={{ mt: 2 }}>
-          Back to the project
-        </Button>
       </Container>
     )
   }
@@ -374,17 +382,17 @@ export default function CompareResults() {
   if (!runs) return null
 
   return (
-    <Container maxWidth="xl" sx={{ mt: 4, mb: 6 }}>
-      <Box sx={{ mb: 2 }}>
-        <Link component={RouterLink} to={backLink} variant="body2">
-          ← Back to the project
-        </Link>
+    // lg, the width every other page and the app bar use: at xl this was the
+    // one page whose edges did not line up with the bar above it.
+    <Container maxWidth="lg" sx={{ py: 4 }}>
+      <Box sx={{ mb: 1.5 }}>
+        <BackLink to={backLink}>{backLabel}</BackLink>
       </Box>
 
-      <Typography variant="h4" gutterBottom>
+      <Typography variant="h1" component="h1" gutterBottom>
         Compare results
       </Typography>
-      <Typography variant="body1" color="textSecondary" sx={{ mb: 3, maxWidth: '72ch' }}>
+      <Typography variant="body1" color="text.secondary" sx={{ mb: 3, maxWidth: '72ch' }}>
         The same dates under {runs.length} different analyses, on one calendar axis. Rows sort by how
         far each date moved, so the dates these analyses disagree about come to the top.
       </Typography>
@@ -414,7 +422,9 @@ export default function CompareResults() {
                 }}
               />
               <Box>
-                <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                {/* A div, not the default p: the reference Chip renders a div,
+                    which a paragraph cannot hold. */}
+                <Typography variant="body2" component="div" sx={{ fontWeight: 600 }}>
                   <Link component={RouterLink} to={`/results/${run.id}`} color="inherit">
                     {run.name}
                   </Link>
@@ -423,7 +433,7 @@ export default function CompareResults() {
                   )}
                 </Typography>
                 <Typography variant="caption" color="textSecondary" component="div">
-                  {run.analysis_type} · {run.results.length} dates · {solverLabel(run)}
+                  {analysisTypeLabel(run.analysis_type)} · {run.results.length} dates · {solverLabel(run)}
                 </Typography>
               </Box>
             </Box>
