@@ -14,7 +14,7 @@
 # ---- Frontend build -------------------------------------------------------
 # Pinned to the build host's platform: the output is plain JS/CSS, identical
 # for every target, and tsc + terser under QEMU emulation is painfully slow.
-FROM --platform=$BUILDPLATFORM node:18-alpine AS frontend
+FROM --platform=$BUILDPLATFORM node:24-alpine AS frontend
 WORKDIR /build
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
@@ -30,7 +30,7 @@ RUN npm run build
 # Every pin in requirements.txt ships a wheel for both amd64 and arm64, so the
 # toolchain is insurance against a future pin that does not; keeping it in a
 # separate stage means the runtime image never carries it either way.
-FROM python:3.11-slim AS backend-deps
+FROM python:3.13-slim AS backend-deps
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc g++ gfortran libopenblas-dev liblapack-dev \
     && rm -rf /var/lib/apt/lists/*
@@ -38,7 +38,7 @@ COPY backend/requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir --prefix=/install -r /tmp/requirements.txt
 
 # ---- Runtime --------------------------------------------------------------
-FROM python:3.11-slim
+FROM python:3.13-slim
 WORKDIR /app
 
 COPY --from=backend-deps /install /usr/local

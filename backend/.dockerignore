@@ -1,0 +1,10 @@
+# A host virtualenv holds the host's Python and platform wheels, useless in a
+# Linux image and hundreds of megabytes to send to the daemon.
+venv
+.venv
+env
+**/__pycache__
+**/*.pyc
+.pytest_cache
+uploads
+.env

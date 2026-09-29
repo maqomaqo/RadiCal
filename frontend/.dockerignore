@@ -1,0 +1,7 @@
+# node_modules installed on the host holds binaries for the host's platform
+# (esbuild, rollup); copied over the image's own install they would shadow the
+# Linux ones, or on Windows break the .bin shims.
+node_modules
+dist
+.vite
+*.log

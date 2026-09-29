@@ -56,12 +56,19 @@ export default defineConfig({
   },
   server: {
     port: 5173,
+    // A repo on a Windows drive, bind-mounted into Docker, sends no file
+    // change events into the container; polling is the only way the dev
+    // server sees an edit there. Off unless asked for: it costs CPU.
+    watch: {
+      usePolling: process.env.CHOKIDAR_USEPOLLING === 'true',
+    },
     proxy: {
       '/api': {
-        // Inside Docker, use the service name; otherwise use localhost
-        target: 'http://radiocarbon_backend:8000',
+        // The frontend calls same-origin /api and this forwards it. Run
+        // directly on the host, the backend is on localhost; the compose
+        // stack sets API_PROXY_TARGET to the backend service instead.
+        target: process.env.API_PROXY_TARGET || 'http://localhost:8000',
         changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api/, '/api'),
       },
     },
   },
