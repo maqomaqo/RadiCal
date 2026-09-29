@@ -9,8 +9,8 @@
 | Run the frontend without Docker | Node.js **22 or 24** (the LTS releases; Vite needs 22.12 or later) |
 
 Python 3.11 and older will not install the pinned scientific packages (numpy 2.5, scipy 1.18),
-and Node 18 and 20 are past end of life. Windows on ARM has no prebuilt `psycopg2`, `numpy` or
-`scipy` for a native install; use Docker there.
+and Node 18 and 20 are past end of life. On Windows on ARM, use Docker: not every pinned package
+has a native ARM64 Windows build.
 
 The commands below are written for macOS Terminal (zsh) and Windows PowerShell. Docker Compose
 is `docker compose` (a space); the older `docker-compose` survives on some installs only as a
@@ -244,7 +244,7 @@ docker compose down -v     # stop AND delete the database
 and 5433 (Postgres, mapped to its own 5432 inside the container). Change the
 left-hand number under `ports:` in `docker-compose.yml`.
 
-**`pip install` fails building numpy, scipy or psycopg2.** The Python is too old
+**`pip install` fails building numpy, scipy or psycopg.** The Python is too old
 (3.11 or earlier) or not a 64-bit CPython. Every pinned package has a
 ready-made wheel for 3.12–3.14 on Windows x64, macOS and Linux; a compile step
 means pip found none for your interpreter. Check with `python3 --version`
