@@ -1,15 +1,21 @@
-# RadiCal from the published image, with its database.
+# RadiCal from the published image, with its database. This is the file
+# docs/INSTALLATION.md has people download, saved as docker-compose.yml in a
+# folder of its own beside a .env holding RADICAL_SECRET_KEY; then
 #
-#   docker compose -f docker-compose.prod.yml up -d
+#   docker compose up -d
 #
-# then open http://localhost:8000. Nothing is built here: the image on
+# and open http://localhost:8000. Nothing is built here: the image on
 # ghcr.io already contains the backend, the built frontend and the
-# calibration curves. Contrast docker-compose.yml, which builds from source
-# and bind-mounts it for development.
+# calibration curves. Contrast the repository's docker-compose.yml, which
+# builds from source and bind-mounts it for development.
 #
-# Set RADICAL_SECRET_KEY before this is reachable by anyone but you: the image
-# runs with RADICAL_ENV=production, and the backend refuses to start in that
-# mode without a real signing key (see .env.example for how to make one).
+# The image runs with RADICAL_ENV=production, and the backend refuses to
+# start in that mode without a real signing key.
+
+# Fixed rather than taken from the folder, which the guide calls RadiCal: that
+# would make the project "radical", the development stack's own name, and on
+# a machine with both, this file would take over its database.
+name: radical-app
 
 services:
   postgres:
@@ -25,6 +31,9 @@ services:
       PGDATA: /var/lib/postgresql/data/pgdata
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    # Like the app below: after a reboot or a Docker Desktop restart, the app
+    # would otherwise come back to a database that did not.
+    restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-radiocarbon} -d ${POSTGRES_DB:-radiocarbon_db}"]
       interval: 10s

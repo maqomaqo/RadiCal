@@ -24,7 +24,8 @@
 
 ## Getting Started
 
-1. Navigate to `http://localhost:5173` (or your deployment URL).
+1. Open RadiCal in your browser: `http://localhost:8000` on the computer it is installed on, or
+   your deployment's address.
 2. Click **New Analysis** (top navigation bar, or from the Dashboard).
 
 There is no multi-step wizard. New Analysis is a single form: settings on the left, adding

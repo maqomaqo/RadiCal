@@ -1,296 +1,128 @@
-# Installation Guide
+# Installing RadiCal
 
-## Requirements
+RadiCal runs in [Docker](https://www.docker.com/): one container for the app and one for its
+database. Docker is the only thing to install — no Python, Node.js or PostgreSQL.
 
-| To... | You need |
-|---|---|
-| Run RadiCal (recommended) | [Docker Desktop](https://www.docker.com/products/docker-desktop/) on macOS or Windows, or Docker Engine with the Compose plugin on Linux |
-| Run the backend without Docker | Python **3.12, 3.13 or 3.14**, and PostgreSQL 15 or later (or just the Docker stack's own database) |
-| Run the frontend without Docker | Node.js **22 or 24** (the LTS releases; Vite needs 22.12 or later) |
+The steps are the same on macOS and Windows. Type the commands into **Terminal** on macOS, or
+**PowerShell** on Windows; where the two differ, both are given.
 
-Python 3.11 and older will not install the pinned scientific packages (numpy 2.5, scipy 1.18),
-and Node 18 and 20 are past end of life. On Windows on ARM, use Docker: not every pinned package
-has a native ARM64 Windows build.
+## 1. Install Docker Desktop
 
-The commands below are written for macOS Terminal (zsh) and Windows PowerShell. Docker Compose
-is `docker compose` (a space); the older `docker-compose` survives on some installs only as a
-compatibility alias.
+Download [Docker Desktop](https://www.docker.com/products/docker-desktop/) and install it.
 
-## Getting the code
+- **macOS:** choose the download for your Mac's chip — *Apple silicon* or *Intel* (Apple menu →
+  About This Mac shows which).
+- **Windows:** Windows 10 or 11, 64-bit. Accept the installer's offer to use **WSL 2**, and restart
+  if it asks you to.
 
-The repository is private, so GitHub needs to know who you are. It stopped accepting account
-passwords for `git clone` in 2021. The simplest route on either platform is the
-[GitHub CLI](https://cli.github.com/):
+Open Docker Desktop and wait until it reports that Docker is running. It needs to be running
+whenever you use RadiCal.
+
+## 2. Download RadiCal's setup file
+
+Make a folder for RadiCal and download its setup file into it. The folder is where RadiCal's
+settings live, and every command below is run from inside it.
 
 ```bash
-gh auth login
-gh repo clone maqomaqo/RadiCal
+mkdir RadiCal
 cd RadiCal
+curl -fLo docker-compose.yml https://raw.githubusercontent.com/maqomaqo/RadiCal/main/docker-compose.prod.yml
 ```
 
-Plain `git clone https://github.com/maqomaqo/RadiCal.git` also works where Git Credential
-Manager is installed (it comes with Git for Windows; on macOS, `brew install
---cask git-credential-manager`), which opens a browser sign-in; or give it a
-[personal access token](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens)
-with read access to this repository as the password.
+On Windows, type `curl.exe` rather than `curl` in the last line — in PowerShell, plain `curl` is a
+different command.
 
-## Quick start with Docker
+## 3. Create a signing key
 
-```bash
-cp .env.example .env
-docker compose up -d
-```
-
-The first start builds both images and takes a few minutes; after that it is
-seconds. Then:
-
-- the app: http://localhost:5173
-- the API's interactive docs: http://localhost:8000/docs
-
-Open the app and create an account. `docker compose logs -f backend` shows the
-backend's output if something does not come up.
-
-### macOS
-
-Docker Desktop runs on both Apple silicon and Intel Macs, and every image here
-has a native arm64 build.
-
-### Windows
-
-Docker Desktop needs the WSL 2 backend (its installer offers to enable it).
-Run the commands above in PowerShell; `cp` works there as an alias for
-`Copy-Item`.
-
-**Where to put the checkout.** The development stack bind-mounts the source
-into its containers so that edits reload. Docker Desktop passes no file-change
-events from a Windows drive (`C:\...`) into a Linux container, so with the
-checkout there the frontend does not notice an edit. Either:
-
-- clone inside WSL 2 (open an Ubuntu terminal, clone into `~`, run
-  `docker compose` from there) — edits reload instantly and file access is much
-  faster; or
-- keep the checkout on `C:\` and add `CHOKIDAR_USEPOLLING=true` to `.env`, which
-  makes the frontend poll for changes. The backend already polls.
-
-If you only want to *use* RadiCal rather than work on it, none of this
-matters — or skip the development stack entirely and run the published image
-(see [the README](../README.md#running-the-published-image)).
-
-**Line endings.** Git for Windows checks files out with CRLF line endings by
-default. Nothing in the app minds, including the calibration curve files.
-
-## Running without Docker
-
-Useful when working on one half of the app. The pieces are independent: run the
-database in Docker and the backend on the host, or everything on the host.
-
-### 1. A database
-
-The easiest database is the Docker stack's own, on port 5433:
-
-```bash
-docker compose up -d postgres
-```
-
-That is what `DATABASE_URL` in `.env.example` points at, so there is nothing
-else to set.
-
-To use a PostgreSQL installed on the machine instead (Homebrew or
-[Postgres.app](https://postgresapp.com/) on macOS, the
-[EDB installer](https://www.postgresql.org/download/windows/) on Windows),
-create a user and a database it **owns**. Ownership matters: since PostgreSQL 15
-a user can no longer create tables in a database it does not own, and the
-backend's first start fails with `permission denied for schema public`.
-
-macOS (Homebrew and Postgres.app make you the superuser):
-
-```bash
-createuser -P radiocarbon                    # choose a password
-createdb -O radiocarbon radiocarbon_db
-```
-
-Windows (the EDB installer's superuser is `postgres`, and its tools are not on
-`PATH`; adjust `17` to your version):
-
-```powershell
-$pg = "C:\Program Files\PostgreSQL\17\bin"
-& "$pg\createuser.exe" -U postgres -P radiocarbon
-& "$pg\createdb.exe" -U postgres -O radiocarbon radiocarbon_db
-```
-
-Then set `DATABASE_URL` in `.env` to
-`postgresql://radiocarbon:YOUR_PASSWORD@localhost:5432/radiocarbon_db`.
-
-The backend creates the tables itself on its first start — there is no separate
-setup step.
-
-### 2. The backend
+RadiCal signs everyone's sign-in with a secret key of your own, kept in a file called `.env` in the
+same folder. This command makes one; it also downloads RadiCal itself, a few hundred megabytes, so
+the first run takes a while.
 
 macOS:
 
 ```bash
-cd backend
-python3.12 -m venv venv        # or python3.13 / python3.14
-source venv/bin/activate
-pip install -r requirements.txt
-uvicorn app.main:app --reload
+docker run --rm ghcr.io/maqomaqo/radical python -c "import secrets; print('RADICAL_SECRET_KEY=' + secrets.token_urlsafe(48))" >> .env
 ```
-
-On macOS the command is `python3`, not `python`. `python3 --version` says
-which one you have; the installers at [python.org](https://www.python.org/downloads/)
-and Homebrew (`brew install python@3.13`) both work.
 
 Windows (PowerShell):
 
 ```powershell
-cd backend
-py -3.13 -m venv venv          # or -3.12 / -3.14
-.\venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-uvicorn app.main:app --reload
+docker run --rm ghcr.io/maqomaqo/radical python -c "import secrets; print('RADICAL_SECRET_KEY=' + secrets.token_urlsafe(48))" | Add-Content .env
 ```
 
-`py` is the Python launcher that the python.org installer adds. If PowerShell
-refuses to run `Activate.ps1` ("running scripts is disabled on this system"),
-allow scripts you create yourself, once:
+Do this once. Keep `.env` and don't share it: anyone with the key could sign in as any account, and
+replacing it signs everyone out.
 
-```powershell
-Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
-```
-
-Either way the API is then on http://localhost:8000 (docs at `/docs`). The
-backend reads the repository's `.env` and finds the calibration curves in
-`calibration_data/` by itself.
-
-Tests (they use a throwaway SQLite file, not your database):
+## 4. Start RadiCal
 
 ```bash
-pip install -r requirements-dev.txt
-pytest
+docker compose up -d
 ```
 
-### 3. The frontend
+After a minute, open **http://localhost:8000** in your browser and create an account.
+
+## Everyday use
+
+Run these from the RadiCal folder.
+
+| To... | Run |
+|---|---|
+| Stop RadiCal | `docker compose stop` |
+| Start it again | `docker compose up -d` |
+| Update to the latest version | `docker compose pull` then `docker compose up -d` |
+
+Your analyses are kept through all of these, and through updates: RadiCal brings its database up to
+date by itself when a new version starts. If Docker Desktop is set to start when you sign in
+(Docker Desktop → Settings → General), RadiCal comes back by itself after the computer restarts.
+
+To **remove RadiCal and everything in it**, run `docker compose down -v` and delete the folder. This
+deletes every analysis and project permanently.
+
+## Who can reach it
+
+Anyone who can reach port 8000 on this computer can open RadiCal and create an account; each
+account sees only its own projects and analyses. To make it reachable from this computer only,
+change the `ports:` line in `docker-compose.yml` from `"8000:8000"` to `"127.0.0.1:8000:8000"`
+and run `docker compose up -d`.
+
+## Using a different port
+
+If something else already uses port 8000, change the *first* number in that same `ports:` line —
+for example `"8080:8000"` — run `docker compose up -d`, and open http://localhost:8080 instead.
+
+## Using your own PostgreSQL server
+
+To keep RadiCal's data in a PostgreSQL server you already run (version 15 or later), run the app
+container on its own and point it there:
 
 ```bash
-cd frontend
-npm ci
-npm run dev
+docker run -d --name radical -p 8000:8000 --restart unless-stopped \
+  -e DATABASE_URL=postgresql://USER:PASSWORD@DB-HOST:5432/DATABASE \
+  -e RADICAL_SECRET_KEY=YOUR-KEY \
+  -v radical_uploads:/app/uploads \
+  ghcr.io/maqomaqo/radical
 ```
 
-Open http://localhost:5173. The dev server forwards everything under `/api` to
-the backend at `http://localhost:8000`; to use a backend somewhere else, set
-`API_PROXY_TARGET` before starting it (`API_PROXY_TARGET=http://host:8000 npm run
-dev`, or `$env:API_PROXY_TARGET = "http://host:8000"` first in PowerShell).
-
-`npm test` runs the frontend's unit tests.
-
-## Upgrading
-
-Pull, then rebuild and restart:
-
-```bash
-git pull
-docker compose up -d --build --renew-anon-volumes
-```
-
-`--build` installs any new backend or frontend dependencies into the images.
-`--renew-anon-volumes` matters for the frontend: its installed packages live in
-a volume of their own, which otherwise keeps the *old* ones and hides the
-rebuilt image's. The database is a named volume and is not touched.
-
-For a backend run outside Docker, recreate the virtual environment when
-`requirements.txt` changes Python versions (it now needs 3.12 or later):
-delete `backend/venv` and repeat step 2.
-
-## Schema changes
-
-The schema is versioned with Alembic (`backend/alembic/`). Day to day this
-needs no attention: the backend migrates on startup, whether that means
-creating the database from nothing or applying migrations added since the last
-run.
-
-A database created before Alembic was adopted (any version before 2026-08-19)
-is recognised on its first start after an upgrade, brought up to date, and
-joined to the migration history automatically. Nothing to do by hand, and
-existing analyses are kept.
-
-**Changing a model.** Edit `backend/app/models.py`, then generate the
-migration and read what it produced before committing it:
-
-```bash
-docker compose exec backend alembic revision --autogenerate -m "what changed"
-```
-
-Autogenerate is a good first draft, not an authority — it does not see a
-rename (it proposes a drop and an add, which loses the data) and it cannot
-know a backfill is needed. `backend/tests/test_migrations.py` fails if the
-models and the migrations disagree, so a forgotten migration cannot reach
-anyone's database.
-
-To take migration out of startup — for a deployment that would rather run it
-deliberately — set `RADICAL_SKIP_MIGRATIONS=1` and run
-`alembic upgrade head` yourself.
-
-## Stopping
-
-```bash
-docker compose down        # stop; the database is kept
-docker compose down -v     # stop AND delete the database
-```
+(In PowerShell, end each continued line with a backtick `` ` `` instead of `\`.) The database must
+be empty and **owned** by the user in `DATABASE_URL` — `createdb -O USER DATABASE` — because
+RadiCal creates its own tables on first start.
 
 ## Troubleshooting
 
-**A port is already in use.** The stack uses 5173 (frontend), 8000 (backend)
-and 5433 (Postgres, mapped to its own 5432 inside the container). Change the
-left-hand number under `ports:` in `docker-compose.yml`.
+**`no configuration file provided`** — the command was run outside the RadiCal folder. `cd` into
+it first.
 
-**`pip install` fails building numpy, scipy or psycopg.** The Python is too old
-(3.11 or earlier) or not a 64-bit CPython. Every pinned package has a
-ready-made wheel for 3.12–3.14 on Windows x64, macOS and Linux; a compile step
-means pip found none for your interpreter. Check with `python3 --version`
-(macOS) or `py --list` (Windows) and recreate the venv with a supported one.
+**`required variable RADICAL_SECRET_KEY is missing a value`** — there is no `.env` with a key in the
+folder. Do step 3.
 
-**The app loads but signing in fails, and the terminal running `npm run dev`
-shows `http proxy error`.** The backend is not running, or not on
-`localhost:8000`. Start it, or set `API_PROXY_TARGET`.
+**`Cannot connect to the Docker daemon`**, or `docker` is not recognised — Docker Desktop is not
+running. Start it and wait until it says so.
 
-**The backend stops at startup with `permission denied for schema public`.**
-The database is not owned by the user in `DATABASE_URL`. Fix it with
-`ALTER DATABASE radiocarbon_db OWNER TO radiocarbon;` as the superuser, or
-recreate it with `createdb -O` as above.
+**`port is already allocated`** — another program uses port 8000. See
+[Using a different port](#using-a-different-port).
 
-**The backend cannot connect to the database.** From the host, the host name is
-`localhost` (port 5433 for the Docker stack's database); `postgres` is its name
-only inside the Docker network. Check the user and password in `.env` match the
-ones the database was created with. The Docker stack's database keeps the
-credentials it was *first* created with — changing `POSTGRES_PASSWORD` later
-does nothing until `docker compose down -v`.
+**The page does not load** — give it a minute after starting. `docker compose ps` should show both
+containers, the app as `healthy`; if not, `docker compose logs radical` shows why.
 
-**On Windows, the frontend in Docker does not reload.** See
-[Where to put the checkout](#windows).
-
-## Environment variables
-
-Set in `.env` (see `.env.example` for the full, commented list):
-
-- `DATABASE_URL` — the connection string for a backend run outside Docker. The
-  Docker stack builds its own from `POSTGRES_USER`, `POSTGRES_PASSWORD` and
-  `POSTGRES_DB`.
-- `CORS_ORIGINS` — origins the backend accepts cross-origin requests from.
-  Nothing needs it in the standard setups, where the frontend calls `/api` on
-  its own origin.
-- `RADICAL_ENV`, `RADICAL_SECRET_KEY` — see
-  [Accounts](../README.md#accounts). Required for anything reachable by other
-  people.
-- `RADICAL_SKIP_MIGRATIONS` — set to `1` to stop the backend migrating the
-  database on startup (see Schema changes above).
-- `CHOKIDAR_USEPOLLING` — set to `true` on Windows with the checkout on a
-  Windows drive (see [Windows](#windows)).
-- `API_PROXY_TARGET` — where the frontend dev server forwards `/api`; defaults to
-  `http://localhost:8000`.
-- `INTCAL_CURVE_PATH` / `MARINE_CURVE_PATH` / `SHCAL_CURVE_PATH` — only needed
-  if the curve files live somewhere other than `calibration_data/`.
-
-MCMC/Bayesian settings (posterior draws, solver choice, the uniform span prior)
-are configured per-analysis in the New Analysis form, not via environment
-variables.
+**Windows: Docker Desktop reports a WSL problem** — run `wsl --update` in PowerShell, restart the
+computer, and start Docker Desktop again.
