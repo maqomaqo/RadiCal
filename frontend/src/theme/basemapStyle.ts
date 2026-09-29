@@ -80,8 +80,8 @@ export function tailorBasemapStyle(style: StyleObject): StyleObject {
   )
   const tailored: StyleObject = { ...style, layers }
   // With the shield layers gone nothing draws an icon, so the sprite sheet
-  // -- two more requests -- is not needed. Plotly's own text layer names an
-  // icon it does not have either way; see preventIconFetch.
+  // -- two more requests -- is not needed. Plotly's own text layer names no
+  // icon for a text-only trace, so it does not need one either.
   delete tailored.sprite
   return tailored
 }
