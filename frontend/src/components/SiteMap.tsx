@@ -531,15 +531,14 @@ export default function SiteMap({
       const textfont = { size: 10, color: plot.axis }
       if (tiles) {
         // Two traces on the tiled map where the offline one takes one. A
-        // `lines+text` trace has no marker, and plotly 2.35's scattermap
-        // worked its label offset out from the marker size all the same --
-        // NaN, which MapLibre rejects, and the rejection takes the WHOLE map
-        // with it: every trace, not just the label. So the line goes in
-        // unlabelled and the label rides on a one-point marker trace whose
-        // marker is there only to be measured, drawn at zero opacity. Kept on
-        // Plotly 4 without re-testing whether the bare form is fixed there:
-        // this form renders identically on both, and the failure it avoids
-        // takes the whole map down.
+        // `lines+text` trace has no marker, and plotly's scattermap works its
+        // label offset out from the marker size all the same -- NaN, which
+        // MapLibre rejects ("text-offset[1]: number expected, NaN found").
+        // On 2.35 that took the WHOLE map down; on 4.1.1, re-tested, the
+        // rest of the map draws but every isochron label is lost and the
+        // map raises an error. So the line goes in unlabelled and the label
+        // rides on a one-point marker trace whose marker is there only to be
+        // measured, drawn at zero opacity.
         list.push({
           type: geoType,
           mode: 'lines' as const,
