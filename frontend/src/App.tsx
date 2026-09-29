@@ -191,6 +191,38 @@ const theme = createTheme({
         root: { textTransform: 'none' },
       },
     },
+    // The ring above never reached a Button: ButtonBase sets `outline: 0` on
+    // its root at the same specificity and later in the cascade, so a focused
+    // text button -- every "Download PNG" -- showed only the ripple. Stated on
+    // the class MUI puts on keyboard focus, which it only puts there for
+    // keyboard focus.
+    MuiButtonBase: {
+      styleOverrides: {
+        root: {
+          '&.Mui-focusVisible': {
+            outline: `2px solid ${PRIMARY}`,
+            outlineOffset: '2px',
+          },
+        },
+      },
+    },
+    // A Switch's focusable part is the round thumb button, which the root
+    // clips (overflow: hidden), so a ring on it is cut off. The ring goes
+    // round the whole track instead.
+    MuiSwitch: {
+      styleOverrides: {
+        root: {
+          '&:has(.Mui-focusVisible)': {
+            outline: `2px solid ${PRIMARY}`,
+            outlineOffset: '0px',
+            borderRadius: 12,
+          },
+        },
+        switchBase: {
+          '&.Mui-focusVisible': { outline: 'none' },
+        },
+      },
+    },
   },
   shadows: warmShadows,
   typography: {

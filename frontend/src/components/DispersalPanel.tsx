@@ -21,7 +21,9 @@
 import {
   Alert,
   Box,
+  Button,
   Chip,
+  Link,
   Paper,
   Stack,
   Table,
@@ -30,10 +32,15 @@ import {
   TableContainer,
   TableHead,
   TableRow,
+  TableSortLabel,
   Tooltip,
   Typography,
 } from '@mui/material'
+import DownloadIcon from '@mui/icons-material/Download'
 
+import { useCallback, useMemo, useState } from 'react'
+import { Link as RouterLink } from 'react-router-dom'
+import DispersalProfilePlot from '@/components/DispersalProfilePlot'
 import SiteMap from '@/components/SiteMap'
 import { usePlotColors } from '@/theme/plotColors'
 import {
@@ -41,7 +48,14 @@ import {
   formatCalendarRange,
   type DateFormat,
 } from '@/utils/dateFormat'
-import { arrivalAges, compassPoint, frontLine, speedText } from '@/utils/dispersalFigure'
+import {
+  compassPoint,
+  formatLatLon,
+  residualReading,
+  residualSpread,
+  speedText,
+  waveIsochrons,
+} from '@/utils/dispersalFigure'
 import type {
   DispersalFit,
   DispersalSection,
@@ -55,9 +69,11 @@ interface Props {
   dateFormat: DateFormat
   /** Drawn on the project's tiled basemap when it has opted into one. */
   tiles?: boolean | null
+  /** Where the analysis is edited, which is where an origin is placed. */
+  editPath?: string
 }
 
-export default function DispersalPanel({ section, dateFormat, tiles = false }: Props) {
+export default function DispersalPanel({ section, dateFormat, tiles = false, editPath }: Props) {
   const { wave, trend, origin_profile: profile } = section
   return (
     <Stack spacing={3}>
@@ -65,7 +81,7 @@ export default function DispersalPanel({ section, dateFormat, tiles = false }: P
           look at the data that has no hypothesis in it yet — and a reader who
           meets the wave first has already accepted somebody's origin before
           seeing whether the dates point that way at all. */}
-      {trend && <TrendCard trend={trend} tiles={tiles} />}
+      {trend && <TrendCard trend={trend} tiles={tiles} dateFormat={dateFormat} />}
       {profile && (
         <OriginProfileCard
           profile={profile}
@@ -78,10 +94,17 @@ export default function DispersalPanel({ section, dateFormat, tiles = false }: P
       )}
       {wave && <WaveCard fit={wave} dateFormat={dateFormat} tiles={tiles} />}
       {!wave && trend && !trend.refused && (
-        <Alert severity="info">
-          No origin was placed, so no front <strong>speed from a point</strong> was
-          fitted — only the models above, which assume none. Place an origin on the
-          map and re-run to add a wave of advance measured from it.
+        <Alert
+          severity="info"
+          action={
+            editPath ? (
+              <Button size="small" component={RouterLink} to={editPath}>
+                Place an origin
+              </Button>
+            ) : undefined
+          }
+        >
+          Place an origin and re-run to add a wave of advance.
         </Alert>
       )}
     </Stack>
@@ -93,8 +116,6 @@ function WaveCard({ fit, dateFormat, tiles }: {
   dateFormat: DateFormat
   tiles: boolean | null
 }) {
-  const plot = usePlotColors()
-
   const placed = fit.sites.filter((s) => s.latitude !== null && s.longitude !== null)
   // One map point per site. SiteMap groups by position, and these are already
   // one per position, so the grouping is a no-op that keeps one code path.
@@ -105,12 +126,25 @@ function WaveCard({ fit, dateFormat, tiles }: {
     longitude: site.longitude as number,
   }))
 
-  // Arrival age per site, for the colour ramp. Reconstructed from what the
-  // fit reported rather than recomputed from coordinates -- see
-  // utils/dispersalFigure for why that distinction is load-bearing.
-  const arrivalByElement = arrivalAges(fit)
+  // Each site coloured by its RESIDUAL, as on the regional gradient. It was
+  // arrival age, which is mostly distance restated -- a ramp that says "further
+  // is later", which the model assumed -- while the residuals are the finding.
+  const residualByElement: Record<string, number> = {}
+  for (const residual of fit.residuals) {
+    residualByElement[residual.element_id] = residual.residual_years
+  }
+  // Circles of equal arrival round the origin, from the fit's own t0 and speed.
+  const isochrons = useMemo(() => waveIsochrons(fit), [fit])
+  const formatIsochron = useCallback(
+    (age: number) => formatCalendarAge(age, dateFormat),
+    [dateFormat]
+  )
+  // The site the reader is pointing at in the residual table, ringed on the
+  // map and the profile so a row and its mark can be found together.
+  const [highlightId, setHighlightId] = useState<string | null>(null)
 
   const refusedSites = fit.sites.filter((s) => s.refusal)
+  const spread = residualSpread(fit)
   const fallback = fit.basis === 'earliest_dated_event'
 
   return (
@@ -120,7 +154,7 @@ function WaveCard({ fit, dateFormat, tiles }: {
           Wave of advance
         </Typography>
         <Typography variant="body2" color="text.secondary">
-          from {fit.origin.lat.toFixed(3)}, {fit.origin.lon.toFixed(3)}
+          from {formatLatLon(fit.origin.lat, fit.origin.lon, 2)}
         </Typography>
       </Stack>
 
@@ -129,12 +163,7 @@ function WaveCard({ fit, dateFormat, tiles }: {
           formed the belief. */}
       {fallback && (
         <Alert severity="warning" sx={{ mb: 2 }}>
-          These sites are dated by their <strong>earliest dated event</strong>, not by a
-          modelled Boundary — this analysis has no model to take one from. The oldest
-          date at a site is a <em>terminus ante quem</em> for arrival, not an estimate of
-          it: you almost never excavate the genuinely first thing at a site, so every
-          arrival here is late by an unknown amount, and late by more at the sites that
-          were dug least. The speed below inherits that bias.
+          Sites are dated by their earliest date, so arrival times are likely too late.
         </Alert>
       )}
 
@@ -145,13 +174,17 @@ function WaveCard({ fit, dateFormat, tiles }: {
           <Box sx={{ mb: 2 }}>
             <SiteMap
               points={points}
-              values={arrivalByElement}
-              valueLabel="Arrival (cal BP)"
-              front={frontLine(fit)}
+              values={residualByElement}
+              valueLabel="Residual (yr, + early)"
+              valueScale="signed"
+              isochrons={isochrons}
+              formatIsochron={formatIsochron}
+              highlightIds={highlightId ? [highlightId] : undefined}
               origin={{ latitude: fit.origin.lat, longitude: fit.origin.lon }}
               tiles={tiles}
               height={380}
               exportName="wave-of-advance"
+              label="Wave of advance map"
             />
           </Box>
 
@@ -182,6 +215,24 @@ function WaveCard({ fit, dateFormat, tiles }: {
                     95.4%: {speedText(fit.speed.hpd_95[0])} to {speedText(fit.speed.hpd_95[1])}
                   </Typography>
                 )}
+                {/* Beside the speed, not in the table: the interval above is
+                    how much the LINE moves between draws, and says nothing
+                    about how far the sites sit from it. A tight speed over a
+                    millennium of scatter is the reading this stops. */}
+                {spread && (
+                  <Typography variant="body2" sx={{ mt: 0.75, maxWidth: '34ch' }}>
+                    Site scatter:{' '}
+                    <Box component="strong" sx={{ fontVariantNumeric: 'tabular-nums' }}>
+                      ±{Math.round(spread.rms).toLocaleString()} yr
+                    </Box>
+                    {spread.span != null && spread.span > 0 && (
+                      <>
+                        {' '}({Math.round((spread.share ?? 0) * 100)}% of the front's{' '}
+                        {Math.round(spread.span).toLocaleString()}-year span)
+                      </>
+                    )}
+                  </Typography>
+                )}
               </Box>
 
               {fit.t0 && (
@@ -203,9 +254,6 @@ function WaveCard({ fit, dateFormat, tiles }: {
                   Sites
                 </Typography>
                 <Typography variant="h5" component="p">{fit.n_sites}</Typography>
-                <Typography variant="body2" color="text.secondary">
-                  fitted per draw
-                </Typography>
               </Box>
             </Stack>
           )}
@@ -214,87 +262,27 @@ function WaveCard({ fit, dateFormat, tiles }: {
               say what it means rather than leaving a minus sign to do it. */}
           {fit.speed && fit.speed.median < 0 && (
             <Alert severity="warning" sx={{ mb: 2 }}>
-              The speed is <strong>negative</strong>: sites further from this origin are
-              modelled as <em>older</em>, not younger. Nothing has been flipped to hide
-              that. Either the front ran the other way, this origin is not where it
-              started, or these dates do not describe a front at all — the residuals
-              below are what tells the three apart.
+              Negative speed: sites further from the origin are older. The front may
+              run the other way, or start somewhere else.
             </Alert>
           )}
 
           {fit.degenerate_draws ? (
             <Alert severity="info" sx={{ mb: 2 }}>
               {fit.degenerate_draws.toLocaleString()} of {(fit.draws || 0).toLocaleString()}{' '}
-              draws had no gradient at all — an infinite speed — and are excluded from the
-              summary above.
+              draws had no gradient and are left out of the summary.
             </Alert>
           ) : null}
 
           {fit.residuals.length > 0 && (
             <>
-              <Typography variant="subtitle2" sx={{ mt: 1, mb: 0.5 }}>
-                Residuals
+              <Typography variant="subtitle2" component="h3" sx={{ mt: 1, mb: 0.5 }}>
+                Arrival against distance
               </Typography>
-              <Typography variant="body2" color="text.secondary" sx={{ mb: 1, maxWidth: '72ch' }}>
-                How far each site sits from the fitted line, in years, on the same draws.
-                Positive means the site is <strong>older</strong> than the front predicts —
-                the thing was there before the line says it should have been. Structure
-                here (neighbouring sites all early, or all late) is the finding; a front
-                that fits has residuals that look like noise.
-              </Typography>
-              <TableContainer>
-                <Table size="small">
-                  <TableHead>
-                    <TableRow>
-                      <TableCell>Site</TableCell>
-                      <TableCell align="right">Distance (km)</TableCell>
-                      <TableCell align="right">Residual (yr)</TableCell>
-                      <TableCell>&nbsp;</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {fit.residuals.map((residual) => (
-                      <TableRow key={residual.element_id}>
-                        <TableCell>{residual.name}</TableCell>
-                        <TableCell align="right">
-                          {Math.round(residual.distance_km).toLocaleString()}
-                        </TableCell>
-                        <TableCell align="right">
-                          {residual.residual_years > 0 ? '+' : ''}
-                          {Math.round(residual.residual_years).toLocaleString()}
-                          <Typography variant="caption" color="text.secondary" sx={{ ml: 0.5 }}>
-                            ± {Math.round(residual.residual_sd).toLocaleString()}
-                          </Typography>
-                        </TableCell>
-                        <TableCell>
-                          {/* The two directions of ONE axis, not two unrelated
-                              colours: early and late are the same measurement
-                              with opposite signs. */}
-                          <Tooltip
-                            title={
-                              residual.residual_years > 0
-                                ? 'Older than the front predicts: the thing arrived here early.'
-                                : 'Younger than the front predicts: the thing arrived here late.'
-                            }
-                          >
-                            <Chip
-                              size="small"
-                              variant="outlined"
-                              label={residual.residual_years > 0 ? 'early' : 'late'}
-                              sx={{
-                                borderColor:
-                                  residual.residual_years > 0 ? plot.residualEarly : plot.residualLate,
-                                color:
-                                  residual.residual_years > 0 ? plot.residualEarly : plot.residualLate,
-                              }}
-                            />
-                          </Tooltip>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </TableContainer>
+              <Box sx={{ mb: 3 }}>
+                <DispersalProfilePlot fit={fit} dateFormat={dateFormat} highlightId={highlightId} />
+              </Box>
+              <ResidualTable fit={fit} onHighlight={setHighlightId} />
             </>
           )}
         </>
@@ -306,40 +294,196 @@ function WaveCard({ fit, dateFormat, tiles }: {
         </Alert>
       ))}
 
-      {/* §6.8, in the panel rather than the manual. */}
-      <Box sx={{ mt: 3, pt: 2, borderTop: 1, borderColor: 'divider' }}>
-        <Typography variant="subtitle2" gutterBottom>
-          What this estimate is, and what it is not
-        </Typography>
-        <Typography
-          variant="body2"
-          color="text.secondary"
-          component="ul"
-          sx={{ pl: 2.5, m: 0, maxWidth: '78ch', '& li': { mb: 0.75 } }}
-        >
-          <li>
-            Fitting per draw propagates the uncertainty in <strong>the ages</strong>. It does
-            not propagate uncertainty in the origin, in the coordinates, or in the
-            assumption that these sites are the front rather than the excavated subset of
-            it.
-          </li>
-          <li>
-            Residuals are assumed <strong>independent</strong>. They are not — neighbouring
-            sites share whatever the model is missing. Spatial autocorrelation is not
-            modelled, so the interval on the speed is optimistic in exactly the way an OLS
-            interval on autocorrelated data always is.
-          </li>
-          <li>
-            This is a plug-in Monte Carlo estimator, <strong>not a hierarchical model</strong>.
-            A full treatment would model site arrival as drawn from a front with a
-            site-level random effect and estimate the front and the scatter together.
-          </li>
-          <li>Distances are great-circle, measured from the origin above.</li>
-        </Typography>
-      </Box>
+      <Link
+        component={RouterLink}
+        to="/help#spatial-dispersal"
+        variant="body2"
+        sx={{ display: 'inline-block', mt: 2 }}
+      >
+        How to read these results
+      </Link>
     </Paper>
   )
 }
+
+/** The rows shown before "Show all": enough to see the largest departures. */
+const RESIDUAL_ROWS_FOLDED = 10
+
+/**
+ * Every site's departure from the front, largest first.
+ *
+ * Largest first because the finding is at the top of that order -- a
+ * leapfrog, a maritime route, a wrong date -- and the manual has always said
+ * so. Folded to the first ten on a model with more: seventy-six rows open by
+ * default made the wave panel six thousand pixels tall on a phone, and the
+ * rows past the tenth are the ones that fit.
+ *
+ * A third reading, "fits", for a residual inside twice its own sd: the chip
+ * used to flip on the median's sign, which called "-3 ± 644" late.
+ */
+function ResidualTable({ fit, onHighlight }: {
+  fit: DispersalFit
+  onHighlight: (id: string | null) => void
+}) {
+  const plot = usePlotColors()
+  const [order, setOrder] = useState<'magnitude' | 'distance'>('magnitude')
+  const [open, setOpen] = useState(false)
+
+  const rows = useMemo(() => {
+    const sorted = [...fit.residuals].sort((a, b) =>
+      order === 'magnitude'
+        ? Math.abs(b.residual_years) - Math.abs(a.residual_years)
+        : a.distance_km - b.distance_km
+    )
+    return sorted.map((r) => ({ ...r, reading: residualReading(r.residual_years, r.residual_sd) }))
+  }, [fit.residuals, order])
+  const counts = {
+    early: rows.filter((r) => r.reading === 'early').length,
+    late: rows.filter((r) => r.reading === 'late').length,
+  }
+  const shown = open ? rows : rows.slice(0, RESIDUAL_ROWS_FOLDED)
+
+  const colourOf = { early: plot.residualEarly, late: plot.residualLate, fits: undefined }
+  const describe = {
+    early: 'Arrived earlier than the front predicts',
+    late: 'Arrived later than the front predicts',
+    fits: 'Within 2 sd of the front',
+  }
+
+  const downloadCsv = () => {
+    const header = 'site,distance_km,residual_years,residual_sd,reading'
+    const quote = (text: string) => `"${text.replace(/"/g, '""')}"`
+    const body = rows.map((r) =>
+      [quote(r.name), r.distance_km.toFixed(1), r.residual_years.toFixed(1), r.residual_sd.toFixed(1), r.reading].join(',')
+    )
+    const blob = new Blob([[header, ...body].join('\n')], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = 'wave-of-advance-residuals.csv'
+    link.click()
+    URL.revokeObjectURL(url)
+  }
+
+  return (
+    <>
+      <Box sx={{ display: 'flex', alignItems: 'baseline', flexWrap: 'wrap', columnGap: 2, mb: 0.5 }}>
+        <Typography variant="subtitle2" component="h3">
+          Residuals
+        </Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ flex: 1 }}>
+          {counts.early} early, {counts.late} late, {rows.length - counts.early - counts.late} fit
+        </Typography>
+        <Button size="small" startIcon={<DownloadIcon />} onClick={downloadCsv}>
+          Download CSV
+        </Button>
+      </Box>
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+        Years from the front. Positive means the site is older (arrived early).
+      </Typography>
+      <TableContainer>
+        <Table
+          size="small"
+          sx={{
+            '& th, & td': { px: { xs: 1, sm: 2 } },
+          }}
+        >
+          <TableHead>
+            <TableRow>
+              <TableCell>Site</TableCell>
+              {/* Not on a phone: four columns with sort arrows do not fit a
+                  295px card, and distance is the arrival plot's own axis. */}
+              <TableCell
+                align="right"
+                sortDirection={order === 'distance' ? 'asc' : false}
+                sx={{ display: { xs: 'none', sm: 'table-cell' } }}
+              >
+                <TableSortLabel
+                  active={order === 'distance'}
+                  direction="asc"
+                  onClick={() => setOrder('distance')}
+                >
+                  Distance (km)
+                </TableSortLabel>
+              </TableCell>
+              <TableCell align="right" sortDirection={order === 'magnitude' ? 'desc' : false}>
+                <TableSortLabel
+                  active={order === 'magnitude'}
+                  direction="desc"
+                  onClick={() => setOrder('magnitude')}
+                >
+                  <span>
+                    Residual <Box component="span" sx={UNIT_SX}>(yr)</Box>
+                  </span>
+                </TableSortLabel>
+              </TableCell>
+              <TableCell>Reading</TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {shown.map((residual) => (
+              <TableRow
+                key={residual.element_id}
+                hover
+                onMouseEnter={() => onHighlight(residual.element_id)}
+                onMouseLeave={() => onHighlight(null)}
+              >
+                <TableCell sx={{ minWidth: '8ch' }}>{residual.name}</TableCell>
+                <TableCell
+                  align="right"
+                  sx={{ ...NUMERIC_SX, display: { xs: 'none', sm: 'table-cell' } }}
+                >
+                  {Math.round(residual.distance_km).toLocaleString()}
+                </TableCell>
+                <TableCell align="right" sx={NUMERIC_SX}>
+                  {residual.residual_years > 0 ? '+' : ''}
+                  {Math.round(residual.residual_years).toLocaleString()}
+                  {/* Under the value on a phone, beside it otherwise: side by
+                      side the pair was the widest cell in the table. */}
+                  <Typography
+                    component="span"
+                    variant="caption"
+                    color="text.secondary"
+                    sx={{ ml: { xs: 0, sm: 0.5 }, display: { xs: 'block', sm: 'inline' } }}
+                  >
+                    ± {Math.round(residual.residual_sd).toLocaleString()}
+                  </Typography>
+                </TableCell>
+                <TableCell>
+                  {/* The two directions of ONE axis, not two unrelated
+                      colours: early and late are the same measurement with
+                      opposite signs. "fits" takes no colour at all. */}
+                  <Tooltip title={describe[residual.reading]}>
+                    <Chip
+                      size="small"
+                      variant="outlined"
+                      tabIndex={0}
+                      label={residual.reading === 'fits' ? 'fits' : residual.reading}
+                      sx={{
+                        borderColor: colourOf[residual.reading],
+                        color: colourOf[residual.reading] ?? 'text.secondary',
+                      }}
+                    />
+                  </Tooltip>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </TableContainer>
+      {rows.length > RESIDUAL_ROWS_FOLDED && (
+        <Button size="small" onClick={() => setOpen((value) => !value)} sx={{ mt: 1 }}>
+          {open ? `Show the largest ${RESIDUAL_ROWS_FOLDED}` : `Show all ${rows.length} sites`}
+        </Button>
+      )}
+    </>
+  )
+}
+
+const NUMERIC_SX = { whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' } as const
+// A header's unit on its own line on a phone, where the sort arrow beside a
+// one-line header made it the widest thing in a 295px card.
+const UNIT_SX = { display: { xs: 'block', sm: 'inline' } } as const
 
 /**
  * The regional gradient: is there a gradient at all, and which way does it
@@ -365,7 +509,15 @@ function WaveCard({ fit, dateFormat, tiles }: {
  * disagree, the finding is usually about the origin rather than about either
  * fit, and that is only visible if both are on the page.
  */
-function TrendCard({ trend, tiles }: { trend: TrendFit; tiles: boolean | null }) {
+function TrendCard({ trend, tiles, dateFormat }: {
+  trend: TrendFit
+  tiles: boolean | null
+  dateFormat: DateFormat
+}) {
+  const formatIsochron = useCallback(
+    (age: number) => formatCalendarAge(age, dateFormat),
+    [dateFormat]
+  )
   const placed = trend.sites.filter(
     (s) => s.latitude !== null && s.longitude !== null && !s.refusal
   )
@@ -389,12 +541,11 @@ function TrendCard({ trend, tiles }: { trend: TrendFit; tiles: boolean | null })
           Regional gradient
         </Typography>
         <Typography variant="body2" color="text.secondary">
-          no origin assumed
+          from the dates alone
         </Typography>
       </Stack>
-      <Typography variant="body2" color="text.secondary" sx={{ mb: 2, maxWidth: '74ch' }}>
-        A plane fitted through arrival age against position, in an equal-area
-        projection. The lines are isochrons that show average direction and speed, not the shape of the front. Each site is coloured by how much earlier or later arrival occurred than predicted by the average. A front that curved, slowed or sped up shows as a patch of neighbouring sites all one colour.
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+        Lines: average arrival age. Colour: how much earlier or later each site arrived.
       </Typography>
 
       {trend.refused ? (
@@ -408,9 +559,11 @@ function TrendCard({ trend, tiles }: { trend: TrendFit; tiles: boolean | null })
               valueLabel="Residual (yr, + early)"
               valueScale="signed"
               isochrons={trend.isochrons}
+              formatIsochron={formatIsochron}
               tiles={tiles}
               height={380}
               exportName="regional-gradient"
+              label="Regional gradient map"
             />
           </Box>
 
@@ -464,7 +617,6 @@ function TrendCard({ trend, tiles }: { trend: TrendFit; tiles: boolean | null })
                 Sites
               </Typography>
               <Typography variant="h5" component="p">{trend.n_sites}</Typography>
-              <Typography variant="body2" color="text.secondary">fitted per draw</Typography>
             </Box>
           </Stack>
 
@@ -474,10 +626,8 @@ function TrendCard({ trend, tiles }: { trend: TrendFit; tiles: boolean | null })
               looks equally confident either way. */}
           {trend.azimuth && trend.azimuth.concentration < 0.5 && (
             <Alert severity="warning" sx={{ mb: 2 }}>
-              The direction is <strong>poorly determined</strong>: across draws the
-              gradient points every which way (concentration{' '}
-              {trend.azimuth.concentration.toFixed(2)} of a possible 1.00). Read the
-              bearing above as "no clear direction", not as the one printed.
+              Direction is uncertain (concentration{' '}
+              {trend.azimuth.concentration.toFixed(2)} of 1.00).
             </Alert>
           )}
 
@@ -518,6 +668,7 @@ function OriginProfileCard({ profile, wave, sites, tiles }: {
       : false
 
   const broad = (profile.share_inside ?? 0) > 0.5
+  const unlocated = broad || Boolean(profile.peak_at_reach)
 
   return (
     <Paper sx={{ p: 3 }}>
@@ -526,10 +677,8 @@ function OriginProfileCard({ profile, wave, sites, tiles }: {
           Where it could have started
         </Typography>
       </Stack>
-      <Typography variant="body2" color="text.secondary" sx={{ mb: 2, maxWidth: '74ch' }}>
-        Every position on a coarse grid tried as an origin, and how well each one fits as a starting point for the front.
-        The shaded cells are those within{' '}
-        {(profile.cutoff * 100).toFixed(0)}% of the best.
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+        Shaded cells are possible starting points.
       </Typography>
 
       {profile.refused ? (
@@ -552,6 +701,7 @@ function OriginProfileCard({ profile, wave, sites, tiles }: {
               tiles={tiles}
               height={380}
               exportName="origin-profile"
+              label="Origin search map"
             />
           </Box>
 
@@ -562,15 +712,19 @@ function OriginProfileCard({ profile, wave, sites, tiles }: {
             divider={<Box sx={{ borderLeft: 1, borderColor: 'divider' }} />}
           >
             {profile.peak && (
-              <Box>
+              <Box sx={{ minWidth: 0 }}>
                 <Typography variant="overline" color="text.secondary" display="block">
                   Best-fitting cell
                 </Typography>
-                <Typography variant="h5" component="p">
-                  {profile.peak.lat.toFixed(1)}, {profile.peak.lon.toFixed(1)}
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  the peak of something broad
+                {/* Demoted when the notices below say the data do not locate
+                    an origin: a coordinate set as large as the region count
+                    reads as the answer those notices are there to withdraw. */}
+                <Typography
+                  variant={unlocated ? 'body1' : 'h5'}
+                  component="p"
+                  sx={{ whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}
+                >
+                  {formatLatLon(profile.peak.lat, profile.peak.lon)}
                 </Typography>
               </Box>
             )}
@@ -589,15 +743,6 @@ function OriginProfileCard({ profile, wave, sites, tiles }: {
                 {profile.reach_km != null && (
                   <> within {Math.round(profile.reach_km).toLocaleString()} km of a site</>
                 )}
-                {/* Said here, beside the count it qualifies: "94 of 416
-                    cells" on a grid of 1,058 needs the other 642 accounted
-                    for, and they are the cells the front ran towards. */}
-                {(profile.candidates_ahead ?? 0) > 0 && (
-                  <>
-                    ; {profile.candidates_ahead!.toLocaleString()} more were where the front
-                    went, not where it started, and were not scored
-                  </>
-                )}
               </Typography>
             </Box>
           </Stack>
@@ -608,36 +753,23 @@ function OriginProfileCard({ profile, wave, sites, tiles }: {
               the next notice explains. */}
           {profile.peak_at_reach && (
             <Alert severity="info" sx={{ mb: 2 }}>
-              The best-fitting cell is on the <strong>edge</strong> of the searched zone,
-              {profile.reach_km != null && (
-                <> {Math.round(profile.reach_km).toLocaleString()} km from the nearest site,</>
-              )}{' '}
-              so the fit was still improving where the search stopped. From far enough
-              back any origin fits a plane wave about as well, which is what this usually
-              means: the dates constrain the direction the front came from, not how far
-              back it started.
+              The best fit is at the edge of the search area. The dates show the
+              direction of travel more clearly than the starting point.
             </Alert>
           )}
 
           {/* The finding a best-guess marker would have hidden. */}
           {broad && (
             <Alert severity="warning" sx={{ mb: 2 }}>
-              The region covers{' '}
-              <strong>{Math.round((profile.share_inside ?? 0) * 100)}%</strong> of the
-              grid searched: these dates do <strong>not</strong> locate an origin. That
-              is the expected shape when a front is sampled along one axis — sliding the
-              start backwards along the line of travel fits just as well — and it is a
-              result, not a failure of the search.
+              The shaded region covers {Math.round((profile.share_inside ?? 0) * 100)}% of
+              the search area, so the starting point is uncertain.
             </Alert>
           )}
 
           {placedOutside && (
             <Alert severity="warning" sx={{ mb: 2 }}>
-              The origin used for the wave of advance below — {wave!.origin.lat.toFixed(3)},{' '}
-              {wave!.origin.lon.toFixed(3)} — falls <strong>outside</strong> this region.
-              The speed reported there is still the speed from that point, correctly
-              computed; what this says is that the dates fit a front from somewhere else
-              considerably better.
+              The origin used below ({formatLatLon(wave!.origin.lat, wave!.origin.lon, 2)}) is
+              outside this region. A different start fits the dates better.
             </Alert>
           )}
         </>

@@ -6,9 +6,14 @@
 // are ONE distribution translated, not n independent results. Drawn without
 // that said, n identically-shaped curves read as n independent confirmations
 // of the same answer -- which is the opposite of what the model claims. The
-// heading says it, the table repeats the shared width in every row, and the
-// member ages are written as the reference plus a gap rather than as
-// free-standing dates.
+// table shows each member's own range; the manual explains the reading. A gap that was MEASURED rather
+// than counted gives its member a width of its own
+// (services/wiggle_match._member_density), and the same column shows that too.
+//
+// Every range here is re-selected from the distribution at the page's
+// confidence through utils/hpd.posteriorRanges -- the one path the results
+// table below also takes -- rather than read off the stored hpd_95, so the
+// panel and the table cannot quote two different ranges for one parameter.
 //
 // The second thing: a D_Sequence asserts the ring counts. If a sample is
 // misidentified by forty rings the model cannot widen to absorb it the way a
@@ -20,6 +25,7 @@
 // standard services/agreement.py holds Amodel to).
 import {
   Box,
+  Link,
   Paper,
   Stack,
   Table,
@@ -28,13 +34,16 @@ import {
   TableContainer,
   TableHead,
   TableRow,
-  Tooltip,
   Typography,
 } from '@mui/material'
+import WarningAmberRoundedIcon from '@mui/icons-material/WarningAmberRounded'
+import { Link as RouterLink } from 'react-router-dom'
+import WiggleMatchFigure, { type WiggleFigureMember } from '@/components/WiggleMatchFigure'
 import { useElementTypeColors } from '@/theme/diagramColors'
 import { formatCalendarAge, formatCalendarRange, type DateFormat } from '@/utils/dateFormat'
 import { POOR_AGREEMENT } from '@/utils/diagnostics'
-import type { PosteriorSummary } from '@/types'
+import { posteriorRanges } from '@/utils/hpd'
+import type { HPDRange, PosteriorSummary } from '@/types'
 
 export interface WiggleMember {
   id: string
@@ -56,10 +65,26 @@ interface Props {
   combinationAgreement?: number | null
   /** Which member gap zero refers to; null when no sample sits exactly there. */
   referenceSampleId?: string | null
+  /** Each member's laboratory measurement, by date id, for the figure. */
+  measurements: Record<
+    string,
+    Pick<WiggleFigureMember, 'ageBp' | 'error1Sigma' | 'deltaR' | 'curveId'> | undefined
+  >
+  /** Each member's own modelled distribution, by date id. */
+  memberDistributions: Record<string, Array<[number, number]> | undefined>
   dateFormat: DateFormat
+  /** The page's selected HPD confidence, and its label. */
+  confidence: number
+  confidenceLabel: string
 }
 
-const NUMERIC_CELL_SX = { whiteSpace: 'nowrap' } as const
+const NUMERIC_CELL_SX = { whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' } as const
+
+/** The outer span of a set of ranges, as the table's range columns report it. */
+function spanOf(ranges: HPDRange[]): [number, number] | null {
+  if (ranges.length === 0) return null
+  return [Math.min(...ranges.map((r) => r.min)), Math.max(...ranges.map((r) => r.max))]
+}
 
 function agreementText(index: number | null | undefined): string {
   return index == null ? '—' : `${index.toFixed(0)}%`
@@ -73,7 +98,11 @@ export default function WiggleMatchPanel({
   seriesSpan,
   combinationAgreement,
   referenceSampleId,
+  measurements,
+  memberDistributions,
   dateFormat,
+  confidence,
+  confidenceLabel,
 }: Props) {
   const colors = useElementTypeColors()
   const ink = colors.wiggle_sequence.ink
@@ -81,21 +110,49 @@ export default function WiggleMatchPanel({
   // the reference, so it increases into the past.
   const ordered = [...members].sort((a, b) => a.ring_offset - b.ring_offset)
   const referenceMember = members.find((m) => m.id === referenceSampleId)
-  const width95 = reference.hpd_95 ? reference.hpd_95[1] - reference.hpd_95[0] : null
+  const referenceRanges = posteriorRanges(reference.probability_distribution, confidence, true)
+  const referenceSpan = spanOf(referenceRanges)
+  const measuredGaps = members.some((m) => (m.ring_offset_error ?? 0) > 0)
+  // A run from before a measured gap gave its member its own width: every member
+  // exactly the reference's width despite a ± gap. Said, rather than left to
+  // contradict the sentence above it; re-running brings the widths in.
+  const memberWidths = members.map((m) => {
+    const span = spanOf(posteriorRanges(memberDistributions[m.id], confidence, true))
+    return span ? span[1] - span[0] : null
+  })
+  const predatesWidening =
+    measuredGaps &&
+    referenceSpan !== null &&
+    memberWidths.every(
+      (w) => w !== null && Math.abs(w - (referenceSpan[1] - referenceSpan[0])) < 1e-6
+    )
+  const figureMembers: WiggleFigureMember[] = ordered.flatMap((m) => {
+    const measurement = measurements[m.id]
+    return measurement
+      ? [{
+          id: m.id,
+          name: m.name,
+          ringOffset: m.ring_offset,
+          ringOffsetError: m.ring_offset_error,
+          agreementIndex: m.agreement_index,
+          ...measurement,
+        }]
+      : []
+  })
   const poor = ordered.filter(
     (m) => m.agreement_index != null && m.agreement_index < POOR_AGREEMENT
   )
 
   return (
     <Paper variant="outlined" sx={{ p: { xs: 2, md: 3 } }}>
-      <Stack spacing={1.5}>
+      <Stack spacing={2}>
         <Box>
           <Typography variant="h6" component="h2" sx={{ color: ink }}>
             {name}
           </Typography>
           <Typography variant="body2" color="text.secondary">
             {members.length} date{members.length === 1 ? '' : 's'} over{' '}
-            {Math.round(seriesSpan)} {gapUnits}, matched as one series.
+            {Math.round(seriesSpan)} {gapUnits}
           </Typography>
         </Box>
 
@@ -103,66 +160,83 @@ export default function WiggleMatchPanel({
             single free parameter, and everything in the table below is it
             plus a number. */}
         <Box>
-          <Typography variant="overline" color="text.secondary" component="div">
+          <Typography variant="subtitle2" component="p" color="text.secondary">
             {referenceMember
               ? `Age at ${referenceMember.name} (gap 0)`
-              : `Age at gap 0${referenceSampleId ? '' : ' — no sample sits there'}`}
+              : 'Age at the reference point (gap 0)'}
           </Typography>
           <Typography variant="h5" component="p" sx={{ fontVariantNumeric: 'tabular-nums' }}>
             {formatCalendarAge(reference.posterior_median, dateFormat)}
           </Typography>
-          {reference.hpd_95 && (
-            <Typography variant="body2" color="text.secondary">
-              95.4%: {formatCalendarRange(reference.hpd_95[0], reference.hpd_95[1], dateFormat, { compact: true })}
-              {width95 != null ? ` (${Math.round(width95)} years wide)` : ''}
+          {referenceSpan && (
+            <Typography variant="body2" color="text.secondary" sx={{ fontVariantNumeric: 'tabular-nums' }}>
+              {confidenceLabel}: {formatCalendarRange(referenceSpan[0], referenceSpan[1], dateFormat, { compact: true })}
+
             </Typography>
           )}
-          {reference.hpd_95_ranges && reference.hpd_95_ranges.length > 1 && (
+          {referenceRanges.length > 1 && (
             // A match that has not resolved. Worth saying plainly, because
             // the headline above still reads as one confident answer.
-            <Typography variant="body2" color="warning.main">
-              The 95.4% region is in {reference.hpd_95_ranges.length} separate
-              ranges, so this series has not settled on one place on the curve.
-              Extending it usually fixes that; adding samples inside the same
-              span usually does not.
+            <Typography variant="body2" color="warning.main" sx={{ mt: 0.5 }}>
+              Split into {referenceRanges.length} ranges. A longer series will resolve it.
             </Typography>
           )}
         </Box>
 
-        {/* The claim the whole panel turns on, stated rather than implied. */}
-        <Typography variant="body2" color="text.secondary">
-          Every date below is that same distribution moved by its own gap — one
-          answer read at {members.length} points on the timber, not{' '}
-          {members.length} independent results. They all have the same width for
-          that reason.
-        </Typography>
+        {figureMembers.length > 0 && (
+          <WiggleMatchFigure
+            members={figureMembers}
+            referenceMedian={reference.posterior_median}
+            referenceSpan={referenceSpan}
+            confidenceLabel={confidenceLabel}
+            gapUnits={gapUnits}
+            dateFormat={dateFormat}
+          />
+        )}
+
+        {predatesWidening && (
+          <Typography variant="body2" color="warning.main" sx={{ maxWidth: '72ch' }}>
+            Re-run this analysis to update the date ranges.
+          </Typography>
+        )}
 
         <TableContainer>
-          <Table size="small">
+          <Table
+            size="small"
+            sx={{ '& th, & td': { px: { xs: 1, sm: 2 } } }}
+          >
             <TableHead>
               <TableRow>
                 <TableCell>Date</TableCell>
-                <TableCell align="right" sx={NUMERIC_CELL_SX}>
-                  Gap ({gapUnits})
-                </TableCell>
-                <TableCell align="right" sx={NUMERIC_CELL_SX}>
-                  Modelled age
-                </TableCell>
-                <TableCell align="right" sx={NUMERIC_CELL_SX}>
-                  <Tooltip title="How well this date's modelled age still fits its own unmodelled calibration. The gaps are asserted, so a date at the wrong ring cannot be absorbed — it just fits worse.">
-                    <span>Agreement</span>
-                  </Tooltip>
+                <TableCell align="right">Gap ({gapUnits})</TableCell>
+                <TableCell align="right">Modelled {confidenceLabel}</TableCell>
+                <TableCell align="right">
+                  {/* "A" on a phone, as the results table writes it: the
+                      word was the widest header and pushed the column it
+                      heads out of a 309px card. */}
+                  <Box component="span" sx={{ display: { xs: 'none', sm: 'inline' } }}>
+                    Agreement
+                  </Box>
+                  <Box
+                    component="abbr"
+                    title="Agreement"
+                    sx={{ display: { sm: 'none' }, textDecoration: 'none' }}
+                  >
+                    A
+                  </Box>
                 </TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
               {ordered.map((member) => {
-                const age = reference.posterior_median + member.ring_offset
+                const span = spanOf(
+                  posteriorRanges(memberDistributions[member.id], confidence, true)
+                )
                 const low = member.agreement_index != null
                   && member.agreement_index < POOR_AGREEMENT
                 return (
                   <TableRow key={member.id}>
-                    <TableCell>{member.name}</TableCell>
+                    <TableCell sx={{ whiteSpace: 'nowrap' }}>{member.name}</TableCell>
                     <TableCell align="right" sx={NUMERIC_CELL_SX}>
                       {member.ring_offset}
                       {member.ring_offset_error
@@ -170,12 +244,22 @@ export default function WiggleMatchPanel({
                         : ''}
                     </TableCell>
                     <TableCell align="right" sx={NUMERIC_CELL_SX}>
-                      {formatCalendarAge(age, dateFormat)}
+                      {span
+                        ? formatCalendarRange(span[0], span[1], dateFormat, { compact: true })
+                        : formatCalendarAge(reference.posterior_median + member.ring_offset, dateFormat)}
                     </TableCell>
                     <TableCell
                       align="right"
-                      sx={{ ...NUMERIC_CELL_SX, color: low ? 'warning.main' : undefined }}
+                      sx={{ ...NUMERIC_CELL_SX, color: low ? 'warning.main' : undefined, fontWeight: low ? 600 : undefined }}
                     >
+                      {/* Poor agreement is a mark AND a colour, and says so to
+                          a screen reader: amber alone is not a signal. */}
+                      {low && (
+                        <WarningAmberRoundedIcon
+                          titleAccess="Poor agreement"
+                          sx={{ fontSize: '1rem', verticalAlign: '-0.2em', mr: 0.5 }}
+                        />
+                      )}
                       {agreementText(member.agreement_index)}
                     </TableCell>
                   </TableRow>
@@ -188,21 +272,19 @@ export default function WiggleMatchPanel({
         <Box>
           <Typography variant="body2">
             Combination agreement:{' '}
-            <Box component="span" sx={{ fontVariantNumeric: 'tabular-nums' }}>
+            <Box component="span" sx={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
               {agreementText(combinationAgreement)}
             </Box>
           </Typography>
-          <Typography variant="caption" color="text.secondary" component="p">
-            No pass mark is quoted for this figure.
-          </Typography>
+          <Link component={RouterLink} to="/help#wiggle-matching" variant="body2">
+            How to read a wiggle match
+          </Link>
         </Box>
 
         {poor.length > 0 && (
           <Typography variant="body2" color="warning.main">
-            {poor.map((m) => m.name).join(', ')} agree{poor.length === 1 ? 's' : ''} poorly
-            with {poor.length === 1 ? 'its' : 'their'} own calibration. In a wiggle
-            match that usually means the gap is wrong — check the ring counts
-            before the dates.
+            Poor agreement: {poor.map((m) => m.name).join(', ')}. Check{' '}
+            {poor.length === 1 ? 'its ring count' : 'their ring counts'}.
           </Typography>
         )}
       </Stack>

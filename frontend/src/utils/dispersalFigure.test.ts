@@ -1,6 +1,14 @@
 import { describe, it, expect } from 'vitest'
 
-import { arrivalAges, compassPoint, frontLine, speedText } from './dispersalFigure'
+import {
+  arrivalAges,
+  compassPoint,
+  formatLatLon,
+  residualReading,
+  residualSpread,
+  speedText,
+  waveIsochrons,
+} from './dispersalFigure'
 import type { DispersalFit } from '@/types'
 
 function summary(median: number) {
@@ -95,51 +103,62 @@ describe('arrivalAges', () => {
   })
 })
 
-describe('frontLine', () => {
-  it('runs from the origin to the furthest site', () => {
-    const line = frontLine(fit())
-    expect(line).toHaveLength(2)
-    expect(line[0]).toEqual({ latitude: 50, longitude: 0 })
-    expect(line[1]).toEqual({ latitude: 50, longitude: 4 })
+describe('waveIsochrons', () => {
+  it('draws circles at round ages between the origin and the furthest site', () => {
+    const lines = waveIsochrons(fit())
+    // t0 6500, 300 km at 1 km/yr: 300 years, so round ages every 100.
+    expect(lines.map((l) => l.age)).toEqual([6400, 6300, 6200])
   })
 
-  it('measures furthest on the distances the fit reported', () => {
-    // B is nearer in degrees but further along the front's own axis. The line
-    // has to end where the REGRESSION reached, not where the arithmetic on
-    // degrees happens to land.
-    const line = frontLine(fit({
-      sites: [
-        { element_id: 'a', name: 'A', parameter_id: 'b0', basis: 'boundary',
-          latitude: 50, longitude: 6, date_ids: [], scatter_km: 0, refusal: null },
-        { element_id: 'b', name: 'B', parameter_id: 'b1', basis: 'boundary',
-          latitude: 50, longitude: 4, date_ids: [], scatter_km: 0, refusal: null },
-      ],
+  it('puts every point of an isochron at the distance its age implies', () => {
+    const [first] = waveIsochrons(fit())
+    const radius = 1.0 * (6500 - first.age)
+    for (const p of first.points) {
+      const phi1 = (50 * Math.PI) / 180
+      const phi2 = (p.latitude * Math.PI) / 180
+      const dLambda = ((p.longitude - 0) * Math.PI) / 180
+      const central = Math.acos(
+        Math.min(1, Math.sin(phi1) * Math.sin(phi2) + Math.cos(phi1) * Math.cos(phi2) * Math.cos(dLambda))
+      )
+      expect(central * 6371.0088).toBeCloseTo(radius, 0)
+    }
+  })
+
+  it('draws nothing for a front that runs backwards', () => {
+    expect(waveIsochrons(fit({ speed: summary(-1.0) }))).toEqual([])
+  })
+})
+
+describe('residualReading', () => {
+  it('calls a residual inside two of its own sd a fit, not a direction', () => {
+    expect(residualReading(-3, 644)).toBe('fits')
+    expect(residualReading(32, 1080)).toBe('fits')
+  })
+
+  it('names the direction once the residual clears its uncertainty', () => {
+    expect(residualReading(500, 100)).toBe('early')
+    expect(residualReading(-500, 100)).toBe('late')
+  })
+})
+
+describe('residualSpread', () => {
+  it('sets the scatter against the time the front takes to cross the sites', () => {
+    const spread = residualSpread(fit({
       residuals: [
-        { element_id: 'a', name: 'A', distance_km: 100, residual_years: 0, residual_sd: 5 },
-        { element_id: 'b', name: 'B', distance_km: 900, residual_years: 0, residual_sd: 5 },
+        { element_id: 'a', name: 'A', distance_km: 0, residual_years: 30, residual_sd: 10 },
+        { element_id: 'b', name: 'B', distance_km: 300, residual_years: -30, residual_sd: 10 },
       ],
     }))
-    expect(line[1].longitude).toBe(4)
+    expect(spread?.rms).toBeCloseTo(30)
+    expect(spread?.span).toBeCloseTo(300)
+    expect(spread?.share).toBeCloseTo(0.1)
   })
+})
 
-  it('leaves a refused site out of the line', () => {
-    const line = frontLine(fit({
-      sites: [
-        { element_id: 'a', name: 'A', parameter_id: 'b0', basis: 'boundary',
-          latitude: 50, longitude: 1, date_ids: [], scatter_km: 0, refusal: null },
-        { element_id: 'bad', name: 'Mixed', parameter_id: 'b1', basis: 'boundary',
-          latitude: 50, longitude: 40, date_ids: [], scatter_km: 60,
-          refusal: 'two places in one phase' },
-      ],
-      residuals: [
-        { element_id: 'a', name: 'A', distance_km: 70, residual_years: 0, residual_sd: 5 },
-      ],
-    }))
-    expect(line[1].longitude).toBe(1)
-  })
-
-  it('draws nothing when no site has a position', () => {
-    expect(frontLine(fit({ sites: [] }))).toEqual([])
+describe('formatLatLon', () => {
+  it('spells out the hemisphere rather than a sign', () => {
+    expect(formatLatLon(-2, 154)).toBe('2.0° S, 154.0° E')
+    expect(formatLatLon(21.3, -157.9)).toBe('21.3° N, 157.9° W')
   })
 })
 

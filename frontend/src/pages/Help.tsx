@@ -3,7 +3,7 @@ import { Box, Button, Collapse, Container, Link, Paper, Typography, useMediaQuer
 import { useTheme } from '@mui/material/styles'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import MenuBookIcon from '@mui/icons-material/MenuBook'
-import { Link as RouterLink } from 'react-router-dom'
+import { Link as RouterLink, useLocation } from 'react-router-dom'
 import manualSource from '@/content/USER_MANUAL.md?raw'
 import Markdown from '@/components/Markdown'
 import { dropSection, parseMarkdown, tableOfContents, type Block } from '@/utils/markdown'
@@ -71,6 +71,15 @@ export default function Help() {
   // in a document this long. Only tracked where the list is beside the manual
   // to be marked up (see `wide`).
   const [activeId, setActiveId] = useState<string>(toc[0]?.id ?? '')
+
+  // A link from elsewhere in the app to one section of the manual -- the
+  // Results panels' "Reading a wiggle match" -- arrives as a client-side
+  // navigation, which does not scroll to its hash the way a page load would.
+  const { hash } = useLocation()
+  useEffect(() => {
+    if (!hash) return
+    document.getElementById(decodeURIComponent(hash.slice(1)))?.scrollIntoView()
+  }, [hash])
 
   // Fifteen sections is a screenful and a half on a phone, where the contents
   // list sits above the manual rather than beside it -- open, it would be the

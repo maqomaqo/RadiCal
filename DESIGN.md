@@ -560,8 +560,26 @@ a tiled one. See the Map Palette under Colors for every mark.
   and a click places every selected date. The Download PNG control sits outside the figure box so
   saving can never also move a pin.
 - **Unplaced dates are listed, not hidden**, under a "Not placed (n)" subtitle below the map.
-- **The fitted front** is drawn as a great circle in the posterior line colour at 2px — dotted
-  offline, solid on tiles (MapLibre lines take no dash through Plotly).
+- **Isochrons, not routes.** A wave of advance draws circles of equal arrival round its origin,
+  clipped to the sites' region and labelled in the page's date format — the model makes arrival a
+  function of distance alone. A single line from the origin to the furthest site read as a voyage.
+- **The wheel belongs to the page.** A plain scroll scrolls past a map; Ctrl/⌘ + scroll zooms, and
+  a brief overlay says so. Zoom in, zoom out and reset sit under every map as labelled icon buttons —
+  the keyboard and touch path. On a touch screen a read-only map does not pan, so a swipe scrolls.
+- **Each map has its own name** ("Wave of advance map"), carried to its group, its MapLibre canvas,
+  its zoom buttons and its download, so three maps on a page are three different things to a
+  screen reader.
+- **Portrait maps lay the colour bar flat** across the top; beside a phone-width map an upright bar
+  took a third of it.
+
+### Figures that carry the answer
+
+- **Wiggle match on the curve.** Each member's ¹⁴C measurement (±1σ, gap error as a horizontal
+  bar) at reference + gap, over the curve's ±1σ/±2σ envelope; the reference's HPD as a wash of Wiggle
+  Amber with a 1.5px rule at gap 0; poor-agreement members ringed in `warning`.
+- **Arrival against distance.** Every site at its distance and modelled arrival (±1 sd), coloured by
+  its reading — Residual Early, Residual Late, or the mean ink for "fits" — with the fitted front in
+  the posterior line colour. A row of the residual table rings its site here and on the map.
 
 ### Age–depth figure
 

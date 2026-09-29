@@ -299,6 +299,66 @@ class TestGapUncertainty:
         assert (loose['reference']['posterior_median']
                 == pytest.approx(fixed['reference']['posterior_median'], abs=20.0))
 
+    def test_a_measured_gap_widens_its_own_member_beyond_the_reference(self):
+        """
+        t_i = t + G_i. Knowing the series' age does not place a ring whose
+        position in the series is itself uncertain, so on this series that
+        member comes back wider than the reference -- not as the reference
+        moved bodily, which is only right for a counted gap. (Not a law: a
+        member whose own measurement is sharper than the series can come back
+        narrower. The brute-force test below pins the maths either way.)
+        """
+        measurements = simulated_series(2500.0, np.linspace(0, 250, 8))
+        loose_id = measurements[4]['id']
+        result = solve(measurements, errors={loose_id: 20.0})
+        reference = result['reference']
+        loose = result['measurements'][loose_id]
+        counted = result['measurements'][measurements[3]['id']]
+        assert loose['posterior_std'] > reference['posterior_std'] + 1.0
+        assert counted['posterior_std'] == pytest.approx(
+            reference['posterior_std'], abs=1e-6)
+        assert loose['posterior_median'] == pytest.approx(
+            reference['posterior_median'] + measurements[4]['ring_offset'], abs=10.0)
+
+    def test_a_measured_member_matches_a_brute_force_integral(self):
+        """
+        The closed form in _member_density against the joint (t, G_i)
+        integrated directly on a grid, with no convolution anywhere.
+        """
+        measurements = simulated_series(2500.0, np.linspace(0, 250, 8), noise=3)
+        errors = {m['id']: 15.0 for m in measurements}
+        result = solve(measurements, errors=errors)
+        members = [(m, float(m['ring_offset']), errors[m['id']]) for m in measurements]
+        grid = wiggle_match._build_grid(members, {})
+        terms = wiggle_match._log_terms(grid, members, {})
+        step = grid[1] - grid[0]
+        for index in (0, 4, 7):
+            measurement, gap, sigma = members[index]
+            rest = wiggle_match._density(
+                np.sum([t for k, t in enumerate(terms) if k != index], axis=0))
+            ages, weights = [], []
+            for shift in np.arange(gap - 5 * sigma, gap + 5 * sigma + step, step):
+                prior = np.exp(-0.5 * ((shift - gap) / sigma) ** 2)
+                likelihood = wiggle_match._date_likelihood(grid + shift, measurement, (None, None))
+                ages.append(grid + shift)
+                weights.append(rest * likelihood * prior)
+            ages = np.concatenate(ages)
+            weights = np.concatenate(weights)
+            weights /= weights.sum()
+            mean = float((ages * weights).sum())
+            sd = float(np.sqrt(((ages - mean) ** 2 * weights).sum()))
+            member = result['measurements'][measurement['id']]
+            assert member['posterior_mean'] == pytest.approx(mean, abs=0.1)
+            assert member['posterior_std'] == pytest.approx(sd, abs=0.1)
+
+    def test_a_vanishing_gap_uncertainty_leaves_the_member_translated(self):
+        measurements = simulated_series(2500.0, np.linspace(0, 250, 8))
+        fixed = solve(measurements)
+        vanishing = solve(measurements, errors={m['id']: 1e-6 for m in measurements})
+        for m in measurements:
+            assert (vanishing['measurements'][m['id']]['posterior_std']
+                    == pytest.approx(fixed['measurements'][m['id']]['posterior_std'], abs=0.2))
+
 
 class TestTheGrid:
     """

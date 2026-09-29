@@ -1,7 +1,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
-import { Box, Button, FormControlLabel, Paper, Switch, Typography } from '@mui/material'
+import {
+  Box,
+  Button,
+  FormControlLabel,
+  IconButton,
+  Paper,
+  Switch,
+  Tooltip,
+  Typography,
+  useMediaQuery,
+} from '@mui/material'
+import AddIcon from '@mui/icons-material/Add'
+import RemoveIcon from '@mui/icons-material/Remove'
+import ZoomOutMapIcon from '@mui/icons-material/ZoomOutMap'
 import DownloadIcon from '@mui/icons-material/Download'
+import { alpha } from '@mui/material/styles'
 import Plotly from 'plotly.js-dist-min'
 import type { ColorScale, Config, Data, Layout } from 'plotly.js-dist-min'
 
@@ -13,12 +27,12 @@ import { usePlotColors, usePlotFont } from '@/theme/plotColors'
 import { downloadPlotPng } from '@/utils/downloadPlot'
 import {
   fitFrameToAspect,
+  densifyGreatCircle,
   frameFor,
   geoProjectionOf,
   groupIntoSites,
   latLonFromMapPoint,
   latLonFromPoint,
-  densifyGreatCircle,
   mapLibreOf,
   roundPlacement,
   siteLabel,
@@ -219,6 +233,10 @@ const VALUE_MARK_OUTLINE = { width: 1, color: 'axis' as const }
 /** How wide a value mark is drawn, before its outline. */
 const VALUE_MARK_SIZE = 12
 
+/** The key that turns a wheel over a map into a zoom, named as the keyboard names it. */
+const ZOOM_MODIFIER =
+  typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.userAgent) ? '⌘' : 'Ctrl'
+
 interface SiteMapProps {
   /** Every date the map is about, placed or not. */
   points: MapPoint[]
@@ -266,6 +284,13 @@ interface SiteMapProps {
   /** Used to name the downloaded PNG. */
   exportName?: string
   /**
+   * What this map shows, in a few words ("Wave of advance map"). Its
+   * accessible name and the name its controls announce: a page with three
+   * maps otherwise had three regions called "Map", three "Download PNG"
+   * buttons and three switches, with nothing to say which was which.
+   */
+  label?: string
+  /**
    * A quantity per point id, drawn as graded strength of ONE hue rather than
    * as a categorical palette -- the same rule the Harris matrix follows, and
    * for the same reason: an arrival age is a quantity, and a set of unrelated
@@ -289,11 +314,6 @@ interface SiteMapProps {
    */
   valueScale?: 'graded' | 'signed'
   /**
-   * A line drawn over the marks -- the fitted front, in the dispersal panel.
-   * Ordered; drawn as given, with no interpolation of its own.
-   */
-  front?: Array<{ latitude: number; longitude: number }>
-  /**
    * A single distinguished position: where a front is hypothesised to have
    * started. Marked differently from a site because it is not one -- nothing
    * was excavated there, and it is an assumption rather than an observation.
@@ -309,6 +329,12 @@ interface SiteMapProps {
    */
   isochrons?: Array<{ age: number; points: Array<{ latitude: number; longitude: number }> }>
   /**
+   * How an isochron's age is written on the map -- the page's date format,
+   * with its unit. A bare "3050" said neither which convention nor which unit,
+   * and stayed cal BP when the reader had asked for BC/AD.
+   */
+  formatIsochron?: (age: number) => string
+  /**
    * A likelihood region: candidate positions with a support in (0, 1].
    *
    * Drawn as translucent square cells rather than as a contour, because that
@@ -318,13 +344,15 @@ interface SiteMapProps {
    * the marks against.
    */
   region?: Array<{ lat: number; lon: number; support: number }>
+  /** Point ids drawn ringed, over the value marks -- the reader's pointer elsewhere. */
+  highlightIds?: string[]
   /** What one region cell spans, in degrees, so the cells read as the grid. */
   regionStepDeg?: number
   /**
    * Individual segments, each of which is a real link between two places --
    * the edges of a spanning tree.
    *
-   * Deliberately NOT `front`, which is one polyline. A WALK of a tree visits
+   * Segments, not one polyline. A WALK of a tree visits
    * every node once but jumps between branches to do it, so drawing the visit
    * order as a polyline puts a line between two sites the tree never joined
    * and the figure claims an adjacency that does not exist. Segments cannot
@@ -364,15 +392,17 @@ export default function SiteMap({
   tiles: tilesWanted = false,
   height = 320,
   exportName = 'site-map',
+  label = 'Site map',
   values,
   valueLabel,
   valueScale = 'graded',
-  front,
   origin,
   isochrons,
+  formatIsochron,
   region,
   regionStepDeg = 1,
   links,
+  highlightIds,
 }: SiteMapProps) {
   const plot = usePlotColors()
   const plotFont = usePlotFont()
@@ -397,8 +427,21 @@ export default function SiteMap({
   // Null until the first click tells us. Not an error state on its own: it
   // only matters in edit mode, and the map is read-only by default.
   const [cannotPlace, setCannotPlace] = useState(false)
+  // Bumped by "Reset view", which redraws the figure at the frame it opened on.
+  const [resetCount, setResetCount] = useState(0)
+  // A plain wheel over the map scrolls the PAGE; see the wheel effect below.
+  const [wheelHint, setWheelHint] = useState(false)
+  // On a touch screen a one-finger drag is how the page scrolls, and three
+  // stacked maps that each swallowed it left no way past them. There the
+  // read-only maps do not pan; the zoom buttons still work, and placing a pin
+  // (which needs a pan to aim) keeps it.
+  const coarsePointer = useMediaQuery('(pointer: coarse)')
+  const panEnabled = editable || !coarsePointer
 
   const selected = useMemo(() => new Set(selectedIds), [selectedIds])
+  const highlightKey = (highlightIds || []).join('|')
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const highlighted = useMemo(() => new Set(highlightIds || []), [highlightKey])
 
   const { sites, missing, frame } = useMemo(() => {
     const grouped = groupIntoSites(points)
@@ -410,13 +453,12 @@ export default function SiteMap({
     const framing = [
       ...grouped,
       ...(region || []).map((cell) => ({ latitude: cell.lat, longitude: cell.lon })),
-      ...(front || []),
       ...(links || []).flatMap((link) => [link.from, link.to]),
       ...(isochrons || []).flatMap((line) => line.points),
       ...(origin ? [origin] : []),
     ] as MapSite[]
     return { sites: grouped, missing: unplaced(points), frame: frameFor(framing) }
-  }, [points, region, front, links, isochrons, origin])
+  }, [points, region, links, isochrons, origin])
 
   // In edit mode the window is fixed at what it opened on. Every click moves
   // the preview pin, which moves the frame, and re-framing on each one threw
@@ -429,6 +471,8 @@ export default function SiteMap({
   // fill it -- see fitFrameToAspect. Starts at the CSS aspect the box is
   // given below and is corrected by the observer on first layout.
   const [aspect, setAspect] = useState(16 / 9)
+  // Portrait or near it: a phone's column, where the colour bar lies flat.
+  const narrowFigure = aspect < 1.25
   const viewFrame = useMemo(
     () => (dataFrame ? fitFrameToAspect(dataFrame, aspect) : null),
     [dataFrame, aspect],
@@ -527,7 +571,7 @@ export default function SiteMap({
       // -- and drawing the line through it sent every isochron on a
       // Polynesian map out across Asia and back.
       const middle = Math.floor(line.points.length / 2)
-      const label = `${Math.round(line.age)}`
+      const label = formatIsochron ? formatIsochron(line.age) : `${Math.round(line.age)}`
       const textfont = { size: 10, color: plot.axis }
       if (tiles) {
         // Two traces on the tiled map where the offline one takes one. A
@@ -581,6 +625,9 @@ export default function SiteMap({
 
     // Spanning-tree links, under the marks they join.
     if (links && links.length > 0) {
+      const edges = links.map((link) =>
+        tiles ? densifyGreatCircle([link.from, link.to]) : [link.from, link.to]
+      )
       list.push({
         type: geoType,
         mode: 'lines' as const,
@@ -588,35 +635,14 @@ export default function SiteMap({
         // One trace with nulls between segments: Plotly breaks the line at a
         // null, so the whole tree draws in one pass without joining the end
         // of one edge to the start of the next.
-        lat: links.flatMap((link) => [link.from.latitude, link.to.latitude, null]),
-        lon: links.flatMap((link) => [lineLon(link.from.longitude), lineLon(link.to.longitude), null]),
+        // On tiles each edge is walked as its great circle, which Mercator
+        // would otherwise draw as a straight chord; offline, Plotly's geo
+        // subplot draws the arc between two points itself.
+        lat: edges.flatMap((edge) => [...edge.map((p) => p.latitude), null]),
+        lon: edges.flatMap((edge) => [...edge.map((p) => lineLon(p.longitude)), null]),
         line: { color: plot.posteriorLine, width: 1.5 },
         hoverinfo: 'skip' as const,
       })
-    }
-
-    // The front next, so it lies UNDER the marks it was fitted to. A line
-    // drawn over a site would hide the observation behind the model.
-    if (front && front.length > 1) {
-      // Two points on the offline map, which draws the great circle between
-      // them itself; the same arc as vertices on the tiled map, which would
-      // otherwise draw a straight line in Mercator -- see densifyGreatCircle.
-      const path = tiles ? densifyGreatCircle(front) : front
-      const fitted = {
-        mode: 'lines' as const,
-        name: 'Fitted front',
-        lat: path.map((p) => p.latitude),
-        lon: path.map((p) => lineLon(p.longitude)),
-        hoverinfo: 'skip' as const,
-      }
-      const line = { color: plot.posteriorLine, width: 2 }
-      // Dotted offline only: scattermap draws lines through MapLibre, which
-      // plotly gives no dash, so on the tiled map the front is solid.
-      list.push(
-        tiles
-          ? { ...fitted, type: 'scattermap', line }
-          : { ...fitted, type: 'scattergeo', line: { ...line, dash: 'dot' } },
-      )
     }
 
     if (values) {
@@ -690,12 +716,28 @@ export default function SiteMap({
           // front starts dark and fades as it spreads, which is the way
           // round a reader already expects a wave to be drawn.
           reversescale: false,
-          colorbar: {
-            title: { text: valueLabel || '', side: 'right' as const },
-            thickness: 12,
-            len: 0.8,
-            outlinewidth: 0,
-          },
+          // Upright beside a landscape map; laid flat across the top of a
+          // portrait one, where an upright bar and its title took a third of
+          // a phone's width from the map it keys.
+          colorbar: narrowFigure
+            ? {
+                orientation: 'h' as const,
+                title: { text: valueLabel || '', side: 'top' as const },
+                thickness: 8,
+                len: 0.7,
+                x: 0.5,
+                xanchor: 'center' as const,
+                y: 0.99,
+                yanchor: 'top' as const,
+                bgcolor: alpha(plot.surface, 0.85),
+                outlinewidth: 0,
+              }
+            : {
+                title: { text: valueLabel || '', side: 'right' as const },
+                thickness: 12,
+                len: 0.8,
+                outlinewidth: 0,
+              },
         }
         // The outline is the marker's own offline; on the tiled map it is
         // the disc trace pushed just above.
@@ -708,6 +750,38 @@ export default function SiteMap({
                 marker: {
                   ...marker,
                   line: { color: plot[VALUE_MARK_OUTLINE.color], width: VALUE_MARK_OUTLINE.width },
+                },
+              },
+        )
+      }
+      // A ring round the site the reader is pointing at elsewhere -- a row
+      // of the residual table -- so the row and its mark are found together.
+      const ringed = sites.filter((site) => site.ids.some((id) => highlighted.has(id)))
+      if (ringed.length > 0) {
+        const ring = {
+          mode: 'markers' as const,
+          name: 'Highlighted',
+          lat: ringed.map((s) => s.latitude),
+          lon: ringed.map((s) => s.longitude),
+          hoverinfo: 'skip' as const,
+        }
+        // MapLibre's circle layer has no open symbol, so on tiles the ring
+        // is a translucent disc over the mark instead.
+        list.push(
+          tiles
+            ? {
+                ...ring,
+                type: 'scattermap',
+                marker: { size: VALUE_MARK_SIZE + 12, color: plot.posteriorLine, opacity: 0.35 },
+              }
+            : {
+                ...ring,
+                type: 'scattergeo',
+                marker: {
+                  size: VALUE_MARK_SIZE + 10,
+                  symbol: 'circle-open',
+                  color: plot.posteriorLine,
+                  line: { color: plot.posteriorLine, width: 2.5 },
                 },
               },
         )
@@ -761,8 +835,8 @@ export default function SiteMap({
     }
 
     return list
-  }, [sites, selected, plot, tiles, values, valueLabel, valueScale, front, origin, isochrons,
-      region, regionStepDeg, links, dataFrame])
+  }, [sites, selected, plot, tiles, values, valueLabel, valueScale, origin, isochrons, narrowFigure,
+      formatIsochron, region, regionStepDeg, links, dataFrame, highlighted])
 
   /**
    * Clicks are taken in the CAPTURE phase, on a native listener, and both
@@ -854,7 +928,8 @@ export default function SiteMap({
     (): Partial<Config> => ({
       displayModeBar: false,
       responsive: true,
-      // Wheel zoom in every mode, for the same reason dragmode is pan.
+      // Wheel zoom in every mode, for the same reason dragmode is pan -- but
+      // only with Ctrl or Cmd held, which the wheel effect below enforces.
       scrollZoom: true,
       // Served from this app. Without it Plotly fetches the world from
       // cdn.plot.ly -- see TOPOJSON_URL above.
@@ -865,7 +940,10 @@ export default function SiteMap({
 
   const onDrawn = useCallback((gd: HTMLElement) => {
     graphDiv.current = gd
-  }, [])
+    // MapLibre names its canvas "Map", whichever map it is.
+    const canvas = (mapLibreOf(gd) as { getCanvas?: () => HTMLElement } | null)?.getCanvas?.()
+    canvas?.setAttribute('aria-label', label)
+  }, [label])
 
   const layout = useMemo((): Partial<Layout> => {
     const common = {
@@ -876,7 +954,7 @@ export default function SiteMap({
       // Pan in every mode, edit included. Placing a pin at site scale needs
       // a zoomed-in map, and the click that ends a pan is kept from placing
       // anything by the pointer-slop check in the click handler above.
-      dragmode: 'pan' as const,
+      dragmode: panEnabled ? ('pan' as const) : (false as const),
       autosize: true,
       // The reader's zoom and pan survive a re-render. Without this every new
       // trace array -- a hover colour, a preview pin -- redrew the map at the
@@ -941,7 +1019,53 @@ export default function SiteMap({
           : {}),
       },
     }
-  }, [plot, plotFont, viewFrame, dataFrame, tiles, basemapStyle])
+  }, [plot, plotFont, viewFrame, dataFrame, tiles, basemapStyle, panEnabled])
+
+  /**
+   * The wheel scrolls the page unless Ctrl or Cmd is held.
+   *
+   * With scrollZoom on and three maps stacked in one column, scrolling down
+   * the Results page zoomed whichever map passed under the pointer -- the
+   * origin map ended up on the Philippines -- and the page stopped moving.
+   * Caught on the way DOWN to the plot, in the capture phase, so neither
+   * Plotly's geo zoom nor MapLibre's ever sees a plain wheel; the browser
+   * scrolls the page as it would over any figure. A trackpad pinch arrives
+   * as a wheel with ctrlKey set, so pinch-to-zoom keeps working.
+   */
+  useEffect(() => {
+    const box = plotBox.current
+    if (!box) return
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const onWheel = (event: WheelEvent) => {
+      if (event.ctrlKey || event.metaKey) return
+      event.stopPropagation()
+      setWheelHint(true)
+      clearTimeout(timer)
+      timer = setTimeout(() => setWheelHint(false), 1400)
+    }
+    box.addEventListener('wheel', onWheel, { capture: true, passive: true })
+    return () => {
+      box.removeEventListener('wheel', onWheel, { capture: true })
+      clearTimeout(timer)
+    }
+  }, [])
+
+  /** Zoom about the centre, by button: the keyboard and touch path. */
+  const zoomBy = useCallback((factor: number) => {
+    const gd = graphDiv.current as
+      | (HTMLElement & {
+          _fullLayout?: { map?: { zoom?: number }; geo?: { projection?: { scale?: number } } }
+        })
+      | null
+    if (!gd || !gd._fullLayout) return
+    if (tiles) {
+      const zoom = gd._fullLayout.map?.zoom ?? 1
+      Plotly.relayout(gd, { 'map.zoom': zoom + Math.log2(factor) } as unknown as Partial<Layout>)
+    } else {
+      const scale = gd._fullLayout.geo?.projection?.scale ?? 1
+      Plotly.relayout(gd, { 'geo.projection.scale': Math.max(1, scale * factor) } as unknown as Partial<Layout>)
+    }
+  }, [tiles])
 
   return (
     <Box>
@@ -949,6 +1073,8 @@ export default function SiteMap({
         elevation={0}
         variant="outlined"
         ref={plotBox}
+        role="group"
+        aria-label={label}
         sx={{
           p: 0,
           overflow: 'hidden',
@@ -970,7 +1096,9 @@ export default function SiteMap({
           <PlotlyFigure
             // A fresh plot when the basemap changes kind, rather than asking
             // Plotly.react to turn a geo subplot into a MapLibre one in place.
-            key={tiles ? 'tiled' : 'offline'}
+            // "Reset view" is a fresh plot too: the one way back to the
+            // frame it opened on that does not depend on which subplot it is.
+            key={`${tiles ? 'tiled' : 'offline'}-${resetCount}`}
             data={traces}
             layout={layout}
             config={config}
@@ -978,30 +1106,74 @@ export default function SiteMap({
             style={{ position: 'absolute', inset: 0 }}
           />
         )}
+        {/* What a plain wheel did instead, said where the reader is looking.
+            The caption under the map says it for anyone who reads first. */}
+        <Box
+          aria-hidden
+          sx={{
+            position: 'absolute',
+            inset: 0,
+            display: 'grid',
+            placeItems: 'center',
+            pointerEvents: 'none',
+            bgcolor: (theme) => alpha(theme.palette.background.paper, 0.72),
+            opacity: wheelHint ? 1 : 0,
+            transition: 'opacity 180ms cubic-bezier(0.16, 1, 0.3, 1)',
+          }}
+        >
+          <Typography variant="body2" sx={{ fontWeight: 500 }}>
+            Hold {ZOOM_MODIFIER} and scroll to zoom the map
+          </Typography>
+        </Box>
       </Paper>
 
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 0.5 }}>
-        <Typography variant="caption" color="textSecondary" sx={{ flex: 1 }}>
-          {cannotPlace
-            ? 'This map cannot read a click on this version of the plotting library. Type the position instead.'
-            : deciding
-              ? tilesWanted === null
-                ? 'Loading the map…'
-                : `Checking whether ${BASEMAP_PROVIDER} can be reached…`
-              : [
-                  editable
-                    ? 'Click the map to place every selected date at that position. Drag to pan and scroll to zoom.'
-                    : 'Drag to pan and scroll to zoom.',
-                  // Which basemap is drawn is said only when it is not the
-                  // one asked for: the switch beside this says the rest.
-                  fellBack
-                    ? `${BASEMAP_PROVIDER} could not be reached, so coastlines are drawn from data this app serves itself; it is used again once there is a connection.`
-                    : '',
-                ].filter(Boolean).join(' ')}
-        </Typography>
+      {/* Controls first, on one line, and the caption under them at full
+          width: beside four controls on a phone the caption wrapped to four
+          lines in a column a third of the width. */}
+      <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', columnGap: 1, mt: 0.5 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center' }}>
+          <Tooltip title="Zoom in">
+            <span>
+              <IconButton
+                size="small"
+                aria-label={`Zoom in on the ${label.toLowerCase()}`}
+                onClick={() => zoomBy(2)}
+                disabled={deciding}
+              >
+                <AddIcon fontSize="small" />
+              </IconButton>
+            </span>
+          </Tooltip>
+          <Tooltip title="Zoom out">
+            <span>
+              <IconButton
+                size="small"
+                aria-label={`Zoom out on the ${label.toLowerCase()}`}
+                onClick={() => zoomBy(0.5)}
+                disabled={deciding}
+              >
+                <RemoveIcon fontSize="small" />
+              </IconButton>
+            </span>
+          </Tooltip>
+          <Tooltip title="Reset view">
+            <span>
+              <IconButton
+                size="small"
+                aria-label={`Reset the ${label.toLowerCase()} to its opening view`}
+                onClick={() => setResetCount((count) => count + 1)}
+                disabled={deciding}
+              >
+                <ZoomOutMapIcon fontSize="small" />
+              </IconButton>
+            </span>
+          </Tooltip>
+        </Box>
+        <Box sx={{ flex: 1 }} />
         {/* Only where the project allows tiles. A project that has not opted
             in gets no switch, since the opt-in is the privacy decision and
-            this is not the place it is made. */}
+            this is not the place it is made. One preference for every map,
+            which the accessible name says: flipping one flips them all. */}
         {tilesWanted === true && (
           <FormControlLabel
             control={
@@ -1009,9 +1181,10 @@ export default function SiteMap({
                 size="small"
                 checked={preferTiles}
                 onChange={(event) => setPreferTiles(event.target.checked)}
+                inputProps={{ 'aria-label': `${BASEMAP_PROVIDER} tiles, on every map` }}
               />
             }
-            label={BASEMAP_PROVIDER}
+            label={`${BASEMAP_PROVIDER} tiles`}
             slotProps={{ typography: { variant: 'caption', color: 'text.secondary' } }}
             sx={{ mr: 0.5, whiteSpace: 'nowrap' }}
           />
@@ -1022,6 +1195,7 @@ export default function SiteMap({
         <Button
           size="small"
           startIcon={<DownloadIcon />}
+          aria-label={`Download the ${label.toLowerCase()} as PNG`}
           // Outside plotBox, so the map's capture listener never sees this
           // click and saving a figure cannot also move a pin.
           onClick={() => downloadPlotPng(plotBox.current, exportName)}
@@ -1029,6 +1203,25 @@ export default function SiteMap({
           Download PNG
         </Button>
       </Box>
+      <Typography variant="caption" color="textSecondary" component="p" sx={{ maxWidth: '72ch' }}>
+        {cannotPlace
+          ? 'This map cannot read a click on this version of the plotting library. Type the position instead.'
+          : deciding
+            ? tilesWanted === null
+              ? 'Loading the map…'
+              : `Checking whether ${BASEMAP_PROVIDER} can be reached…`
+            : [
+                editable ? 'Click the map to place every selected date at that position.' : '',
+                panEnabled
+                  ? `Drag to pan; hold ${ZOOM_MODIFIER} and scroll, or use the buttons, to zoom.`
+                  : 'Use the buttons to zoom.',
+                // Which basemap is drawn is said only when it is not the
+                // one asked for: the switch beside this says the rest.
+                fellBack
+                  ? `${BASEMAP_PROVIDER} is unreachable, so the offline map is shown.`
+                  : '',
+              ].filter(Boolean).join(' ')}
+      </Typography>
 
       {missing.length > 0 && (
         <Box sx={{ mt: 1.5 }}>

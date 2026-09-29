@@ -56,7 +56,7 @@ export default function Navigation() {
             // bar's background -- so every control up here focused into
             // nothing. Inset rather than offset because a full-height section
             // tab's ring would otherwise be clipped by the bar's own edges.
-            '& :focus-visible': {
+            '& :focus-visible, & .MuiButtonBase-root.Mui-focusVisible': {
               outline: '2px solid #fff',
               outlineOffset: '-2px',
             },
