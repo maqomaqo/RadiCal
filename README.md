@@ -155,87 +155,27 @@ RadiCal/
 └── .env.example
 ```
 
-## Quick Start
+## Installation
 
-### Prerequisites
-- [Docker Desktop](https://www.docker.com/products/docker-desktop/) on macOS or Windows (Docker
-  Engine with the Compose plugin on Linux) — recommended, **or** Node.js 22 or 24, Python 3.12–3.14
-  and PostgreSQL 15+ for running the two services directly.
-- Access to this repository. It is private: clone it with the
-  [GitHub CLI](https://cli.github.com/) (`gh auth login`, then `gh repo clone maqomaqo/RadiCal`),
-  or with `git clone` and a sign-in through Git Credential Manager or a personal access token —
-  GitHub no longer accepts an account password there.
-
-### Installation
+RadiCal runs in Docker, on macOS, Windows or Linux; Docker is the only thing to install. In short,
+from an empty folder:
 
 ```bash
-gh repo clone maqomaqo/RadiCal
-cd RadiCal
-cp .env.example .env
+curl -fLo docker-compose.yml https://raw.githubusercontent.com/maqomaqo/RadiCal/main/docker-compose.prod.yml
+docker run --rm ghcr.io/maqomaqo/radical python -c "import secrets; print('RADICAL_SECRET_KEY=' + secrets.token_urlsafe(48))" >> .env
 docker compose up -d
-
-# Frontend: http://localhost:5173
-# Backend API + interactive docs: http://localhost:8000/docs
 ```
 
-On Windows run the same commands in PowerShell. Clone into your WSL 2 home directory if you plan
-to edit the code while the stack runs; a checkout on `C:\` works, but needs
-`CHOKIDAR_USEPOLLING=true` in `.env` for the frontend to notice edits (see
-[`docs/INSTALLATION.md`](docs/INSTALLATION.md#windows)).
+then open http://localhost:8000 and create an account. On Windows, two of those lines differ in
+PowerShell; the guide gives both.
+[`docs/INSTALLATION.md`](docs/INSTALLATION.md) walks through each step on macOS and Windows,
+with everyday use, updating, and troubleshooting.
 
-Open the frontend and **create an account** — the first one made on an installation takes
-ownership of any projects and analyses that were there before accounts existed, and the sign-up
-screen says how many it adopted.
+The image, `ghcr.io/maqomaqo/radical`, holds the app, its web interface and the calibration curves
+in one container, for both Intel/AMD and ARM machines; the only other container is its PostgreSQL
+database.
 
-See [`docs/INSTALLATION.md`](docs/INSTALLATION.md) for step-by-step macOS and Windows instructions,
-running the frontend and backend outside Docker, upgrading, and troubleshooting.
-
-### Running the published image
-
-Every push to `main` publishes a ready-built image, `ghcr.io/maqomaqo/radical:latest`, that
-contains the backend, the built frontend and the calibration curves in one container (built by
-[`.github/workflows/publish-image.yml`](.github/workflows/publish-image.yml) from the root
-[`Dockerfile`](Dockerfile), for both amd64 and arm64). It needs only a PostgreSQL database and a
-signing key:
-
-```bash
-echo "RADICAL_SECRET_KEY=$(python3 -c 'import secrets; print(secrets.token_urlsafe(48))')" >> .env
-docker compose -f docker-compose.prod.yml up -d
-
-# Everything, frontend and API, on http://localhost:8000
-```
-
-In PowerShell, the first line is:
-
-```powershell
-Add-Content .env "RADICAL_SECRET_KEY=$(py -c 'import secrets; print(secrets.token_urlsafe(48))')"
-```
-
-Keep the key in `.env` rather than exporting it in one shell: every `docker compose -f
-docker-compose.prod.yml` command, `down` and `logs` included, refuses to run without it, and a
-different key on the next start signs everyone out.
-
-or, against a database you already have:
-
-```bash
-docker run -d -p 8000:8000 \
-  -e DATABASE_URL=postgresql://user:password@db-host:5432/radical \
-  -e RADICAL_SECRET_KEY=... \
-  -v radical_uploads:/app/uploads \
-  ghcr.io/maqomaqo/radical:latest
-```
-
-The image runs as `RADICAL_ENV=production` and refuses to start without `RADICAL_SECRET_KEY` (see
-[Accounts](#accounts)). The repository is private, so pulling needs a
-[classic personal access token with `read:packages`](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry#authenticating-to-the-container-registry)
-(the container registry does not accept fine-grained tokens) unless the package is made public in
-its settings:
-
-```bash
-docker login ghcr.io -u YOUR_GITHUB_USERNAME   # paste the token as the password
-```
-
-### Accounts
+## Accounts
 
 Every project and analysis belongs to one account and is visible to nobody else. There is no
 sharing and no administrator who can see everything. Calibration curves are the deliberate
@@ -247,59 +187,13 @@ Registration is **open** — anyone who can reach the app can create an account.
 expected to be whatever fronts the deployment (a VPN, an institutional SSO proxy, a private
 network); what accounts add behind that gate is attribution and separation, not admission control.
 
-Before exposing this to anyone else, set `RADICAL_SECRET_KEY` to a long random string and
-`RADICAL_ENV` to something other than `development`. Login tokens are signed with it, so without
-one the app falls back to a key published in this repository — it says so at startup, and refuses
-to start at all once `RADICAL_ENV` says the deployment is real. See `.env.example`.
-
-### Development
-
-Both containers bind-mount their source and hot-reload, so `docker compose up -d` is normally enough
-during development too. To run a service directly on the host instead (Windows equivalents are in
-[`docs/INSTALLATION.md`](docs/INSTALLATION.md#running-without-docker)):
-
-#### Backend
-```bash
-cd backend
-python3.12 -m venv venv          # any of 3.12, 3.13, 3.14
-source venv/bin/activate
-pip install -r requirements.txt
-uvicorn app.main:app --reload
-```
-It reads the repository's `.env`; `DATABASE_URL` there points at `localhost:5433`, the Docker
-stack's Postgres (`docker compose up -d postgres` starts just that).
-
-#### Frontend
-```bash
-cd frontend
-npm ci
-npm run dev
-```
-The dev server forwards `/api` to `http://localhost:8000`; set `API_PROXY_TARGET` to point it
-elsewhere.
-
-#### Backend tests
-The runtime image installs `requirements.txt` only, so the test dependencies live in a separate
-file:
-```bash
-cd backend
-pip install -r requirements-dev.txt
-pytest
-```
-
-#### Frontend tests
-```bash
-cd frontend
-npm test
-```
-Vitest, running in plain node. It covers the pure helpers — most importantly
-`utils/harrisLayout.ts`, whose geometry cannot be checked any other way: React Flow draws into a
-measured viewport, so nothing in the DOM tells you whether the boxes actually line up.
+Sign-ins are signed with `RADICAL_SECRET_KEY`, the key made during installation; the app refuses
+to start without one.
 
 ## API Overview
 
 Full interactive documentation (generated from the actual FastAPI routes) is at
-`http://localhost:8000/docs` once the backend is running.
+`http://localhost:8000/docs` on a running installation.
 
 **Every endpoint below needs a bearer token** except `/api/auth/register`, `/api/auth/login` and
 `/api/health`. Get one from `POST /api/auth/login` and send it as `Authorization: Bearer <token>`;
@@ -343,7 +237,7 @@ The main groups:
 
 ## Documentation
 
-- [`docs/INSTALLATION.md`](docs/INSTALLATION.md) — setup and troubleshooting.
+- [`docs/INSTALLATION.md`](docs/INSTALLATION.md) — installing on macOS and Windows, and troubleshooting.
 - [`frontend/src/content/USER_MANUAL.md`](frontend/src/content/USER_MANUAL.md) — using the app. It
   lives inside the frontend because the app ships it: the Help page (the question mark in the top
   bar, `/help`) renders this exact file, so there is no second copy to keep in step. Edit it as
