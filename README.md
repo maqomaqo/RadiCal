@@ -119,7 +119,7 @@ Boundaries), and interactive posterior visualization.
 - **Zustand** for the shared New Analysis / Model Structure draft state
 
 ### Backend
-- **Python 3.11** with **FastAPI**
+- **Python 3.12+** with **FastAPI**
 - **NumPy/SciPy** for the calibration math and both Bayesian solvers (exact integration for
   chain-shaped models, OxCal's own MH/Gibbs scheme otherwise — no PyMC, no MCMC sampler dependency)
 - **SQLAlchemy** ORM over **PostgreSQL**, with **Alembic** migrations applied on startup
@@ -156,27 +156,37 @@ RadiCal/
 ## Quick Start
 
 ### Prerequisites
-- Docker and Docker Compose (recommended), **or** Node.js 18+, Python 3.11+ and PostgreSQL 14+ for
-  running the two services directly.
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) on macOS or Windows (Docker
+  Engine with the Compose plugin on Linux) — recommended, **or** Node.js 22 or 24, Python 3.12–3.14
+  and PostgreSQL 15+ for running the two services directly.
+- Access to this repository. It is private: clone it with the
+  [GitHub CLI](https://cli.github.com/) (`gh auth login`, then `gh repo clone maqomaqo/RadiCal`),
+  or with `git clone` and a sign-in through Git Credential Manager or a personal access token —
+  GitHub no longer accepts an account password there.
 
 ### Installation
 
 ```bash
-git clone https://github.com/maqomaqo/RadiCal.git
+gh repo clone maqomaqo/RadiCal
 cd RadiCal
 cp .env.example .env
-docker-compose up -d
+docker compose up -d
 
 # Frontend: http://localhost:5173
 # Backend API + interactive docs: http://localhost:8000/docs
 ```
 
+On Windows run the same commands in PowerShell. Clone into your WSL 2 home directory if you plan
+to edit the code while the stack runs; a checkout on `C:\` works, but needs
+`CHOKIDAR_USEPOLLING=true` in `.env` for the frontend to notice edits (see
+[`docs/INSTALLATION.md`](docs/INSTALLATION.md#windows)).
+
 Open the frontend and **create an account** — the first one made on an installation takes
 ownership of any projects and analyses that were there before accounts existed, and the sign-up
 screen says how many it adopted.
 
-See [`docs/INSTALLATION.md`](docs/INSTALLATION.md) for running the frontend and backend outside
-Docker, and for troubleshooting.
+See [`docs/INSTALLATION.md`](docs/INSTALLATION.md) for step-by-step macOS and Windows instructions,
+running the frontend and backend outside Docker, upgrading, and troubleshooting.
 
 ### Running the published image
 
@@ -187,11 +197,21 @@ contains the backend, the built frontend and the calibration curves in one conta
 signing key:
 
 ```bash
-export RADICAL_SECRET_KEY=$(python3 -c "import secrets; print(secrets.token_urlsafe(48))")
+echo "RADICAL_SECRET_KEY=$(python3 -c 'import secrets; print(secrets.token_urlsafe(48))')" >> .env
 docker compose -f docker-compose.prod.yml up -d
 
 # Everything, frontend and API, on http://localhost:8000
 ```
+
+In PowerShell, the first line is:
+
+```powershell
+Add-Content .env "RADICAL_SECRET_KEY=$(py -c 'import secrets; print(secrets.token_urlsafe(48))')"
+```
+
+Keep the key in `.env` rather than exporting it in one shell: every `docker compose -f
+docker-compose.prod.yml` command, `down` and `logs` included, refuses to run without it, and a
+different key on the next start signs everyone out.
 
 or, against a database you already have:
 
@@ -205,8 +225,13 @@ docker run -d -p 8000:8000 \
 
 The image runs as `RADICAL_ENV=production` and refuses to start without `RADICAL_SECRET_KEY` (see
 [Accounts](#accounts)). The repository is private, so pulling needs a
-[GitHub token with `read:packages`](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry#authenticating-to-the-container-registry)
-unless the package is made public in its settings.
+[classic personal access token with `read:packages`](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry#authenticating-to-the-container-registry)
+(the container registry does not accept fine-grained tokens) unless the package is made public in
+its settings:
+
+```bash
+docker login ghcr.io -u YOUR_GITHUB_USERNAME   # paste the token as the password
+```
 
 ### Accounts
 
@@ -227,24 +252,29 @@ to start at all once `RADICAL_ENV` says the deployment is real. See `.env.exampl
 
 ### Development
 
-Both containers bind-mount their source and hot-reload, so `docker-compose up -d` is normally enough
-during development too. To run a service directly on the host instead:
-
-#### Frontend
-```bash
-cd frontend
-npm install
-npm run dev
-```
+Both containers bind-mount their source and hot-reload, so `docker compose up -d` is normally enough
+during development too. To run a service directly on the host instead (Windows equivalents are in
+[`docs/INSTALLATION.md`](docs/INSTALLATION.md#running-without-docker)):
 
 #### Backend
 ```bash
 cd backend
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+python3.12 -m venv venv          # any of 3.12, 3.13, 3.14
+source venv/bin/activate
 pip install -r requirements.txt
 uvicorn app.main:app --reload
 ```
+It reads the repository's `.env`; `DATABASE_URL` there points at `localhost:5433`, the Docker
+stack's Postgres (`docker compose up -d postgres` starts just that).
+
+#### Frontend
+```bash
+cd frontend
+npm ci
+npm run dev
+```
+The dev server forwards `/api` to `http://localhost:8000`; set `API_PROXY_TARGET` to point it
+elsewhere.
 
 #### Backend tests
 The runtime image installs `requirements.txt` only, so the test dependencies live in a separate
