@@ -262,6 +262,94 @@ class TestTheCoastalMiddenModel:
         assert charcoal[0]['outlier_prior'] == 1.0
 
 
+class TestTheDuneModelWithDisplayAttributes:
+    """
+    tests/fixtures/oxcal_display/Dune_layers.oxcal -- the structure of a real
+    dune stratigraphy, with its lab codes and ages replaced. Every date in it
+    carries a `color=` so that its layer comes out in its own colour on
+    OxCal's graph, and the file closes with the Interval, Span and Difference
+    queries that read the posterior back out.
+
+    None of that shapes the model, and all of it used to take the whole file
+    down: a `color="red";` parses to an assignment, the R_Date reader knew only
+    `z=`, and every other assignment fell through to the catch-all refusal --
+    twelve errors, no dates, for twelve lines that change nothing.
+
+    The colours are dropped rather than stored, because this app has no colour
+    of its own to put them in. What it must not do is lose the dates with them.
+    """
+
+    def setup_method(self):
+        self.result = parse_oxcal(
+            read_fixture('oxcal_display', 'Dune_layers.oxcal'),
+            'Dune_layers.oxcal',
+        )
+
+    def test_the_whole_model_imports(self):
+        assert self.result.ok, self.result.errors
+        assert self.result.warnings == []
+        assert len(self.result.dates) == 12
+
+    def test_the_stratigraphy_survives_in_order(self):
+        assert [c['name'] for c in self.result.model_tree['children']] == [
+            'Start 11', 'Layer 11', 'End 11',
+            'Start 9', 'Layer 9', 'End 9', 'Layer 8',
+            'Start 7', 'Layer 7',
+            'Layer 6 lower', 'Layer 6 upper', 'Layer 6',
+            'Start 5', 'Layer 5',
+            'Start 4', 'Layer 4',
+            'End 3',
+        ]
+
+    def test_the_outlier_model_still_reaches_every_date(self):
+        """
+        The colour sits in the same block as the Outlier(), so a reader that
+        stumbles on one could plausibly drop the other.
+        """
+        assert all(d['outlier_model'] == 'general' for d in self.result.dates)
+        assert all(d['outlier_prior'] == 0.05 for d in self.result.dates)
+
+    def test_the_import_says_it_passed_the_colours_over(self):
+        """
+        Silence is the failure mode here: a user who wrote colours and got a
+        model back is entitled to know the colours are not in it.
+        """
+        assert any('color=' in note for note in self.result.notes)
+
+    def test_a_colour_on_a_phase_is_passed_over_too(self):
+        """OxCal takes color= on a container as well as on a date."""
+        result = parse_oxcal(oxcal_model(
+            'Phase("P"){ color="red"; R_Date("A",1000,25); }'
+        ))
+
+        assert result.ok, result.errors
+        assert len(result.dates) == 1
+        assert any('color=' in note for note in result.notes)
+
+    def test_an_unrecognised_assignment_is_still_refused(self):
+        """
+        The point of reading color= is not that assignments are harmless. An
+        unknown key could be setting a likelihood, and naming it in the error
+        is the difference between a line the user can find and the old `=()`.
+        """
+        result = parse_oxcal(oxcal_model(
+            'Phase("P"){ R_Date("A",1000,25){ resolution=5; }; }'
+        ))
+
+        assert not result.ok
+        assert 'resolution=' in result.errors[0]
+        assert 'R_Date("A")' in result.errors[0]
+
+    def test_a_z_is_still_read_as_a_depth(self):
+        """The one assignment that does shape a model, unchanged."""
+        result = parse_oxcal(oxcal_model(
+            'Phase("P"){ R_Date("A",1000,25){ color="red"; z=47; }; }'
+        ))
+
+        assert result.ok, result.errors
+        assert result.dates[0]['depth_cm'] == 47.0
+
+
 # --------------------------------------------------------------------------
 # Refusals -- the half that keeps a wrong model out
 # --------------------------------------------------------------------------
