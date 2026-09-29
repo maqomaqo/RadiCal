@@ -1,6 +1,6 @@
 # Installing RadiCal
 
-RadiCal runs in [Docker](https://www.docker.com/): one container for the app and one for its
+RadiCal runs in [Docker](https://docs.docker.com/get-started/): one container for the app and one for its
 database. Docker is the only thing to install — no Python, Node.js or PostgreSQL.
 
 The steps are the same on macOS and Windows. Type the commands into **Terminal** on macOS, or
