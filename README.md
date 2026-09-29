@@ -124,8 +124,8 @@ docker run --rm ghcr.io/maqomaqo/radical python -c "import secrets; print('RADIC
 docker compose up -d
 ```
 
-then open http://localhost:8000 and create an account. On Windows, two of those lines differ in
-PowerShell; the guide gives both.
+then open http://localhost:8000 and create an account. 
+On Windows, two of those lines differ in PowerShell - read the following installation guide for details.
 [`docs/INSTALLATION.md`](docs/INSTALLATION.md) walks through each step on macOS and Windows,
 with everyday use, updating, and troubleshooting.
 
