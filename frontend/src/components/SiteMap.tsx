@@ -3,6 +3,7 @@ import type { CSSProperties } from 'react'
 import { Box, Button, FormControlLabel, Paper, Switch, Typography } from '@mui/material'
 import DownloadIcon from '@mui/icons-material/Download'
 import Plotly from 'plotly.js-dist-min'
+import type { ColorScale, Config, Data, Layout } from 'plotly.js-dist-min'
 
 import { useBasemapPreference } from '@/hooks/useBasemapPreference'
 import { useTileServerReachable } from '@/hooks/useTileServer'
@@ -54,9 +55,9 @@ function PlotlyFigure({
   onDrawn,
   style,
 }: {
-  data: unknown[]
-  layout: Record<string, unknown>
-  config: Record<string, unknown>
+  data: Data[]
+  layout: Partial<Layout>
+  config: Partial<Config>
   /** Called with the graph div each time Plotly has finished drawing it. */
   onDrawn: (graphDiv: HTMLElement) => void
   style?: CSSProperties
@@ -67,10 +68,7 @@ function PlotlyFigure({
     const el = ref.current
     if (!el) return
     let current = true
-    const plotly = Plotly as {
-      react(gd: HTMLElement, data: unknown[], layout: unknown, config: unknown): Promise<unknown>
-    }
-    plotly
+    Plotly
       .react(el, data, layout, config)
       .then(() => {
         if (current) onDrawn(el)
@@ -86,7 +84,7 @@ function PlotlyFigure({
   useEffect(() => {
     const el = ref.current
     return () => {
-      if (el) (Plotly as { purge(gd: HTMLElement): void }).purge(el)
+      if (el) Plotly.purge(el)
     }
   }, [])
 
@@ -200,6 +198,11 @@ function placeFromTiledMap(graphDiv: unknown, event: MouseEvent): Placement {
  * comes from the outline -- see VALUE_MARK_OUTLINE.
  */
 const VALUE_RAMP = ['#8fcdb7', '#6cb59d', ...CONTEXT_PALETTE]
+
+/** VALUE_RAMP as a Plotly colour scale: its stops evenly spaced over 0-1. */
+const VALUE_SCALE: ColorScale = VALUE_RAMP.map(
+  (hex, i): [number, string] => [i / (VALUE_RAMP.length - 1), hex],
+)
 
 /**
  * How the marks that carry a value are outlined.
@@ -431,7 +434,7 @@ export default function SiteMap({
     [dataFrame, aspect],
   )
 
-  const traces = useMemo(() => {
+  const traces = useMemo((): Data[] => {
     // Every LINE's longitudes, brought within half a turn of the frame's
     // centre on the tiled map -- see unwrapLongitude for why the offline
     // map needs nothing of the kind.
@@ -471,35 +474,42 @@ export default function SiteMap({
     // with nothing placed yet had no trace, so no basemap, no projection, and
     // every click reported as unreadable. This is the ordinary first state
     // of that dialog, not an edge case.
-    const list: unknown[] = [
+    const list: Data[] = [
       { type: geoType, mode: 'markers' as const, lat: [], lon: [], hoverinfo: 'skip' as const },
     ]
 
     // The likelihood region underneath everything: it is the backdrop the
     // marks are read against, and drawn over them it would bury them.
     if (region && region.length > 0) {
-      const last = VALUE_RAMP.length - 1
-      list.push({
-        type: geoType,
+      const cells = {
         mode: 'markers' as const,
         name: 'Origin region',
         lat: region.map((cell) => cell.lat),
         lon: region.map((cell) => cell.lon),
         text: region.map((cell) => `support ${cell.support.toFixed(2)}`),
-        marker: {
-          // Square, and sized to the grid step, so the cells read as the
-          // coarse grid this is rather than as a set of observations.
-          symbol: tiles ? undefined : ('square' as const),
-          size: Math.max(8, 14 * regionStepDeg),
-          color: region.map((cell) => cell.support),
-          colorscale: VALUE_RAMP.map((hex, i) => [i / last, hex]),
-          cmin: 0,
-          cmax: 1,
-          opacity: 0.45,
-          line: { width: 0 },
-        },
         hovertemplate: '%{text}<br>%{lat:.1f}, %{lon:.1f}<extra></extra>',
-      })
+      }
+      const marker = {
+        size: Math.max(8, 14 * regionStepDeg),
+        color: region.map((cell) => cell.support),
+        colorscale: VALUE_SCALE,
+        cmin: 0,
+        cmax: 1,
+        opacity: 0.45,
+      }
+      list.push(
+        tiles
+          ? { ...cells, type: 'scattermap', marker }
+          : {
+              ...cells,
+              type: 'scattergeo',
+              // Square, and sized to the grid step, so the cells read as the
+              // coarse grid this is rather than as a set of observations.
+              // Offline only: scattermap marks are circles and take no
+              // outline.
+              marker: { ...marker, symbol: 'square', line: { width: 0 } },
+            },
+      )
     }
 
     // Isochrons next, so every mark and every other line sits over them.
@@ -593,15 +603,21 @@ export default function SiteMap({
       // them itself; the same arc as vertices on the tiled map, which would
       // otherwise draw a straight line in Mercator -- see densifyGreatCircle.
       const path = tiles ? densifyGreatCircle(front) : front
-      list.push({
-        type: geoType,
+      const fitted = {
         mode: 'lines' as const,
         name: 'Fitted front',
         lat: path.map((p) => p.latitude),
         lon: path.map((p) => lineLon(p.longitude)),
-        line: { color: plot.posteriorLine, width: 2, dash: 'dot' },
         hoverinfo: 'skip' as const,
-      })
+      }
+      const line = { color: plot.posteriorLine, width: 2 }
+      // Dotted offline only: scattermap draws lines through MapLibre, which
+      // plotly gives no dash, so on the tiled map the front is solid.
+      list.push(
+        tiles
+          ? { ...fitted, type: 'scattermap', line }
+          : { ...fitted, type: 'scattergeo', line: { ...line, dash: 'dot' } },
+      )
     }
 
     if (values) {
@@ -615,7 +631,6 @@ export default function SiteMap({
       }
       const graded = sites.filter((site) => valueOf(site) !== null)
       if (graded.length > 0) {
-        const last = VALUE_RAMP.length - 1
         const magnitudes = graded.map((s) => Math.abs(valueOf(s) as number))
         const reach = Math.max(...magnitudes, 1)
         // See the `valueScale` prop. The neutral at zero is a pale warm
@@ -636,7 +651,7 @@ export default function SiteMap({
                 cmin: -reach,
                 cmax: reach,
               }
-            : { colorscale: VALUE_RAMP.map((hex, i) => [i / last, hex]) }
+            : { colorscale: VALUE_SCALE }
         if (tiles) {
           // The outline, as a disc UNDER each mark. scattermap has no
           // marker.line -- MapLibre's circle layer takes no stroke through
@@ -657,34 +672,46 @@ export default function SiteMap({
             hoverinfo: 'skip' as const,
           })
         }
-        list.push({
-          type: geoType,
+        const marks = {
           mode: 'markers' as const,
           name: valueLabel || 'Value',
           lat: graded.map((s) => s.latitude),
           lon: graded.map((s) => s.longitude),
           text: graded.map(siteLabel),
-          marker: {
-            size: VALUE_MARK_SIZE,
-            color: graded.map((s) => valueOf(s) as number),
-            ...scale,
-            // Reversed so the OLDEST arrival is the strongest shade: the
-            // front starts dark and fades as it spreads, which is the way
-            // round a reader already expects a wave to be drawn.
-            reversescale: false,
-            line: { color: plot[VALUE_MARK_OUTLINE.color], width: VALUE_MARK_OUTLINE.width },
-            colorbar: {
-              title: { text: valueLabel || '', side: 'right' as const },
-              thickness: 12,
-              len: 0.8,
-              outlinewidth: 0,
-            },
-          },
           hovertemplate:
             valueScale === 'signed'
               ? '%{text}<br>%{marker.color:+.0f} yr<extra></extra>'
               : '%{text}<br>%{marker.color:.0f}<extra></extra>',
-        })
+        }
+        const marker = {
+          size: VALUE_MARK_SIZE,
+          color: graded.map((s) => valueOf(s) as number),
+          ...scale,
+          // Reversed so the OLDEST arrival is the strongest shade: the
+          // front starts dark and fades as it spreads, which is the way
+          // round a reader already expects a wave to be drawn.
+          reversescale: false,
+          colorbar: {
+            title: { text: valueLabel || '', side: 'right' as const },
+            thickness: 12,
+            len: 0.8,
+            outlinewidth: 0,
+          },
+        }
+        // The outline is the marker's own offline; on the tiled map it is
+        // the disc trace pushed just above.
+        list.push(
+          tiles
+            ? { ...marks, type: 'scattermap', marker }
+            : {
+                ...marks,
+                type: 'scattergeo',
+                marker: {
+                  ...marker,
+                  line: { color: plot[VALUE_MARK_OUTLINE.color], width: VALUE_MARK_OUTLINE.width },
+                },
+              },
+        )
       }
     } else {
       const chosen = sites.filter(isSelected)
@@ -712,21 +739,26 @@ export default function SiteMap({
           hoverinfo: 'skip' as const,
         })
       }
-      list.push({
-        type: geoType,
+      const pin = {
         mode: 'markers' as const,
         name: 'Origin',
         lat: [origin.latitude],
         lon: [origin.longitude],
         text: ['Assumed origin'],
-        marker: {
-          size: 15,
-          color: plot.surface,
-          symbol: tiles ? undefined : ('x' as const),
-          line: { color: plot.posteriorLine, width: 3 },
-        },
         hovertemplate: '%{text}<br>%{lat:.4f}, %{lon:.4f}<extra></extra>',
-      })
+      }
+      const marker = { size: 15, color: plot.surface }
+      // An x ringed in the line colour offline; on the tiled map a plain
+      // disc over the ring trace above.
+      list.push(
+        tiles
+          ? { ...pin, type: 'scattermap', marker }
+          : {
+              ...pin,
+              type: 'scattergeo',
+              marker: { ...marker, symbol: 'x', line: { color: plot.posteriorLine, width: 3 } },
+            },
+      )
     }
 
     return list
@@ -813,14 +845,14 @@ export default function SiteMap({
       const { width, height: tall } = entries[0].contentRect
       if (width > 0 && tall > 0) setAspect(width / tall)
       const gd = graphDiv.current as HTMLElement | null
-      if (gd && gd.isConnected) (Plotly as { Plots: { resize(gd: HTMLElement): void } }).Plots.resize(gd)
+      if (gd && gd.isConnected) Plotly.Plots.resize(gd)
     })
     observer.observe(container)
     return () => observer.disconnect()
   }, [])
 
   const config = useMemo(
-    () => ({
+    (): Partial<Config> => ({
       displayModeBar: false,
       responsive: true,
       // Wheel zoom in every mode, for the same reason dragmode is pan.
@@ -836,7 +868,7 @@ export default function SiteMap({
     graphDiv.current = gd
   }, [])
 
-  const layout = useMemo(() => {
+  const layout = useMemo((): Partial<Layout> => {
     const common = {
       margin: { l: 0, r: 0, t: 0, b: 0 },
       paper_bgcolor: plot.surface,

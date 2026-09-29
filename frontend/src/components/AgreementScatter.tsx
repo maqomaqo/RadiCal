@@ -1,13 +1,11 @@
 import { useMemo } from 'react'
 import { Box, Typography } from '@mui/material'
-import Plotly from 'plotly.js-dist-min'
-import createPlotlyComponent from 'react-plotly.js/factory'
+import Plot from '@/components/Plot'
 import type { ComparedRow } from '@/utils/comparePairing'
 import { POOR_AGREEMENT } from '@/utils/diagnostics'
 import { usePlotColors } from '@/theme/plotColors'
 import type { RunStyle } from '@/theme/compareColors'
 
-const Plot = createPlotlyComponent(Plotly)
 
 /**
  *

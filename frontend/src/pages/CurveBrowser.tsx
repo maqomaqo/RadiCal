@@ -19,8 +19,8 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material'
-import Plotly from 'plotly.js-dist-min'
-import createPlotlyComponent from 'react-plotly.js/factory'
+import Plot from '@/components/Plot'
+import type { Config, Data, Layout, LayoutAxis, PlotMouseEvent, PlotRelayoutEvent } from 'plotly.js-dist-min'
 import DownloadIcon from '@mui/icons-material/Download'
 import CurveScrubber from '@/components/CurveScrubber'
 import {
@@ -58,7 +58,6 @@ import { resolutionStride } from '@/utils/resolutionStride'
 import { interpolateAt } from '@/utils/seriesLookup'
 import { compactGrid } from '@/utils/curveGrid'
 
-const Plot = createPlotlyComponent(Plotly)
 
 /**
  * Laboratory uncertainties to offer, as the 1σ on a modern sample; the method
@@ -69,6 +68,12 @@ const Plot = createPlotlyComponent(Plotly)
  * published curves, wrong for "can I date this period well enough", where it
  * quotes a precision most samples will not get.
  */
+
+/** The calendar age under the pointer, from the first point Plotly reports. */
+function calendarAgeOf(event: PlotMouseEvent): number | null {
+  const x = event.points[0]?.x
+  return typeof x === 'number' ? x : null
+}
 const LAB_UNCERTAINTIES = [
   { value: 15, label: '±15 yr (best AMS)' },
   { value: 25, label: '±25 yr (typical)' },
@@ -421,7 +426,7 @@ export default function CurveBrowser() {
 
   const comparedSpec = curves.find((curve) => curve.id === compareWith)
 
-  const plotData = useMemo(() => {
+  const plotData = useMemo((): Data[] => {
     if (points.length === 0) return []
     const cal = points.map((p) => p[0])
     const c14 = points.map((p) => p[1])
@@ -443,7 +448,7 @@ export default function CurveBrowser() {
       showlegend: true,
     })
 
-    const traces: any[] = [
+    const traces: Data[] = [
       band(2, colors.hpd95, '±2σ'),
       band(1, colors.hpd68, '±1σ'),
       {
@@ -513,7 +518,7 @@ export default function CurveBrowser() {
    */
   const chartHeight = Math.max(380 - panelCount * (panelHeight + SECTION_CHROME), 200)
 
-  const layout = useMemo(() => {
+  const layout = useMemo((): Partial<Layout> => {
     const ticks = window ? calendarAxisTicks(window.from, window.to, dateFormat) : null
     return {
       height: chartHeight,
@@ -563,7 +568,7 @@ export default function CurveBrowser() {
   }, [spec, curveId, dateFormat, colors, window, chartHeight, panelCount])
 
   const config = useMemo(
-    () => ({
+    (): Partial<Config> => ({
       responsive: true,
       displaylogo: false,
       // The bar goes; the CANVAS stays. Plotly's modebar duplicates zoom and
@@ -591,13 +596,13 @@ export default function CurveBrowser() {
    * which is what made the page feel heavy to scrub across.
    */
   const panelConfig = useMemo(
-    () => ({ responsive: true, displayModeBar: false as const }),
+    (): Partial<Config> => ({ responsive: true, displayModeBar: false as const }),
     []
   )
 
   /** The axis and chrome both panels share: the curve's window, no labels. */
   const panelAxis = useMemo(
-    () => ({
+    (): Partial<LayoutAxis> => ({
       // Locked to the curve above rather than autoranged: the two are read
       // together, and an axis drifting a few years would line a plateau up
       // against the wrong stretch.
@@ -605,7 +610,7 @@ export default function CurveBrowser() {
       showticklabels: false,
       gridcolor: colors.grid,
       showspikes: true,
-      spikemode: 'across' as const,
+      spikemode: 'across',
       spikethickness: 1,
       spikedash: 'dot',
       spikecolor: colors.grid,
@@ -614,7 +619,7 @@ export default function CurveBrowser() {
   )
 
   const comparisonData = useMemo(
-    () =>
+    (): Data[] =>
       [
         {
           x: [...comparison.map((p) => p[0]), ...comparison.map((p) => p[0]).reverse()],
@@ -636,12 +641,12 @@ export default function CurveBrowser() {
           line: { color: colors.posteriorLine, width: 1.5 },
           hovertemplate: '<b>%{customdata}</b><br>%{y:.0f} ¹⁴C yr apart<extra></extra>',
         },
-      ] as any,
+      ],
     [comparison, colors, dateFormat]
   )
 
   const comparisonLayout = useMemo(
-    () =>
+    (): Partial<Layout> =>
       ({
         height: panelHeight,
         xaxis: panelAxis,
@@ -662,12 +667,12 @@ export default function CurveBrowser() {
         paper_bgcolor: colors.surface,
         margin: { l: 52, r: 20, t: 4, b: 4 },
         autosize: true,
-      }) as any,
+      }),
     [panelAxis, panelHeight, colors]
   )
 
   const resolutionData = useMemo(
-    () =>
+    (): Data[] =>
       [
         {
           // The 5th-95th band: how lucky or unlucky one date can be.
@@ -689,12 +694,12 @@ export default function CurveBrowser() {
           name: 'Mean',
           hovertemplate: '<b>%{customdata}</b><br>about %{y:.0f} years (95.4%)<extra></extra>',
         },
-      ] as any,
+      ],
     [resolution, colors, dateFormat]
   )
 
   const resolutionLayout = useMemo(
-    () =>
+    (): Partial<Layout> =>
       ({
         height: panelHeight,
         xaxis: { ...panelAxis, matches: 'x' },
@@ -711,7 +716,7 @@ export default function CurveBrowser() {
         paper_bgcolor: colors.surface,
         margin: { l: 52, r: 20, t: 4, b: 4 },
         autosize: true,
-      }) as any,
+      }),
     [panelAxis, panelHeight, colors]
   )
 
@@ -728,7 +733,7 @@ export default function CurveBrowser() {
    * render that caused them.
    */
   const handleRelayout = useCallback(
-    (event: Record<string, unknown>) => {
+    (event: PlotRelayoutEvent) => {
       if (!extent) return
       const lo = event['xaxis.range[0]']
       const hi = event['xaxis.range[1]']
@@ -864,20 +869,20 @@ export default function CurveBrowser() {
           </Alert>
         )}
         <Plot
-          data={plotData as any}
-          layout={layout as any}
+          data={plotData}
+          layout={layout}
           config={config}
           useResizeHandler
           style={{ width: '100%', height: `${chartHeight}px` }}
           onRelayout={handleRelayout}
-          onHover={(event: any) => noteHover(event?.points?.[0]?.x ?? null)}
+          onHover={(event) => noteHover(calendarAgeOf(event))}
           onUnhover={() => noteHover(null)}
           // Clicking a year asks what a date from it would look like. In a
           // plateau the answer is three or four disjoint ranges, which says
           // what a plateau costs more plainly than any single number.
-          onClick={(event: any) => {
-            const clicked = event?.points?.[0]?.x
-            if (typeof clicked === 'number') setSimulateAt(clicked)
+          onClick={(event) => {
+            const clicked = calendarAgeOf(event)
+            if (clicked !== null) setSimulateAt(clicked)
           }}
         />
 
@@ -894,7 +899,7 @@ export default function CurveBrowser() {
               config={panelConfig}
               useResizeHandler
               style={{ width: '100%', height: `${panelHeight}px` }}
-              onHover={(event: any) => noteHover(event?.points?.[0]?.x ?? null)}
+              onHover={(event) => noteHover(calendarAgeOf(event))}
               onUnhover={() => noteHover(null)}
             />
           </PanelSection>
@@ -953,7 +958,7 @@ export default function CurveBrowser() {
               config={panelConfig}
               useResizeHandler
               style={{ width: '100%', height: `${panelHeight}px` }}
-              onHover={(event: any) => noteHover(event?.points?.[0]?.x ?? null)}
+              onHover={(event) => noteHover(calendarAgeOf(event))}
               onUnhover={() => noteHover(null)}
             />
           </PanelSection>
