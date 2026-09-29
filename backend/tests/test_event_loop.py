@@ -49,11 +49,18 @@ def _endpoints():
     /openapi.json and the oauth2 redirect) which are coroutines it defines
     and we do not maintain; they serve static strings and a cached schema,
     so they are not the problem this file is about.
+
+    FastAPI no longer copies an included router's routes into app.routes: it
+    keeps the router, and hands out each of its routes -- full path, methods,
+    endpoint -- through effective_route_contexts(). Both shapes are walked,
+    so a route declared on the app itself is not missed either.
     """
-    for route in app.routes:
-        endpoint = getattr(route, 'endpoint', None)
-        if endpoint is not None and endpoint.__module__.startswith('app.'):
-            yield route, endpoint
+    for entry in app.routes:
+        expand = getattr(entry, 'effective_route_contexts', None)
+        for route in (expand() if expand else [entry]):
+            endpoint = getattr(route, 'endpoint', None)
+            if endpoint is not None and endpoint.__module__.startswith('app.'):
+                yield route, endpoint
 
 
 def test_every_route_handler_is_accounted_for():

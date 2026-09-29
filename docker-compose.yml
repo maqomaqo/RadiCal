@@ -53,13 +53,16 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-      args:
-        VITE_API_URL: ${VITE_API_URL:-http://localhost:8000}
     container_name: radiocarbon_frontend
     ports:
       - "5173:5173"
     environment:
-      VITE_API_URL: ${VITE_API_URL:-http://localhost:8000}
+      # Where the dev server forwards /api: the backend service, by name.
+      API_PROXY_TARGET: http://backend:8000
+      # Set to true in .env when the checkout is on a Windows drive: Docker
+      # Desktop passes no file-change events from it into the container, and
+      # without polling the dev server never sees an edit.
+      CHOKIDAR_USEPOLLING: ${CHOKIDAR_USEPOLLING:-false}
     volumes:
       - ./frontend:/app
       - /app/node_modules

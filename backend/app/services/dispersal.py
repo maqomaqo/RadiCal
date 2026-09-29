@@ -606,6 +606,13 @@ MIN_TREND_ASPECT = 0.05
 # nothing further to say.
 ISOCHRON_COUNT = 5
 
+# Below this spread of fitted ages across the sites, in years, the surface is
+# flat and has no isochrons. Not zero: a least-squares fit to identical ages
+# comes back with a gradient of ~1e-13 rather than 0, how small depending on
+# the BLAS underneath, and an exact test drew three lines at "5999.999999 cal
+# BP" on one platform and none on another.
+ISOCHRON_MIN_SPAN_YEARS = 1.0
+
 
 def _lambert_azimuthal(sites: Sequence[SiteSpec]) -> Tuple[np.ndarray, np.ndarray, Tuple[float, float]]:
     """
@@ -830,7 +837,7 @@ def _isochrons(a: float, b: float, c: float,
 
     fitted = a + b * x + c * y
     low, high = float(fitted.min()), float(fitted.max())
-    if not math.isfinite(low) or high <= low:
+    if not math.isfinite(low) or high - low < ISOCHRON_MIN_SPAN_YEARS:
         return []
 
     # Round ages rather than the fitted extremes: "6200 cal BP" is a line a

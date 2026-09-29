@@ -446,7 +446,9 @@ def _load_curve_from_file(filepath: str, curve_name: str = "") -> Optional[Calib
     c14_errors = []
     
     try:
-        with open(filepath, 'r') as f:
+        # UTF-8 explicitly: the IntCal and Marine20 headers name their authors
+        # with accents, and Windows would otherwise decode with its locale.
+        with open(filepath, 'r', encoding='utf-8') as f:
             for line_num, line in enumerate(f, 1):
                 # Skip empty lines and comments
                 line = line.strip()
