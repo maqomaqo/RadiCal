@@ -286,6 +286,13 @@ IGNORABLE = {
     'posterior', 'display', 'plot_axis', 'sample',
 }
 
+# Assignments that set how OxCal DRAWS something rather than what it models:
+# `color="red";` inside an R_Date tints that date on the plot. Skipped for the
+# same reason Axis() is -- nothing downstream of the likelihood sees them, and
+# this app has no colour of its own to carry them into. Kept separate from
+# IGNORABLE because those are commands and these are `name=value`.
+DISPLAY_ATTRIBUTES = {'color', 'colour'}
+
 # Constructs this app has no equivalent for, each stating what reading it as
 # something we DO implement would cost -- which is why it is refused.
 UNSUPPORTED = {
@@ -429,6 +436,7 @@ class _Translator:
         self.delta_r_usage: Dict[str, int] = {}
         self.wrapped_sequence_dates = 0
         self.seen_ignorable: List[str] = []
+        self.seen_display_attributes: List[str] = []
         # Curve names this file defined with Mix_Curves, mapped to the stored
         # curve each was matched to. Scoped to the file, as OxCal scopes them.
         self.mixed_curves: Dict[str, str] = {}
@@ -478,6 +486,13 @@ class _Translator:
                 'Ignored ' + ', '.join(f'{name}()' for name in unique)
                 + ' -- these ask OxCal to plot or summarise a result and do '
                 'not affect the model, so leaving them out changes nothing.'
+            )
+        if self.seen_display_attributes:
+            unique = sorted(set(self.seen_display_attributes))
+            self.result.notes.append(
+                'Ignored ' + ', '.join(f'{name}=' for name in unique)
+                + ' -- these set how OxCal draws a date and do not affect the '
+                'model.'
             )
         if self.wrapped_sequence_dates:
             self.result.notes.append(
@@ -569,7 +584,13 @@ class _Translator:
             command = node.command.lower()
 
             if command == '=':
-                continue                      # an Options() assignment
+                # An Options() assignment, or a display attribute written on a
+                # container -- `Phase("...") { color="red"; ... }`. Neither
+                # shapes the model; the display ones are noted so the import
+                # says what it passed over.
+                if node.args and str(node.args[0]).lower() in DISPLAY_ATTRIBUTES:
+                    self.seen_display_attributes.append(str(node.args[0]).lower())
+                continue
             if command in TRANSPARENT:
                 items.extend(self._translate_block(node.block or [], scope.copy()))
                 continue
@@ -875,19 +896,8 @@ class _Translator:
                 self._apply_delta_r(child, inner)
                 date['delta_r'] = inner.delta_r
                 date['delta_r_error'] = inner.delta_r_error
-            elif command == '=' and child.args and str(child.args[0]).lower() == 'z':
-                # The date's place on a P_Sequence's depth axis. Read here
-                # rather than only in _translate_deposition_sequence so the
-                # same R_Date reader serves both, and so a stray z= outside a
-                # deposition sequence is recorded as an ordinary depth rather
-                # than refused -- depth_cm is a column every date has.
-                try:
-                    date['depth_cm'] = float(child.args[1])
-                except (TypeError, ValueError, IndexError):
-                    self.error(
-                        child,
-                        f'R_Date("{name}") has a z= that is not a number.',
-                    )
+            elif command == '=':
+                self._apply_date_attribute(child, date, name)
             elif command in IGNORABLE:
                 self.seen_ignorable.append(child.command)
             else:
@@ -903,6 +913,46 @@ class _Translator:
             )
 
         return date
+
+    def _apply_date_attribute(self, node: Node, date: Dict[str, Any],
+                              name: str) -> None:
+        """
+        A `key=value` written inside an R_Date.
+
+        `z=` is the date's place on a P_Sequence's depth axis, read here rather
+        than only in _translate_deposition_sequence so the same R_Date reader
+        serves both, and so a stray z= outside a deposition sequence is
+        recorded as an ordinary depth rather than refused -- depth_cm is a
+        column every date has.
+
+        The display attributes are skipped, and anything else is refused: an
+        unrecognised key could be setting a likelihood this app would then get
+        wrong, and guessing which is which is exactly what this module does
+        not do.
+        """
+        key = str(node.args[0]).lower() if node.args else ''
+
+        if key == 'z':
+            try:
+                date['depth_cm'] = float(node.args[1])
+            except (TypeError, ValueError, IndexError):
+                self.error(
+                    node,
+                    f'R_Date("{name}") has a z= that is not a number.',
+                )
+            return
+
+        if key in DISPLAY_ATTRIBUTES:
+            self.seen_display_attributes.append(key)
+            return
+
+        self.error(
+            node,
+            f'{key or "An assignment"}= inside R_Date("{name}") is not '
+            'something this importer recognises. It has been left out rather '
+            'than guessed at -- if it does not affect the model, delete the '
+            'line and import again.',
+        )
 
     def _apply_outlier(self, node: Node, date: Dict[str, Any]) -> None:
         model_name = (node.name or 'General').strip()

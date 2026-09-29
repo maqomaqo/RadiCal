@@ -1,0 +1,110 @@
+ /* A dune stratigraphy written the way a plotting-minded OxCal user writes
+    one: every date carries a color= so that each layer comes out in its own
+    colour on the graph, and the queries at the end read the posterior back
+    out. The structure is a real one; the lab codes and ages are not. */
+Plot()
+{
+  Outlier_Model("General",T(5),U(0,4),"t");
+  Axis(1250,1500);
+  Curve("SHCal20","shcal20.14c");
+  Sequence("Dune")
+  {
+    Boundary("Start 11");
+    Phase("Layer 11")
+    {
+      R_Date("LAB-1101 egg",658,21)
+      {
+        color="red";
+        Outlier("General", 0.05);
+      };
+      R_Date("LAB-1102 egg",671,21)
+      {
+        color="red";
+        Outlier("General", 0.05);
+      };
+    };
+    Boundary("End 11");
+    Interval("Interval L9/11");
+    Boundary("Start 9");
+    Phase("Layer 9")
+    {
+      R_Date("LAB-1901 ch",736,17)
+      {
+        color="green";
+        Outlier("General", 0.05);
+      };
+      R_Date("LAB-1902 egg",751,17)
+      {
+        color="green";
+        Outlier("General",0.05);
+      };
+    };
+    Boundary("End 9");
+    Phase("Layer 8")
+    {
+    };
+    Interval("Interval L8/9");
+    Boundary("Start 7");
+    Phase("Layer 7")
+    {
+      R_Date("LAB-1701 ch",665,17)
+      {
+        color="yellow";
+        Outlier("General", 0.05);
+      };
+      R_Date("LAB-1702 ch",687,17)
+      {
+        color="yellow";
+        Outlier("General", 0.05);
+      };
+    };
+    Boundary("Layer 6 lower");
+    Interval("Interval L7/6");
+    Boundary("Layer 6 upper");
+    Phase("Layer 6")
+    {
+      R_Date("LAB-1601 ch",588,16)
+      {
+        color="pink";
+        Outlier("General", 0.05);
+      };
+      R_Date("LAB-1602 ch",607,17)
+      {
+        color="pink";
+        Outlier("General", 0.05);
+      };
+    };
+    Boundary("Start 5");
+    Phase("Layer 5")
+    {
+      R_Date("LAB-1501 egg",639,19)
+      {
+        color="orange";
+        Outlier("General",0.05);
+      };
+      R_Date("LAB-1502 bone",632,16)
+      {
+        color="orange";
+        Outlier("General",0.05);
+      };
+      R_Date("LAB-1503 ch",662,16)
+      {
+        color="orange";
+        Outlier("General", 0.05);
+      };
+    };
+    Boundary("Start 4");
+    Phase("Layer 4")
+    {
+      R_Date("LAB-1401 ch",585,21)
+      {
+        color="blue";
+        Outlier("General",0.05);
+      };
+    };
+    Boundary("End 3");
+    Span("Span Dune");
+    Difference("Difference 11/9","Start 9","End 11");
+    Difference("Difference 9/7","Start 7","End 9");
+  };
+};

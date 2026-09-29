@@ -129,7 +129,10 @@ A `D_Sequence` or `V_Sequence` nested inside a larger model fails too: this app 
 match on its own, and reading its members as ordinary dates in a phase would report a match that
 was never made. An unrecognised command fails it too. Commands that only affect what OxCal plots (`Sum`, `KDE_Plot`,
 `Span`, `Difference`, `Order`…) are skipped with a note, since they query a posterior rather than
-shape one.
+shape one. So are the display attributes: a `color="red";` written on a date or a phase sets the
+colour OxCal draws it in, and a note says the colours were passed over. An assignment that is not
+one of those still fails the import, naming the key — an unknown `key=` could be setting a
+likelihood, and it is not guessed at.
 
 Two differences in how the file is read are reported rather than left implicit: a date sitting
 directly inside a `Sequence` is put in a Phase of its own (this app attaches dates to Phases; its
