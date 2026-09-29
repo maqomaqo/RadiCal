@@ -11,6 +11,11 @@ colors:
   boundary-coral-ink: "#d23f4a"
   phase-green: "#1f7a62"
   hiatus-violet: "#7a5c99"
+  wiggle-amber: "#a5651a"
+  deposition-teal: "#1c6a86"
+  undated-level-slate: "#5b7f8d"
+  residual-early: "#b85c14"
+  residual-late: "#215f7a"
   muted-surface: "#f6f0eb"
   context-shade-lightest: "#35826e"
   context-shade-darkest: "#04372a"
@@ -33,6 +38,9 @@ typography:
     fontSize: "1rem"
     fontWeight: 400
     lineHeight: 1.5
+  code:
+    fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
+    fontSize: "0.875em"
 rounded:
   base: "8px"
   cell: "2px"
@@ -61,6 +69,11 @@ components:
     backgroundColor: "{colors.muted-surface}"
     textColor: "{colors.warm-ink}"
     padding: "6px 16px"
+  code-inline:
+    backgroundColor: "{colors.muted-surface}"
+    textColor: "{colors.warm-ink}"
+    typography: "{typography.code}"
+    rounded: "{rounded.base}"
   matrix-cell:
     backgroundColor: "{colors.warm-ink}"
     rounded: "{rounded.cell}"
@@ -191,6 +204,15 @@ of the three collided with hues RadiCal had already spent.
   themselves are never written into a plot: a band carries its own label from `utils/hpd.hpdBands`,
   so a legend cannot name a level its geometry was not computed at.
 - **Muted Violet** (`#7a5c99`): a Hiatus, everywhere.
+- **Wiggle Amber** (`#a5651a`): a wiggle-match sequence — one calendar age with fixed, measured gaps
+  hung off it. **Deposition Teal** (`#1c6a86`): a deposition sequence, which prices the intervals
+  between its levels rather than leaving them uniform. Both are hues of their own, not borrowings:
+  painting either in the Phase green would call it an unordered pile of dates, the opposite of what
+  makes it worth having. Both sit clear of the primary blue, the Phase green and the Boundary coral,
+  and both clear 4.5:1 on white so they can carry a 10px label as well as a border.
+- **Undated Level Slate** (`#5b7f8d`): an interpolated depth inside a deposition sequence — the
+  deposition teal desaturated, because it belongs to that sequence and is not a different kind of
+  thing from the dated levels beside it. The same instance-by-strength logic as the context shades.
 - **Context shades** (`#35826e` → `#04372a`): one *stratigraphic context* against another in the
   Harris matrix. Six graded steps of the Phase hue, not six hues: hue held at 164°, only lightness
   and chroma moving, every step clearing 4.5:1 on white because these carry 10px node labels as well
@@ -205,6 +227,37 @@ of the three collided with hues RadiCal had already spent.
   the *absence* of information — and because every hue above is already a claim about what something
   is. Discrete, matching the five bands `services/intervals.py` classifies into
   (`none` → `extensive`), so the legend is a key a reader can match a square to.
+
+### Map Palette
+Maps are the one figure drawn over someone else's picture — a tiled basemap — so their marks are
+chosen against that as well as against white.
+
+- **Residual Early / Residual Late** (`#b85c14` orange / `#215f7a` deep teal-blue): a site arriving
+  earlier or later than a fitted dispersal front predicts, on the map and in the table beside it.
+  They used to be the primary blue and the ink, which read on the offline map and failed on tiles:
+  an early site in the app's blue sat on the pale tile ocean like a wave on water. The pair are the
+  two ends of the one axis a colour-blind reader still separates, both clear of the tile ocean and
+  pale land, and both dark enough to carry their own outline. The signed scale meets at a pale
+  warm neutral (`#e3e2e2`, Warm Ink at 13% over white, flattened because Plotly's colour bar cannot
+  composite an rgba stop), so a site the front predicts exactly reads as "on the surface" rather
+  than as a third colour. Neither is an element hue — the wiggle amber and deposition teal are
+  deliberately not reused, since a site coloured in one would be claiming to be a wiggle match.
+- **Value ramp** (`#8fcdb7`, `#6cb59d`, then the six context shades): a quantity per site. The
+  context ramp alone rendered as eight dots of roughly one green on unlabelled 12px marks, so it is
+  continued at the pale end in the *same* 164° hue — legitimate only because nothing is written on a
+  mark. The pale anchors stop at 1.8:1 and 2.4:1 on white; paler ones (1.2:1, 1.5:1) simply vanished
+  on a pale basemap. Every value mark takes a 1px ink edge (`plotColors.axis`) rather than a white
+  halo, which is what makes a pale fill read as a filled shape instead of a stain.
+- **Pins:** placed sites in the mean ink (9px), selected sites in the primary (13px, drawn last so
+  a selection is never buried), both with a 1.5px white halo. The assumed origin is drawn last of
+  all, ringed in the primary, because it is the assumption the whole figure is measured from.
+- **Offline basemap:** land is the plot surface, coastlines in the axis ink at 0.6px, country
+  borders and water at the grid's strength — the sea is the one tinted surface on any figure, and
+  it stays quieter than any mark drawn on it.
+- **Tiled basemap:** OpenFreeMap's Positron, trimmed in `theme/basemapStyle.ts` — woodland and park
+  fills, road names and shields, and airports are removed so land is one colour and nothing on the
+  map is a colour except the marks. Roads and place names stay: they are the shape of the land at
+  high zoom.
 
 ### Named Rules
 **The One Object, One Color Rule.** A Boundary, Phase, or Hiatus is the same hue in the tree editor,
@@ -227,25 +280,47 @@ smudged.
 (a solved solver, an actual warning, a destructive confirm action). They are never repurposed as a
 categorical label for structural elements — that reads as a status display where none is intended.
 
+**The Basemap-Is-A-Surface Rule.** A mark on a map is checked against the tiles it will sit on, not
+only against white. A colour that reads on the offline map and disappears into a tile's ocean or
+land has failed, and the fix is a different mark colour or an ink edge, never a busier basemap.
+
 ## Typography
 
 **Body & UI Font:** Roboto (with system-ui/sans-serif fallback), via `@fontsource/roboto`.
+
+**Code Font:** the platform monospace stack (`ui-monospace, SFMono-Regular, Menlo, Consolas,
+monospace`), for inline identifiers and code blocks in the manual and for an error message.
 
 **Character:** A single, unadorned grotesque doing all the work — no display face, no accent
 typeface. Precision comes from hierarchy and restraint (two explicit heading overrides, everything
 else at MUI's Roboto defaults), not from typographic flourish.
 
 ### Hierarchy
-- **Headline** (600, 2.5rem, line-height 1.167): page-level titles (`h1`) — e.g. "RadiCal
-  Dashboard".
+- **Headline** (600, 2.5rem, line-height 1.167; 2rem below `sm`): page-level titles (`h1`) — e.g.
+  "RadiCal Dashboard". The phone step is set once in the theme: at 2.5rem a two-word title broke
+  onto a line per word in a 311px column.
 - **Title** (600, 2rem, line-height 1.2): section-level titles (`h2`).
 - **Body** (400, 1rem, line-height 1.5): the MUI Roboto default, unmodified — the bulk of form
   labels, table content, and descriptive text.
+- **Figure lettering** (11px, axis ink): every tick label, axis title and legend — see Plots.
+- **Code** (0.875em of its context): inline on a Muted Surface chip with an 8px radius; blocks at
+  0.8125rem.
+
+**Sentence case everywhere.** Buttons, Tabs and ToggleButtons all drop MUI's uppercase
+(`textTransform: 'none'`; Tabs at 0.9375rem). "ANALYSES (3)" beside a "New Analysis" button, or
+"STACKED / INDIVIDUAL / CURVE" above a plot whose every other control was sentence case, read as
+two different apps.
+
+**The reading scale.** The manual and glossary set their own heading scale, local to the reading
+surface rather than in the theme: 2.25rem / 1.5rem / 1.1875rem / 1.0625rem, all 600, with prose in
+`text.secondary` held to a 72ch measure. It sits below the app's `h1`/`h2` because a manual page is
+long-form text inside the app, not another app page.
 
 ### Named Rules
-**The Two-Override Rule.** Only `h1` and `h2` carry explicit weight/size overrides. Every other
-level is trusted to MUI's own Roboto scale rather than re-specified — restraint applied to the type
-system itself, not just the palette.
+**The Two-Override Rule.** Only `h1` and `h2` carry explicit weight/size overrides in the theme.
+Every other level is trusted to MUI's own Roboto scale rather than re-specified — restraint applied
+to the type system itself, not just the palette. The reading scale is the one scoped exception, and
+it stays scoped to the reading surface.
 
 ## Layout
 
@@ -255,10 +330,21 @@ generous vertical breathing room (`py: 4` = 32px) and a `Paper` as the primary c
 is the common inline-control gap, `mb: 3`/`mb: 4` (24px/32px) separate major sections.
 
 The primary navigation is a sticky `AppBar` that never scrolls out of view, since analyses and model
-trees can run long. Below the `sm` breakpoint the three secondary nav links (Dashboard, Projects,
-Curves) collapse into a hamburger menu rather than wrapping the bar to a second line — a wrapped
+trees can run long. Below the `sm` breakpoint the three section links (Dashboard, Projects, Curves)
+and Help collapse into a hamburger menu rather than wrapping the bar to a second line — a wrapped
 sticky bar would push all page content down a row on every load. The primary action, "New Analysis",
-stays visible at every width; it never collapses into the menu.
+stays visible at every width; it never collapses into the menu. The account control stays reachable
+at every width too, dropping to its icon below `md`.
+
+Pages load on demand; while a page's chunk arrives, a centred spinner sits below the nav, which
+stays put.
+
+The manual is two columns from `md` up: a contents list beside the text that marks the section
+being read, and the text in one Paper per section. Below `md` the contents list sits above the text,
+folded by default — open, fifteen sections would be the whole first screen on a phone.
+
+A map is the one landscape figure: full column width at 16:9, floored for narrow screens and capped
+against the viewport.
 
 ### Data tables
 
@@ -299,7 +385,9 @@ not a bespoke shadow per component.
 
 The one deliberate flattening: a dense `Accordion` inside a dialog (`ImportDatesDialog`) drops to
 `elevation={0}` with a 1px `divider`-colored border instead of a shadow — nested elevation inside an
-already-elevated Dialog reads as noise, so the boundary is drawn with a line instead.
+already-elevated Dialog reads as noise, so the boundary is drawn with a line instead. A map sits
+in the same kind of frame — an outlined, unelevated Paper — because it is a figure inside a page's
+card, not a card of its own.
 
 ### Named Rules
 **The Warm Shadow Rule.** No elevated surface in the app uses a black-tinted shadow. Shadows are
@@ -351,9 +439,21 @@ not a RadiCal-specific choice).
   in-progress "Working…" state rather than leaving the dialog silently unresponsive.
 
 ### Navigation
-- Sticky `AppBar`, primary-colored. Wordmark is the 36×36 logo mark plus "RadiCal" (h6, 600 weight)
-  linking home. Links inline at `sm` and above; a hamburger `Menu` below `sm`. See Layout for the
-  collapse behavior and why "New Analysis" never collapses.
+- Sticky `AppBar`, primary-colored. It reads left to right as three things, not one list: the
+  wordmark (36×36 logo mark plus "RadiCal", h6, 600 weight) with the section rail beside it, then
+  empty space that belongs to nobody, then the controls — Help, account, and "New Analysis".
+- **Section tabs** are full-height, square-cornered text buttons. The current section is marked by
+  weight (600) and a 2px rule in `currentColor` along the tab's foot, never by dimming the others:
+  white at any alpha over this blue falls under 4.5:1. Hover is the translucent white wash plus the
+  rule at 0.4. A section stays current for every page beneath it (`/projects/12/compare` is
+  Projects).
+- **Help** is a question-mark icon on the controls side, not a fourth tab — it is the way out of
+  being stuck anywhere, not a place.
+- **Account** is a menu, not a bare sign-out button: the trigger shows the address (truncated,
+  220px max; icon only below `md`) and the menu spells it out in full under a "Signed in as" caption.
+- **Focus on the bar** is a 2px white ring inset by 2px. The theme's primary focus ring would be
+  invisible on a primary bar, and an outset ring would be clipped by the bar's edges.
+- See Layout for the collapse behavior and why "New Analysis" never collapses.
 
 ### Progress & Status (signature component)
 - `JobProgress` uses MUI's `Alert severity="info"` for a run in progress — deliberately not a
@@ -372,6 +472,7 @@ and sticky rules; what follows is what a table *says*.
   beside the name. This is the only thing distinguishing a Sequence from a Phase in a tree table,
   and the two are not interchangeable: a Sequence orders what it contains and a Phase does not.
   Suppressed when the name already says it, so an element called "Boundary" is not labelled twice.
+  The wiggle-match and deposition sequences and the undated level take their own hues the same way.
 - **No type glyphs.** A coloured word and a symbol are two marks for one fact, and a symbol needs a
   legend the table does not have. The one glyph that survives is `⚠` for a date belonging to no
   element — a warning, not a type, with no colour of its own.
@@ -442,6 +543,48 @@ thousand pixels, and everything below follows from that height.
   name its group, and that inverse is only right if it is the exact inverse of where the figure
   drew the row.
 
+### Maps (signature component)
+
+`SiteMap` draws every placed date by position, on either an offline basemap the app serves itself or
+a tiled one. See the Map Palette under Colors for every mark.
+
+- **Tiles are opt-in, per project.** A tiled map sends the square of the earth on screen to a third
+  party, so only a project that has said yes gets one — and only then a small `Switch` under the map,
+  labelled with the provider, to turn it off. A project that has not opted in gets no switch: the
+  opt-in is the privacy decision, and it is not made here.
+- **The caption says what the map is doing**, in one caption line under the figure: loading,
+  checking whether the provider can be reached, the pan/zoom (and click-to-place) instructions, and
+  — only when it happened — that the provider could not be reached and the offline coastlines are
+  drawn instead.
+- **A figure first, an input second.** Read-only by default; in edit mode the cursor is a crosshair
+  and a click places every selected date. The Download PNG control sits outside the figure box so
+  saving can never also move a pin.
+- **Unplaced dates are listed, not hidden**, under a "Not placed (n)" subtitle below the map.
+- **The fitted front** is drawn as a great circle in the posterior line colour at 2px — dotted
+  offline, solid on tiles (MapLibre lines take no dash through Plotly).
+
+### Age–depth figure
+
+Depth down the left, calendar age across the foot, both rulers positioned against the one plot box.
+The median runs through the envelope as a 1.5px line in the mean ink, drawn last so it is never
+buried. Each level is a 6px dot: filled for a dated level, **hollow** (surface fill, ink edge) for an
+undated one whose age is entirely inferred — a reader has to be able to tell the two apart.
+
+### Reading surface (manual and glossary)
+
+The manual renders from Markdown through theme tokens only, so it reads as part of the app rather
+than a document embedded in it: its tables are the app's tables (bordered in `divider`, 8px radius),
+its links the app's links. Links inside the document stay in the tab; external ones open a new one.
+Headings carry a scroll margin that clears the sticky bar. The contents list marks the current
+section with the primary colour, 600 weight and a 2px left rule; the rule is drawn only where the
+list is beside the text, since folded above it nothing is "current".
+
+### Error fallback
+
+A page that throws is caught below the nav, so the reader still has something to navigate with. The
+fallback shows the error's message — not its stack — in a Muted Surface block at 0.8125rem, then a
+contained "Reload the page" action. It resets when the route changes.
+
 ### Browser surfaces
 
 The parts of the page the app does not draw ship in colours belonging to no design system, and the
@@ -497,6 +640,11 @@ scattered rows in a table.
   toolbar.
 - **Do** hand a component the space it may use. A component that measures its own wrapper measures
   a number it produced.
+- **Do** check every map mark on the tiled basemap as well as on white, and give a pale mark a 1px
+  ink edge rather than a white halo.
+- **Do** mark the current item in a nav or contents list with weight and a rule; keep every label at
+  full contrast.
+- **Do** write every control label in sentence case, Tabs and ToggleButtons included.
 
 ### Don't:
 - **Don't** fall back to MUI's stock blue (`#1976d2`) or pink (`#dc004e`) — both were the literal
@@ -530,3 +678,9 @@ scattered rows in a table.
   label with its geometry, so the two cannot disagree.
 - **Don't** leave a vendor control interacting with state the app also owns. Either the app follows
   it or the canvas is locked.
+- **Don't** reuse an element hue (wiggle amber, deposition teal) for a measurement on a map. A site
+  in the wiggle amber is claiming to be a wiggle match.
+- **Don't** dim an inactive nav label on the primary bar. White at any alpha over the blue is under
+  4.5:1.
+- **Don't** add colour to the tiled basemap. Woodland, parks and road shields were cut so the marks
+  are the only colour on it.
