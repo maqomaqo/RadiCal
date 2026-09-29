@@ -31,7 +31,8 @@ let underlying: ReturnType<typeof vi.fn>
 let client: Client
 
 function lastHeaders(): Headers {
-  const init = underlying.mock.calls.at(-1)?.[1]
+  const calls = underlying.mock.calls
+  const init = calls[calls.length - 1]?.[1]
   return new Headers(init?.headers || {})
 }
 
