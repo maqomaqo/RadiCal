@@ -9,84 +9,47 @@ Boundaries), and interactive posterior visualization.
 - **Three analysis types**: single calibration, independent calibration of several samples at once
   ("group calibration"), and full Bayesian modelling with stratigraphic constraints.
 - **Calibration curves**: IntCal20, Marine20, SHCal20, with marine reservoir (ΔR) correction.
-  Which curves exist, and everything countable about each of them — point count, calendar and
-  radiocarbon range, the calendar grid's step structure, a content hash — comes from one registry
-  (`backend/app/services/curve_registry.py`) that measures them from the curves it actually loads,
-  and is what the curve pickers, the CSV importer and the OxCal importer all read.
+  Which curves exist, and everything countable about each of them is kept in one registry
+  (`backend/app/services/curve_registry.py`).
 - **Your own curves**: import a curve from a `.14c` or a headed CSV (columns matched by name in any
   order; a BC/AD calendar column converted on the way in), previewed before anything is stored.
-  An imported curve is then selectable on any date, understood by the CSV and OxCal importers under
-  whatever aliases it was given, and exportable byte-for-byte as uploaded. Its numbers are immutable
-  — a correction is a new curve, not an edit — and a curve something has been calibrated against
+  An imported curve is then selectable on any date, understood by the CSV and OxCal file importers under
+  whatever aliases it was given, and exportable byte-for-byte as uploaded. If a curve has been used in an analysis it
   cannot be deleted, only archived, so an analysis that used it still reruns. The **Curves** page
   is where they are imported, described, downloaded and archived, and it shows what was measured
   from each curve — points, range, calendar grid — beside it.
 - **Curve browser**: look at any curve's shape with its own ±1σ/±2σ error bounds, scrolled and
-  zoomed along the calendar axis. A strip under the plot shows the whole 55,000 years with the
-  current view marked — drag it to move, drag an edge to zoom, click to jump — because panning
-  inside a chart never says *where* you are. Hovering reports what the curve says at that
-  calendar age and how steeply it is running, which is what decides how tightly anything can be
-  dated there: near 1 the curve tracks calendar time, near 0 it is a plateau and a measurement
-  spreads over centuries, below 0 it reverses and one measurement splits into disjoint ranges.
-- **Compare and simulate**: overlay a second curve and read their *difference* on its own panel —
-  two curves drawn over each other are indistinguishable at any zoom that fits a millennium on
-  screen, while IntCal20 − SHCal20 shows the hemispheric offset (about 40 ¹⁴C years) at a glance.
+  zoomed along the calendar axis.
+- **Compare and simulate**: overlay a second curve and read their *difference* on a separate panel.
   Clicking a calendar year shows what a date from it would actually look like: inside the Hallstatt
   plateau, a ±25 yr measurement comes back as **four disjoint calendar ranges spread over 337
   years**, which says what a plateau costs more plainly than any single number. The visible window
   exports as CSV.
 - **Expected temporal resolution**: under the curve, on the same calendar axis, how tightly a date
   from each year could be known *before anyone measures anything* — the method of Svetlik et al.
-  (2019), as implemented in [res14c](https://github.com/demjanp/res14c_online). Mean plus a
-  5th–95th percentile band for how lucky one date can be, with the assumed laboratory error
-  selectable — ±25 by default, what a commercial date typically carries, down to the ±15 of the
-  best AMS work — and a CSV export. On IntCal20 at ±25 it puts the Hallstatt plateau at about 330
-  years against 103 at the steep drop into it; at ±15 the same two points are 312 and 33. Either
-  way it is the difference between a date worth commissioning and one that will not answer the
-  question.
-- **Mixed curves**: OxCal's `Mix_Curves`, for a sample whose carbon came from more than one
-  reservoir — a human or animal with a partly marine diet, whose bone is neither terrestrial nor
-  marine carbon and is wrong by centuries against either curve alone. Built from two curves and a
-  proportion, with the uncertainty on that proportion widening the result most where the two
-  curves are furthest apart, which is where being wrong about the diet moves a date furthest. An
-  `.oxcal` file using `Mix_Curves` now imports, matched against a mixture this app already has —
-  and naming exactly what to create when it has none.
+  (2019), as implemented in [res14c](https://github.com/demjanp/res14c_online).
+- **Mixed curves**: Similar to OxCal's `Mix_Curves`, for a sample whose carbon came from more than one
+  reservoir — e.g. a bone from an animal with a partly marine diet. In the app you can build a new mixed curve by choosing two curves and a
+  proportion. An `.oxcal` file using `Mix_Curves` will then import, or you'll get a prompt if you haven't already mixed an appropriate curve.
 - **Bayesian chronological modelling**: an explicit model tree of nested Sequences, Phases,
   Boundaries and Hiatuses (the OxCal idiom), each date assigned to a Phase; TPQ/TAQ age limiters;
   an optional outlier model per date. Solved exactly where the model permits it, and by OxCal's own
-  MH/Gibbs scheme otherwise — validated against real OxCal 4.4 runs in
-  [`test_oxcal_agreement.py`](backend/tests/test_oxcal_agreement.py),
-  [`test_exact_chain.py`](backend/tests/test_exact_chain.py) and
-  [`test_gibbs.py`](backend/tests/test_gibbs.py).
+  MH/Gibbs scheme otherwise — all validated against real OxCal 4.4 runs.
 - **Wiggle matching** (OxCal's `D_Sequence`/`V_Sequence`): a series of dates separated by counted
   rings or varves has ONE free parameter — the calendar age at the reference ring — so it is solved
-  in closed form rather than sampled. At the Hallstatt plateau that is the difference between a
-  single date's 285-year range in two pieces and eight samples over 250 rings giving 20 years in
-  one. Enter ring numbers and the app converts them to gaps, in the one direction that is right:
+  in closed form rather than sampled. Enter ring numbers and the app converts them to gaps:
   a gap counts years *before* the reference and increases into the past. Where the gaps were
   measured rather than counted, each carries its own uncertainty.
 - **Age-depth modelling** (OxCal's `P_Sequence`): deposition modelled as a Poisson process down a
   core, giving age against depth with a band round it, the accumulation rate between each pair of
-  levels, and an age at any depth you ask for — including ones nothing was dated at. The rigidity
-  is inferred from the dates rather than set, and reported alongside the band: a stiff model draws
-  a straighter line through a calibration plateau than the dates alone support, and the app says
-  when that rigidity has run up against the end of the range it was allowed.
-- **Harris matrix diagram**: the model tree drawn to the conventional reading, oldest at the bottom
+  levels, and an age at any depth you ask for — including ones nothing was dated at.
+- **Model structure diagram**: the model tree drawn as a graph, oldest at the bottom
   — nesting shown as boxes within boxes, Boundaries as labelled rules carrying their modelled
-  range, and an arrow only between adjacent blocks that nothing else already separates. Laid out
-  from the tree by `utils/harrisLayout.ts`, whose geometry is unit-tested rather than eyeballed.
+  range.
 - **Durations and differences** (opt-in): how long each Sequence, each Phase, and each phase's set
   of *dated events* lasted, and how far apart the phases sit — a gap in years where they are
   separate, an overlap where they are not, each graded from "none" to "extensive" at the same
-  68.3%/95.4% levels the HPD regions use. The three durations are three different questions: a Phase's
-  duration is the interval its Boundaries enclose, its dated events span less than that, and the
-  distance between the two is how much of the phase the dates did not catch. Every one of these is a
-  function of several modelled ages at once, so they are read off *joint* draws of the posterior —
-  exactly what the marginal distributions elsewhere in the app cannot give you (pairing two boundary
-  marginals puts 8% of one test phase's durations below zero). On the exact solver those draws are
-  independent draws from the true posterior, by backward sampling over the same chain it already
-  built. A group calibration gets the differences without the durations: dates with no relationship
-  asserted between them belong to no phase.
+  68.3%/95.4% levels the HPD regions use.
 - **Diagnostics**: an OxCal-style agreement index per date (how much the model had to move it away
   from its own unconstrained calibration) and an outlier posterior probability where an outlier model
   is applied.
@@ -108,8 +71,6 @@ Boundaries), and interactive posterior visualization.
   solver that actually produced it, the results table in the model's own reading order with dates
   and Boundaries reporting through the same columns, the durations-and-differences table where one
   was produced, and a posterior plot for each parameter with its unmodelled calibration behind it.
-  All three come from one assembly, so the three downloads of one analysis cannot disagree; a column appears in the report only when the run has something to put
-  in it, so a plain calibration is not padded out with the diagnostics only a model produces.
 
 ## Tech Stack
 
