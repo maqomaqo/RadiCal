@@ -167,11 +167,11 @@ def _gap_kernel(step: float, sigma: float) -> np.ndarray:
     return kernel / total if total > 0 else kernel
 
 
-def _log_product(grid: np.ndarray, members: List[Tuple[Dict, float, float]],
-                 bounds_by_id: Dict[str, Tuple]) -> np.ndarray:
+def _log_terms(grid: np.ndarray, members: List[Tuple[Dict, float, float]],
+               bounds_by_id: Dict[str, Tuple]) -> Optional[List[np.ndarray]]:
     """
-    log of the product over members, as a function of the REFERENCE age on
-    `grid`.
+    Each member's log likelihood as a function of the REFERENCE age on `grid`,
+    scaled to peak at zero; None when some member has no support on it.
 
     Each member is evaluated at grid + its own gap, which is the whole of the
     model: shift, multiply. Where a gap carries an uncertainty the shifted
@@ -179,7 +179,7 @@ def _log_product(grid: np.ndarray, members: List[Tuple[Dict, float, float]],
     difference between a D_Sequence and a V_Sequence.
     """
     step = float(grid[1] - grid[0])
-    total = np.zeros(len(grid))
+    terms: List[np.ndarray] = []
     for measurement, offset, offset_error in members:
         shifted = _date_likelihood(
             grid + offset, measurement,
@@ -188,14 +188,63 @@ def _log_product(grid: np.ndarray, members: List[Tuple[Dict, float, float]],
             shifted = convolve_on_grid(shifted, _gap_kernel(step, offset_error))
         peak = shifted.max()
         if peak <= 0:
-            # Nowhere on this window can this member be. Left as -inf rather
-            # than raising: the caller decides, and the coarse pass reaching
-            # here simply means the window is in the wrong place.
-            return np.full(len(grid), -np.inf)
+            # Nowhere on this window can this member be. Returned as None
+            # rather than raising: the caller decides, and the coarse pass
+            # reaching here simply means the window is in the wrong place.
+            return None
         with np.errstate(divide='ignore'):
-            total = total + np.log(np.where(shifted > 0, shifted / peak, 1.0))
-            total = np.where(shifted > 0, total, -np.inf)
-    return total
+            terms.append(np.log(shifted / peak))
+    return terms
+
+
+def _log_product(grid: np.ndarray, members: List[Tuple[Dict, float, float]],
+                 bounds_by_id: Dict[str, Tuple]) -> np.ndarray:
+    """log of the product over members, as a function of the REFERENCE age."""
+    terms = _log_terms(grid, members, bounds_by_id)
+    if terms is None:
+        return np.full(len(grid), -np.inf)
+    return np.sum(terms, axis=0)
+
+
+def _member_density(grid: np.ndarray, index: int,
+                    members: List[Tuple[Dict, float, float]],
+                    terms: List[np.ndarray],
+                    bounds_by_id: Dict[str, Tuple],
+                    reference_density: np.ndarray) -> np.ndarray:
+    """
+    Member `index`'s own age, t_i = t + G_i, as a density on grid + g_i.
+
+    With a COUNTED gap (sigma 0) G_i is g_i exactly, and this is the
+    reference's density moved bodily -- one distribution translated.
+
+    With a MEASURED gap it is not. Marginalising every other gap as the
+    reference does, then the reference age itself, leaves
+
+        p(t_i)  proportional to  L_i(t_i) * (R_-i conv N(0, sigma_i))(t_i - g_i)
+
+    where R_-i is the product of every OTHER member's smeared term. The
+    member's own measurement stays sharp and what the rest of the series says
+    about it is blurred by how well its position in the series is known. So
+    the member gets a width of its own: usually wider than the reference --
+    knowing the series' age to +/-4 years does not place a ring whose
+    position in it is only known to +/-5 -- but narrower where its own
+    measurement sits on a steep stretch of curve and pins it harder than the
+    series pins gap 0. Checked against a brute-force integral over (t, G_i).
+    """
+    measurement, offset, offset_error = members[index]
+    if offset_error <= 0:
+        return reference_density
+    step = float(grid[1] - grid[0])
+    others = [term for k, term in enumerate(terms) if k != index]
+    rest = _density(np.sum(others, axis=0)) if others else np.ones(len(grid))
+    smeared_rest = convolve_on_grid(rest, _gap_kernel(step, offset_error))
+    own = _date_likelihood(grid + offset, measurement,
+                           bounds_by_id.get(measurement['id'], (None, None)))
+    density = own * smeared_rest
+    # The two integrate to the same mass analytically; only a window that
+    # clips the smear could empty this, and the translated reference is the
+    # honest fallback there rather than an exception.
+    return density if density.sum() > 0 else reference_density
 
 
 def _density(log_weights: np.ndarray) -> np.ndarray:
@@ -280,9 +329,11 @@ def solve(measurements: List[Dict], group: WiggleGroup,
          'gap_units':   what the offsets are counted in,
          'series_span': the outermost gap minus the innermost}
 
-    Each member's posterior is the reference's shifted by its own gap. They
-    are one distribution translated rather than n results, and every caller
-    that renders them has to say so.
+    Each member's posterior is the reference's shifted by its own gap -- one
+    distribution translated rather than n results, which every caller that
+    renders them has to say -- except where the gap was measured rather than
+    counted, which gives that member a width of its own (see
+    _member_density).
     """
     by_id = {m['id']: m for m in measurements}
     element_bounds = inherited_bounds(root) if root else {}
@@ -325,7 +376,9 @@ def solve(measurements: List[Dict], group: WiggleGroup,
             measurement, {'taq_age_bp': el_taq, 'tpq_age_bp': el_tpq})
 
     grid = _build_grid(members, bounds_by_id)
-    density = _density(_log_product(grid, members, bounds_by_id))
+    terms = _log_terms(grid, members, bounds_by_id)
+    density = (_density(np.sum(terms, axis=0)) if terms is not None
+               else np.zeros(len(grid)))
     if density.sum() <= 0:
         raise WiggleMatchError(
             'no calendar age fits every member of this series at the gaps '
@@ -339,15 +392,18 @@ def solve(measurements: List[Dict], group: WiggleGroup,
     results: Dict[str, Dict] = {}
     member_records: List[Dict] = []
     indices: List[Optional[float]] = []
-    for measurement, offset, offset_error in members:
+    for index, (measurement, offset, offset_error) in enumerate(members):
         shifted_grid = grid + offset
-        # The SAME density on a grid moved bodily by this member's gap. Not a
-        # separate inference: _summarize normalises and trims identically
-        # whatever the shift, so a member's plotted curve is the reference's
-        # translated, which is exactly the claim the model makes -- and
-        # exactly what the results panel has to say out loud, or n
-        # identically-shaped curves read as n independent confirmations.
-        summary = _summarize(shifted_grid, density, rng, num_samples)
+        # For a counted gap, the SAME density on a grid moved bodily by this
+        # member's gap. Not a separate inference: _summarize normalises and
+        # trims identically whatever the shift, so a member's plotted curve is
+        # the reference's translated, which is exactly the claim the model
+        # makes -- and exactly what the results panel has to say out loud, or
+        # n identically-shaped curves read as n independent confirmations.
+        # A measured gap widens its member; see _member_density.
+        member_density = _member_density(
+            grid, index, members, terms, bounds_by_id, density)
+        summary = _summarize(shifted_grid, member_density, rng, num_samples)
         index = agreement_service.agreement_index(
             measurement, summary['probability_distribution'])
         summary['agreement_index'] = index

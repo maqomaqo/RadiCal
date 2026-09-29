@@ -577,7 +577,7 @@ counted in. It labels the axis and the results panel; the maths is the same eith
 **increases into the past**, so a sample nearer the pith has the larger gap and the older age. The
 reference defaults to the outermost sample, which is the one a felling date is quoted against.
 
-**What it buys, and what it does not.** At a calibration plateau a single date is close to useless
+**What it buys.** At a calibration plateau a single date is close to useless
 and a long enough series is not: at 2500 cal BP, one date at ±25 gives a 285-year range in two
 disjoint pieces, where eight samples over 250 rings give 20 years in one. But **length decides
 whether the match resolves at all, and count only decides how tightly**. Twelve samples packed into
@@ -585,9 +585,18 @@ whether the match resolves at all, and count only decides how tightly**. Twelve 
 series is short, because that is a thing to know before the dates are commissioned rather than
 after the answer comes back in two pieces.
 
-**Reading the result.** Every member's posterior is the *same distribution moved by its own gap* —
-one answer read at several points on the timber, not several independent results. They all have the
-same width for that reason, and the panel says so.
+**Reading the result.** The panel sits above the results table and gives the age at the reference
+point, with its range at the confidence selected on the page. Every member's posterior is the *same
+distribution moved by its own gap* — one answer read at several points on the timber, not several
+independent results — so with counted gaps every member's range is the same width. A member whose gap was **measured** (entered with a ±) gets a width of its own — usually
+wider, because its place in the series is uncertain, but narrower where its own measurement sits on
+a steep stretch of curve and pins it more tightly than the series pins the reference.
+
+The panel's figure places each laboratory measurement (±1σ) on the calibration curve at the
+reference age plus its gap. A good match lies along the curve's wiggles all at once; a date that
+sits off the curve is ringed, and usually has the wrong ring count. If the reference age splits into
+several ranges, the series has not settled on one place on the curve: a longer series resolves it,
+while more samples inside the same span usually do not.
 
 The **combination agreement** is not a diagnostic beside the answer; it is the check that the match
 happened. The gaps are asserted, so a sample misidentified by forty rings cannot be absorbed the way
@@ -687,7 +696,7 @@ switch: the setting in Edit Project is where that decision is made.
 The tiled basemap needs the internet. Before it is drawn the app checks that OpenFreeMap can be
 reached; if it cannot, the map falls back to the offline basemap and says so underneath, then
 checks again a few times and switches to tiles as soon as the server answers. Lines on the tiled
-map — the fitted front, isochrons and spanning-tree links — are drawn along great circles, as the
+map — isochrons and spanning-tree links — are drawn along great circles, as the
 offline map draws them, so the same figure reads the same way on either.
 
 The Edit Project dialog also sets the project's **coordinate precision** — full, or rounded to
@@ -745,14 +754,23 @@ that were sampled together — and the Results page shows them above the results
 - **Wave of advance** from a placed origin — `t = t₀ − d / v` per draw — reported as **front
   speed**, **arrival at the origin**, and the number of sites. Optional: press **Place an origin**
   under the switch to drop a pin (with the dates on the map for context) and the fit is added
-  beside the two that assume none. A negative speed is reported as negative: either the front ran
-  the other way, the origin is not where it started, or these dates do not describe a front at
-  all. Nothing flips a sign to make the answer look like a dispersal.
+  beside the two that assume none. Its map draws **isochrons as circles** round the origin — the
+  model makes arrival a function of distance alone, so a line of equal arrival is a circle — and
+  beneath it an **arrival against distance** plot puts every site at its distance and modelled
+  arrival with the fitted front drawn through them, which is where a pause or a leapfrog shows.
+  Beside the speed the panel states how widely the sites **scatter** about the front, set against
+  the time the front takes to cross them: the speed's interval is how much the line moves between
+  draws, not how far the sites sit from it. A negative speed is reported as negative: either the
+  front ran the other way, the origin is not where it started, or these dates do not describe a
+  front at all. Nothing flips a sign to make the answer look like a dispersal.
 
 **Residuals are the finding.** Every site is coloured on the map by how far it departs from the
 fit — orange where it is early, blue-grey where it is late, pale near zero — and the wave of
 advance lists them in a table beside it: the signed residual in years — positive means the site
-is *older* than the front predicts (**early**), negative *later* (**late**) — sorted by magnitude. A plane's isochrons are always straight, parallel and evenly
+is *older* than the front predicts (**early**), negative *later* (**late**) — sorted by magnitude,
+the ten largest shown first. A site within twice its own uncertainty of the front is marked
+**fits** rather than given a direction its evidence does not support. Pointing at a row rings its
+site on the map and the plot, and **Download CSV** saves the whole table. A plane's isochrons are always straight, parallel and evenly
 spaced, so a front that curved, slowed or sped up shows as a patch of neighbouring sites all one
 colour rather than in the lines. A single early outlier is where the
 interesting archaeology usually is: a leapfrog, a maritime route, a redeposited sample, or a wrong
@@ -764,14 +782,41 @@ shown with a caveat. A trend surface also needs sites spread in two directions �
 place an origin and read the wave of advance instead — and a wave of advance needs the sites at
 more than a few distinct distances from its origin. Each refusal names its reason on the panel.
 
-**What the estimate is not.** Fitting per draw propagates the uncertainty in the *ages*. It does
-not propagate uncertainty in the origin, in the coordinates, or in the assumption that these sites
-are the front rather than the excavated subset of it; residuals are assumed independent when
-neighbouring sites in fact share whatever the model is missing, so the interval on the speed is
-optimistic in the way an OLS interval on autocorrelated data always is; and it is a plug-in
-Monte Carlo estimator, not a hierarchical model. The panel says all of this beside the number. For
-a group calibration, which has no model and so no Boundaries, sites are dated by their **earliest
-dated event** and labelled exactly that, with the bias named on the panel.
+**Reading the maps.** A plain scroll wheel over a map scrolls the page; hold **Ctrl** (**⌘** on a
+Mac) to zoom, or use the **+**, **−** and **reset** buttons under it, which also work from the
+keyboard. On a touch screen the read-only maps do not pan, so a swipe scrolls past them.
+
+**Limits of the estimate.**
+
+- The front is refitted on every posterior draw, so uncertainty in the *ages* carries into the
+  speed. Uncertainty in the origin, in the coordinates, and in whether these sites are the true
+  front (rather than the part of it that was excavated) is left out.
+- Residuals are treated as independent. Neighbouring sites share whatever the model misses, so the
+  interval on the speed is narrower than it should be — as for any least-squares fit to spatially
+  correlated data. The **site scatter** figure beside the speed shows how far the sites actually
+  sit from the front: the root-mean-square residual, and that as a share of the time the front
+  takes to cross from the origin to the furthest site.
+- The speed is a line refitted to each draw and summarised. A hierarchical model would estimate
+  the front and each site's scatter together.
+- For a group calibration, which has no Boundaries, sites are dated by their **earliest dated
+  event**. The oldest date at a site is a *terminus ante quem* for arrival: the first thing at a
+  site is rarely the thing excavated, so every arrival is late by an unknown amount, and later at
+  the least-dug sites. The speed inherits that bias.
+
+**Reading the origin search.** Shaded cells are candidate origins whose likelihood is at least the
+shown share of the best cell's. Cells where sites get *older* with distance are where the front
+went rather than where it started, so they are not scored. When the shaded region covers most of
+the search area, the dates fix the direction of travel but not the starting point — the expected
+result when sites lie along one axis, since sliding the start back along that axis fits almost as
+well. A best cell on the edge of the search area means the same thing.
+
+**Reading the regional gradient.** Its isochrons are straight, parallel and evenly spaced by
+construction, so a curving or slowing front shows in the site colours rather than in the lines. The
+direction's **concentration** runs from 0 (draws point every way) to 1 (all agree); below 0.5 the
+panel marks the direction as uncertain.
+
+**Negative speed.** Sites further from the origin are older. Either the front ran the other way,
+the origin is elsewhere, or the sites do not form a front; the residuals tell these apart.
 
 ## Exporting Data
 
@@ -1411,6 +1456,19 @@ that member's distance from the reference — and treats them as independent. Ox
 chain, so two members beyond a shared gap have correlated distances; importing an OxCal
 `V_Sequence` accumulates its gap errors in quadrature and says that it did.
 
+A measured gap also gives **its own member** a width of its own. Member `i`'s age is `t + G_i`, and marginalising the
+reference age as well as every gap leaves
+
+```
+p(t_i)  proportional to  L_i(t_i) · (R_−i ⊛ N(0, sigma_i))(t_i − g_i)
+```
+
+where `R_−i` is the product of every other member's smeared term: the member's own measurement
+stays sharp, and what the rest of the series says about it is blurred by how well its position in
+the series is known. Usually that makes the member wider than the reference; where its own
+measurement is sharp it can make it narrower. With `sigma_i = 0` this is the reference moved
+bodily, as for a counted gap.
+
 **The grid** is the series' own support plus a small fixed pad, at one year, located by a coarse
 first pass. It is not the solver grid of A.6: that one pads by six times the dates' width so that
 Boundaries have room, and a wiggle match has no Boundaries, so at a fixed point budget the padding
@@ -1418,7 +1476,8 @@ would be paid for in resolution — several years per cell on a long series, qua
 whose whole point is a range ten years wide.
 
 **Agreement, and no outlier model.** Each member's index is A.8's, comparing its modelled posterior
-(the reference's, shifted) against its own unmodelled likelihood; the combination is the same
+(the reference's shifted, or its own as above for a measured gap) against its own unmodelled
+likelihood; the combination is the same
 `100·(∏A_i/100)^(1/√n)` A.8 uses. It carries more weight here than elsewhere: the gaps are
 asserted, so a misidentified member cannot be absorbed by the model widening — it can only make
 everything fit worse. No threshold is quoted against it, for the reason A.8 gives for not reporting

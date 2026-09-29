@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { createContext, useContext, useState, useEffect, useMemo } from 'react'
 import { useParams, useNavigate, Link as RouterLink } from 'react-router-dom'
 import {
   Container,
@@ -60,6 +60,7 @@ import HarrisMatrixDiagram from '@/components/HarrisMatrixDiagram'
 import DurationsPanel from '@/components/DurationsPanel'
 import { modelCanReportIntervals } from '@/utils/intervalsAvailable'
 import WiggleMatchPanel from '@/components/WiggleMatchPanel'
+import { ELEMENT_TYPE_LABEL } from '@/utils/elementLabels'
 import AgeDepthPanel from '@/components/AgeDepthPanel'
 import DispersalPanel from '@/components/DispersalPanel'
 import ConfirmDialog from '@/components/ConfirmDialog'
@@ -579,6 +580,14 @@ interface ResultColumn {
  * advertised a Diagnostics column above a blank strip while the banner on the
  * same card named the dates that were supposed to be marked in it.
  */
+/**
+ * Whether this analysis's model can give a date an outlier probability at
+ * all. A wiggle match cannot (services/wiggle_match refuses the setting), so
+ * its "O —" on every row read as a diagnostic that failed to compute rather
+ * than one that does not exist for this model.
+ */
+const OutlierModelApplies = createContext(true)
+
 function DiagnosticsCell({
   result,
   outlierPrior,
@@ -589,6 +598,7 @@ function DiagnosticsCell({
   outlierModel?: 'general' | 'charcoal' | null
 }) {
   const concern = concernFor(result, outlierPrior)
+  const outlierApplies = useContext(OutlierModelApplies)
   // A date given a NOTABLE outlier prior whose posterior did not rise above it
   // still had special treatment -- worth saying, but not as a warning, so it
   // is a plain chip rather than folded into the reasons text. Below
@@ -635,10 +645,14 @@ function DiagnosticsCell({
               where a diagnostic was not computed -- an older analysis,
               or a date with no outlier model -- which is not zero. */}
           {result?.agreement_index != null ? `A ${result.agreement_index.toFixed(0)}` : 'A \u2014'}
-          {'  \u00b7  '}
-          {result?.outlier_probability != null
-            ? `O ${Math.round(result.outlier_probability * 100)}%`
-            : 'O \u2014'}
+          {outlierApplies && (
+            <>
+              {'  \u00b7  '}
+              {result?.outlier_probability != null
+                ? `O ${Math.round(result.outlier_probability * 100)}%`
+                : 'O \u2014'}
+            </>
+          )}
         </Box>
       </Stack>
     </TableCell>
@@ -694,6 +708,13 @@ function StructureTableRow({
     row.kind !== 'date' && row.kind !== 'unassigned'
       ? elementTypeColors[row.kind]?.ink
       : undefined
+  // The type as a word, not as its identifier: "wiggle_sequence" printed
+  // verbatim beside every wiggle match, and never matched the name check
+  // below because no element is called that.
+  const typeWord =
+    row.kind !== 'date' && row.kind !== 'unassigned'
+      ? (ELEMENT_TYPE_LABEL[row.kind] ?? String(row.kind)).toLowerCase()
+      : ''
   const isDate = row.kind === 'date'
   const posterior = row.posterior
   // A heading has no posterior of its own: its numbers are the boundaries
@@ -826,12 +847,12 @@ function StructureTableRow({
             Still suppressed when the name already says it -- an element
             called "Boundary" does not need "boundary" after it, and briefly
             did. */}
-        {!isDate && typeColor && !row.name.toLowerCase().includes(String(row.kind)) && (
+        {!isDate && typeColor && !row.name.toLowerCase().includes(typeWord) && (
           <Box
             component="span"
             sx={{ ml: 1, color: typeColor, fontSize: '0.75rem', fontWeight: 500 }}
           >
-            {row.kind}
+            {typeWord}
           </Box>
         )}
         {limiters && (
@@ -2310,7 +2331,82 @@ export default function Results() {
         </Paper>
       )}
 
+      {/* A wiggle match, before the results table rather than after it.
+          The table below lists every member as a date of its own, which is
+          the one reading this model does NOT support -- they are one age with
+          the measured gaps added -- so the panel that says so has to come
+          first. */}
+      {wiggleMatch && (
+        <Box sx={{ mb: 3 }}>
+          <WiggleMatchPanel
+            name={wiggleMatch.name}
+            reference={wiggleMatch.posterior}
+            members={analysis.solver?.members || []}
+            gapUnits={analysis.solver?.gap_units || 'rings'}
+            seriesSpan={analysis.solver?.series_span ?? 0}
+            combinationAgreement={analysis.solver?.combination_agreement}
+            referenceSampleId={analysis.solver?.reference_sample_id}
+            measurements={Object.fromEntries(
+              (analysis.solver?.members || []).map((member) => {
+                const m = measurementBySampleId.get(member.id)
+                return [
+                  member.id,
+                  m
+                    ? {
+                        ageBp: m.age_bp,
+                        error1Sigma: m.error_1sigma,
+                        deltaR: m.delta_r,
+                        curveId: m.curve_id,
+                      }
+                    : undefined,
+                ]
+              })
+            )}
+            memberDistributions={Object.fromEntries(
+              (analysis.results || []).map((r) => [r.sample_id, r.probability_distribution])
+            )}
+            dateFormat={dateFormat}
+            confidence={confidence}
+            confidenceLabel={CONFIDENCE_LABEL}
+          />
+        </Box>
+      )}
+
+      {/* An age-depth model, likewise before the table: the band IS the
+          answer, and a column of per-level posteriors answers a different
+          question. */}
+      {ageDepthRecords.map((record) => (
+        <Box key={record.element_id} sx={{ mb: 3 }}>
+          <AgeDepthPanel
+            record={record}
+            rigidity={(analysis.solver?.deposition || []).find(
+              (d) => d.element_id === record.element_id
+            )}
+            dateFormat={dateFormat}
+          />
+        </Box>
+      ))}
+
+      {/* A wave of advance, before the table for the same reason the age-depth
+          band is: the map IS the answer, and a column of per-site arrival ages
+          answers a different question.
+
+          Drawn on the project's basemap: a project that has opted into tiles
+          gets them here as it does when placing, and one filed nowhere gets
+          the private default. */}
+      {dispersalSection && (
+        <Box sx={{ mb: 3 }}>
+          <DispersalPanel
+            section={dispersalSection}
+            dateFormat={dateFormat}
+            tiles={mapTiles}
+            editPath={`/analysis/${analysisId}/edit`}
+          />
+        </Box>
+      )}
+
       {/* Results Table */}
+      <OutlierModelApplies.Provider value={analysis.solver?.method !== 'wiggle_match'}>
       <Paper sx={{ p: 3, mb: 3 }}>
         {/* The card's masthead: what this is, and the two ways to take it
             away. Everything that changes how it READS is in the strip under
@@ -2517,9 +2613,14 @@ export default function Results() {
             {/* What "Edit analysis" is for. The button was the only exit from
                 this banner and said nothing about what to change once it was
                 pressed, which left the reader with a verdict and no move. */}
+            {/* The advice has to fit the model. A wiggle match refuses an
+                outlier prior (its gaps are asserted, so there is nothing for a
+                date to be an outlier from) -- recommending one sent the reader
+                to a setting the next run would reject. */}
             <Typography variant="body2" sx={{ mt: 0.5 }}>
-              They are highlighted in the table below; hover over a chip for the reason. Edit the
-              analysis to change the model, remove a date, or give it an outlier prior.
+              {analysis.solver?.method === 'wiggle_match'
+                ? 'Check the ring count of each flagged date, or remove it.'
+                : 'They are highlighted in the table below; hover over a chip for the reason. Edit the analysis to change the model, remove a date, or give it an outlier prior.'}
             </Typography>
           </Alert>
         )}
@@ -2801,7 +2902,9 @@ export default function Results() {
         {isBayesian && (
           <Typography variant="caption" color="textSecondary" component="p" sx={{ mt: 1.5 }}>
             <strong>A</strong> = agreement index — how far the model moved a date from the original calibration. 100 is unchanged, above 100 means it sharpened the date onto its own peak. Below 60 is considered a major shift.{' '}
-            <br /><strong>O</strong> = the probability the date is an outlier.{' '}
+            {analysis.solver?.method !== 'wiggle_match' && (
+              <><br /><strong>O</strong> = the probability the date is an outlier.{' '}</>
+            )}
             {/* The chips read as a verdict with no stated rule, and the rule
                 is not guessable from the two numbers beside them: both chips
                 compare O against the PRIOR the date was given, not against a
@@ -2814,54 +2917,7 @@ export default function Results() {
           </Typography>
         )}
       </Paper>
-
-      {/* A wiggle match, before the results table rather than after it.
-          The table below lists every member as a date of its own, which is
-          the one reading this model does NOT support -- they are one age with
-          the measured gaps added -- so the panel that says so has to come
-          first. */}
-      {wiggleMatch && (
-        <Box sx={{ mb: 3 }}>
-          <WiggleMatchPanel
-            name={wiggleMatch.name}
-            reference={wiggleMatch.posterior}
-            members={analysis.solver?.members || []}
-            gapUnits={analysis.solver?.gap_units || 'rings'}
-            seriesSpan={analysis.solver?.series_span ?? 0}
-            combinationAgreement={analysis.solver?.combination_agreement}
-            referenceSampleId={analysis.solver?.reference_sample_id}
-            dateFormat={dateFormat}
-          />
-        </Box>
-      )}
-
-      {/* An age-depth model, likewise before the table: the band IS the
-          answer, and a column of per-level posteriors answers a different
-          question. */}
-      {ageDepthRecords.map((record) => (
-        <Box key={record.element_id} sx={{ mb: 3 }}>
-          <AgeDepthPanel
-            record={record}
-            rigidity={(analysis.solver?.deposition || []).find(
-              (d) => d.element_id === record.element_id
-            )}
-            dateFormat={dateFormat}
-          />
-        </Box>
-      ))}
-
-      {/* A wave of advance, before the table for the same reason the age-depth
-          band is: the map IS the answer, and a column of per-site arrival ages
-          answers a different question.
-
-          Drawn on the project's basemap: a project that has opted into tiles
-          gets them here as it does when placing, and one filed nowhere gets
-          the private default. */}
-      {dispersalSection && (
-        <Box sx={{ mb: 3 }}>
-          <DispersalPanel section={dispersalSection} dateFormat={dateFormat} tiles={mapTiles} />
-        </Box>
-      )}
+      </OutlierModelApplies.Provider>
 
       {/* Model Structure -- read-only view of the groups/relationships/TPQ-TAQ
           this bayesian analysis actually used, if any. Doubles as the
@@ -2988,7 +3044,7 @@ export default function Results() {
           <Typography variant="body2" color="textSecondary" sx={{ mt: 1 }}>
             {plotView === 'stacked'
               ? `All ${
-                  isBayesian ? 'dates and modelled transitions' : 'dates'
+                  isBayesian && !wiggleMatch ? 'dates and modelled transitions' : 'dates'
                 } shown, oldest first, in the same order as the table above. Each row is scaled to its own peak, so heights compare precision, not probability.`
               : plotView === 'curve'
               ? 'Each date plotted on the curve it was calibrated against. Lab measurement on the left axis, and the calibrated distribution sitting where it intersects the curve.'
@@ -2996,6 +3052,15 @@ export default function Results() {
                   isBayesian ? 'date and modelled transition' : 'date'
                 }, oldest first, in the same order as the table above.`}
           </Typography>
+          {/* A wiggle match's members drawn as n rows look like n independent
+              confirmations -- the reading the model forbids. Said here, where
+              the n rows are, and pointed at the one figure that shows them as
+              what they are. */}
+          {wiggleMatch && (
+            <Typography variant="body2" color="textSecondary" sx={{ mt: 0.5 }}>
+              The wiggle-match rows share one age, shifted by each gap.
+            </Typography>
+          )}
 
           {/* Above the plots rather than beside the table's controls, so the
               switch that hides them isn't below everything it hides. Only shown
