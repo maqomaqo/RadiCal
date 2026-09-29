@@ -14,10 +14,7 @@ Boundaries), and interactive posterior visualization.
 - **Your own curves**: import a curve from a `.14c` or a headed CSV (columns matched by name in any
   order; a BC/AD calendar column converted on the way in), previewed before anything is stored.
   An imported curve is then selectable on any date, understood by the CSV and OxCal file importers under
-  whatever aliases it was given, and exportable byte-for-byte as uploaded. If a curve has been used in an analysis it
-  cannot be deleted, only archived, so an analysis that used it still reruns. The **Curves** page
-  is where they are imported, described, downloaded and archived, and it shows what was measured
-  from each curve — points, range, calendar grid — beside it.
+  whatever aliases it was given, and exportable byte-for-byte as uploaded. 
 - **Curve browser**: look at any curve's shape with its own ±1σ/±2σ error bounds, scrolled and
   zoomed along the calendar axis.
 - **Compare and simulate**: overlay a second curve and read their *difference* on a separate panel.
