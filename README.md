@@ -54,8 +54,10 @@ Boundaries), and interactive posterior visualization.
 - **Bayesian chronological modelling**: an explicit model tree of nested Sequences, Phases,
   Boundaries and Hiatuses (the OxCal idiom), each date assigned to a Phase; TPQ/TAQ age limiters;
   an optional outlier model per date. Solved exactly where the model permits it, and by OxCal's own
-  MH/Gibbs scheme otherwise — see [`REMAINING_WORK.md`](REMAINING_WORK.md) for how the solvers were
-  validated against real OxCal 4.4 runs.
+  MH/Gibbs scheme otherwise — validated against real OxCal 4.4 runs in
+  [`test_oxcal_agreement.py`](backend/tests/test_oxcal_agreement.py),
+  [`test_exact_chain.py`](backend/tests/test_exact_chain.py) and
+  [`test_gibbs.py`](backend/tests/test_gibbs.py).
 - **Wiggle matching** (OxCal's `D_Sequence`/`V_Sequence`): a series of dates separated by counted
   rings or varves has ONE free parameter — the calendar age at the reference ring — so it is solved
   in closed form rather than sampled. At the Hallstatt plateau that is the difference between a
@@ -347,8 +349,8 @@ The main groups:
   bar, `/help`) renders this exact file, so there is no second copy to keep in step. Edit it as
   Markdown; `frontend/src/utils/markdown.ts` documents the subset the page can render, and its
   tests fail on anything outside it or on a cross-reference that no longer resolves.
-- [`REMAINING_WORK.md`](REMAINING_WORK.md) — what's built, what isn't, and why, kept current against
-  the actual code rather than written once and left to drift.
+- [`REMAINING_WORK.md`](REMAINING_WORK.md) — the open work: what is not built yet, checked against
+  the code.
 
 ## References
 
