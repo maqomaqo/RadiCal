@@ -82,6 +82,11 @@ export interface ImportPreview {
   suggested_analysis_type: 'bayesian' | 'group_calibration'
   date_count: number
   filename?: string
+  // For a refused OxCal model: the same file read as its dates alone, when
+  // that reading succeeds, and the commands that sank the model. Offered, not
+  // applied -- the user is asked whether to take the dates without the model.
+  dates_only?: ImportPreview | null
+  blocking_commands?: string[]
 }
 
 interface ColumnDoc {
@@ -389,6 +394,41 @@ export default function ImportDatesDialog({
                     </li>
                   ))}
                 </Box>
+              </Alert>
+            )}
+
+            {preview.dates_only && (
+              <Alert
+                severity="info"
+                sx={{ mb: 2 }}
+                action={
+                  <Button
+                    color="inherit"
+                    size="small"
+                    sx={{ whiteSpace: 'nowrap' }}
+                    onClick={() =>
+                      setPreview({ ...preview.dates_only!, filename: preview.filename })
+                    }
+                  >
+                    Import dates only
+                  </Button>
+                }
+              >
+                RadiCal cannot import this model
+                {preview.blocking_commands?.length ? (
+                  <>
+                    {' '}because it contains the unsupported command
+                    {preview.blocking_commands.length === 1 ? ' ' : 's '}
+                    {preview.blocking_commands.map((command, index) => (
+                      <span key={command}>
+                        {index > 0 && ', '}
+                        <code>{command}</code>
+                      </span>
+                    ))}
+                  </>
+                ) : null}
+                . Would you like to import the {preview.dates_only.date_count} date
+                {preview.dates_only.date_count === 1 ? '' : 's'} without the model?
               </Alert>
             )}
 

@@ -459,6 +459,55 @@ class TestConstructsThatMustBeRefused:
         assert any('Sum() contains 2 date(s)' in w for w in result.warnings), result.warnings
 
 
+class TestDatesWithoutTheModel:
+    """
+    A refused model comes back with its dates read on their own, for the user
+    to take or leave. Nothing about the refusal itself changes.
+    """
+
+    def test_a_refused_model_offers_its_dates_and_names_the_command(self):
+        result = parse_oxcal(oxcal_model(
+            'Sequence(){ Tau_Boundary("t"); Phase("A"){ R_Date("a",3000,25); '
+            'After(R_Date("b",3100,25)); }; Boundary(); };'
+        ), 't.oxcal')
+
+        assert not result.ok
+        assert result.dates == [] and result.model_tree is None
+        assert result.blocking_commands == ['Tau_Boundary', 'After']
+        offered = result.dates_only
+        assert offered.ok and offered.model_tree is None
+        assert [(d['sample_name'], d['phase_name']) for d in offered.dates] == [
+            ('a', 'A'), ('b', 'A')]
+        assert offered.suggested_analysis_type == 'group_calibration'
+
+    def test_dates_hidden_in_a_sum_are_offered_naming_the_sum(self):
+        result = parse_oxcal(oxcal_model(
+            'Curve("Marine20","marine20.14c"); Delta_R("local",-162,28); '
+            'Sum("S"){ R_Date("a",3000,25); R_Date("b",3100,25); };'
+        ), 't.oxcal')
+
+        assert not result.ok
+        assert result.blocking_commands == ['Sum']
+        a, b = result.dates_only.dates
+        assert (a['curve_id'], a['delta_r'], a['phase_name']) == ('marine20', -162.0, 'S')
+
+    def test_a_date_that_is_itself_wrong_offers_nothing(self):
+        """Letting go of the model does not make a bad date good."""
+        result = parse_oxcal(oxcal_model(
+            'Phase("A"){ Tau_Boundary("t"); '
+            'R_Date("a",3000,25){ Outlier("Mine",0.1); }; };'
+        ), 't.oxcal')
+
+        assert not result.ok
+        assert result.dates_only is None
+
+    def test_an_importable_model_offers_nothing(self):
+        result = parse_oxcal(oxcal_model('Phase("A"){ R_Date("a",3000,25); };'), 't.oxcal')
+
+        assert result.ok
+        assert result.dates_only is None and result.as_dict()['dates_only'] is None
+
+
 class TestTranslationChoices:
     """Where the file's shape and the app's differ, and what gets reported."""
 
@@ -674,6 +723,46 @@ class TestTranslationChoices:
 
         assert not result.ok
         assert str(date_import.MAX_DATES) in result.errors[0]
+
+    def test_a_simulated_date_takes_the_curves_value_at_its_year(self):
+        """
+        R_Simulate states a calendar year, not a measurement. The measurement
+        is the curve's own radiocarbon age there -- without OxCal's random
+        scatter, so the import is the same every time -- and a note says so.
+        """
+        result = parse_oxcal(oxcal_model(
+            'Sequence(){ Boundary(); Phase("A"){ R_Simulate("s",-1000,25); '
+            'R_Date("a",2900,25); }; Boundary(); };'
+        ), 't.oxcal')
+
+        assert result.ok, result.errors
+        simulated = next(d for d in result.dates if d['sample_name'] == 's')
+        c14_age, _ = curve_registry.resolve('intcal20').interpolate(2950.0)
+        assert simulated['age_bp'] == pytest.approx(float(c14_age), abs=0.1)
+        assert simulated['error_1sigma'] == 25.0
+        assert 'R_Simulate' in simulated['notes']
+        assert any('R_Simulate' in n for n in result.notes), result.notes
+
+    def test_a_simulated_marine_date_carries_its_offset(self):
+        """A marine sample of calendar age t measures curve(t) + delta_r."""
+        result = parse_oxcal(oxcal_model(
+            'Curve("Marine20","marine20.14c"); Delta_R("local",-162,28); '
+            'Phase("M"){ R_Simulate("shell",-1000,20); };'
+        ), 't.oxcal')
+
+        assert result.ok, result.errors
+        shell, = result.dates
+        c14_age, _ = curve_registry.resolve('marine20').interpolate(2950.0)
+        assert shell['age_bp'] == pytest.approx(float(c14_age) - 162, abs=0.1)
+        assert (shell['delta_r'], shell['delta_r_error']) == (-162.0, 28.0)
+
+    def test_a_simulated_date_off_the_end_of_its_curve_is_refused(self):
+        result = parse_oxcal(oxcal_model(
+            'Phase("A"){ R_Simulate("s",-80000,25); R_Date("a",2900,25); };'
+        ), 't.oxcal')
+
+        assert not result.ok
+        assert any('outside intcal20' in e for e in result.errors), result.errors
 
     def test_comments_are_ignored(self):
         result = parse_oxcal(

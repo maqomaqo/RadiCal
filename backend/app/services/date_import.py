@@ -64,6 +64,13 @@ class ImportResult:
     # A name for the analysis, from the file where it says one (an .oxcal model
     # names its outermost element) and from the filename otherwise.
     analysis_name: Optional[str] = None
+    # For a refused .oxcal file: the same file read as its dates alone, with
+    # no model, when that reading succeeds. A complete import of its own rather
+    # than the remains of the refused one, so offering it is not the partial
+    # import refuse() exists to prevent -- the user is asked first, and told
+    # which commands the model needed that this app does not have.
+    dates_only: Optional['ImportResult'] = None
+    blocking_commands: List[str] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
@@ -110,6 +117,8 @@ class ImportResult:
             'analysis_name': self.analysis_name,
             'suggested_analysis_type': self.suggested_analysis_type,
             'date_count': len(self.dates),
+            'dates_only': self.dates_only.as_dict() if self.dates_only else None,
+            'blocking_commands': self.blocking_commands,
         }
 
 
@@ -906,6 +915,6 @@ def looks_like_cql2(text: str) -> bool:
     """
     stripped = re.sub(r'//[^\n]*', '', text)
     return bool(re.search(
-        r'\b(Plot|Sequence|Phase|R_Date|Boundary|Outlier_Model|Curve)\s*\(',
+        r'\b(Plot|Sequence|Phase|R_Date|R_Simulate|Boundary|Outlier_Model|Curve)\s*\(',
         stripped,
     ))

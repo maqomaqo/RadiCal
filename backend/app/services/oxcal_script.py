@@ -277,6 +277,11 @@ ORDINATE_SEQUENCES = {'d_sequence', 'v_sequence'}
 # element, which an ordinary block walk has no use for and drops.
 DEPOSITION_SEQUENCE = 'p_sequence'
 
+# Commands that each put one radiocarbon measurement into the model.
+# R_Simulate states a calendar year instead of a measurement, and the
+# measurement is read off the curve (see _simulate_measurement).
+DATE_COMMANDS = {'r_date', 'r_simulate'}
+
 # Queries and plots: they read a posterior rather than shape one, so leaving
 # them out changes nothing.
 IGNORABLE = {
@@ -338,10 +343,6 @@ UNSUPPORTED = {
         'report and enter the pooled age and error as a single date.'
     ),
     'combine': 'a combination of likelihoods, which this app does not model.',
-    'r_simulate': (
-        'a simulated measurement. This app calibrates real measurements; '
-        'a simulated date has no equivalent here.'
-    ),
     'u_date': 'a uranium-series date, which this app does not calibrate.',
     'tl_date': 'a luminescence date, which this app does not calibrate.',
     'after': (
@@ -435,6 +436,12 @@ class _Translator:
         # How many dates each named offset ended up on, for the note below.
         self.delta_r_usage: Dict[str, int] = {}
         self.wrapped_sequence_dates = 0
+        self.simulated_dates = 0
+        # Commands the model needs and this app does not have, in file order,
+        # for the offer to import the dates without the model.
+        self.blocking_commands: List[str] = []
+        # Plotting commands that took dates out of the model with them.
+        self.date_holding_commands: List[str] = []
         self.seen_ignorable: List[str] = []
         self.seen_display_attributes: List[str] = []
         # Curve names this file defined with Mix_Curves, mapped to the stored
@@ -466,7 +473,67 @@ class _Translator:
         self._collect_declarations(nodes)
 
         self._assemble(self._translate_block(nodes, scope))
+        self._report()
 
+    def translate_dates_only(self, nodes: List[Node]) -> None:
+        """
+        The file's dates with none of its model: every R_Date and R_Simulate
+        wherever it sits, each with the curve, reservoir offset and outlier
+        setting in force there, to be calibrated independently.
+
+        What a refused model is offered as. Anything wrong with a DATE is
+        still an error here -- an unknown curve, an undeclared offset -- since
+        those would be wrong without a model too. Only the structure is let go.
+        """
+        self._collect_declarations(nodes)
+        self.result.dates = self._collect_dates(nodes, _Scope(), None)
+        self._report()
+        if self.result.dates:
+            self.result.notes.append(
+                f'Imported without the model: the {len(self.result.dates)} '
+                'date(s) will be calibrated independently. Each keeps the name '
+                'of the Phase or other command it sat in as its context.'
+            )
+        elif not self.result.errors:
+            self.result.errors.append('No dates were found in the file.')
+
+    def _collect_dates(self, nodes: List[Node], scope: _Scope,
+                       context: Optional[str]) -> List[Dict[str, Any]]:
+        dates: List[Dict[str, Any]] = []
+        for node in nodes:
+            command = node.command.lower()
+            if command == '=':
+                continue
+            if command == 'curve':
+                self._select_curve(node, scope)
+                continue
+            if command == 'delta_r':
+                self._apply_delta_r(node, scope)
+                continue
+            if command == 'mix_curves':
+                self._define_mixed_curve(node)
+                continue
+            if command in DATE_COMMANDS:
+                date = self._translate_date(node, scope)
+                if date is not None:
+                    date['phase_name'] = context
+                    dates.append(date)
+                continue
+            # A date written as an argument -- After(R_Date(...)) -- is still
+            # a measurement once the constraint around it is gone.
+            for argument in node.args:
+                if isinstance(argument, Call) and argument.name.lower() in DATE_COMMANDS:
+                    date = self._translate_date(
+                        Node(argument.name, argument.args, None, node.line), scope)
+                    if date is not None:
+                        date['phase_name'] = context
+                        dates.append(date)
+            if node.block:
+                inner = context if command in TRANSPARENT else (node.name or context)
+                dates.extend(self._collect_dates(node.block, scope.copy(), inner))
+        return dates
+
+    def _report(self) -> None:
         for label, count in sorted(self.delta_r_usage.items()):
             offset, uncertainty = self.declared_delta_r.get(
                 label.lower(), (None, None)
@@ -480,6 +547,14 @@ class _Translator:
                 'offset; the table shows which.'
             )
 
+        if self.simulated_dates:
+            self.result.notes.append(
+                f'{self.simulated_dates} date(s) are R_Simulate. Each was '
+                "given its curve's radiocarbon age at the stated year, with the "
+                'stated error. OxCal adds random scatter to a simulated '
+                'measurement, so its results vary from run to run; these do '
+                'not.'
+            )
         if self.seen_ignorable:
             unique = sorted(set(self.seen_ignorable))
             self.result.notes.append(
@@ -608,7 +683,7 @@ class _Translator:
             if command == 'options':
                 self._note_options(node)
                 continue
-            if command == 'r_date':
+            if command in DATE_COMMANDS:
                 date = self._translate_date(node, scope)
                 if date is not None:
                     items.append(('date', date))
@@ -635,6 +710,7 @@ class _Translator:
                     items.append(('element', element))
                 continue
             if command in UNSUPPORTED:
+                self.blocking_commands.append(node.command)
                 self.error(
                     node,
                     f'{node.command}() is {UNSUPPORTED[command]}',
@@ -645,6 +721,7 @@ class _Translator:
                 self.seen_ignorable.append(node.command)
                 continue
 
+            self.blocking_commands.append(node.command)
             self.error(
                 node,
                 f"{node.command}() is not a command this importer recognises. "
@@ -663,6 +740,7 @@ class _Translator:
         """
         buried = self._count_dates(node.block or [])
         if buried:
+            self.date_holding_commands.append(node.command)
             self.result.warnings.append(
                 f'Line {node.line}: {node.command}() contains {buried} date(s). '
                 f'{node.command}() summarises distributions rather than '
@@ -673,7 +751,7 @@ class _Translator:
     def _count_dates(self, nodes: List[Node]) -> int:
         total = 0
         for node in nodes:
-            if node.command.lower() == 'r_date':
+            if node.command.lower() in DATE_COMMANDS:
                 total += 1
             if node.block:
                 total += self._count_dates(node.block)
@@ -846,16 +924,18 @@ class _Translator:
             )
 
     def _translate_date(self, node: Node, scope: _Scope) -> Optional[Dict[str, Any]]:
+        simulated = node.command.lower() == 'r_simulate'
         numbers = node.numbers
         if len(numbers) < 2:
             self.error(
                 node,
-                f'R_Date needs a radiocarbon age and an error; found '
-                f'{len(numbers)} number(s).',
+                f'{node.command} needs '
+                + ('a calendar year' if simulated else 'a radiocarbon age')
+                + f' and an error; found {len(numbers)} number(s).',
             )
             return None
 
-        name = node.name or f'R_Date line {node.line}'
+        name = node.name or f'{node.command} line {node.line}'
         date: Dict[str, Any] = {
             'id': f'd-{uuid.uuid4().hex[:12]}',
             'sample_name': name,
@@ -903,9 +983,14 @@ class _Translator:
             else:
                 self.error(
                     child,
-                    f'{child.command}() inside R_Date("{name}") is not '
+                    f'{child.command}() inside {node.command}("{name}") is not '
                     'something this importer recognises.',
                 )
+
+        # After the block, because a Curve() or Delta_R() inside it decides
+        # what the simulated measurement is.
+        if simulated and not self._simulate_measurement(node, date, numbers[0]):
+            return None
 
         if date['delta_r'] is not None and inner.delta_r_name:
             self.delta_r_usage[inner.delta_r_name] = (
@@ -913,6 +998,49 @@ class _Translator:
             )
 
         return date
+
+    def _simulate_measurement(self, node: Node, date: Dict[str, Any],
+                              year: float) -> bool:
+        """
+        `R_Simulate(name, year, error)` -- the measurement a sample from that
+        calendar year would give, measured with that error.
+
+        The year is OxCal's: AD positive, BC negative, so cal BP is 1950 minus
+        it. The measurement is the curve's own radiocarbon age there, plus the
+        reservoir offset in force, since a marine sample of calendar age t
+        measures curve(t) + delta_r.
+
+        OxCal draws a random measurement around that value, a different one
+        every run. This app uses the value itself, as the curve browser's
+        Simulate does: the model is then reproducible, and differs from any
+        one OxCal run only by that run's scatter. The note in translate() says
+        so.
+        """
+        cal_bp = 1950.0 - year
+        try:
+            curve = curve_registry.resolve(date['curve_id'])
+        except ValueError as exc:
+            self.error(node, f'{node.command}("{date["sample_name"]}"): {exc}')
+            return False
+
+        low, high = float(curve.cal_ages.min()), float(curve.cal_ages.max())
+        if not low <= cal_bp <= high:
+            self.error(
+                node,
+                f'{node.command}("{date["sample_name"]}") is for the year '
+                f'{year:g} ({cal_bp:g} cal BP), outside {date["curve_id"]}, '
+                f'which covers {low:g}-{high:g} cal BP. There is no curve '
+                'value there to simulate a measurement from.',
+            )
+            return False
+
+        c14_age, _ = curve.interpolate(cal_bp)
+        date['age_bp'] = round(float(c14_age) + (date['delta_r'] or 0.0), 1)
+        date['notes'] = (
+            f'Simulated (R_Simulate) for the year {year:g}, {cal_bp:g} cal BP.'
+        )
+        self.simulated_dates += 1
+        return True
 
     def _apply_date_attribute(self, node: Node, date: Dict[str, Any],
                               name: str) -> None:
@@ -1252,14 +1380,14 @@ class _Translator:
                 continue
 
             depth = self._depth_of(child)
-            if command == 'r_date':
+            if command in DATE_COMMANDS:
                 date = self._translate_date(child, inner)
                 if date is None:
                     return None
                 if depth is None:
                     self.error(
                         child,
-                        f'R_Date("{date["sample_name"]}") inside '
+                        f'{child.command}("{date["sample_name"]}") inside '
                         f'P_Sequence("{name}") has no z=. Depth is the axis '
                         'the deposition model runs along, so a level without '
                         'one cannot take part in it.',
@@ -1290,6 +1418,7 @@ class _Translator:
                 })
                 continue
 
+            self.blocking_commands.append(child.command)
             self.error(
                 child,
                 f'{child.command}() inside P_Sequence("{name}") is not '
@@ -1503,10 +1632,40 @@ def parse_oxcal(text: str, owner_id: str, filename: Optional[str] = None) -> Imp
     if result.errors:
         # A partially-read model is more dangerous than none: the tree would
         # look complete while missing whatever was refused.
-        return result.refuse()
+        return _offer_dates_only(result.refuse(), translator, nodes, owner_id)
 
     _validate_imported_tree(result)
-    return result.refuse()
+    if result.errors:
+        return _offer_dates_only(result.refuse(), translator, nodes, owner_id)
+    return result
+
+
+def _offer_dates_only(result: ImportResult, translator: '_Translator',
+                      nodes: List[Node], owner_id: str) -> ImportResult:
+    """
+    Attach the file read as dates alone to a refused model, when that reading
+    succeeds, so the user can be asked whether to take the dates without it.
+
+    Names the commands that sank the model. Where nothing was refused as such
+    but a plotting command such as Sum() held the dates, that command is
+    named instead, being why there was no model left to import.
+    """
+    result.blocking_commands = list(dict.fromkeys(
+        translator.blocking_commands or translator.date_holding_commands
+    ))
+
+    fallback = ImportResult(source_format='oxcal')
+    fallback.analysis_name = result.analysis_name
+    _Translator(fallback, owner_id).translate_dates_only(nodes)
+
+    from app.services.date_import import MAX_DATES, _validate_dates
+    if len(fallback.dates) > MAX_DATES:
+        return result
+    if fallback.ok:
+        _validate_dates(fallback)
+    if fallback.ok and fallback.dates:
+        result.dates_only = fallback
+    return result
 
 
 def _validate_imported_tree(result: ImportResult) -> None:
