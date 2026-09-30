@@ -1298,36 +1298,51 @@ one would make the reported probability a function of the window width.
 
 ### A.8 Agreement indices
 
-The standard OxCal diagnostic (Bronk Ramsey 1995), comparing each date's modelled posterior against
-its own unmodelled likelihood over a shared calendar grid:
+The standard OxCal diagnostic (Bronk Ramsey 1995), comparing each date's modelled posterior `p`
+against its own likelihood `L`, both as densities in calendar years:
 
 ```
-A_i = 100 * sum(modelled * unmodelled) / sum(unmodelled^2)
+A_i = 100 * integral(p * L) / integral(L^2)
 ```
 
+That is the posterior expectation of the likelihood, scaled by the likelihood's overlap with itself.
 A date the model leaves alone scores 100. One the model had to push off its own likelihood scores
 low; one the model *sharpens* onto the peak of its likelihood scores above 100, so values over 100
-are expected. Below about 60 is the conventional threshold for a second look. The overall index
-combines them:
+are expected. Below about 60 is the conventional threshold for a second look.
+
+`Amodel` is the same expectation over the **joint** posterior, every date at once, and `Aoverall`
+combines the per-date indices as though they were independent:
 
 ```
-A_overall = 100 * (product of A_i/100)^(1/sqrt(n))
+Amodel   = 100 * (E[product of L_i(t_i) / integral(L_i^2)])^(1/sqrt(n))
+Aoverall = 100 * (product of A_i/100)^(1/sqrt(n))
 ```
 
-Both are computed on a 5-year grid, matching OxCal's export resolution, and both distributions are
-normalised over a window spanning *both*; normalising the likelihood over only the posterior's
-support would let a badly displaced date score well on the sliver where the two still overlap.
+`Amodel` falls below `Aoverall` when the model's structure is doing work, because it sees the
+correlation the ordering puts between the dates. It is a Monte Carlo average over the run's joint
+draws, good to about ±0.5.
 
-Against 24 known answers from OxCal 4.4 across three models, the individual indices reproduce to
-rms 0.81 and worst 1.4, the overall ones to 0.1.
+**Resolution.** The indices are ratios of integrals, and the right value is the one a finer grid
+converges to. The likelihood is evaluated exactly at every posterior point, and `integral(L^2)` is
+taken at one-year steps, because calibration curves carry structure at one year. OxCal's own
+indices depend on its calculation resolution: the same model gives `Aoverall` 100.4 at OxCal's
+default five years and 105.4 at `Options(){ Resolution=1; };`. This app matches OxCal run at one
+year (per-date rms 0.23–0.30, `Aoverall` 105.5 against 105.4, `Amodel` 100.9 against 100.6). Against
+a default OxCal run it reads about 0.7 higher per date, and several points higher overall.
+
+**Outlier models.** A date under an outlier model is scored against the likelihood term the model
+actually contains: the date fits either as it stands or moved by a shift, the second with the
+outlier *prior* `p`. The expectation runs over the shift and the outlier scale as well as the date,
+the scale taken from each posterior state where the sampler draws it. A date explained only as an
+outlier therefore scores about `100 p`, near 5 at the usual 0.05, and never more. Each outlier model
+in use also adds one term to `n`, as OxCal counts its scale parameter. Against OxCal at one year this
+reproduces the per-date indices to rms 0.4–0.5 and the model indices to within about 1, flagged
+dates included (Shag River Mouth's NZ7756: 5.2 against OxCal's 5.4).
 
 Note the limits of the diagnostic: it detects a date the *model had to move*, which is not the same
 as a date that does not belong. On an unconstrained phase, a date 600 radiocarbon years from its
 neighbours scores 100.5, because the phase simply widens. Use an outlier model to find a date that
 is merely wrong.
-
-OxCal's `Amodel` is deliberately not implemented: it cannot be derived from the per-date indices,
-and a guess at the headline number people screen on would be worse than reporting nothing.
 
 ### A.9 Durations and differences
 
@@ -1495,8 +1510,8 @@ whose whole point is a range ten years wide.
 likelihood; the combination is the same
 `100·(∏A_i/100)^(1/√n)` A.8 uses. It carries more weight here than elsewhere: the gaps are
 asserted, so a misidentified member cannot be absorbed by the model widening — it can only make
-everything fit worse. No threshold is quoted against it, for the reason A.8 gives for not reporting
-`Amodel`.
+everything fit worse. No threshold is quoted against it: the one OxCal uses for a combination scales
+with n, and this app does not print a threshold it has not pinned against a real run.
 
 The same rigidity is why an outlier model (A.7) is **refused** rather than applied here. Mixing in a
 broad component would marginalise an offset scale independently per member — the approximation A.6

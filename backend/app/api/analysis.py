@@ -413,17 +413,14 @@ def _analysis_result_row(analysis_id: str, sample_id: str, result: Dict) -> Anal
 
 def _model_agreement(solved: Dict, measurements: List[Dict]) -> Optional[float]:
     """
-    Amodel, from the joint states the solver kept and each date's posterior
-    outlier probability -- the latter so a date under an outlier model is judged
-    against the likelihood the model gave it, as its own A is
-    (services/agreement.py).
+    Amodel, from the joint states the solver kept and, where it sampled one,
+    each outlier model's scale in those same states (services/agreement.py).
     """
     draws = solved.get('joint_draws')
     if not draws:
         return None
-    outlier = {date_id: entry.get('outlier_probability')
-               for date_id, entry in solved['measurements'].items()}
-    return agreement_service.model_agreement(measurements, draws, outlier)
+    return agreement_service.model_agreement(
+        measurements, draws, solved.get('joint_scales'))
 
 
 def _run_wiggle_match(
@@ -635,7 +632,9 @@ def _run_bayesian(
             estimate_durations=estimate_durations,
             dispersal=dispersal_spec,
         )
-        overall = agreement_service.attach(solved['measurements'], measurements)
+        overall = agreement_service.attach(
+            solved['measurements'], measurements,
+            solved.get('joint_draws'), solved.get('joint_scales'))
         amodel = _model_agreement(solved, measurements)
         return solved['measurements'], solved['boundaries'], {
             'method': 'exact',
@@ -667,7 +666,9 @@ def _run_bayesian(
         # gibbs.solve_chains for what the extra chains are for.
         chains=int(bayesian_config.get('mcmc_chains') or gibbs.DEFAULT_CHAINS),
     )
-    overall = agreement_service.attach(sampled['measurements'], measurements)
+    overall = agreement_service.attach(
+        sampled['measurements'], measurements,
+        sampled.get('joint_draws'), sampled.get('joint_scales'))
     amodel = _model_agreement(sampled, measurements)
     return sampled['measurements'], sampled['boundaries'], {
         'method': 'gibbs',
