@@ -1518,12 +1518,16 @@ class _Chain:
                 self.outlier_total[date_id] += float(
                     model.responsibility_at[date_id][node][state.index[date_id]])
             if stride and step % stride == 0:
-                kept_states.append([state.index[p] for p in model.params])
+                # Each outlier model's scale node rides along with the ages:
+                # a flagged date's agreement is scored under the scale its own
+                # state held (services/agreement.py).
+                kept_states.append([state.index[p] for p in model.params]
+                                   + [state.scale[m] for m in model.outlier_models])
             self.accumulated += 1
         self.rounds.append(current)
         if self.per_round_draws:
             self.round_draws.append(np.array(kept_states, dtype=np.int32).reshape(
-                len(kept_states), len(model.params)))
+                len(kept_states), len(model.params) + len(model.outlier_models)))
 
         if len(self.rounds) > 2 * ROUNDS:
             self.rounds = _folded(self.rounds, model.params)
@@ -1562,6 +1566,8 @@ class _Chain:
             'draws': (np.concatenate([d for d in kept_draws if len(d)])
                       if any(len(d) for d in kept_draws) else None),
             'draw_params': list(model.params),
+            # The columns after draw_params: one scale node per outlier model.
+            'draw_scale_models': list(model.outlier_models),
             'scale_histograms': self.scale_counts,
             'outlier_probability': {d: (v / accumulated if accumulated else 0.0)
                                     for d, v in self.outlier_total.items()},
@@ -2070,6 +2076,7 @@ def _pool_chains(results: List[Dict]) -> Dict:
         'rate_histograms': rate_histograms,
         'draws': np.concatenate(draws) if draws else None,
         'draw_params': results[0]['draw_params'],
+        'draw_scale_models': results[0]['draw_scale_models'],
         'scale_histograms': scale_histograms,
         'outlier_probability': outlier_probability,
         'sweeps': int(sum(r['sweeps'] for r in results)),
@@ -2349,9 +2356,17 @@ def solve(measurements: List[Dict], root: Dict, sweeps: int = DEFAULT_SWEEPS,
     # modelled ages AT ONCE, so they are read off the same states or they are
     # describing different runs.
     results['joint_draws'] = None
+    results['joint_scales'] = None
     if chain['draws'] is not None:
         joint = {param: model.grid[chain['draws'][:, column]]
                  for column, param in enumerate(chain['draw_params'])}
+        # Each outlier model's shared scale in the same states, as log10
+        # years, so a flagged date can be scored under the scale its own
+        # state held rather than one averaged over the run.
+        first = len(chain['draw_params'])
+        results['joint_scales'] = {
+            outlier_model: model.scale_grid[outlier_model][chain['draws'][:, first + i]]
+            for i, outlier_model in enumerate(chain['draw_scale_models'])}
         # Kept whether or not durations were asked for: Amodel is the headline
         # number a model is screened on, not an extra an analyst should have to
         # opt into. The states cost one list of indices per kept sweep. Scored
