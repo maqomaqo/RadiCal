@@ -14,6 +14,7 @@ other run. Nothing here asserts on how long anything took.
 """
 import threading
 import time
+from datetime import datetime
 
 import pytest
 
@@ -305,20 +306,16 @@ class TestOrdering:
         first_id = first.json()['data']['job_id']
         second_id = second.json()['data']['job_id']
 
-        overlapped = False
-        deadline = time.monotonic() + 240
-        while time.monotonic() < deadline:
-            a = client.get(f'/api/jobs/{first_id}').json()['data']
-            b = client.get(f'/api/jobs/{second_id}').json()['data']
-            if a['state'] == 'running' and b['state'] == 'running':
-                overlapped = True
-            if b['state'] in ('completed', 'failed', 'cancelled'):
-                break
-            time.sleep(0.05)
+        a = _await_job(client, first_id)
+        b = _await_job(client, second_id)
+        assert a['state'] == 'completed'
+        assert b['state'] == 'completed'
 
-        assert not overlapped, "both jobs were running at once"
-        assert _await_job(client, first_id)['state'] == 'completed'
-        assert _await_job(client, second_id)['state'] == 'completed'
+        # Judged on the worker's own timestamps, not on polling both states:
+        # two separate GETs can straddle the handover and see both 'running'.
+        first_finished = datetime.fromisoformat(a['finished_at'])
+        second_started = datetime.fromisoformat(b['started_at'])
+        assert second_started >= first_finished, "both jobs were running at once"
 
 
 class TestReconciliation:
