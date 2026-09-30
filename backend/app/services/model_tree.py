@@ -651,12 +651,14 @@ def _plan_element(
             contained.extend(child_contained)
         return uniform, contained
 
-    # sequence: children are ordered oldest -> youngest.
-    for i in range(len(children) - 1):
-        older_terms = _subtree_terms(children[i], dates_by_element)
-        younger_terms = _subtree_terms(children[i + 1], dates_by_element)
-        if older_terms and younger_terms:
-            ordering.append((older_terms, younger_terms))
+    # sequence: children are ordered oldest -> youngest. A child with no
+    # terms -- an undated Phase between two Boundaries, say -- is skipped
+    # over rather than breaking the chain: ordering only its neighbours
+    # against it would leave the Boundaries either side of it unordered,
+    # splitting one sequence into two independent halves.
+    child_terms = [t for t in (_subtree_terms(c, dates_by_element) for c in children) if t]
+    for older_terms, younger_terms in zip(child_terms, child_terms[1:]):
+        ordering.append((older_terms, younger_terms))
 
     # Bounded groups: dates between each consecutive pair of Boundary children.
     boundary_positions = [
