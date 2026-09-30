@@ -33,6 +33,8 @@ import re
 
 import numpy as np
 
+from oxcal_fixture import ad_to_calbp
+
 FIXTURES = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                         'fixtures', 'oxcal_outlier')
 MODEL = os.path.join(FIXTURES, 'Shag_River.oxcal')
@@ -97,7 +99,7 @@ def distributions():
         out[name] = {}
         for kind, pairs in kinds.items():
             pairs.sort()
-            calbp = (1950.0 - np.array([p[0] for p in pairs]))[::-1]
+            calbp = ad_to_calbp([p[0] for p in pairs])[::-1]
             prob = np.array([p[1] for p in pairs])[::-1]
             step = float(np.median(np.diff(calbp))) if len(calbp) > 1 else 5.0
             total = prob.sum() * step

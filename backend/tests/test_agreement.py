@@ -397,8 +397,36 @@ class TestAgainstTheOutlierFixture:
         assert table[sf.OUTLIER]['agreement'] < 10.0
 
         from_oxcal = agreement.overall_agreement(
-            [table[x['id']]['agreement'] for x in sf.measurements()])
-        assert from_oxcal == pytest.approx(table['model']['Aoverall'], abs=1.0)
+            [table[x['id']]['agreement'] for x in sf.measurements()],
+            agreement.outlier_scale_terms(sf.measurements()))
+        assert from_oxcal == pytest.approx(table['model']['Aoverall'], abs=0.2)
+
+
+class TestOutlierScaleTerms:
+    """
+    OxCal counts each outlier model's scale parameter -- A = 100 in its table
+    -- in the n of Aoverall and Amodel. Without it, OxCal's own per-date
+    indices give 82.3 on Shag River Mouth against its reported 82.9, and 44.5
+    on SRM against 45.9.
+    """
+
+    # SRM (Shag River Mouth dune sequence, Petchey), OxCal 4.4, General
+    # outlier model at prior 0.05 on all twelve dates: its per-date A column
+    # and its reported Aoverall.
+    SRM_A = [86.7, 110.5, 99.9, 109.1, 109.0, 90.1, 26.5, 84.7, 108.4, 113.3, 22.2, 96.6]
+    SRM_AOVERALL = 45.9
+
+    def test_reproduces_oxcals_aoverall_from_its_own_indices(self):
+        assert agreement.overall_agreement(self.SRM_A, 1) == pytest.approx(
+            self.SRM_AOVERALL, abs=0.2)
+        assert agreement.overall_agreement(self.SRM_A) < self.SRM_AOVERALL - 1.0
+
+    def test_one_term_per_outlier_model_in_use(self):
+        def m(prior, model=None):
+            return {'outlier_prior': prior, 'outlier_model': model}
+        assert agreement.outlier_scale_terms([m(None), m(0.0)]) == 0
+        assert agreement.outlier_scale_terms([m(0.05), m(0.05, 'general')]) == 1
+        assert agreement.outlier_scale_terms([m(0.05), m(1.0, 'charcoal')]) == 2
 
 
 def _draws_from(grid, density, rng, count):
@@ -717,7 +745,8 @@ class TestOutlierAwareComparison:
         OxCal's own posteriors and its own outlier probabilities so only the
         comparison likelihood is under test. Measured: the bare calibration
         gives 15.4, a prior-weighted mixture 32.0, and the posterior-weighted
-        one 79.2 -- against OxCal's 82.9.
+        one 79.2 -- against OxCal's 82.9; 79.6 once n counts the outlier
+        model's scale term as OxCal does (TestOutlierScaleTerms).
         """
         import shag_fixture as sf
         dists, table = sf.distributions(), sf.table()
@@ -727,8 +756,9 @@ class TestOutlierAwareComparison:
                 outlier_probability=table[m['id']]['outlier_probability'])
             for m in sf.measurements()
         }
-        assert agreement.overall_agreement(scores.values()) == pytest.approx(
-            table['model']['Aoverall'], abs=6.0)
+        got = agreement.overall_agreement(
+            scores.values(), agreement.outlier_scale_terms(sf.measurements()))
+        assert got == pytest.approx(table['model']['Aoverall'], abs=4.0)
         # The flagged date itself: low, as OxCal has it (5.3), but no longer
         # the zero that took the product down with it.
         assert 1.0 < scores[sf.OUTLIER] < agreement.POOR_AGREEMENT_BELOW, scores[sf.OUTLIER]
@@ -736,14 +766,16 @@ class TestOutlierAwareComparison:
     def test_amodel_uses_the_same_comparison(self):
         """
         Amodel and A_i are one definition read two ways, and that has to stay
-        true for a date under an outlier model: at n = 1 they must agree.
+        true for a date under an outlier model: on one date they must agree,
+        once both count the outlier model's scale term in n.
         """
         m = self._measurement(age=3000, prior=1.0, model='charcoal')
         grid = np.arange(2600.0, 3600.0, 5.0)
         peak = grid[np.argmax(agreement.unmodelled_likelihood(m, grid))]
         posterior = np.exp(-0.5 * ((grid - (peak - 150.0)) / 20.0) ** 2)
-        expected = agreement.agreement_index(
-            m, np.column_stack([grid, posterior]), outlier_probability=1.0)
+        expected = agreement.overall_agreement([agreement.agreement_index(
+            m, np.column_stack([grid, posterior]), outlier_probability=1.0)],
+            agreement.outlier_scale_terms([m]))
         got = agreement.model_agreement(
             [m], {m['id']: _draws_from(grid, posterior, np.random.default_rng(5), 40000)},
             {m['id']: 1.0})

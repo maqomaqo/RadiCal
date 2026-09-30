@@ -225,6 +225,8 @@ import re
 
 import numpy as np
 
+from oxcal_fixture import ad_to_calbp
+
 FIXTURES = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                         'fixtures', 'oxcal_charcoal')
 MODEL = os.path.join(FIXTURES, 'Nenthorn_Seq.oxcal')
@@ -311,7 +313,7 @@ def distributions():
         for kind, pairs in kinds.items():
             pairs.sort()
             # The export is in AD/BC; everything in this app is cal BP.
-            calbp = (1950.0 - np.array([p[0] for p in pairs]))[::-1]
+            calbp = ad_to_calbp([p[0] for p in pairs])[::-1]
             prob = np.array([p[1] for p in pairs])[::-1]
             total = prob.sum()
             out[name][kind] = (calbp, prob / total if total > 0 else prob)

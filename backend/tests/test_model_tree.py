@@ -146,6 +146,20 @@ class TestPlanner:
         assert len(gapped_plan.boundary_names) == 4
         assert any(len(g.date_ids) == 0 for g in gapped_plan.span_groups)
 
+    def test_undated_phase_does_not_unorder_the_boundaries_either_side(self):
+        # Shag River Mouth's "Layer 8": an undated phase between End 9 and
+        # Start 7. With nothing in it to order against, those two boundaries
+        # were left unordered and the one sequence sampled as two halves.
+        tree = _sequence("r", "Site", [
+            _boundary("b0"), _phase("p1"), _boundary("b1"),
+            _phase("empty"),
+            _boundary("b2"), _phase("p2"), _boundary("b3")])
+        m = _dates(element_id="p1", count=2) + _dates(element_id="p2", count=2)
+
+        pairs = [({t for _k, t in o}, {t for _k, t in y})
+                 for o, y in plan_model(tree, m).ordering]
+        assert ({"b1"}, {"b2"}) in pairs
+
     def test_limiters_are_inherited_through_nesting(self):
         inner = _sequence("inner", "Inner", [_phase("p", tpq_age_bp=4000)], taq_age_bp=1000)
         tree = _sequence("r", "Site", [inner], tpq_age_bp=5000)

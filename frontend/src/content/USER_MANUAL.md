@@ -120,6 +120,12 @@ model**, reading each element's `z=` as its depth below the surface. A `Date()` 
 `P_Sequence` becomes an undated level — the "how old is 47 cm" an age-depth model exists to answer —
 and a `Date()` anywhere else is still refused, having nothing to bound it.
 
+A simulated date, `R_Simulate("name", -1000, 25)`, comes across as an ordinary date whose
+radiocarbon age is the curve's own value at that calendar year (OxCal's numbering: negative is BC),
+plus any ΔR in force, with the error given. OxCal adds random scatter to a simulated measurement,
+so its results vary slightly from run to run; this app leaves the scatter out, so the imported model
+gives the same result every time. The date's notes record that it was simulated and for which year.
+
 OxCal's language is larger than what this app models. Anything that would change the posterior and
 cannot be honoured **fails the import** with a message naming it, rather than being read as the
 nearest thing that is implemented: `Tau_Boundary`, `Sigma_Boundary` and `Zero_Boundary`
@@ -133,6 +139,12 @@ shape one. So are the display attributes: a `color="red";` written on a date or 
 colour OxCal draws it in, and a note says the colours were passed over. An assignment that is not
 one of those still fails the import, naming the key — an unknown `key=` could be setting a
 likelihood, and it is not guessed at.
+
+When a model is refused but its dates can still be read, the import offers to bring in the dates
+without the model, naming the command that stopped it. The same applies when every date sits inside
+a `Sum`. Each date keeps its curve, ΔR and outlier setting, and the name of the Phase (or other
+command) it sat in becomes its context; the dates are then calibrated independently. A problem with
+a date itself, such as a curve the app does not have, still stops the import.
 
 Two differences in how the file is read are reported rather than left implicit: a date sitting
 directly inside a `Sequence` is put in a Phase of its own (this app attaches dates to Phases; its
