@@ -75,8 +75,18 @@ Measured against OxCal's own run with an outlier model active
 (tests/fixtures/oxcal_outlier, Shag River Mouth, whose outlier OxCal gives 5.3
 and a 99% outlier probability), fed OxCal's own posteriors: the bare
 calibration gives A_overall 15.4, a prior-weighted mixture 32.0, and the
-posterior-weighted one 79.2, against OxCal's 82.9. A date with no outlier model
-is compared against its bare calibration exactly as before.
+posterior-weighted one 79.2 (79.6 with the scale term below), against OxCal's
+82.9. A date with no outlier model is compared against its bare calibration
+exactly as before.
+
+An outlier model also adds a term to n, in both overall indices. OxCal gives
+each Outlier_Model a scale parameter of its own -- the U(0,4) under General --
+and lists it in the results table with A = 100, which it then counts: n is the
+dates PLUS one per outlier model in use. The term contributes nothing to the
+product but widens the 1/sqrt(n) exponent, which lifts both indices. Fed
+OxCal's own per-date indices, the rule reproduces its Aoverall on both runs
+with an outlier model we hold: Shag River Mouth 82.8 against 82.9 (82.3
+without the term), SRM 46.0 against 45.9 (44.5 without).
 """
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
@@ -85,9 +95,10 @@ import numpy as np
 from app.services.calibration import get_curve
 from app.services.exact_chain import DEFAULT_OUTLIER_MODEL, _with_outlier_component
 
-# Calendar step the comparison is made on. OxCal's exports are at 5 years and
-# its indices are reproduced most closely there (rms 0.81 against 1.15 at one
-# year), a finer grid measuring something slightly different.
+# Calendar step the comparison is made on, which is OxCal's export step. Scored
+# against OxCal's own posteriors, a finer step helps the Nenthorn runs (per-date
+# rms 0.8 at five years, 0.5 at one) and hurts SRM, which runs an outlier
+# model (1.05 against 2.8), so neither is clearly closer to what OxCal does.
 COMPARISON_STEP_YEARS = 5.0
 # Likelihood below this fraction of its peak is outside the compared window.
 SUPPORT_THRESHOLD = 1e-6
@@ -184,8 +195,9 @@ def _comparison_grid(lo: float, hi: float, anchor: float = 0.0) -> np.ndarray:
 
     `anchor` is a node of a distribution being compared, when the caller has one
     it did not compute itself: landing on that distribution's own nodes reads it
-    as exported rather than interpolating it, which matters for the OxCal
-    fixtures, whose export is on half-year cal BP values.
+    as exported rather than interpolating it, which matters for OxCal's
+    exports: on whole cal BP years at OxCal's 1950.5 datum
+    (tests/oxcal_fixture.OXCAL_PRESENT), but not necessarily on this lattice.
     """
     step = COMPARISON_STEP_YEARS
     start = anchor + np.floor((lo - anchor) / step) * step
@@ -263,9 +275,23 @@ def agreement_index(
     return float(100.0 * (fitted * observed).sum() / denominator)
 
 
-def overall_agreement(indices: Iterable[Optional[float]]) -> Optional[float]:
+def outlier_scale_terms(measurements: Iterable[Dict]) -> int:
+    """
+    How many outlier-model scale parameters OxCal would count in n: one per
+    distinct outlier model any date is under (see the module docstring).
+    """
+    return len({m.get('outlier_model') or DEFAULT_OUTLIER_MODEL
+                for m in measurements if (m.get('outlier_prior') or 0.0) > 0})
+
+
+def overall_agreement(indices: Iterable[Optional[float]],
+                      extra_terms: int = 0) -> Optional[float]:
     """
     The whole model's agreement, combining the per-date indices.
+
+    `extra_terms` counts parameters that score exactly 100 and so add to n
+    without touching the product -- outlier_scale_terms, for a model with an
+    outlier model in it.
 
     Computed in log space, since the product runs over every date and would
     otherwise underflow on a large model.
@@ -280,7 +306,7 @@ def overall_agreement(indices: Iterable[Optional[float]]) -> Optional[float]:
         return None
     floored = np.maximum(np.asarray(usable, dtype=float), MINIMUM_FOR_OVERALL)
     logs = np.log(floored / 100.0)
-    return float(100.0 * np.exp(logs.sum() / np.sqrt(len(usable))))
+    return float(100.0 * np.exp(logs.sum() / np.sqrt(len(usable) + extra_terms)))
 
 
 def model_agreement(
@@ -363,7 +389,10 @@ def model_agreement(
     # of the product instead -- a different and much smaller number.
     peak = float(log_joint.max())
     log_expectation = peak + float(np.log(np.exp(log_joint - peak).mean()))
-    return float(100.0 * np.exp((log_expectation - log_independent) / np.sqrt(counted)))
+    # The outlier models' scale parameters count towards n here as they do in
+    # A_overall, and for the same reason: OxCal counts them.
+    n = counted + outlier_scale_terms(measurements)
+    return float(100.0 * np.exp((log_expectation - log_independent) / np.sqrt(n)))
 
 
 def attach(results: Dict[str, Dict], measurements: List[Dict]) -> Optional[float]:
@@ -382,4 +411,4 @@ def attach(results: Dict[str, Dict], measurements: List[Dict]) -> Optional[float
                                 outlier_probability=entry.get('outlier_probability'))
         entry['agreement_index'] = index
         indices.append(index)
-    return overall_agreement(indices)
+    return overall_agreement(indices, outlier_scale_terms(measurements))
