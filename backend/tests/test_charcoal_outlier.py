@@ -29,6 +29,7 @@ from app.services import gibbs
 from app.services.model_tree import with_implicit_boundaries
 
 import nenthorn_charcoal_fixture as fx
+from oxcal_fixture import ad_to_calbp
 
 
 def _solved():
@@ -319,7 +320,7 @@ class TestPhaseWidth:
         oxcal = {}
         for name, pairs in rows.items():
             pairs.sort()
-            calbp = (1950.0 - np.array([p[0] for p in pairs]))[::-1]
+            calbp = ad_to_calbp([p[0] for p in pairs])[::-1]
             weight = np.array([p[1] for p in pairs])[::-1]
             oxcal[name] = float((calbp * weight / weight.sum()).sum())
         oxcal_span = oxcal['Start'] - oxcal['End']

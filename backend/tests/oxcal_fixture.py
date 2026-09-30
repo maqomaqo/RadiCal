@@ -76,14 +76,24 @@ def key(name):
     return re.sub(r'[^A-Za-z0-9]', '', name).upper()
 
 
+# OxCal's time axis is fractional years AD with each calendar year at its
+# midpoint, so 0 cal BP -- the year AD 1950 -- sits at 1950.5, and its raw
+# exports fall on x.5 AD, i.e. on whole cal BP years. Converting them with
+# 1950 instead shifts every OxCal distribution half a year young (measured on
+# SRM: best-fit constant 1950.54 across all twelve likelihoods).
+OXCAL_PRESENT = 1950.5
+
+
 def ad_to_calbp(ad):
-    """OxCal reports AD; the app works in cal BP. No year zero is crossed here."""
-    return 1950.0 - np.asarray(ad, dtype=float)
+    """
+    OxCal's fractional AD -> cal BP. No year zero is crossed here.
+    """
+    return OXCAL_PRESENT - np.asarray(ad, dtype=float)
 
 
 def as_ad(ranges):
-    """cal BP (min, max) ranges -> AD (from, to)."""
-    return [(1950.0 - hi, 1950.0 - lo) for lo, hi in ranges]
+    """cal BP (min, max) ranges -> OxCal's AD (from, to); ad_to_calbp inverted."""
+    return [(OXCAL_PRESENT - hi, OXCAL_PRESENT - lo) for lo, hi in ranges]
 
 
 def measurements():
