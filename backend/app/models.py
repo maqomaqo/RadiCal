@@ -392,8 +392,15 @@ class Analysis(Base):
 
     # Which solver produced these results -- exact or MH/Gibbs -- and, when
     # sampled, why the model was not exactly solvable plus the convergence it
-    # reached. See api/analysis._run_bayesian for the shape. NULL on a
-    # calibration-only analysis.
+    # reached. Also the two MODEL-level agreement indices, `model_agreement`
+    # and `overall_agreement` (OxCal's Amodel and Aoverall): they are
+    # properties of the whole fit, so they have nowhere to live on a per-date
+    # AnalysisResult row, and they ride here beside the run that produced them
+    # rather than in columns of their own -- as the wiggle match's
+    # `combination_agreement` already does. See api/analysis._run_bayesian for
+    # the shape and services/agreement.py for the definitions. NULL on a
+    # calibration-only analysis, and the two keys are absent on an analysis run
+    # before they were reported.
     solver = Column(JSON, nullable=True)
 
     # Durations and separations -- functions of SEVERAL modelled ages at once,

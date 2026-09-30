@@ -87,3 +87,36 @@ export function concernTitle(concern: Concern): string {
       : 'This date is worth a second look'
   return `${lead}: ${concern.reasons.join('; ')}.`
 }
+
+/**
+ * The two MODEL-level agreement indices a Bayesian run reports, as the results
+ * page shows them: OxCal's Amodel and Aoverall.
+ *
+ * Amodel is the whole model's agreement, computed over the joint posterior;
+ * Aoverall is the same index combined from the dates one at a time, and so
+ * reads as if the model had left them independent. Both are percentages on the
+ * same scale as a date's own A, and the same threshold applies to them -- below
+ * POOR_AGREEMENT the model is conventionally reconsidered rather than the date.
+ *
+ * Null for a plain calibration, which has no model, and for a Bayesian analysis
+ * run before these were reported; either way there is nothing to draw, which is
+ * not the same as a model that disagrees.
+ */
+export type ModelAgreement = { model: number | null; overall: number | null; poor: boolean }
+
+export function modelAgreementOf(solver?: {
+  model_agreement?: number | null
+  overall_agreement?: number | null
+} | null): ModelAgreement | null {
+  const model = solver?.model_agreement ?? null
+  const overall = solver?.overall_agreement ?? null
+  if (model == null && overall == null) return null
+  return {
+    model,
+    overall,
+    // Amodel is the one screened on where both are present: Aoverall's
+    // independence assumption is what Amodel exists to drop, so a model whose
+    // joint fit has failed is not excused by the product of its marginals.
+    poor: (model ?? overall ?? 100) < POOR_AGREEMENT,
+  }
+}

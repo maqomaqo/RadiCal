@@ -48,8 +48,8 @@ Boundaries), and interactive posterior visualization.
   separate, an overlap where they are not, each graded from "none" to "extensive" at the same
   68.3%/95.4% levels the HPD regions use.
 - **Diagnostics**: an OxCal-style agreement index per date (how much the model had to move it away
-  from its own unconstrained calibration) and an outlier posterior probability where an outlier model
-  is applied.
+  from its own unconstrained calibration), the whole model's agreement as OxCal's Amodel and
+  Aoverall, and an outlier posterior probability where an outlier model is applied.
 - **Posterior visualization**: Plotly charts, individually or all stacked on one shared calendar
   axis, with HPD range bars at 68.3%/95.4%/99.7% confidence, optional mean/median markers, and an
   optional overlay of each date's unconstrained ("prior") calibration behind its modelled posterior.

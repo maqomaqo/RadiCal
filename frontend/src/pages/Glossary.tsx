@@ -287,6 +287,25 @@ const SECTIONS: Section[] = [
         ),
       },
       {
+        term: 'Amodel and Aoverall',
+        id: 'model-agreement',
+        body: (
+          <>
+            The same index for the model as a whole, reported under the results table.{' '}
+            <strong>Amodel</strong> is computed over the joint posterior &mdash; every date at
+            once, with the correlations the model&rsquo;s structure puts between them.{' '}
+            <strong>Aoverall</strong> combines the dates&rsquo; individual indices instead, which
+            assumes the model left them independent, so on a constrained model it is the more
+            flattering of the two and the gap between them is the ordering doing work. On a single
+            unconstrained Phase they coincide. Both are percentages on the same scale as a
+            date&rsquo;s own agreement index, and below about 60 the convention is to reconsider
+            the model rather than any one date. Amodel is averaged over the run&rsquo;s own
+            sampled states, so it carries a sampling error of a few tenths where the per-date
+            indices do not.
+          </>
+        ),
+      },
+      {
         term: 'Outlier probability',
         id: 'outlier',
         body: (

@@ -109,6 +109,7 @@ import type {
 import {
   concernFor,
   concernTitle,
+  modelAgreementOf,
   NOTABLE_OUTLIER_PRIOR,
   POOR_AGREEMENT,
   type Concern,
@@ -177,6 +178,14 @@ interface AnalysisResult {
     between_chain_convergence?: number | null
     rhat?: number | null
     rhat_target?: number | null
+    // The whole model's agreement with its dates, both of OxCal's headline
+    // indices. `model_agreement` (Amodel) is computed over the joint
+    // posterior; `overall_agreement` (Aoverall) combines the per-date indices
+    // and so reads as if the model had left the dates independent, which is
+    // why it is the more flattering of the two on a constrained model. Absent
+    // on an analysis run before they were reported.
+    model_agreement?: number | null
+    overall_agreement?: number | null
     // Legacy: set only on analyses run before the current sampler.
     draws?: number
     // Wiggle-match path only. The combination index is not a diagnostic
@@ -1481,6 +1490,10 @@ export default function Results() {
   collectBoundaries(analysis.model_tree)
   const isBayesian = analysis.analysis_type === 'bayesian'
   const measurementBySampleId = new Map((analysis.measurements || []).map((m) => [m.id, m]))
+  // The whole model's agreement, reported under the table the per-date column
+  // is in: the two are the same index at two scales, and a reader who has just
+  // read the A column is the reader who wants to know what it comes to.
+  const modelAgreement = modelAgreementOf(analysis.solver)
 
   /**
    * The columns the reader can turn on or off, and whether this run earns
@@ -2896,6 +2909,36 @@ export default function Results() {
           <strong>{CONFIDENCE_LABEL} span</strong> is the earliest and latest calendar age of
           the {CONFIDENCE_LABEL} HPD (highest posterior density) region. Use a column’s <strong>unfold</strong> control to read the full ranges in place.
         </Typography>
+        {/* The model-level pair, above the per-date key rather than among the
+            chips at the top: they are read off the same A scale as the column
+            in this table, and stating them here puts the whole-model number
+            next to the dates it was computed from. Shown only when the run
+            reported them, so an analysis from before they existed says nothing
+            rather than showing blanks. */}
+        {isBayesian && modelAgreement && (
+          <Typography
+            variant="caption"
+            component="p"
+            color={modelAgreement.poor ? 'error' : 'textSecondary'}
+            sx={{ mt: 1.5 }}
+          >
+            {modelAgreement.model != null && (
+              <>
+                <strong>Amodel {modelAgreement.model.toFixed(0)}</strong> — the model&rsquo;s
+                agreement with all of its dates at once.{' '}
+              </>
+            )}
+            {modelAgreement.overall != null && (
+              <>
+                <strong>Aoverall {modelAgreement.overall.toFixed(0)}</strong> — the same index
+                built from the dates one at a time.{' '}
+              </>
+            )}
+            {modelAgreement.poor
+              ? `Below ${POOR_AGREEMENT}, which is the conventional point for reconsidering the model itself rather than any one date.`
+              : `${POOR_AGREEMENT} is the conventional threshold; both are on the same scale as the A column.`}
+          </Typography>
+        )}
         {/* The key a first-time reader needs, present without a hover: the
             two diagnostics letters, spelled out once under the table they
             label. */}

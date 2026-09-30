@@ -127,12 +127,13 @@ class TestReproducesOxCal:
 
 def test_amodel_is_not_derivable_from_the_date_indices():
     """
-    Guards the decision not to report Amodel. On the `ordered` run the
-    per-date indices multiply to more than one, so every exponent of that
-    product lands above 100 while OxCal reports 96.0 -- Amodel must carry a
-    term for the model structure that these indices do not contain. If a
-    future change claims to compute Amodel, this documents what it has to
-    account for.
+    Why Amodel needs the joint posterior rather than the A column. On the
+    `ordered` run the per-date indices multiply to more than one, so every
+    exponent of that product lands above 100 while OxCal reports 96.0: Amodel
+    carries the correlation the model's structure puts between the dates, which
+    their marginal indices cannot contain. That is what
+    agreement.model_agreement computes and what TestModelIndexAgainstOxCal
+    holds it to; this pins the reason it cannot be done more cheaply.
     """
     values = np.array(list(REPORTED['ordered']['dates'].values())) / 100.0
     assert values.prod() > 1.0
@@ -394,3 +395,230 @@ class TestAgainstTheOutlierFixture:
         from_oxcal = agreement.overall_agreement(
             [table[x['id']]['agreement'] for x in sf.measurements()])
         assert from_oxcal == pytest.approx(table['model']['Aoverall'], abs=1.0)
+
+
+def _draws_from(grid, density, rng, count):
+    """
+    `count` draws from a density on `grid`, as the solvers produce them: a
+    calendar age is drawn AT a grid node, not interpolated between two, so a
+    drawn state means the same thing here as it does in a run.
+    """
+    return rng.choice(grid, size=count, p=density / density.sum())
+
+
+class TestModelIndex:
+    """
+    A_model (agreement.model_agreement) on its own terms: the properties that
+    say it is the joint version of A_i rather than a second number that
+    happens to land nearby.
+    """
+
+    def _measurement(self, tag='am_x', age=3000, error=30):
+        return {'id': tag, 'sample_name': tag, 'age_bp': age,
+                'error_1sigma': error, 'curve_id': 'intcal20'}
+
+    def test_one_date_reduces_to_its_own_agreement_index(self):
+        """
+        The identity the definition rests on: with n = 1 the joint
+        distribution IS the marginal and the 1/sqrt(n) exponent is 1, so
+        A_model has to return that date's own A_i. Anything else means the two
+        are measuring different things.
+        """
+        m = self._measurement()
+        grid = np.arange(2800.0, 3600.0, 5.0)
+        # Sharpened onto the peak of its own likelihood, so the expected
+        # answer is well away from 100 and a coincidence is ruled out.
+        peak = grid[np.argmax(agreement.unmodelled_likelihood(m, grid))]
+        posterior = np.exp(-0.5 * ((grid - peak) / 15.0) ** 2)
+        expected = agreement.agreement_index(m, np.column_stack([grid, posterior]))
+        got = agreement.model_agreement(
+            [m], {m['id']: _draws_from(grid, posterior, np.random.default_rng(1), 40000)})
+        assert got == pytest.approx(expected, rel=0.02), (got, expected)
+
+    def test_dates_the_model_left_independent_score_100(self):
+        """
+        No model at all: every date drawn from its own likelihood, nothing
+        correlated with anything. A_model must report that as agreement, and
+        must not accumulate a penalty for having several dates in it.
+        """
+        rng = np.random.default_rng(2)
+        grid = np.arange(2600.0, 3800.0, 5.0)
+        ms = [self._measurement(f'am_ind{i}', age=age)
+              for i, age in enumerate((2900, 3000, 3100, 3200, 3300))]
+        draws = {m['id']: _draws_from(
+            grid, agreement.unmodelled_likelihood(m, grid), rng, 40000) for m in ms}
+        assert agreement.model_agreement(ms, draws) == pytest.approx(100.0, abs=2.0)
+
+    def test_dates_forced_together_score_low(self):
+        """
+        The case it exists for. Five dates spread over 700 radiocarbon years,
+        all driven to one calendar age -- a model whose structure the data
+        cannot satisfy.
+        """
+        rng = np.random.default_rng(3)
+        ms = [self._measurement(f'am_sq{i}', age=age)
+              for i, age in enumerate((2800, 2950, 3100, 3250, 3400))]
+        grid = np.arange(2600.0, 3800.0, 5.0)
+        squeezed = np.exp(-0.5 * ((grid - 3150.0) / 20.0) ** 2)
+        draws = {m['id']: _draws_from(grid, squeezed, rng, 20000) for m in ms}
+        assert agreement.model_agreement(ms, draws) < agreement.POOR_AGREEMENT_BELOW
+
+    def test_sampling_error_is_small_at_the_draws_the_solvers_keep(self):
+        """
+        A_model is a Monte Carlo average where A_i and A_overall are not, so
+        the size of that error is part of the number. Pinned here so a change
+        to how many states a run keeps cannot quietly make it noise.
+        """
+        ms = [self._measurement(f'am_mc{i}', age=age)
+              for i, age in enumerate((2950, 3000, 3050, 3100))]
+        grid = np.arange(2700.0, 3500.0, 5.0)
+        posterior = np.exp(-0.5 * ((grid - 3150.0) / 60.0) ** 2)
+        scores = []
+        for seed in (11, 12, 13, 14):
+            rng = np.random.default_rng(seed)
+            scores.append(agreement.model_agreement(
+                ms, {m['id']: _draws_from(grid, posterior, rng, 20000) for m in ms}))
+        assert max(scores) - min(scores) < 1.0, scores
+
+    def test_returns_none_rather_than_inventing_a_score(self):
+        m = self._measurement()
+        assert agreement.model_agreement([m], {}) is None
+        assert agreement.model_agreement([m], {m['id']: []}) is None
+        assert agreement.model_agreement([], {}) is None
+
+    def test_a_date_with_no_draws_is_left_out_of_n(self):
+        """
+        Not scored as a zero: a date the run did not report a state for is
+        missing information, and counting it in n would drag the whole model
+        down for it.
+        """
+        rng = np.random.default_rng(4)
+        grid = np.arange(2600.0, 3800.0, 5.0)
+        ms = [self._measurement(f'am_miss{i}', age=age) for i, age in enumerate((2950, 3050))]
+        draws = {m['id']: _draws_from(
+            grid, agreement.unmodelled_likelihood(m, grid), rng, 20000) for m in ms}
+        both = agreement.model_agreement(ms, draws)
+        one = agreement.model_agreement(
+            ms + [self._measurement('am_missing_x')], draws)
+        assert one == pytest.approx(both, abs=1e-9)
+
+
+class TestModelIndexAgainstOxCal:
+    """
+    A_model end to end, against the Amodel OxCal reports for the same three
+    models -- the number an analyst actually screens a model on, so the claim
+    that we compute the same quantity has to be made against its own value and
+    not only against the per-date column.
+
+    Solved rather than fed in: Amodel is a function of the JOINT posterior, and
+    the fixture's export holds only the marginals, so there is nothing to
+    substitute for running the model. That makes this looser than the formula
+    tests above by exactly the amount our posterior differs from OxCal's -- the
+    same cost test_our_own_likelihood_gives_much_the_same_answer pins per date.
+    """
+
+    SOLVED = {}
+
+    def _solved(self, run):
+        """One run per model, cached: each is a few seconds of sampling."""
+        if run not in self.SOLVED:
+            from app.services import gibbs
+            self.SOLVED[run] = gibbs.solve(
+                ox.measurements(), ox.model_tree(run), num_samples=200)
+        return self.SOLVED[run]
+
+    def _our_indices(self, solved):
+        return [
+            agreement.agreement_index(
+                m, solved['measurements'][m['id']]['probability_distribution'])
+            for m in ox.measurements()
+        ]
+
+    @pytest.mark.parametrize('run', RUNS)
+    def test_reproduces_oxcals_amodel(self, run):
+        got = self._solved(run)['model_agreement']
+        assert got is not None
+        # Reads high by 1.5-3.3 across the three models, which is our
+        # posterior's own offset carried through rather than slack: the same
+        # dates' per-date indices read high by about 0.7 each.
+        assert got == pytest.approx(REPORTED[run]['model'], abs=3.5), got
+
+    @pytest.mark.parametrize('run', RUNS)
+    def test_amodel_is_closer_to_oxcal_than_aoverall_is(self, run):
+        """
+        Why the joint index is worth the joint draws. A_overall's independence
+        assumption costs it about 5 units on these models -- more than the
+        difference it is being read for -- and A_model does not pay it.
+        """
+        solved = self._solved(run)
+        joint_error = abs(solved['model_agreement'] - REPORTED[run]['model'])
+        overall = agreement.overall_agreement(self._our_indices(solved))
+        overall_error = abs(overall - REPORTED[run]['overall'])
+        assert joint_error < overall_error, (joint_error, overall_error)
+
+    def test_ordering_pulls_amodel_below_aoverall(self):
+        """
+        The difference between the two indices, and the direction OxCal reports
+        it in: on the ordered model the constraints correlate the dates and
+        Amodel falls below Aoverall (96.0 against 100.4 in OxCal's own run),
+        while on the unordered one -- same dates, branches free -- the two all
+        but coincide (106.6 against 107.0).
+        """
+        assert REPORTED['ordered']['model'] < REPORTED['ordered']['overall']
+        assert abs(REPORTED['unordered']['model']
+                   - REPORTED['unordered']['overall']) < 1.0
+
+        gaps = {}
+        for run in ('ordered', 'unordered'):
+            solved = self._solved(run)
+            gaps[run] = (agreement.overall_agreement(self._our_indices(solved))
+                         - solved['model_agreement'])
+        assert gaps['ordered'] > gaps['unordered'], gaps
+        assert gaps['ordered'] > 0.0, gaps
+
+    def test_both_solvers_report_the_same_amodel(self):
+        """
+        Exact integration and the sampler must agree about it, or the number
+        means something different depending on which solver a model happened to
+        qualify for. The exact solver needs the implied transition supplied,
+        which is a real change to the model -- hence a wider tolerance than the
+        two solvers' marginals themselves agree to.
+        """
+        from app.services import exact_chain
+        from app.services.model_tree import with_implicit_boundaries
+        measurements = ox.measurements()
+        tree, inserted = with_implicit_boundaries(ox.model_tree('ordered'))
+        assert inserted
+        layout, _reason = exact_chain.layout_with_reason(tree, measurements)
+        assert layout is not None
+        exact = exact_chain.solve(measurements, tree, layout, num_samples=200)
+        assert exact['model_agreement'] == pytest.approx(
+            self._solved('ordered')['model_agreement'], abs=1.5)
+
+
+def test_a_lone_phase_leaves_amodel_and_aoverall_together():
+    """
+    The structural claim, on a model with no ordering in it: one Phase
+    constrains nothing between its dates, so the joint index and the product of
+    the per-date ones have nothing to disagree about. OxCal's second fixture is
+    exactly this shape (tests/fixtures/oxcal_outlier, sixteen dates in one
+    phase) and reports Amodel 82.9 and Aoverall 82.9 -- the same number twice.
+    """
+    from app.services import gibbs
+    measurements = [
+        {'id': f'lone_{i}', 'sample_name': f'S{i}', 'age_bp': age,
+         'error_1sigma': 30, 'curve_id': 'intcal20', 'element_id': 'lone_phase'}
+        for i, age in enumerate((2900, 2960, 3010, 3050, 3120))
+    ]
+    tree = {'id': 'lone_seq', 'element_type': 'sequence', 'name': 'Site',
+            'tpq_age_bp': None, 'taq_age_bp': None,
+            'children': [{'id': 'lone_phase', 'element_type': 'phase', 'name': 'Phase',
+                          'tpq_age_bp': None, 'taq_age_bp': None, 'children': []}]}
+    solved = gibbs.solve(measurements, tree, num_samples=200)
+    overall = agreement.overall_agreement([
+        agreement.agreement_index(
+            m, solved['measurements'][m['id']]['probability_distribution'])
+        for m in measurements
+    ])
+    assert solved['model_agreement'] == pytest.approx(overall, abs=2.0), (
+        solved['model_agreement'], overall)

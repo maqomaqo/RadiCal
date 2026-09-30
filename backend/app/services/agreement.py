@@ -34,11 +34,29 @@ tests/fixtures/oxcal, which hold 24 known answers across three models. The
 individual indices are reproduced to rms 0.81 and worst 1.4, the overall ones
 to 0.1; tests/test_agreement.py asserts that.
 
-NOT implemented: OxCal's `Amodel`. It cannot be derived from the per-date
-indices -- on the `ordered` fixture their product exceeds one, so no exponent
-of it reaches the 96.0 OxCal reports, meaning Amodel carries a term for the
-model structure itself. A guess at the headline number archaeologists screen on
-would be worse than reporting nothing.
+A_overall is an approximation, and its error is not small: it treats the dates
+as independent, which a model is precisely what makes them not. OxCal's
+`Amodel` is the same index computed on the JOINT distribution instead, over
+every date at once:
+
+    A_model = 100 * (E_posterior[product of L_i(t_i)] / product of sum(L_i^2))
+                    ^ (1/sqrt(n))
+
+with each L_i the date's own normalised likelihood. In one dimension that IS
+A_i, and with a model that leaves the dates independent it returns A_overall;
+what separates the two is the correlation the model's structure puts between
+the dates -- which is why Amodel drops below Aoverall exactly when constraints
+are doing work (100.4 against 96.0 on the `ordered` fixture) and the two
+converge when they are not (107.0 against 106.6 on `unordered`, whose branches
+are unordered). That also settles the earlier reading of this file, that Amodel
+could not be reached from the per-date indices: it cannot, because it is not a
+function of them.
+
+The expectation is a Monte Carlo average over the run's own joint states, so
+Amodel carries sampling error where A_i and A_overall do not -- about +/-0.5 at
+the 20,000 joint draws both solvers keep (tests/test_agreement.py pins it).
+Both solvers report it, computed from the same draws the duration and
+age-depth sections use.
 """
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
@@ -58,6 +76,10 @@ POOR_AGREEMENT_BELOW = 60.0
 # off its likelihood scores a true zero, and dropping those would remove
 # precisely the worst dates and let a broken model report a healthy overall.
 MINIMUM_FOR_OVERALL = 0.01
+# Density given to a joint draw the date's own likelihood puts no mass at,
+# where a true zero would take the whole product to -inf and lose every other
+# draw with it.
+_UNSUPPORTED = 1e-300
 
 
 def unmodelled_likelihood(measurement: Dict, grid: np.ndarray) -> np.ndarray:
@@ -87,6 +109,27 @@ def _support(measurement: Dict) -> Tuple[float, float]:
     if not len(significant):
         return float(cal[0]), float(cal[-1])
     return float(cal[significant[0]]), float(cal[significant[-1]])
+
+
+def _comparison_grid(lo: float, hi: float, anchor: float = 0.0) -> np.ndarray:
+    """
+    The calendar grid a date is compared on, spanning [lo, hi].
+
+    Its nodes sit on a FIXED lattice through `anchor` rather than starting at
+    `lo` itself. A grid that started at the window's own edge moved every node
+    with it, and since the likelihood is normalised over the nodes, the same two
+    distributions compared over a window three years wider scored about 2%
+    differently -- which is also what stopped A_model, whose window comes from
+    the draws, from reducing to A_i on a single date.
+
+    `anchor` is a node of a distribution being compared, when the caller has one
+    it did not compute itself: landing on that distribution's own nodes reads it
+    as exported rather than interpolating it, which matters for the OxCal
+    fixtures, whose export is on half-year cal BP values.
+    """
+    step = COMPARISON_STEP_YEARS
+    start = anchor + np.floor((lo - anchor) / step) * step
+    return np.arange(start, hi + step, step)
 
 
 def agreement_index(
@@ -129,7 +172,7 @@ def agreement_index(
     if not np.isfinite(lo) or not np.isfinite(hi) or hi <= lo:
         return None
 
-    grid = np.arange(lo, hi + COMPARISON_STEP_YEARS, COMPARISON_STEP_YEARS)
+    grid = _comparison_grid(lo, hi, anchor=lo_support if supplied is not None else 0.0)
     if supplied is not None:
         observed = np.interp(grid, supplied[:, 0], supplied[:, 1], left=0.0, right=0.0)
     else:
@@ -166,6 +209,82 @@ def overall_agreement(indices: Iterable[Optional[float]]) -> Optional[float]:
     floored = np.maximum(np.asarray(usable, dtype=float), MINIMUM_FOR_OVERALL)
     logs = np.log(floored / 100.0)
     return float(100.0 * np.exp(logs.sum() / np.sqrt(len(usable))))
+
+
+def model_agreement(
+    measurements: List[Dict],
+    draws: Dict[str, Sequence[float]],
+) -> Optional[float]:
+    """
+    A_model: the agreement index of the whole model, from its JOINT posterior.
+
+    `draws` maps a date's id to the calendar ages it took across the run's
+    joint states -- one state per draw, every date in it at once, which is
+    what carries the correlation the model imposed. Both solvers keep such
+    states (gibbs.run's `collect_draws`, exact_chain's own boundary and date
+    draws), and this is read off the same set the duration and age-depth
+    sections use, so the three cannot describe different runs.
+
+    Where A_overall multiplies the per-date indices and so assumes the dates
+    are independent, this is the same index computed over all of them at once:
+    the posterior expectation of the product of their likelihoods, against what
+    that product would be if the model had left each date alone. Dates missing
+    from `draws`, or with no likelihood to speak of, are left out of both the
+    product and the count of n, exactly as A_overall leaves out a date whose
+    index could not be computed.
+
+    Returns None when no date could be included, rather than a number standing
+    for nothing.
+    """
+    log_joint: Optional[np.ndarray] = None
+    log_independent = 0.0
+    counted = 0
+    for measurement in measurements:
+        drawn = draws.get(measurement['id'])
+        if drawn is None:
+            continue
+        drawn = np.asarray(drawn, dtype=float)
+        if not drawn.size:
+            continue
+        lo_support, hi_support = _support(measurement)
+        lo = min(lo_support, float(drawn.min()))
+        hi = max(hi_support, float(drawn.max()))
+        if not np.isfinite(lo) or not np.isfinite(hi) or hi <= lo:
+            continue
+        # The same grid and the same likelihood the per-date index is computed
+        # on, so Amodel and the A column are one definition read two ways.
+        grid = _comparison_grid(lo, hi)
+        observed = unmodelled_likelihood(measurement, grid)
+        total = observed.sum()
+        if total <= 0:
+            continue
+        observed = observed / total
+        log_independent += float(np.log((observed ** 2).sum()))
+        # Each draw is read at the grid CELL it falls in rather than
+        # interpolated between nodes, which is what keeps this the same
+        # comparison A_i makes: on a posterior sharp against the five-year step
+        # an interpolated reading runs about 2% high, and at n = 1 the two
+        # would then disagree about the same date.
+        cell = np.clip(np.rint((drawn - grid[0]) / COMPARISON_STEP_YEARS).astype(int),
+                       0, len(grid) - 1)
+        # In logs from here: the product runs over every date, and at eight
+        # dates it is already at 1e-14.
+        at_draw = observed[cell]
+        # A draw the likelihood gives no mass to contributes nothing to the
+        # expectation, which is the honest reading: the model put the date
+        # where its own measurement says it cannot be.
+        term = np.log(np.maximum(at_draw, _UNSUPPORTED))
+        log_joint = term if log_joint is None else log_joint + term
+        counted += 1
+
+    if log_joint is None or not counted:
+        return None
+    # log of the MEAN, not the mean of the logs: the index is a ratio of
+    # expectations, and averaging in log space would report the geometric mean
+    # of the product instead -- a different and much smaller number.
+    peak = float(log_joint.max())
+    log_expectation = peak + float(np.log(np.exp(log_joint - peak).mean()))
+    return float(100.0 * np.exp((log_expectation - log_independent) / np.sqrt(counted)))
 
 
 def attach(results: Dict[str, Dict], measurements: List[Dict]) -> Optional[float]:

@@ -705,11 +705,26 @@ def _solver_sentence(solver: Optional[Dict]) -> Optional[str]:
             sentence += '.'
     if solver.get('converged') is False:
         sentence += ' The sampler did not meet its convergence criterion.'
+    # The whole model's agreement with its dates, both of OxCal's indices, so a
+    # printed report carries the number a model is screened on rather than only
+    # the per-date column in the table. See services/agreement.py for what
+    # separates them.
+    model_agreement = solver.get('model_agreement')
+    overall_agreement = solver.get('overall_agreement')
+    if model_agreement is not None or overall_agreement is not None:
+        quoted = ', '.join(
+            f'{label} {value:.0f}%'
+            for label, value in (('Amodel', model_agreement),
+                                 ('Aoverall', overall_agreement))
+            if value is not None
+        )
+        sentence += f' Agreement over the whole model: {quoted}.'
     if solver.get('method') == 'wiggle_match':
         # The check that the match is REAL rather than a diagnostic beside it:
         # the gaps are asserted, so a member at the wrong ring cannot be
-        # absorbed. Quoted without a pass mark, for the reason
-        # services/agreement.py gives for not publishing Amodel.
+        # absorbed. Quoted without a pass mark, since what OxCal holds a
+        # combination against scales with the number of members and this app
+        # does not print a threshold it has not pinned against a real run.
         combination = solver.get('combination_agreement')
         if combination is not None:
             sentence += (

@@ -259,6 +259,17 @@ class TestReportContent:
         text = pdf_text(_pdf(client, analysis_id))
         assert "Solved by" in text
 
+    def test_a_modelled_run_quotes_the_whole_model_agreement(self, client):
+        """
+        Amodel and Aoverall, the two numbers a model is screened on. Printed
+        beside the solver rather than only in the app, so a report handed to a
+        reader carries the same verdict the results page shows.
+        """
+        analysis_id = _modelled(client)
+        text = pdf_text(_pdf(client, analysis_id))
+        assert "Agreement over the whole model" in text
+        assert "Amodel" in text and "Aoverall" in text
+
     def test_a_modelled_run_carries_the_unmodelled_comparison(self, client):
         # The whole point of a Bayesian report: what the date says on its
         # own, beside what the model made of it.

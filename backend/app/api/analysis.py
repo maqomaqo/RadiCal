@@ -620,12 +620,20 @@ def _run_bayesian(
             estimate_durations=estimate_durations,
             dispersal=dispersal_spec,
         )
-        agreement_service.attach(solved['measurements'], measurements)
+        overall = agreement_service.attach(solved['measurements'], measurements)
         return solved['measurements'], solved['boundaries'], {
             'method': 'exact',
             'requested': requested,
             'reason': None,
             'implicit_boundaries': exact_needs_boundaries,
+            # The two model-level agreement indices, alongside the per-date
+            # ones attach() has just written. See services/agreement.py for
+            # what separates them: Aoverall combines the per-date indices and
+            # so assumes the dates are independent, Amodel is the same index
+            # over the joint posterior, where the model's structure has
+            # correlated them.
+            'model_agreement': solved.get('model_agreement'),
+            'overall_agreement': overall,
         }, solved.get('intervals')
 
     # Only the sampler takes a progress callback: exact integration does not
@@ -643,10 +651,14 @@ def _run_bayesian(
         # gibbs.solve_chains for what the extra chains are for.
         chains=int(bayesian_config.get('mcmc_chains') or gibbs.DEFAULT_CHAINS),
     )
-    agreement_service.attach(sampled['measurements'], measurements)
+    overall = agreement_service.attach(sampled['measurements'], measurements)
     return sampled['measurements'], sampled['boundaries'], {
         'method': 'gibbs',
         'requested': requested,
+        # As on the exact path: Aoverall from the per-date indices, Amodel from
+        # the run's joint states (services/agreement.py).
+        'model_agreement': sampled.get('model_agreement'),
+        'overall_agreement': overall,
         # Why the model is not a chain AS AUTHORED, and None when it is one
         # and the sampler ran by choice -- so the results page does not warn
         # about a deliberate, valid decision.

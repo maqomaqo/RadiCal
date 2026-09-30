@@ -469,3 +469,74 @@ class TestStaleRecords:
         assert copy.status_code == 200, copy.text
         copy_id = copy.json()['data']['id']
         assert client.get(f'/api/analysis/{copy_id}').json()['data']['solver'] is None
+
+
+class TestModelAgreementIsReported:
+    """
+    The two model-level agreement indices travel with the run that produced
+    them: they are properties of the whole fit, so they ride on the solver
+    block rather than on any date's row (see services/agreement.py), and the
+    results page reads them from there.
+    """
+
+    def _both(self, solver):
+        return solver.get('model_agreement'), solver.get('overall_agreement')
+
+    def test_the_exact_path_reports_and_persists_both_indices(self, client):
+        tag = f'sr{next(_IDS)}'
+        created = _run(client, tag, _chain_tree(tag), [
+            _measurement(f'{tag}s1', f'{tag}p1', age_bp=3000),
+            _measurement(f'{tag}s2', f'{tag}p1', age_bp=3040),
+        ])
+        assert created.status_code == 200, created.text
+        solver = created.json()['data']['solver']
+        assert solver['method'] == 'exact'
+        model, overall = self._both(solver)
+        # A lone phase constrains nothing between its dates, so a healthy model
+        # -- which this is -- reports both near 100 rather than merely present.
+        assert model is not None and overall is not None
+        assert 80.0 < model < 130.0, model
+        assert 80.0 < overall < 130.0, overall
+
+        analysis_id = created.json()['data']['id']
+        fetched = client.get(f'/api/analysis/{analysis_id}').json()['data']
+        assert self._both(fetched['solver']) == (model, overall)
+
+    def test_the_sampled_path_reports_both_indices_too(self, client):
+        """
+        Or the number would mean something different depending on which solver
+        a model happened to qualify for.
+        """
+        tag = f'sr{next(_IDS)}'
+        created = _run(client, tag, _unbounded_tree(tag), [
+            _measurement(f'{tag}s1', f'{tag}p1', age_bp=3200),
+            _measurement(f'{tag}s2', f'{tag}p2', age_bp=3100),
+            _measurement(f'{tag}s3', f'{tag}p3', age_bp=3000),
+        ])
+        assert created.status_code == 200, created.text
+        solver = created.json()['data']['solver']
+        assert solver['method'] == 'gibbs'
+        model, overall = self._both(solver)
+        assert model is not None and overall is not None
+        assert 0.0 <= model <= 200.0 and 0.0 <= overall <= 200.0
+
+    def test_a_model_its_dates_contradict_reports_a_low_amodel(self, client):
+        """
+        What the number is for. The younger phase holds a date 600 radiocarbon
+        years older than the phase above it, so the ordering cannot be
+        satisfied -- and the whole-model index has to say so, not just the one
+        date's own.
+        """
+        tag = f'sr{next(_IDS)}'
+        tree = _chain_tree(tag)
+        tree['children'].insert(2, {'id': f'{tag}p2', 'element_type': 'phase',
+                                    'name': 'Later', 'children': []})
+        created = _run(client, tag, tree, [
+            _measurement(f'{tag}s1', f'{tag}p1', age_bp=3000),
+            _measurement(f'{tag}s2', f'{tag}p1', age_bp=3020),
+            _measurement(f'{tag}s3', f'{tag}p2', age_bp=2900),
+            _measurement(f'{tag}s4', f'{tag}p2', age_bp=3640),
+        ])
+        assert created.status_code == 200, created.text
+        model, _overall = self._both(created.json()['data']['solver'])
+        assert model is not None and model < 60.0, model

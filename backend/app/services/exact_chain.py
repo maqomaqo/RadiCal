@@ -68,6 +68,7 @@ import numpy as np
 from scipy.signal import fftconvolve
 from scipy.special import gammaln
 
+from app.services import agreement as agreement_service
 from app.services import intervals
 from app.services.calibration import SIGMA_1, SIGMA_2, get_curve, hpd_ranges_from_distribution
 from app.services.model_tree import inherited_bounds, plan_model
@@ -1158,17 +1159,20 @@ def solve(measurements: List[Dict], root: Dict, chain: Chain,
     exact marginal by inverse CDF so plotting and export code is unchanged.
 
     Those draws are from the MARGINALS and carry no joint correlation between
-    dates. Nothing reads joint structure off them: `estimate_durations` is the
-    one caller that needs it and takes its own draws from the joint posterior.
+    dates. Nothing reads joint structure off them: `model_agreement` (OxCal's
+    Amodel) and `estimate_durations` both need it, and both read the separate
+    joint draws this takes from the message-passed posterior.
 
     `uniform_span_prior` applies OxCal's correction of the same name, on by
     default there too; see _span_prior_correction.
 
-    `estimate_durations` adds `intervals` (services/intervals.py). Off by
-    default because it costs `interval_draws` joint draws and a second pass over
-    the transfer matrices, and because a duration is a claim about a phase's
-    extent not every analysis wants to make. Its draws use their own generator,
-    so every other number here is bit-for-bit what it would be with the flag off.
+    `interval_draws` joint draws are taken whatever was asked for, since Amodel
+    needs them; they use their own generator, so every other number here is
+    bit-for-bit what it was before they were collected.
+
+    `estimate_durations` adds `intervals` (services/intervals.py), read off
+    those same draws. Off by default because a duration is a claim about a
+    phase's extent not every analysis wants to make.
 
     `dispersal` asks for the spatial section, and needs the same joint draws
     for the same reason -- so it is a second reason to take them, independent
@@ -1291,18 +1295,22 @@ def solve(measurements: List[Dict], root: Dict, chain: Chain,
             'posterior': _summarize(grid, density, rng, num_samples),
         }
 
-    # A dispersal fit is the second reason to take joint draws, and it is
-    # independent of the first: a front's speed is a function of many modelled
-    # ages at once whether or not anybody wanted phase durations.
+    # Joint draws: taken always, because Amodel -- the whole model's agreement
+    # index -- is a function of every date at once and is always reported
+    # (services/agreement.model_agreement). Durations and a dispersal fit read
+    # the SAME draws when they were asked for, so the three sections cannot
+    # describe different states of the model.
+    #
+    # Seeded apart from the generator above, so every other number here stays
+    # bit-for-bit identical to what it was before any of this was collected.
+    joint_rng = np.random.default_rng(seed + 1)
+    boundary_draws = draw_boundaries(joint_rng, interval_draws)
+    date_draws = _draw_dates(joint_rng, chain, cumulative, boundary_draws)
+    joint = {bid: grid[boundary_draws[:, i]]
+             for i, bid in enumerate(chain.boundary_ids)}
+    joint.update({date_id: grid[idx] for date_id, idx in date_draws.items()})
+    results['model_agreement'] = agreement_service.model_agreement(measurements, joint)
     if estimate_durations or dispersal is not None:
-        # Seeded apart from the generator above, so every other number here
-        # stays bit-for-bit identical whether or not durations were asked for.
-        joint_rng = np.random.default_rng(seed + 1)
-        boundary_draws = draw_boundaries(joint_rng, interval_draws)
-        date_draws = _draw_dates(joint_rng, chain, cumulative, boundary_draws)
-        joint = {bid: grid[boundary_draws[:, i]]
-                 for i, bid in enumerate(chain.boundary_ids)}
-        joint.update({date_id: grid[idx] for date_id, idx in date_draws.items()})
         results['intervals'] = intervals.report(
             root, measurements, joint, independent=True,
             durations=estimate_durations, dispersal=dispersal)

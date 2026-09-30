@@ -162,7 +162,7 @@ from typing import Callable, Dict, List, Optional, Sequence, Tuple
 import numpy as np
 from scipy.special import gammaln
 
-from app.services import calibration, intervals
+from app.services import agreement, calibration, intervals
 from app.services.exact_chain import (
     DEFAULT_OUTLIER_MODEL,
     OUTLIER_KERNEL_HALF_WIDTH_YEARS,
@@ -2221,38 +2221,45 @@ def solve(measurements: List[Dict], root: Dict, sweeps: int = DEFAULT_SWEEPS,
     `grid` is accepted so a caller can force exact_chain's own grid and compare
     the two solvers without a resolution difference confounding the answer.
 
-    `estimate_durations` adds `intervals` as exact_chain.solve's flag does, from
-    `interval_draws` whole states kept jointly through the run. Off by default
-    for the same reasons, plus one here: those states are an MCMC chain rather
-    than independent draws, so a duration read off them converges more slowly
-    than the marginals beside it and the run is not extended on its account.
+    `interval_draws` whole states are kept jointly through the run whatever was
+    asked for, because `model_agreement` -- OxCal's Amodel, the whole model's
+    agreement index -- is a function of every date at once and is always
+    reported. Those states are an MCMC chain rather than independent draws, so
+    anything read off them converges more slowly than the marginals beside it;
+    the run is not extended on their account, and Amodel carries the sampling
+    error services/agreement.py quantifies.
+
+    `estimate_durations` adds `intervals` as exact_chain.solve's flag does,
+    from the same states. Off by default for the same reasons.
 
     `dispersal` asks for the spatial section and takes the same joint states,
     with the same MCMC qualification on everything read off them.
     """
     model = Model(measurements, root, grid=grid,
                   uniform_span_prior=uniform_span_prior)
-    # An age-depth model needs joint draws whether or not durations were asked
-    # for: its deliverable IS a function of several ages at once -- the band,
-    # and the accumulation rate between one level and the next -- so it is not
-    # something an analyst should have to opt into to get an answer at all.
-    # Phase durations stay opt-in, being a modelling claim of their own.
-    # ...and so does a dispersal fit, for the same reason and independently of
-    # the other two: a front's speed is a function of many modelled ages at
-    # once, and asking for it is not asking for phase durations.
-    wants_draws = (estimate_durations or bool(model.depositions)
-                   or dispersal is not None)
+    # Joint states are always kept, because Amodel is always reported and is a
+    # function of every date at once (services/agreement.model_agreement).
+    # What is still optional is what ELSE is read off them: an age-depth model
+    # needs them whether or not durations were asked for, its deliverable BEING
+    # a function of several ages at once -- the band, and the accumulation rate
+    # between one level and the next. Phase durations stay opt-in, being a
+    # modelling claim of their own, and so does a dispersal fit, for the same
+    # reason and independently of the other two: a front's speed is a function
+    # of many modelled ages at once, and asking for it is not asking for phase
+    # durations.
+    wants_intervals = (estimate_durations or bool(model.depositions)
+                       or dispersal is not None)
     if chains > 1:
         chain = solve_chains(
             measurements, root, chains=chains, sweeps=sweeps, seed=seed,
             uniform_span_prior=uniform_span_prior, grid=model.grid,
             target_convergence=target_convergence, max_sweeps=max_sweeps,
-            collect_draws=interval_draws if wants_draws else 0,
+            collect_draws=interval_draws,
             on_progress=on_progress)
     else:
         chain = run(model, sweeps=sweeps, seed=seed,
                     target_convergence=target_convergence, max_sweeps=max_sweeps,
-                    collect_draws=interval_draws if wants_draws else 0,
+                    collect_draws=interval_draws,
                     on_progress=on_progress)
     rng = np.random.default_rng(seed)
 
@@ -2336,11 +2343,21 @@ def solve(measurements: List[Dict], root: Dict, sweeps: int = DEFAULT_SWEEPS,
         }
     results['grid'] = {'lower': float(model.grid[0]), 'upper': float(model.grid[-1]),
                        'step': model.dt}
-    if wants_draws and chain['draws'] is not None:
+    # The joint states, which the marginal histograms above cannot stand in
+    # for: both Amodel and the duration section are functions of several
+    # modelled ages AT ONCE, so they are read off the same states or they are
+    # describing different runs.
+    results['model_agreement'] = None
+    if chain['draws'] is not None:
         joint = {param: model.grid[chain['draws'][:, column]]
                  for column, param in enumerate(chain['draw_params'])}
-        results['intervals'] = intervals.report(
-            measurements=measurements, root=root, draws=joint,
-            independent=False, durations=estimate_durations,
-            dispersal=dispersal)
+        # Kept whether or not durations were asked for: Amodel is the headline
+        # number a model is screened on, not an extra an analyst should have to
+        # opt into. The states cost one list of indices per kept sweep.
+        results['model_agreement'] = agreement.model_agreement(measurements, joint)
+        if wants_intervals:
+            results['intervals'] = intervals.report(
+                measurements=measurements, root=root, draws=joint,
+                independent=False, durations=estimate_durations,
+                dispersal=dispersal)
     return results
