@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { modelAgreementOf, POOR_AGREEMENT } from './diagnostics'
+import { formatAgreement, modelAgreementOf, POOR_AGREEMENT } from './diagnostics'
 
 describe('modelAgreementOf', () => {
   it('reads both indices off a solver block', () => {
@@ -33,5 +33,13 @@ describe('modelAgreementOf', () => {
     // ...and with no Amodel to screen on, Aoverall stands in for it.
     expect(modelAgreementOf({ overall_agreement: POOR_AGREEMENT - 1 })?.poor).toBe(true)
     expect(modelAgreementOf({ overall_agreement: POOR_AGREEMENT })?.poor).toBe(false)
+  })
+})
+
+describe('formatAgreement', () => {
+  it('prints a whole number with a percent sign, the one form used everywhere', () => {
+    expect(formatAgreement(33.4)).toBe('33%')
+    expect(formatAgreement(104.6)).toBe('105%')
+    expect(formatAgreement(0)).toBe('0%')
   })
 })

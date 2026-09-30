@@ -120,3 +120,13 @@ export function modelAgreementOf(solver?: {
     poor: (model ?? overall ?? 100) < POOR_AGREEMENT,
   }
 }
+
+/**
+ * An agreement index as the app prints it everywhere -- the row cells, the
+ * model pair, the PDF, the CSV's "Agreement %" column: a whole number with a
+ * percent sign. Whole, because A_model carries a few tenths of sampling error
+ * and a decimal would claim precision it does not have.
+ */
+export function formatAgreement(value: number): string {
+  return `${value.toFixed(0)}%`
+}

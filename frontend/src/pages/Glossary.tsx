@@ -1,5 +1,6 @@
 import { Box, Container, Link, Paper, Typography } from '@mui/material'
-import { Link as RouterLink } from 'react-router-dom'
+import { useEffect } from 'react'
+import { Link as RouterLink, useLocation } from 'react-router-dom'
 import BackLink from '@/components/BackLink'
 import AgreementSymbol from '@/components/AgreementSymbol'
 
@@ -299,7 +300,8 @@ const SECTIONS: Section[] = [
         id: 'model-agreement',
         body: (
           <>
-            The same index for the model as a whole, reported under the results table.{' '}
+            The same index for the model as a whole, reported beside the solver at the top of the
+            results page.{' '}
             <strong><AgreementSymbol which="model" /></strong> is computed over the joint posterior &mdash; every date at
             once, with the correlations the model&rsquo;s structure puts between them.{' '}
             <strong><AgreementSymbol which="overall" /></strong> combines the dates&rsquo; individual indices instead, which
@@ -325,6 +327,25 @@ const SECTIONS: Section[] = [
         ),
       },
       {
+        term: 'Suspect, Check and Assigned',
+        id: 'diagnostic-flags',
+        body: (
+          <>
+            The chips beside a date in the results table. <strong>Suspect</strong>: the date&rsquo;s
+            outlier probability rose at least 50 points above the prior it was given, or its
+            agreement index fell below 60 while its outlier prior was under 20%.{' '}
+            <strong>Check</strong>: its outlier probability rose 20&ndash;50 points above its prior.{' '}
+            <strong>Assigned</strong>: it was given an outlier prior of 20% or more and the run left it
+            close to that, so the data added nothing beyond what was assumed &mdash; a note about the
+            setting, not a finding. The outlier rules compare against the prior rather than a fixed
+            number, because a date given a prior of 100% comes back at 100% by construction. Above a
+            20% prior the agreement index stops counting as evidence: a date pulled toward its own
+            outlier component is expected to drift from its calibration. Select or hover a chip for
+            the reason it was given.
+          </>
+        ),
+      },
+      {
         term: 'Convergence, chains and R̂',
         id: 'convergence',
         body: (
@@ -345,6 +366,15 @@ const SECTIONS: Section[] = [
 ]
 
 export default function Glossary() {
+  // The Results page links to single entries (#agreement, #model-agreement,
+  // ...). That arrives as a client-side navigation, which does not scroll to
+  // its hash the way a page load would -- the same fix the manual carries.
+  const { hash } = useLocation()
+  useEffect(() => {
+    if (!hash) return
+    document.getElementById(decodeURIComponent(hash.slice(1)))?.scrollIntoView()
+  }, [hash])
+
   return (
     <Container maxWidth="lg" sx={{ py: 4 }}>
       <Paper sx={{ p: 3, mb: 3 }}>

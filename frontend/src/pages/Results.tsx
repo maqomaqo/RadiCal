@@ -110,6 +110,7 @@ import AgreementSymbol from '@/components/AgreementSymbol'
 import {
   concernFor,
   concernTitle,
+  formatAgreement,
   modelAgreementOf,
   NOTABLE_OUTLIER_PRIOR,
   POOR_AGREEMENT,
@@ -654,7 +655,7 @@ function DiagnosticsCell({
               rather than only seeing the ones that are not. An em dash
               where a diagnostic was not computed -- an older analysis,
               or a date with no outlier model -- which is not zero. */}
-          {result?.agreement_index != null ? `A ${result.agreement_index.toFixed(0)}` : 'A \u2014'}
+          {result?.agreement_index != null ? `A ${formatAgreement(result.agreement_index)}` : 'A \u2014'}
           {outlierApplies && (
             <>
               {'  \u00b7  '}
@@ -1491,9 +1492,8 @@ export default function Results() {
   collectBoundaries(analysis.model_tree)
   const isBayesian = analysis.analysis_type === 'bayesian'
   const measurementBySampleId = new Map((analysis.measurements || []).map((m) => [m.id, m]))
-  // The whole model's agreement, reported under the table the per-date column
-  // is in: the two are the same index at two scales, and a reader who has just
-  // read the A column is the reader who wants to know what it comes to.
+  // The whole model's agreement: beside the solver at the top, and -- when it
+  // is poor -- the lead line of the banner above the table.
   const modelAgreement = modelAgreementOf(analysis.solver)
 
   /**
@@ -2155,10 +2155,73 @@ export default function Results() {
           }}
         >
           {(solverChip ||
+            modelAgreement ||
             analysis.status !== 'completed' ||
             analysis.results.length !== analysis.measurements_count) && (
             <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap alignItems="center">
               {solverChip}
+              {/* The whole model's agreement, beside the solver: both say how
+                  far to trust the span above, and a reader should meet them
+                  before copying it rather than a table's length after. Text
+                  rather than a chip, since it is a measurement and not a state;
+                  only the number takes colour, and only when it is poor --
+                  what that means is said once, in the banner above the table.
+                  The symbol links to the glossary, which carries the
+                  definitions this page no longer spells out. */}
+              {modelAgreement && (
+                <Typography
+                  variant="body2"
+                  component="p"
+                  sx={{ fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}
+                >
+                  {modelAgreement.model != null && (
+                    <>
+                      <Link
+                        component={RouterLink}
+                        to="/help/glossary#model-agreement"
+                        color="inherit"
+                        underline="hover"
+                      >
+                        <AgreementSymbol which="model" />
+                      </Link>{' '}
+                      <Box
+                        component="strong"
+                        sx={{ color: modelAgreement.poor ? 'warning.main' : 'text.primary' }}
+                      >
+                        {formatAgreement(modelAgreement.model)}
+                      </Box>
+                    </>
+                  )}
+                  {modelAgreement.model != null && modelAgreement.overall != null && (
+                    <Box component="span" aria-hidden="true" sx={{ color: 'text.secondary', mx: 1 }}>
+                      ·
+                    </Box>
+                  )}
+                  {modelAgreement.overall != null && (
+                    <>
+                      <Link
+                        component={RouterLink}
+                        to="/help/glossary#model-agreement"
+                        color="inherit"
+                        underline="hover"
+                      >
+                        <AgreementSymbol which="overall" />
+                      </Link>{' '}
+                      <Box
+                        component="strong"
+                        sx={{
+                          color:
+                            modelAgreement.poor && modelAgreement.model == null
+                              ? 'warning.main'
+                              : 'text.primary',
+                        }}
+                      >
+                        {formatAgreement(modelAgreement.overall)}
+                      </Box>
+                    </>
+                  )}
+                </Typography>
+              )}
               {analysis.status !== 'completed' && (
                 <Chip
                   label={analysis.status}
@@ -2604,26 +2667,74 @@ export default function Results() {
             the table, where the reader is looking when they ask; printing
             both meant the same sentence twice, in two places that could
             disagree once either was edited. */}
-        {isBayesian && flaggedDates.length > 0 && (
+        {isBayesian && (flaggedDates.length > 0 || modelAgreement?.poor) && (
           <Alert
             severity={flaggedDates.some((f) => f.concern.level === 'suspect') ? 'error' : 'warning'}
-            sx={{ mb: 2 }}
+            sx={{
+              mb: 2,
+              // On a phone the action takes a row of its own under the
+              // message: beside it, the button (kept on one line) left the
+              // message a column a few words wide.
+              flexWrap: { xs: 'wrap', sm: 'nowrap' },
+              '& .MuiAlert-action': {
+                width: { xs: '100%', sm: 'auto' },
+                justifyContent: { xs: 'flex-end', sm: 'flex-start' },
+                ml: { xs: 0, sm: 'auto' },
+                pt: { xs: 0, sm: 0.5 },
+              },
+            }}
             action={
+              // nowrap: the Alert's message column takes every spare pixel,
+              // which left the action to break into "Edit / analysis".
               <Button
                 size="small"
                 startIcon={<EditIcon />}
                 onClick={() => navigate(`/analysis/${analysisId}/edit`)}
+                sx={{ whiteSpace: 'nowrap' }}
               >
                 Edit analysis
               </Button>
             }
           >
-            <Typography variant="body2" sx={{ fontWeight: 600 }}>
-              {flaggedDates.length} of {analysis.results.length} dates look suspect
-            </Typography>
-            <Typography variant="body2">
-              {flaggedDates.map((f) => f.name).join(' · ')}
-            </Typography>
+            {/* The model's own verdict comes first when it has one. Below the
+                threshold the convention is to reconsider the model rather
+                than any one date, so leading with the dates would send the
+                reader to fix the wrong thing -- and a poor model with no
+                flagged date used to get no banner at all. */}
+            {modelAgreement?.poor && (
+              <>
+                <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                  The model fits its dates poorly:{' '}
+                  {modelAgreement.model != null ? (
+                    <>
+                      <AgreementSymbol which="model" /> {formatAgreement(modelAgreement.model)}
+                    </>
+                  ) : (
+                    <>
+                      <AgreementSymbol which="overall" />{' '}
+                      {formatAgreement(modelAgreement.overall ?? 0)}
+                    </>
+                  )}
+                  , below {POOR_AGREEMENT}%.
+                </Typography>
+                <Typography variant="body2" sx={{ mb: flaggedDates.length ? 1 : 0 }}>
+                  Check its structure before its individual dates.{' '}
+                  <Link component={RouterLink} to="/help/glossary#model-agreement">
+                    About model agreement
+                  </Link>
+                </Typography>
+              </>
+            )}
+            {flaggedDates.length > 0 && (
+              <>
+                <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                  {flaggedDates.length} of {analysis.results.length} dates are flagged
+                </Typography>
+                <Typography variant="body2">
+                  {flaggedDates.map((f) => f.name).join(' · ')}
+                </Typography>
+              </>
+            )}
             {/* What "Edit analysis" is for. The button was the only exit from
                 this banner and said nothing about what to change once it was
                 pressed, which left the reader with a verdict and no move. */}
@@ -2631,11 +2742,13 @@ export default function Results() {
                 outlier prior (its gaps are asserted, so there is nothing for a
                 date to be an outlier from) -- recommending one sent the reader
                 to a setting the next run would reject. */}
-            <Typography variant="body2" sx={{ mt: 0.5 }}>
-              {analysis.solver?.method === 'wiggle_match'
-                ? 'Check the ring count of each flagged date, or remove it.'
-                : 'They are highlighted in the table below; hover over a chip for the reason. Edit the analysis to change the model, remove a date, or give it an outlier prior.'}
-            </Typography>
+            {flaggedDates.length > 0 && (
+              <Typography variant="body2" sx={{ mt: 0.5 }}>
+                {analysis.solver?.method === 'wiggle_match'
+                  ? 'Check the ring count of each flagged date, or remove it.'
+                  : 'They are highlighted in the table below; select or hover a chip for the reason. Edit the analysis to change the model, remove a date, or give it an outlier prior.'}
+              </Typography>
+            )}
           </Alert>
         )}
 
@@ -2900,64 +3013,46 @@ export default function Results() {
             </TableBody>
           </Table>
         </TableContainer>
-        {/* What the span column is, and where the rest of it lives.
-            Unconditional, because it applies to every analysis type and
-            because it is the page's only expansion of "HPD". The column deliberately shows one pair of
-            bounds rather than every disjoint range: a multimodal posterior
-            can produce four, and four per row would make the table unreadable
-            for the sake of a case the plot already draws correctly. */}
-        <Typography variant="caption" color="textSecondary" component="p" sx={{ mt: 1.5 }}>
-          <strong>{CONFIDENCE_LABEL} span</strong> is the earliest and latest calendar age of
-          the {CONFIDENCE_LABEL} HPD (highest posterior density) region. Use a column’s <strong>unfold</strong> control to read the full ranges in place.
+        {/* The key to the table, and nothing else. Definitions live in the
+            glossary, one link away, rather than here: the reader who needs
+            them follows the link, and the one who does not is not made to
+            read a paragraph of them on every visit -- and a second copy of a
+            definition had already drifted from the glossary's. The
+            model-level indices are not here either: they sit beside the
+            solver at the top, and a poor one is stated in the banner above
+            the table. Capped to a reading measure, since at full card width a
+            caption line ran to two hundred characters. */}
+        <Typography
+          variant="caption"
+          color="textSecondary"
+          component="p"
+          sx={{ mt: 1.5, maxWidth: '75ch' }}
+        >
+          Spans run from the earliest to the latest age of the {CONFIDENCE_LABEL}{' '}
+          <Link component={RouterLink} to="/help/glossary#hpd">HPD region</Link>.
         </Typography>
-        {/* The model-level pair, above the per-date key rather than among the
-            chips at the top: they are read off the same A scale as the column
-            in this table, and stating them here puts the whole-model number
-            next to the dates it was computed from. Shown only when the run
-            reported them, so an analysis from before they existed says nothing
-            rather than showing blanks. */}
-        {isBayesian && modelAgreement && (
+        {isBayesian && (
           <Typography
             variant="caption"
+            color="textSecondary"
             component="p"
-            color={modelAgreement.poor ? 'error' : 'textSecondary'}
-            sx={{ mt: 1.5 }}
+            sx={{ mt: 0.5, maxWidth: '75ch' }}
           >
-            {modelAgreement.model != null && (
-              <>
-                <strong><AgreementSymbol which="model" /> {modelAgreement.model.toFixed(0)}</strong> — the model&rsquo;s
-                agreement with all of its dates at once.{' '}
-              </>
-            )}
-            {modelAgreement.overall != null && (
-              <>
-                <strong><AgreementSymbol which="overall" /> {modelAgreement.overall.toFixed(0)}</strong> — the same index
-                built from the dates one at a time.{' '}
-              </>
-            )}
-            {modelAgreement.poor
-              ? `Below ${POOR_AGREEMENT}, which is the conventional point for reconsidering the model itself rather than any one date.`
-              : `${POOR_AGREEMENT} is the conventional threshold; both are on the same scale as the A column.`}
-          </Typography>
-        )}
-        {/* The key a first-time reader needs, present without a hover: the
-            two diagnostics letters, spelled out once under the table they
-            label. */}
-        {isBayesian && (
-          <Typography variant="caption" color="textSecondary" component="p" sx={{ mt: 1.5 }}>
-            <strong>A</strong> = agreement index — how far the model moved a date from the original calibration. 100 is unchanged, above 100 means it sharpened the date onto its own peak. Below 60 is considered a major shift.{' '}
+            <strong>A</strong>{' '}
+            <Link component={RouterLink} to="/help/glossary#agreement">agreement index</Link>
+            {/* No outlier probability on a wiggle match, which refuses an
+                outlier model, so neither O nor "Assigned" can appear there. */}
             {analysis.solver?.method !== 'wiggle_match' && (
-              <><br /><strong>O</strong> = the probability the date is an outlier.{' '}</>
+              <>
+                {'  ·  '}
+                <strong>O</strong>{' '}
+                <Link component={RouterLink} to="/help/glossary#outlier">outlier probability</Link>
+              </>
             )}
-            {/* The chips read as a verdict with no stated rule, and the rule
-                is not guessable from the two numbers beside them: both chips
-                compare O against the PRIOR the date was given, not against a
-                fixed number. Stated here, once, next to the letters they are
-                drawn from. */}
-            A <strong>Suspect</strong> or <strong>Check</strong> chip marks a date whose
-            outlier probability rose well above the prior it was given, or whose agreement
-            fell below {POOR_AGREEMENT}; <strong>Assigned</strong> marks one that was given
-            a raised outlier prior and stayed close to it.
+            {'  ·  '}
+            <Link component={RouterLink} to="/help/glossary#diagnostic-flags">
+              How dates are flagged
+            </Link>
           </Typography>
         )}
       </Paper>
