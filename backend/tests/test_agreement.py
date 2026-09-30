@@ -328,8 +328,11 @@ class TestAgainstTheOutlierFixture:
 
     It also pins something the first fixture could not show: with an outlier
     model running, OxCal judges each posterior against the OUTLIER-ADJUSTED
-    likelihood rather than the raw one, so our raw-likelihood index reads
-    systematically low against it.
+    likelihood rather than the raw one, so an index fed the raw likelihood --
+    which is what OxCal's export holds, and what these tests feed in -- reads
+    systematically low against it. The app's own path no longer does: see
+    TestOutlierAwareComparison, which feeds the same posteriors against the
+    posterior-weighted mixture comparison_likelihood builds.
     """
 
     def test_agreement_flags_the_outlier_and_nothing_else(self):
@@ -378,10 +381,11 @@ class TestAgainstTheOutlierFixture:
         A date the model has pushed entirely off its likelihood has no
         overlap left to measure, so the index bottoms out. OxCal reports 5.3
         because its comparison likelihood carries the outlier component's
-        tail; ours reports ~0 against the raw likelihood. Both say the same
+        tail; against the raw likelihood it reads ~0. Both say the same
         thing for screening, but the overall index is built from a product
         and is therefore hypersensitive to the difference -- 82.9 against
-        OxCal's own value, 15.6 from ours.
+        OxCal's own value, 15.6 from the raw one. That gap is what
+        comparison_likelihood closes (TestOutlierAwareComparison).
         """
         import shag_fixture as sf
         dists, table = sf.distributions(), sf.table()
@@ -503,6 +507,13 @@ class TestModelIndex:
         assert one == pytest.approx(both, abs=1e-9)
 
 
+def _amodel(solved, measurements):
+    """A solved run's Amodel, scored as api/analysis._model_agreement does."""
+    return agreement.model_agreement(
+        measurements, solved['joint_draws'],
+        {d: e.get('outlier_probability') for d, e in solved['measurements'].items()})
+
+
 class TestModelIndexAgainstOxCal:
     """
     A_model end to end, against the Amodel OxCal reports for the same three
@@ -536,7 +547,7 @@ class TestModelIndexAgainstOxCal:
 
     @pytest.mark.parametrize('run', RUNS)
     def test_reproduces_oxcals_amodel(self, run):
-        got = self._solved(run)['model_agreement']
+        got = _amodel(self._solved(run), ox.measurements())
         assert got is not None
         # Reads high by 1.5-3.3 across the three models, which is our
         # posterior's own offset carried through rather than slack: the same
@@ -551,7 +562,7 @@ class TestModelIndexAgainstOxCal:
         difference it is being read for -- and A_model does not pay it.
         """
         solved = self._solved(run)
-        joint_error = abs(solved['model_agreement'] - REPORTED[run]['model'])
+        joint_error = abs(_amodel(solved, ox.measurements()) - REPORTED[run]['model'])
         overall = agreement.overall_agreement(self._our_indices(solved))
         overall_error = abs(overall - REPORTED[run]['overall'])
         assert joint_error < overall_error, (joint_error, overall_error)
@@ -572,7 +583,7 @@ class TestModelIndexAgainstOxCal:
         for run in ('ordered', 'unordered'):
             solved = self._solved(run)
             gaps[run] = (agreement.overall_agreement(self._our_indices(solved))
-                         - solved['model_agreement'])
+                         - _amodel(solved, ox.measurements()))
         assert gaps['ordered'] > gaps['unordered'], gaps
         assert gaps['ordered'] > 0.0, gaps
 
@@ -592,8 +603,8 @@ class TestModelIndexAgainstOxCal:
         layout, _reason = exact_chain.layout_with_reason(tree, measurements)
         assert layout is not None
         exact = exact_chain.solve(measurements, tree, layout, num_samples=200)
-        assert exact['model_agreement'] == pytest.approx(
-            self._solved('ordered')['model_agreement'], abs=1.5)
+        assert _amodel(exact, measurements) == pytest.approx(
+            _amodel(self._solved('ordered'), measurements), abs=1.5)
 
 
 def test_a_lone_phase_leaves_amodel_and_aoverall_together():
@@ -620,5 +631,120 @@ def test_a_lone_phase_leaves_amodel_and_aoverall_together():
             m, solved['measurements'][m['id']]['probability_distribution'])
         for m in measurements
     ])
-    assert solved['model_agreement'] == pytest.approx(overall, abs=2.0), (
-        solved['model_agreement'], overall)
+    amodel = _amodel(solved, measurements)
+    assert amodel == pytest.approx(overall, abs=2.0), (amodel, overall)
+
+
+
+class TestOutlierAwareComparison:
+    """
+    A date under an outlier model is judged against the likelihood the model
+    gave it -- its calibration mixed with the outlier component, weighted by
+    the POSTERIOR outlier probability (agreement.comparison_likelihood) --
+    rather than its bare calibration. An outlier model is an instruction to
+    move a date, and scoring the move it asked for as a failure collapsed
+    every model that used one: three charcoal dates at prior 1 took a Nenthorn
+    model's Aoverall to 2.
+    """
+
+    def _measurement(self, tag='oc_x', age=3000, prior=None, model=None):
+        return {'id': tag, 'sample_name': tag, 'age_bp': age, 'error_1sigma': 30,
+                'curve_id': 'intcal20', 'outlier_prior': prior, 'outlier_model': model}
+
+    def test_a_date_with_no_outlier_model_is_judged_as_before(self):
+        m = self._measurement()
+        grid = np.arange(2800.0, 3600.0, 5.0)
+        np.testing.assert_array_equal(
+            agreement.comparison_likelihood(m, grid, outlier_probability=0.9),
+            agreement.unmodelled_likelihood(m, grid))
+
+    def test_the_posterior_weights_the_mixture_not_the_prior(self):
+        """
+        A date given a 5% prior that the data then cleared is compared against
+        its calibration, not against a 5% mixture it no longer needs.
+        """
+        m = self._measurement(prior=0.05, model='general')
+        grid = np.arange(2800.0, 3600.0, 5.0)
+        np.testing.assert_array_equal(
+            agreement.comparison_likelihood(m, grid, outlier_probability=0.0),
+            agreement.unmodelled_likelihood(m, grid))
+        # ...and with no posterior known, the prior is what the model was told.
+        assert not np.array_equal(
+            agreement.comparison_likelihood(m, grid),
+            agreement.unmodelled_likelihood(m, grid))
+
+    def test_a_charcoal_date_moved_as_instructed_is_not_scored_a_failure(self):
+        """
+        The case that exposed it. Old wood, charcoal model at prior 1, and the
+        model has put the context 250 years younger than the wood -- exactly
+        the move the model exists to make. Against the bare calibration that is
+        a date pushed off its likelihood; against the likelihood the model gave
+        it, it is not.
+        """
+        m = self._measurement(age=3000, prior=1.0, model='charcoal')
+        grid = np.arange(2600.0, 3600.0, 5.0)
+        peak = grid[np.argmax(agreement.unmodelled_likelihood(m, grid))]
+        younger = np.exp(-0.5 * ((grid - (peak - 250.0)) / 20.0) ** 2)
+        pairs = np.column_stack([grid, younger])
+        bare = agreement.agreement_index(
+            m, pairs, unmodelled=np.column_stack(
+                [grid, agreement.unmodelled_likelihood(m, grid)]))
+        aware = agreement.agreement_index(m, pairs, outlier_probability=1.0)
+        assert bare < 1.0, bare
+        # Not near 100 either, and should not be: at prior 1 the comparison IS
+        # the outlier component, which spreads the wood's date over centuries,
+        # so no single placement of the context matches it closely. What
+        # matters for the product is that it is off the floor -- measured 17.
+        assert aware > 10.0, aware
+
+    def test_charcoal_does_not_excuse_a_date_moved_the_wrong_way(self):
+        """
+        The component is one-sided: the context can be younger than old wood,
+        never older. A charcoal date the model pushed OLDER is still a date the
+        model had to fight, and must still read that way.
+        """
+        m = self._measurement(age=3000, prior=1.0, model='charcoal')
+        grid = np.arange(2600.0, 3800.0, 5.0)
+        peak = grid[np.argmax(agreement.unmodelled_likelihood(m, grid))]
+        younger = np.column_stack([grid, np.exp(-0.5 * ((grid - (peak - 150.0)) / 20.0) ** 2)])
+        older = np.column_stack([grid, np.exp(-0.5 * ((grid - (peak + 150.0)) / 20.0) ** 2)])
+        assert (agreement.agreement_index(m, older, outlier_probability=1.0)
+                < agreement.agreement_index(m, younger, outlier_probability=1.0) / 5.0)
+
+    def test_reproduces_oxcals_overall_on_its_outlier_run(self):
+        """
+        Against the one OxCal run we hold with an outlier model active, fed
+        OxCal's own posteriors and its own outlier probabilities so only the
+        comparison likelihood is under test. Measured: the bare calibration
+        gives 15.4, a prior-weighted mixture 32.0, and the posterior-weighted
+        one 79.2 -- against OxCal's 82.9.
+        """
+        import shag_fixture as sf
+        dists, table = sf.distributions(), sf.table()
+        scores = {
+            m['id']: agreement.agreement_index(
+                m, np.column_stack(dists[m['id']]['posterior']),
+                outlier_probability=table[m['id']]['outlier_probability'])
+            for m in sf.measurements()
+        }
+        assert agreement.overall_agreement(scores.values()) == pytest.approx(
+            table['model']['Aoverall'], abs=6.0)
+        # The flagged date itself: low, as OxCal has it (5.3), but no longer
+        # the zero that took the product down with it.
+        assert 1.0 < scores[sf.OUTLIER] < agreement.POOR_AGREEMENT_BELOW, scores[sf.OUTLIER]
+
+    def test_amodel_uses_the_same_comparison(self):
+        """
+        Amodel and A_i are one definition read two ways, and that has to stay
+        true for a date under an outlier model: at n = 1 they must agree.
+        """
+        m = self._measurement(age=3000, prior=1.0, model='charcoal')
+        grid = np.arange(2600.0, 3600.0, 5.0)
+        peak = grid[np.argmax(agreement.unmodelled_likelihood(m, grid))]
+        posterior = np.exp(-0.5 * ((grid - (peak - 150.0)) / 20.0) ** 2)
+        expected = agreement.agreement_index(
+            m, np.column_stack([grid, posterior]), outlier_probability=1.0)
+        got = agreement.model_agreement(
+            [m], {m['id']: _draws_from(grid, posterior, np.random.default_rng(5), 40000)},
+            {m['id']: 1.0})
+        assert got == pytest.approx(expected, rel=0.02), (got, expected)

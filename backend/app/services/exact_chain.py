@@ -68,7 +68,6 @@ import numpy as np
 from scipy.signal import fftconvolve
 from scipy.special import gammaln
 
-from app.services import agreement as agreement_service
 from app.services import intervals
 from app.services.calibration import SIGMA_1, SIGMA_2, get_curve, hpd_ranges_from_distribution
 from app.services.model_tree import inherited_bounds, plan_model
@@ -1159,9 +1158,10 @@ def solve(measurements: List[Dict], root: Dict, chain: Chain,
     exact marginal by inverse CDF so plotting and export code is unchanged.
 
     Those draws are from the MARGINALS and carry no joint correlation between
-    dates. Nothing reads joint structure off them: `model_agreement` (OxCal's
-    Amodel) and `estimate_durations` both need it, and both read the separate
-    joint draws this takes from the message-passed posterior.
+    dates. Nothing reads joint structure off them: Amodel and
+    `estimate_durations` both need it, and both read the separate joint draws
+    this takes from the message-passed posterior -- the dates' half of which
+    is returned as `joint_draws`, {date_id: calendar ages}, one per draw.
 
     `uniform_span_prior` applies OxCal's correction of the same name, on by
     default there too; see _span_prior_correction.
@@ -1296,10 +1296,13 @@ def solve(measurements: List[Dict], root: Dict, chain: Chain,
         }
 
     # Joint draws: taken always, because Amodel -- the whole model's agreement
-    # index -- is a function of every date at once and is always reported
-    # (services/agreement.model_agreement). Durations and a dispersal fit read
-    # the SAME draws when they were asked for, so the three sections cannot
-    # describe different states of the model.
+    # index -- is a function of every date at once and is always reported.
+    # The dates' draws are returned as `joint_draws` for services/agreement.py
+    # to read, rather than scored here: the diagnostic needs each date's
+    # posterior outlier probability as well, which is a finished result, and
+    # keeping the scoring out of the solvers keeps it one definition for both.
+    # Durations and a dispersal fit read the SAME draws when they were asked
+    # for, so the sections cannot describe different states of the model.
     #
     # Seeded apart from the generator above, so every other number here stays
     # bit-for-bit identical to what it was before any of this was collected.
@@ -1309,7 +1312,7 @@ def solve(measurements: List[Dict], root: Dict, chain: Chain,
     joint = {bid: grid[boundary_draws[:, i]]
              for i, bid in enumerate(chain.boundary_ids)}
     joint.update({date_id: grid[idx] for date_id, idx in date_draws.items()})
-    results['model_agreement'] = agreement_service.model_agreement(measurements, joint)
+    results['joint_draws'] = {date_id: grid[idx] for date_id, idx in date_draws.items()}
     if estimate_durations or dispersal is not None:
         results['intervals'] = intervals.report(
             root, measurements, joint, independent=True,

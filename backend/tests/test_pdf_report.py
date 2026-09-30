@@ -267,8 +267,11 @@ class TestReportContent:
         """
         analysis_id = _modelled(client)
         text = pdf_text(_pdf(client, analysis_id))
-        assert "Agreement over the whole model" in text
-        assert "Amodel" in text and "Aoverall" in text
+        sentence = text[text.index("Agreement over the whole model"):][:120]
+        # Set with the qualifier subscripted, so the extracted text may carry
+        # the two runs apart; what matters is that both indices are quoted.
+        assert re.search(r"A\s*model\s*\d+%", sentence), sentence
+        assert re.search(r"A\s*overall\s*\d+%", sentence), sentence
 
     def test_a_modelled_run_carries_the_unmodelled_comparison(self, client):
         # The whole point of a Bayesian report: what the date says on its

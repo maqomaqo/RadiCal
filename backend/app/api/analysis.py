@@ -411,6 +411,21 @@ def _analysis_result_row(analysis_id: str, sample_id: str, result: Dict) -> Anal
     )
 
 
+def _model_agreement(solved: Dict, measurements: List[Dict]) -> Optional[float]:
+    """
+    Amodel, from the joint states the solver kept and each date's posterior
+    outlier probability -- the latter so a date under an outlier model is judged
+    against the likelihood the model gave it, as its own A is
+    (services/agreement.py).
+    """
+    draws = solved.get('joint_draws')
+    if not draws:
+        return None
+    outlier = {date_id: entry.get('outlier_probability')
+               for date_id, entry in solved['measurements'].items()}
+    return agreement_service.model_agreement(measurements, draws, outlier)
+
+
 def _run_wiggle_match(
     measurements: List[Dict], model_tree: Dict, requested: str,
 ) -> Optional[Tuple[Dict, Dict, Dict, Optional[Dict]]]:
@@ -621,6 +636,7 @@ def _run_bayesian(
             dispersal=dispersal_spec,
         )
         overall = agreement_service.attach(solved['measurements'], measurements)
+        amodel = _model_agreement(solved, measurements)
         return solved['measurements'], solved['boundaries'], {
             'method': 'exact',
             'requested': requested,
@@ -632,7 +648,7 @@ def _run_bayesian(
             # so assumes the dates are independent, Amodel is the same index
             # over the joint posterior, where the model's structure has
             # correlated them.
-            'model_agreement': solved.get('model_agreement'),
+            'model_agreement': amodel,
             'overall_agreement': overall,
         }, solved.get('intervals')
 
@@ -652,12 +668,13 @@ def _run_bayesian(
         chains=int(bayesian_config.get('mcmc_chains') or gibbs.DEFAULT_CHAINS),
     )
     overall = agreement_service.attach(sampled['measurements'], measurements)
+    amodel = _model_agreement(sampled, measurements)
     return sampled['measurements'], sampled['boundaries'], {
         'method': 'gibbs',
         'requested': requested,
         # As on the exact path: Aoverall from the per-date indices, Amodel from
         # the run's joint states (services/agreement.py).
-        'model_agreement': sampled.get('model_agreement'),
+        'model_agreement': amodel,
         'overall_agreement': overall,
         # Why the model is not a chain AS AUTHORED, and None when it is one
         # and the sampler ran by choice -- so the results page does not warn

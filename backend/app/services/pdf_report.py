@@ -714,8 +714,10 @@ def _solver_sentence(solver: Optional[Dict]) -> Optional[str]:
     if model_agreement is not None or overall_agreement is not None:
         quoted = ', '.join(
             f'{label} {value:.0f}%'
-            for label, value in (('Amodel', model_agreement),
-                                 ('Aoverall', overall_agreement))
+            # Paragraph markup: set as OxCal's literature writes them, with
+            # the qualifier subscripted, matching the results page.
+            for label, value in (('A<sub>model</sub>', model_agreement),
+                                 ('A<sub>overall</sub>', overall_agreement))
             if value is not None
         )
         sentence += f' Agreement over the whole model: {quoted}.'

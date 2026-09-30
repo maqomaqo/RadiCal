@@ -55,14 +55,35 @@ function of them.
 The expectation is a Monte Carlo average over the run's own joint states, so
 Amodel carries sampling error where A_i and A_overall do not -- about +/-0.5 at
 the 20,000 joint draws both solvers keep (tests/test_agreement.py pins it).
-Both solvers report it, computed from the same draws the duration and
-age-depth sections use.
+Both solvers return those states as `joint_draws`, the same draws the duration
+and age-depth sections use, and this module scores them.
+
+Dates under an OUTLIER MODEL are judged against the likelihood the model
+actually gave them, not their bare calibration. An outlier model is an
+instruction to move a date -- Charcoal at prior 1 says "this wood is older than
+its context by some unknown amount" -- and scoring the move it asked for as a
+failure turns the diagnostic against the analyst who set it up. So the
+comparison likelihood is the date's calibration mixed with its outlier
+component, weighted by the POSTERIOR probability that it is an outlier:
+
+    L_compare = (1 - q) * L_calibration + q * L_outlier,  q = P(outlier | data)
+
+The posterior rather than the prior, because that is the state the model
+settled on: OxCal scores a date against its likelihood as shifted by the
+outlier state it sampled, and averaged over the run that is this mixture at q.
+Measured against OxCal's own run with an outlier model active
+(tests/fixtures/oxcal_outlier, Shag River Mouth, whose outlier OxCal gives 5.3
+and a 99% outlier probability), fed OxCal's own posteriors: the bare
+calibration gives A_overall 15.4, a prior-weighted mixture 32.0, and the
+posterior-weighted one 79.2, against OxCal's 82.9. A date with no outlier model
+is compared against its bare calibration exactly as before.
 """
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
 
 from app.services.calibration import get_curve
+from app.services.exact_chain import DEFAULT_OUTLIER_MODEL, _with_outlier_component
 
 # Calendar step the comparison is made on. OxCal's exports are at 5 years and
 # its indices are reproduced most closely there (rms 0.81 against 1.15 at one
@@ -96,6 +117,45 @@ def unmodelled_likelihood(measurement: Dict, grid: np.ndarray) -> np.ndarray:
     # Nothing beyond the curve's ends; interpolate() clamps rather than
     # extrapolates there (see exact_chain._date_likelihood).
     return np.where((grid >= curve.cal_ages[0]) & (grid <= curve.cal_ages[-1]), lik, 0.0)
+
+
+def comparison_likelihood(
+    measurement: Dict,
+    grid: np.ndarray,
+    outlier_probability: Optional[float] = None,
+) -> np.ndarray:
+    """
+    The likelihood a date's modelled posterior is judged against, on `grid`.
+
+    Its bare calibration, unless it carries an outlier model: then that
+    calibration mixed with the same outlier component the solvers use
+    (exact_chain._with_outlier_component, so the two cannot drift), weighted by
+    `outlier_probability` -- the POSTERIOR chance the date is an outlier, see
+    the module docstring for why. Falls back to the prior when no posterior is
+    known, which is the best available statement of what the model was told.
+
+    The element's TPQ/TAQ bounds are deliberately NOT applied, though the
+    solvers' own likelihood tables carry them: a bound is part of the model, and
+    judging a date against a likelihood already truncated by it would hide
+    exactly the conflict with the bound this exists to show.
+    """
+    lik = unmodelled_likelihood(measurement, grid)
+    prior = measurement.get('outlier_prior') or 0.0
+    if prior <= 0:
+        return lik
+    weight = prior if outlier_probability is None else float(outlier_probability)
+    if weight <= 0:
+        return lik
+    step = float(grid[1] - grid[0]) if len(grid) > 1 else COMPARISON_STEP_YEARS
+    total = lik.sum() * step
+    if total <= 0:
+        return lik
+    # Normalised as the solvers' tables are before the component is mixed in,
+    # so the two halves of the mixture are on the scale it is defined on.
+    mixture, _component = _with_outlier_component(
+        grid, lik / total, min(weight, 1.0),
+        measurement.get('outlier_model') or DEFAULT_OUTLIER_MODEL)
+    return mixture
 
 
 def _support(measurement: Dict) -> Tuple[float, float]:
@@ -136,16 +196,18 @@ def agreement_index(
     measurement: Dict,
     modelled: Sequence[Sequence[float]],
     unmodelled: Optional[Sequence[Sequence[float]]] = None,
+    outlier_probability: Optional[float] = None,
 ) -> Optional[float]:
     """
     A_i for one date. `modelled` is its posterior as [[cal_age, density], ...]
     -- the `probability_distribution` both solver paths already return.
 
     `unmodelled` is the likelihood to judge it against, in the same form.
-    Normally left out and computed from the measurement; passing one holds the
-    comparison against a likelihood from elsewhere, which is how the formula is
-    checked against OxCal's exports without our own calibration differences
-    muddying the test.
+    Normally left out and computed from the measurement (comparison_likelihood,
+    which takes `outlier_probability` when the date carries an outlier model);
+    passing one holds the comparison against a likelihood from elsewhere, which
+    is how the formula is checked against OxCal's exports without our own
+    calibration differences muddying the test.
 
     Returns None rather than a number when there is nothing meaningful to
     compare, so a caller can leave the field empty rather than publish a
@@ -167,8 +229,18 @@ def agreement_index(
         hi_support = float(supplied[:, 0].max())
     else:
         lo_support, hi_support = _support(measurement)
-    lo = min(float(modelled[:, 0].min()), lo_support)
-    hi = max(float(modelled[:, 0].max()), hi_support)
+    # The posterior's extent is where it has meaningful mass, by the same rule
+    # the likelihood's is, rather than wherever its array happens to end. That
+    # matters once a date carries an outlier component: the mixture's tail runs
+    # far past the calibration, so the window's width moves the score, and a
+    # posterior stored with a long run of near-zero tail would otherwise be
+    # judged over a different window from the same posterior read off the
+    # run's draws -- which is what model_agreement sees.
+    meaningful = modelled[modelled[:, 1] >= modelled[:, 1].max() * SUPPORT_THRESHOLD, 0]
+    if not len(meaningful):
+        return None
+    lo = min(float(meaningful.min()), lo_support)
+    hi = max(float(meaningful.max()), hi_support)
     if not np.isfinite(lo) or not np.isfinite(hi) or hi <= lo:
         return None
 
@@ -176,7 +248,7 @@ def agreement_index(
     if supplied is not None:
         observed = np.interp(grid, supplied[:, 0], supplied[:, 1], left=0.0, right=0.0)
     else:
-        observed = unmodelled_likelihood(measurement, grid)
+        observed = comparison_likelihood(measurement, grid, outlier_probability)
     fitted = np.interp(grid, modelled[:, 0], modelled[:, 1], left=0.0, right=0.0)
 
     observed_total, fitted_total = observed.sum(), fitted.sum()
@@ -214,6 +286,7 @@ def overall_agreement(indices: Iterable[Optional[float]]) -> Optional[float]:
 def model_agreement(
     measurements: List[Dict],
     draws: Dict[str, Sequence[float]],
+    outlier_probability: Optional[Dict[str, Optional[float]]] = None,
 ) -> Optional[float]:
     """
     A_model: the agreement index of the whole model, from its JOINT posterior.
@@ -233,9 +306,14 @@ def model_agreement(
     product and the count of n, exactly as A_overall leaves out a date whose
     index could not be computed.
 
+    `outlier_probability` maps a date's id to its posterior outlier
+    probability, so a date under an outlier model is judged against the same
+    likelihood its A_i is (comparison_likelihood).
+
     Returns None when no date could be included, rather than a number standing
     for nothing.
     """
+    outlier_probability = outlier_probability or {}
     log_joint: Optional[np.ndarray] = None
     log_independent = 0.0
     counted = 0
@@ -254,7 +332,8 @@ def model_agreement(
         # The same grid and the same likelihood the per-date index is computed
         # on, so Amodel and the A column are one definition read two ways.
         grid = _comparison_grid(lo, hi)
-        observed = unmodelled_likelihood(measurement, grid)
+        observed = comparison_likelihood(
+            measurement, grid, outlier_probability.get(measurement['id']))
         total = observed.sum()
         if total <= 0:
             continue
@@ -290,7 +369,8 @@ def model_agreement(
 def attach(results: Dict[str, Dict], measurements: List[Dict]) -> Optional[float]:
     """
     Add `agreement_index` to each per-date result in place and return the
-    overall index. Works off `probability_distribution`, which both solvers
+    overall index. Works off `probability_distribution` and, for a date under
+    an outlier model, `outlier_probability` -- both of which both solvers
     produce, so the two report the same diagnostic.
     """
     indices = []
@@ -298,7 +378,8 @@ def attach(results: Dict[str, Dict], measurements: List[Dict]) -> Optional[float
         entry = results.get(m['id'])
         if entry is None:
             continue
-        index = agreement_index(m, entry.get('probability_distribution') or [])
+        index = agreement_index(m, entry.get('probability_distribution') or [],
+                                outlier_probability=entry.get('outlier_probability'))
         entry['agreement_index'] = index
         indices.append(index)
     return overall_agreement(indices)

@@ -162,7 +162,7 @@ from typing import Callable, Dict, List, Optional, Sequence, Tuple
 import numpy as np
 from scipy.special import gammaln
 
-from app.services import agreement, calibration, intervals
+from app.services import calibration, intervals
 from app.services.exact_chain import (
     DEFAULT_OUTLIER_MODEL,
     OUTLIER_KERNEL_HALF_WIDTH_YEARS,
@@ -2222,12 +2222,13 @@ def solve(measurements: List[Dict], root: Dict, sweeps: int = DEFAULT_SWEEPS,
     the two solvers without a resolution difference confounding the answer.
 
     `interval_draws` whole states are kept jointly through the run whatever was
-    asked for, because `model_agreement` -- OxCal's Amodel, the whole model's
-    agreement index -- is a function of every date at once and is always
-    reported. Those states are an MCMC chain rather than independent draws, so
-    anything read off them converges more slowly than the marginals beside it;
-    the run is not extended on their account, and Amodel carries the sampling
-    error services/agreement.py quantifies.
+    asked for, because Amodel -- OxCal's whole-model agreement index -- is a
+    function of every date at once and is always reported; the dates' half is
+    returned as `joint_draws` for services/agreement.py to score. Those states
+    are an MCMC chain rather than independent draws, so anything read off them
+    converges more slowly than the marginals beside it; the run is not extended
+    on their account, and Amodel carries the sampling error
+    services/agreement.py quantifies.
 
     `estimate_durations` adds `intervals` as exact_chain.solve's flag does,
     from the same states. Off by default for the same reasons.
@@ -2347,14 +2348,15 @@ def solve(measurements: List[Dict], root: Dict, sweeps: int = DEFAULT_SWEEPS,
     # for: both Amodel and the duration section are functions of several
     # modelled ages AT ONCE, so they are read off the same states or they are
     # describing different runs.
-    results['model_agreement'] = None
+    results['joint_draws'] = None
     if chain['draws'] is not None:
         joint = {param: model.grid[chain['draws'][:, column]]
                  for column, param in enumerate(chain['draw_params'])}
         # Kept whether or not durations were asked for: Amodel is the headline
         # number a model is screened on, not an extra an analyst should have to
-        # opt into. The states cost one list of indices per kept sweep.
-        results['model_agreement'] = agreement.model_agreement(measurements, joint)
+        # opt into. The states cost one list of indices per kept sweep. Scored
+        # by services/agreement.py, as exact_chain.solve's are.
+        results['joint_draws'] = {d: joint[d] for d in model.date_ids if d in joint}
         if wants_intervals:
             results['intervals'] = intervals.report(
                 measurements=measurements, root=root, draws=joint,

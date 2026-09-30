@@ -106,6 +106,7 @@ import type {
   ModelElement,
   PosteriorSummary,
 } from '@/types'
+import AgreementSymbol from '@/components/AgreementSymbol'
 import {
   concernFor,
   concernTitle,
@@ -2924,13 +2925,13 @@ export default function Results() {
           >
             {modelAgreement.model != null && (
               <>
-                <strong>Amodel {modelAgreement.model.toFixed(0)}</strong> — the model&rsquo;s
+                <strong><AgreementSymbol which="model" /> {modelAgreement.model.toFixed(0)}</strong> — the model&rsquo;s
                 agreement with all of its dates at once.{' '}
               </>
             )}
             {modelAgreement.overall != null && (
               <>
-                <strong>Aoverall {modelAgreement.overall.toFixed(0)}</strong> — the same index
+                <strong><AgreementSymbol which="overall" /> {modelAgreement.overall.toFixed(0)}</strong> — the same index
                 built from the dates one at a time.{' '}
               </>
             )}

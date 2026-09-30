@@ -1,6 +1,7 @@
 import { Box, Container, Link, Paper, Typography } from '@mui/material'
 import { Link as RouterLink } from 'react-router-dom'
 import BackLink from '@/components/BackLink'
+import AgreementSymbol from '@/components/AgreementSymbol'
 
 /**
  * The domain vocabulary, defined once.
@@ -20,7 +21,7 @@ import BackLink from '@/components/BackLink'
  */
 
 interface Entry {
-  term: string
+  term: React.ReactNode
   id: string
   body: React.ReactNode
 }
@@ -282,24 +283,31 @@ const SECTIONS: Section[] = [
             onto its own peak scores above 100, which is normal; below about 60 is the conventional
             threshold for a second look. It detects a date the <em>model had to move</em>, which is
             not the same as a date that does not belong — an outlier in an unconstrained Phase can
-            score perfectly, because a lone Phase simply widens to accommodate it.
+            score perfectly, because a lone Phase simply widens to accommodate it. A date under an
+            outlier model is judged against the likelihood that model gave it, weighted by how
+            likely the run found it to be an outlier: a charcoal date moved younger, as its model
+            instructs, is not scored as a failure for it.
           </>
         ),
       },
       {
-        term: 'Amodel and Aoverall',
+        term: (
+          <>
+            <AgreementSymbol which="model" /> and <AgreementSymbol which="overall" />
+          </>
+        ),
         id: 'model-agreement',
         body: (
           <>
             The same index for the model as a whole, reported under the results table.{' '}
-            <strong>Amodel</strong> is computed over the joint posterior &mdash; every date at
+            <strong><AgreementSymbol which="model" /></strong> is computed over the joint posterior &mdash; every date at
             once, with the correlations the model&rsquo;s structure puts between them.{' '}
-            <strong>Aoverall</strong> combines the dates&rsquo; individual indices instead, which
+            <strong><AgreementSymbol which="overall" /></strong> combines the dates&rsquo; individual indices instead, which
             assumes the model left them independent, so on a constrained model it is the more
             flattering of the two and the gap between them is the ordering doing work. On a single
             unconstrained Phase they coincide. Both are percentages on the same scale as a
             date&rsquo;s own agreement index, and below about 60 the convention is to reconsider
-            the model rather than any one date. Amodel is averaged over the run&rsquo;s own
+            the model rather than any one date. <AgreementSymbol which="model" /> is averaged over the run&rsquo;s own
             sampled states, so it carries a sampling error of a few tenths where the per-date
             indices do not.
           </>
