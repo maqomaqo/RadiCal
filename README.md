@@ -6,68 +6,25 @@ Boundaries), and interactive posterior visualization.
 
 ## Features
 
-- **Three analysis types**: single calibration, independent calibration of several samples at once
-  ("group calibration"), and full Bayesian modelling with stratigraphic constraints.
-- **Calibration curves**: IntCal20, Marine20, SHCal20, with marine reservoir (ΔR) correction.
-  Which curves exist, and everything countable about each of them is kept in one registry
-  (`backend/app/services/curve_registry.py`).
-- **Your own curves**: import a curve from a `.14c` or a headed CSV (columns matched by name in any
-  order; a BC/AD calendar column converted on the way in), previewed before anything is stored.
-  An imported curve is then selectable on any date, understood by the CSV and OxCal file importers under
-  whatever aliases it was given, and exportable byte-for-byte as uploaded. 
-- **Curve browser**: look at any curve's shape with its own ±1σ/±2σ error bounds, scrolled and
-  zoomed along the calendar axis.
-- **Compare and simulate**: overlay a second curve and read their *difference* on a separate panel.
-  Clicking a calendar year shows what a date from it would actually look like: inside the Hallstatt
-  plateau, a ±25 yr measurement comes back as **four disjoint calendar ranges spread over 337
-  years**, which says what a plateau costs more plainly than any single number. The visible window
-  exports as CSV.
-- **Expected temporal resolution**: under the curve, on the same calendar axis, how tightly a date
-  from each year could be known *before anyone measures anything* — the method of Svetlik et al.
-  (2019), as implemented in [res14c](https://github.com/demjanp/res14c_online).
-- **Mixed curves**: Similar to OxCal's `Mix_Curves`, for a sample whose carbon came from more than one
-  reservoir — e.g. a bone from an animal with a partly marine diet. In the app you can build a new mixed curve by choosing two curves and a
-  proportion. An `.oxcal` file using `Mix_Curves` will then import, or you'll get a prompt if you haven't already mixed an appropriate curve.
-- **Bayesian chronological modelling**: an explicit model tree of nested Sequences, Phases,
-  Boundaries and Hiatuses (the OxCal idiom), each date assigned to a Phase; TPQ/TAQ age limiters;
-  an optional outlier model per date. Solved exactly where the model permits it, and by OxCal's own
-  MH/Gibbs scheme otherwise — all validated against real OxCal 4.4 runs.
-- **Wiggle matching** (OxCal's `D_Sequence`/`V_Sequence`): a series of dates separated by counted
-  rings or varves has ONE free parameter — the calendar age at the reference ring — so it is solved
-  in closed form rather than sampled. Enter ring numbers and the app converts them to gaps:
-  a gap counts years *before* the reference and increases into the past. Where the gaps were
-  measured rather than counted, each carries its own uncertainty.
-- **Age-depth modelling** (OxCal's `P_Sequence`): deposition modelled as a Poisson process down a
-  core, giving age against depth with a band round it, the accumulation rate between each pair of
-  levels, and an age at any depth you ask for — including ones nothing was dated at.
-- **Model structure diagram**: the model tree drawn as a graph, oldest at the bottom
-  — nesting shown as boxes within boxes, Boundaries as labelled rules carrying their modelled
-  range.
-- **Durations and differences** (opt-in): how long each Sequence, each Phase, and each phase's set
-  of *dated events* lasted, and how far apart the phases sit — a gap in years where they are
-  separate, an overlap where they are not, each graded from "none" to "extensive" at the same
-  68.3%/95.4% levels the HPD regions use.
-- **Diagnostics**: an OxCal-style agreement index per date (how much the model had to move it away
-  from its own unconstrained calibration), the whole model's agreement as OxCal's Amodel and
-  Aoverall, and an outlier posterior probability where an outlier model is applied.
-- **Posterior visualization**: Plotly charts, individually or all stacked on one shared calendar
-  axis, with HPD range bars at 68.3%/95.4%/99.7% confidence, optional mean/median markers, and an
-  optional overlay of each date's unconstrained ("prior") calibration behind its modelled posterior.
-- **Projects and date collections**: group analyses under a project; keep a project's own collection
-  of dates (entered individually, by bulk paste, or by file import) and deploy any selection of them
-  into a new analysis, independently of how many other analyses have already used them; re-run one
-  analysis or every analysis in a project; duplicate or edit an existing analysis's inputs.
-- **File import**: read dates from a CSV (header-driven, column order irrelevant, common lab-report
-  spellings understood) or straight from an OxCal `.oxcal` model file, whose Sequences, Phases,
-  Boundaries, wiggle-matched and deposition sequences, per-scope curves and per-date outlier
-  settings all come across. Every import is previewed before anything is stored, and is
-  all-or-nothing. An OxCal construct this app does not model — a non-uniform Boundary, `C_Date`,
-  `R_Combine`, `U_Sequence`, an unknown curve — fails the import naming itself rather than being
-  read as the nearest thing that is implemented.
-- **Export**: CSV, JSON, and a printable PDF report — the analysis's metadata, the curves and
-  solver that actually produced it, the results table in the model's own reading order with dates
-  and Boundaries reporting through the same columns, the durations-and-differences table where one
-  was produced, and a posterior plot for each parameter with its unmodelled calibration behind it.
+- **Calibration** of single dates or groups of dates against IntCal20, Marine20 and SHCal20, with
+  marine reservoir (ΔR) correction.
+- **Custom and mixed curves**: import your own curve (`.14c` or CSV) or mix two curves in a chosen
+  proportion.
+- **Curve browser**: view, compare and simulate dates against any curve, including expected
+  temporal resolution.
+- **Bayesian chronological modelling**: OxCal-style Sequences, Phases, Boundaries and outlier
+  models, validated against OxCal 4.4.
+- **Wiggle matching and age-depth modelling** (OxCal's `D_Sequence`/`V_Sequence` and
+  `P_Sequence`).
+- **Kernel density estimates** (OxCal's `KDE_Plot`): how a group of dates is spread through time,
+  without the spurious peaks of a summed distribution.
+- **Geographic modelling**: place dates on a map, derive ΔR from a marine sample's position, and
+  model the spread of a phenomenon across a landscape — speed, direction and likely origin.
+- **Diagnostics and summaries**: agreement indices, durations, and differences between phases.
+- **Interactive plots** of posteriors with HPD ranges.
+- **Projects**: organise analyses and reusable date collections.
+- **Import and export**: import from CSV or OxCal `.oxcal` files; export to CSV, JSON or a PDF
+  report.
 
 ## Tech Stack
 
