@@ -1,8 +1,6 @@
 # RadiCal
 
-A web-based tool for radiocarbon dating analysis: calibration against IntCal20/Marine20/SHCal20,
-Bayesian chronological modelling with stratigraphic constraints (OxCal-style Sequences, Phases and
-Boundaries), and interactive posterior visualization.
+A web-based tool for radiocarbon dating analysis: calibration, Bayesian chronological modelling with constraints, and interactive posterior visualization.
 
 ## Features
 
@@ -13,10 +11,9 @@ Boundaries), and interactive posterior visualization.
 - **Curve browser**: view, compare and simulate dates against any curve, including expected
   temporal resolution.
 - **Bayesian chronological modelling**: OxCal-style Sequences, Phases, Boundaries and outlier
-  models, validated against OxCal 4.4.
-- **Wiggle matching and age-depth modelling** (OxCal's `D_Sequence`/`V_Sequence` and
-  `P_Sequence`).
-- **Kernel density estimates** (OxCal's `KDE_Plot`): how a group of dates is spread through time,
+  models.
+- **Wiggle matching and age-depth modelling**
+- **Kernel density estimates**: how a group of dates is spread through time,
   without the spurious peaks of a summed distribution.
 - **Geographic modelling**: place dates on a map, derive ΔR from a marine sample's position, and
   model the spread of a phenomenon across a landscape — speed, direction and likely origin.
@@ -32,13 +29,13 @@ Boundaries), and interactive posterior visualization.
 - **React 18** with TypeScript, built with **Vite**
 - **Material-UI** for components
 - **Plotly.js** for posterior distribution charts
-- **React Flow** for the Harris matrix / model tree diagram
+- **React Flow** for the matrix / model tree diagram
 - **Zustand** for the shared New Analysis / Model Structure draft state
 
 ### Backend
 - **Python 3.12+** with **FastAPI**
 - **NumPy/SciPy** for the calibration math and both Bayesian solvers (exact integration for
-  chain-shaped models, OxCal's own MH/Gibbs scheme otherwise — no PyMC, no MCMC sampler dependency)
+  chain-shaped models, MH/Gibbs otherwise — no PyMC, no MCMC sampler dependency)
 - **SQLAlchemy** ORM over **PostgreSQL**, with **Alembic** migrations applied on startup
 - **ReportLab** and **Matplotlib** for the PDF report — the figures are drawn through matplotlib's
   object API rather than pyplot, whose global figure registry is a leak waiting to happen in a
@@ -92,11 +89,8 @@ database.
 
 ## Accounts
 
-Every project and analysis belongs to one account and is visible to nobody else. There is no
-sharing and no administrator who can see everything. Calibration curves are the deliberate
-exception: they are reference data, readable by everyone signed in and editable only by whoever
-imported them, because a per-account curve registry would let two people on one site calibrate
-against different copies of the same curve.
+Every project and analysis belongs to a user account. There is no
+sharing and no administrator who can see everything.
 
 Registration is **open** — anyone who can reach the app can create an account. The gate is
 expected to be whatever fronts the deployment (a VPN, an institutional SSO proxy, a private
@@ -162,6 +156,7 @@ The main groups:
   the code.
 
 ## References
+The maths and logic is built on, and validated against, the work of others:
 
 - Svetlik, I., et al. (2019). The best possible time resolution: how precise could a radiocarbon dating method be? Radiocarbon, 61(6).
 - Reimer, P. J., et al. (2020). IntCal20 Northern Hemisphere radiocarbon age calibration curve. Radiocarbon, 62(4).
