@@ -31,6 +31,8 @@ import {
   AccordionDetails,
   Divider,
   ListSubheader,
+  alpha,
+  keyframes,
 } from '@mui/material'
 import AddIcon from '@mui/icons-material/Add'
 import DeleteIcon from '@mui/icons-material/Delete'
@@ -770,6 +772,12 @@ function subtreeIds(flat: FlatNode[], activeId: string): Set<string> {
   }
   return ids
 }
+
+/** The focused block's frame arriving: a brief swell from nothing. */
+const blockGlow = keyframes`
+  from { opacity: 0; transform: scaleX(0.985); }
+  to { opacity: 1; transform: none; }
+`
 
 /** Do two projections describe the same landing place? Used to keep a
  * pointer move that changes nothing from re-rendering the outline. */
@@ -1595,6 +1603,8 @@ interface DragHandleProps {
   onMoveDown: (id: string) => void
   onIndent: (id: string) => boolean
   onOutdent: (id: string) => boolean
+  /** Report this handle gaining (its id) or losing (null) keyboard focus. */
+  onKeyboardFocus: (id: string | null) => void
 }
 
 function DragHandle({
@@ -1606,6 +1616,7 @@ function DragHandle({
   onMoveDown,
   onIndent,
   onOutdent,
+  onKeyboardFocus,
 }: DragHandleProps) {
   const { attributes, listeners, isDragActive } = useContext(HandleContext)
   return (
@@ -1613,11 +1624,22 @@ function DragHandle({
       <Box
         {...attributes}
         {...listeners}
+        // Found by the outline's Alt+arrow navigation.
+        data-row-handle={id}
+        // The BLOCK lights for keyboard focus only: a pointer press focuses
+        // the handle too, on its way to starting a drag, and framing the
+        // block for that would flash it under the cursor for nothing. A
+        // clicked handle lights itself instead (see :focus below).
+        onFocus={(e) => {
+          if (e.currentTarget.matches(':focus-visible')) onKeyboardFocus(id)
+        }}
+        onBlur={() => onKeyboardFocus(null)}
         onKeyDown={(e) => {
           // Only before a dnd-kit keyboard drag has been activated with
           // Space/Enter -- once it has, the sensor owns the arrow keys
           // and this would fight it for the same gesture.
-          if (isDragActive) return
+          // Alt+arrows belong to the outline: they step between handles.
+          if (isDragActive || e.altKey) return
           const handled: Record<string, () => boolean | void> = {
             ArrowLeft: () => onOutdent(id),
             ArrowRight: () => onIndent(id),
@@ -1627,9 +1649,12 @@ function DragHandle({
           const action = handled[e.key]
           if (!action) return
           e.preventDefault()
+          // Reached by a click, the handle is not lit yet; an arrow key is
+          // the moment the reader needs to see what it is carrying.
+          onKeyboardFocus(id)
           action()
         }}
-        aria-label={`Reorder ${name}. Arrow up and down move it among its neighbours; arrow left and right change how deeply it is nested.`}
+        aria-label={`Reorder ${name}. Arrow up and down move it among its neighbours; arrow left and right change how deeply it is nested; Alt or Option with arrow up or down goes to the previous or next element.`}
         sx={{
           display: 'flex',
           alignItems: 'center',
@@ -1642,6 +1667,9 @@ function DragHandle({
           ...HIT_TARGET,
           borderRadius: 1,
           '&:active': { cursor: 'grabbing' },
+          // Selected, however it was reached: the arrow keys now act on this
+          // row, so the handle says so even before they light the block.
+          '&:focus': { bgcolor: 'primary.main', color: 'primary.contrastText' },
           '&:focus-visible': {
             outline: (theme) => `2px solid ${theme.palette.primary.main}`,
             outlineOffset: 2,
@@ -1674,6 +1702,15 @@ interface TreeRowProps {
   isDropTarget: boolean
   /** This row is part of the block being dragged. */
   isDragged: boolean
+  /**
+   * Depth of the block whose handle has keyboard focus, when this row is part
+   * of it -- what the arrow keys will move -- and null otherwise. Primitives
+   * rather than one object, so sameRow can compare them by value.
+   */
+  focusBlockDepth: number | null
+  focusBlockHead: boolean
+  focusBlockTail: boolean
+  onHandleKeyboardFocus: (id: string | null) => void
   onRename: (id: string, name: string) => void
   onSetParam: (id: string, patch: ElementParams) => void
   /**
@@ -1739,6 +1776,10 @@ const TreeRow = memo(function TreeRow({
   indicator,
   isDropTarget,
   isDragged,
+  focusBlockDepth,
+  focusBlockHead,
+  focusBlockTail,
+  onHandleKeyboardFocus,
   onRename,
   onSetParam,
   onSetOrdinate,
@@ -1770,6 +1811,37 @@ const TreeRow = memo(function TreeRow({
   return (
     <>
       {indicator && <DropIndicator depth={indicator.depth} label={indicator.label} />}
+      {/* The block a focused handle will move, lit as one piece: each of its
+          rows draws its own slice of the frame, and since the row gap lives
+          inside the rows the slices meet edge to edge. Before the guides, so
+          those still read on top of it. */}
+      {focusBlockDepth !== null && (
+        <Box
+          aria-hidden
+          sx={(theme) => {
+            const edge = `2px solid ${theme.palette.primary.main}`
+            return {
+              position: 'absolute',
+              top: 0,
+              bottom: focusBlockTail ? -6 : 0,
+              left: focusBlockDepth * INDENT_PX - 10,
+              right: -8,
+              bgcolor: alpha(theme.palette.primary.main, theme.palette.mode === 'dark' ? 0.22 : 0.14),
+              borderLeft: `4px solid ${theme.palette.primary.main}`,
+              borderRight: edge,
+              ...(focusBlockHead && { borderTop: edge, borderTopLeftRadius: 8, borderTopRightRadius: 8 }),
+              ...(focusBlockTail && {
+                borderBottom: edge,
+                borderBottomLeftRadius: 8,
+                borderBottomRightRadius: 8,
+              }),
+              pointerEvents: 'none',
+              animation: `${blockGlow} 140ms ease-out`,
+              '@media (prefers-reduced-motion: reduce)': { animation: 'none' },
+            }
+          }}
+        />
+      )}
       {/* One guide per level this row is nested under, in that container's own
           hue: solid where the container orders its children, dashed where it
           does not.
@@ -1791,7 +1863,7 @@ const TreeRow = memo(function TreeRow({
           }}
         />
       ))}
-      <Box sx={{ ml: depth * INDENT_UNITS, opacity: isDragged ? 0.4 : 1 }}>
+      <Box sx={{ position: 'relative', ml: depth * INDENT_UNITS, opacity: isDragged ? 0.4 : 1 }}>
       <Paper
         variant="outlined"
         sx={{
@@ -1800,6 +1872,12 @@ const TreeRow = memo(function TreeRow({
           ...(isDropTarget
             ? { borderColor: 'primary.main', boxShadow: (theme) => `0 0 0 1px ${theme.palette.primary.main}` }
             : {}),
+          // Inside the lit block the cards take a wash of the same hue, so the
+          // frame reads as one piece rather than as a border around white.
+          ...(focusBlockDepth !== null && {
+            backgroundImage: (theme) =>
+              `linear-gradient(${alpha(theme.palette.primary.main, 0.06)}, ${alpha(theme.palette.primary.main, 0.06)})`,
+          }),
         }}
       >
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
@@ -1812,6 +1890,7 @@ const TreeRow = memo(function TreeRow({
             onMoveDown={onMoveDown}
             onIndent={onIndent}
             onOutdent={onOutdent}
+            onKeyboardFocus={onHandleKeyboardFocus}
           />
           {/* Only a container can hide anything, and a leaf reserves nothing
               for the chevron it will never have: a Boundary or Hiatus row has
@@ -2379,6 +2458,53 @@ export default function ModelTreeEditor({
     () => (activeId ? subtreeIds(flat, activeId) : new Set<string>()),
     [flat, activeId]
   )
+  /**
+   * Alt+Up/Down -- Option on a Mac, which reports itself as altKey -- to the
+   * previous or next row's handle: from a handle, or from any control inside
+   * a row, where Alt+Up goes to that row's own handle.
+   * Tabbing there instead crosses every field and every date's phase picker
+   * on the way. Not from a phase picker, where Alt+Down opens the list, and
+   * not mid-drag, where the sensor owns the arrows.
+   */
+  const stepBetweenHandles = (e: React.KeyboardEvent<HTMLElement>) => {
+    if (!e.altKey || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') || activeId) return
+    const target = e.target as HTMLElement
+    if (target.closest('[role="combobox"], [aria-haspopup="listbox"], textarea')) return
+    const handles = Array.from(e.currentTarget.querySelectorAll<HTMLElement>('[data-row-handle]'))
+    const up = e.key === 'ArrowUp'
+    const onHandle = target.closest<HTMLElement>('[data-row-handle]')
+    let index: number
+    if (onHandle) {
+      index = handles.indexOf(onHandle) + (up ? -1 : 1)
+    } else {
+      const own = target.closest('[role="listitem"]')?.querySelector<HTMLElement>('[data-row-handle]')
+      if (!own) return
+      index = handles.indexOf(own) + (up ? 0 : 1)
+    }
+    const next = handles[index]
+    if (!next) return
+    e.preventDefault()
+    next.focus()
+    // An arrow press lights the block, as on the handle itself. Not left to
+    // the focus handler: script-moved focus counts as :focus-visible only if
+    // the last focus did, and from a clicked handle it did not.
+    setKeyboardFocusId(next.dataset.rowHandle ?? null)
+  }
+
+  // The row whose handle has keyboard focus, and the block the arrow keys
+  // would carry with it. Not during a drag: the dimmed block says it then.
+  const [keyboardFocusId, setKeyboardFocusId] = useState<string | null>(null)
+  const focusBlock = useMemo(() => {
+    if (!keyboardFocusId || activeId) return null
+    const ids = subtreeIds(flat, keyboardFocusId)
+    const head = flat.find((n) => n.id === keyboardFocusId)
+    if (!head) return null
+    // The last member actually on screen -- a collapsed head hides the rest,
+    // so it closes the frame itself.
+    let tailId = keyboardFocusId
+    for (const n of rendered) if (ids.has(n.id)) tailId = n.id
+    return { ids, depth: head.depth, headId: keyboardFocusId, tailId }
+  }, [flat, rendered, keyboardFocusId, activeId])
 
   /** Name of whatever container the block would land in, for the indicator's
    * tag. The root is not in `flat` -- it is rendered above the list. */
@@ -2628,6 +2754,7 @@ export default function ModelTreeEditor({
               how deeply it is nested. The blue line shows where it will land, and which container it
               will land in. From the keyboard, focus a handle and use the arrow keys: up and down
               move an element among its neighbours, left and right change how deeply it is nested.
+              Alt+↑/↓ (⌥↑/↓ on a Mac) steps to the previous or next element's handle.
             </Typography>
             <Typography variant="body2" color="text.secondary" paragraph>
               Nest Sequences inside a Phase for parallel branches, and put a Hiatus between two
@@ -2944,7 +3071,7 @@ export default function ModelTreeEditor({
               the part that was actually missing: nesting was expressed only as
               a left margin, so assistive technology heard a flat run of text
               fields with no depth at all. */}
-          <Box role="list" aria-label="Model structure outline">
+          <Box role="list" aria-label="Model structure outline" onKeyDown={stepBetweenHandles}>
           {rendered.map((node) => {
             const parent = parentMap.get(node.id)
             const siblings = parent?.children || []
@@ -2977,6 +3104,10 @@ export default function ModelTreeEditor({
                 }
                 isDropTarget={!!projection && projection.parentId === node.id}
                 isDragged={draggedIds.has(node.id)}
+                focusBlockDepth={focusBlock?.ids.has(node.id) ? focusBlock.depth : null}
+                focusBlockHead={focusBlock?.headId === node.id}
+                focusBlockTail={focusBlock?.tailId === node.id}
+                onHandleKeyboardFocus={setKeyboardFocusId}
                 onRename={rowRename}
                 onSetParam={rowSetParam}
                 onSetOrdinate={onSetOrdinate ? rowSetOrdinate : undefined}
