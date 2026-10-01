@@ -149,7 +149,7 @@ class TestFallbackIsRecorded:
             _measurement(f'{tag}s2', f'{tag}p2', age_bp=3100),
             _measurement(f'{tag}s3', f'{tag}p3', age_bp=3000),
         ]
-        results, boundaries, solver, _intervals = analysis_api._run_bayesian(
+        results, boundaries, solver, _intervals, _summaries = analysis_api._run_bayesian(
             measurements, tree, {'mcmc_samples': 200},
         )
         return measurements, tree, results, boundaries, solver
@@ -214,7 +214,7 @@ class TestSolverOverride:
         return analysis_api._run_bayesian(measurements, _chain_tree(tag), config)
 
     def test_auto_still_integrates_a_chain_exactly(self):
-        _r, _b, solver, _i = self._chain()
+        _r, _b, solver, _i, _s = self._chain()
         assert solver['method'] == 'exact'
         assert solver['requested'] == 'auto'
 
@@ -225,14 +225,14 @@ class TestSolverOverride:
         "cannot be solved exactly" would be false and would make the results page
         warn about a deliberate, valid decision.
         """
-        _r, _b, solver, _i = self._chain(solver='gibbs')
+        _r, _b, solver, _i, _s = self._chain(solver='gibbs')
         assert solver['method'] == 'gibbs'
         assert solver['requested'] == 'gibbs'
         assert solver['reason'] is None
         assert solver['sweeps'] > 0
 
     def test_exact_can_be_required(self):
-        _r, _b, solver, _i = self._chain(solver='exact')
+        _r, _b, solver, _i, _s = self._chain(solver='exact')
         assert solver['method'] == 'exact'
         assert solver['requested'] == 'exact'
 
@@ -267,8 +267,8 @@ class TestSolverOverride:
         reported to 5 years.
         """
         tag = f'so{next(_IDS)}'
-        exact_results, _eb, exact_solver, _ei = self._chain(solver='exact', tag=tag)
-        sampled_results, _sb, sampled_solver, _si = self._chain(solver='gibbs', tag=tag)
+        exact_results, _eb, exact_solver, _ei, _es = self._chain(solver='exact', tag=tag)
+        sampled_results, _sb, sampled_solver, _si, _ss = self._chain(solver='gibbs', tag=tag)
         assert exact_solver['method'] == 'exact'
         assert sampled_solver['method'] == 'gibbs'
 
@@ -300,7 +300,7 @@ class TestSolverOverride:
         from app.api import analysis as analysis_api
         records = {}
         for choice in ('exact', 'gibbs'):
-            _r, _b, records[choice], _i = analysis_api._run_bayesian(
+            _r, _b, records[choice], _i, _s = analysis_api._run_bayesian(
                 measurements, tree, {'mcmc_samples': 200, 'solver': choice})
         assert records['exact']['implicit_boundaries'] == 1
         assert records['gibbs']['implicit_boundaries'] == 0

@@ -76,7 +76,7 @@ import type {
 } from '@/types'
 import { expandRelationships, findCycle } from '@/utils/stratigraphy'
 import { ELEMENT_TYPE_LABEL, elementLabel } from '@/utils/elementLabels'
-import { modelCanReportIntervals } from '@/utils/intervalsAvailable'
+import { modelCanReportIntervals, modelCanReportKde } from '@/utils/intervalsAvailable'
 import { summariseTree } from '@/utils/harrisLayout'
 import { validateTree } from '@/components/ModelTreeEditor'
 
@@ -632,15 +632,14 @@ export default function NewAnalysis() {
   // A wiggle match answers false, which is the point: the spacing of its
   // members is an INPUT rather than something the run infers, so the switch
   // would promise a table that comes back empty.
-  const canReportIntervals =
-    modelCanReportIntervals(
-      modelTree,
-      measurements.map((m) => ({
-        id: m.id,
-        element_id: elementAssignments[m.id] || null,
-        group_id: m.group_id ?? null,
-      }))
-    ) !== false
+  const placedMeasurements = measurements.map((m) => ({
+    id: m.id,
+    element_id: elementAssignments[m.id] || null,
+    group_id: m.group_id ?? null,
+  }))
+  const canReportIntervals = modelCanReportIntervals(modelTree, placedMeasurements) !== false
+  // The same rule for a per-phase KDE: a phase with two dates to summarise.
+  const canReportKde = modelCanReportKde(modelTree, placedMeasurements) !== false
 
   // Dates carrying a position. A dispersal fit is about where sites are, so
   // with none of them placed the switch would promise a section that comes
@@ -1199,6 +1198,7 @@ export default function NewAnalysis() {
             // far apart these dates are and whether they can be told apart.
             // There are no phases here to have durations.
             estimate_durations: mcmc.estimate_durations,
+            estimate_kde: mcmc.estimate_kde,
           }),
         })
         const data = await response.json()
@@ -1413,6 +1413,24 @@ export default function NewAnalysis() {
                     </FormHelperText>
                   </>
                 )}
+                {canReportKde && (
+                  <>
+                    <FormControlLabel
+                      sx={{ display: 'flex' }}
+                      control={
+                        <Switch
+                          checked={mcmc.estimate_kde}
+                          onChange={(e) => setMcmc({ estimate_kde: e.target.checked })}
+                        />
+                      }
+                      label={<span>Kernel density estimates</span>}
+                    />
+                    <FormHelperText sx={{ mt: 0, ml: 0 }}>
+                      How each phase&rsquo;s modelled dates are spread through time, as
+                      OxCal&rsquo;s KDE_Plot.
+                    </FormHelperText>
+                  </>
+                )}
                 {/* Offered only where the dates are placed: a dispersal fit is
                     about where sites ARE, and with nothing placed the switch
                     would promise a section that comes back refused. */}
@@ -1534,6 +1552,19 @@ export default function NewAnalysis() {
                 <FormHelperText sx={{ mt: 0, ml: 0 }}>
                   How many years apart each pair of dates is, and how confidently they
                   can be put in order.
+                </FormHelperText>
+                <FormControlLabel
+                  sx={{ mt: 1 }}
+                  control={
+                    <Switch
+                      checked={mcmc.estimate_kde}
+                      onChange={(e) => setMcmc({ estimate_kde: e.target.checked })}
+                    />
+                  }
+                  label={<span>Kernel density estimate</span>}
+                />
+                <FormHelperText sx={{ mt: 0, ml: 0 }}>
+                  How the dates are spread through time, as OxCal&rsquo;s KDE_Plot.
                 </FormHelperText>
               </Box>
             )}

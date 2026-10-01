@@ -58,6 +58,7 @@ import StackedPosteriorPlot, { type SeriesMeasurement } from '@/components/Stack
 import CurvePosteriorPlot from '@/components/CurvePosteriorPlot'
 import HarrisMatrixDiagram from '@/components/HarrisMatrixDiagram'
 import DurationsPanel from '@/components/DurationsPanel'
+import KdePanel from '@/components/KdePanel'
 import { modelCanReportIntervals } from '@/utils/intervalsAvailable'
 import WiggleMatchPanel from '@/components/WiggleMatchPanel'
 import { ELEMENT_TYPE_LABEL } from '@/utils/elementLabels'
@@ -103,6 +104,7 @@ import type {
   DraftRelationship,
   ElementType,
   IntervalsBlock,
+  SummariesBlock,
   ModelElement,
   PosteriorSummary,
 } from '@/types'
@@ -227,6 +229,8 @@ interface AnalysisResult {
   // Durations and separations. Null when the run was not asked for them, which
   // is not "there are none" -- the page says so and points at the option.
   intervals?: IntervalsBlock | null
+  // Summaries of the dates as a set. Null when the run was not asked for any.
+  summaries?: SummariesBlock | null
   results: SampleResult[]
 }
 
@@ -3303,6 +3307,11 @@ export default function Results() {
           </Box>
           )}
         </Paper>
+      )}
+
+      {/* After the dates it summarises, before the lengths of time. */}
+      {analysis.summaries?.kde && analysis.summaries.kde.length > 0 && (
+        <KdePanel estimates={analysis.summaries.kde} dateFormat={dateFormat} />
       )}
 
       {/* Durations and differences, last on the page. Every figure in it is a

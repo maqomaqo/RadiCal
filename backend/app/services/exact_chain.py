@@ -1313,6 +1313,9 @@ def solve(measurements: List[Dict], root: Dict, chain: Chain,
              for i, bid in enumerate(chain.boundary_ids)}
     joint.update({date_id: grid[idx] for date_id, idx in date_draws.items()})
     results['joint_draws'] = {date_id: grid[idx] for date_id, idx in date_draws.items()}
+    # The Boundaries in the same states, for a per-phase KDE to reflect at
+    # (services/kde.report_phases).
+    results['joint_boundaries'] = {bid: joint[bid] for bid in chain.boundary_ids}
     if estimate_durations or dispersal is not None:
         results['intervals'] = intervals.report(
             root, measurements, joint, independent=True,

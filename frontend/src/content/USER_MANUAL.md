@@ -12,15 +12,16 @@
 8. [Running an Analysis](#running-an-analysis)
 9. [Viewing Results](#viewing-results)
 10. [Durations and Differences](#durations-and-differences)
-11. [Wiggle Matching](#wiggle-matching)
-12. [Age-Depth Modelling](#age-depth-modelling)
-13. [Geographic Analysis](#geographic-analysis)
-14. [Exporting Data](#exporting-data)
-15. [Projects and Date Collections](#projects-and-date-collections)
-16. [Comparing Analyses](#comparing-analyses)
-17. [Best Practices](#best-practices)
-18. [Appendix A: Mathematical Methods](#appendix-a-mathematical-methods)
-19. [Bibliography](#bibliography)
+11. [Kernel Density Estimates](#kernel-density-estimates)
+12. [Wiggle Matching](#wiggle-matching)
+13. [Age-Depth Modelling](#age-depth-modelling)
+14. [Geographic Analysis](#geographic-analysis)
+15. [Exporting Data](#exporting-data)
+16. [Projects and Date Collections](#projects-and-date-collections)
+17. [Comparing Analyses](#comparing-analyses)
+18. [Best Practices](#best-practices)
+19. [Appendix A: Mathematical Methods](#appendix-a-mathematical-methods)
+20. [Bibliography](#bibliography)
 
 ## Getting Started
 
@@ -568,6 +569,40 @@ error, and the panel says how many draws they came from and whether those draws 
 The reported ranges are quoted at a step that widens for a very long duration, rather than claiming
 five-year precision the draws cannot support.
 
+## Kernel Density Estimates
+
+Off by default. Turn on **Kernel density estimate** under **Reporting** for a Group Calibration,
+or **Kernel density estimates** under **Model settings** for a Bayesian analysis. To add them to an
+analysis that has already run, **Edit** it, turn the option on, and run it again.
+
+The plot shows how the dates are spread through time, as OxCal's `KDE_Plot` does. It is the
+question a summed probability distribution (OxCal's `Sum`) is usually asked, without the Sum's
+sharp peaks and cliffs, which mostly come from the wiggles in the calibration curve rather than
+from anything the dated events did.
+
+The line is the estimate; the shaded band is its ±1σ variability across draws. Read the band as
+how robust the curve is to which calendar age each date really has and to the choice of kernel
+width: where it is narrow, the shape is well supported. The kernel width the dates chose is printed
+above the plot.
+
+Two cautions:
+
+- The estimate treats the dates as a **sample of one population of events**. Several dates from
+  one context, or one well-dated site among sparsely dated ones, will raise the curve wherever they
+  fall.
+- It is **conservative**. Measurement uncertainty is not removed, so a KDE is somewhat wider than
+  the underlying distribution of events, and its first and last edges sit too early and too late.
+  Where the dates belong to a bounded phase, model them as one (a Bayesian analysis) and read the
+  phase's Boundaries for its start and end.
+
+In a **Bayesian analysis** there is one estimate per Phase holding two or more dates, drawn from
+the *modelled* dates, as OxCal's `KDE_Plot` is when used in place of `Phase`. Where the Phase sits
+between two Boundaries the curve stops at them rather than tailing off past them: the model does
+not let its events fall outside, so neither does the estimate. This answers the second caution
+above, and it is the better way to summarise a bounded phase.
+
+A Group Calibration has one estimate of all its dates. Either way, at least two dates are needed.
+
 ## Wiggle Matching
 
 For a series of dates whose separations are **counted** rather than inferred: blocks of tree rings
@@ -838,7 +873,10 @@ the origin is elsewhere, or the sites do not form a front; the residuals tell th
 - **Export CSV** (on the Results page): the full results table, including the unmodelled
   comparison, in the currently-selected date format. Where a run produced durations and differences,
   they follow as a second block below it, after a blank line and their own header. They share no
-  column with the results table, since every figure in them is a length rather than a date.
+  column with the results table, since every figure in them is a length rather than a date. A kernel
+  density estimate follows in two more blocks: one row saying how it was made (dates, draws, kernel
+  width), then the curve itself, one row per calendar year step with its density and ±1σ, so it can
+  be redrawn in a spreadsheet.
 - **JSON**: available via the API (`GET /api/results/{id}/export/json`) for anyone who wants the
   full result machine-readable; there's no button for it in the UI yet.
 - **Curve data** (on a curve's browser page): **Export this window** saves the visible stretch of
@@ -848,7 +886,7 @@ the origin is elsewhere, or the sites do not form a front; the residuals tell th
 - **Export PDF** (on the Results page): a printable report of the whole analysis: what it is and
   when it was run, the curve(s) it was calibrated against with their references, which solver
   computed the posteriors, the results table in the model's own reading order, the durations and
-  differences where there are any, and a plot of every date and Boundary with its HPD ranges marked. Like the CSV it reads in the date format currently
+  differences where there are any, the kernel density estimate where there is one, and a plot of every date and Boundary with its HPD ranges marked. Like the CSV it reads in the date format currently
   selected. It is rendered on the server and draws a plot per modelled parameter, so a large model
   takes a few seconds, and the button says so while it works.
 - **Export CSV** (on a comparison page): every paired date with each run's median, HPD range and
@@ -1639,6 +1677,58 @@ values of the centred site coordinates), each withhold the fit and say why. Resi
 independent; spatial autocorrelation is not modelled, and the interval on `v` is optimistic to that
 extent. Distances are great-circle.
 
+### A.17 Kernel density estimates
+
+The method is OxCal's `KDE_Plot` (Bronk Ramsey 2017). Each **draw** takes one calendar age
+`t_i` for each of the `n` dates, from that date's own calibrated distribution, and builds an
+ordinary Gaussian KDE from those `n` points:
+
+```
+f(t) = 1/(n h) sum_i K((t - t_i) / h),     K = N(0, 1)
+```
+
+The plotted curve is the mean of `f` over the draws, and the band is its standard deviation at
+each calendar year. In a Group Calibration the draws are taken from each date's own calibration; in
+a Bayesian analysis they are the solver's joint draws of the Phase's dates, 500 states thinned
+evenly from the many thousands it keeps. Pooling every draw of every date under one kernel would not be the same: that
+is a smoothed Sum, still carrying each date's full calibrated width.
+
+**Kernel width.** Silverman's rule (Silverman 1986) is optimal when the underlying distribution is
+normal, and over-smooths anything with more than one mode, so it is used as a ceiling:
+
+```
+h_S = (4/3)^(1/5) sd(t) n^(-1/5)
+h   = g h_S,        g ~ U(0, 1)
+```
+
+`g` is weighted by how well each date is predicted by a KDE of all the others:
+
+```
+L(g | t) ∝ prod_i [ 1/((n-1) g h_S) sum_{j≠i} K((t_i - t_j) / (g h_S)) ] ^ ((n-2)/n)
+```
+
+The power `(n-2)/n` reflects that the mean and standard deviation have already been taken from the
+`n` points. At `n = 2` it is zero, and `g` keeps its uniform prior.
+
+**Inside a model** each state's kernels are reflected at the Boundaries bracketing the Phase in
+that state (Bronk Ramsey 2017, eq. 8): a date near a Boundary gains its mirror image beyond it,
+and the density is zero outside. The curve then stays flat up to the transition instead of
+rounding off, and still integrates to one. The bandwidth likelihood above is left on plain kernels,
+as the paper states it. The solvers work on a calendar grid, so their draws are grid years; each is
+spread uniformly across its grid cell first, which is the continuous posterior the grid stands for.
+Without this, the dates of a short phase would sometimes share one year and have no spread at all.
+
+**How it is computed.** OxCal moves `g` by Metropolis-Hastings inside its MCMC. Here each joint
+draw of the dates is taken as given (exact draws from each calibration, or the solver's joint
+draws), and `g` is drawn directly from `L(g | t)` for that draw. That is evaluated on 32 cells
+across (0, 1), and then 16 finer cells across the best of them. 500 draws are used. Every kernel sum is a histogram of the points,
+linearly binned at an eighth of the kernel width and convolved with the kernel. The cost therefore
+grows with the span of the dates rather than with `n²`, and the result is within about 0.1% of the
+direct sum. A date the kernel leaves with no neighbour in reach is summed directly, so it lowers the
+likelihood by the right amount rather than making it zero.
+
+Not yet checked against an OxCal `KDE_Plot` export.
+
 ## Bibliography
 
 - Ammerman, A. J., and Cavalli-Sforza, L. L. (1971). Measuring the rate of spread of early farming
@@ -1655,6 +1745,8 @@ extent. Distances are great-circle.
 - Bronk Ramsey, C. (2009a). Bayesian analysis of radiocarbon dates. *Radiocarbon* 51(1), 337–360.
 - Bronk Ramsey, C. (2009b). Dealing with outliers and offsets in radiocarbon dating. *Radiocarbon*
   51(3), 1023–1045.
+- Bronk Ramsey, C. (2017). Methods for summarizing radiocarbon datasets. *Radiocarbon* 59(6),
+  1809–1833.
 - Buck, C. E., Kenworthy, J. B., Litton, C. D., and Smith, A. F. M. (1991). Combining archaeological
   and radiocarbon information: a Bayesian approach to calibration. *Antiquity* 65(249), 808–821.
 - Buck, C. E., Litton, C. D., and Smith, A. F. M. (1992). Calibration of radiocarbon results
@@ -1692,6 +1784,8 @@ extent. Distances are great-circle.
 - Reimer, P. J., Austin, W. E. N., Bard, E., Bayliss, A., Blackwell, P. G., Bronk Ramsey, C., et al.
   (2020). The IntCal20 Northern Hemisphere radiocarbon age calibration curve (0–55 cal kBP).
   *Radiocarbon* 62(4), 725–757.
+- Silverman, B. W. (1986). *Density Estimation for Statistics and Data Analysis*. London: Chapman
+  and Hall.
 - Stuiver, M., and Polach, H. A. (1977). Discussion: reporting of ¹⁴C data. *Radiocarbon* 19(3),
   355–363.
 - Stuiver, M., and Reimer, P. J. (1993). Extended ¹⁴C data base and revised CALIB 3.0 ¹⁴C age

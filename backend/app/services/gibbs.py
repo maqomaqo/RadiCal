@@ -2372,6 +2372,10 @@ def solve(measurements: List[Dict], root: Dict, sweeps: int = DEFAULT_SWEEPS,
         # opt into. The states cost one list of indices per kept sweep. Scored
         # by services/agreement.py, as exact_chain.solve's are.
         results['joint_draws'] = {d: joint[d] for d in model.date_ids if d in joint}
+        # Every other parameter in the same states -- the Boundaries among
+        # them -- for a per-phase KDE to reflect at (services/kde.report_phases).
+        dates = set(model.date_ids)
+        results['joint_boundaries'] = {p: v for p, v in joint.items() if p not in dates}
         if wants_intervals:
             results['intervals'] = intervals.report(
                 measurements=measurements, root=root, draws=joint,

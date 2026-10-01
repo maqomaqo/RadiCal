@@ -549,6 +549,46 @@ def _write_age_depth(writer, analysis, date_format: str) -> None:
             writer.writerow(row)
 
 
+# The kernel density estimates, as two more blocks: one row per estimate
+# saying how it was made, then every curve, so a spreadsheet can redraw them.
+# `Phase` names the phase a model's estimate is of, and is blank for a group
+# calibration's one estimate of all its dates. The curve's age is a calendar
+# age and gains a formatted counterpart on the file's usual rule; its density
+# and band do not.
+KDE_SUMMARY_HEADER = [
+    'Row Type', 'Phase', 'Dates', 'Draws', 'Kernel Width Median (yr)',
+    'Kernel Width 68.3% (yr)', 'Silverman Factor Median', 'Reflected at Boundaries',
+]
+KDE_CURVE_HEADER = ['Row Type', 'Phase', 'Age BP', 'Density', 'Density 1 Sigma']
+
+
+def _write_kde(writer, analysis, date_format: str) -> None:
+    """The kernel density estimates, when the run was asked for them."""
+    records = (analysis.summaries or {}).get('kde') or []
+    if not records:
+        return
+    writer.writerow([])
+    writer.writerow(KDE_SUMMARY_HEADER)
+    for kde in records:
+        width = kde['bandwidth']
+        writer.writerow([
+            'KDE Summary', kde.get('name') or '', kde['dates'], kde['draws'],
+            f"{width['median']:.0f}",
+            f"{width['range_68'][0]:.0f}-{width['range_68'][1]:.0f}",
+            f"{kde['factor']['median']:.3f}",
+            'yes' if kde.get('reflected') else 'no',
+        ])
+    era = date_format_service.ERA_LABELS.get(date_format)
+    writer.writerow([])
+    writer.writerow(KDE_CURVE_HEADER + ([f'Age ({era})'] if era else []))
+    for kde in records:
+        for age, density, sd in kde['distribution']:
+            row = ['KDE', kde.get('name') or '', f'{age:.0f}', f'{density:.6g}', f'{sd:.6g}']
+            if era:
+                row.append(date_format_service.format_age(age, date_format))
+            writer.writerow(row)
+
+
 def _write_intervals(writer, analysis) -> None:
     """
     The durations-and-differences table, appended below the results table with
@@ -611,6 +651,7 @@ def _build_csv(analysis_id: str, db: Session, date_format: Optional[str] = None)
             )
         _write_intervals(writer, analysis)
         _write_age_depth(writer, analysis, date_format)
+        _write_kde(writer, analysis, date_format)
         return output.getvalue()
 
     for order, row in enumerate(structure, start=1):
@@ -642,6 +683,7 @@ def _build_csv(analysis_id: str, db: Session, date_format: Optional[str] = None)
 
     _write_intervals(writer, analysis)
     _write_age_depth(writer, analysis, date_format)
+    _write_kde(writer, analysis, date_format)
     return output.getvalue()
 
 
@@ -774,6 +816,8 @@ def export_json(analysis_id: str, db: Session = Depends(get_db),
             # Carried whole rather than flattened as the CSV flattens it,
             # since JSON has room for the full HPD breakdown.
             "intervals": analysis.intervals,
+            # Null unless the run was asked for one (Analysis.summaries).
+            "summaries": analysis.summaries,
         }
     }
 
@@ -836,6 +880,7 @@ def export_pdf(analysis_id: str, date_format: Optional[str] = None,
         distributions=distributions,
         context_spans=_context_spans(analysis_id, db),
         intervals=analysis.intervals,
+        summaries=analysis.summaries,
         project_name=analysis.project.name if analysis.project else None,
         date_format=date_format,
         coordinate_precision=data['coordinate_precision'],

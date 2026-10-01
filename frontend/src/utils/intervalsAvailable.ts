@@ -23,17 +23,24 @@ import type { MatrixMeasurement, ModelElement } from '@/types'
  * which on the New Analysis form is the ordinary state before one is built.
  * Callers should treat that as "offer it", never as "no".
  */
-export function modelCanReportIntervals(
-  tree: ModelElement | null | undefined,
-  measurements: Pick<MatrixMeasurement, 'id' | 'element_id' | 'group_id'>[]
-): boolean | null {
-  if (!tree) return null
+type Placed = Pick<MatrixMeasurement, 'id' | 'element_id' | 'group_id'>
 
+function countDatesIn(measurements: Placed[]): Map<string, number> {
   const datesIn = new Map<string, number>()
   for (const m of measurements) {
     const holder = m.element_id || m.group_id
     if (holder) datesIn.set(holder, (datesIn.get(holder) || 0) + 1)
   }
+  return datesIn
+}
+
+export function modelCanReportIntervals(
+  tree: ModelElement | null | undefined,
+  measurements: Placed[]
+): boolean | null {
+  if (!tree) return null
+
+  const datesIn = countDatesIn(measurements)
 
   let boundaries = 0
   let phaseWithSeveralDates = false
@@ -49,4 +56,22 @@ export function modelCanReportIntervals(
   // Two Boundaries are the fewest that enclose anything; one multi-dated phase
   // is the fewest that has a span of its own.
   return boundaries >= 2 || phaseWithSeveralDates
+}
+
+/**
+ * Whether a model has anything for a per-phase kernel density estimate to be
+ * of: a phase holding two or more dates, the same phases
+ * services/kde.report_phases summarises. `null` as above when there is no
+ * structure yet.
+ */
+export function modelCanReportKde(
+  tree: ModelElement | null | undefined,
+  measurements: Placed[]
+): boolean | null {
+  if (!tree) return null
+  const datesIn = countDatesIn(measurements)
+  const walk = (element: ModelElement): boolean =>
+    (element.element_type === 'phase' && (datesIn.get(element.id) || 0) >= 2) ||
+    (element.children || []).some(walk)
+  return walk(tree)
 }

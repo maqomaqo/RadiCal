@@ -413,6 +413,14 @@ class Analysis(Base):
     # written once per run and read whole.
     intervals = Column(JSON, nullable=True)
 
+    # Summaries of the dates taken as a set rather than one at a time --
+    # currently `kde`, a kernel density estimate of how the dated events are
+    # spread through time (services/kde.py). Like `intervals`, written only
+    # when asked for (bayesian_config.estimate_kde), so NULL means "not asked
+    # for", and one JSON column because it is written once per run and read
+    # whole.
+    summaries = Column(JSON, nullable=True)
+
     # Relations
     project = relationship('Project', back_populates='analyses')
     # Ordered by the user's arrangement (RadiocarbonSample.sort_order), with

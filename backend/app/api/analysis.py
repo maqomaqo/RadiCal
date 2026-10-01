@@ -18,6 +18,7 @@ from app.services import wiggle_match
 from app.services import jobs
 from app.services import agreement as agreement_service
 from app.services import intervals
+from app.services import kde
 from app.services import failures
 from app.api.auth import current_user, owned_or_404
 from app.api.curves import authorise_curve_ids
@@ -136,6 +137,51 @@ def _date_difference_block(samples: List, seed: int = 42) -> Dict:
                       'median': float(np.median(drawn))})
     dates.sort(key=lambda d: d['median'], reverse=True)
     return intervals.report_dates(dates, draws)
+
+
+def _summary_block(samples: List) -> Optional[Dict]:
+    """
+    Analysis.summaries for a group calibration: a kernel density estimate of
+    how its dates are spread through time (services/kde.py). Each date's own
+    calibration is what is drawn from, the dates being independent with no
+    model to move them. None below kde.MIN_DATES, as the differences are for
+    one date.
+    """
+    calibrated = []
+    for sample in samples:
+        curve = get_curve(sample.curve_id)
+        calibrated.append(curve.calibrate(
+            sample.age_bp, sample.error_1sigma, sample.delta_r, sample.delta_r_error))
+    summary = kde.summarise(calibrated)
+    # A list, as a model's one-per-phase KDEs are; this one is of every date
+    # in the analysis, so it belongs to no element.
+    return {'kde': [{'element_id': None, 'name': None, **summary}]} if summary else None
+
+
+def _phase_summary_block(tree: Dict, measurements: List[Dict], solved: Dict,
+                         wanted: bool) -> Optional[Dict]:
+    """
+    Analysis.summaries for a model: one kernel density estimate per Phase,
+    from the solver's own joint draws and reflected at the phase's Boundaries
+    (kde.report_phases). None unless asked for, or when no phase holds two
+    dates.
+    """
+    if not wanted:
+        return None
+    draws = {**(solved.get('joint_boundaries') or {}), **(solved.get('joint_draws') or {})}
+    records = kde.report_phases(tree, measurements, draws,
+                                grid_step=(solved.get('grid') or {}).get('step') or 0.0)
+    return {'kde': records} if records else None
+
+
+def _relabel_summaries(block: Optional[Dict], id_map: Dict[str, str]) -> Optional[Dict]:
+    """_relabel_intervals for the summaries block: each KDE names its phase."""
+    if not block or not id_map:
+        return block
+    return {**block, 'kde': [
+        {**record, 'element_id': id_map.get(record.get('element_id'), record.get('element_id'))}
+        for record in block.get('kde') or []
+    ]}
 
 
 def _calibration_result_row(
@@ -526,16 +572,19 @@ def _run_bayesian(
     model_tree: Dict,
     bayesian_config: Dict,
     on_progress: Optional[Callable[[Dict], bool]] = None,
-) -> Tuple[Dict, Dict, Dict, Optional[Dict]]:
+) -> Tuple[Dict, Dict, Dict, Optional[Dict], Optional[Dict]]:
     """
     Solve the model against an explicit model tree, returning (per-sample
-    results, per-boundary results, solver record, durations and differences).
-    Shared between a fresh run and a rerun so the two cannot drift apart.
+    results, per-boundary results, solver record, durations and differences,
+    summaries). Shared between a fresh run and a rerun so the two cannot drift
+    apart.
 
-    The last is None unless bayesian_config.estimate_durations asked for it;
-    it is a separate return rather than more per-sample fields because every
-    quantity in it is a function of several modelled ages at once (see
-    services/intervals.py).
+    The fourth is None unless bayesian_config.estimate_durations asked for it,
+    and the fifth -- a kernel density estimate per phase -- unless
+    bayesian_config.estimate_kde did. They are separate returns rather than
+    more per-sample fields because every quantity in them is a function of
+    several modelled ages at once (see services/intervals.py and
+    services/kde.py).
 
     A chain-shaped model -- a Sequence of Phases separated by Boundaries, the
     ordinary archaeological shape -- is integrated EXACTLY by
@@ -575,6 +624,7 @@ def _run_bayesian(
     """
     requested = bayesian_config.get('solver') or 'auto'
     estimate_durations = bool(bayesian_config.get('estimate_durations'))
+    estimate_kde = bool(bayesian_config.get('estimate_kde'))
     dispersal_spec = _dispersal_spec(bayesian_config)
 
     # Refused here as well as at the request schema, because a rerun comes
@@ -585,7 +635,9 @@ def _run_bayesian(
 
     wiggle_result = _run_wiggle_match(measurements, model_tree, requested)
     if wiggle_result is not None:
-        return wiggle_result
+        # No phase KDE: a wiggle match's members are one age plus fixed gaps,
+        # not a sample of events whose spread means anything.
+        return (*wiggle_result, None)
 
     # Each solver gets the tree it can take: the sampler the model as
     # AUTHORED, the exact solver a copy with the implied transitions supplied,
@@ -649,7 +701,8 @@ def _run_bayesian(
             # correlated them.
             'model_agreement': amodel,
             'overall_agreement': overall,
-        }, solved.get('intervals')
+        }, solved.get('intervals'), _phase_summary_block(
+            exact_tree, measurements, solved, estimate_kde)
 
     # Only the sampler takes a progress callback: exact integration does not
     # iterate towards an answer, so it has no fraction to report and nothing
@@ -714,7 +767,8 @@ def _run_bayesian(
         # reports its own U(0,n) posterior in, so a published run's inferred
         # hyperparameter can be compared directly.
         'outlier_scale': sampled['outlier_scale'],
-    }, sampled.get('intervals')
+    }, sampled.get('intervals'), _phase_summary_block(
+        model_tree, measurements, sampled, estimate_kde)
 
 
 def _job_progress(handle: jobs.JobHandle):
@@ -939,9 +993,10 @@ def calibrate_group(request: GroupCalibrationRequest, db: Session = Depends(get_
             name=request.name,
             analysis_type='group_calibration',
             status='completed',
-            # No solver to configure, but the one option it takes is recorded
-            # so a rerun and an edit round-trip it.
-            bayesian_config={'estimate_durations': request.estimate_durations},
+            # No solver to configure, but the options it takes are recorded
+            # so a rerun and an edit round-trip them.
+            bayesian_config={'estimate_durations': request.estimate_durations,
+                             'estimate_kde': request.estimate_kde},
             project_id=project_id,
             owner_id=user.id,
         )
@@ -967,6 +1022,8 @@ def calibrate_group(request: GroupCalibrationRequest, db: Session = Depends(get_
         # from, so the option is inert rather than an error.
         if request.estimate_durations and len(saved_samples) > 1:
             analysis.intervals = _date_difference_block(saved_samples)
+        if request.estimate_kde:
+            analysis.summaries = _summary_block(saved_samples)
 
         db.commit()
         db.refresh(analysis)
@@ -1086,7 +1143,8 @@ def bayesian_analysis(request: BayesianRequest, wait: bool = False,
                 ))
             db.commit()
 
-        def _solve_and_store(db: Session, handle) -> Tuple[Dict, Dict, Dict, Optional[Dict]]:
+        def _solve_and_store(db: Session, handle
+                             ) -> Tuple[Dict, Dict, Dict, Optional[Dict], Optional[Dict]]:
             """
             Solve the model and write what it produced. Serves both paths:
             called directly for a synchronous run, or handed to the job queue.
@@ -1104,7 +1162,7 @@ def bayesian_analysis(request: BayesianRequest, wait: bool = False,
             # client-side ids rather than the persisted ones, because
             # build_model() matches against an `ages` dict keyed the same way.
             root, group_boundaries, tree_measurements = _tree_from_request(request)
-            results, boundary_results, solver, interval_block = _run_bayesian(
+            results, boundary_results, solver, interval_block, summary_block = _run_bayesian(
                 tree_measurements, root, request.bayesian_config.model_dump(),
                 on_progress=_job_progress(handle),
             )
@@ -1184,9 +1242,10 @@ def bayesian_analysis(request: BayesianRequest, wait: bool = False,
                 # own sample rows.
                 analysis.intervals = _relabel_intervals(
                     interval_block, {**groups_map, **samples_map})
+                analysis.summaries = _relabel_summaries(summary_block, groups_map)
                 analysis.status = 'completed'
                 db.commit()
-            return results, context_results, solver, interval_block
+            return results, context_results, solver, interval_block, summary_block
 
         if save and not wait:
             # Queued. The inputs are persisted and the analysis is readable at
@@ -1201,7 +1260,7 @@ def bayesian_analysis(request: BayesianRequest, wait: bool = False,
                     worker_analysis.status = 'running'
                     db.commit()
                 try:
-                    _, _, solver, _intervals = _solve_and_store(db, handle)
+                    _, _, solver, _intervals, _summaries = _solve_and_store(db, handle)
                 except gibbs.Cancelled:
                     db.rollback()
                     worker_analysis = db.query(Analysis).filter(
@@ -1240,7 +1299,7 @@ def bayesian_analysis(request: BayesianRequest, wait: bool = False,
                 },
             })
 
-        results, context_results, solver, interval_block = _solve_and_store(
+        results, context_results, solver, interval_block, summary_block = _solve_and_store(
             db, jobs.NullHandle())
 
         # Summary stats plus the binned distribution. The raw
@@ -1277,6 +1336,8 @@ def bayesian_analysis(request: BayesianRequest, wait: bool = False,
                 # Null unless the run was asked for them; see
                 # Analysis.intervals.
                 "intervals": interval_block,
+                # Likewise; see Analysis.summaries.
+                "summaries": summary_block,
                 "measurements_count": len(request.measurements)
             }
         }
@@ -1402,6 +1463,9 @@ def get_analysis(analysis_id: str, db: Session = Depends(get_db),
             # for them. Null otherwise, which the Results page answers by
             # offering to re-run rather than showing an empty table.
             "intervals": analysis.intervals,
+            # Summaries of the dates as a set -- a kernel density estimate --
+            # present only when the run was asked for one.
+            "summaries": analysis.summaries,
             # The model structure, migrated from contexts + relationships on
             # first access. Boundary elements carry their own posterior once
             # the analysis has been run, as do a wiggle match and an undated
@@ -1736,6 +1800,10 @@ def _rerun_analysis(analysis: Analysis, db: Session,
             if (analysis.bayesian_config or {}).get('estimate_durations')
             and len(samples) > 1 else None
         )
+        analysis.summaries = (
+            _summary_block(samples)
+            if (analysis.bayesian_config or {}).get('estimate_kde') else None
+        )
 
     elif analysis.analysis_type == 'bayesian':
         groups = db.query(SampleGroup).filter(SampleGroup.analysis_id == analysis.id).all()
@@ -1781,7 +1849,7 @@ def _rerun_analysis(analysis: Analysis, db: Session,
             for s in samples
         ]
 
-        results, boundary_results, solver, interval_block = _run_bayesian(
+        results, boundary_results, solver, interval_block, summary_block = _run_bayesian(
             measurement_dicts, root, analysis.bayesian_config or {},
             on_progress=on_progress,
         )
@@ -1789,6 +1857,7 @@ def _rerun_analysis(analysis: Analysis, db: Session,
         # No relabelling, unlike a fresh run: the tree came out of the
         # database, so every id is already the persisted one.
         analysis.intervals = interval_block
+        analysis.summaries = summary_block
 
         # Each boundary's posterior on its element, mirrored onto the
         # per-context start/end for anything still reading that.
@@ -2259,6 +2328,7 @@ def replace_analysis_inputs(
         # sets the solver again.
         analysis.solver = None
         analysis.intervals = None
+        analysis.summaries = None
         db.commit()
     except HTTPException:
         db.rollback()
