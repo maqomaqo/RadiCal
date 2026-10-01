@@ -99,17 +99,44 @@ export function hpdRangesFromCurve(
 }
 
 /**
- * Calendar step a MODELLED range is reported at.
+ * Calendar step a MODELLED range is reported at by default.
  *
  * Mirrors REPORTING_STEP_YEARS in backend/app/services/exact_chain.py, which
  * is where the reasoning lives; both sides must agree, because this page
  * re-selects a region from a distribution the backend computed and the stored
- * hpd_68_ranges/hpd_95_ranges beside it were built at that step.
+ * hpd_68_ranges/hpd_95_ranges beside it were built at that step. An analysis
+ * that asked for another resolution records it as solver.resolution, and
+ * reportingOf hands that through instead.
  */
 export const REPORTING_STEP_YEARS = 5
 
 /**
- * Ranges for a modelled posterior, rebinned to REPORTING_STEP_YEARS first.
+ * How one posterior's ranges are reported. `false` for an unmodelled
+ * calibration, whose distribution sits on the curve's own grid. For a
+ * modelled one, the calendar step in years its analysis reported it at, or
+ * `true` for the default step -- an analysis run before the step could be
+ * set, or a surface with no analysis to ask.
+ */
+export type RangeReporting = boolean | number
+
+/** The reporting for an analysis's posteriors. See RangeReporting. */
+export function reportingOf(analysis: {
+  analysis_type?: string
+  solver?: { resolution?: number | null } | null
+} | null | undefined): RangeReporting {
+  if (analysis?.analysis_type !== 'bayesian') return false
+  return analysis.solver?.resolution ?? true
+}
+
+function modelledStep(reporting: RangeReporting): number | null {
+  if (reporting === false) return null
+  if (reporting === true) return REPORTING_STEP_YEARS
+  return reporting > 0 ? reporting : REPORTING_STEP_YEARS
+}
+
+/**
+ * Ranges for a modelled posterior, rebinned to its reporting step first --
+ * REPORTING_STEP_YEARS unless the analysis asked for another.
  *
  * A mirror of exact_chain._reported_ranges, and it exists for the same two
  * reasons. The solver picks its internal grid step from the date
@@ -127,7 +154,8 @@ export const REPORTING_STEP_YEARS = 5
  */
 function reportedRangesFromPosterior(
   distribution: Array<[number, number]> | undefined | null,
-  confidence: number
+  confidence: number,
+  step: number
 ): HPDRange[] {
   if (!distribution || distribution.length === 0) return []
   const ages = distribution.map(([a]) => a)
@@ -135,7 +163,6 @@ function reportedRangesFromPosterior(
   const widths = cellWidths(ages)
   const mass = densities.map((d, i) => d * widths[i])
 
-  const step = REPORTING_STEP_YEARS
   // The mass in a reporting bin is the cumulative mass between its two
   // edges, read off the CELL edges by interpolation: each grid point stands
   // for the cell half a solver step either side of it. Exact for a density
@@ -200,10 +227,11 @@ function reportedRangesFromPosterior(
 export function posteriorRanges(
   distribution: Array<[number, number]> | undefined | null,
   confidence: number,
-  modelled: boolean
+  modelled: RangeReporting
 ): HPDRange[] {
-  return modelled
-    ? reportedRangesFromPosterior(distribution, confidence)
+  const step = modelledStep(modelled)
+  return step !== null
+    ? reportedRangesFromPosterior(distribution, confidence, step)
     : hpdRangesFromCurve(distribution, confidence)
 }
 
@@ -215,10 +243,11 @@ export function posteriorRanges(
 export function posteriorEnvelope(
   distribution: Array<[number, number]> | undefined | null,
   confidence: number,
-  modelled: boolean
+  modelled: RangeReporting
 ): [number, number] | null {
-  if (!modelled) return hpdEnvelopeFromHistogram(distribution, confidence)
-  const ranges = reportedRangesFromPosterior(distribution, confidence)
+  const step = modelledStep(modelled)
+  if (step === null) return hpdEnvelopeFromHistogram(distribution, confidence)
+  const ranges = reportedRangesFromPosterior(distribution, confidence, step)
   if (ranges.length === 0) return null
   return [
     Math.min(...ranges.map((r) => r.min)),
@@ -283,9 +312,9 @@ export function hpdBands(
   distribution: Array<[number, number]> | undefined | null,
   confidence: number,
   confidenceLabel: string,
-  /** Whether the distribution came out of a solver, which decides the
-   *  resolution its ranges are reported at -- see posteriorRanges. */
-  modelled = false
+  /** Whether the distribution came out of a solver, and at what step, which
+   *  decides the resolution its ranges are reported at -- see posteriorRanges. */
+  modelled: RangeReporting = false
 ): HPDBand[] {
   const outer = posteriorRanges(distribution, confidence, modelled)
   if (outer.length === 0) return []

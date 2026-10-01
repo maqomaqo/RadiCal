@@ -35,6 +35,10 @@ export interface McmcConfig {
   // BayesianConfigInput.uniform_span_prior on the backend for what it does.
   // On by default there and here.
   uniform_span_prior: boolean
+  // The calendar step, in years, modelled ranges and durations are reported
+  // at: OxCal's Options Resolution. 5 by default, as there -- see
+  // BayesianConfigInput.resolution on the backend.
+  resolution: number
   // Also estimate durations and separations. Off by default, matching
   // BayesianConfigInput.estimate_durations: a duration is a claim about a
   // phase's extent the analyst makes, not one the app makes for them.
@@ -65,10 +69,21 @@ export const DEFAULT_MCMC: McmcConfig = {
   mcmc_tune: 1000,
   mcmc_chains: 4,
   uniform_span_prior: true,
+  resolution: 5,
   estimate_durations: false,
   estimate_kde: false,
   estimate_dispersal: false,
   dispersal_origin: null,
+}
+
+/**
+ * Whether typed text is a reporting resolution the backend accepts: a whole
+ * number of years from 1 to 100 (BayesianConfigInput.resolution).
+ */
+export function isUsableResolution(text: string): boolean {
+  if (!/^\s*\d+\s*$/.test(text)) return false
+  const years = Number(text)
+  return years >= 1 && years <= 100
 }
 
 interface AnalysisDraftState {

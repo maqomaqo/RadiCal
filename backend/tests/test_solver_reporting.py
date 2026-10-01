@@ -400,6 +400,45 @@ class TestSolverOverride:
         # No stale record claiming a method it never managed to use.
         assert after['solver'] is None
 
+    def test_the_reporting_resolution_is_recorded_and_applied(self, client):
+        tag = f'rs{next(_IDS)}'
+        created = client.post('/api/analysis/bayesian?wait=true', json={
+            'name': f'Resolution {tag}',
+            'measurements': [_measurement(f'{tag}s1', f'{tag}p1')],
+            'model_tree': _chain_tree(tag),
+            'bayesian_config': {'mcmc_samples': 200, 'resolution': 2},
+            'save': True,
+        })
+        assert created.status_code == 200, created.text
+        data = created.json()['data']
+        assert data['solver']['resolution'] == 2
+        for result in data['results'].values():
+            for r in result['hpd_95_ranges']:
+                assert r['min'] % 2 == 0 and r['max'] % 2 == 0
+
+        fetched = client.get(f"/api/analysis/{data['id']}").json()['data']
+        assert fetched['solver']['resolution'] == 2
+        assert fetched['bayesian_config']['resolution'] == 2
+
+    def test_the_reporting_resolution_defaults_to_five_years(self, client):
+        tag = f'rd{next(_IDS)}'
+        created = _run(client, tag, _chain_tree(tag),
+                       [_measurement(f'{tag}s1', f'{tag}p1')])
+        assert created.status_code == 200, created.text
+        assert created.json()['data']['solver']['resolution'] == 5
+
+    @pytest.mark.parametrize('resolution', [0, 101, 2.5])
+    def test_an_unusable_resolution_is_refused(self, client, resolution):
+        tag = f'rb{next(_IDS)}'
+        response = client.post('/api/analysis/bayesian?wait=true', json={
+            'name': f'Bad {tag}',
+            'measurements': [_measurement(f'{tag}s1', f'{tag}p1')],
+            'model_tree': _chain_tree(tag),
+            'bayesian_config': {'resolution': resolution},
+            'save': False,
+        })
+        assert response.status_code == 422
+
     def test_an_unknown_solver_is_refused_rather_than_guessed(self, client):
         tag = f'so{next(_IDS)}'
         response = client.post('/api/analysis/bayesian?wait=true', json={

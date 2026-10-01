@@ -7,7 +7,7 @@
 // come back through utils/hpd like every other surface's, at the confidence
 // the reader selected.
 import { formatHPDRanges, type DateFormat } from '@/utils/dateFormat'
-import { posteriorRanges } from '@/utils/hpd'
+import { posteriorRanges, type RangeReporting } from '@/utils/hpd'
 import type { ComparedRow, UnmatchedRow } from '@/utils/comparePairing'
 import { SHARED_BOUNDARY_TEXT } from '@/components/DurationsPanel'
 import {
@@ -31,7 +31,9 @@ function csvRow(cells: Array<string | number | null | undefined>): string {
 export interface CompareCsvRun {
   name: string
   analysisType: string
-  modelled: boolean
+  /** Whether the run is modelled, and at what reporting step; see
+   *  utils/hpd.reportingOf. */
+  modelled: RangeReporting
 }
 
 

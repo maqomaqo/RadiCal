@@ -65,7 +65,7 @@ import { concernFor, concernTitle, type Concern } from '@/utils/diagnostics'
 import { formatApiError, describeFetchError } from '@/utils/apiError'
 import { buildInputsPayload } from '@/utils/analysisPayload'
 import { useNotify } from '@/contexts/NotificationContext'
-import { useAnalysisDraftStore, DEFAULT_MCMC } from '@/stores/analysisStore'
+import { useAnalysisDraftStore, DEFAULT_MCMC, isUsableResolution } from '@/stores/analysisStore'
 import type { McmcConfig, SolverChoice } from '@/stores/analysisStore'
 import type {
   DraftGroup,
@@ -172,6 +172,17 @@ export default function NewAnalysis() {
     loadFromAnalysis,
     reset: resetDraft,
   } = useAnalysisDraftStore()
+  // Resolution as typed. Only a usable value reaches the draft, so a
+  // half-typed one never rides along in a payload -- including one for an
+  // analysis type that hides the field. Re-read from the draft when that
+  // changes underneath it: an import carrying OxCal's Resolution, or loading
+  // a saved analysis to edit.
+  const [resolutionText, setResolutionText] = useState(String(mcmc.resolution))
+  const resolutionValid = isUsableResolution(resolutionText)
+  useEffect(() => {
+    if (Number(resolutionText) !== mcmc.resolution) setResolutionText(String(mcmc.resolution))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mcmc.resolution])
   // The assigned project's basemap setting, so the origin is placed on the
   // same map its dates were.
   const mapTiles = useProjectMapTiles(projectId || null)
@@ -865,6 +876,7 @@ export default function NewAnalysis() {
     setModelTree(preview.model_tree, preview.element_assignments)
     setAnalysisType(preview.suggested_analysis_type)
     if (!analysisName && preview.analysis_name) setAnalysisName(preview.analysis_name)
+    if (preview.resolution) setMcmc({ resolution: preview.resolution })
     setImportOpen(false)
 
     // After the draft is populated, so a failure to reach the collection
@@ -1011,6 +1023,9 @@ export default function NewAnalysis() {
   const runBlockedReason = (): string | null => {
     if (measurements.length === 0) return 'Add at least one date first.'
     if (!analysisName.trim()) return 'Give the analysis a name first.'
+    if (analysisType === 'bayesian' && !resolutionValid) {
+      return 'Set Resolution under Advanced settings to a whole number of years from 1 to 100.'
+    }
     return structureProblem()
   }
 
@@ -1512,6 +1527,27 @@ export default function NewAnalysis() {
                       value={mcmc.mcmc_samples}
                       onChange={(e) => setMcmc({ mcmc_samples: Number(e.target.value) })}
                       helperText="How many samples each date's posterior is reported with."
+                    />
+                    <TextField
+                      fullWidth
+                      size="small"
+                      type="number"
+                      label="Resolution (years)"
+                      sx={{ mt: 2 }}
+                      value={resolutionText}
+                      onChange={(e) => {
+                        setResolutionText(e.target.value)
+                        if (isUsableResolution(e.target.value)) {
+                          setMcmc({ resolution: Number(e.target.value) })
+                        }
+                      }}
+                      inputProps={{ min: 1, max: 100, step: 1 }}
+                      error={!resolutionValid}
+                      helperText={
+                        resolutionValid
+                          ? 'The calendar step modelled ranges are reported at.'
+                          : 'A whole number of years from 1 to 100.'
+                      }
                     />
                     <FormControlLabel
                       sx={{ mt: 1, display: 'flex' }}

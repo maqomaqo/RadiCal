@@ -115,6 +115,10 @@ holding marine dates on Marine20 and terrestrial ones on SHCal20 gives the offse
 dates only. The preview shows the ΔR carried by each date, and a note says how many dates each named
 offset reached.
 
+`Options(){ Resolution=n; };` sets the analysis's **Resolution** (see
+**Model settings** under [Model Structure](#model-structure-bayesian-only)). Other options, such as `kIterations`, configure OxCal's own run
+and are skipped with a note.
+
 `D_Sequence` and `V_Sequence` come across as a **wiggle match**, with each `Gap()` turned into a
 distance from the youngest member of the series; `P_Sequence` comes across as an **age-depth
 model**, reading each element's `z=` as its depth below the surface. A `Date()` with a `z=` inside a
@@ -370,6 +374,11 @@ the group that contains it), so it is laid out rather than arranged by hand.
   otherwise), Exact solver only (fast, but only works on chain-shaped models), or MH/Gibbs (works on all models, uses the same MCMC sampling method as OxCal throughout). See
   [Choosing a solver](#choosing-a-solver) for when to override Automatic and what it costs.
 - **Posterior draws**: how many samples each date's posterior is reported with.
+- **Resolution (years)**: the calendar step modelled ranges and durations are reported at, as
+  OxCal's `Resolution` option. 5 years by default; 1 or 2 can suit dates from the last few centuries,
+  whose ranges span only a few decades, and 10 or 20 dates from the Pleistocene. A saved analysis
+  keeps the step it was run at until it is run again. Only the reporting changes: the posteriors, agreement indices
+  and plots are the same whatever it is set to (see [A.4](#a4-summarising-a-posterior)).
 - **Uniform span prior**: OxCal's `UniformSpanPrior` correction (on by default), which keeps a
   sequence's overall span prior independent of how finely it's subdivided. Only affects a sequence
   with three or more Boundaries.
@@ -1060,7 +1069,7 @@ different things:
 | Range | Reported on | Why |
 | --- | --- | --- |
 | Unmodelled calibration | the curve's own grid | the posterior is exact at every grid point the curve provides |
-| Modelled date or Boundary | a 5-year grid | independent of the solver's internal step, which varies with the model (see [A.4](#a4-summarising-a-posterior)) |
+| Modelled date or Boundary | a 5-year grid, or the analysis's **Resolution** | independent of the solver's internal step, which varies with the model (see [A.4](#a4-summarising-a-posterior)) |
 | Duration or difference | an adaptive step, reported with the figure | computed from draws, so the step is set by what the draws can support (see [A.9](#a9-durations-and-differences)) |
 
 So a single calibration or the unmodelled column of a Bayesian result can and does return ranges
@@ -1151,15 +1160,21 @@ would make a published range depend on an implementation detail, and the same da
 sequence would come back with different widths. At a fine step the HPD picks out peak tops and
 skips the dips between them.
 
-Modelled ranges are therefore rebinned to the 5-year reporting step before the HPD is taken. The
+Modelled ranges are therefore rebinned to the reporting step before the HPD is taken: five years,
+or the **Resolution** set for the analysis. The
 rebinning integrates the density: each grid point stands for the cell half a step either side of
 it, the cumulative mass is read off the cell edges, and a reporting bin's mass is the difference
 between the readings at its two edges. This is exact for a density that is constant within a cell,
 and — unlike counting which grid *points* fall in each bin — it does not depend on how the two
 grids happen to align. That alignment is not a detail: a solver step of 1.015 years puts four grid
 points in one 5-year bin and five in the next, a ±20% sawtooth on the bin masses that the HPD then
-selects on. The solver's step is also chosen to tile the reporting step exactly (a divisor of five
-years below it, a multiple above), so a reporting bin is always a whole number of solver cells.
+selects on. The solver's step is also chosen to tile the five-year step exactly (a divisor of five
+years below it, a multiple above), so a five-year bin is always a whole number of solver cells.
+
+Setting a different **Resolution** changes only this rebinning. The solver's grid, and so every
+posterior, draw and agreement index, is the same whatever it is set to. This differs from OxCal,
+where `Resolution` is also the calculation grid. A step that does not divide five years, such as
+1 or 2, does not nest in the solver's cells, which the integration above handles.
 
 Unmodelled calibration is *not* rebinned. It has no solver grid to hide, and the curve's own
 spacing is the honest resolution of the answer.
@@ -1423,7 +1438,8 @@ rather than round numbers: the band edges are `1 - sigma_2`, `1 - sigma_1`, `sig
 so `none` means separated at 2 sigma and `extensive` means overlapping at 2 sigma.
 
 **Reporting resolution.** A duration posterior can be thousands of years wide, so quoting it at the
-5-year calendar step would claim a resolution the draws do not have. The histogram is capped at 40
+5-year calendar step (or the analysis's **Resolution**, which replaces it as the finest step) would
+claim a resolution the draws do not have. The histogram is capped at 40
 bins, with the bin width taken from the 0.5–99.5 percentile spread rather than the full range (so
 that asking for more draws cannot coarsen the answer by finding a more extreme one). The step
 actually used is reported with every figure.

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { useAnalysisDraftStore } from './analysisStore'
+import { useAnalysisDraftStore, isUsableResolution, DEFAULT_MCMC } from './analysisStore'
 import type { DraftMeasurement, ModelElement } from '@/types'
 
 const tree: ModelElement = {
@@ -43,5 +43,24 @@ describe('analysis draft store phase assignments', () => {
     useAnalysisDraftStore.getState().removeMeasurement('a')
     expect(useAnalysisDraftStore.getState().elementAssignments).toEqual({})
     expect(useAnalysisDraftStore.getState().measurements).toEqual([])
+  })
+})
+
+describe('isUsableResolution', () => {
+  it('takes a whole number of years from 1 to 100', () => {
+    expect(isUsableResolution('1')).toBe(true)
+    expect(isUsableResolution('5')).toBe(true)
+    expect(isUsableResolution(' 10 ')).toBe(true)
+    expect(isUsableResolution('100')).toBe(true)
+  })
+
+  it('refuses what the backend would refuse', () => {
+    for (const text of ['', '0', '101', '2.5', '-1', 'abc', '1e1']) {
+      expect(isUsableResolution(text)).toBe(false)
+    }
+  })
+
+  it('defaults to OxCal’s five years', () => {
+    expect(DEFAULT_MCMC.resolution).toBe(5)
   })
 })

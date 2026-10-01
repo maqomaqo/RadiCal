@@ -1090,6 +1090,72 @@ class TestReportingIsIndependentOfTheInternalGrid:
             assert w95 > w68 * 1.3, f'{d["id"]}: 68% {w68} vs 95% {w95}'
 
 
+class TestReportingResolution:
+    """
+    An analysis can ask for its ranges at a step other than the default five
+    years -- OxCal's Options Resolution. Only the reporting follows it.
+    """
+
+    def _solve(self, **kwargs):
+        dates = _dates(('rr_a', 3000, 30, 'p'), ('rr_b', 3040, 30, 'p'),
+                       ('rr_c', 3080, 30, 'p'))
+        tree = _sequence('s', [_boundary('b0'), _phase('p'), _boundary('b1')])
+        chain = ec.layout(tree, dates)
+        return dates, ec.solve(dates, tree, chain, num_samples=200, **kwargs)
+
+    @pytest.mark.parametrize('step', [1, 2, 10])
+    def test_ranges_land_on_the_requested_step(self, step):
+        dates, solved = self._solve(resolution=step)
+        posteriors = [solved['measurements'][d['id']] for d in dates]
+        posteriors += [b['posterior'] for b in solved['boundaries'].values()]
+        for posterior in posteriors:
+            for key in ('hpd_68_ranges', 'hpd_95_ranges'):
+                for r in posterior[key]:
+                    assert r['min'] % step == pytest.approx(0.0, abs=1e-6)
+                    assert r['max'] % step == pytest.approx(0.0, abs=1e-6)
+                    assert r['max'] - r['min'] >= step
+
+    def test_the_default_is_five_years(self):
+        dates, default = self._solve()
+        _again, explicit = self._solve(resolution=ec.REPORTING_STEP_YEARS)
+        for d in dates:
+            assert (default['measurements'][d['id']]['hpd_95_ranges']
+                    == explicit['measurements'][d['id']]['hpd_95_ranges'])
+
+    def test_only_the_reporting_moves(self):
+        """The posteriors, and so the agreement indices and draws read off
+        them, are the same whatever step the ranges are quoted at."""
+        dates, five = self._solve()
+        _again, one = self._solve(resolution=1)
+        assert one['grid'] == five['grid']
+        for d in dates:
+            a, b = five['measurements'][d['id']], one['measurements'][d['id']]
+            assert a['probability_distribution'] == b['probability_distribution']
+            assert a['posterior_mean'] == b['posterior_mean']
+        for date_id, draws in five['joint_draws'].items():
+            np.testing.assert_array_equal(draws, one['joint_draws'][date_id])
+
+    def test_a_finer_step_gives_tighter_ranges(self):
+        """The point of asking for one: a range quoted to five years carries
+        up to five years of rounding at each end."""
+        dates, five = self._solve()
+        _again, one = self._solve(resolution=1)
+        for d in dates:
+            w5 = sum(r['max'] - r['min'] for r in five['measurements'][d['id']]['hpd_95_ranges'])
+            w1 = sum(r['max'] - r['min'] for r in one['measurements'][d['id']]['hpd_95_ranges'])
+            assert w1 <= w5
+
+    @pytest.mark.parametrize('step', [1, 10])
+    def test_durations_follow_the_step(self, step):
+        _dates_, solved = self._solve(resolution=step, estimate_durations=True)
+        durations = solved['intervals']['durations']
+        assert durations
+        for record in durations:
+            quoted = record['years']['step']
+            assert quoted >= step
+            assert quoted % step == pytest.approx(0.0, abs=1e-6)
+
+
 class TestOutlierModel:
     """
     The outlier model, against the OxCal 4.4 run in

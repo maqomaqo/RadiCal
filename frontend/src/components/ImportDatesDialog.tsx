@@ -79,6 +79,8 @@ export interface ImportPreview {
   notes: string[]
   source_format: 'csv' | 'oxcal'
   analysis_name: string | null
+  // An .oxcal model's Options Resolution, when it set one.
+  resolution?: number | null
   suggested_analysis_type: 'bayesian' | 'group_calibration'
   date_count: number
   filename?: string

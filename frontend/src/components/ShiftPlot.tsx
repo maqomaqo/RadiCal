@@ -20,7 +20,7 @@ import {
   calendarRulerTicks,
   formatCalendarAge,
 } from '@/utils/dateFormat'
-import { hpdBands, type HPDBand } from '@/utils/hpd'
+import { hpdBands, type HPDBand, type RangeReporting } from '@/utils/hpd'
 import type { ComparedRow } from '@/utils/comparePairing'
 import { useCompareMarks, type RunStyle } from '@/theme/compareColors'
 import { POOR_AGREEMENT } from '@/utils/diagnostics'
@@ -66,9 +66,10 @@ interface ShiftPlotProps {
   runs: ShiftPlotRun[]
   runStyles: RunStyle[]
   rows: ComparedRow[]
-  /** Per run: whether its distributions came out of a solver, which decides
-   *  the resolution its HPD ranges are reported at. */
-  modelled: boolean[]
+  /** Per run: whether its distributions came out of a solver, and at what
+   *  calendar step, which decides the resolution its HPD ranges are reported
+   *  at. See utils/hpd.reportingOf. */
+  modelled: RangeReporting[]
   /** [younger, older] in cal BP -- the window every row is drawn in. */
   window: [number, number]
   confidence: number

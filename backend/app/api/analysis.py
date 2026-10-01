@@ -469,8 +469,19 @@ def _model_agreement(solved: Dict, measurements: List[Dict]) -> Optional[float]:
         measurements, draws, solved.get('joint_scales'))
 
 
+def _reporting_resolution(bayesian_config: Dict) -> float:
+    """
+    The calendar step, in years, this analysis's modelled ranges and durations
+    are reported at: OxCal's Options Resolution, five years unless the analyst
+    set another (see BayesianConfigInput.resolution). A config saved before the
+    setting existed has no key and gets the default it was run at.
+    """
+    return float(bayesian_config.get('resolution') or exact_chain.REPORTING_STEP_YEARS)
+
+
 def _run_wiggle_match(
     measurements: List[Dict], model_tree: Dict, requested: str,
+    resolution: float = exact_chain.REPORTING_STEP_YEARS,
 ) -> Optional[Tuple[Dict, Dict, Dict, Optional[Dict]]]:
     """
     Solve a model that IS one wiggle-matched series, or None if it is not one.
@@ -512,7 +523,8 @@ def _run_wiggle_match(
         )
 
     plan = model_tree_service.plan_model(model_tree, measurements)
-    solved = wiggle_match.solve(measurements, plan.wiggle_groups[0], root=model_tree)
+    solved = wiggle_match.solve(measurements, plan.wiggle_groups[0], root=model_tree,
+                                resolution=resolution)
     element_results = {
         element['id']: {
             'name': model_tree_service.element_label(element),
@@ -522,6 +534,7 @@ def _run_wiggle_match(
     return solved['measurements'], element_results, {
         'method': 'wiggle_match',
         'requested': requested,
+        'resolution': resolution,
         'reason': None,
         'implicit_boundaries': 0,
         # The check that the match is REAL, not a diagnostic beside it: a
@@ -610,6 +623,7 @@ def _run_bayesian(
 
         {'method': 'exact' | 'gibbs',
          'requested': what the config asked for ('auto' unless overridden),
+         'resolution': the calendar step in years the ranges were reported at,
          'reason': why the model is not exactly solvable AS AUTHORED (None when
                    it is, whichever solver actually ran),
          'implicit_boundaries': how many transitions were supplied to the solver
@@ -623,6 +637,7 @@ def _run_bayesian(
          inferred, which only the sampler estimates (see services/gibbs.py)}
     """
     requested = bayesian_config.get('solver') or 'auto'
+    resolution = _reporting_resolution(bayesian_config)
     estimate_durations = bool(bayesian_config.get('estimate_durations'))
     estimate_kde = bool(bayesian_config.get('estimate_kde'))
     dispersal_spec = _dispersal_spec(bayesian_config)
@@ -633,7 +648,7 @@ def _run_bayesian(
     # be matched at a gap of zero.
     validate_ordinates(model_tree, measurements)
 
-    wiggle_result = _run_wiggle_match(measurements, model_tree, requested)
+    wiggle_result = _run_wiggle_match(measurements, model_tree, requested, resolution)
     if wiggle_result is not None:
         # No phase KDE: a wiggle match's members are one age plus fixed gaps,
         # not a sample of events whose spread means anything.
@@ -683,6 +698,7 @@ def _run_bayesian(
             uniform_span_prior=bayesian_config.get('uniform_span_prior', True),
             estimate_durations=estimate_durations,
             dispersal=dispersal_spec,
+            resolution=resolution,
         )
         overall = agreement_service.attach(
             solved['measurements'], measurements,
@@ -691,6 +707,9 @@ def _run_bayesian(
         return solved['measurements'], solved['boundaries'], {
             'method': 'exact',
             'requested': requested,
+            # The calendar step the ranges were reported at, which the results
+            # page re-selects them at -- see _reporting_resolution.
+            'resolution': resolution,
             'reason': None,
             'implicit_boundaries': exact_needs_boundaries,
             # The two model-level agreement indices, alongside the per-date
@@ -718,6 +737,7 @@ def _run_bayesian(
         # Independent chains in parallel processes, pooled; see
         # gibbs.solve_chains for what the extra chains are for.
         chains=int(bayesian_config.get('mcmc_chains') or gibbs.DEFAULT_CHAINS),
+        resolution=resolution,
     )
     overall = agreement_service.attach(
         sampled['measurements'], measurements,
@@ -726,6 +746,7 @@ def _run_bayesian(
     return sampled['measurements'], sampled['boundaries'], {
         'method': 'gibbs',
         'requested': requested,
+        'resolution': resolution,
         # As on the exact path: Aoverall from the per-date indices, Amodel from
         # the run's joint states (services/agreement.py).
         'model_agreement': amodel,

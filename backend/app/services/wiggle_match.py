@@ -93,6 +93,7 @@ from app.services import agreement as agreement_service
 from app.services.calibration import get_curve
 from app.services.exact_chain import (
     MIN_GRID_STEP_YEARS,
+    REPORTING_STEP_YEARS,
     SUPPORT_THRESHOLD,
     _date_likelihood,
     _summarize,
@@ -312,7 +313,7 @@ def _build_grid(members: List[Tuple[Dict, float, float]],
 
 def solve(measurements: List[Dict], group: WiggleGroup,
           root: Optional[Dict] = None, num_samples: int = 4000,
-          seed: int = 42) -> Dict:
+          seed: int = 42, resolution: float = REPORTING_STEP_YEARS) -> Dict:
     """
     Solve one wiggle-matched series.
 
@@ -334,6 +335,9 @@ def solve(measurements: List[Dict], group: WiggleGroup,
     renders them has to say -- except where the gap was measured rather than
     counted, which gives that member a width of its own (see
     _member_density).
+
+    `resolution` is the calendar step the HPD ranges are reported at, as in
+    exact_chain.solve.
     """
     by_id = {m['id']: m for m in measurements}
     element_bounds = inherited_bounds(root) if root else {}
@@ -387,7 +391,7 @@ def solve(measurements: List[Dict], group: WiggleGroup,
         )
 
     rng = np.random.default_rng(seed)
-    reference = _summarize(grid, density, rng, num_samples)
+    reference = _summarize(grid, density, rng, num_samples, resolution)
 
     results: Dict[str, Dict] = {}
     member_records: List[Dict] = []
@@ -403,7 +407,7 @@ def solve(measurements: List[Dict], group: WiggleGroup,
         # A measured gap widens its member; see _member_density.
         member_density = _member_density(
             grid, index, members, terms, bounds_by_id, density)
-        summary = _summarize(shifted_grid, member_density, rng, num_samples)
+        summary = _summarize(shifted_grid, member_density, rng, num_samples, resolution)
         index = agreement_service.agreement_index(
             measurement, summary['probability_distribution'])
         summary['agreement_index'] = index

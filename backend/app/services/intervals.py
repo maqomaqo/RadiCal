@@ -144,9 +144,11 @@ SHARED_BOUNDARY_TEXT = 'shares a transition'
 
 def _reporting_step() -> float:
     """
-    The finest step a duration is reported at: the same five years every
-    calendar HPD here is. Imported inside the function because exact_chain
-    imports THIS module, and restating the number would let the two drift.
+    The finest step a duration is reported at by default: the same five years
+    every calendar HPD here is. Imported inside the function because
+    exact_chain imports THIS module, and restating the number would let the two
+    drift. An analysis that asked for another resolution passes it down as
+    `step`, so its durations stay on the grid its calendar ranges are on.
     """
     from app.services.exact_chain import REPORTING_STEP_YEARS
     return REPORTING_STEP_YEARS
@@ -171,12 +173,13 @@ def _step_for(values: np.ndarray, base: Optional[float] = None) -> float:
     them), and always a whole multiple of the reporting step so two quantities
     on one page are quoted on compatible grids.
 
-    `base` overrides the five-year floor for a quantity that is NOT measured in
-    years. The only such caller is a dispersal speed in km/yr (services/
+    `base` overrides the five-year floor. For a quantity in years it is the
+    analysis's own reporting resolution, when that is not the default. The one
+    quantity NOT measured in years is a dispersal speed in km/yr (services/
     dispersal.py), where the default would quote a front whose whole posterior
     spans half a kilometre per year in a single five-wide bin and return an
-    HPD of nonsense. Every quantity actually measured in years leaves it alone,
-    so they all stay on one grid.
+    HPD of nonsense. Every quantity in years in one analysis gets the same
+    base, so they all stay on one grid.
     """
     base = _reporting_step() if base is None else float(base)
     low, high = np.percentile(values, SPREAD_PERCENTILES)
@@ -228,8 +231,9 @@ def summarise(values: Sequence[float],
     calendar-age columns BY NAME -- so different names are what stops a
     duration reaching a calendar formatter by accident.
 
-    `base_step` is for the one quantity here that is not in years -- a front
-    speed in km/yr -- and says what resolution to quote it at. See _step_for.
+    `base_step` is the finest resolution to quote it at: the analysis's
+    reporting resolution for a quantity in years, or a km/yr step for a front
+    speed. See _step_for.
     """
     values = np.asarray(values, dtype=float)
     values = values[np.isfinite(values)]
@@ -556,20 +560,22 @@ def _interval_of(boundaries: Tuple[str, str], draws: Dict[str, np.ndarray]):
 
 
 def evaluate(duration_specs: List[Dict], difference_specs: List[Dict],
-             draws: Dict[str, np.ndarray]) -> Tuple[List[Dict], List[Dict]]:
+             draws: Dict[str, np.ndarray],
+             step: Optional[float] = None) -> Tuple[List[Dict], List[Dict]]:
     """
     Turn specs plus joint draws into the records the API stores.
 
     `draws` maps a parameter id to calendar ages in cal BP, one entry per joint
     draw. Every array must be the same length and come from ONE set of draws:
     per-parameter marginals give the wrong answer for every quantity here.
+    `step` is the analysis's reporting resolution, None for the default.
     """
     durations = []
     for spec in duration_specs:
         values = _duration_values(spec, draws)
         if values is None:
             continue
-        summary = summarise(values)
+        summary = summarise(values, step)
         if summary is None:
             continue
         durations.append({
@@ -610,7 +616,7 @@ def evaluate(duration_specs: List[Dict], difference_specs: List[Dict],
             overlap = float(2.0 * min(older, 1.0 - older))
             older_probability = older
 
-        summary = summarise(signed)
+        summary = summarise(signed, step)
         if summary is None:
             continue
         record = {
@@ -700,7 +706,8 @@ def plan_age_depth(root: Optional[Dict], measurements: List[Dict]) -> List[Dict]
     return specs
 
 
-def evaluate_age_depth(specs: List[Dict], draws: Dict[str, np.ndarray]) -> List[Dict]:
+def evaluate_age_depth(specs: List[Dict], draws: Dict[str, np.ndarray],
+                       step: Optional[float] = None) -> List[Dict]:
     """
     Specs plus joint draws into the age-depth records the API stores.
 
@@ -733,7 +740,7 @@ def evaluate_age_depth(specs: List[Dict], draws: Dict[str, np.ndarray]) -> List[
             if depth_gap <= 0:
                 continue
             elapsed = draws[older['id']] - draws[younger['id']]
-            years = summarise(elapsed)
+            years = summarise(elapsed, step)
             if years is None:
                 continue
             rate = elapsed / depth_gap
@@ -767,7 +774,8 @@ def evaluate_age_depth(specs: List[Dict], draws: Dict[str, np.ndarray]) -> List[
 def report(root: Optional[Dict], measurements: List[Dict],
            draws: Dict[str, np.ndarray], independent: bool,
            durations: bool = True,
-           dispersal: Optional[Dict] = None) -> Dict:
+           dispersal: Optional[Dict] = None,
+           step: Optional[float] = None) -> Dict:
     """
     The whole durations-and-differences block for a modelled analysis, ready
     to store on Analysis.intervals.
@@ -787,14 +795,18 @@ def report(root: Optional[Dict], measurements: List[Dict],
     measured FROM somewhere, and its speed is meaningless without the point it
     was measured from. So an origin buys the wave AND the trend, and no origin
     buys the trend alone.
+
+    `step` is the analysis's reporting resolution in years (None for the
+    default), which every span here is quoted on.
     """
     duration_specs = plan_durations(root, measurements) if root and durations else []
     difference_specs, note = (plan_phase_differences(root, measurements)
                               if root and durations else ([], None))
-    found_durations, differences = evaluate(duration_specs, difference_specs, draws)
+    found_durations, differences = evaluate(
+        duration_specs, difference_specs, draws, step)
     block = _block(found_durations, differences, draws, independent, note)
     block['age_depth'] = evaluate_age_depth(
-        plan_age_depth(root, measurements), draws)
+        plan_age_depth(root, measurements), draws, step)
     if dispersal is not None:
         # Imported here rather than at module scope: dispersal imports this
         # module for summarise and calendar_band, and at the top the two would

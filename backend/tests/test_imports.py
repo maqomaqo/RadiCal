@@ -563,14 +563,35 @@ class TestTranslationChoices:
         assert [c['name'] for c in result.model_tree['children']] == ['S1', 'S2']
         assert any('no ordering between them' in n for n in result.notes)
 
-    def test_options_are_noted_rather_than_carried_over(self):
+    def test_resolution_is_carried_over_and_other_options_noted(self):
         result = parse_oxcal(oxcal_model(
             'Options(){ Resolution=1; kIterations=30; }; '
             'Sequence(){ Boundary(); Phase("A"){ R_Date("a",3000,25); }; Boundary(); };'
         ), 't.oxcal')
 
         assert result.ok, result.errors
-        assert any('Resolution' in n and 'not carried over' in n for n in result.notes)
+        assert result.resolution == 1
+        assert result.as_dict()['resolution'] == 1
+        assert any('Resolution=1 was carried over' in n for n in result.notes)
+        assert any('kIterations' in n and 'not carried over' in n for n in result.notes)
+        assert not any('Resolution' in n and 'not carried over' in n for n in result.notes)
+
+    def test_an_unusable_resolution_is_noted_and_left_at_the_default(self):
+        result = parse_oxcal(oxcal_model(
+            'Options(){ Resolution=0.5; }; '
+            'Sequence(){ Boundary(); Phase("A"){ R_Date("a",3000,25); }; Boundary(); };'
+        ), 't.oxcal')
+
+        assert result.ok, result.errors
+        assert result.resolution is None
+        assert any('Resolution=0.5 was not carried over' in n for n in result.notes)
+
+    def test_a_file_without_options_sets_no_resolution(self):
+        result = parse_oxcal(oxcal_model(
+            'Sequence(){ Boundary(); Phase("A"){ R_Date("a",3000,25); }; Boundary(); };'
+        ), 't.oxcal')
+
+        assert result.resolution is None
 
     def test_delta_r_applies_to_the_dates_in_its_scope(self):
         result = parse_oxcal(oxcal_model(

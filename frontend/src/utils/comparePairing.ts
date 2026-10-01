@@ -21,7 +21,7 @@
 //   "the probability the date moved earlier" is not -- it would need a
 //   distribution over both models that was never sampled. See the note on
 //   RowMetrics.
-import { posteriorEnvelope } from '@/utils/hpd'
+import { posteriorEnvelope, type RangeReporting } from '@/utils/hpd'
 
 /**
  * A date's identity for matching, from its name.
@@ -180,14 +180,14 @@ export interface RowMetrics {
 }
 
 /**
- * `modelled` per run decides the resolution its ranges are reported at, and is
- * simply whether the analysis went through a solver -- the same distinction
- * utils/hpd.posteriorRanges makes, passed through so the widths measured here
+ * `modelled` per run decides the resolution its ranges are reported at: whether
+ * the analysis went through a solver, and at what calendar step -- the same
+ * distinction utils/hpd.posteriorRanges makes, passed through so the widths measured here
  * are the same numbers the results page prints for each run.
  */
 export function rowMetrics(
   row: PairedRow,
-  modelled: boolean[],
+  modelled: RangeReporting[],
   confidence: number
 ): RowMetrics {
   const widths = row.cells.map((cell, i) => {
@@ -271,7 +271,7 @@ export function sortComparedRows(rows: ComparedRow[], sort: CompareSort): Compar
  */
 export function comparisonWindow(
   rows: ComparedRow[],
-  modelled: boolean[],
+  modelled: RangeReporting[],
   confidence: number,
   paddingFraction = 0.04
 ): [number, number] | null {

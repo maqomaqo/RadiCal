@@ -18,9 +18,10 @@ any of those as the nearest thing we do implement would produce a result that
 looks right, carries no warning, and is wrong.
 
 Constructs that only affect what OxCal PLOTS are skipped with a note, since
-they query a posterior rather than shape it. Options() values are not read at
-all: Resolution and kIterations configure OxCal's own grid and run length,
-which this app has neither of.
+they query a posterior rather than shape it. Of the Options() values only
+Resolution is read, as the step the model's ranges are reported at; the rest
+-- kIterations and the like -- configure OxCal's own run length, which this
+app does not have.
 """
 import re
 import uuid
@@ -911,10 +912,14 @@ class _Translator:
         )
 
     def _note_options(self, node: Node) -> None:
-        settings = [
-            str(item.args[0]) for item in (node.block or [])
-            if item.command == '=' and item.args
-        ]
+        settings = []
+        for item in node.block or []:
+            if item.command != '=' or not item.args:
+                continue
+            name = str(item.args[0])
+            if name.lower() == 'resolution' and self._take_resolution(item):
+                continue
+            settings.append(name)
         if settings:
             self.result.notes.append(
                 'Options(' + ', '.join(sorted(settings)) + ') was not carried '
@@ -922,6 +927,37 @@ class _Translator:
                 'this app integrates exactly where it can and extends its own '
                 'run until it converges.'
             )
+
+    def _take_resolution(self, item: Node) -> bool:
+        """
+        Carry Options Resolution over as the step the ranges are reported at,
+        or say why not. True when it was taken.
+
+        OxCal's Resolution is its calculation grid as well; here the solver
+        picks its own grid and only the reporting follows. The note says so,
+        since an index computed at OxCal's coarser grid can differ from this
+        app's.
+        """
+        value = item.args[1] if len(item.args) > 1 else None
+        try:
+            years = float(value)
+        except (TypeError, ValueError):
+            return False
+        if years != int(years) or not 1 <= years <= 100:
+            self.result.notes.append(
+                f'Resolution={value} was not carried over: the reporting '
+                'resolution here is a whole number of years from 1 to 100. '
+                'The analysis uses the default of 5.'
+            )
+            return True
+        self.result.resolution = int(years)
+        self.result.notes.append(
+            f'Resolution={int(years)} was carried over as the step the '
+            "modelled ranges are reported at. OxCal also calculates on that "
+            "grid; this app's solver picks its own, so agreement indices can "
+            'differ slightly from an OxCal run at a coarse resolution.'
+        )
+        return True
 
     def _translate_date(self, node: Node, scope: _Scope) -> Optional[Dict[str, Any]]:
         simulated = node.command.lower() == 'r_simulate'

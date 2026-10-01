@@ -561,6 +561,13 @@ class BayesianConfigInput(BaseModel):
     # boundaries. See exact_chain._span_prior_correction and
     # gibbs.Model._span_priors.
     uniform_span_prior: bool = True
+    # The calendar step, in years, modelled HPD ranges and durations are
+    # reported at: OxCal's Options Resolution, five years by default there and
+    # here. Finer suits a recent model whose ranges span a few decades, coarser
+    # a Pleistocene one. Reporting only -- the solver's own grid, and so every
+    # posterior, agreement index and draw, is the same whatever is set; see
+    # exact_chain.REPORTING_STEP_YEARS.
+    resolution: int = Field(default=5, ge=1, le=100)
     # Also estimate how long each sequence, phase and set of dated events
     # lasted, and how far apart the phases sit (services/intervals.py).
     #
