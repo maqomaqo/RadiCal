@@ -44,7 +44,7 @@ import {
   DEFAULT_DATE_FORMAT,
   formatCalendarAge,
 } from '@/utils/dateFormat'
-import { CONFIDENCE_LEVELS, SIGMA_2 } from '@/utils/hpd'
+import { CONFIDENCE_LEVELS, SIGMA_2, reportingOf } from '@/utils/hpd'
 import { formatApiError } from '@/utils/apiError'
 import { analysisTypeLabel } from '@/utils/analysisTypes'
 import type { IntervalsBlock, MatrixMeasurement, ModelElement } from '@/types'
@@ -91,6 +91,7 @@ interface RunPayload {
     sweeps?: number
     convergence?: number
     converged?: boolean
+    resolution?: number
   } | null
   model_tree?: ModelElement | null
   intervals?: IntervalsBlock | null
@@ -206,7 +207,7 @@ export default function CompareResults() {
   )
 
   const modelled = useMemo(
-    () => (runs ?? []).map((run) => run.analysis_type === 'bayesian'),
+    () => (runs ?? []).map((run) => reportingOf(run)),
     [runs]
   )
 

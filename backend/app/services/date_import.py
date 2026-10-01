@@ -64,6 +64,10 @@ class ImportResult:
     # A name for the analysis, from the file where it says one (an .oxcal model
     # names its outermost element) and from the filename otherwise.
     analysis_name: Optional[str] = None
+    # The calendar step the model's ranges are reported at, when the file set
+    # one -- an .oxcal model's Options(){ Resolution=n; }. None leaves the
+    # analysis on the default.
+    resolution: Optional[int] = None
     # For a refused .oxcal file: the same file read as its dates alone, with
     # no model, when that reading succeeds. A complete import of its own rather
     # than the remains of the refused one, so offering it is not the partial
@@ -115,6 +119,7 @@ class ImportResult:
             'notes': self.notes,
             'source_format': self.source_format,
             'analysis_name': self.analysis_name,
+            'resolution': self.resolution,
             'suggested_analysis_type': self.suggested_analysis_type,
             'date_count': len(self.dates),
             'dates_only': self.dates_only.as_dict() if self.dates_only else None,

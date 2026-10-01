@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { modelCanReportIntervals } from './intervalsAvailable'
+import { modelCanReportIntervals, modelCanReportKde } from './intervalsAvailable'
 import type { MatrixMeasurement, ModelElement } from '@/types'
 
 function el(
@@ -77,5 +77,27 @@ describe('modelCanReportIntervals', () => {
       { id: 'b', element_id: null, group_id: 'p1' },
     ] as Pick<MatrixMeasurement, 'id' | 'element_id' | 'group_id'>[]
     expect(modelCanReportIntervals(tree, dates)).toBe(true)
+  })
+})
+
+describe('modelCanReportKde', () => {
+  it('says yes to a phase holding two dates', () => {
+    const tree = el('root', 'sequence', [el('b0', 'boundary'), el('p1', 'phase'), el('b1', 'boundary')])
+    expect(modelCanReportKde(tree, [at('a', 'p1'), at('b', 'p1')])).toBe(true)
+  })
+
+  it('says no where every phase has one date, boundaries or not', () => {
+    const tree = el('root', 'sequence', [
+      el('b0', 'boundary'),
+      el('p1', 'phase'),
+      el('b1', 'boundary'),
+      el('p2', 'phase'),
+      el('b2', 'boundary'),
+    ])
+    expect(modelCanReportKde(tree, [at('a', 'p1'), at('b', 'p2')])).toBe(false)
+  })
+
+  it('cannot tell before there is a model', () => {
+    expect(modelCanReportKde(null, [])).toBeNull()
   })
 })

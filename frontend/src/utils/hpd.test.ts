@@ -26,6 +26,7 @@ import {
   hpdRangesFromCurve,
   posteriorEnvelope,
   posteriorRanges,
+  reportingOf,
   storedHpdBands,
 } from './hpd'
 import reportedRangesFixture from './__fixtures__/reportedRanges.json'
@@ -366,5 +367,33 @@ describe('modelled ranges match the backend', () => {
     expect(hpdBands(distribution, SIGMA_2, '95.4%', false)[0].ranges).toEqual(
       posteriorRanges(distribution, SIGMA_2, false)
     )
+  })
+})
+
+describe('a reporting resolution other than the default', () => {
+  const peak: Array<[number, number]> = Array.from({ length: 400 }, (_, i) => {
+    const age = 300 + i * 0.75
+    return [age, Math.exp(-((age - 420) ** 2) / (2 * 15 ** 2))]
+  })
+
+  it.each([1, 2, 10])('lands ranges on a %i-year step', (step) => {
+    const ranges = posteriorRanges(peak, SIGMA_2, step)
+    expect(ranges.length).toBeGreaterThan(0)
+    for (const r of ranges) {
+      expect(Math.abs(r.min / step - Math.round(r.min / step))).toBeLessThan(1e-9)
+      expect(Math.abs(r.max / step - Math.round(r.max / step))).toBeLessThan(1e-9)
+    }
+  })
+
+  it('treats `true` as the default step', () => {
+    expect(posteriorRanges(peak, SIGMA_2, true)).toEqual(
+      posteriorRanges(peak, SIGMA_2, REPORTING_STEP_YEARS))
+  })
+
+  it('reads the step off an analysis, defaulting where none was recorded', () => {
+    expect(reportingOf({ analysis_type: 'bayesian', solver: { resolution: 2 } })).toBe(2)
+    expect(reportingOf({ analysis_type: 'bayesian', solver: { } })).toBe(true)
+    expect(reportingOf({ analysis_type: 'bayesian', solver: null })).toBe(true)
+    expect(reportingOf({ analysis_type: 'group_calibration' })).toBe(false)
   })
 })

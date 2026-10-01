@@ -561,6 +561,13 @@ class BayesianConfigInput(BaseModel):
     # boundaries. See exact_chain._span_prior_correction and
     # gibbs.Model._span_priors.
     uniform_span_prior: bool = True
+    # The calendar step, in years, modelled HPD ranges and durations are
+    # reported at: OxCal's Options Resolution, five years by default there and
+    # here. Finer suits a recent model whose ranges span a few decades, coarser
+    # a Pleistocene one. Reporting only -- the solver's own grid, and so every
+    # posterior, agreement index and draw, is the same whatever is set; see
+    # exact_chain.REPORTING_STEP_YEARS.
+    resolution: int = Field(default=5, ge=1, le=100)
     # Also estimate how long each sequence, phase and set of dated events
     # lasted, and how far apart the phases sit (services/intervals.py).
     #
@@ -569,6 +576,12 @@ class BayesianConfigInput(BaseModel):
     # modelling assumption to make. These are also the only figures here
     # carrying Monte Carlo error, since they can only be read off JOINT draws.
     estimate_durations: bool = False
+    # Also summarise how each phase's dates are spread through time as a
+    # kernel density estimate (services/kde.py, OxCal's KDE_Plot used in place
+    # of Phase): from the solver's joint draws, with the kernels reflected at
+    # the phase's Boundaries. Opt-in as group calibration's is: it reads the
+    # dates as a sample of one population of events.
+    estimate_kde: bool = False
     # Also fit the spatial models: how fast the thing being dated moved across
     # the landscape, and which way (services/dispersal.py).
     #
@@ -614,6 +627,11 @@ class GroupCalibrationRequest(BaseModel):
     # drawing them separately IS drawing from the joint), and opt-in so thirty
     # dates do not answer with 435 pairs nobody asked for.
     estimate_durations: bool = False
+    # Also summarise how the dates are spread through time: a kernel density
+    # estimate, OxCal's KDE_Plot (services/kde.py). Opt-in because it reads
+    # the dates as a sample of one population of events, which is the
+    # analyst's claim to make, and a tidy curve appears either way.
+    estimate_kde: bool = False
 
     @field_validator("name")
     @classmethod

@@ -65,7 +65,7 @@ import { concernFor, concernTitle, type Concern } from '@/utils/diagnostics'
 import { formatApiError, describeFetchError } from '@/utils/apiError'
 import { buildInputsPayload } from '@/utils/analysisPayload'
 import { useNotify } from '@/contexts/NotificationContext'
-import { useAnalysisDraftStore, DEFAULT_MCMC } from '@/stores/analysisStore'
+import { useAnalysisDraftStore, DEFAULT_MCMC, isUsableResolution } from '@/stores/analysisStore'
 import type { McmcConfig, SolverChoice } from '@/stores/analysisStore'
 import type {
   DraftGroup,
@@ -76,7 +76,7 @@ import type {
 } from '@/types'
 import { expandRelationships, findCycle } from '@/utils/stratigraphy'
 import { ELEMENT_TYPE_LABEL, elementLabel } from '@/utils/elementLabels'
-import { modelCanReportIntervals } from '@/utils/intervalsAvailable'
+import { modelCanReportIntervals, modelCanReportKde } from '@/utils/intervalsAvailable'
 import { summariseTree } from '@/utils/harrisLayout'
 import { validateTree } from '@/components/ModelTreeEditor'
 
@@ -172,6 +172,17 @@ export default function NewAnalysis() {
     loadFromAnalysis,
     reset: resetDraft,
   } = useAnalysisDraftStore()
+  // Resolution as typed. Only a usable value reaches the draft, so a
+  // half-typed one never rides along in a payload -- including one for an
+  // analysis type that hides the field. Re-read from the draft when that
+  // changes underneath it: an import carrying OxCal's Resolution, or loading
+  // a saved analysis to edit.
+  const [resolutionText, setResolutionText] = useState(String(mcmc.resolution))
+  const resolutionValid = isUsableResolution(resolutionText)
+  useEffect(() => {
+    if (Number(resolutionText) !== mcmc.resolution) setResolutionText(String(mcmc.resolution))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mcmc.resolution])
   // The assigned project's basemap setting, so the origin is placed on the
   // same map its dates were.
   const mapTiles = useProjectMapTiles(projectId || null)
@@ -632,15 +643,14 @@ export default function NewAnalysis() {
   // A wiggle match answers false, which is the point: the spacing of its
   // members is an INPUT rather than something the run infers, so the switch
   // would promise a table that comes back empty.
-  const canReportIntervals =
-    modelCanReportIntervals(
-      modelTree,
-      measurements.map((m) => ({
-        id: m.id,
-        element_id: elementAssignments[m.id] || null,
-        group_id: m.group_id ?? null,
-      }))
-    ) !== false
+  const placedMeasurements = measurements.map((m) => ({
+    id: m.id,
+    element_id: elementAssignments[m.id] || null,
+    group_id: m.group_id ?? null,
+  }))
+  const canReportIntervals = modelCanReportIntervals(modelTree, placedMeasurements) !== false
+  // The same rule for a per-phase KDE: a phase with two dates to summarise.
+  const canReportKde = modelCanReportKde(modelTree, placedMeasurements) !== false
 
   // Dates carrying a position. A dispersal fit is about where sites are, so
   // with none of them placed the switch would promise a section that comes
@@ -866,6 +876,7 @@ export default function NewAnalysis() {
     setModelTree(preview.model_tree, preview.element_assignments)
     setAnalysisType(preview.suggested_analysis_type)
     if (!analysisName && preview.analysis_name) setAnalysisName(preview.analysis_name)
+    if (preview.resolution) setMcmc({ resolution: preview.resolution })
     setImportOpen(false)
 
     // After the draft is populated, so a failure to reach the collection
@@ -1012,6 +1023,9 @@ export default function NewAnalysis() {
   const runBlockedReason = (): string | null => {
     if (measurements.length === 0) return 'Add at least one date first.'
     if (!analysisName.trim()) return 'Give the analysis a name first.'
+    if (analysisType === 'bayesian' && !resolutionValid) {
+      return 'Set Resolution under Advanced settings to a whole number of years from 1 to 100.'
+    }
     return structureProblem()
   }
 
@@ -1199,6 +1213,7 @@ export default function NewAnalysis() {
             // far apart these dates are and whether they can be told apart.
             // There are no phases here to have durations.
             estimate_durations: mcmc.estimate_durations,
+            estimate_kde: mcmc.estimate_kde,
           }),
         })
         const data = await response.json()
@@ -1413,6 +1428,24 @@ export default function NewAnalysis() {
                     </FormHelperText>
                   </>
                 )}
+                {canReportKde && (
+                  <>
+                    <FormControlLabel
+                      sx={{ display: 'flex' }}
+                      control={
+                        <Switch
+                          checked={mcmc.estimate_kde}
+                          onChange={(e) => setMcmc({ estimate_kde: e.target.checked })}
+                        />
+                      }
+                      label={<span>Kernel density estimates</span>}
+                    />
+                    <FormHelperText sx={{ mt: 0, ml: 0 }}>
+                      How each phase&rsquo;s modelled dates are spread through time, as
+                      OxCal&rsquo;s KDE_Plot.
+                    </FormHelperText>
+                  </>
+                )}
                 {/* Offered only where the dates are placed: a dispersal fit is
                     about where sites ARE, and with nothing placed the switch
                     would promise a section that comes back refused. */}
@@ -1495,6 +1528,27 @@ export default function NewAnalysis() {
                       onChange={(e) => setMcmc({ mcmc_samples: Number(e.target.value) })}
                       helperText="How many samples each date's posterior is reported with."
                     />
+                    <TextField
+                      fullWidth
+                      size="small"
+                      type="number"
+                      label="Resolution (years)"
+                      sx={{ mt: 2 }}
+                      value={resolutionText}
+                      onChange={(e) => {
+                        setResolutionText(e.target.value)
+                        if (isUsableResolution(e.target.value)) {
+                          setMcmc({ resolution: Number(e.target.value) })
+                        }
+                      }}
+                      inputProps={{ min: 1, max: 100, step: 1 }}
+                      error={!resolutionValid}
+                      helperText={
+                        resolutionValid
+                          ? 'The calendar step modelled ranges are reported at.'
+                          : 'A whole number of years from 1 to 100.'
+                      }
+                    />
                     <FormControlLabel
                       sx={{ mt: 1, display: 'flex' }}
                       control={
@@ -1534,6 +1588,19 @@ export default function NewAnalysis() {
                 <FormHelperText sx={{ mt: 0, ml: 0 }}>
                   How many years apart each pair of dates is, and how confidently they
                   can be put in order.
+                </FormHelperText>
+                <FormControlLabel
+                  sx={{ mt: 1 }}
+                  control={
+                    <Switch
+                      checked={mcmc.estimate_kde}
+                      onChange={(e) => setMcmc({ estimate_kde: e.target.checked })}
+                    />
+                  }
+                  label={<span>Kernel density estimate</span>}
+                />
+                <FormHelperText sx={{ mt: 0, ml: 0 }}>
+                  How the dates are spread through time, as OxCal&rsquo;s KDE_Plot.
                 </FormHelperText>
               </Box>
             )}

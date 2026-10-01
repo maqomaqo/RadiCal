@@ -490,6 +490,40 @@ export interface IntervalsBlock {
   note?: string | null
 }
 
+// A kernel density estimate of how a set of dates is spread through time:
+// OxCal's KDE_Plot, computed by services/kde.py on the backend.
+export interface KdeQuantity {
+  median: number
+  mean: number
+  range_68: [number, number]
+}
+
+export interface KdeSummary {
+  method: 'kde_plot'
+  // The phase a model's estimate is of; both null for a group calibration's
+  // one estimate of all its dates.
+  element_id: string | null
+  name: string | null
+  // Kernels reflected at the phase's Boundaries, as inside a model.
+  reflected: boolean
+  dates: number
+  draws: number
+  // [cal BP, mean density, ±1σ of the density across draws], ascending cal BP.
+  distribution: Array<[number, number, number]>
+  // The kernel width in years, Silverman's ceiling on it, and the factor on
+  // that ceiling the dates chose.
+  bandwidth: KdeQuantity
+  silverman: KdeQuantity
+  factor: KdeQuantity
+}
+
+// Summaries of an analysis's dates taken as a set. Null when the run was not
+// asked for any. `kde` holds one estimate for a group calibration, one per
+// phase with two or more dates for a model.
+export interface SummariesBlock {
+  kde?: KdeSummary[]
+}
+
 export interface DraftGroup {
   id: string
   name: string

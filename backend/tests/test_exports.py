@@ -142,7 +142,7 @@ class TestJsonExport:
         assert "samples_by_id" not in payload
         assert set(payload) == {
             "id", "name", "analysis_type", "status", "created_at", "project_id",
-            "results", "structure", "intervals", "coordinate_precision",
+            "results", "structure", "intervals", "summaries", "coordinate_precision",
         }
 
     def test_agrees_with_the_csv_on_the_dates(self, client):

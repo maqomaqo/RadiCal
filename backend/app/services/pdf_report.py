@@ -374,6 +374,49 @@ def _posterior_figure(
     return buffer.getvalue()
 
 
+def _kde_figure(kde: Dict, date_format: str) -> Optional[bytes]:
+    """
+    The kernel density estimate as the results page draws it: the mean curve
+    over a band of its ±1σ across draws, on the same reversed calendar axis as
+    every posterior.
+    """
+    points = kde.get('distribution') or []
+    if not points:
+        return None
+    ages = [float(p[0]) for p in points]
+    mean = [float(p[1]) for p in points]
+    upper = [float(p[1]) + float(p[2]) for p in points]
+    lower = [max(float(p[1]) - float(p[2]), 0.0) for p in points]
+
+    figure = Figure(figsize=FIGURE_SIZE_IN, dpi=FIGURE_DPI)
+    FigureCanvasAgg(figure)
+    ax = figure.add_subplot(111)
+    ax.fill_between(ages, lower, upper, color=PRIMARY, alpha=POSTERIOR_FILL_ALPHA,
+                    linewidth=0, label='±1σ')
+    ax.plot(ages, mean, color=PRIMARY, linewidth=1.4, label='KDE')
+    ax.set_ylim(0, max(upper) * 1.08)
+    ax.set_xlim(max(ages), min(ages))
+    ticks = _axis_ticks(min(ages), max(ages), date_format)
+    if ticks:
+        ax.set_xticks(ticks[0])
+        ax.set_xticklabels(ticks[1])
+    ax.set_xlabel(_axis_title(date_format), fontsize=9, color=INK)
+    ax.set_ylabel('Probability Density', fontsize=9, color=INK)
+    ax.tick_params(labelsize=8, colors=INK)
+    ax.grid(True, color=INK, alpha=GRID_ALPHA, linewidth=0.6)
+    ax.set_axisbelow(True)
+    for spine in ax.spines.values():
+        spine.set_color(INK)
+        spine.set_alpha(0.25)
+    ax.legend(loc='upper right', fontsize=7.5, frameon=False, ncol=2)
+    figure.tight_layout(pad=0.6)
+
+    buffer = io.BytesIO()
+    figure.savefig(buffer, format='png', dpi=FIGURE_DPI)
+    buffer.seek(0)
+    return buffer.getvalue()
+
+
 def _prior_distribution(sample) -> Optional[Sequence]:
     """
     What a date calibrates to on its own, for the shadow behind its
@@ -926,6 +969,7 @@ def render_report(
     distributions: Dict[str, Any],
     context_spans: List[Dict],
     intervals: Optional[Dict] = None,
+    summaries: Optional[Dict] = None,
     project_name: Optional[str] = None,
     date_format: Optional[str] = None,
     coordinate_precision: str = 'full',
@@ -944,6 +988,9 @@ def render_report(
     describes. None when the run was not asked for them, in which case the
     report simply has no such section -- an empty one would read as "nothing
     lasted any time", which is not what a missing option means.
+
+    `summaries` is the analysis's summaries block (a kernel density
+    estimate, services/kde.py), passed in on the same terms as `intervals`.
 
     `coordinate_precision` is the project's setting, and is used only to SAY
     what it is: the positions in `rows` have already been rounded to it by
@@ -1118,6 +1165,38 @@ def render_report(
         story.append(_age_depth_table(record, date_format, styles))
         if record.get('accumulation'):
             story.append(_accumulation_table(record, styles))
+
+    # --- the kernel density estimates, when the run was asked for them
+    kde_blocks: List[Any] = []
+    for kde in ((summaries or {}).get('kde') or []):
+        png = _kde_figure(kde, date_format)
+        if png is None:
+            continue
+        width = kde['bandwidth']
+        block = []
+        if kde.get('name'):
+            block.append(Paragraph(f"Phase: {kde['name']}", styles['caption']))
+        block += [
+            Paragraph(
+                f"{kde['dates']} dates, {kde['draws']:,} draws. Kernel width "
+                f"{width['median']:.0f} years (68.3%: {width['range_68'][0]:.0f}"
+                f"–{width['range_68'][1]:.0f})"
+                + (", reflected at the phase's Boundaries." if kde.get('reflected') else "."),
+                styles['note'],
+            ),
+            Image(io.BytesIO(png), width=CONTENT_WIDTH,
+                  height=CONTENT_WIDTH * FIGURE_SIZE_IN[1] / FIGURE_SIZE_IN[0]),
+        ]
+        kde_blocks.append(KeepTogether(block))
+    if kde_blocks:
+        story.append(Paragraph('Kernel Density Estimates', styles['heading']))
+        story.append(Paragraph(
+            "How the dates are spread through time, as OxCal's KDE_Plot (Bronk Ramsey "
+            "2017): the mean of many kernel density estimates, each of one joint draw "
+            "of the dates, with their ±1σ as a band.",
+            styles['note'],
+        ))
+        story.extend(kde_blocks)
 
     # --- one figure per modelled parameter
     figures: List[Any] = []

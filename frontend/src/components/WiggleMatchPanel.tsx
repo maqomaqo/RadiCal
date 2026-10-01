@@ -42,7 +42,7 @@ import WiggleMatchFigure, { type WiggleFigureMember } from '@/components/WiggleM
 import { useElementTypeColors } from '@/theme/diagramColors'
 import { formatCalendarAge, formatCalendarRange, type DateFormat } from '@/utils/dateFormat'
 import { POOR_AGREEMENT } from '@/utils/diagnostics'
-import { posteriorRanges } from '@/utils/hpd'
+import { posteriorRanges, type RangeReporting } from '@/utils/hpd'
 import type { HPDRange, PosteriorSummary } from '@/types'
 
 export interface WiggleMember {
@@ -76,6 +76,9 @@ interface Props {
   /** The page's selected HPD confidence, and its label. */
   confidence: number
   confidenceLabel: string
+  /** The calendar step the analysis reported its ranges at; `true` for the
+   *  default. See utils/hpd.reportingOf. */
+  reporting?: RangeReporting
 }
 
 const NUMERIC_CELL_SX = { whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' } as const
@@ -103,6 +106,7 @@ export default function WiggleMatchPanel({
   dateFormat,
   confidence,
   confidenceLabel,
+  reporting = true,
 }: Props) {
   const colors = useElementTypeColors()
   const ink = colors.wiggle_sequence.ink
@@ -110,14 +114,14 @@ export default function WiggleMatchPanel({
   // the reference, so it increases into the past.
   const ordered = [...members].sort((a, b) => a.ring_offset - b.ring_offset)
   const referenceMember = members.find((m) => m.id === referenceSampleId)
-  const referenceRanges = posteriorRanges(reference.probability_distribution, confidence, true)
+  const referenceRanges = posteriorRanges(reference.probability_distribution, confidence, reporting)
   const referenceSpan = spanOf(referenceRanges)
   const measuredGaps = members.some((m) => (m.ring_offset_error ?? 0) > 0)
   // A run from before a measured gap gave its member its own width: every member
   // exactly the reference's width despite a ± gap. Said, rather than left to
   // contradict the sentence above it; re-running brings the widths in.
   const memberWidths = members.map((m) => {
-    const span = spanOf(posteriorRanges(memberDistributions[m.id], confidence, true))
+    const span = spanOf(posteriorRanges(memberDistributions[m.id], confidence, reporting))
     return span ? span[1] - span[0] : null
   })
   const predatesWidening =
@@ -230,7 +234,7 @@ export default function WiggleMatchPanel({
             <TableBody>
               {ordered.map((member) => {
                 const span = spanOf(
-                  posteriorRanges(memberDistributions[member.id], confidence, true)
+                  posteriorRanges(memberDistributions[member.id], confidence, reporting)
                 )
                 const low = member.agreement_index != null
                   && member.agreement_index < POOR_AGREEMENT

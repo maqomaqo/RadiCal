@@ -58,6 +58,7 @@ import StackedPosteriorPlot, { type SeriesMeasurement } from '@/components/Stack
 import CurvePosteriorPlot from '@/components/CurvePosteriorPlot'
 import HarrisMatrixDiagram from '@/components/HarrisMatrixDiagram'
 import DurationsPanel from '@/components/DurationsPanel'
+import KdePanel from '@/components/KdePanel'
 import { modelCanReportIntervals } from '@/utils/intervalsAvailable'
 import WiggleMatchPanel from '@/components/WiggleMatchPanel'
 import { ELEMENT_TYPE_LABEL } from '@/utils/elementLabels'
@@ -95,7 +96,9 @@ import {
   hpdBands,
   posteriorEnvelope,
   posteriorRanges,
+  reportingOf,
   type HPDBand,
+  type RangeReporting,
 } from '@/utils/hpd'
 import type {
   MatrixMeasurement,
@@ -103,6 +106,7 @@ import type {
   DraftRelationship,
   ElementType,
   IntervalsBlock,
+  SummariesBlock,
   ModelElement,
   PosteriorSummary,
 } from '@/types'
@@ -159,6 +163,10 @@ interface AnalysisResult {
     // Implied transitions supplied to the solver that ran; always 0 when
     // sampled.
     implicit_boundaries?: number
+    // The calendar step, in years, the modelled ranges were reported at --
+    // OxCal's Resolution. Absent on a run from before it could be set, which
+    // was reported at the default; see utils/hpd.reportingOf.
+    resolution?: number
     // How many WOULD be needed for the exact solver to apply, set only when
     // that is why this was sampled. Distinct from `reason`, which says the
     // model cannot be integrated exactly at all.
@@ -227,6 +235,8 @@ interface AnalysisResult {
   // Durations and separations. Null when the run was not asked for them, which
   // is not "there are none" -- the page says so and points at the option.
   intervals?: IntervalsBlock | null
+  // Summaries of the dates as a set. Null when the run was not asked for any.
+  summaries?: SummariesBlock | null
   results: SampleResult[]
 }
 
@@ -678,7 +688,7 @@ function DiagnosticsCell({
  */
 function StructureTableRow({
   row, result, measurement, curveName,
-  isBayesian, showAge, showCurve, showUnmodelled, showMean, showMedian,
+  isBayesian, reporting, showAge, showCurve, showUnmodelled, showMean, showMedian,
   showDiagnostics, confidence, dateFormat,
   unmodelledExpanded, posteriorExpanded,
   isCollapsible, isCollapsed, onToggleCollapse, thinNote,
@@ -686,6 +696,8 @@ function StructureTableRow({
   row: StructureRow
   result?: SampleResult
   isBayesian: boolean
+  /** How this analysis's posteriors are reported; see utils/hpd.reportingOf. */
+  reporting: RangeReporting
   /** The lab measurement behind a date row; absent on an element row. */
   measurement?: AnalysisMeasurement
   /** Its curve's display name, already resolved. */
@@ -736,13 +748,13 @@ function StructureTableRow({
   const median = isDate ? result?.posterior_median : posterior?.posterior_median
   const std = isDate ? result?.posterior_std : posterior?.posterior_std
   const distribution = isDate ? result?.probability_distribution : posterior?.probability_distribution
-  const envelope = distribution ? posteriorEnvelope(distribution, confidence, isBayesian) : null
+  const envelope = distribution ? posteriorEnvelope(distribution, confidence, reporting) : null
   // The disjoint ranges behind that envelope, for when the column unfolds.
   const expandedRanges = useMemo(
     () => (posteriorExpanded && distribution
-      ? posteriorRanges(distribution, confidence, isBayesian)
+      ? posteriorRanges(distribution, confidence, reporting)
       : []),
-    [posteriorExpanded, distribution, confidence, isBayesian]
+    [posteriorExpanded, distribution, confidence, reporting]
   )
   const unmodelledRanges = isDate && isBayesian
     ? unmodelledRangesFor(result, confidence)
@@ -1398,11 +1410,11 @@ export default function Results() {
       if (hit) return hit
       const bands = hpdBands(
         distribution, confidence, CONFIDENCE_LABEL,
-        analysis?.analysis_type === 'bayesian')
+        reportingOf(analysis))
       cache.set(key, bands)
       return bands
     }
-  }, [confidence, CONFIDENCE_LABEL, analysis?.analysis_type])
+  }, [confidence, CONFIDENCE_LABEL, analysis?.analysis_type, analysis?.solver?.resolution])
 
   // For the page-level qualifier under the headline, where naming every curve
   // the analysis used IS the honest statement.
@@ -1491,6 +1503,10 @@ export default function Results() {
   }
   collectBoundaries(analysis.model_tree)
   const isBayesian = analysis.analysis_type === 'bayesian'
+  const reporting = reportingOf(analysis)
+  // For the surfaces that only ever show a solver's output -- boundaries, a
+  // wiggle match, the Harris matrix -- whatever the analysis type says.
+  const modelledReporting: RangeReporting = analysis.solver?.resolution ?? true
   const measurementBySampleId = new Map((analysis.measurements || []).map((m) => [m.id, m]))
   // The whole model's agreement: beside the solver at the top, and -- when it
   // is poor -- the lead line of the banner above the table.
@@ -2066,7 +2082,7 @@ export default function Results() {
                 const envelope = posteriorEnvelope(
                   row.posterior!.probability_distribution,
                   confidence,
-                  true
+                  modelledReporting
                 )
                 if (!envelope) return null
                 const range = formatCalendarRange(envelope[0], envelope[1], dateFormat)
@@ -2368,8 +2384,8 @@ export default function Results() {
               </TableHead>
               <TableBody>
                 {contextsWithModeledSpan.map((g) => {
-                  const startEnvelope = posteriorEnvelope(g.modeled_start!.probability_distribution, confidence, true)
-                  const endEnvelope = posteriorEnvelope(g.modeled_end!.probability_distribution, confidence, true)
+                  const startEnvelope = posteriorEnvelope(g.modeled_start!.probability_distribution, confidence, modelledReporting)
+                  const endEnvelope = posteriorEnvelope(g.modeled_end!.probability_distribution, confidence, modelledReporting)
                   return (
                     <TableRow key={g.id}>
                       <TableCell>{g.name}</TableCell>
@@ -2445,6 +2461,7 @@ export default function Results() {
             dateFormat={dateFormat}
             confidence={confidence}
             confidenceLabel={CONFIDENCE_LABEL}
+            reporting={modelledReporting}
           />
         </Box>
       )}
@@ -2893,6 +2910,7 @@ export default function Results() {
                           : null
                       }
                       isBayesian={isBayesian}
+                      reporting={reporting}
                       showAge={showAge}
                       showCurve={showCurve}
                       showUnmodelled={showUnmodelled}
@@ -2930,9 +2948,9 @@ export default function Results() {
                       ? unmodelledRangesFor(result, confidence)
                       : []
                     const modelledEnvelope = posteriorEnvelope(
-                      result.probability_distribution, confidence, isBayesian)
+                      result.probability_distribution, confidence, reporting)
                     const modelledRanges = posteriorExpanded
-                      ? posteriorRanges(result.probability_distribution, confidence, isBayesian)
+                      ? posteriorRanges(result.probability_distribution, confidence, reporting)
                       : []
                     return (
                       <TableRow key={result.sample_id}>
@@ -3126,6 +3144,7 @@ export default function Results() {
                   dateFormat={dateFormat}
                   confidence={confidence}
                   confidenceLabel={CONFIDENCE_LABEL}
+                  reporting={modelledReporting}
                 />
               </Box>
             </Collapse>
@@ -3303,6 +3322,11 @@ export default function Results() {
           </Box>
           )}
         </Paper>
+      )}
+
+      {/* After the dates it summarises, before the lengths of time. */}
+      {analysis.summaries?.kde && analysis.summaries.kde.length > 0 && (
+        <KdePanel estimates={analysis.summaries.kde} dateFormat={dateFormat} />
       )}
 
       {/* Durations and differences, last on the page. Every figure in it is a

@@ -119,6 +119,12 @@ DEFAULT_OUTLIER_MODEL = 'general'
 # Resolution the reported HPD ranges are computed at, independent of the
 # solver's internal grid step -- see _reported_ranges. Five years is OxCal's
 # own default and about as fine as a calibrated date is meaningful.
+#
+# The DEFAULT: an analysis can ask for another (BayesianConfigInput.resolution,
+# OxCal's Options Resolution) -- finer for a recent model whose ranges are a
+# few decades wide, coarser for a Pleistocene one. Only the reporting moves;
+# the internal grid stays aligned to this default whatever is asked, so a
+# model's posteriors, agreement indices and draws do not depend on it.
 REPORTING_STEP_YEARS = 5.0
 # Density below this fraction of the peak is left off the plotted series, and
 # this much padding is kept either side of what remains -- see _plottable.
@@ -1149,7 +1155,8 @@ def solve(measurements: List[Dict], root: Dict, chain: Chain,
           uniform_span_prior: bool = True,
           estimate_durations: bool = False,
           dispersal: Optional[Dict] = None,
-          interval_draws: int = intervals.DEFAULT_DRAWS) -> Dict:
+          interval_draws: int = intervals.DEFAULT_DRAWS,
+          resolution: float = REPORTING_STEP_YEARS) -> Dict:
     """
     Exact marginal posteriors for every date and every boundary in `chain`.
 
@@ -1177,6 +1184,9 @@ def solve(measurements: List[Dict], root: Dict, chain: Chain,
     `dispersal` asks for the spatial section, and needs the same joint draws
     for the same reason -- so it is a second reason to take them, independent
     of whether durations were wanted. See intervals.report for its shape.
+
+    `resolution` is the calendar step, in years, the HPD ranges and any
+    durations are reported at -- see REPORTING_STEP_YEARS.
     """
     element_bounds = inherited_bounds(root)
     by_id = {m['id']: m for m in measurements}
@@ -1279,7 +1289,7 @@ def solve(measurements: List[Dict], root: Dict, chain: Chain,
             np.cumsum(reversed_view, axis=1, out=reversed_view)
             density = likelihood[date_id] * np.diagonal(W)
             densities.append(density)
-            summary = _summarize(grid, density, rng, num_samples)
+            summary = _summarize(grid, density, rng, num_samples, resolution)
             if date_id in outlier_parts:
                 summary['outlier_probability'] = _outlier_probability(
                     density, likelihood[date_id], *outlier_parts[date_id])
@@ -1292,7 +1302,7 @@ def solve(measurements: List[Dict], root: Dict, chain: Chain,
         densities.append(density)
         results['boundaries'][bid] = {
             'name': chain.boundary_names.get(bid, 'Boundary'),
-            'posterior': _summarize(grid, density, rng, num_samples),
+            'posterior': _summarize(grid, density, rng, num_samples, resolution),
         }
 
     # Joint draws: taken always, because Amodel -- the whole model's agreement
@@ -1313,10 +1323,13 @@ def solve(measurements: List[Dict], root: Dict, chain: Chain,
              for i, bid in enumerate(chain.boundary_ids)}
     joint.update({date_id: grid[idx] for date_id, idx in date_draws.items()})
     results['joint_draws'] = {date_id: grid[idx] for date_id, idx in date_draws.items()}
+    # The Boundaries in the same states, for a per-phase KDE to reflect at
+    # (services/kde.report_phases).
+    results['joint_boundaries'] = {bid: joint[bid] for bid in chain.boundary_ids}
     if estimate_durations or dispersal is not None:
         results['intervals'] = intervals.report(
             root, measurements, joint, independent=True,
-            durations=estimate_durations, dispersal=dispersal)
+            durations=estimate_durations, dispersal=dispersal, step=resolution)
 
     results['method'] = 'exact'
     results['uniform_span_prior'] = log_correction is not None
@@ -1361,10 +1374,11 @@ def _edge_mass(densities: List[np.ndarray], grid: np.ndarray) -> float:
     return worst
 
 
-def _reported_ranges(grid: np.ndarray, mass: np.ndarray, confidence: float) -> List[Dict]:
+def _reported_ranges(grid: np.ndarray, mass: np.ndarray, confidence: float,
+                     step: float = REPORTING_STEP_YEARS) -> List[Dict]:
     """
-    HPD ranges at REPORTING_STEP_YEARS rather than at the solver's internal
-    grid step.
+    HPD ranges at `step` -- REPORTING_STEP_YEARS unless the analysis asked for
+    another -- rather than at the solver's internal grid step.
 
     Two reasons. The internal step is chosen from the date range and the number
     of groups, so reporting at it would make a published range depend on an
@@ -1379,7 +1393,6 @@ def _reported_ranges(grid: np.ndarray, mass: np.ndarray, confidence: float) -> L
     a calibrated date is meaningful. The full-resolution density is still what
     gets plotted and what the point estimates come from.
     """
-    step = REPORTING_STEP_YEARS
     dt = float(grid[1] - grid[0])
     # Each grid point stands for the cell [t - dt/2, t + dt/2]; the mass in a
     # reporting bin is the cumulative mass between its edges, read off the
@@ -1425,12 +1438,13 @@ def _plottable(grid: np.ndarray, density: np.ndarray) -> List[List[float]]:
     return [[float(a), float(p)] for a, p in zip(grid[lo:hi], density[lo:hi])]
 
 
-def _summarize(grid: np.ndarray, density: np.ndarray, rng, num_samples: int) -> Dict:
+def _summarize(grid: np.ndarray, density: np.ndarray, rng, num_samples: int,
+               step: float = REPORTING_STEP_YEARS) -> Dict:
     """
     An exact density in the summary shape the rest of the app expects. Point
     estimates come from the density itself rather than from draws, so they carry
     no Monte Carlo error; the draws exist only for downstream code that wants
-    samples.
+    samples. `step` is the calendar step the HPD ranges are reported at.
     """
     dt = float(grid[1] - grid[0])
     total = density.sum() * dt
@@ -1444,8 +1458,8 @@ def _summarize(grid: np.ndarray, density: np.ndarray, rng, num_samples: int) -> 
     cdf = np.cumsum(mass)
     median = float(np.interp(0.5, cdf, grid))
 
-    hpd_68 = _reported_ranges(grid, mass, SIGMA_1)
-    hpd_95 = _reported_ranges(grid, mass, SIGMA_2)
+    hpd_68 = _reported_ranges(grid, mass, SIGMA_1, step)
+    hpd_95 = _reported_ranges(grid, mass, SIGMA_2, step)
 
     draws = np.interp(rng.random(num_samples), cdf, grid)
 

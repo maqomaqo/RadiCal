@@ -166,6 +166,7 @@ from app.services import calibration, intervals
 from app.services.exact_chain import (
     DEFAULT_OUTLIER_MODEL,
     OUTLIER_KERNEL_HALF_WIDTH_YEARS,
+    REPORTING_STEP_YEARS,
     _build_grid,
     _outlier_kernel_at_scale,
     _summarize,
@@ -2209,7 +2210,8 @@ def solve(measurements: List[Dict], root: Dict, sweeps: int = DEFAULT_SWEEPS,
           dispersal: Optional[Dict] = None,
           interval_draws: int = intervals.DEFAULT_DRAWS,
           on_progress: Optional[Callable[[Dict], bool]] = None,
-          chains: int = 1) -> Dict:
+          chains: int = 1,
+          resolution: float = REPORTING_STEP_YEARS) -> Dict:
     """
     Posterior summaries for every date and boundary, in the same shape
     exact_chain.solve returns -- so a caller does not need to know which
@@ -2242,6 +2244,9 @@ def solve(measurements: List[Dict], root: Dict, sweeps: int = DEFAULT_SWEEPS,
 
     `dispersal` asks for the spatial section and takes the same joint states,
     with the same MCMC qualification on everything read off them.
+
+    `resolution` is the calendar step the HPD ranges and durations are
+    reported at, as in exact_chain.solve. It does not touch the run.
     """
     model = Model(measurements, root, grid=grid,
                   uniform_span_prior=uniform_span_prior)
@@ -2274,7 +2279,7 @@ def solve(measurements: List[Dict], root: Dict, sweeps: int = DEFAULT_SWEEPS,
     results: Dict = {'measurements': {}, 'boundaries': {}}
     for date_id in model.date_ids:
         density = chain['histograms'][date_id]
-        summary = _summarize(model.grid, density, rng, num_samples)
+        summary = _summarize(model.grid, density, rng, num_samples, resolution)
         if date_id in model.outlier_parts:
             # Taken from the run rather than recomputed: the responsibility
             # depends on the shared scale, so it must be read while that is
@@ -2288,7 +2293,7 @@ def solve(measurements: List[Dict], root: Dict, sweeps: int = DEFAULT_SWEEPS,
             continue
         results['boundaries'][boundary_id] = {
             'name': model.plan.boundary_names.get(boundary_id, 'Boundary'),
-            'posterior': _summarize(model.grid, density, rng, num_samples),
+            'posterior': _summarize(model.grid, density, rng, num_samples, resolution),
         }
 
     # Undated levels report through the same slot as boundaries: both are
@@ -2301,7 +2306,7 @@ def solve(measurements: List[Dict], root: Dict, sweeps: int = DEFAULT_SWEEPS,
             continue
         results['boundaries'][level_id] = {
             'name': model.level_names.get(level_id, 'Undated level'),
-            'posterior': _summarize(model.grid, density, rng, num_samples),
+            'posterior': _summarize(model.grid, density, rng, num_samples, resolution),
         }
 
     results['method'] = 'gibbs'
@@ -2372,9 +2377,13 @@ def solve(measurements: List[Dict], root: Dict, sweeps: int = DEFAULT_SWEEPS,
         # opt into. The states cost one list of indices per kept sweep. Scored
         # by services/agreement.py, as exact_chain.solve's are.
         results['joint_draws'] = {d: joint[d] for d in model.date_ids if d in joint}
+        # Every other parameter in the same states -- the Boundaries among
+        # them -- for a per-phase KDE to reflect at (services/kde.report_phases).
+        dates = set(model.date_ids)
+        results['joint_boundaries'] = {p: v for p, v in joint.items() if p not in dates}
         if wants_intervals:
             results['intervals'] = intervals.report(
                 measurements=measurements, root=root, draws=joint,
                 independent=False, durations=estimate_durations,
-                dispersal=dispersal)
+                dispersal=dispersal, step=resolution)
     return results

@@ -50,7 +50,7 @@ import {
   type LaidOutNode,
 } from '@/utils/harrisLayout'
 import { DEFAULT_DATE_FORMAT, formatCalendarRange, type DateFormat } from '@/utils/dateFormat'
-import { SIGMA_2, posteriorEnvelope } from '@/utils/hpd'
+import { SIGMA_2, posteriorEnvelope, type RangeReporting } from '@/utils/hpd'
 
 interface NodeData {
   node: LaidOutNode
@@ -266,6 +266,9 @@ interface Props {
    *  for the draft-model callers that have no selector of their own. */
   confidence?: number
   confidenceLabel?: string
+  /** The calendar step the analysis reported its ranges at; `true` for the
+   *  default. See utils/hpd.reportingOf. */
+  reporting?: RangeReporting
   height?: number
 }
 
@@ -276,6 +279,7 @@ export default function HarrisMatrixDiagram({
   dateFormat = DEFAULT_DATE_FORMAT,
   confidence = SIGMA_2,
   confidenceLabel = '95.4%',
+  reporting = true,
   height = 520,
 }: Props) {
   const theme = useTheme()
@@ -300,7 +304,7 @@ export default function HarrisMatrixDiagram({
         const envelope = posteriorEnvelope(
           element.posterior.probability_distribution,
           confidence,
-          true
+          reporting
         )
         if (envelope) {
           ranges[element.id] =
@@ -311,7 +315,7 @@ export default function HarrisMatrixDiagram({
     }
     if (tree) walk(tree)
     return ranges
-  }, [tree, dateFormat, confidence, confidenceLabel])
+  }, [tree, dateFormat, confidence, confidenceLabel, reporting])
 
   const layout = useMemo(
     () => layoutHarrisMatrix(tree, measurements, assignments, boundaryRanges),
