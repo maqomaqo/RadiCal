@@ -9,7 +9,7 @@
 import { formatHPDRanges, type DateFormat } from '@/utils/dateFormat'
 import { posteriorRanges, type RangeReporting } from '@/utils/hpd'
 import type { ComparedRow, UnmatchedRow } from '@/utils/comparePairing'
-import { SHARED_BOUNDARY_TEXT } from '@/components/DurationsPanel'
+import { SHARED_BOUNDARY_TEXT } from '@/utils/sharedBoundary'
 import {
   DERIVED_KIND_LABELS,
   rowsOnAxis,

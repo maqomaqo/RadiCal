@@ -315,6 +315,12 @@ def _relabel_intervals(block: Optional[Dict], id_map: Dict[str, str]) -> Optiona
                     for level in record.get('levels') or []]}
         for record in block.get('age_depth') or []
     ]
+    activity = block.get('phase_activity')
+    if activity:
+        relabelled['phase_activity'] = {
+            **activity,
+            'rows': [{**row, 'id': rename(row['id'])} for row in activity.get('rows') or []],
+        }
     return relabelled
 
 

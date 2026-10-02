@@ -28,6 +28,7 @@ import io
 import math
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+import numpy as np
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
 from reportlab.lib import colors
@@ -417,6 +418,71 @@ def _kde_figure(kde: Dict, date_format: str) -> Optional[bytes]:
     return buffer.getvalue()
 
 
+# How strongly a probability is inked in the phases-through-time figure,
+# mirrored from components/PhaseActivityPlot.tsx: steeper than linear at the
+# low end, where most of a phase's strip sits.
+ACTIVITY_RAMP = ((0.0, 0.0), (0.02, 0.08), (0.1, 0.3), (0.3, 0.6), (0.6, 0.85), (1.0, 1.0))
+ACTIVITY_ROW_IN = 0.26
+
+
+def _rgb(hex_colour: str) -> Tuple[float, float, float]:
+    value = hex_colour.lstrip('#')
+    return tuple(int(value[i:i + 2], 16) / 255.0 for i in (0, 2, 4))
+
+
+def _phase_activity_figure(activity: Dict, date_format: str) -> Optional[Tuple[bytes, float]]:
+    """
+    One strip per phase on a shared calendar axis, shaded by the probability
+    the phase was in progress, as the results page draws it. A single date's
+    strip is its own relative probability, in the dates' blue. Returns the PNG
+    and its height in inches, which grows with the rows.
+    """
+    rows = activity.get('rows') or []
+    if len(rows) < 2 or not rows[0].get('values'):
+        return None
+    count = len(rows[0]['values'])
+    start, step = float(activity['start']), float(activity['step'])
+    oldest, youngest = start + step / 2.0, start - (count - 0.5) * step
+    at, strength = zip(*ACTIVITY_RAMP)
+
+    height = 0.7 + ACTIVITY_ROW_IN * len(rows)
+    figure = Figure(figsize=(FIGURE_SIZE_IN[0], height), dpi=FIGURE_DPI)
+    FigureCanvasAgg(figure)
+    ax = figure.add_subplot(111)
+    for index, row in enumerate(rows):
+        alpha = np.interp(np.asarray(row['values'], dtype=float), at, strength)
+        image = np.zeros((1, count, 4))
+        image[0, :, :3] = _rgb(PRIMARY if row.get('relative') else PHASE_GREEN)
+        image[0, :, 3] = alpha
+        # Columns run oldest first, so the image's left edge is the oldest year.
+        ax.imshow(image, extent=(oldest, youngest, index + 0.4, index - 0.4),
+                  aspect='auto', interpolation='bilinear')
+    ax.set_xlim(oldest, youngest)
+    ax.set_ylim(len(rows) - 0.5, -0.5)
+    ax.set_yticks(range(len(rows)))
+    ax.set_yticklabels([
+        f"{row['name'].strip()} ({'1 date' if row['dates'] == 1 else str(row['dates']) + ' dates'})"
+        if row.get('dates') else row['name'].strip()
+        for row in rows
+    ])
+    ticks = _axis_ticks(youngest, oldest, date_format)
+    if ticks:
+        ax.set_xticks(ticks[0])
+        ax.set_xticklabels(ticks[1])
+    ax.set_xlabel(_axis_title(date_format), fontsize=9, color=INK)
+    ax.tick_params(labelsize=8, colors=INK, length=2)
+    ax.grid(True, axis='x', color=INK, alpha=GRID_ALPHA, linewidth=0.6)
+    ax.set_axisbelow(True)
+    for spine in ax.spines.values():
+        spine.set_visible(False)
+    figure.tight_layout(pad=0.6)
+
+    buffer = io.BytesIO()
+    figure.savefig(buffer, format='png', dpi=FIGURE_DPI)
+    buffer.seek(0)
+    return buffer.getvalue(), height
+
+
 def _prior_distribution(sample) -> Optional[Sequence]:
     """
     What a date calibrates to on its own, for the shadow behind its
@@ -567,6 +633,7 @@ def _context_spans_table(
 _INTERVAL_LABELS = {
     'sequence_duration': 'Sequence',
     'phase_duration': 'Phase',
+    'hiatus_duration': 'Hiatus',
     'sample_duration': 'Dated events',
 }
 
@@ -1134,16 +1201,34 @@ def render_report(
         ))
         if durations:
             story.append(_durations_table(durations, styles))
+        drawn = (_phase_activity_figure(intervals['phase_activity'], date_format)
+                 if (intervals or {}).get('phase_activity') else None)
+        if drawn:
+            png, height = drawn
+            story.append(KeepTogether([
+                Paragraph('Phases through time', styles['caption']),
+                Paragraph(
+                    "Shading is the probability each phase was in progress in each "
+                    "year. A phase represented by a single date shows that date's own "
+                    "probability, relative to its peak.",
+                    styles['note'],
+                ),
+                Image(io.BytesIO(png), width=CONTENT_WIDTH,
+                      height=CONTENT_WIDTH * height / FIGURE_SIZE_IN[0]),
+            ]))
         if differences:
             story.append(Paragraph(
                 "Differences are positive for a gap and negative for an overlap. "
                 "\"Overlap\" is the probability that the two cannot be separated in "
                 "time -- for two phases, that their modelled intervals intersect; for "
                 "two dates, that the model cannot say which came first -- graded at the "
-                "same 68.3% and 95.4% levels the HPD regions use. Two phases either "
-                f"side of one shared Boundary read \"{SHARED_BOUNDARY_TEXT}\" instead: "
-                "one phase's end is the next one's start, so the model gives them no "
-                "gap and no overlap to measure.",
+                "same 68.3% and 95.4% levels the HPD regions use. Phases are compared "
+                "only where the model leaves their order open, as in parallel branches."
+                # Only an analysis stored before ordered pairs were dropped has these.
+                + (f" Two phases either side of one shared Boundary read "
+                   f"\"{SHARED_BOUNDARY_TEXT}\" instead: one phase's end is the next "
+                   "one's start, so the model gives them no gap and no overlap to measure."
+                   if any(d.get('shared_boundary') for d in differences) else ""),
                 styles['note'],
             ))
             story.append(_differences_table(differences, styles))

@@ -101,6 +101,7 @@ INTERVAL_HEADER = [
 INTERVAL_LABELS = {
     'sequence_duration': 'Sequence Duration',
     'phase_duration': 'Phase Duration',
+    'hiatus_duration': 'Hiatus Duration',
     'sample_duration': 'Sample Duration',
     'phase_difference': 'Phase Difference',
     'date_difference': 'Date Difference',

@@ -15,7 +15,7 @@ dates it puts 8.2% of the pairs below zero, a phase ending before it starts,
 where the joint posterior gives that no probability at all. So this module is
 fed joint draws rather than marginals.
 
-The four quantities, in the vocabulary the rest of the app uses:
+The quantities, in the vocabulary the rest of the app uses:
 
   sequence duration  the timespan of a Sequence: its first Boundary minus its
                      last. The site-wide "how long was this place in use".
@@ -24,11 +24,15 @@ The four quantities, in the vocabulary the rest of the app uses:
                      so it can and usually does exceed the spread of the dates
                      inside it: the dated events are a sample of the phase, not
                      the whole of it.
+  hiatus duration    the gap between two adjacent Boundaries with nothing
+                     but a Hiatus between them: the end of one group to the
+                     start of the next. OxCal's Interval() placed in a gap.
   sample duration    the timespan of the DATED EVENTS in a phase, max minus min
                      -- OxCal's Span(). Always shorter than the phase duration
                      above, and the gap between the two is exactly how much of
                      the phase the dates did not catch.
-  difference         between two phases: the signed years between their
+  difference         between two phases the model does not put in order --
+                     parallel branches: the signed years between their
                      modelled intervals, POSITIVE for a gap and NEGATIVE for an
                      overlap. Between two dates in a group calibration: the
                      signed years between them, positive when the first is the
@@ -72,7 +76,7 @@ Taken knowingly:
 `draws` and `independent` are reported alongside the numbers, so the
 qualification travels with them.
 """
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Set, Tuple
 
 import numpy as np
 
@@ -135,6 +139,8 @@ SEVERITY_TOP = 'extensive'
 SEVERITY_WORDS = tuple(word for _, word in SEVERITY_BANDS) + (SEVERITY_TOP,)
 
 # What a shared-boundary pair says instead of a figure and a severity word.
+# Only analyses stored before ordered pairs were dropped from the differences
+# (see plan_phase_differences) carry one; the exports still print it for them.
 # Its gap and overlap probability are both exactly zero BY CONSTRUCTION -- one
 # phase's end IS the next one's start -- so a reader meeting `0` and `none` in
 # an export could not tell the structure from a result, and `none` elsewhere
@@ -352,6 +358,50 @@ def _enclosures(root: Dict) -> Tuple[Dict[str, Tuple[str, str]], List[Dict]]:
     return enclosing, groups
 
 
+def _substantive(group: Dict) -> List[Dict]:
+    """A bounded group's members other than a Hiatus, which carries no
+    parameter and so encloses nothing."""
+    return [e for e in group['elements'] if e.get('element_type') != 'hiatus']
+
+
+def _group_name(group: Dict, names: Dict[str, str]) -> str:
+    return ' + '.join(names[e['id']] for e in _substantive(group))
+
+
+def _hiatus_spec(gap: Dict, groups: List[Dict], names: Dict[str, str]) -> Dict:
+    """
+    The gap between two adjacent Boundaries as a duration.
+
+    Named by the Hiatus when the analyst gave it a name of their own, and
+    otherwise by what it separates -- "Lower -> Upper" -- since a bare
+    "Hiatus" in a table of several says nothing about which one. The editor
+    names a new Hiatus "Hiatus", so that counts as no name. A gap at either
+    end of a sequence has no group on that side, and the Boundary there names
+    it instead.
+    """
+    hiatuses = [e for e in gap['elements'] if e.get('element_type') == 'hiatus']
+    named = [e for e in hiatuses
+             if (e.get('name') or '').strip().lower() not in ('', 'hiatus')]
+    if len(named) == 1:
+        name = named[0]['name']
+    else:
+        before = next((g for g in groups
+                       if g['younger'] == gap['older'] and _substantive(g)), None)
+        after = next((g for g in groups
+                      if g['older'] == gap['younger'] and _substantive(g)), None)
+        older = _group_name(before, names) if before else names[gap['older']]
+        younger = _group_name(after, names) if after else names[gap['younger']]
+        name = f'{older} \u2192 {younger}'
+    return {
+        'kind': 'hiatus_duration',
+        'id': f"hiatus:{gap['older']}:{gap['younger']}",
+        'name': name,
+        'element_id': hiatuses[0]['id'] if len(hiatuses) == 1 else None,
+        'boundaries': (gap['older'], gap['younger']),
+        'dates': (),
+    }
+
+
 def plan_durations(root: Dict, measurements: List[Dict]) -> List[Dict]:
     """
     Every duration this model can report, as specs: dicts carrying what to
@@ -364,9 +414,14 @@ def plan_durations(root: Dict, measurements: List[Dict]) -> List[Dict]:
                          one phase between them, since the phase duration is
                          then the same quantity under another name.
       phase_duration     each consecutive pair of Boundary siblings, provided
-                         something other than a Hiatus sits between them. A
-                         pair with only a Hiatus between them is a GAP, reported
-                         as a difference instead.
+                         something other than a Hiatus sits between them.
+      hiatus_duration    each consecutive pair of Boundary siblings with
+                         nothing but a Hiatus between them, or nothing at all:
+                         the GAP between the group before and the group after.
+                         The Hiatus element itself carries no parameter, so
+                         two adjacent Boundaries are a gap whether or not one
+                         is drawn between them. Listed in place, between the
+                         phase durations either side of it.
       sample_duration    each phase holding two or more dates.
     """
     if not root:
@@ -412,16 +467,14 @@ def plan_durations(root: Dict, measurements: List[Dict]) -> List[Dict]:
         })
 
     for group in groups:
-        substantive = [e for e in group['elements']
-                       if e.get('element_type') != 'hiatus']
+        substantive = _substantive(group)
         if not substantive:
-            # Two boundaries with only a Hiatus between them: the gap the
-            # difference table already reports as the phases' separation.
+            specs.append(_hiatus_spec(group, groups, names))
             continue
         if len(substantive) == 1:
             name, element_id = names[substantive[0]['id']], substantive[0]['id']
         else:
-            name = ' + '.join(names[e['id']] for e in substantive)
+            name = _group_name(group, names)
             element_id = None
         specs.append({
             'kind': 'phase_duration',
@@ -450,65 +503,306 @@ def plan_durations(root: Dict, measurements: List[Dict]) -> List[Dict]:
     return specs
 
 
+def _phase_sides(root: Dict, measurements: List[Dict]):
+    """
+    (compared, sides, at_or_before): the phases that can be placed in time,
+    depth first and siblings oldest first; how each is represented, by id --
+    {'boundaries': (older, younger)} or {'dates': ids}, plus the `older` and
+    `younger` candidates for each end; and _boundary_order over Boundaries
+    and dates. See plan_phase_differences for which representation is used.
+    """
+    enclosing, _groups = _enclosures(root)
+
+    direct: Dict[str, List[str]] = {}
+    for m in measurements:
+        if m.get('element_id'):
+            direct.setdefault(m['element_id'], []).append(m['id'])
+
+    def dates_in(element: Dict) -> List[str]:
+        return direct.get(element['id'], []) + [
+            d for child in _children(element) for d in dates_in(child)]
+
+    at_or_before = _boundary_order(root, direct)
+
+    # Depth first, siblings oldest first -- the order the results table and
+    # every export put the model in. Each phase is kept with the phases
+    # enclosing it, to tell a bracket's own phase from those nested in it.
+    phases: List[Tuple[Dict, Tuple[str, ...]]] = []
+
+    def walk(element: Dict, ancestors: Tuple[str, ...]) -> None:
+        if element.get('element_type') == 'phase':
+            phases.append((element, ancestors))
+            ancestors = ancestors + (element['id'],)
+        for child in _children(element):
+            walk(child, ancestors)
+
+    walk(root, ())
+
+    sharing: Dict[Tuple[str, str], List[str]] = {}
+    for phase, ancestors in phases:
+        pair = enclosing.get(phase['id'])
+        if pair and not any(enclosing.get(a) == pair for a in ancestors):
+            sharing.setdefault(pair, []).append(phase['id'])
+
+    # Each side as (older end, younger end), each end a set of parameters
+    # whose oldest or youngest it is: one Boundary, or the phase's dates.
+    sides: Dict[str, Dict] = {}
+    for phase, _ancestors in phases:
+        pair = enclosing.get(phase['id'])
+        if pair and sharing.get(pair) == [phase['id']]:
+            sides[phase['id']] = {'boundaries': pair,
+                                  'older': (pair[0],), 'younger': (pair[1],)}
+            continue
+        dates = tuple(dates_in(phase))
+        if dates:
+            sides[phase['id']] = {'dates': dates, 'older': dates, 'younger': dates}
+
+    compared = [phase for phase, _ancestors in phases if phase['id'] in sides]
+    return compared, sides, at_or_before
+
+
 def plan_phase_differences(root: Dict, measurements: List[Dict]) -> Tuple[List[Dict], Optional[str]]:
     """
-    Every pair of phases whose separation the model has something to say
-    about, plus a note when the table had to be cut down.
+    Every pair of phases whose order the model leaves open, plus a note when
+    the table had to be cut down.
 
-    A phase is comparable only if a pair of Boundaries brackets it, since that
-    bracket IS its modelled interval. Two phases sharing BOTH boundaries are
-    skipped: they are bracketed identically, so "they coincide exactly" would
-    be structural rather than inferred.
+    A phase is represented by its modelled interval when it has a pair of
+    Boundaries of its own -- the one phase in its bracket, not counting
+    phases nested inside it. A phase without one, such as a single-date area
+    in a Sequence with no Boundaries, shares its bracket with everything else
+    in it, so that bracket says nothing about the phase. It is represented by
+    its dated events instead: the span from the oldest to the youngest, a
+    single point for one date. A phase with neither is not compared.
 
-    A pair sharing ONE boundary is kept and flagged `shared_boundary`. Its gap
-    is exactly zero by construction, and saying so plainly beats dropping the
-    row and leaving the reader to wonder.
+    Of the remaining pairs, two kinds are dropped because the structure, not
+    the dates, already gives the answer:
+
+      ordered      one phase ends at or before the other starts -- any two
+                   phases in one Sequence. They cannot overlap, and the gap
+                   between them is the durations between them, which the
+                   Durations table already reports.
+      overlapping  each phase starts before the other ends -- one nested
+                   inside the other. They overlap by construction.
+
+    What is left is phases in parallel branches, where the overlap is a
+    finding. A model with none -- every phase in one Sequence -- has no
+    differences to report.
     """
     if not root:
         return [], None
-    enclosing, _groups = _enclosures(root)
+    compared, sides, at_or_before = _phase_sides(root, measurements)
 
-    dated: Dict[str, int] = {}
-    for m in measurements:
-        if m.get('element_id'):
-            dated[m['element_id']] = dated.get(m['element_id'], 0) + 1
+    def ends_before(a: Dict, b: Dict) -> bool:
+        """Every candidate for a's younger end is at or before b's older one."""
+        return all(at_or_before(x, y) for x in a['younger'] for y in b['older'])
 
-    # Depth first, siblings oldest first -- the order the results table and
-    # every export put the model in.
-    phases: List[Dict] = []
+    def starts_before(a: Dict, b: Dict) -> bool:
+        """Some candidate for a's older end is at or before b's younger one."""
+        return any(at_or_before(x, y) for x in a['older'] for y in b['younger'])
 
-    def walk(element: Dict) -> None:
-        if element.get('element_type') == 'phase' and element['id'] in enclosing:
-            phases.append(element)
-        for child in _children(element):
-            walk(child)
+    def open_question(a: Dict, b: Dict) -> bool:
+        if ends_before(a, b) or ends_before(b, a):
+            return False
+        return not (starts_before(a, b) and starts_before(b, a))
 
-    walk(root)
-
-    pairs = [(a, b) for i, a in enumerate(phases) for b in phases[i + 1:]
-             if enclosing[a['id']] != enclosing[b['id']]]
+    pairs = [(a, b) for i, a in enumerate(compared) for b in compared[i + 1:]
+             if open_question(sides[a['id']], sides[b['id']])]
     note = None
     if len(pairs) > MAX_PAIRS:
-        pairs = [(phases[i], phases[i + 1]) for i in range(len(phases) - 1)
-                 if enclosing[phases[i]['id']] != enclosing[phases[i + 1]['id']]]
-        note = (f'{len(phases)} phases make more than {MAX_PAIRS} pairs, so only '
+        pairs = [(compared[i], compared[i + 1]) for i in range(len(compared) - 1)
+                 if open_question(sides[compared[i]['id']], sides[compared[i + 1]['id']])]
+        note = (f'{len(compared)} phases make more than {MAX_PAIRS} pairs, so only '
                 'each phase against the next one is reported.')
 
     specs = []
     for older, younger in pairs:
-        a, b = enclosing[older['id']], enclosing[younger['id']]
-        specs.append({
+        spec = {
             'kind': 'phase_difference',
             'id': f"phase-diff:{older['id']}:{younger['id']}",
             'from_id': older['id'],
             'from_name': _name_of(older),
             'to_id': younger['id'],
             'to_name': _name_of(younger),
-            'from_boundaries': a,
-            'to_boundaries': b,
-            'shared_boundary': bool(set(a) & set(b)),
-        })
+        }
+        for prefix, phase in (('from', older), ('to', younger)):
+            side = sides[phase['id']]
+            if 'boundaries' in side:
+                spec[f'{prefix}_boundaries'] = side['boundaries']
+            else:
+                spec[f'{prefix}_dates'] = side['dates']
+        specs.append(spec)
     return specs, note
+
+
+def _boundary_order(root: Dict, dates_by_element: Optional[Dict[str, List[str]]] = None):
+    """
+    `at_or_before(x, y)`: whether the structure puts parameter x at or before
+    parameter y in time -- the same one, or x in an earlier child of some
+    Sequence than y, followed transitively. The parameters are Boundaries and
+    dates (`dates_by_element`, element id -> date ids). Nested ones take part
+    in their parent sequence's order like anything else, as model_tree has it.
+    """
+    dates_by_element = dates_by_element or {}
+    later: Dict[str, Set[str]] = {}
+
+    def parameters_in(element: Dict) -> List[str]:
+        if element.get('element_type') == 'boundary':
+            return [element['id']]
+        return list(dates_by_element.get(element['id'], ())) + [
+            p for child in _children(element) for p in parameters_in(child)]
+
+    def walk(element: Dict) -> None:
+        children = _children(element)
+        if element.get('element_type') == 'sequence':
+            inside = [parameters_in(child) for child in children]
+            for i, earlier in enumerate(inside):
+                following = {p for group in inside[i + 1:] for p in group}
+                for p in earlier:
+                    later.setdefault(p, set()).update(following)
+        for child in children:
+            walk(child)
+
+    walk(root)
+    reachable: Dict[str, Set[str]] = {}
+
+    def after(x: str) -> Set[str]:
+        if x not in reachable:
+            found: Set[str] = set()
+            stack = list(later.get(x, ()))
+            while stack:
+                y = stack.pop()
+                if y not in found:
+                    found.add(y)
+                    stack.extend(later.get(y, ()))
+            reachable[x] = found
+        return reachable[x]
+
+    return lambda x, y: x == y or y in after(x)
+
+
+# The phase-activity figure's finest column, in years: the solvers' calendar
+# grid, so a strip is as smooth as the draws allow. Not the reporting step,
+# which is for quoting ranges -- at five years a 150-year site is 30 blocks.
+ACTIVITY_STEP_YEARS = 1.0
+# Most columns it is computed at, the step widening past this. The rows are
+# drawn as strips a few hundred pixels wide, so more would be resolution no
+# one can see, paid for in every stored analysis.
+MAX_ACTIVITY_COLUMNS = 300
+# Spread of the kernel a single date's histogram is smoothed by, in columns.
+# A sampled run holds a few thousand draws, which at one year a column is a
+# ragged histogram rather than the smooth posterior it estimates.
+ACTIVITY_DATE_SMOOTHING = 2.0
+
+
+def _spread_over_cells(values: np.ndarray, rng: np.random.Generator) -> np.ndarray:
+    """
+    Draws that sit on a calendar grid, each spread uniformly across its own
+    cell, as kde.py does. A Boundary's grid can be coarser than the figure's
+    one-year columns -- five years in a sampled run -- and left on its grid
+    points, every strip would step in five-year blocks.
+    """
+    cells = np.unique(values)
+    if cells.size < 2:
+        return values
+    width = float(np.min(np.diff(cells)))
+    return values + rng.uniform(-0.5, 0.5, values.size) * width
+
+
+def _gaussian_smoothed(values: np.ndarray, spread: float) -> np.ndarray:
+    """`values` under a Gaussian kernel `spread` columns wide, ends held so no
+    mass leaves the support -- _smoothed, wider."""
+    reach = int(np.ceil(3 * spread))
+    if reach < 1 or len(values) < 2:
+        return values
+    kernel = np.exp(-0.5 * (np.arange(-reach, reach + 1) / spread) ** 2)
+    padded = np.concatenate([np.full(reach, values[0]), values, np.full(reach, values[-1])])
+    return np.convolve(padded, kernel / kernel.sum(), mode='valid')
+
+
+def plan_phase_activity(root: Dict, measurements: List[Dict]) -> List[Dict]:
+    """
+    One row per phase that can be placed in time, for the figure that shows
+    which phases were in progress together: depth first, siblings oldest
+    first, each represented as plan_phase_differences represents it.
+    """
+    if not root:
+        return []
+    compared, sides, _at_or_before = _phase_sides(root, measurements)
+    rows = []
+    for phase in compared:
+        side = sides[phase['id']]
+        row = {'id': phase['id'], 'name': _name_of(phase)}
+        if 'boundaries' in side:
+            row['boundaries'] = side['boundaries']
+        else:
+            row['dates'] = side['dates']
+        rows.append(row)
+    return rows
+
+
+def evaluate_phase_activity(rows: List[Dict], draws: Dict[str, np.ndarray]) -> Optional[Dict]:
+    """
+    For each row, across a shared calendar grid, the probability the phase is
+    IN PROGRESS at each year: P(older end >= t >= younger end) over the joint
+    draws. Along a Sequence it draws the phases succeeding one another; read
+    down a column across parallel branches, it says which phases were
+    probably running at once -- the overlap the difference table reports pair
+    by pair, drawn for every phase together.
+
+    A single date has no extent to be in progress over. Its row is its
+    posterior density instead, smoothed, scaled to a peak of 1 and flagged
+    `relative`, so the figure can draw it as a different kind of mark.
+
+    None with fewer than two rows: one strip shows no overlap.
+    """
+    rng = np.random.default_rng(0)
+    ends = []
+    for row in rows:
+        spec = {'row_boundaries': row.get('boundaries'), 'row_dates': row.get('dates')}
+        found = _interval_of(spec, 'row', draws)
+        if found is None:
+            continue
+        older, younger = found
+        if len(row.get('dates') or ()) == 1:
+            older = younger = _spread_over_cells(older, rng)
+        else:
+            older, younger = _spread_over_cells(older, rng), _spread_over_cells(younger, rng)
+        ends.append((row, (older, younger)))
+    if len(ends) < 2:
+        return None
+
+    base = ACTIVITY_STEP_YEARS
+    oldest = float(np.percentile(np.concatenate([older for _, (older, _y) in ends]), 99.5))
+    youngest = float(np.percentile(np.concatenate([younger for _, (_o, younger) in ends]), 0.5))
+    width = base * max(1.0, np.ceil((oldest - youngest) / (MAX_ACTIVITY_COLUMNS * base)))
+    oldest = np.ceil(oldest / width) * width
+    youngest = np.floor(youngest / width) * width
+    # Oldest first, as every calendar axis here reads.
+    centres = np.arange(oldest, youngest - width / 2.0, -width)
+
+    out = []
+    for row, (older, younger) in ends:
+        dates = row.get('dates') or ()
+        record = {'id': row['id'], 'name': row['name']}
+        if len(dates) == 1:
+            edges = np.append(centres + width / 2.0, centres[-1] - width / 2.0)[::-1]
+            counts, _ = np.histogram(older, bins=edges)
+            counts = _gaussian_smoothed(counts[::-1].astype(float), ACTIVITY_DATE_SMOOTHING)
+            values = counts / counts.max() if counts.max() > 0 else counts
+            record['relative'] = True
+        else:
+            # The younger end never passes the older, so "older at or before t
+            # and younger after it" is one subtraction of two tail counts.
+            n = float(len(older))
+            older_from = 1.0 - np.searchsorted(np.sort(older), centres, side='left') / n
+            younger_past = 1.0 - np.searchsorted(np.sort(younger), centres, side='right') / n
+            values = np.clip(older_from - younger_past, 0.0, 1.0)
+        if dates:
+            record['dates'] = len(dates)
+        record['values'] = [round(float(v), 3) for v in values]
+        out.append(record)
+
+    return {'start': float(centres[0]), 'step': float(width), 'rows': out}
 
 
 def plan_date_differences(dates: List[Dict]) -> Tuple[List[Dict], Optional[str]]:
@@ -552,8 +846,19 @@ def _duration_values(spec: Dict, draws: Dict[str, np.ndarray]) -> Optional[np.nd
     return draws[older] - draws[younger]
 
 
-def _interval_of(boundaries: Tuple[str, str], draws: Dict[str, np.ndarray]):
-    older, younger = boundaries
+def _interval_of(spec: Dict, prefix: str, draws: Dict[str, np.ndarray]):
+    """
+    One side of a phase difference as (older end, younger end) draws: its
+    Boundaries, or the oldest and youngest of its dates -- one date being
+    both ends at once. See plan_phase_differences.
+    """
+    dates = spec.get(f'{prefix}_dates')
+    if dates:
+        if not all(d in draws for d in dates):
+            return None
+        block = np.vstack([draws[d] for d in dates])
+        return block.max(axis=0), block.min(axis=0)
+    older, younger = spec[f'{prefix}_boundaries']
     if older not in draws or younger not in draws:
         return None
     return draws[older], draws[younger]
@@ -590,8 +895,8 @@ def evaluate(duration_specs: List[Dict], difference_specs: List[Dict],
     differences = []
     for spec in difference_specs:
         if spec['kind'] == 'phase_difference':
-            first = _interval_of(spec['from_boundaries'], draws)
-            second = _interval_of(spec['to_boundaries'], draws)
+            first = _interval_of(spec, 'from', draws)
+            second = _interval_of(spec, 'to', draws)
             if first is None or second is None:
                 continue
             # Each interval is [younger end, older end] on the cal BP number
@@ -602,7 +907,18 @@ def evaluate(duration_specs: List[Dict], difference_specs: List[Dict],
             intersection = (np.minimum(first[0], second[0])
                             - np.maximum(first[1], second[1]))
             signed = -intersection          # positive = gap, negative = overlap
-            overlap = float(np.mean(intersection > 0.0))
+            points = [len(spec.get(f'{p}_dates') or ()) == 1 for p in ('from', 'to')]
+            if all(points):
+                # Two single dates never intersect, so overlap is the date
+                # pair's measure instead: how far the model is from ordering
+                # them. The separation is the gap between them either way.
+                older = float(np.mean(first[0] > second[0]))
+                overlap = float(2.0 * min(older, 1.0 - older))
+            elif any(points):
+                # A date ON a phase's end is inside it, so the zero counts.
+                overlap = float(np.mean(intersection >= 0.0))
+            else:
+                overlap = float(np.mean(intersection > 0.0))
             older_probability = None
         else:
             first_draws = draws.get(spec['from_id'])
@@ -632,8 +948,10 @@ def evaluate(duration_specs: List[Dict], difference_specs: List[Dict],
         }
         if older_probability is not None:
             record['older_probability'] = older_probability
-        if spec.get('shared_boundary'):
-            record['shared_boundary'] = True
+        # How many dates stand in for a phase with no Boundaries of its own.
+        for prefix in ('from', 'to'):
+            if spec.get(f'{prefix}_dates'):
+                record[f'{prefix}_dates'] = len(spec[f'{prefix}_dates'])
         differences.append(record)
 
     return durations, differences
@@ -805,6 +1123,9 @@ def report(root: Optional[Dict], measurements: List[Dict],
     found_durations, differences = evaluate(
         duration_specs, difference_specs, draws, step)
     block = _block(found_durations, differences, draws, independent, note)
+    if root and durations:
+        block['phase_activity'] = evaluate_phase_activity(
+            plan_phase_activity(root, measurements), draws)
     block['age_depth'] = evaluate_age_depth(
         plan_age_depth(root, measurements), draws, step)
     if dispersal is not None:
@@ -883,6 +1204,10 @@ def _block(durations: List[Dict], differences: List[Dict],
         # has the key and no consumer has to tell "no age-depth model" from
         # "written before there was one".
         'age_depth': [],
+        # Which phases were in progress when, year by year: set by report()
+        # wherever durations were asked for and two or more phases can be
+        # placed in time. See evaluate_phase_activity.
+        'phase_activity': None,
         # None means NOT ASKED FOR, which the results page reads as an offer to
         # re-run -- the same convention durations and age-depth already use. A
         # fit that was asked for and refused is a section whose models carry a

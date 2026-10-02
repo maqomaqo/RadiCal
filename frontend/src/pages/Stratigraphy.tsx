@@ -50,6 +50,7 @@ export default function Stratigraphy() {
   const {
     measurements,
     setMeasurements,
+    removeMeasurement,
     modelTree: draftTree,
     elementAssignments: draftAssignments,
     setModelTree: setDraftTree,
@@ -248,6 +249,26 @@ export default function Stratigraphy() {
     if (editRouteId) setSavedMeasurements(apply(savedMeasurements))
   }
 
+  /**
+   * Take dates out of the analysis, from the editor's unassigned list.
+   *
+   * Through the draft store's own removeMeasurement -- the path the Delete
+   * button on the analysis page takes -- so whatever else names a date (its
+   * assignment, a relationship) goes with it. Offered only when the draft
+   * holds the dates, for the reason given at the sort control: anything else
+   * would change the screen and not what gets submitted. On the edit route
+   * the dates then differ from the saved ones, so the structure saves with
+   * Run Analysis -- see datesDiverged.
+   */
+  const canRemoveDates = draftHoldsDates && measurements.length > 0
+  const removeDates = (ids: string[]) => {
+    for (const id of ids) removeMeasurement(id)
+    if (editRouteId) {
+      const gone = new Set(ids)
+      setAssignments((prev) => Object.fromEntries(Object.entries(prev).filter(([mid]) => !gone.has(mid))))
+    }
+  }
+
   const activeTree = editRouteId ? modelTree : draftTree
   const activeAssignments = editRouteId ? assignments : draftAssignments
   const activeMeasurements = draftHoldsDates ? measurements : savedMeasurements
@@ -391,6 +412,7 @@ export default function Stratigraphy() {
                 onChange={(nextTree, nextAssignments) => setDraftTree(nextTree, nextAssignments)}
                 onSortDates={canSortDates ? sortDates : undefined}
                 onSetOrdinate={canSetOrdinates ? setOrdinate : undefined}
+                onRemoveDates={canRemoveDates ? removeDates : undefined}
                 tiles={mapTiles}
               />
             ) : (
@@ -413,6 +435,7 @@ export default function Stratigraphy() {
                 assignments={assignments}
                 onSortDates={canSortDates ? sortDates : undefined}
                 onSetOrdinate={canSetOrdinates ? setOrdinate : undefined}
+                onRemoveDates={canRemoveDates ? removeDates : undefined}
                 tiles={mapTiles}
                 onChange={(nextTree, nextAssignments) => {
                   setModelTree(nextTree)

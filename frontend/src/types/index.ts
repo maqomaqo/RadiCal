@@ -228,7 +228,11 @@ export interface DurationSummary {
   distribution: Array<[number, number]>
 }
 
-export type DurationKind = 'sequence_duration' | 'phase_duration' | 'sample_duration'
+export type DurationKind =
+  | 'sequence_duration'
+  | 'phase_duration'
+  | 'hiatus_duration'
+  | 'sample_duration'
 
 export interface DurationRecord {
   kind: DurationKind
@@ -261,7 +265,13 @@ export interface DifferenceRecord {
   older_probability?: number
   // Phases only: the two share a Boundary, so their gap is zero because the
   // model says so rather than because the dates do.
+  // Only analyses stored before ordered pairs were dropped carry one: phases
+  // are now compared only where the model leaves their order open.
   shared_boundary?: boolean
+  // Phases only: set when that side has no Boundaries of its own and is
+  // represented by its dated events instead -- how many.
+  from_dates?: number
+  to_dates?: number
 }
 
 // --- age against depth ---
@@ -488,6 +498,25 @@ export interface IntervalsBlock {
   // Set when the difference table had to be cut down -- see MAX_PAIRS on the
   // backend.
   note?: string | null
+  // Which phases were in progress when, year by year, wherever durations were
+  // asked for and two or more phases can be placed in time.
+  phase_activity?: PhaseActivity | null
+}
+
+// One strip per phase on a shared calendar grid: `values[i]` is at
+// `start - i * step` cal BP, oldest first. A phase's value is the probability
+// it was in progress that year; a single date's (`relative`) is its posterior
+// density scaled to a peak of 1.
+export interface PhaseActivity {
+  start: number
+  step: number
+  rows: Array<{
+    id: string
+    name: string
+    dates?: number
+    relative?: boolean
+    values: number[]
+  }>
 }
 
 // A kernel density estimate of how a set of dates is spread through time:

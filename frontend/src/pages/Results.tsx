@@ -3339,6 +3339,7 @@ export default function Results() {
           confidenceLabel={CONFIDENCE_LABEL}
           showMean={showMean}
           showMedian={showMedian}
+          dateFormat={dateFormat}
           // Oldest first, as the table and plots are, so a well-ordered
           // chronology reads down the matrix diagonal rather than scattered.
           dateAxis={chronologicalResults.map((r) => ({

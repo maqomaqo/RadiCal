@@ -1422,8 +1422,9 @@ export default function NewAnalysis() {
                       label={<span>Durations and differences</span>}
                     />
                     <FormHelperText sx={{ mt: 0, ml: 0 }}>
-                      How long each sequence, phase and set of dated events lasted, and how
-                      far apart the phases sit. Off by default: a phase&rsquo;s duration
+                      How long each sequence, phase, hiatus and set of dated events lasted,
+                      when each phase was in progress, and how phases in parallel branches
+                      overlap. Off by default: a phase&rsquo;s duration
                       assumes its dates sample a bounded episode.
                     </FormHelperText>
                   </>

@@ -26,7 +26,7 @@ import {
   type DerivedRow,
 } from '@/utils/compareDerived'
 import { useCompareMarks, type RunStyle } from '@/theme/compareColors'
-import { SHARED_BOUNDARY_TEXT } from '@/components/DurationsPanel'
+import { SHARED_BOUNDARY_TEXT } from '@/utils/sharedBoundary'
 
 /**
  * What each model DERIVED, run against run: boundary ages, durations, and the

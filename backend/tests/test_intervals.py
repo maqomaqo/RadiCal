@@ -92,45 +92,243 @@ class TestWhatAModelHasToReport:
         specs = intervals.plan_durations(tree, _dates(('d1', 3000, 30, 'p')))
         assert _by_kind(specs, 'sample_duration') == []
 
-    def test_a_hiatus_is_not_reported_as_a_phase_duration(self):
+    def test_a_hiatus_is_reported_as_its_own_duration(self):
         """
-        Two Boundaries with only a Hiatus between them bracket a GAP, and the
-        gap between the phases either side is what the difference table
-        reports. Reporting it here too would print one quantity twice.
+        Two Boundaries with only a Hiatus between them bracket a GAP, not a
+        phase. It is reported as a hiatus duration, in place between the
+        phases either side, and named by what it separates.
         """
+        tree = _sequence('s', [
+            _boundary('b0'), _phase('p1', 'Lower'), _boundary('b1'), _hiatus('h'),
+            _boundary('b2'), _phase('p2', 'Upper'), _boundary('b3')])
+        measurements = _dates(('d1', 3000, 30, 'p1'), ('d2', 2600, 30, 'p2'))
+        specs = intervals.plan_durations(tree, measurements)
+        bracketed = [(s['kind'], s['boundaries']) for s in specs
+                     if s['kind'] in ('phase_duration', 'hiatus_duration')]
+        assert bracketed == [('phase_duration', ('b0', 'b1')),
+                             ('hiatus_duration', ('b1', 'b2')),
+                             ('phase_duration', ('b2', 'b3'))]
+        [gap] = _by_kind(specs, 'hiatus_duration')
+        assert gap['name'] == 'Lower \u2192 Upper'
+        assert gap['element_id'] == 'h'
+
+    def test_a_hiatus_named_by_the_analyst_keeps_its_name(self):
+        tree = _sequence('s', [
+            _boundary('b0'), _phase('p1'), _boundary('b1'), _hiatus('h', 'Abandonment'),
+            _boundary('b2'), _phase('p2'), _boundary('b3')])
+        [gap] = _by_kind(intervals.plan_durations(tree, []), 'hiatus_duration')
+        assert gap['name'] == 'Abandonment'
+
+    def test_two_adjacent_boundaries_are_a_gap_without_a_hiatus_drawn(self):
+        """The Hiatus carries no parameter, so the gap is the same without it."""
+        tree = _sequence('s', [
+            _boundary('b0'), _phase('p1'), _boundary('b1'),
+            _boundary('b2'), _phase('p2'), _boundary('b3')])
+        [gap] = _by_kind(intervals.plan_durations(tree, []), 'hiatus_duration')
+        assert gap['boundaries'] == ('b1', 'b2')
+        assert gap['element_id'] is None
+
+    def test_a_hiatus_duration_is_the_gap_between_its_boundaries(self):
         tree = _sequence('s', [
             _boundary('b0'), _phase('p1'), _boundary('b1'), _hiatus('h'),
             _boundary('b2'), _phase('p2'), _boundary('b3')])
-        measurements = _dates(('d1', 3000, 30, 'p1'), ('d2', 2600, 30, 'p2'))
-        specs = intervals.plan_durations(tree, measurements)
-        pairs = [s['boundaries'] for s in _by_kind(specs, 'phase_duration')]
-        assert ('b1', 'b2') not in pairs
-        assert pairs == [('b0', 'b1'), ('b2', 'b3')]
+        specs = _by_kind(intervals.plan_durations(tree, []), 'hiatus_duration')
+        draws = {'b0': np.full(500, 3400.0), 'b1': np.full(500, 3300.0),
+                 'b2': np.full(500, 3180.0), 'b3': np.full(500, 3100.0)}
+        [gap], _differences = intervals.evaluate(specs, [], draws)
+        assert gap['kind'] == 'hiatus_duration'
+        assert gap['years']['mean'] == pytest.approx(120.0)
 
-    def test_adjacent_phases_are_flagged_as_sharing_their_transition(self):
-        tree = _sequence('s', [_boundary('b0'), _phase('p1'), _boundary('b1'),
-                               _phase('p2'), _boundary('b2')])
-        specs, note = intervals.plan_phase_differences(
-            tree, _dates(('d1', 3000, 30, 'p1'), ('d2', 2800, 30, 'p2')))
-        assert note is None
-        assert len(specs) == 1
-        assert specs[0]['shared_boundary'] is True
-
-    def test_phases_bracketed_identically_are_not_compared(self):
+    def test_phases_in_one_sequence_are_not_compared(self):
         """
-        Two phases inside one pair of Boundaries have the same modelled
-        interval by construction, so "they coincide" would be a fact about the
-        model rather than anything inferred from the dates.
+        The Sequence orders every phase in it, so no two can overlap: a pair
+        sharing a Boundary has no gap by construction, and any other gap is
+        the durations between them, Hiatus included.
+        """
+        tree = _sequence('s', [
+            _boundary('b0'), _phase('p1'), _boundary('b1'), _phase('p2'),
+            _boundary('b2'), _hiatus('h'), _boundary('b3'), _phase('p3'),
+            _boundary('b4')])
+        specs, note = intervals.plan_phase_differences(
+            tree, _dates(('d1', 3000, 30, 'p1'), ('d2', 2800, 30, 'p3')))
+        assert specs == []
+        assert note is None
+
+    def test_phases_in_parallel_branches_are_compared(self):
+        """
+        Two sequences side by side in one phase leave the order between their
+        phases open -- the only place the overlap is a finding. Within each
+        branch the order is still settled.
+        """
+        tree = _sequence('s', [
+            _boundary('start'),
+            {'id': 'site', 'element_type': 'phase', 'name': 'Site',
+             'tpq_age_bp': None, 'taq_age_bp': None, 'children': [
+                 _sequence('north', [_boundary('n0'), _phase('n1', 'North 1'),
+                                     _boundary('n2'), _phase('n3', 'North 2'),
+                                     _boundary('n4')]),
+                 _sequence('south', [_boundary('s0'), _phase('s1', 'South'),
+                                     _boundary('s2')]),
+             ]},
+            _boundary('end'),
+            _phase('later', 'Later'),
+            _boundary('last')])
+        specs, _note = intervals.plan_phase_differences(tree, [])
+        assert {(s['from_name'], s['to_name']) for s in specs} == {
+            ('North 1', 'South'), ('North 2', 'South')}
+
+    def test_a_phase_nested_inside_another_is_not_compared(self):
+        """Its interval sits inside the outer one, so they overlap by construction."""
+        tree = _sequence('s', [
+            _boundary('b0'),
+            {'id': 'outer', 'element_type': 'phase', 'name': 'Outer',
+             'tpq_age_bp': None, 'taq_age_bp': None, 'children': [
+                 _sequence('inner', [_boundary('i0'), _phase('p', 'Inner'),
+                                     _boundary('i1')])]},
+            _boundary('b1')])
+        specs, _note = intervals.plan_phase_differences(tree, [])
+        assert specs == []
+
+    def test_phases_sharing_a_bracket_are_compared_by_their_dates(self):
+        """
+        Two phases inside one pair of Boundaries have no interval of their
+        own -- the bracket is the outer phase's -- so their dated events stand
+        in. The outer phase contains both, so it is not compared with either.
         """
         tree = _sequence('s', [
             _boundary('b0'),
             {'id': 'both', 'element_type': 'phase', 'name': 'Areas',
              'tpq_age_bp': None, 'taq_age_bp': None,
-             'children': [_phase('p1'), _phase('p2')]},
+             'children': [_phase('p1', 'East'), _phase('p2', 'West')]},
             _boundary('b1')])
         specs, _note = intervals.plan_phase_differences(
-            tree, _dates(('d1', 3000, 30, 'p1'), ('d2', 2900, 30, 'p2')))
-        assert specs == []
+            tree, _dates(('d1', 3000, 30, 'p1'), ('d2', 2900, 30, 'p2'),
+                         ('d3', 2950, 30, 'p2')))
+        [spec] = specs
+        assert (spec['from_name'], spec['to_name']) == ('East', 'West')
+        assert spec['from_dates'] == ('d1',)
+        assert spec['to_dates'] == ('d2', 'd3')
+        assert 'from_boundaries' not in spec
+
+    def test_a_single_date_area_is_compared_with_the_other_areas(self):
+        """
+        The site as excavated: areas side by side in one site phase, some
+        with their own stratigraphy and Boundaries, some a Sequence holding
+        one undivided phase and one date.
+        """
+        tree = _sequence('s', [
+            _boundary('start'),
+            {'id': 'site', 'element_type': 'phase', 'name': 'Site',
+             'tpq_age_bp': None, 'taq_age_bp': None, 'children': [
+                 _sequence('a', [_phase('pa', 'Area A')]),
+                 _sequence('b', [_boundary('b0'), _phase('pb1', 'B lower'),
+                                 _boundary('b1'), _phase('pb2', 'B upper'),
+                                 _boundary('b2')]),
+                 _sequence('c', [_phase('pc', 'Area C')]),
+             ]},
+            _boundary('end')])
+        measurements = _dates(('da', 3000, 30, 'pa'), ('db1', 3100, 30, 'pb1'),
+                              ('db2', 2900, 30, 'pb2'), ('dc', 2950, 30, 'pc'))
+        specs, _note = intervals.plan_phase_differences(tree, measurements)
+        assert {(s['from_name'], s['to_name']) for s in specs} == {
+            ('Area A', 'B lower'), ('Area A', 'B upper'), ('Area A', 'Area C'),
+            ('B lower', 'Area C'), ('B upper', 'Area C')}
+
+    def test_a_date_inside_a_phase_overlaps_it(self):
+        draws = {'o': np.full(1000, 3400.0), 'y': np.full(1000, 3200.0),
+                 'd': np.concatenate([np.full(600, 3300.0), np.full(400, 3150.0)])}
+        spec = {'kind': 'phase_difference', 'id': 'x',
+                'from_id': 'a', 'from_name': 'A', 'to_id': 'b', 'to_name': 'B',
+                'from_boundaries': ('o', 'y'), 'to_dates': ('d',)}
+        _d, [record] = intervals.evaluate([], [spec], draws)
+        assert record['overlap'] == pytest.approx(0.6)
+        assert record['to_dates'] == 1
+        assert 'from_dates' not in record
+
+        draws['d'] = np.full(1000, 3200.0)       # on the phase's end
+        _d, [record] = intervals.evaluate([], [spec], draws)
+        assert record['overlap'] == 1.0
+
+    def test_two_single_dates_overlap_as_far_as_they_cannot_be_ordered(self):
+        rng = np.random.default_rng(4)
+        draws = {'d1': rng.normal(3000, 40, 20000), 'd2': rng.normal(3000, 40, 20000)}
+        spec = {'kind': 'phase_difference', 'id': 'x',
+                'from_id': 'a', 'from_name': 'A', 'to_id': 'b', 'to_name': 'B',
+                'from_dates': ('d1',), 'to_dates': ('d2',)}
+        _d, [record] = intervals.evaluate([], [spec], draws)
+        assert record['overlap'] == pytest.approx(1.0, abs=0.03)
+        assert record['years']['mean'] > 0, 'the gap between two points'
+
+
+class TestPhaseActivity:
+    """Which phases were in progress together, year by year."""
+
+    def _tree(self):
+        return _sequence('s', [
+            _boundary('start'),
+            {'id': 'site', 'element_type': 'phase', 'name': 'Site',
+             'tpq_age_bp': None, 'taq_age_bp': None, 'children': [
+                 _sequence('a', [_boundary('a0'), _phase('pa', 'Area A'),
+                                 _boundary('a1')]),
+                 _sequence('b', [_phase('pb', 'Area B')]),
+             ]},
+            _boundary('end')])
+
+    def test_one_row_per_phase_in_model_order(self):
+        rows = intervals.plan_phase_activity(
+            self._tree(), _dates(('da', 3000, 30, 'pa'), ('db', 2950, 30, 'pb')))
+        assert [(r['name'], r.get('boundaries'), r.get('dates')) for r in rows] == [
+            ('Site', ('start', 'end'), None),
+            ('Area A', ('a0', 'a1'), None),
+            ('Area B', None, ('db',))]
+
+    def test_a_phase_is_in_progress_between_its_boundaries(self):
+        n = 1000
+        draws = {'a0': np.full(n, 3300.0), 'a1': np.full(n, 3200.0),
+                 'start': np.full(n, 3400.0), 'end': np.full(n, 3100.0),
+                 'db': np.full(n, 3250.0)}
+        rows = intervals.plan_phase_activity(
+            self._tree(), _dates(('db', 2950, 30, 'pb')))
+        block = intervals.evaluate_phase_activity(rows, draws)
+        ages = [block['start'] - i * block['step'] for i in range(len(block['rows'][0]['values']))]
+        area_a = dict(zip(ages, block['rows'][1]['values']))
+        assert area_a[3250.0] == 1.0
+        assert area_a[3300.0] == 1.0 and area_a[3200.0] == 1.0
+        assert area_a[3350.0] == 0.0 and area_a[3150.0] == 0.0
+
+        area_b = block['rows'][2]
+        assert area_b['relative'] is True
+        assert area_b['dates'] == 1
+        assert max(area_b['values']) == 1.0
+        assert dict(zip(ages, area_b['values']))[3250.0] == 1.0
+
+    def test_a_linear_model_gets_one_too(self):
+        """Along one Sequence the strips draw the phases succeeding each other."""
+        rng = np.random.default_rng(2)
+        n = 500
+        older = rng.normal(3300, 10, n)
+        draws = {'b0': older + 100, 'b1': older, 'b2': older - 100, 'd': older + 50}
+        linear = _sequence('s', [_boundary('b0'), _phase('p1', 'Lower'), _boundary('b1'),
+                                 _phase('p2', 'Upper'), _boundary('b2')])
+        block = intervals.report(linear, _dates(('d', 3000, 30, 'p1')), draws, True)
+        assert [row['name'] for row in block['phase_activity']['rows']] == ['Lower', 'Upper']
+        assert block['differences'] == []
+
+        unasked = intervals.report(linear, _dates(('d', 3000, 30, 'p1')), draws, True,
+                                   durations=False)
+        assert unasked['phase_activity'] is None
+
+    def test_the_pdf_draws_it(self):
+        from app.services import pdf_report
+        block = {'start': 3300.0, 'step': 1.0, 'rows': [
+            {'id': 'a', 'name': 'Lower', 'values': [0.0, 0.5, 1.0, 0.5]},
+            {'id': 'b', 'name': 'Area B', 'dates': 1, 'relative': True,
+             'values': [0.2, 1.0, 0.2, 0.0]}]}
+        png, height = pdf_report._phase_activity_figure(block, 'calBP')
+        assert png.startswith(b'\x89PNG')
+        assert height > 0
+        assert pdf_report._phase_activity_figure({**block, 'rows': block['rows'][:1]},
+                                                 'calBP') is None
 
 
 class TestSeverity:
@@ -576,7 +774,8 @@ class TestThroughTheApi:
         assert 'Sequence Duration' in labels
         assert 'Phase Duration' in labels
         assert 'Sample Duration' in labels
-        assert 'Phase Difference' in labels
+        # One Sequence orders both phases, so there is no difference to report.
+        assert 'Phase Difference' not in labels
 
         exported = client.get(f'/api/results/{analysis_id}/export/json').json()['data']
         stored = client.get(f'/api/analysis/{analysis_id}').json()['data']['intervals']
@@ -585,27 +784,40 @@ class TestThroughTheApi:
 
         assert client.get(f'/api/results/{analysis_id}/pdf').status_code == 200
 
-    def test_a_shared_transition_is_not_exported_as_a_measurement(self, client):
-        """
-        Two phases either side of one Boundary have a gap of exactly zero and
-        an overlap probability of exactly zero, both by construction. Printed
-        bare, those zeroes read as a measured separation -- and `none` reads as
-        "separated at 2 sigma", which is what the word means on every other
-        row. The export must say what the row is instead.
-        """
-        analysis_id = self._run(client, _sequence('iv5-root', [
-            _boundary('iv5-b0', 'Start'), _phase('iv5-p1', 'Lower'),
-            _boundary('iv5-b1', 'Mid'), _phase('iv5-p2', 'Upper'),
-            _boundary('iv5-b2', 'End')], name='Site'),
-            'Shared transition', True, ['iv5-a', 'iv5-b', 'iv5-c', 'iv5-d'],
-            phases=('iv5-p1', 'iv5-p2'))
+    def test_parallel_branches_are_compared_through_to_the_exports(self, client):
+        tree = _sequence('iv5-root', [
+            _boundary('iv5-start', 'Start'),
+            {'id': 'iv5-site', 'element_type': 'phase', 'name': 'Site',
+             'tpq_age_bp': None, 'taq_age_bp': None, 'children': [
+                 _sequence('iv5-n', [_boundary('iv5-n0', 'North start'),
+                                     _phase('iv5-p1', 'North'),
+                                     _boundary('iv5-n1', 'North end')]),
+                 _sequence('iv5-s', [_boundary('iv5-s0', 'South start'),
+                                     _phase('iv5-p2', 'South'),
+                                     _boundary('iv5-s1', 'South end')]),
+             ]},
+            _boundary('iv5-end', 'End')], name='Site')
+        analysis_id = self._run(client, tree, 'Parallel branches', True,
+                                ['iv5-a', 'iv5-b', 'iv5-c', 'iv5-d'],
+                                phases=('iv5-p1', 'iv5-p2'))
 
         stored = client.get(f'/api/analysis/{analysis_id}').json()['data']['intervals']
-        differences = stored['differences']
-        assert len(differences) == 1
-        assert differences[0]['shared_boundary'] is True, (
-            'the two phases share the Mid boundary'
-        )
+        [difference] = stored['differences']
+        assert (difference['from_name'], difference['to_name']) == ('North', 'South')
+        assert 'shared_boundary' not in difference
+
+        # The figure's rows name the saved elements, as every record does.
+        activity = stored['phase_activity']
+        assert [row['name'] for row in activity['rows']] == ['Site', 'North', 'South']
+        saved = set()
+
+        def walk(node):
+            saved.add(node['id'])
+            for child in node.get('children') or []:
+                walk(child)
+
+        walk(client.get(f'/api/analysis/{analysis_id}').json()['data']['model_tree'])
+        assert all(row['id'] in saved for row in activity['rows'])
 
         from app.api.results import INTERVAL_HEADER
 
@@ -614,15 +826,34 @@ class TestThroughTheApi:
         header = rows.index(INTERVAL_HEADER)
         row = next(r for r in rows[header + 1:] if r and r[0] == 'Phase Difference')
         cells = dict(zip(INTERVAL_HEADER, row))
+        assert cells['Mean (yr)'] != ''
+        assert cells['Overlap'] in intervals.SEVERITY_WORDS
+
+        assert client.get(f'/api/results/{analysis_id}/pdf').status_code == 200
+
+    def test_a_stored_shared_transition_is_not_exported_as_a_measurement(self):
+        """
+        Analyses stored before ordered pairs were dropped carry pairs either
+        side of one Boundary, whose gap and overlap probability are both zero
+        by construction. Printed bare, those zeroes read as a measured
+        separation -- and `none` as "separated at 2 sigma". The export must
+        say what the row is instead.
+        """
+        from app.api.results import INTERVAL_HEADER, _interval_rows
+
+        summary = intervals.summarise(np.zeros(100))
+        [row] = _interval_rows({'durations': [], 'differences': [{
+            'kind': 'phase_difference', 'id': 'x', 'from_id': 'a',
+            'from_name': 'Lower', 'to_id': 'b', 'to_name': 'Upper',
+            'years': summary, 'overlap': 0.0, 'severity': 'none',
+            'shared_boundary': True}]})
+        cells = dict(zip(INTERVAL_HEADER, row))
         assert cells['Overlap'] == intervals.SHARED_BOUNDARY_TEXT
         assert cells['Overlap Probability'] == ''
         for column in ('Mean (yr)', 'Median (yr)', 'Std (yr)',
                        '68.3% Range (yr)', '95.4% Range (yr)'):
             assert cells[column] == '', (
                 f'{column} must be blank, not a zero that reads as a measurement')
-
-        # The PDF renders the same rows through a different table.
-        assert client.get(f'/api/results/{analysis_id}/pdf').status_code == 200
 
     def test_editing_the_model_drops_them(self, client):
         """

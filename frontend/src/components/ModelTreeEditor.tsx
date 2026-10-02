@@ -876,6 +876,13 @@ interface Props {
    */
   onSetOrdinate?: (measurementId: string, patch: Partial<MatrixMeasurement>) => void
   /**
+   * Take dates out of the analysis altogether -- offered for the unassigned
+   * ones, the dates a model has no place for. Optional on the same rule as
+   * onSetOrdinate: a host that cannot write the removal back to what gets
+   * submitted does not get the button.
+   */
+  onRemoveDates?: (measurementIds: string[]) => void
+  /**
    * The project's basemap-tiles setting, for the one map this editor can
    * open -- the spatial-order proposal's.
    */
@@ -1978,6 +1985,7 @@ export default function ModelTreeEditor({
   onChange,
   onSortDates,
   onSetOrdinate,
+  onRemoveDates,
   tiles = false,
 }: Props) {
   const [addMenu, setAddMenu] = useState<{ anchor: HTMLElement; targetId: string } | null>(null)
@@ -2436,6 +2444,9 @@ export default function ModelTreeEditor({
     const phaseIds = new Set(phaseOptions(tree).map((p) => p.id))
     return measurements.filter((m) => !phaseIds.has(assignments[m.id] || ''))
   }, [measurements, assignments, tree])
+  // Removing them is confirmed: the dates belong to the host, not to this
+  // editor's history, so Undo cannot bring them back.
+  const [confirmRemoveUnassigned, setConfirmRemoveUnassigned] = useState(false)
 
   const toggleCollapsed = (id: string) =>
     setCollapsed((prev) => {
@@ -3183,9 +3194,23 @@ export default function ModelTreeEditor({
           <Typography variant="subtitle1" component="h2">
             Unassigned dates
           </Typography>
-          {onSortDates && (
-            <SortDatesButton measurements={measurements} onSort={onSortDates} />
-          )}
+          <Stack direction="row" spacing={1} alignItems="center">
+            {/* Not when every date is unassigned: that would empty the
+                analysis, which is the analysis page's business, not a tidy-up. */}
+            {onRemoveDates && unassigned.length > 0 && unassigned.length < measurements.length && (
+              <Button
+                size="small"
+                color="error"
+                startIcon={<DeleteIcon fontSize="small" />}
+                onClick={() => setConfirmRemoveUnassigned(true)}
+              >
+                {unassigned.length === 1 ? 'Remove from analysis' : `Remove all ${unassigned.length} from analysis`}
+              </Button>
+            )}
+            {onSortDates && (
+              <SortDatesButton measurements={measurements} onSort={onSortDates} />
+            )}
+          </Stack>
         </Stack>
         {measurements.length === 0 ? (
           <Typography variant="body2" color="textSecondary">
@@ -3213,6 +3238,24 @@ export default function ModelTreeEditor({
           ))
         )}
       </Paper>
+
+      {onRemoveDates && (
+        <ConfirmDialog
+          open={confirmRemoveUnassigned}
+          title={`Remove ${unassigned.length} unassigned date${unassigned.length === 1 ? '' : 's'} from the analysis?`}
+          message={`${unassigned
+            .slice(0, 5)
+            .map((m) => m.sample_name)
+            .join(', ')}${unassigned.length > 5 ? ` and ${unassigned.length - 5} more` : ''} will no longer be part of this analysis. Undo cannot restore them; they would have to be added again.`}
+          confirmLabel="Remove"
+          danger
+          onConfirm={() => {
+            onRemoveDates(unassigned.map((m) => m.id))
+            setConfirmRemoveUnassigned(false)
+          }}
+          onCancel={() => setConfirmRemoveUnassigned(false)}
+        />
+      )}
 
       {/* The phase picker, rendered once for every date on the page -- see
           PhaseButton for why it is not a Select per date. */}

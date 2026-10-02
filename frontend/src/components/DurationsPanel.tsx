@@ -32,19 +32,13 @@ import { visuallyHidden } from '@mui/utils'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import { hpdEnvelopeFromHistogram } from '@/utils/hpd'
 import OrderingMatrix, { orderingSentence, type OrderingAxisEntry } from '@/components/OrderingMatrix'
+import PhaseActivityPlot from '@/components/PhaseActivityPlot'
+import { SHARED_BOUNDARY_TEXT } from '@/utils/sharedBoundary'
+import type { DateFormat } from '@/utils/dateFormat'
 import type { DifferenceRecord, DurationRecord, DurationSummary, IntervalsBlock } from '@/types'
 
 const NUMERIC_CELL_SX = { whiteSpace: 'nowrap' } as const
 
-/**
- * What a shared-boundary pair says in place of a figure.
- *
- * Its gap and overlap probability are both exactly zero BY CONSTRUCTION — one
- * phase's end IS the next one's start — and `none` is the wrong word for the
- * second, meaning "separated at 2 sigma" everywhere else here. The CSV and PDF
- * print the same phrase (intervals.SHARED_BOUNDARY_TEXT).
- */
-export const SHARED_BOUNDARY_TEXT = 'shares a transition'
 const SHARED_BOUNDARY_HELP =
   'These two phases share a Boundary, so the model gives them no gap and no overlap to ' +
   'measure \u2014 one phase\u2019s end is the other\u2019s start, by construction rather than by inference.'
@@ -59,6 +53,7 @@ const READOUT_MIN_WIDTH = 300
 const DURATION_LABELS: Record<DurationRecord['kind'], string> = {
   sequence_duration: 'Sequence',
   phase_duration: 'Phase',
+  hiatus_duration: 'Hiatus',
   sample_duration: 'Dated events',
 }
 
@@ -75,6 +70,8 @@ function useDurationKindColor() {
       ? colors.sequence.ink
       : kind === 'phase_duration'
       ? colors.phase.ink
+      : kind === 'hiatus_duration'
+      ? colors.hiatus.ink
       : undefined
 }
 
@@ -83,8 +80,26 @@ const DURATION_HELP: Record<DurationRecord['kind'], string> = {
     'From the first Boundary of this sequence to its last — how long the whole of it was in use.',
   phase_duration:
     'The interval this phase’s two Boundaries enclose. Longer than the span of its dated events, because those events are a sample of the phase rather than the whole of it.',
+  hiatus_duration:
+    'The gap between the end of one phase and the start of the next.',
   sample_duration:
     'From the oldest to the youngest dated event in this phase — what the dates themselves cover, with nothing inferred beyond them.',
+}
+
+/** A phase's name, noting when its dated events stand in for Boundaries it
+ *  does not have. */
+function PhaseName({ name, dates }: { name: string; dates?: number }) {
+  return (
+    <>
+      {name}
+      {dates ? (
+        <Typography component="span" variant="body2" color="textSecondary">
+          {' '}
+          ({dates === 1 ? '1 date' : `${dates} dates`})
+        </Typography>
+      ) : null}
+    </>
+  )
 }
 
 /** A length of time, rounded to the year: the reported step is coarser anyway,
@@ -126,7 +141,11 @@ function OverlapMeter({ record }: { record: DifferenceRecord }) {
   const share = Math.max(0, Math.min(1, record.overlap))
   const help =
     record.kind === 'phase_difference'
-      ? `${(share * 100).toFixed(0)}% probability that the two modelled intervals intersect.`
+      ? record.from_dates === 1 && record.to_dates === 1
+        ? `${(share * 100).toFixed(0)}% — how far the model is from being able to say which of the two dates came first.`
+        : record.from_dates || record.to_dates
+        ? `${(share * 100).toFixed(0)}% probability that the two overlap. A phase without Boundaries of its own is represented by its dated events.`
+        : `${(share * 100).toFixed(0)}% probability that the two modelled intervals intersect.`
       : `${(share * 100).toFixed(0)}% — how far the model is from being able to say which of the two came first. 100% is a coin flip.`
   return (
     <Tooltip title={help}>
@@ -172,6 +191,8 @@ interface Props {
   /** The analysis's dated events, oldest first, as the results table and plots
    *  order them. Only the ordering matrix uses it; the panel renders without. */
   dateAxis?: OrderingAxisEntry[]
+  /** For the calendar axis of the phase overlap figure. */
+  dateFormat?: DateFormat
 }
 
 export default function DurationsPanel({
@@ -181,6 +202,7 @@ export default function DurationsPanel({
   showMean,
   showMedian,
   dateAxis = [],
+  dateFormat,
 }: Props) {
   const theme = useTheme()
   const durationKindColor = useDurationKindColor()
@@ -255,7 +277,7 @@ export default function DurationsPanel({
             Durations
           </Typography>
           <Typography variant="body2" color="textSecondary" sx={{ mb: 2 }}>
-            How long each sequence, phase and set of dated events lasted, in years. Estimated from{' '}
+            How long each sequence, phase, hiatus and set of dated events lasted, in years. Estimated from{' '}
             {intervals.draws.toLocaleString()}{' '}
             {intervals.independent ? 'independent' : 'sampled'} joint draws.
           </Typography>
@@ -273,7 +295,7 @@ export default function DurationsPanel({
                 '& thead th': { backgroundColor: 'background.muted', top: { xs: 'auto', md: 0 } },
               }}>
                 <caption style={visuallyHidden}>
-                  How long each sequence, phase and set of dated events lasted, in years.
+                  How long each sequence, phase, hiatus and set of dated events lasted, in years.
                 </caption>
               <TableHead>
                 <TableRow>
@@ -325,6 +347,15 @@ export default function DurationsPanel({
             </Table>
           </TableContainer>
         )}
+        </Paper>
+      )}
+
+      {intervals.phase_activity && intervals.phase_activity.rows.length > 1 && (
+        <Paper sx={{ p: 3, mb: 3 }}>
+          <Typography variant="h6" component="h2" gutterBottom>
+            Phases through time
+          </Typography>
+          <PhaseActivityPlot activity={intervals.phase_activity} dateFormat={dateFormat} />
         </Paper>
       )}
 
@@ -475,7 +506,7 @@ export default function DurationsPanel({
             <Typography variant="body2" color="textSecondary" sx={{ mb: 1 }}>
               {comparingDates
                 ? 'A positive difference means the first date is the older of the two. “Overlap” grades how far the model is from being able to say which came first.'
-                : 'Separation is positive for a gap between the two phases and negative for an overlap. “Overlap” grades the probability that their modelled intervals intersect. Two phases either side of one shared Boundary have neither measured, because one phase’s end is the next one’s start.'}
+                : 'Phases in parallel branches of the model. Separation is positive for a gap between the two and negative for an overlap. “Overlap” grades the probability that they intersect. A phase without Boundaries of its own is represented by its dated events.'}
             </Typography>
             {/* Below sm the same rows are stacked cards rather than a grid.
                 At 375px this table measured 452px inside a 295px container: the
@@ -492,7 +523,8 @@ export default function DurationsPanel({
                     sx={{ p: 1.5, border: 1, borderColor: 'divider', borderRadius: 1 }}
                   >
                     <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                      {record.from_name} → {record.to_name}
+                      <PhaseName name={record.from_name} dates={record.from_dates} /> →{' '}
+                      <PhaseName name={record.to_name} dates={record.to_dates} />
                     </Typography>
                     <Typography
                       variant="body2"
@@ -559,8 +591,12 @@ export default function DurationsPanel({
                 <TableBody>
                   {differences.map((record) => (
                     <TableRow key={record.id}>
-                      <TableCell>{record.from_name}</TableCell>
-                      <TableCell>{record.to_name}</TableCell>
+                      <TableCell>
+                        <PhaseName name={record.from_name} dates={record.from_dates} />
+                      </TableCell>
+                      <TableCell>
+                        <PhaseName name={record.to_name} dates={record.to_dates} />
+                      </TableCell>
                       {showMean && (
                         <TableCell align="right" sx={NUMERIC_CELL_SX}>
                           {years(record.years.mean)}

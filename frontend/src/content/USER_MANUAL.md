@@ -526,12 +526,18 @@ again; **Re-run** on its own reuses the settings the analysis was saved with.
 Everything in this section is a **length of time in years**, never a calendar date, so none of it is
 converted to BC/AD when you change the reporting format.
 
-### The three durations
+### The durations
 
 - **Sequence**: from a Sequence's first Boundary to its last. How long the whole of it was in use.
 - **Phase**: the interval a Phase's two Boundaries enclose. This is OxCal's `Interval()`, and it is
   the *modelled* duration: it is normally longer than the spread of the dates inside, because those
   dates are treated as a sample of the phase rather than the whole of it.
+- **Hiatus**: the gap between two adjacent Boundaries, from the end of one phase to the start of
+  the next. This is what OxCal's `Interval()` gives when placed between an end Boundary and a start
+  Boundary. It is listed between the two phases it separates, under the Hiatus's own name if you
+  gave it one and otherwise as "*earlier phase* → *later phase*". The Hiatus element itself adds
+  nothing to the model, so two Boundaries side by side are a gap whether or not a Hiatus is drawn
+  between them. A single Boundary between two phases is a shared transition, with no gap to report.
 - **Dated events**: from the oldest to the youngest dated event in a Phase (OxCal's `Span()`).
   Nothing is inferred beyond the dates themselves.
 
@@ -541,7 +547,26 @@ years but whose modelled duration is 250 is a phase your dates have barely sampl
 A Phase with fewer than two dates gets no "dated events" row, since one date has no span. A
 Sequence with only one bounded group gets no Sequence row, because its Phase duration is already the same quantity.
 
+### Phases through time
+
+A figure showing every phase that can be placed in time on one calendar axis, one strip each, in
+model order. A phase's shading is the probability it was **in progress** in that year, read off the
+same joint draws as the durations: darker means more probable, and the hover gives the figure.
+Along a Sequence the strips follow one another; across parallel branches, a column read top to
+bottom shows which phases were probably running at the same time. A phase without Boundaries of its
+own is represented by its dated events, and one represented by a single date has no extent to be in
+progress over, so its strip is that date's own probability, in the dates' colour and scaled to its
+peak. **Download PNG** saves the figure, and the PDF report includes it.
+
 ### Differences
+
+For **phases**, the table compares only pairs whose order the model leaves open: phases in
+different branches, such as two Sequences side by side inside one Phase. Those are the only phases
+that can overlap, so the overlap is a finding. Phases in one Sequence are never compared, since the
+Sequence already puts them in order: they cannot overlap, and the gap between two of them is
+reported in Durations as Phase and Hiatus durations. A phase nested inside another is not compared
+either, because it overlaps the outer one by construction. A model with no parallel branches has
+no Differences table.
 
 One row per pair. For two **phases** the figure is signed: **positive is a gap** between them in
 years, **negative is an overlap**. For two **dates** in a Group Calibration, positive means the first
@@ -555,18 +580,8 @@ the model is from being able to say which came first (100% is a coin flip). The 
 
 The years column beside it is headed **Separation** for phases and **Difference** for dates.
 
-Two phases either side of a single shared Boundary read **shares a transition** in place of both
-figures, and the Overlap column reads **—**: one phase's end *is* the next one's start, so the model
-gives them no gap and no overlap to measure. Neither zero is a finding, which is why neither is
-printed, on screen or in the CSV or the PDF. Put a **Hiatus** between two Boundaries where you
-want the gap itself modelled. Two phases sitting inside the *same* pair of Boundaries are not
-compared at all: the model brackets them identically, so it has nothing to say about their order.
-
-In a plain Sequence, where every Phase shares its Boundaries with its neighbours, this table has
-little to add: adjacent pairs share a transition, and the gap between two non-adjacent Phases is
-the durations of the Phases between them, which the Durations table already reports. The table
-earns its place where the model leaves the order genuinely open: Phases separated by a Hiatus, and
-Phases in different branches of the model.
+An analysis run before this rule may still list pairs either side of a single shared Boundary,
+reading **shares a transition**. Run it again to drop them.
 
 ### What these cost
 
@@ -1210,8 +1225,9 @@ p(t, b)  proportional to  prod_dates L_d(t_d)
 
 **Boundaries** are single shared parameters. A Boundary placed between two Phases is simultaneously
 the end of the earlier and the start of the later, not two independent transitions. This is why
-adjacent phases have no gap to measure (see [Differences](#differences)). A deliberate gap is
-modelled as two Boundaries with a Hiatus between them.
+adjacent phases have no gap to measure. A deliberate gap is modelled as two Boundaries side by
+side, conventionally with a Hiatus between them, and is reported as a Hiatus duration (see
+[Durations and Differences](#durations-and-differences)).
 
 **Uniform span prior.** Placing `n` ordered Boundaries across a span leaves the `n-2` interior ones
 free within it, and the induced prior therefore favours long sequences purely for having more room
@@ -1415,12 +1431,14 @@ pooled across every chain that ran (A.6). They are not independent: consecutive 
 chain are correlated, so a duration read off them converges more slowly than the marginals beside
 it, and the run is not extended on its account. The report says which kind of draws it holds.
 
-**The three durations** are OxCal's quantities under the app's own names: the *Sequence duration*
+**The durations** are OxCal's quantities under the app's own names: the *Sequence duration*
 (first Boundary minus last), the *Phase duration* (the interval a pair of Boundaries encloses,
-OxCal's `Interval`), and the *dated-events* or sample duration (the range of the dates themselves,
+OxCal's `Interval`), the *Hiatus duration* (the same between two adjacent Boundaries with no phase
+between them), and the *dated-events* or sample duration (the range of the dates themselves,
 OxCal's `Span`). The gap between the last two is how much of the phase the dates failed to sample.
 
-**Differences** between two phases are the signed years between their modelled intervals, positive
+**Differences** between two phases whose order the model leaves open are the signed years between
+their modelled intervals, positive
 for a gap and negative for an overlap, computed as one quantity from the intersection length of the
 two intervals in each draw. Between two dates in a group calibration, the signed difference in
 calendar age.

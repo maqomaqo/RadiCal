@@ -28,6 +28,7 @@ export type DerivedKind =
   | 'boundary'
   | 'sequence_duration'
   | 'phase_duration'
+  | 'hiatus_duration'
   | 'sample_duration'
   | 'phase_difference'
 
@@ -42,6 +43,7 @@ export const DERIVED_KIND_LABELS: Record<DerivedKind, string> = {
   boundary: 'modelled transition',
   sequence_duration: 'sequence duration',
   phase_duration: 'phase duration, boundary to boundary',
+  hiatus_duration: 'gap between two phases, boundary to boundary',
   sample_duration: 'span of the dated events in the phase',
   phase_difference: 'phase separation',
 }
@@ -50,6 +52,7 @@ export const AXIS_FOR_KIND: Record<DerivedKind, DerivedAxis> = {
   boundary: 'calendar',
   sequence_duration: 'duration',
   phase_duration: 'duration',
+  hiatus_duration: 'duration',
   sample_duration: 'duration',
   phase_difference: 'separation',
 }
@@ -232,6 +235,7 @@ export function rowsOnAxis(rows: DerivedRow[], axis: DerivedAxis): DerivedRow[] 
     'boundary',
     'sequence_duration',
     'phase_duration',
+    'hiatus_duration',
     'sample_duration',
     'phase_difference',
   ]
