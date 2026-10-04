@@ -11,6 +11,7 @@ from app.services.calibration import (
     CalibrationCurve,
     get_curve,
 )
+from app.services import cross_check
 from app.services import exact_chain
 from app.services import gibbs
 from app.services import model_tree as model_tree_service
@@ -586,6 +587,26 @@ def _dispersal_spec(bayesian_config: Dict) -> Optional[Dict]:
     return {'origin': placed}
 
 
+def _cross_check(measurements: List[Dict], model_tree: Dict, sampled: Dict,
+                 bayesian_config: Dict) -> Optional[Dict]:
+    """
+    services/cross_check.check for a sampled run, or None when the analysis
+    turned it off. A failure in the check is reported as the check's own
+    outcome and never fails the analysis, whose answer stands without it.
+    """
+    if bayesian_config.get('cross_check') is False:
+        return None
+    try:
+        return cross_check.check(
+            measurements, model_tree, sampled,
+            uniform_span_prior=bayesian_config.get('uniform_span_prior', True))
+    except Exception as error:                   # noqa: BLE001 - reported, not raised
+        return {'status': 'not_checked',
+                'reason': f'the direct calculation failed ({type(error).__name__})',
+                'shape': None, 'threshold': cross_check.DISAGREEMENT, 'checked': 0,
+                'worst': None, 'differing': [], 'seconds': None}
+
+
 def _run_bayesian(
     measurements: List[Dict],
     model_tree: Dict,
@@ -638,9 +659,11 @@ def _run_bayesian(
          'exact_needs_boundaries': how many WOULD have to be supplied for the
                    exact solver to apply, set only when that is why the sampler
                    ran,
-         and for the sampled path: 'sweeps', 'convergence', 'converged', and
+         and for the sampled path: 'sweeps', 'convergence', 'converged',
          'outlier_scale' -- the shared offset scale each outlier model's dates
-         inferred, which only the sampler estimates (see services/gibbs.py)}
+         inferred, which only the sampler estimates (see services/gibbs.py) --
+         and 'cross_check', the Boundaries against a direct calculation of the
+         same model (services/cross_check.py), None if turned off}
     """
     requested = bayesian_config.get('solver') or 'auto'
     resolution = _reporting_resolution(bayesian_config)
@@ -751,6 +774,10 @@ def _run_bayesian(
     amodel = _model_agreement(sampled, measurements)
     return sampled['measurements'], sampled['boundaries'], {
         'method': 'gibbs',
+        # The sampled Boundaries against a direct calculation of the same
+        # model, where the model's shape allows one (services/cross_check.py):
+        # the one check that does not compare the sampler with itself.
+        'cross_check': _cross_check(measurements, model_tree, sampled, bayesian_config),
         'requested': requested,
         'resolution': resolution,
         # As on the exact path: Aoverall from the per-date indices, Amodel from
