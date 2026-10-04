@@ -32,6 +32,11 @@ tests/test_gibbs.py's TestTheEndpointWeighting pins it from both directions: the
 span against exact_chain's, and grid refinement, which no step-dependent error
 survives.
 
+The same counting argument keeps two BOUNDARIES at least a cell apart (see
+Model.allowed): the span correction divides by the placements strictly inside
+a span, so boundaries that may meet have arrangements it never divides out.
+TestBoundariesNeverShareACell pins that one.
+
 The maths
 ---------
 The posterior is
@@ -154,6 +159,7 @@ See tests/test_gibbs.py and tests/test_charcoal_outlier.py, and _span_priors for
 how the UniformSpanPrior correction is grouped so it reduces to exact_chain's on
 a chain.
 """
+import itertools
 import multiprocessing
 import os
 import threading
@@ -209,6 +215,16 @@ ADAPT_INTERVAL = 50
 # kernel never will, so a low acceptance rate on those is expected.
 WIDE_MOVE_FRACTION = 0.3
 WIDE_MOVE_YEARS = 120.0
+# Of the wide proposals, the fraction that jump by one of the distances
+# between the members' own calibration peaks rather than by a draw from the
+# wide kernel (see Model.peak_gaps), and how much the jump is blurred, in years.
+PEAK_JUMP_FRACTION = 0.5
+PEAK_JUMP_JITTER_YEARS = 5.0
+# A calibration peak counts when it stands this far above the valleys either
+# side of it, as a fraction of the date's highest point.
+PEAK_PROMINENCE = 0.05
+# Most distinct peak gaps kept per move set, the most common first.
+MAX_PEAK_GAPS = 12
 # Sweeps the run starts with, and the ceiling it will extend to when the
 # convergence measure is not met. See run() for why the length is not fixed.
 DEFAULT_SWEEPS = 20000
@@ -222,15 +238,21 @@ ROUNDS = 8
 # solve_chains). Four is the usual number for a between-chain diagnostic:
 # enough that a chain stuck in one calibration lobe while the others found
 # another shows up as disagreement, few enough to leave cores for the rest of
-# the machine.
+# the machine. Only if they START apart (start_quantiles): four chains from
+# one state can settle in one lobe together and agree perfectly.
 DEFAULT_CHAINS = 4
 # Most worker processes the chain pool holds, whatever is asked for.
 MAX_CHAIN_WORKERS = 8
 # Gelman-Rubin R-hat the chains must agree to before a pooled run may stop.
 # 1.05 is the conventional threshold (Gelman et al.); a chain settled in a
 # calibration lobe the others left gives values in the tens, so what this
-# guards against is unmistakable at any threshold in the usual range.
+# guards against is unmistakable at any threshold in the usual range. What it
+# cannot see is a lobe NO chain is in.
 TARGET_RHAT = 1.05
+# The span of the dates' likelihoods the extra chains start across (see
+# start_quantiles). Short of the extreme tails, where an outlier model's broad
+# component puts a date centuries from anything it is plausibly near.
+START_QUANTILE_RANGE = (0.025, 0.975)
 # Nodes the deposition rigidity `k` is tabulated over, log-uniform between the
 # sequence's own bounds. Twenty-four is what the outlier scale uses over four
 # decades and is more than enough here: k enters the answer only through
@@ -373,6 +395,7 @@ class Model:
         self._build_outlier_tables()
 
         self.boundary_ids = list(self.plan.boundary_names)
+        self.boundary_set = set(self.boundary_ids)
         # Every boundary is sampled, including the outermost ones exact_chain
         # marginalises: a Gibbs draw from a truncated power law is exact
         # however heavy the tail.
@@ -745,6 +768,12 @@ class Model:
                  for p in self.params for o in self.below[p]]
         self.edge_younger = np.array([a for a, _b in pairs], dtype=np.intp)
         self.edge_older = np.array([b for _a, b in pairs], dtype=np.intp)
+        # How far apart each edge's ends must be, in cells: one between two
+        # boundaries, none otherwise. See allowed() for why.
+        boundaries = set(self.boundary_ids)
+        self.edge_gap = np.array(
+            [int(self.params[a] in boundaries and self.params[b] in boundaries)
+             for a, b in pairs], dtype=np.int64)
         self.window_lo = np.array([self.window[p][0] for p in self.params])
         self.window_hi = np.array([self.window[p][1] for p in self.params])
 
@@ -920,12 +949,29 @@ class Model:
     # -- conditionals ------------------------------------------------------
 
     def allowed(self, param: str, state: _State) -> Tuple[int, int]:
-        """The index range `param` may currently occupy, constraints included."""
+        """
+        The index range `param` may currently occupy, constraints included.
+
+        Two BOUNDARIES are kept at least one cell apart; anything else may
+        share a cell with what it is ordered against. The span prior counts
+        the ways n - 2 interior boundaries fit inside a span of j cells as
+        C(j - 1, n - 2) -- strictly inside and strictly ordered, which is also
+        what exact_chain's transfer matrices integrate (span > 0 for every
+        group, an empty one included). Letting boundaries coincide gives a
+        span more arrangements than it is divided by, and as with the endpoint
+        weighting the excess is largest at the SMALLEST spans, so the chain
+        packs everything together. Wherever an empty phase or a nesting level
+        separated two boundaries -- a Sequence of layers with sterile sand
+        between them, or Sequences inside a Phase -- they could meet. On a
+        real dune section of that kind it took the start of the sequence from
+        615 to 563 cal BP, P(< 585) from 0.09 to 1.0, and every chain agreed.
+        """
         lo, hi = self.window[param]
+        gap = 1 if param in self.boundary_set else 0
         for older in self.below[param]:
-            hi = min(hi, state.index[older])
+            hi = min(hi, state.index[older] - (gap if older in self.boundary_set else 0))
         for younger in self.above[param]:
-            lo = max(lo, state.index[younger])
+            lo = max(lo, state.index[younger] + (gap if younger in self.boundary_set else 0))
         return lo, hi
 
     def endpoint_weight(self, date_id: str, state: _State) -> float:
@@ -1102,7 +1148,7 @@ class Model:
         if ((index < self.window_lo) | (index > self.window_hi)).any():
             return -np.inf
         if len(self.edge_younger) and (
-                index[self.edge_younger] > index[self.edge_older]).any():
+                index[self.edge_younger] + self.edge_gap > index[self.edge_older]).any():
             return -np.inf
 
         total = 0.0
@@ -1153,7 +1199,7 @@ class Model:
 
         return float(total)
 
-    def initial_state(self) -> _State:
+    def initial_state(self, quantile: Optional[float] = None) -> _State:
         """
         A state satisfying every hard constraint, built by walking the ordering
         from oldest to youngest and giving each parameter the youngest position
@@ -1168,6 +1214,18 @@ class Model:
         Topological order fixes it by construction: each step leaves at least
         one grid cell of separation, so every span is positive and the starting
         log posterior finite.
+
+        WHERE a date prefers to be is its likelihood mode by default, and with
+        `quantile` the point that fraction of the way through its likelihood
+        instead -- the SAME fraction for every date. That is what makes
+        between-chain R-hat mean anything (solve_chains): it only sees a chain
+        stuck in one calibration range if another chain is somewhere else, and
+        chains that all start at the mode all start in the same range, so the
+        diagnostic passes whichever one that is. One shared fraction rather
+        than one per date because the ranges that matter are a whole group's:
+        a phase's dates calibrate on the same stretch of curve, and a group can
+        only be found in its other range if its members start there together
+        -- single-site moves cannot carry it across one date at a time.
         """
         # Longest chain of "must be older than" above each parameter, so every
         # constraint on it is already placed by the time it is.
@@ -1189,7 +1247,12 @@ class Model:
 
         preferred: Dict[str, int] = {}
         for date_id in self.date_ids:
-            preferred[date_id] = int(np.argmax(self.likelihood[date_id]))
+            if quantile is None:
+                preferred[date_id] = int(np.argmax(self.likelihood[date_id]))
+            else:
+                cdf = self.cdf[date_id]
+                preferred[date_id] = int(min(self.M - 1, np.searchsorted(
+                    cdf, quantile * cdf[-1])))
         for level_id in self.level_ids:
             # A flat table has no mode -- argmax would return index 0, the
             # oldest end of the whole grid, and the topological pass below
@@ -1297,6 +1360,7 @@ class Model:
                 if {other_older, other_younger} & {older_id, younger_id}:
                     members |= set(other_dates) | {other_older, other_younger}
             sets.append(sorted(members))
+            sets.extend(self._with_enclosure(members))
 
             # One FLAGGED date with the boundary that pens it in, per side.
             #
@@ -1323,6 +1387,78 @@ class Model:
                     sets.append(sorted({date_id, younger_id}))
         return sets
 
+    def _with_enclosure(self, members: set) -> List[List[str]]:
+        """
+        `members` with the nearest boundary penning it in from outside, once
+        per side: the boundary just older than its oldest boundary, and the
+        one just younger than its youngest.
+
+        A group in one of several PARALLEL branches is held in by boundaries
+        it does not share with any other group -- a Site's Start and End
+        around two sequences -- and its own set cannot carry it past them. The
+        Site's span correction keeps those boundaries hard against whatever
+        they enclose, so on a real two-area site model, moving one area's
+        phase between its two calibration ranges needed the Start (going
+        older) or the End (going younger) to move with it. Without this the
+        run converged with 0.27 of that phase in its later range against the
+        exact 0.40.
+
+        One side at a time, as for a flagged date, so the far boundary is not
+        dragged across the other branch's dates.
+        """
+        boundaries = set(self.boundary_ids)
+        own = members & boundaries
+        variants = []
+        for outward in (self.below, self.above):
+            outside = {b for m in own for b in outward[m]
+                       if b in boundaries and b not in members}
+            # Nearest only: one with another of them between it and the set
+            # is pinned by that one and would block the move.
+            nearest = {b for b in outside
+                       if not any(o in outside for o in
+                                  (self.above if outward is self.below else self.below)[b])}
+            if nearest:
+                variants.append(sorted(members | nearest))
+        return variants
+
+    def peak_gaps(self, params: List[str]) -> np.ndarray:
+        """
+        The distances, in cells, between the calibration peaks of the dates in
+        `params` -- the jumps that carry a group from one of its lobes to
+        another. Cached per set.
+
+        WIDE_MOVE_YEARS is a guess at the spacing of calibration wiggles, and
+        a fixed Gaussian at that scale proposes a 40-year jump often and an
+        80-year one rarely, wherever the lobes actually are. The dates
+        themselves say where: each one's (inlier) likelihood has its peaks,
+        and a phase's dates on one stretch of curve share the gaps between
+        them. Each gap is a fixed distance proposed either way, so the
+        proposal stays symmetric whatever state it is made from.
+        """
+        key = tuple(params)
+        cache = self.__dict__.setdefault('_peak_gaps', {})
+        if key in cache:
+            return cache[key]
+        from scipy.signal import find_peaks
+        counts: Dict[int, int] = {}
+        bin_cells = max(1, int(round(PEAK_JUMP_JITTER_YEARS / self.dt)))
+        for param in params:
+            if param not in self.likelihood:
+                continue
+            row = (self.outlier_parts[param][0] if param in self.outlier_parts
+                   else self.likelihood[param])
+            peak = float(row.max())
+            if peak <= 0:
+                continue
+            found, _ = find_peaks(row, prominence=PEAK_PROMINENCE * peak)
+            for a, b in itertools.combinations(found, 2):
+                gap = int(round(abs(int(b) - int(a)) / bin_cells)) * bin_cells
+                if gap > 2 * bin_cells:
+                    counts[gap] = counts.get(gap, 0) + 1
+        common = sorted(counts, key=lambda g: (-counts[g], g))[:MAX_PEAK_GAPS]
+        cache[key] = np.array(sorted(common), dtype=np.int64)
+        return cache[key]
+
     def shift(self, state: _State, rng, params: List[str], scale: float,
               current_lp: Optional[float] = None
               ) -> Tuple[_State, float, bool, bool]:
@@ -1343,9 +1479,18 @@ class Model:
         # the time, a wide one otherwise so lobe-to-lobe jumps get proposed at
         # all (see WIDE_MOVE_FRACTION).
         wide = rng.random() < WIDE_MOVE_FRACTION
-        if wide:
-            scale = WIDE_MOVE_YEARS / self.dt
-        steps = int(round(rng.normal(0.0, max(scale, 1e-9))))
+        gaps = self.peak_gaps(params) if wide else ()
+        if len(gaps) and rng.random() < PEAK_JUMP_FRACTION:
+            # A jump the size of a gap between calibration peaks, either way,
+            # blurred a little: symmetric, so the ratio is still the posterior
+            # ratio alone.
+            jitter = int(round(PEAK_JUMP_JITTER_YEARS / self.dt))
+            steps = (int(gaps[rng.integers(len(gaps))]) * (1 if rng.random() < 0.5 else -1)
+                     + int(rng.integers(-jitter, jitter + 1)))
+        else:
+            if wide:
+                scale = WIDE_MOVE_YEARS / self.dt
+            steps = int(round(rng.normal(0.0, max(scale, 1e-9))))
         if steps == 0:
             return state, current_lp, False, wide
 
@@ -1382,10 +1527,12 @@ class _Chain:
 
     def __init__(self, model: Model, sweeps: int, seed: int,
                  burn_in: Optional[int], max_sweeps: Optional[int],
-                 collect_draws: int):
+                 collect_draws: int, start_quantile: Optional[float] = None):
         self.model = model
         self.rng = np.random.default_rng(seed)
-        self.state = model.initial_state()
+        # Where in the dates' likelihoods the chain starts; None is the mode.
+        # See Model.initial_state and solve_chains.
+        self.state = model.initial_state(start_quantile)
         self.burn_in = int(sweeps * BURN_IN_FRACTION) if burn_in is None else burn_in
         self.max_sweeps = max(sweeps, MAX_SWEEPS) if max_sweeps is None else max_sweeps
 
@@ -1620,10 +1767,14 @@ def run(model: Model, sweeps: int = DEFAULT_SWEEPS, seed: int = 42,
         target_convergence: float = TARGET_CONVERGENCE,
         max_sweeps: Optional[int] = None,
         collect_draws: int = 0,
-        on_progress: Optional[Callable[[Dict], bool]] = None) -> Dict:
+        on_progress: Optional[Callable[[Dict], bool]] = None,
+        start_quantile: Optional[float] = None) -> Dict:
     """
     Sweep the sampler and accumulate each parameter's marginal as a histogram
     over the calendar grid, extending the run until it has converged.
+
+    `start_quantile` is where the chain starts (Model.initial_state); None,
+    the likelihood modes, is the single-chain run and chain 0 of any wider one.
 
     Histograms rather than stored draw arrays: the grid is the natural
     resolution of the whole problem, a count per cell is all _summarize needs,
@@ -1664,7 +1815,8 @@ def run(model: Model, sweeps: int = DEFAULT_SWEEPS, seed: int = 42,
     Returns {'histograms', 'sweeps', 'sweeps_kept', 'convergence', 'acceptance',
     ...} -- convergence being OxCal's own diagnostic, per parameter.
     """
-    chain = _Chain(model, sweeps, seed, burn_in, max_sweeps, collect_draws)
+    chain = _Chain(model, sweeps, seed, burn_in, max_sweeps, collect_draws,
+                   start_quantile)
 
     def report(phase: str, convergence: float) -> None:
         if on_progress is None:
@@ -1799,7 +1951,8 @@ def _chain_server(conn) -> None:
                               grid=payload['grid'],
                               uniform_span_prior=payload['uniform_span_prior'])
                 chain = _Chain(model, payload['sweeps'], payload['seed'],
-                               None, payload['max_sweeps'], payload['collect_draws'])
+                               None, payload['max_sweeps'], payload['collect_draws'],
+                               payload.get('start_quantile'))
                 reply = {'params': list(model.params), 'burn_in': chain.burn_in,
                          'max_sweeps': chain.max_sweeps}
             elif command == 'burn':
@@ -1919,6 +2072,27 @@ def _curve_payload(measurements: List[Dict]) -> Dict[str, calibration.Calibratio
     return {curve_id: calibration.get_curve(curve_id) for curve_id in ids}
 
 
+def start_quantiles(chains: int, seed: int) -> List[Optional[float]]:
+    """
+    Where each chain of a multi-chain run starts, as the quantile of the
+    dates' likelihoods Model.initial_state places them at: None (the mode)
+    for chain 0, so it stays the single-chain run, and one draw from each of
+    `chains - 1` equal strata of START_QUANTILE_RANGE for the rest.
+
+    Stratified rather than independent so the starts are spread whatever the
+    seed: with three draws left to chance, two or three of them land on the
+    same side of a date's likelihood about half the time, and a calibration
+    range on the other side is then found by one chain or none.
+    """
+    if chains <= 1:
+        return [None] * chains
+    rng = np.random.default_rng(seed)
+    low, high = START_QUANTILE_RANGE
+    width = (high - low) / (chains - 1)
+    return [None] + [float(low + (c + rng.random()) * width)
+                     for c in range(chains - 1)]
+
+
 def solve_chains(measurements: List[Dict], root: Dict, chains: int,
                  sweeps: int = DEFAULT_SWEEPS, seed: int = 42,
                  uniform_span_prior: bool = True,
@@ -1933,7 +2107,9 @@ def solve_chains(measurements: List[Dict], root: Dict, chains: int,
     run()'s shape plus the between-chain diagnostics.
 
     Chain c is seeded with seed + c, so chain 0 of a multi-chain run is the
-    single-chain run and every chain is reproducible on its own. All chains
+    single-chain run and every chain is reproducible on its own. The other
+    chains also START elsewhere -- see start_quantiles -- since R-hat can only
+    report a calibration range some chain is actually in. All chains
     advance in step -- the same burn-in, one round at a time -- and stop
     together when the pooled first-half/second-half measure reaches
     `target_convergence` or each has run `max_sweeps`.
@@ -1987,7 +2163,8 @@ def solve_chains(measurements: List[Dict], root: Dict, chains: int,
             'uniform_span_prior': uniform_span_prior, 'sweeps': sweeps,
             'seed': seed + c, 'max_sweeps': max_sweeps,
             'collect_draws': collect_draws, 'curves': curves,
-        } for c in range(chains)])
+            'start_quantile': start,
+        } for c, start in enumerate(start_quantiles(chains, seed))])
         params: List[str] = built[0]['params']
         burn_in: int = built[0]['burn_in']
 
