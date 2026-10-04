@@ -587,7 +587,9 @@ class TestTheChainCanActuallyMove:
         lobes 40 years apart happens only by diffusion and the lobe WEIGHTS
         converge far too slowly. With the wide component switched off, the same
         run was 1.5-32.6 years from the exact answer across five seeds; with it,
-        0.19-1.23.
+        0.19-1.23. Since Boundaries were kept a cell apart both are steadier --
+        a spread across seeds of 1.27 years without it against 0.53 with -- so
+        the margin asserted is twofold rather than the threefold it once was.
 
         Asserted against the sampler ITSELF rather than against the exact solver,
         because those two currently disagree for an unrelated reason (see
@@ -611,7 +613,7 @@ class TestTheChainCanActuallyMove:
         monkeypatch.setattr(gibbs, 'WIDE_MOVE_FRACTION', 0.0)
         without = spread_across_seeds()
         assert with_wide < 2.0, with_wide
-        assert without > 3 * with_wide, (without, with_wide)
+        assert without > 2 * with_wide, (without, with_wide)
 
 
 class TestOutlierModel:
@@ -997,8 +999,8 @@ class TestParallelChains:
                                     max_sweeps=1500, seed=7, grid=model.grid,
                                     target_convergence=1.01)
         alone = [gibbs.run(model, sweeps=1500, max_sweeps=1500, seed=7 + c,
-                           target_convergence=1.01)
-                 for c in range(3)]
+                           target_convergence=1.01, start_quantile=start)
+                 for c, start in enumerate(gibbs.start_quantiles(3, 7))]
         for param in model.params:
             expected = sum(r['histograms'][param] for r in alone)
             assert np.array_equal(pooled['histograms'][param], expected), param
@@ -1018,7 +1020,8 @@ class TestParallelChains:
                                     max_sweeps=1500, seed=42, grid=model.grid,
                                     target_convergence=1.01)
         other = gibbs.run(model, sweeps=1500, max_sweeps=1500, seed=43,
-                          target_convergence=1.01)
+                          target_convergence=1.01,
+                          start_quantile=gibbs.start_quantiles(2, 42)[1])
         for param in model.params:
             assert np.array_equal(pooled['histograms'][param],
                                   alone['histograms'][param] + other['histograms'][param])
@@ -1143,3 +1146,133 @@ class TestParallelChains:
                                       max_sweeps=1000, target_convergence=1.01,
                                       on_progress=lambda info: True)
             assert good['sweeps'] == 3000
+
+
+class TestChainStarts:
+    """
+    Where the chains of a multi-chain run start (gibbs.start_quantiles,
+    Model.initial_state). R-hat can only report a calibration range some chain
+    is in, so chains that all start at the likelihood modes can settle in one
+    range together and pass at 1.00 -- which is what a real multi-area site model did.
+    """
+
+    def _model(self):
+        phase = _element('phase', 'Only')
+        tree = _element('sequence', 'Site', [
+            _element('boundary', 'Start'), phase, _element('boundary', 'End')])
+        return ([_date(phase['id'], 640), _date(phase['id'], 650),
+                 _date(phase['id'], 660)], tree)
+
+    def test_chain_zero_starts_at_the_modes_and_the_rest_are_spread(self):
+        starts = gibbs.start_quantiles(4, 42)
+        assert starts[0] is None
+        low, high = gibbs.START_QUANTILE_RANGE
+        width = (high - low) / 3
+        for c, start in enumerate(starts[1:]):
+            assert low + c * width <= start <= low + (c + 1) * width
+        assert gibbs.start_quantiles(4, 42) == starts
+        assert gibbs.start_quantiles(1, 42) == [None]
+
+    def test_a_quantile_moves_every_date_together(self):
+        measurements, tree = self._model()
+        model = gibbs.Model(measurements, tree)
+        young, old = model.initial_state(0.05), model.initial_state(0.95)
+        for date_id in model.date_ids:
+            assert young.index[date_id] < old.index[date_id]
+        for state in (young, old, model.initial_state()):
+            assert np.isfinite(model.log_posterior(state))
+
+    def test_the_chains_of_a_run_do_not_all_start_in_one_place(self):
+        measurements, tree = self._model()
+        model = gibbs.Model(measurements, tree)
+        starts = [model.initial_state(q).index[model.date_ids[0]]
+                  for q in gibbs.start_quantiles(4, 42)]
+        assert len(set(starts)) == 4
+
+
+class TestBoundariesNeverShareACell:
+    """
+    Two Boundaries are at least one cell apart, as in the exact solver.
+
+    The span correction divides by C(cells - 1, n - 2), the ways n - 2
+    interior Boundaries fit STRICTLY inside a span, so a sampler that lets
+    them coincide has more arrangements at each span than it divides out, the
+    excess largest at the smallest spans. It could only happen where nothing
+    but an empty Phase or a level of nesting separated two Boundaries, and on
+    a real multi-area site model it put a whole site into a late calibration lobe holding
+    under 1% of the posterior, with four chains agreeing at R-hat 1.001.
+    """
+
+    def _layers(self):
+        # Shaped like a real dune section: dated layers with sterile ones between,
+        # every date under a General outlier model. Synthetic ages.
+        layers = [[615, 630, 705], [], [690], [], [625, 645], [],
+                  [550, 565], [595, 590, 620], [545]]
+        children, measurements = [_element('boundary', 'Start')], []
+        for i, ages in enumerate(layers):
+            phase = _element('phase', f'Layer {i}')
+            children.append(phase)
+            for age in ages:
+                date = _date(phase['id'], age)
+                date.update(error_1sigma=18, outlier_model='general', outlier_prior=0.05)
+                measurements.append(date)
+            children.append(_element('boundary', f'Top {i}'))
+        return measurements, _element('sequence', 'Dune', children)
+
+    def test_two_boundaries_either_side_of_an_empty_phase_cannot_meet(self):
+        measurements, tree = self._layers()
+        model = gibbs.Model(measurements, tree)
+        state = model.initial_state()
+        # Either side of Layer 1, which is empty.
+        older, younger = tree['children'][2]['id'], tree['children'][4]['id']
+        assert model.allowed(younger, state)[1] == state.index[older] - 1
+        assert model.allowed(older, state)[0] == state.index[younger] + 1
+        touching = state.copy()
+        touching.index[younger] = state.index[older]
+        assert model.log_posterior(touching) == -np.inf
+
+    def test_it_agrees_with_the_exact_solver_across_empty_phases(self):
+        """
+        Exact Start 617.0. With coincident Boundaries allowed the same runs
+        gave 606.3 and 562.4 -- the second a whole lobe out -- and with them
+        kept apart 619.5 and 621.7.
+        """
+        measurements, tree = self._layers()
+        chain = ec.layout(tree, measurements)
+        exact = ec.solve(measurements, tree, chain, interval_draws=500)
+        grid = _exact_grid(exact)
+        start = chain.boundary_ids[0]
+        means = []
+        for seed in (1, 2):
+            model = gibbs.Model(measurements, tree, grid=grid)
+            run = gibbs.run(model, sweeps=6000, max_sweeps=6000, seed=seed,
+                            target_convergence=1.01)
+            visits = run['histograms'][start]
+            means.append(float((grid * visits).sum() / visits.sum()))
+        assert np.mean(means) == pytest.approx(
+            exact['boundaries'][start]['posterior']['posterior_mean'], abs=6.0)
+
+
+class TestEnclosureMoves:
+    """
+    A group in one of several parallel branches is offered its translation
+    with the Boundary enclosing it on one side (Model._with_enclosure), since
+    it cannot reach another calibration lobe while that Boundary holds it in.
+    """
+
+    def test_a_branch_inside_a_site_can_move_with_the_site_start_or_end(self):
+        nen, dune = _element('phase', 'Nen'), _element('phase', 'Dune')
+        start, end = _element('boundary', 'Site start'), _element('boundary', 'Site end')
+        tree = _element('sequence', 'Site', [start, _element('phase', 'Activity', [
+            _element('sequence', 'A', [_element('boundary', 'sA'), nen,
+                                       _element('boundary', 'eA')]),
+            _element('sequence', 'B', [_element('boundary', 'sB'), dune,
+                                       _element('boundary', 'eB')]),
+        ]), end])
+        measurements = [_date(nen['id'], 650), _date(nen['id'], 660),
+                        _date(dune['id'], 600), _date(dune['id'], 610)]
+        model = gibbs.Model(measurements, tree)
+        sets = [set(s) for s in model.move_sets()]
+        nen_dates = {m['id'] for m in measurements[:2]}
+        assert any(nen_dates <= s and start['id'] in s and end['id'] not in s for s in sets)
+        assert any(nen_dates <= s and end['id'] in s and start['id'] not in s for s in sets)

@@ -175,7 +175,8 @@ interface AnalysisResult {
     // overlap-integral convergence measure -- read off the rounds pooled over
     // every chain when several ran -- AND, with several chains, Gelman-Rubin
     // R̂ under `rhat_target`, so chains that settled in different calibration
-    // lobes cannot be pooled in silence. The between-chain overlap is
+    // lobes cannot be pooled in silence (a lobe no chain reached is another
+    // matter -- see `cross_check`). The between-chain overlap is
     // information only. The chain fields are null on a single chain, which
     // has nothing to disagree with. `sweeps` is the total over every chain.
     sweeps?: number
@@ -188,6 +189,15 @@ interface AnalysisResult {
     between_chain_convergence?: number | null
     rhat?: number | null
     rhat_target?: number | null
+    // Sampled path only: the sampled Boundaries against a direct calculation
+    // of the same model (services/cross_check.py), where the model's shape
+    // allows one. Null when the analysis turned it off.
+    cross_check?: {
+      status: 'agrees' | 'differs' | 'not_checked'
+      reason: string | null
+      checked: number
+      differing: { id: string; name: string; distance: number }[]
+    } | null
     // The whole model's agreement with its dates, both of OxCal's headline
     // indices. `model_agreement` (Amodel) is computed over the joint
     // posterior; `overall_agreement` (Aoverall) combines the per-date indices
@@ -1883,6 +1893,19 @@ export default function Results() {
     chainCount > 1 ? `${chainCount} chains and ${passes} passes${rhat}` : `${passes} passes`
   let solverChip: JSX.Element | null = null
   let solverAlert: JSX.Element | null = null
+  const crossCheck = analysis.solver?.method === 'gibbs' ? analysis.solver.cross_check : null
+  const crossCheckAlert =
+    isBayesian && crossCheck?.status === 'differs' ? (
+      <Alert severity="warning">
+        <Typography variant="subtitle2" gutterBottom>
+          A direct calculation gives a different answer
+        </Typography>
+        <Typography variant="body2">
+          Differs at {crossCheck.differing.map((row) => row.name).join(', ')}. See the
+          manual on checking a sampled result.
+        </Typography>
+      </Alert>
+    ) : null
   if (isBayesian && analysis.status !== 'failed') {
     if (!analysis.solver) {
       solverChip = (
@@ -2004,7 +2027,10 @@ export default function Results() {
               analysis.solver.convergence !== undefined
                 ? (analysis.solver.convergence * 100).toFixed(1) + '%'
                 : 'the 95% target'
-            } over ${sampling}.`
+            } over ${sampling}.` +
+            (crossCheck?.status === 'agrees'
+              ? ' A direct calculation of the same model agrees.'
+              : '')
           }
         >
           <Chip
@@ -2346,6 +2372,7 @@ export default function Results() {
           summary chip row above -- only a warning worth its own paragraph
           lands here. */}
       {solverAlert && <Box sx={{ mb: 3 }}>{solverAlert}</Box>}
+      {crossCheckAlert && <Box sx={{ mb: 3 }}>{crossCheckAlert}</Box>}
 
       {/* Boundaries are not listed separately: they sit in the results table
           in their place in the structure, between the phases they separate,

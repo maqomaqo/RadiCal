@@ -1570,3 +1570,66 @@ class TestSequenceOfSequences:
         dates = _dates(('d1', 3200, 30, 'p1'), ('d2', 3000, 30, 'p2'))
         assert ec.layout(tree, dates) is None
         assert ec.layout(_spelled_out(tree), dates) is not None
+
+
+class TestJointDraws:
+    """
+    The joint draws Amodel and the durations read, taken by drawing each
+    boundary from its conditional given the ones already drawn.
+    """
+
+    def test_a_row_on_a_tiny_scale_still_draws_from_its_own_weights(self):
+        """
+        A conditional's rows are products of messages running from 1 down to
+        1e-60, so one batch holds rows on wildly different scales. Batching
+        them through one shared searchsorted rounded the small rows away: each
+        drew column 0, a cell of zero weight, i.e. a boundary where it cannot
+        be.
+        """
+        width = 400
+        weights = np.zeros((6, width))
+        weights[0::2, 150:] = 19.0 / 250          # rows totalling about 19
+        weights[1::2, 300:320] = 1e-13 / 20       # ...and about 1e-13
+        picked = ec._sample_columns(np.random.default_rng(0), np.tile(weights, (100, 1)))
+        assert np.all(np.tile(weights, (100, 1))[np.arange(len(picked)), picked] > 0)
+        small = picked.reshape(100, 6)[:, 1::2]
+        assert small.min() >= 300 and small.max() < 320
+
+    def test_draws_are_spread_as_the_weights_say(self):
+        weights = np.tile(np.array([[0.0, 1e-30, 3e-30, 0.0, 6e-30, 0.0]]), (20000, 1))
+        picked = ec._sample_columns(np.random.default_rng(1), weights)
+        counts = np.bincount(picked, minlength=6) / len(picked)
+        np.testing.assert_allclose(counts, [0, 0.1, 0.3, 0, 0.6, 0], atol=0.015)
+
+    def test_a_long_sequence_with_empty_phases_and_outliers(self):
+        """
+        The shape that failed: a dune profile of eleven groups, three of them
+        empty, inside an outer Start/End pair, every date under the general
+        outlier model. The marginals were fine but the joint draws raised 'a
+        conditional came out empty' -- an earlier draw had landed on a
+        zero-weight cell, leaving nothing for the next boundary to take.
+        Synthetic dates; the failure did not depend on their exact values.
+        """
+        groups = [[(700, 20), (680, 18), (665, 16)], [], [(670, 16)], [],
+                  [(640, 18), (630, 16)], [], [(600, 15), (585, 16)],
+                  [(590, 18), (580, 15), (575, 15)], [(550, 20)]]
+        children = [_boundary('dn_start', 'Site start'), _boundary('dn_b0')]
+        dates = []
+        for k, group in enumerate(groups):
+            children += [_phase(f'dn_p{k}'), _boundary(f'dn_b{k + 1}')]
+            for j, (age, error) in enumerate(group):
+                dates.append({'id': f'dn_{k}_{j}', 'sample_name': f'dn_{k}_{j}',
+                              'age_bp': age, 'error_1sigma': error,
+                              'curve_id': 'shcal20', 'element_id': f'dn_p{k}',
+                              'outlier_prior': 0.05, 'outlier_model': 'general'})
+        children.append(_boundary('dn_end', 'Site end'))
+        tree = _sequence('dn', children)
+        chain = ec.layout(tree, dates)
+        assert chain is not None and len(chain.groups) == 11
+
+        solved = ec.solve(dates, tree, chain, num_samples=200)
+
+        # Every draw is a possible state: each boundary strictly older than
+        # the next.
+        ages = np.array([solved['joint_boundaries'][b] for b in chain.boundary_ids])
+        assert np.all(np.diff(ages, axis=0) < 0)

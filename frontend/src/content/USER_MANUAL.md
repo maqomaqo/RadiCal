@@ -415,14 +415,21 @@ the worst parameter reaches 95% on OxCal's own convergence measure, and extends 
 has not; the achieved figure is reported with the results, and a run that fell short is flagged
 rather than quietly returned.
 
-By default four independent chains run at once on separate processor cores, each from its own
-random start, and stop together under one rule: the convergence measure is read off their pooled
-draws, so the target is reached in about a quarter of the sweeps per chain and the run finishes about
-three times sooner than a single chain would. The chains must also agree with one another before the
-run may stop — the Gelman–Rubin R̂, reported with the results, has to sit under 1.05 — which is a
-check a single chain cannot make on itself: a chain settled into one of a date's two calendar ranges
-looks perfectly converged to itself, and only another chain that settled into the other range can show
-it up. The chain count is set in the analysis options; one chain is the plain run.
+By default four independent chains run at once on separate processor cores and stop together under
+one rule: the convergence measure is read off their pooled draws, so the target is reached in about a
+quarter of the sweeps per chain and the run finishes about three times sooner than a single chain
+would. The first chain starts with every date at the peak of its own calibration; the others start
+spread across the dates' calibrated ranges, one towards the older end, one in the middle, one towards
+the younger end. The chains must also agree with one another before the run may stop — the
+Gelman–Rubin R̂, reported with the results, has to sit under 1.05 — which is a check a single chain
+cannot make on itself: a chain settled into one of a date's two calendar ranges looks perfectly
+converged to itself, and only another chain that settled into the other range can show it up. That is
+why the starts are spread: chains that all begin in the same range can all stay there and agree.
+Agreement is strong evidence, not proof. A calendar range that none of the chains reaches is still
+invisible to R̂, so where a result has two well-separated ranges and the decision rests on which one
+is right, check it another way as well. For two common model shapes the app does this itself and
+says on the Results page whether a direct calculation agrees (see [A.6](#a6-solvers)). The chain
+count is set in the analysis options; one chain is the plain run.
 
 Where both can be asked, they agree to under a year, and they are checked against each other on
 every model both can handle.
@@ -1296,7 +1303,24 @@ the span factors of the groups it bounds. The app draws these by inverse CDF on 
 cumulative table rather than by rejection as OxCal does: the same target distribution, at bounded
 cost per draw. Conditionally independent dates are updated in blocks, and whole-group translation
 moves are proposed on the exact MH ratio so a tightly constrained group can cross between
-calibration lobes, which single-site updating cannot do.
+calibration lobes, which single-site updating cannot do. A group in one of several parallel branches
+is also offered the move together with the Boundary enclosing it on one side, since it cannot cross
+to another lobe while that Boundary holds it in. Of the wide proposals, half jump by one of the
+distances between the group's own calibration peaks, either way and blurred by a few years, rather
+than by a draw from a fixed 120-year kernel: a fixed kernel proposes a 40-year jump often and an
+80-year one rarely, wherever the lobes actually are. Each distance is proposed in both directions
+from any state, so the proposal stays symmetric and the acceptance ratio is still the posterior
+ratio alone. On a test model of several areas within a site, the two moves together brought a run that had stopped unconverged at
+the 200,000-sweep ceiling to convergence in 50,000, and without the enclosure move a run converged
+with the wrong weight on a group's two lobes (0.27 against the exact 0.40).
+
+Two Boundaries never share a grid cell, a date may sit on one at half weight, and the sampler holds
+to this exactly as the exact solver does. The span correction below divides by the number of ways
+the interior Boundaries fit *strictly* inside a span, so letting two of them meet adds arrangements
+the correction never divides out, most of all at the smallest spans. An earlier version let
+Boundaries separated only by an empty Phase, or by a level of nesting, coincide; models with sterile
+layers between dated ones, or Sequences inside a Phase, were then packed too tightly and could sit
+in the wrong calibration lobe with every chain agreeing.
 
 **Convergence** is OxCal's own diagnostic: the overlap integral between the distribution accumulated
 over the first half of the run and over the second half, per parameter, targeting 0.95. The run
@@ -1305,7 +1329,12 @@ value is always reported.
 
 **Several chains, one stopping rule.** By default four independent chains run at once, one per
 processor core, each seeded differently (chain 0 with the run's own seed, so a single-chain run is
-chain 0 of any wider one). They advance in step — the same burn-in, one round at a time — and the
+chain 0 of any wider one). Chain 0 starts with every date at its likelihood mode. Chain `c` of the
+other `n − 1` starts with every date at the same quantile `q_c` of its own likelihood, `q_c` drawn
+from the `c`-th of `n − 1` equal strata of 0.025–0.975, and the ordering is then repaired from the
+oldest parameter down. One quantile for every date rather than one each, because the lobes that
+matter belong to whole groups: a Phase's dates calibrate on the same stretch of curve, and a group
+can only be found in its other lobe if its members start there together. They advance in step — the same burn-in, one round at a time — and the
 convergence measure above is read off their rounds *pooled*, so the run stops when the pooled
 histogram has converged rather than when each chain has on its own. The deficit in that measure is
 mostly Monte Carlo noise, which falls as `1/sqrt(draws)`, so four chains reach the target in about a
@@ -1322,11 +1351,46 @@ with `W` the mean within-chain variance and `B` the between-chain variance of th
 read from the chains' histograms with `n` the draws each holds, held under 1.05 for every parameter.
 That is the check a single chain cannot make on itself: a chain settled into one of a date's two
 calendar ranges looks perfectly converged to itself, and only another chain that settled into the
-other range can show it up, as `R-hat` in the tens. A run that hits the sweep ceiling with the chains
+other range can show it up, as `R-hat` in the tens. It follows that `R-hat` can only report a range
+some chain has actually visited. Chains that all start from the same state can settle in the same
+lobe, never leave it, and pass at 1.00, which is why the starts are spread. Spreading them makes
+that failure less likely, but it does not rule it out. A run that hits the sweep ceiling with the chains
 still apart is reported as unconverged whatever its pooled overlap says. The overlap of each chain's
 own histogram with the pool is reported beside these for information, but not held to the 0.95
 target: one chain holds a quarter of the pooled draws, so that overlap is noisier by construction and
 sits near 0.93 when the chains agree perfectly by `R-hat`.
+
+**Checking a sampled result.** Both convergence measures compare the sampler with itself: one half
+of a run with the other, one chain with another. Neither can see a lobe no chain reached, and
+neither can see a target that is wrong in the same way for every chain. So for two common shapes the
+app also calculates the same model directly, without sampling, and compares the two:
+
+- a chain of Phases and Boundaries written with nested Sequences, such as a Sequence of two
+  Sequences;
+- parallel chains between an outer pair, such as a site's Start and End Boundaries around a Phase
+  holding one Sequence per area.
+
+Given the outer pair, the branches are independent, so
+
+```
+p(S, E) ∝ C(S, E) · T0(S, E) · Π_b Z_b(S, E)
+```
+
+with `C` the span correction over the outer pair, `T0` the span factor and likelihoods of any dates
+sitting directly in the Phase, and `Z_b(S, E)` branch `b` integrated with its ends strictly between
+`S` and `E`. Each `Z_b` is a cumulative sum of the branch's end-to-end transfer product, and each
+branch's own Boundaries then come from the chain's message passing with an end-to-end weight in place
+of its span correction. A shared outlier scale is handled by conditioning on it: for every
+combination of scale nodes the model is an ordinary one, so each is integrated and the results are
+mixed by their evidence under the same uniform prior the sampler uses. Everything that defines the
+target (likelihoods, Boundary limits, the span correction) is taken from the sampler's own model, so
+the two calculate the same posterior and should agree up to Monte Carlo noise.
+
+Each Boundary is compared on 5-year bins by total variation distance, the share of probability that
+sits in a different place in the two answers. Over 0.15 is reported on the Results page as a
+difference, naming the Boundaries. Runs that agree sit under about 0.08. Treat a difference as the
+direct calculation being right: it has no lobe to miss. Other model shapes are not checked, and the
+solver record says why.
 
 The pooled histogram is the sum of the chains' and so assumes every chain has mixed, which is
 exactly what `R-hat` checks. The chains run as separate processes and never touch the database; the
