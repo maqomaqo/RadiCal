@@ -1392,3 +1392,181 @@ class TestImplicitBoundaries:
         solved = ec.solve(samples, patched, ec.layout(patched, samples), num_samples=300)
         for m in samples:
             assert 'outlier_probability' in solved['measurements'][m['id']]
+
+
+def _spelled_out(element):
+    """`element` with every Sequence directly inside a Sequence replaced by its
+    children, at any depth -- the same model written flat."""
+    children = []
+    for child in element.get('children') or []:
+        child = _spelled_out(child)
+        if (element.get('element_type') == 'sequence'
+                and child.get('element_type') == 'sequence'):
+            children.extend(child['children'])
+        else:
+            children.append(child)
+    return dict(element, children=children)
+
+
+class TestSequenceOfSequences:
+    """
+    Sequence['Nenthorn then SRM': Sequence[B, P, B], Sequence[B, P, B, P, B]]
+    -- each inner Sequence bracketed by its own Boundaries. It plans as two
+    paths of groups with only an ordering across the gap between them, which
+    is exactly an empty group there, so it is the same chain as the children
+    written out in place. It used to be refused as branching and sent to the
+    sampler.
+    """
+
+    def _nested(self):
+        first = _sequence('nen', [_boundary('b0', 'Start N'), _phase('pn', 'Nenthorn'),
+                                  _boundary('b1', 'End N')], name='Nenthorn')
+        second = _sequence('srm', [_boundary('b2', 'Start S'), _phase('ps1', 'SRM 1'),
+                                   _boundary('b3', 'Mid S'), _phase('ps2', 'SRM 2'),
+                                   _boundary('b4', 'End S')], name='SRM')
+        tree = _sequence('root', [first, second], name='Nenthorn then SRM')
+        dates = _dates(('n1', 3230, 30, 'pn'), ('n2', 3190, 30, 'pn'),
+                       ('s1', 3060, 30, 'ps1'), ('s2', 3090, 30, 'ps1'),
+                       ('s3', 2960, 30, 'ps2'), ('s4', 2990, 30, 'ps2'))
+        return tree, dates
+
+    def test_it_is_a_chain(self):
+        tree, dates = self._nested()
+        chain, reason = ec.layout_with_reason(tree, dates)
+        assert reason is None
+        assert chain.boundary_ids == ['b0', 'b1', 'b2', 'b3', 'b4']
+        assert chain.groups == [['n1', 'n2'], [], ['s1', 's2'], ['s3', 's4']]
+
+    def test_it_is_the_same_chain_as_spelled_out_in_place(self):
+        tree, dates = self._nested()
+        nested = ec.layout(tree, dates)
+        flat = ec.layout(_spelled_out(tree), dates)
+        assert nested.boundary_ids == flat.boundary_ids
+        assert nested.groups == flat.groups
+
+    def test_deeper_nesting_is_still_one_line(self):
+        tree, dates = self._nested()
+        third = _sequence('late', [_boundary('b5'), _phase('pl'), _boundary('b6')])
+        deeper = _sequence('top', [tree, third])
+        dates = dates + _dates(('l1', 2850, 30, 'pl'))
+        chain = ec.layout(deeper, dates)
+        assert chain.boundary_ids == ['b0', 'b1', 'b2', 'b3', 'b4', 'b5', 'b6']
+        assert chain.groups[-2:] == [[], ['l1']]
+
+    def test_the_plan_is_the_same_model(self):
+        """
+        plan_model on the nested tree: the same dated groups, the same
+        Boundaries, and every ordering the flat tree states also forced --
+        the flat tree's extra empty group carries no factor of its own.
+        """
+        from app.services.model_tree import plan_model
+
+        tree, dates = self._nested()
+        nested, flat = plan_model(tree, dates), plan_model(_spelled_out(tree), dates)
+
+        def groups(plan):
+            return sorted((g.older_boundary_id, g.younger_boundary_id, tuple(g.date_ids))
+                          for g in plan.span_groups if g.date_ids)
+
+        assert groups(nested) == groups(flat)
+        assert nested.boundary_names == flat.boundary_names
+        assert [(g.older_boundary_id, g.younger_boundary_id)
+                for g in flat.span_groups if not g.date_ids] == [('b1', 'b2')]
+
+        def pairs(plan):
+            return {(o, y) for olds, youngs in plan.ordering
+                    for _ko, o in olds for _ky, y in youngs}
+
+        assert pairs(flat) <= pairs(nested)
+
+    def test_the_sampler_applies_the_same_span_prior(self):
+        """
+        The gibbs Model works from the unstitched plan. Its UniformSpanPrior
+        components must still be the single one exact_chain applies: all five
+        Boundaries, oldest b0, youngest b4, exponent n - 2 = 3.
+        """
+        from app.services import gibbs
+
+        tree, dates = self._nested()
+        exact = ec.solve(dates, tree, ec.layout(tree, dates), num_samples=50)
+        grid = np.arange(exact['grid']['lower'], exact['grid']['upper'] + 1e-9,
+                         exact['grid']['step'])
+        nested = gibbs.Model(dates, tree, grid=grid)
+        flat = gibbs.Model(dates, _spelled_out(tree), grid=grid)
+        assert nested.span_priors == [('b0', 'b4', 3)]
+        assert nested.span_priors == flat.span_priors
+        for a, b in zip(nested.span_prior_rows, flat.span_prior_rows):
+            np.testing.assert_array_equal(a, b)
+
+    def test_it_solves_identically_to_spelled_out(self):
+        tree, dates = self._nested()
+        flat_tree = _spelled_out(tree)
+        nested = ec.solve(dates, tree, ec.layout(tree, dates), num_samples=200)
+        flat = ec.solve(dates, flat_tree, ec.layout(flat_tree, dates), num_samples=200)
+        for m in dates:
+            assert (nested['measurements'][m['id']]['posterior_mean']
+                    == pytest.approx(flat['measurements'][m['id']]['posterior_mean'],
+                                     abs=1e-9))
+        for bid in ('b1', 'b2', 'b3'):
+            assert (nested['boundaries'][bid]['posterior']['posterior_mean']
+                    == pytest.approx(flat['boundaries'][bid]['posterior']['posterior_mean'],
+                                     abs=1e-9))
+
+    def test_it_matches_the_sampler(self):
+        """
+        The independent check: gibbs.solve on the NESTED tree, which it plans
+        as written, lands on the exact answer. Same grid, so only inference can
+        differ; 3 years rms is the bound test_gibbs uses on the chain fixtures.
+        Interior Boundaries only -- an outermost one's tail depends on the
+        window (see test_gibbs.test_interior_boundaries_match).
+        """
+        from app.services import gibbs
+
+        tree, dates = self._nested()
+        exact = ec.solve(dates, tree, ec.layout(tree, dates), num_samples=100)
+        grid = np.arange(exact['grid']['lower'], exact['grid']['upper'] + 1e-9,
+                         exact['grid']['step'])
+        sampled = gibbs.solve(dates, tree, sweeps=20000, max_sweeps=20000,
+                              num_samples=100, grid=grid)
+        errors = np.array([
+            sampled['measurements'][m['id']]['posterior_mean']
+            - exact['measurements'][m['id']]['posterior_mean'] for m in dates])
+        assert np.sqrt((errors ** 2).mean()) < 3.0, errors.round(2)
+        for bid in ('b1', 'b2', 'b3'):
+            assert (sampled['boundaries'][bid]['posterior']['posterior_mean']
+                    == pytest.approx(exact['boundaries'][bid]['posterior']['posterior_mean'],
+                                     abs=5.0)), bid
+
+    def test_the_analysis_api_integrates_it_exactly(self):
+        from app.api import analysis as analysis_api
+
+        tree, dates = self._nested()
+        _r, _b, solver, _i, _s = analysis_api._run_bayesian(
+            dates, tree, {'mcmc_samples': 200})
+        assert solver['method'] == 'exact'
+        assert solver['reason'] is None
+        assert solver['implicit_boundaries'] == 0
+
+    def test_independent_branches_are_still_not_chained(self):
+        """Stitching needs the tree to order the paths. Two bracketed branches
+        inside a Phase are not ordered, so joining them would add a constraint."""
+        tree, dates = self._nested()
+        tree = _sequence('root', [{'id': 'par', 'element_type': 'phase',
+                                   'name': 'Parallel', 'tpq_age_bp': None,
+                                   'taq_age_bp': None, 'children': tree['children']}])
+        chain, reason = ec.layout_with_reason(tree, dates)
+        assert chain is None
+        assert 'branches' in reason
+
+    def test_an_unbracketed_inner_sequence_is_not_spelled_out(self):
+        """
+        Sequence[B, Sequence[P1, B], P2, B] is NOT the flat model: the outer
+        Boundaries enclose P1 and P2 as one group with the inner Boundary
+        ordered between them. Spelling it out would change the prior, so it
+        stays with the sampler.
+        """
+        inner = _sequence('in', [_phase('p1'), _boundary('mid')])
+        tree = _sequence('s', [_boundary('b0'), inner, _phase('p2'), _boundary('b1')])
+        dates = _dates(('d1', 3200, 30, 'p1'), ('d2', 3000, 30, 'p2'))
+        assert ec.layout(tree, dates) is None
+        assert ec.layout(_spelled_out(tree), dates) is not None
