@@ -401,7 +401,9 @@ and samples otherwise, and the Results page always says which of the two actuall
 exists for the handful of cases below.
 
 **Exact integration** applies to a *chain-shaped* model - one line of Phases separated by Boundaries,
-with every date inside a bounded group, and no ordering the chain does not already imply. It computes 
+with every date inside a bounded group, and no ordering the chain does not already imply. A Sequence
+of Sequences counts, as long as each inner Sequence starts and ends with its own Boundary: it is the
+same model as writing their contents out in one Sequence, and is solved as one. It computes 
 the posterior on a calendar grid by message passing. There is no sampler, so nothing to converge, no 
 run length to choose, and no calibration lobe the chain can miss. It is also the faster of the two, usually 
 by a wide margin: a single deterministic pass, with no progress bar because there is no iteration to report.
@@ -1269,7 +1271,10 @@ it narrows.
 The app chooses between two solvers by model shape. Both target the same posterior, and are checked
 against each other on models both can handle.
 
-**Exact integration** (chain-shaped models: a Sequence of Phases separated by Boundaries). Every
+**Exact integration** (chain-shaped models: a Sequence of Phases separated by Boundaries, or a
+Sequence of such Sequences, each bracketed by its own Boundaries — the gap between one inner
+Sequence's last Boundary and the next one's first is a group with no dates, contributing only the
+ordering, so the model is the same chain written out flat). Every
 date other than the one being marginalised enters only through its likelihood integrated over an
 interval, which a cumulative sum supplies for all intervals at once. What remains is a chain over
 the Boundaries, solved by forward/backward message passing:

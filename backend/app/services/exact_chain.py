@@ -61,6 +61,10 @@ NO boundary between them is not a chain: its dates share one enclosing boundary
 pair while an extra constraint orders them against each other, and that
 constraint does not factorise along the chain. Adding an explicit Boundary
 between such groups makes it solvable here, and is better practice anyway.
+
+A Sequence of Sequences, each with its own Boundaries, IS a chain: it is the
+same model as its children written out in place, with an empty group between
+one inner Sequence's last Boundary and the next one's first. See _stitched.
 """
 from typing import Dict, List, Optional, Sequence, Tuple
 
@@ -70,7 +74,7 @@ from scipy.special import gammaln
 
 from app.services import intervals
 from app.services.calibration import SIGMA_1, SIGMA_2, get_curve, hpd_ranges_from_distribution
-from app.services.model_tree import inherited_bounds, plan_model
+from app.services.model_tree import SpanGroup, inherited_bounds, plan_model
 from app.services.stratigraphy import effective_bounds
 
 # Largest calendar grid the solver will build. Every step of the algorithm is
@@ -201,32 +205,39 @@ def layout_with_reason(
             'of it'
         )
 
-    # Link the groups into one path: each group's younger boundary must be the
-    # next group's older boundary, and no boundary may be reused elsewhere.
+    # Link the groups into paths: each group's younger boundary must be the
+    # next group's older boundary, and no boundary may start or end two groups.
     branched = (
         'the model branches: it has parallel groups rather than one line of '
         'phases, so the phases do not share a single chain of Boundaries'
     )
-    by_older = {}
+    by_older, by_younger = {}, set()
     for group in plan.span_groups:
-        if group.older_boundary_id in by_older:
-            return None, branched            # a boundary starting two groups
+        if (group.older_boundary_id in by_older
+                or group.younger_boundary_id in by_younger):
+            return None, branched            # a boundary starting/ending two groups
         by_older[group.older_boundary_id] = group
-    younger = {g.younger_boundary_id for g in plan.span_groups}
-    heads = [g for g in plan.span_groups if g.older_boundary_id not in younger]
-    if len(heads) != 1:
-        return None, branched
+        by_younger.add(group.younger_boundary_id)
+    heads = [g for g in plan.span_groups if g.older_boundary_id not in by_younger]
+    if not heads:
+        return None, branched                # every group is in a cycle
 
-    ordered_groups, seen = [], set()
-    current = heads[0]
-    while current is not None:
-        if id(current) in seen:
-            return None, branched
-        seen.add(id(current))
-        ordered_groups.append(current)
-        current = by_older.get(current.younger_boundary_id)
-    if len(ordered_groups) != len(plan.span_groups):
-        return None, branched                # more than one disjoint chain
+    segments, seen = [], set()
+    for head in heads:
+        segment, current = [], head
+        while current is not None:
+            if id(current) in seen:
+                return None, branched
+            seen.add(id(current))
+            segment.append(current)
+            current = by_older.get(current.younger_boundary_id)
+        segments.append(segment)
+    if len(seen) != len(plan.span_groups):
+        return None, branched                # a cycle hanging off a path
+
+    ordered_groups = _stitched(segments, plan)
+    if ordered_groups is None:
+        return None, branched                # paths not ordered against each other
 
     boundary_ids = ([g.older_boundary_id for g in ordered_groups]
                     + [ordered_groups[-1].younger_boundary_id])
@@ -286,6 +297,71 @@ def layout_with_reason(
 
     return Chain(boundary_ids, [list(g.date_ids) for g in ordered_groups],
                  dict(plan.boundary_names)), None
+
+
+def _stitched(segments: List[List[SpanGroup]], plan) -> Optional[List[SpanGroup]]:
+    """
+    Paths of bounded groups joined into one line, oldest first, or None when
+    the tree does not order them one after another.
+
+    A Sequence of Sequences, each bracketed by its own Boundaries, plans as one
+    path per inner Sequence: nothing encloses the gap between one's last
+    Boundary and the next one's first, only an ordering constraint across it.
+    That is exactly an EMPTY group there -- (span)^0 = 1 and the ordering, kept
+    strict like every other pair of Boundaries -- which is also what writing
+    the inner children out in place plans to. So the paths are joined by one,
+    but only where the tree's ordering already forces the earlier path's last
+    Boundary older than the later one's first. Anything less would ADD an
+    ordering: two independently bracketed branches inside a Phase are paths
+    too, and they must stay unchained.
+
+    The gibbs Model sees the same prior from the unstitched plan: its span
+    correction groups Boundaries by what the ordering makes comparable, which
+    puts every Boundary of the stitched line in one component with the same
+    outermost pair, and an empty group contributes nothing to it.
+    """
+    if len(segments) == 1:
+        return segments[0]
+
+    # Everything forced younger than each term, through the ordering and
+    # through each group's containment of its dates.
+    younger_of: Dict[str, List[str]] = {}
+
+    def edge(older: str, younger: str):
+        younger_of.setdefault(older, []).append(younger)
+
+    for older_terms, younger_terms in plan.ordering:
+        for _ko, older in older_terms:
+            for _ky, younger in younger_terms:
+                edge(older, younger)
+    for group in plan.span_groups:
+        for date_id in list(group.date_ids) + list(group.contained_ids):
+            edge(group.older_boundary_id, date_id)
+            edge(date_id, group.younger_boundary_id)
+
+    def reachable(start: str) -> set:
+        found, stack = set(), [start]
+        while stack:
+            for nxt in younger_of.get(stack.pop(), ()):
+                if nxt not in found:
+                    found.add(nxt)
+                    stack.append(nxt)
+        return found
+
+    below = [reachable(seg[-1].younger_boundary_id) for seg in segments]
+    heads = [seg[0].older_boundary_id for seg in segments]
+    # A path forced older than k others belongs k places from the end; the
+    # check below catches any pair the ordering leaves unrelated.
+    order = sorted(range(len(segments)),
+                   key=lambda i: -sum(h in below[i] for h in heads))
+    joined = list(segments[order[0]])
+    for earlier, later in zip(order, order[1:]):
+        if heads[later] not in below[earlier]:
+            return None
+        joined.append(SpanGroup(segments[earlier][-1].younger_boundary_id,
+                                heads[later], []))
+        joined.extend(segments[later])
+    return joined
 
 
 # --------------------------------------------------------------------------
