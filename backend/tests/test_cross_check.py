@@ -91,6 +91,41 @@ class TestShape:
             cross_check.shape(_element('phase', 'Just a phase'), dates)
 
 
+class TestOnlyTheWrittenModel:
+    """
+    Spelling nested Sequences out in place is only a restatement when each is
+    bracketed by Boundaries of its own; otherwise the flattened chain has
+    groups the written model does not, and the check must decline rather
+    than compare the sampler with a different model.
+    """
+
+    def _inner(self, inner_children):
+        a = _element('phase', 'A')
+        tree = _element('sequence', 'Site', [
+            _element('boundary', 'S'), a, _element('boundary', 'M'),
+            _element('sequence', 'Inner', inner_children), _element('boundary', 'E')])
+        return a, tree
+
+    @pytest.mark.parametrize('layout', ['middle', 'no_close', 'no_open'])
+    def test_an_unbracketed_inner_sequence_is_not_checked(self, layout):
+        x, y = _element('phase', 'X'), _element('phase', 'Y')
+        children = {
+            'middle': [x, _element('boundary', 'N'), y],
+            'no_close': [_element('boundary', 'N'), x],
+            'no_open': [x, _element('boundary', 'N')],
+        }[layout]
+        a, tree = self._inner(children)
+        dates = [_date(a['id'], 900), _date(x['id'], 800), _date(x['id'], 790)]
+        if layout == 'middle':
+            dates.append(_date(y['id'], 700))
+        with pytest.raises(cross_check.NotChecked):
+            cross_check.reference(dates, tree)
+
+    def test_a_bracketed_one_still_is(self):
+        dates, tree = _nested_chain()
+        assert cross_check.reference(dates, tree)['shape'] == 'chain'
+
+
 class TestTheSameModel:
     def test_it_is_the_exact_solver_on_a_chain(self):
         """The nested chain, spelled out, is something exact_chain solves."""

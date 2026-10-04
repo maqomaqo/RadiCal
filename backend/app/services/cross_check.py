@@ -164,6 +164,69 @@ def shape(root: Dict, measurements: List[Dict]
     return (children[0]['id'], children[2]['id'], loose), branches
 
 
+def _same_model(model: gibbs.Model, outer, branches: List[exact_chain.Chain]) -> None:
+    """
+    Raise NotChecked unless the shape is the model AS WRITTEN: the same span
+    groups, each with the same two Boundaries and the same dates, and the
+    same ordering between every pair of parameters, transitively, both ways.
+
+    Spelling nested Sequences out in place is only a restatement when every
+    inner Sequence is bracketed by Boundaries of its own. One that is not --
+    a Sequence holding two Phases and one Boundary, say -- flattens into a
+    chain whose groups the written model does not have, and integrating that
+    would check the sampler against a different model. The Boundaries and the
+    span correction can match while the groups do not, so the groups and the
+    ordering are compared directly.
+    """
+    groups = []
+    for chain in branches:
+        for index, dates in enumerate(chain.groups):
+            groups.append((chain.boundary_ids[index], chain.boundary_ids[index + 1],
+                           frozenset(dates)))
+    if outer is not None:
+        groups.append((outer[0], outer[1], frozenset(outer[2])))
+    written = {(older, younger, frozenset(dates))
+               for older, younger, dates in model.group_dates if dates}
+    if written != {g for g in groups if g[2]}:
+        raise NotChecked('its groups are not the ones the written model has')
+
+    younger_than: Dict[str, set] = {p: set() for p in model.params}
+
+    def order(older: str, younger: str) -> None:
+        younger_than[older].add(younger)
+
+    for chain in branches:
+        for index, dates in enumerate(chain.groups):
+            older, younger = chain.boundary_ids[index], chain.boundary_ids[index + 1]
+            order(older, younger)
+            for date_id in dates:
+                order(older, date_id)
+                order(date_id, younger)
+    if outer is not None:
+        start, end, loose = outer
+        for chain in branches:
+            order(start, chain.boundary_ids[0])
+            order(chain.boundary_ids[-1], end)
+        for date_id in loose:
+            order(start, date_id)
+            order(date_id, end)
+
+    closed: Dict[str, set] = {}
+
+    def reach(param: str) -> set:
+        if param not in closed:
+            closed[param] = set()
+            found = set()
+            for younger in younger_than[param]:
+                found |= {younger} | reach(younger)
+            closed[param] = found
+        return closed[param]
+
+    implied = {p: reach(p) for p in model.params}
+    if implied != model._younger_reachable():
+        raise NotChecked('its ordering is not the one the written model has')
+
+
 def _grid(measurements: List[Dict], root: Dict) -> np.ndarray:
     """
     The direct calculation's grid: the sampler's own step where that fits in
@@ -392,6 +455,7 @@ def reference(measurements: List[Dict], root: Dict,
                         uniform_span_prior=uniform_span_prior)
     if model.depositions or model.level_ids:
         raise NotChecked('the model has a deposition sequence')
+    _same_model(model, outer, branches)
     expected = sum(len(c.boundary_ids) for c in branches) + (2 if outer else 0)
     if set(model.boundary_ids) != (
             {b for c in branches for b in c.boundary_ids}
