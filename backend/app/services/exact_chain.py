@@ -937,6 +937,16 @@ def _sample_columns(rng, weights: np.ndarray) -> np.ndarray:
     """
     One column index per ROW of a (rows x M) weight matrix -- a batch of
     independent inverse-CDF draws, each from its own row.
+
+    Each row is compared only against its own cumulative, so rows on wildly
+    different scales cannot interfere. They do differ: a conditional's rows
+    are products of message entries that run from 1 down to 1e-60. This used
+    to lift every row by its row number times the largest total and run one
+    searchsorted over the flattened lot, and a row totalling 1e-13 beside one
+    totalling 19 vanished into the lift's rounding: its draw landed on column
+    0, a cell of zero weight, so a boundary was drawn where it cannot be. On
+    the span-prior path the next conditional then came out empty; on the plain
+    path the impossible draw went through silently.
     """
     cumulative = np.cumsum(weights, axis=1)
     totals = cumulative[:, -1]
@@ -944,14 +954,15 @@ def _sample_columns(rng, weights: np.ndarray) -> np.ndarray:
         raise ValueError('a conditional came out empty while drawing from the '
                          'joint posterior; the model may be contradictory')
     draw = rng.random(len(totals)) * totals
-    # One searchsorted over every row at once: each row's cumulative is lifted
-    # by its row number times a step larger than any total, so the flattened
-    # array is monotone and a row's draw, lifted the same way, lands in it.
-    rows, width = cumulative.shape
-    lift = (np.arange(rows) * (2.0 * float(totals.max()) + 1.0))
-    flat = (cumulative + lift[:, None]).ravel()
-    found = np.searchsorted(flat, draw + lift, side='left') - np.arange(rows) * width
-    return np.clip(found, 0, width - 1)
+    # The first column whose cumulative EXCEEDS the draw, which always carries
+    # weight: a zero cell repeats its predecessor's cumulative, so it cannot
+    # be the first to exceed anything.
+    found = (cumulative <= draw[:, None]).sum(axis=1)
+    # draw < total in exact arithmetic, but u * total can round up to it; the
+    # last column with weight is where such a draw belongs.
+    width = weights.shape[1]
+    last_with_weight = width - 1 - np.argmax(weights[:, ::-1] > 0, axis=1)
+    return np.minimum(found, last_with_weight)
 
 
 # Draws taken at a time when sampling the joint posterior. One block holds a
