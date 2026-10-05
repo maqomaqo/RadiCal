@@ -59,7 +59,7 @@ for name, filename in (('INTCAL_CURVE_PATH', 'intcal20.14c'),
 sys.path.insert(0, os.path.normpath(os.path.join(HERE, '..', '..')))
 sys.path.insert(0, os.path.normpath(os.path.join(HERE, '..')))
 
-from app.services import calibration, cross_check, gibbs  # noqa: E402
+from app.services import calibration, cross_check, exact_chain, gibbs  # noqa: E402
 
 ARMS = gibbs.START_STRATEGIES
 FAULTS = ('none', 'ties', 'slowmix', 'enclosure', 'singlesite')
@@ -266,6 +266,80 @@ def start_quality(model, starts):
             'pattern_distance': hamming}, states
 
 
+# The lobe-occupancy flag of the feature spec (S2): a lobe that holds at least
+# this share of a date's likelihood, yet less than OCC_EMPTY of the pooled
+# posterior, and that no chain spent more than OCC_EMPTY of its draws in.
+OCC_LIKELIHOOD_SHARE = 0.10
+OCC_EMPTY = 0.01
+# A lobe the exact answer puts at least this much on is a real miss, not a lobe
+# the model rules out.
+OCC_REAL = 0.05
+
+_DATE_TRUTH = {}
+
+
+def date_truth(key, measurements, tree):
+    """{date id: (calendar ages, mass per age)} from the exact solver, or None
+    where the model is not a chain it can solve."""
+    if key not in _DATE_TRUTH:
+        chain = exact_chain.layout(tree, measurements)
+        found = None
+        if chain is not None:
+            result = exact_chain.solve(measurements, tree, chain, interval_draws=50)
+            step = float(result['grid']['step'])
+            found = {}
+            for date_id, row in result['measurements'].items():
+                points = np.array(row['probability_distribution'], dtype=float)
+                found[date_id] = (points[:, 0], points[:, 1] * step)
+        _DATE_TRUTH[key] = found
+    return _DATE_TRUTH[key]
+
+
+def occupancy(model, histograms, truth):
+    """
+    The S2 flags over every date with several lobes (Model.lobes): per chain,
+    the posterior mass in each lobe; a lobe is UNVISITED when it holds at least
+    OCC_LIKELIHOOD_SHARE of the date's likelihood but no chain put more than
+    OCC_EMPTY of its draws there; the chains DISAGREE when they do not share a
+    dominant lobe. With `truth` (date posteriors from the exact solver), an
+    unvisited lobe is REAL when the exact answer puts OCC_REAL or more on it and
+    RULED OUT when it puts under OCC_EMPTY, so the flag's two readings can be
+    told apart; `lobe_error` is the worst gap between pooled and exact mass.
+    """
+    out = {'occ_dates': 0, 'occ_unvisited': 0, 'occ_unvisited_real': 0,
+           'occ_unvisited_ruled_out': 0, 'occ_disagree': 0, 'occ_lobe_error': None}
+    worst = 0.0
+    for date_id in model.date_ids:
+        lobes = model.lobes(date_id)
+        if not lobes:
+            continue
+        out['occ_dates'] += 1
+        per_chain = []
+        for chain in histograms:
+            row = chain[date_id]
+            per_chain.append([float(row[first:last].sum() / row.sum())
+                              for _peak, _share, first, last in lobes])
+        pooled = np.mean(per_chain, axis=0)
+        if len({int(np.argmax(masses)) for masses in per_chain}) > 1:
+            out['occ_disagree'] += 1
+        for k, (_peak, share, first, last) in enumerate(lobes):
+            exact = None
+            if truth is not None and date_id in truth:
+                ages, mass = truth[date_id]
+                low, high = model.grid[first], model.grid[last - 1]
+                exact = float(mass[(ages >= low) & (ages <= high)].sum())
+                worst = max(worst, abs(float(pooled[k]) - exact))
+            if (share >= OCC_LIKELIHOOD_SHARE and pooled[k] < OCC_EMPTY
+                    and max(masses[k] for masses in per_chain) <= OCC_EMPTY):
+                out['occ_unvisited'] += 1
+                if exact is not None:
+                    out['occ_unvisited_real'] += exact >= OCC_REAL
+                    out['occ_unvisited_ruled_out'] += exact < OCC_EMPTY
+    if truth is not None:
+        out['occ_lobe_error'] = worst
+    return out
+
+
 def drift(model, starts, states, sweeps, seed):
     """Share of multi-lobe dates still in the lobe they started in after burn-in."""
     kept = []
@@ -296,6 +370,7 @@ def job(args):
     try:
         measurements, tree = _inputs(key)
         truth = _truth(key, measurements, tree)
+        dates_exact = date_truth(key, measurements, tree)
         grid = truth['grid'] if truth else None
         with faulted(fault):
             model = gibbs.Model(measurements, tree, grid=grid)
@@ -312,7 +387,8 @@ def job(args):
 
         record = {'model': key, 'arm': arm, 'fault': fault, 'seed': seed,
                   'sweeps': sweeps, 'rhat': rhat, 'drift_kept': kept,
-                  'has_truth': truth is not None, **quality}
+                  'has_truth': truth is not None, 'has_date_truth': dates_exact is not None,
+                  **quality, **occupancy(model, histograms, dates_exact)}
         if truth:
             low = float(truth['grid'][0])
             count = int(np.ceil((truth['grid'][-1] - low) / cross_check.REPORTING_STEP_YEARS)) + 1
@@ -521,6 +597,51 @@ def command_report(options):
                       f"{_pct([r['seconds'] for r in rs], 50):9.1f} {sweeps / base:12.2f}")
 
 
+def command_occupancy(options):
+    """How the S2 lobe-occupancy flag does against the runs the faults made wrong."""
+    rows = [r for r in _load(options.results) if 'error' not in r and r.get('has_truth')]
+    rhat_value = lambda r: float('inf') if r['rhat'] is None else r['rhat']
+    flags = {
+        'R-hat': lambda r: rhat_value(r) > RHAT_GATE,
+        'unvisited': lambda r: r['occ_unvisited'] > 0,
+        'disagree': lambda r: r['occ_disagree'] > 0,
+        'unvisited+disagree': lambda r: r['occ_unvisited'] > 0 or r['occ_disagree'] > 0,
+        'any + R-hat': lambda r: (r['occ_unvisited'] > 0 or r['occ_disagree'] > 0
+                                  or rhat_value(r) > RHAT_GATE),
+    }
+    arms = sorted({r['arm'] for r in rows})
+    print(f"{len(rows)} runs with truth; wrong = worst Boundary over {WRONG} from truth")
+    for fault in sorted({r['fault'] for r in rows}):
+        for arm in arms:
+            runs = [r for r in rows if r['fault'] == fault and r['arm'] == arm]
+            wrong = [r for r in runs if r['tv_truth'] > WRONG]
+            right = [r for r in runs if r['tv_truth'] <= WRONG]
+            print(f"\n{fault} / {arm}: {len(wrong)} wrong of {len(runs)}")
+            print(f"  {'flag':20s} {'catches wrong':>14s} {'false alarms':>13s} {'precision':>10s}")
+            for name, flag in flags.items():
+                caught = sum(flag(r) for r in wrong)
+                false = sum(flag(r) for r in right)
+                fired = caught + false
+                print(f"  {name:20s} {f'{caught}/{len(wrong)}':>14s} {f'{false}/{len(right)}':>13s} "
+                      f"{(f'{caught}/{fired}' if fired else '-'):>10s}")
+    # The flag's two readings, where the exact solver gives the date posteriors.
+    solved = [r for r in rows if r.get('has_date_truth') and r['occ_unvisited']]
+    real = sum(r['occ_unvisited_real'] for r in solved)
+    ruled = sum(r['occ_unvisited_ruled_out'] for r in solved)
+    total = sum(r['occ_unvisited'] for r in solved)
+    print(f"\nUnvisited lobes on exactly solvable models: {total} flagged -- "
+          f"{real} the exact answer puts at least {OCC_REAL} on (real misses), "
+          f"{ruled} it puts under {OCC_EMPTY} on (ruled out by the model)")
+    for fault in sorted({r['fault'] for r in rows}):
+        errors = [r['occ_lobe_error'] for r in rows
+                  if r['fault'] == fault and r.get('occ_lobe_error') is not None]
+        wrong = [r['occ_lobe_error'] for r in rows if r['fault'] == fault
+                 and r.get('occ_lobe_error') is not None and r['tv_truth'] > WRONG]
+        if errors:
+            print(f"worst date-lobe mass error, {fault}: median {_pct(errors, 50):.3f}"
+                  + (f"; on wrong runs {_pct(wrong, 50):.3f}" if wrong else ""))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
     sub = parser.add_subparsers(dest='command', required=True)
@@ -539,11 +660,14 @@ def main():
             p.add_argument('--drift', action='store_true', help='also measure burn-in drift')
         else:
             p.add_argument('--max-sweeps', type=int, default=gibbs.MAX_SWEEPS)
+    p = sub.add_parser('occupancy')
+    p.add_argument('results')
     p = sub.add_parser('report')
     p.add_argument('results')
     p.add_argument('cost', nargs='?')
     options = parser.parse_args()
-    {'run': command_run, 'cost': command_cost, 'report': command_report}[options.command](options)
+    {'run': command_run, 'cost': command_cost, 'report': command_report,
+     'occupancy': command_occupancy}[options.command](options)
 
 
 if __name__ == '__main__':
