@@ -150,19 +150,26 @@ class Chain:
         return f"Chain({len(self.groups)} groups, {len(self.boundary_ids)} boundaries)"
 
 
-def layout(root: Dict, measurements: List[Dict]) -> Optional[Chain]:
+def layout(root: Dict, measurements: List[Dict],
+           allow_inner_order: bool = False) -> Optional[Chain]:
     """
     The chain this model reduces to, or None if it does not reduce to one.
 
     Semantic rather than syntactic: it works from plan_model's output, so
     nesting that adds no ordering of its own -- a Sequence wrapping a single
     Phase, say -- is still recognised as a chain.
+
+    `allow_inner_order` is for services/cross_check.py, which integrates
+    groups whose dates are ordered against each other inside one pair of
+    Boundaries. It returns the chain of Boundaries and groups without insisting
+    that the chain implies every ordering the tree asks for; the caller must
+    check the extra ordering is one it can integrate. This solver never asks.
     """
-    return layout_with_reason(root, measurements)[0]
+    return layout_with_reason(root, measurements, allow_inner_order)[0]
 
 
 def layout_with_reason(
-    root: Dict, measurements: List[Dict]
+    root: Dict, measurements: List[Dict], allow_inner_order: bool = False
 ) -> Tuple[Optional[Chain], Optional[str]]:
     """
     layout(), plus a plain-English reason when the model is not a chain, so
@@ -289,6 +296,8 @@ def layout_with_reason(
         if any(r is None for r in older_ranks + younger_ranks):
             return None, branched
         if max(older_ranks) >= min(younger_ranks):
+            if allow_inner_order:
+                continue
             return None, (
                 'two groups are ordered against each other with no Boundary '
                 'between them. Add a Boundary at that transition to make the '

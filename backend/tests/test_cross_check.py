@@ -164,6 +164,121 @@ class TestTheSameModel:
         assert np.median([abs(r['sampled_mean'] - r['direct_mean']) for r in rows]) < 2.0
 
 
+def _ordered_phases(ages=((700, 720), (640, 650))):
+    """Phases in a Sequence with NO Boundary between them: one Boundary pair,
+    and every date of one phase older than every date of the next."""
+    phases = [_element('phase', f'Phase {i}') for i in range(len(ages))]
+    tree = _element('sequence', 'Site', [_element('boundary', 'S'), *phases,
+                                         _element('boundary', 'E')])
+    dates = [_date(phase['id'], age) for phase, group in zip(phases, ages) for age in group]
+    return dates, tree
+
+
+class _Reach:
+    """Just enough of a gibbs.Model for _blocks: what each date is older than."""
+
+    def __init__(self, younger):
+        self._younger = younger
+
+    def _younger_reachable(self):
+        return {d: set(y) for d, y in self._younger.items()}
+
+
+class TestOrderedGroups:
+    """
+    Dates ordered against each other inside one pair of Boundaries -- the shape
+    OxCal's own Nenthorn example takes, and one the exact solver declines
+    ("two groups are ordered against each other with no Boundary between them").
+    """
+
+    def test_the_exact_solver_declines_it_and_the_check_reads_it_as_a_chain(self):
+        dates, tree = _ordered_phases()
+        assert ec.layout(tree, dates) is None
+        outer, branches = cross_check.shape(tree, dates)
+        assert outer is None and len(branches) == 1
+        assert len(branches[0].boundary_ids) == 2
+        assert len(branches[0].groups) == 1 and len(branches[0].groups[0]) == 4
+
+    def test_blocks_come_oldest_first(self):
+        model = _Reach({'a1': {'b1', 'b2'}, 'a2': {'b1', 'b2'}, 'b1': set(), 'b2': set()})
+        blocks = cross_check._blocks(model, ['b2', 'a1', 'b1', 'a2'])
+        assert [sorted(b) for b in blocks] == [['a1', 'a2'], ['b1', 'b2']]
+
+    def test_three_blocks_in_any_listing_order(self):
+        model = _Reach({'a': {'b', 'c'}, 'b': {'c'}, 'c': set()})
+        assert cross_check._blocks(model, ['c', 'a', 'b']) == [['a'], ['b'], ['c']]
+
+    def test_dates_ordered_in_any_other_way_are_not_checked(self):
+        # a is older than b, and c is unrelated to both: not blocks.
+        model = _Reach({'a': {'b'}, 'b': set(), 'c': set()})
+        with pytest.raises(cross_check.NotChecked):
+            cross_check._blocks(model, ['a', 'b', 'c'])
+
+    def test_it_matches_a_brute_force_sum_over_every_placement(self):
+        """
+        Two dates, the first phase's older than the second's, so
+        p(S, E) is proportional to the span correction times (S - E)^-2 times
+        the sum of L_a(x) L_b(y) over E <= y < x <= S. Summed by a different
+        route, a 2-D running sum. The correction is the sampler's own row for
+        the pair, which is what keeps the improper tails of two dates and a
+        pair of Boundaries from running off.
+        """
+        dates, tree = _ordered_phases(((700,), (640,)))
+        direct = cross_check.reference(dates, tree)
+        grid = direct['grid']
+        model = gibbs.Model(dates, tree, grid=grid)
+        a, b = (model.likelihood[d['id']] for d in dates)
+        weight = np.tril(np.outer(a, b), -1) * model.dt ** 2       # x older than y
+        running = np.zeros((model.M + 1, model.M + 1))
+        running[1:, 1:] = weight.cumsum(0).cumsum(1)
+        start, end = tree['children'][0]['id'], tree['children'][3]['id']
+        joint = np.zeros((model.M, model.M))
+        for s in range(model.M):
+            for e in range(s):
+                inside = (running[s + 1, s + 1] - running[e, s + 1]
+                          - running[s + 1, e] + running[e, e])
+                joint[s, e] = (inside / ((s - e) * model.dt) ** 2
+                               * np.exp(model.span_prior_rows[0][s - e]))
+        low = float(grid[0])
+        count = int(np.ceil((grid[-1] - low) / cross_check.REPORTING_STEP_YEARS)) + 1
+        for boundary_id, marginal in ((start, joint.sum(axis=1)), (end, joint.sum(axis=0))):
+            theirs = cross_check._binned(grid, marginal / marginal.sum(), low, count)
+            ours = cross_check._binned(grid, direct['boundaries'][boundary_id], low, count)
+            assert 0.5 * np.abs(theirs - ours).sum() < 0.04
+
+    def test_it_agrees_with_the_sampler_on_the_oxcal_nenthorn_model(self):
+        import oxcal_fixture as ox
+        dates, tree = ox.measurements(), ox.model_tree('ordered')
+        assert ec.layout(tree, dates) is None
+        sampled = gibbs.solve(dates, tree, sweeps=20000, max_sweeps=20000,
+                              num_samples=200, chains=4)
+        record = cross_check.check(dates, tree, sampled)
+        assert record['status'] == 'agrees', record
+        assert record['checked'] == 2
+        assert record['worst']['distance'] < 0.08
+
+    def test_it_agrees_with_the_sampler_when_the_phases_are_unordered(self):
+        import oxcal_fixture as ox
+        dates, tree = ox.measurements(), ox.model_tree('unordered')
+        sampled = gibbs.solve(dates, tree, sweeps=20000, max_sweeps=20000,
+                              num_samples=200, chains=4)
+        record = cross_check.check(dates, tree, sampled)
+        assert record['status'] == 'agrees', record
+        assert record['worst']['distance'] < 0.08
+
+    def test_a_flagged_answer_is_reported_on_the_ordered_model(self):
+        dates, tree = _ordered_phases()
+        sampled = gibbs.solve(dates, tree, sweeps=8000, max_sweeps=8000,
+                              num_samples=200, chains=1)
+        moved = copy.deepcopy(sampled['boundaries'])
+        end = tree['children'][3]['id']
+        points = moved[end]['posterior']['probability_distribution']
+        moved[end]['posterior']['probability_distribution'] = [[x + 60.0, p] for x, p in points]
+        record = cross_check.check(dates, tree, {'boundaries': moved})
+        assert record['status'] == 'differs'
+        assert [row['id'] for row in record['differing']] == [end]
+
+
 class TestItFlagsAWrongAnswer:
     def test_a_boundary_in_the_wrong_place_is_reported(self):
         dates, tree = _parallel()

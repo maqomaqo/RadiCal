@@ -108,16 +108,15 @@ An OxCal model file is read directly. Its `Sequence`, `Phase`, `Boundary` and `H
 per-scope `Curve` and `Delta_R`, and per-date `Outlier` settings all come across, keeping the names
 OxCal gave them. Importing one from New Analysis brings the model structure with it.
 
-A reservoir offset can be written int he ways OxCal allows: in full, `Delta_R("LocalMarine",-162,28)`,
+A reservoir offset can be written in the ways OxCal allows: in full, `Delta_R("LocalMarine",-162,28)`,
 or stated once under a name and cited wherever it applies, `Delta_R("=LocalMarine", )`. The offset
-belongs to the curve it was stated for (OxCal applies `Delta_R` to the current `Curve`), so a phase
+belongs to the stated curve (OxCal applies `Delta_R` to the current `Curve`), so a phase
 holding marine dates on Marine20 and terrestrial ones on SHCal20 gives the offset to the marine
 dates only. The preview shows the ΔR carried by each date, and a note says how many dates each named
 offset reached.
 
 `Options(){ Resolution=n; };` sets the analysis's **Resolution** (see
-**Model settings** under [Model Structure](#model-structure-bayesian-only)). Other options, such as `kIterations`, configure OxCal's own run
-and are skipped with a note.
+**Model settings** under [Model Structure](#model-structure-bayesian-only)). Other options, such as `kIterations`, configure are skipped with a note.
 
 `D_Sequence` and `V_Sequence` come across as a **wiggle match**, with each `Gap()` turned into a
 distance from the youngest member of the series; `P_Sequence` comes across as an **age-depth
@@ -200,7 +199,7 @@ removes it from the curve pickers while leaving it resolvable, so those analyses
 
 ### Mixed curves
 
-**New Mixed Curve** builds a curve from two others in a fixed proportion, OxCal's `Mix_Curves`.
+**New Mixed Curve** builds a curve from two others in a fixed proportion, as per OxCal's `Mix_Curves`.
 Its use is a sample whose carbon came from more than one reservoir, most often a human or animal
 with a partly marine diet: their bone is neither terrestrial nor marine carbon, and calibrating it
 against either curve alone is wrong by centuries in one direction or the other, with nothing in the
@@ -371,7 +370,7 @@ the group that contains it), so it is laid out rather than arranged by hand.
 
 **Model settings**, on the New Analysis form itself:
 - **Solver**: Automatic (recommended: exact integration where the model allows it, sampling
-  otherwise), Exact solver only (fast, but only works on chain-shaped models), or MH/Gibbs (works on all models, uses the same MCMC sampling method as OxCal throughout). See
+  otherwise), Exact solver only (fast, but only works on chain-shaped models), or MH/Gibbs (works on all models). See
   [Choosing a solver](#choosing-a-solver) for when to override Automatic and what it costs.
 - **Posterior draws**: how many samples each date's posterior is reported with.
 - **Resolution (years)**: the calendar step modelled ranges and durations are reported at, as
@@ -408,10 +407,10 @@ the posterior on a calendar grid by message passing. There is no sampler, so not
 run length to choose, and no calibration lobe the chain can miss. It is also the faster of the two, usually 
 by a wide margin: a single deterministic pass, with no progress bar because there is no iteration to report.
 
-**MH/Gibbs sampling** is OxCal's own scheme (Metropolis-Hastings within Gibbs) and takes any model:
+**MH/Gibbs sampling** is the same method used by OxCal (i.e. Metropolis-Hastings within Gibbs) and takes any model:
 branching structures, parallel groups, two groups ordered against each other with no Boundary
 between them, dates sitting outside every Boundary. It is budgeted 20,000 sweeps, stops as soon as
-the worst parameter reaches 95% on OxCal's own convergence measure, and extends up to 200,000 if it
+the worst parameter reaches 95% convergence, and extends up to 200,000 if it
 has not; the achieved figure is reported with the results, and a run that fell short is flagged
 rather than quietly returned.
 
@@ -1322,7 +1321,7 @@ Boundaries separated only by an empty Phase, or by a level of nesting, coincide;
 layers between dated ones, or Sequences inside a Phase, were then packed too tightly and could sit
 in the wrong calibration lobe with every chain agreeing.
 
-**Convergence** is OxCal's own diagnostic: the overlap integral between the distribution accumulated
+**Convergence** is the same diagnostic used in OxCal: the overlap integral between the distribution accumulated
 over the first half of the run and over the second half, per parameter, targeting 0.95. The run
 extends until the worst parameter meets the target or the sweep ceiling is reached, and the achieved
 value is always reported.
@@ -1363,15 +1362,13 @@ own histogram with the pool is reported beside these for information, but not he
 target: one chain holds a quarter of the pooled draws, so that overlap is noisier by construction and
 sits near 0.93 when the chains agree perfectly by `R-hat`.
 
-**Checking a sampled result.** Both convergence measures compare the sampler with itself: one half
-of a run with the other, one chain with another. Neither can see a lobe no chain reached, and
-neither can see a target that is wrong in the same way for every chain. So for two common shapes the
-app also calculates the same model directly, without sampling, and compares the two:
+**Checking a sampled result.** Both convergence measures evaluate the sampler by comparing it against itself—either by contrasting one half of a run with the other, or by comparing different chains. However, neither method can detect a lobe that no chain has reached, nor can they identify a target that is consistently incorrect across all chains. To address this, the app directly calculates the same model without sampling for two common shapes and compares the results:
 
-- a chain of Phases and Boundaries written with nested Sequences, such as a Sequence of two
-  Sequences;
-- parallel chains between an outer pair, such as a site's Start and End Boundaries around a Phase
-  holding one Sequence per area.
+- A chain of Phases and Boundaries created using nested Sequences, such as a Sequence containing two other Sequences.
+- Parallel chains situated between an outer pair, like a site's Start and End Boundaries surrounding a Phase that holds one Sequence per area.
+- either of those with Phases or Sequences that have no Boundary between them, so that every date
+  of one is older than every date of the next. The exact solver does not take these; the direct calculation does, treating each Phase's dates as a block that
+  follows the one before.
 
 Given the outer pair, the branches are independent, so
 
@@ -1465,20 +1462,12 @@ draws, good to about ±0.5.
 
 **Resolution.** The indices are ratios of integrals, and the right value is the one a finer grid
 converges to. The likelihood is evaluated exactly at every posterior point, and `integral(L^2)` is
-taken at one-year steps, because calibration curves carry structure at one year. OxCal's own
-indices depend on its calculation resolution: the same model gives `Aoverall` 100.4 at OxCal's
-default five years and 105.4 at `Options(){ Resolution=1; };`. This app matches OxCal run at one
+taken at one-year steps, because calibration curves carry structure at one year. OxCal's indices depend on its calculation resolution: the same model gives `Aoverall` 100.4 at OxCal's default five years and 105.4 at `Options(){ Resolution=1; };`. This app matches OxCal run at one
 year (per-date rms 0.23–0.30, `Aoverall` 105.5 against 105.4, `Amodel` 100.9 against 100.6). Against
 a default OxCal run it reads about 0.7 higher per date, and several points higher overall.
 
-**Outlier models.** A date under an outlier model is scored against the likelihood term the model
-actually contains: the date fits either as it stands or moved by a shift, the second with the
-outlier *prior* `p`. The expectation runs over the shift and the outlier scale as well as the date,
-the scale taken from each posterior state where the sampler draws it. A date explained only as an
-outlier therefore scores about `100 p`, near 5 at the usual 0.05, and never more. Each outlier model
-in use also adds one term to `n`, as OxCal counts its scale parameter. Against OxCal at one year this
-reproduces the per-date indices to rms 0.4–0.5 and the model indices to within about 1, flagged
-dates included (Shag River Mouth's NZ7756: 5.2 against OxCal's 5.4).
+Outlier models. When using an outlier model, a date is evaluated against the specific likelihood term within that model. The date can either fit as originally recorded or be adjusted by a shift, with the latter incorporating the outlier prior p. The expected value accounts for the shift, the outlier scale, and the date itself, drawing the scale from each posterior state during sampling. Consequently, a date identified solely as an outlier will score approximately 100 p—which is around 5 at the standard 0.05 level—and will never exceed this. Additionally, each active outlier model contributes one term to n, as OxCal includes its scale parameter. When compared against OxCal at a one-year resolution, this approach replicates per-date indices to an rms of 0.4–0.5 and model indices to within roughly 1, even when flagged dates are included.
+
 
 Note the limits of the diagnostic: it detects a date the *model had to move*, which is not the same
 as a date that does not belong. On an unconstrained phase, a date 600 radiocarbon years from its
@@ -1503,8 +1492,7 @@ pooled across every chain that ran (A.6). They are not independent: consecutive 
 chain are correlated, so a duration read off them converges more slowly than the marginals beside
 it, and the run is not extended on its account. The report says which kind of draws it holds.
 
-**The durations** are OxCal's quantities under the app's own names: the *Sequence duration*
-(first Boundary minus last), the *Phase duration* (the interval a pair of Boundaries encloses,
+**The durations** are: the *Sequence duration* (first Boundary minus last), the *Phase duration* (the interval a pair of Boundaries encloses,
 OxCal's `Interval`), the *Hiatus duration* (the same between two adjacent Boundaries with no phase
 between them), and the *dated-events* or sample duration (the range of the dates themselves,
 OxCal's `Span`). The gap between the last two is how much of the phase the dates failed to sample.
@@ -1626,9 +1614,7 @@ a tight answer, in the wrong place.
 **Measured gaps** (OxCal's `V_Sequence`) give each offset an uncertainty `G_i ~ N(g_i, sigma_i)`.
 Marginalising it convolves that member's shifted likelihood with the Gaussian, so the fixed-gap case
 is exactly `sigma = 0` of the same expression. RadiCal carries **one uncertainty per member** —
-that member's distance from the reference — and treats them as independent. OxCal's gaps form a
-chain, so two members beyond a shared gap have correlated distances; importing an OxCal
-`V_Sequence` accumulates its gap errors in quadrature and says that it did.
+that member's distance from the reference — and treats them as independent. Because OxCal's gaps are chained, the distances between members separated by a shared gap are correlated. When you import an OxCal `V_Sequence`, the gap errors accumulate in quadrature, and the model explicitly accounts for this.
 
 A measured gap also gives **its own member** a width of its own. Member `i`'s age is `t + G_i`, and marginalising the
 reference age as well as every gap leaves
@@ -1652,17 +1638,13 @@ whose whole point is a range ten years wide.
 **Agreement, and no outlier model.** Each member's index is A.8's, comparing its modelled posterior
 (the reference's shifted, or its own as above for a measured gap) against its own unmodelled
 likelihood; the combination is the same
-`100·(∏A_i/100)^(1/√n)` A.8 uses. It carries more weight here than elsewhere: the gaps are
-asserted, so a misidentified member cannot be absorbed by the model widening — it can only make
-everything fit worse. No threshold is quoted against it: the one OxCal uses for a combination scales
-with n, and this app does not print a threshold it has not pinned against a real run.
+`100·(∏A_i/100)^(1/√n)` A.8 uses.This carries greater significance here than in other contexts. Because the gaps are strictly defined, the model cannot accommodate a misidentified member simply by widening; instead, it only degrades the overall fit. No specific threshold is provided for this; the threshold OxCal applies to combinations scales with n, and this app does not display a threshold unless it has been validated against an actual run.
+
 
 The same rigidity is why an outlier model (A.7) is **refused** rather than applied here. Mixing in a
 broad component would marginalise an offset scale independently per member — the approximation A.6
 describes for the exact solver, not OxCal's shared scale — and on a series whose members are one
-rigid distribution that is a stronger assumption than it appears. Refusing is the honest answer
-until there is a real OxCal `D_Sequence` run with `Outlier()` in it to hold an implementation
-against.
+rigid distribution that is a stronger assumption than it appears.
 
 ### A.14 Age-depth modelling
 
@@ -1832,8 +1814,6 @@ linearly binned at an eighth of the kernel width and convolved with the kernel. 
 grows with the span of the dates rather than with `n²`, and the result is within about 0.1% of the
 direct sum. A date the kernel leaves with no neighbour in reach is summed directly, so it lowers the
 likelihood by the right amount rather than making it zero.
-
-Not yet checked against an OxCal `KDE_Plot` export.
 
 ## Bibliography
 

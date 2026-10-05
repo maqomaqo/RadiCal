@@ -15,7 +15,7 @@ and the results page reports whether the two agree.
 
 Shapes
 ------
-Two, which between them cover what the sampler is most often given:
+Three, which between them cover what the sampler is most often given:
 
   * A CHAIN that exact_chain.layout does not recognise because it is written
     with nested Sequences -- one area then another, a Sequence of two Sequences.
@@ -35,6 +35,18 @@ Two, which between them cover what the sampler is most often given:
     end-to-end transfer product, so the whole thing is a few matrix products
     per branch. Each branch's interior is then exact_chain's own chain with an
     end-to-end factor W_b in place of its span correction.
+
+  * Either of those with ORDERED BLOCKS of dates inside a pair of Boundaries:
+    Phases or Sequences in a Sequence with no Boundary between them, so that
+    every date of one is older than every date of the next -- OxCal's own
+    Nenthorn example, which the exact solver declines ("two groups are ordered
+    against each other with no Boundary between them"). The blocks are read off
+    the sampler's own ordering (_blocks), and the group's integral over its
+    dates (_log_ordered) replaces the product of interval integrals: cut the
+    order at the oldest date of each block, and the sum over placements is a
+    chain over those cuts, a product of matrices like the one over Boundaries.
+    Dates in the same block are unordered, and one block alone is the plain
+    unordered group.
 
 Anything else is reported as not checked, with the reason.
 
@@ -132,7 +144,7 @@ def shape(root: Dict, measurements: List[Dict]
     if root.get('element_type') != 'sequence':
         raise NotChecked('the model is not a Sequence')
     flat = _flattened(root)
-    chain = exact_chain.layout(flat, measurements)
+    chain = exact_chain.layout(flat, measurements, allow_inner_order=True)
     if chain is not None:
         return None, [chain]
 
@@ -150,7 +162,7 @@ def shape(root: Dict, measurements: List[Dict]
                              f"'{outer_phase.get('name')}' is not a Sequence")
         inside = _ids(child)
         members = [m for m in measurements if m.get('element_id') in inside]
-        branch = exact_chain.layout(_flattened(child), members)
+        branch = exact_chain.layout(_flattened(child), members, allow_inner_order=True)
         if branch is None:
             raise NotChecked(f"'{child.get('name')}' is not a chain")
         branches.append(branch)
@@ -162,6 +174,60 @@ def shape(root: Dict, measurements: List[Dict]
         raise NotChecked('some dates sit outside every branch')
     loose = [m['id'] for m in measurements if m.get('element_id') == outer_phase['id']]
     return (children[0]['id'], children[2]['id'], loose), branches
+
+
+def _blocks(model: gibbs.Model, dates: List[str]) -> List[List[str]]:
+    """
+    A group's dates as BLOCKS, oldest block first: dates within a block are not
+    ordered against each other, and every date of a block is ordered against
+    every date of every other block. Read from the sampler's own ordering, so
+    it is the model as written, not an assumption about it.
+
+    A Sequence of Phases with no Boundary between them is this: the Phases'
+    dates share the Boundaries either side and the Sequence puts every date of
+    one before every date of the next. Anything else inside a group -- two
+    chains of dates side by side, say -- is a partial order that does not
+    reduce to blocks, and raises NotChecked.
+    """
+    cache = model.__dict__.setdefault('_check_blocks', {})
+    key = tuple(dates)
+    if key in cache:
+        return cache[key]
+    reach = model._younger_reachable()
+    members = list(dates)
+    parent = {d: d for d in members}
+
+    def find(d):
+        while parent[d] != d:
+            parent[d] = parent[parent[d]]
+            d = parent[d]
+        return d
+
+    def ordered(a, b):
+        return b in reach[a] or a in reach[b]
+
+    for a, b in itertools.combinations(members, 2):
+        if not ordered(a, b):
+            parent[find(a)] = find(b)
+    groups: Dict[str, List[str]] = {}
+    for d in members:
+        groups.setdefault(find(d), []).append(d)
+    blocks = list(groups.values())
+    for block in blocks:
+        if any(ordered(a, b) for a, b in itertools.combinations(block, 2)):
+            raise NotChecked('some dates in a group are ordered against each other '
+                             'in a way that is not one block after another')
+    # Oldest first: a block is older than the ones its dates all precede.
+    found = list(blocks)               # a list being sorted reads as empty
+    blocks.sort(key=lambda block: -sum(
+        1 for other in found if other is not block and other[0] in reach[block[0]]))
+    for i, older in enumerate(blocks):
+        for younger in blocks[i + 1:]:
+            if not all(y in reach[o] for o in older for y in younger):
+                raise NotChecked('some dates in a group are ordered against each other '
+                                 'in a way that is not one block after another')
+    cache[key] = blocks
+    return blocks
 
 
 def _same_model(model: gibbs.Model, outer, branches: List[exact_chain.Chain]) -> None:
@@ -195,6 +261,17 @@ def _same_model(model: gibbs.Model, outer, branches: List[exact_chain.Chain]) ->
     def order(older: str, younger: str) -> None:
         younger_than[older].add(younger)
 
+    def inner(dates: List[str]) -> None:
+        # Dates ordered against each other inside one pair of Boundaries, as
+        # blocks (see _blocks); the closure below then shows whether that is
+        # ALL the ordering the written model has.
+        blocks = _blocks(model, dates) if len(dates) > 1 else []
+        for i, older_block in enumerate(blocks):
+            for younger_block in blocks[i + 1:]:
+                for o in older_block:
+                    for y in younger_block:
+                        order(o, y)
+
     for chain in branches:
         for index, dates in enumerate(chain.groups):
             older, younger = chain.boundary_ids[index], chain.boundary_ids[index + 1]
@@ -202,6 +279,7 @@ def _same_model(model: gibbs.Model, outer, branches: List[exact_chain.Chain]) ->
             for date_id in dates:
                 order(older, date_id)
                 order(date_id, younger)
+            inner(dates)
     if outer is not None:
         start, end, loose = outer
         for chain in branches:
@@ -210,6 +288,7 @@ def _same_model(model: gibbs.Model, outer, branches: List[exact_chain.Chain]) ->
         for date_id in loose:
             order(start, date_id)
             order(date_id, end)
+        inner(loose)
 
     closed: Dict[str, set] = {}
 
@@ -294,11 +373,100 @@ class _Direct:
             log_span = np.where(self.older,
                                 np.log(np.maximum(self.cells, 1) * self.dt), -np.inf)
         term = np.where(self.older, -K * log_span if K else 0.0, -np.inf)
+        blocks = _blocks(self.model, dates) if K > 1 else []
+        if len(blocks) > 1:
+            return term + self._log_ordered(blocks, nodes)
         for date_id in dates:
             row = self._likelihood(date_id, nodes)
             # exact_chain's is indexed [younger, older].
             term = term + _log_interval_integral(np.cumsum(row) * self.dt, row, self.dt).T
         return term
+
+    def _log_block_oldest(self, block: List[str], nodes: Dict[str, int]) -> np.ndarray:
+        """
+        T[b, a] for a block of dates all lying in [a, b] with the OLDEST of them
+        at b, in the log, indexed [older, younger]: the derivative with respect
+        to b of the product of the dates' interval integrals,
+
+            sum over dates j of  L_j(b) dt  prod over k != j of F_k(b, a),
+
+        with F the trapezoidal interval integral the dates inside a pair of
+        Boundaries use (half weight on each end cell). The product of all the
+        others is formed as a sum of logs with the dates whose integral is zero
+        counted, so a date at the very edge of its own likelihood does not turn
+        the whole thing to nan.
+
+        The trapezoid, not whole cells, is a choice about how a continuous
+        ordering is put on a grid. Two dates can share a cell, and counting
+        that whole gives a configuration with several dates in one cell more
+        weight than the continuum does, most where the span is a few cells;
+        half weights at the ends are what the sampler's own draws use for a
+        date held by a neighbouring date (Model.draw_date) and what OxCal's
+        continuous model converges to. The sampler's log_posterior does NOT
+        weigh a date-to-date tie that way, only a date on a Boundary; weighing
+        every tie as log_posterior does moved this calculation 0.2 from the
+        sampler's output on models of ordered phases, and the half weights
+        brought it back to 0.03-0.1.
+        """
+        rows = {d: self._likelihood(d, nodes) for d in block}
+
+        def log_f(d):
+            row = rows[d]
+            return _log_interval_integral(np.cumsum(row) * self.dt, row, self.dt).T
+
+        total = np.zeros((self.M, self.M))
+        zeros = np.zeros((self.M, self.M), dtype=int)
+        for d in block:
+            lf = log_f(d)
+            finite = np.isfinite(lf)
+            total += np.where(finite, lf, 0.0)
+            zeros += ~finite
+        out = np.full((self.M, self.M), -np.inf)
+        with np.errstate(divide='ignore', invalid='ignore'):
+            for d in block:
+                lf = log_f(d)
+                finite = np.isfinite(lf)
+                others = np.where(finite, np.where(zeros == 0, total - lf, -np.inf),
+                                  np.where(zeros == 1, total, -np.inf))
+                log_mass = np.log(rows[d] * self.dt)[:, None]
+                out = np.logaddexp(out, log_mass + others)
+        return np.where(self.cells >= 0, out, -np.inf)
+
+    def _log_ordered(self, blocks: List[List[str]], nodes: Dict[str, int]) -> np.ndarray:
+        """
+        The dates' integral over a group whose blocks are ordered, [older
+        boundary S, younger boundary E], in the log: the sum over placements of
+        every date with each block wholly older than the next.
+
+        Cut the order at the oldest date of each block after the first, c_i of
+        block i + 1. Block i's dates then lie in [c_i, c_(i-1)] with its oldest
+        at c_(i-1), which is T_i(c_i, c_(i-1)) (_log_block_oldest), the last
+        block's below by E itself, and the first block's oldest is under S. That
+        is a chain over the c's, and its sum is a product of matrices:
+
+            Z[S, E] = sum over c_0 < S of (T_1 T_2 ... T_n)[c_0, E]
+
+        Endpoints take half weight as an interval integral's do: a date at S
+        or at E counts half.
+        """
+        log_scale = 0.0
+        matrices = []
+        for i, block in enumerate(blocks):
+            log_t = self._log_block_oldest(block, nodes)
+            if i == len(blocks) - 1:
+                # The last block's lower end is E itself, not a date.
+                log_t = log_t + np.where(self.cells == 0, np.log(0.5), 0.0)
+            matrix, peak = self._exp(log_t)
+            matrices.append(matrix)
+            log_scale += peak
+        product = matrices[0]
+        for matrix in matrices[1:]:
+            product, factor = self._scaled(product @ matrix)
+            log_scale += factor
+        below = np.vstack([np.zeros((1, self.M)), np.cumsum(product, axis=0)[:-1]])
+        Z = below + 0.5 * product
+        with np.errstate(divide='ignore'):
+            return np.where(Z > 0, np.log(np.where(Z > 0, Z, 1.0)), -np.inf) + log_scale
 
     @staticmethod
     def _exp(log_matrix: np.ndarray) -> Tuple[np.ndarray, float]:
