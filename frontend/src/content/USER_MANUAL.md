@@ -407,7 +407,7 @@ the posterior on a calendar grid by message passing. There is no sampler, so not
 run length to choose, and no calibration lobe the chain can miss. It is also the faster of the two, usually 
 by a wide margin: a single deterministic pass, with no progress bar because there is no iteration to report.
 
-**MH/Gibbs sampling** is the same method used by OxCal (i.e. Metropolis-Hastings within Gibbs) and takes any model:
+**MH/Gibbs sampling** follows OxCal's Metropolis-Hastings approach (see A.6) and takes any model:
 branching structures, parallel groups, two groups ordered against each other with no Boundary
 between them, dates sitting outside every Boundary. It is budgeted 20,000 sweeps, stops as soon as
 the worst parameter reaches 95% convergence, and extends up to 200,000 if it
@@ -1293,14 +1293,18 @@ refinement: a plain cumulative difference gives an interval spanning `k` cells t
 cells, while the span factor charges `k`, so near-coincident configurations gain `2^K` and every
 modelled phase comes out several times too narrow.
 
-**Metropolis-Hastings / Gibbs sampling** (everything else) is the scheme OxCal uses (Metropolis et
-al. 1953; Hastings 1970; Geman and Geman 1984; applied to this problem by Buck et al. 1992 and Bronk
-Ramsey 1995). Each full conditional is one-dimensional and exactly samplable: a date's conditional
-is its own likelihood over the interval its neighbours and boundaries allow (the span factor drops
-out, being independent of where within the interval the date sits); a Boundary's is the product of
-the span factors of the groups it bounds. The app draws these by inverse CDF on a precomputed
-cumulative table rather than by rejection as OxCal does: the same target distribution, at bounded
-cost per draw. Conditionally independent dates are updated in blocks, and whole-group translation
+**Metropolis-Hastings / Gibbs sampling** (everything else) follows the scheme OxCal uses (Metropolis
+et al. 1953; Hastings 1970; applied to this problem by Buck et al. 1992 and Bronk Ramsey 1995).
+OxCal makes every move by Metropolis-Hastings (Bronk Ramsey 2009a). For the single-event update in
+its KDE model, Bronk Ramsey (2021) describes a proposal uniform over the range the event's
+likelihood covers, limited by any constraints, which behaves much like a Gibbs draw (Geman and Geman
+1984) from the event's conditional; its group shift is uniform over half a standard deviation of the
+events either way. Each full conditional is one-dimensional and exactly samplable: a date's
+conditional is its own likelihood over the interval its neighbours and boundaries allow (the span
+factor drops out, being independent of where within the interval the date sits); a Boundary's is the
+product of the span factors of the groups it bounds. The app draws these by inverse CDF on a
+precomputed cumulative table rather than by proposing and rejecting as OxCal does: the same target
+distribution, at bounded cost per draw. Conditionally independent dates are updated in blocks, and whole-group translation
 moves are proposed on the exact MH ratio so a tightly constrained group can cross between
 calibration lobes, which single-site updating cannot do. A group in one of several parallel branches
 is also offered the move together with the Boundary enclosing it on one side, since it cannot cross
@@ -1834,6 +1838,8 @@ likelihood by the right amount rather than making it zero.
   51(3), 1023–1045.
 - Bronk Ramsey, C. (2017). Methods for summarizing radiocarbon datasets. *Radiocarbon* 59(6),
   1809–1833.
+- Bronk Ramsey, C. (2021). Replies to M. Price in "Additional details on KDE algorithm and/or source
+  code", OxCal mailing list, 23–24 March 2021. https://groups.google.com/g/oxcal/c/ZfhqJt0qyck
 - Buck, C. E., Kenworthy, J. B., Litton, C. D., and Smith, A. F. M. (1991). Combining archaeological
   and radiocarbon information: a Bayesian approach to calibration. *Antiquity* 65(249), 808–821.
 - Buck, C. E., Litton, C. D., and Smith, A. F. M. (1992). Calibration of radiocarbon results
