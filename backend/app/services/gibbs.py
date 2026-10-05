@@ -32,6 +32,14 @@ tests/test_gibbs.py's TestTheEndpointWeighting pins it from both directions: the
 span against exact_chain's, and grid refinement, which no step-dependent error
 survives.
 
+The half is per TIED ORDERING EDGE, whether the other end is a Boundary or
+another date (ordered dates inside one pair of Boundaries, with no Boundary
+between them), and it is one rule in one place: draw_date, draw_boundary and
+log_posterior must all weigh a configuration identically, or the Gibbs draws
+and the Metropolis shift moves target different distributions and a run's
+answer depends on how much of each it used. TestEveryKernelTargetsOneDistribution
+holds them to each other.
+
 The same counting argument keeps two BOUNDARIES at least a cell apart (see
 Model.allowed): the span correction divides by the placements strictly inside
 a span, so boundaries that may meet have arrangements it never divides out.
@@ -728,9 +736,6 @@ class Model:
         # which is what makes the span density proper without a floor (see the
         # module docstring).
         self.group_dates: List[Tuple[str, str, List[str]]] = []
-        # The same relation from the date's side, so endpoint_weight does not
-        # have to scan every group on every draw.
-        self.date_groups: Dict[str, List[Tuple[str, str]]] = {}
         for group in self.plan.span_groups:
             dates = [d for d in group.date_ids if d in self.likelihood]
             self.group_dates.append(
@@ -738,8 +743,6 @@ class Model:
             for date_id in dates:
                 add(date_id, group.older_boundary_id)
                 add(group.younger_boundary_id, date_id)
-                self.date_groups.setdefault(date_id, []).append(
-                    (group.older_boundary_id, group.younger_boundary_id))
             # Contained but NOT part of the span term: a deposition
             # sequence's levels are penned in by the same boundaries while
             # their spacing is priced by the deposition model instead. They
@@ -795,6 +798,24 @@ class Model:
              for a, b in pairs], dtype=np.int64)
         self.window_lo = np.array([self.window[p][0] for p in self.params])
         self.window_hi = np.array([self.window[p][1] for p in self.params])
+
+        # The ties that carry a half weight (see endpoint_weight): each
+        # ordering edge ONCE, however many times the plan listed it, with a
+        # date at one end at least and no deposition level at either.
+        self.tied_with: Dict[str, List[str]] = {p: [] for p in self.params}
+        tie_pairs = set()
+        for younger, older in ((self.params[a], self.params[b]) for a, b in pairs):
+            if (younger in boundaries and older in boundaries
+                    or younger in self.deposition_of or older in self.deposition_of
+                    or (younger, older) in tie_pairs):
+                continue
+            tie_pairs.add((younger, older))
+            self.tied_with[younger].append(older)
+            self.tied_with[older].append(younger)
+        self.tie_younger = np.array([self.param_row[y] for y, _o in tie_pairs],
+                                    dtype=np.intp)
+        self.tie_older = np.array([self.param_row[o] for _y, o in tie_pairs],
+                                  dtype=np.intp)
 
     def _span_prior_rows(self) -> List[np.ndarray]:
         """
@@ -995,8 +1016,10 @@ class Model:
 
     def endpoint_weight(self, date_id: str, state: _State) -> float:
         """
-        The weight a date carries for sitting exactly ON one of its group's
-        boundaries: a half rather than a whole.
+        The weight a date carries for sitting exactly ON something it is
+        ordered against -- one of its group's boundaries, or another date it
+        must be older or younger than: a half for each such tie rather than a
+        whole.
 
         The sampler's half of the correction in exact_chain._interval_integral.
         A date confined between boundaries k cells apart can occupy k+1 grid
@@ -1007,24 +1030,41 @@ class Model:
         Halving the endpoint cells makes the sum over a date's positions equal
         the trapezoidal integral the exact solver uses, so the two agree by
         construction.
+
+        The same holds where the neighbour is a DATE rather than a boundary:
+        a sum over i <= j counts the diagonal whole, which is half a cell of
+        extra volume along the whole ordering surface, and the tie is a
+        measure-zero event in the continuum model. Halving it is the same
+        trapezoid, and what the weight must NOT be is something different
+        in the Gibbs draws and in the Metropolis ratio -- they would then
+        target different distributions (tests/test_gibbs.py,
+        TestEveryKernelTargetsOneDistribution). One half per tied ordering
+        EDGE, so the joint is a plain product and every full conditional is
+        its own factor of it; a rule that gave a date two ties at one cell a
+        single half would have conditionals no joint distribution agrees with.
         """
         weight = 1.0
         index = state.index[date_id]
-        for older_id, younger_id in self.date_groups.get(date_id, ()):
-            if index == state.index[older_id] or index == state.index[younger_id]:
+        for other in self.tied_with[date_id]:
+            if state.index[other] == index:
                 weight *= 0.5
         return weight
 
     def draw_date(self, date_id: str, state: _State, u: float) -> int:
         """
         Exact draw from a date's full conditional: its own likelihood over the
-        allowed interval, with the endpoint cells at half weight (see
+        allowed interval, with each end at the weight its ties give it (see
         endpoint_weight), by inverse CDF.
 
         The half weights are applied by splitting the draw rather than
         rebuilding a cumulative table per sweep: the interior comes from the
         precomputed cumulative in one searchsorted and the endpoints are their
         own outcomes. Same distribution, still O(log M).
+
+        An end is weighted only where something is TIED there. The interval
+        can also end at the date's own window, where the likelihood table has
+        already been cut, and halving that cell would be a weight
+        log_posterior does not give it.
         """
         lo, hi = self.allowed(date_id, state)
         if hi <= lo:
@@ -1036,10 +1076,21 @@ class Model:
         density = (self.likelihood[date_id] if node is None
                    else self.likelihood_at[date_id][node])
 
-        # Interior cells lo+1 .. hi-1 at full weight, the two endpoints at half.
+        # Whatever sits ON an end is something this date is ordered against:
+        # a younger neighbour cannot be above lo, an older one below hi.
+        low_weight = high_weight = 1.0
+        index = state.index
+        for other in self.tied_with[date_id]:
+            at = index[other]
+            if at == lo:
+                low_weight *= 0.5
+            elif at == hi:
+                high_weight *= 0.5
+
+        # Interior cells lo+1 .. hi-1 at full weight, the two ends as weighted.
         interior = float(cdf[hi - 1] - cdf[lo]) if hi - 1 >= lo + 1 else 0.0
-        low_end = 0.5 * float(density[lo])
-        high_end = 0.5 * float(density[hi])
+        low_end = low_weight * float(density[lo])
+        high_end = high_weight * float(density[hi])
         total = interior + low_end + high_end
         if total <= 0:
             # No likelihood anywhere it is allowed to be. Uniform keeps the
@@ -1120,14 +1171,14 @@ class Model:
                 cells > 0, -K * self.log_span_of_cells.take(cells, mode='clip'),
                 -np.inf)
 
-            # A date sitting exactly ON the candidate is an endpoint there, so
-            # it counts a half (endpoint_weight). Only coincidences with THIS
-            # boundary vary with the candidate; the other boundary's cancel in
-            # the normalisation below.
-            for date_id in dates:
-                index = state.index[date_id]
-                if lo <= index <= hi:
-                    log_dens[index - lo] -= np.log(2.0)
+        # A date sitting exactly ON the candidate is tied to it, so it counts a
+        # half (endpoint_weight). Only coincidences with THIS boundary vary
+        # with the candidate; the other boundary's cancel in the normalisation
+        # below.
+        for date_id in self.tied_with[boundary_id]:
+            index = state.index[date_id]
+            if lo <= index <= hi:
+                log_dens[index - lo] -= np.log(2.0)
 
         for pi, is_oldest in self.boundary_priors.get(boundary_id, ()):
             oldest_id, youngest_id, _exponent = self.span_priors[pi]
@@ -1178,13 +1229,9 @@ class Model:
             table = (self.log_likelihood[date_id] if model is None
                      else self.log_likelihood_at[date_id][scale.get(model, 0)])
             total += table[state.index[date_id]]
-        # log of endpoint_weight, summed: -log 2 per boundary a date sits on.
-        halves = 0
-        for date_id, groups in self.date_groups.items():
-            at = state.index[date_id]
-            for older_id, younger_id in groups:
-                if at == state.index[older_id] or at == state.index[younger_id]:
-                    halves += 1
+        # log of endpoint_weight, summed: -log 2 per tied ordering edge, a date
+        # on a boundary or on another date.
+        halves = int((index[self.tie_younger] == index[self.tie_older]).sum())
         total -= halves * np.log(2.0)
 
         # The deposition prior, in full and NORMALISED -- the shift moves

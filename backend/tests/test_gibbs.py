@@ -289,6 +289,266 @@ class TestTheEndpointWeighting:
             unweighted - len(group) * np.log(2.0))
 
 
+class TestEveryKernelTargetsOneDistribution:
+    """
+    The Gibbs draws and the Metropolis shift moves are two kernels for ONE
+    posterior, so each must be a kernel of the same discrete weights -- which
+    is Model.log_posterior, the only place the weights are written down.
+
+    They once were not. draw_date halved the end cells of the interval it
+    allows, whatever set them, while log_posterior halved only a date sitting
+    on one of its group's Boundaries: a tie between two ORDERED DATES (a
+    Sequence of Phases with no Boundary between them) was half weight in the
+    draws and full weight in the Metropolis ratio. Nothing failed -- each
+    kernel is a valid sampler of its own target -- and the pooled answer
+    depended on how much of each a run used. Against a direct enumeration of
+    the weights, Gibbs alone sat 0.07-0.10 (total variation, per marginal)
+    from log_posterior's target and MH alone sat 0.07-0.14 from the Gibbs one,
+    at both of two grid steps.
+    """
+
+    def _ordered(self, step=40.0):
+        """Two Phases of two dates each, older then younger, no Boundary
+        between them, with dates close enough that ties matter."""
+        older = _element('phase', 'Older')
+        younger = _element('phase', 'Younger')
+        tree = _element('sequence', 'Site', [
+            _element('boundary', 'Start'), older, younger,
+            _element('boundary', 'End')])
+        dates = [_date(older['id'], 3020), _date(older['id'], 3010),
+                 _date(younger['id'], 3000), _date(younger['id'], 2990)]
+        return gibbs.Model(dates, tree, grid=np.arange(3100, 3500 + 1e-9, step))
+
+    def _random_states(self, model, count=12, seed=3):
+        rng = np.random.default_rng(seed)
+        state = model.initial_state()
+        for _ in range(count):
+            for _ in range(int(rng.integers(5, 25))):
+                for date_id in model.drawable_ids:
+                    state.index[date_id] = model.draw_date(
+                        date_id, state, float(rng.random()))
+                for boundary_id in model.boundary_ids:
+                    state.index[boundary_id] = model.draw_boundary(
+                        boundary_id, state, float(rng.random()))
+            yield state.copy()
+
+    def test_every_full_conditional_is_the_log_posterior_over_its_interval(self):
+        """
+        No sampling: the probability a draw gives each cell, against what
+        log_posterior says that cell is worth with everything else held. Their
+        ratios must agree for every date and Boundary at every state, and
+        a tie is where they did not -- by exactly log 2.
+        """
+        model = self._ordered()
+        us = (np.arange(1500) + 0.5) / 1500
+        for state in self._random_states(model):
+            for param in model.params:
+                draw = (model.draw_boundary if param in model.boundary_set
+                        else model.draw_date)
+                lo, hi = model.allowed(param, state)
+                if hi <= lo:
+                    continue
+                drawn = np.bincount([draw(param, state, float(u)) for u in us],
+                                    minlength=model.M) / len(us)
+                held, log_post = state.index[param], {}
+                for cell in range(lo, hi + 1):
+                    state.index[param] = cell
+                    log_post[cell] = model.log_posterior(state)
+                state.index[param] = held
+                # Cells the draw visits often enough to read a ratio from.
+                cells = [c for c in range(lo, hi + 1)
+                         if drawn[c] > 0.03 and np.isfinite(log_post[c])]
+                if len(cells) < 2:
+                    continue
+                ref = cells[0]
+                for cell in cells[1:]:
+                    assert (np.log(drawn[cell] / drawn[ref])
+                            == pytest.approx(log_post[cell] - log_post[ref],
+                                             abs=0.15)), (param, lo, hi, cell)
+
+    def test_a_tie_between_ordered_dates_counts_a_half(self):
+        model = self._ordered()
+        state = model.initial_state()
+        first, second, third, fourth = model.date_ids
+        older, younger = model.group_dates[0][:2]
+        state.index[older], state.index[younger] = 10, 0
+        for date_id, cell in ((first, 6), (second, 9), (third, 5), (fourth, 2)):
+            state.index[date_id] = cell
+        apart = model.log_posterior(state)
+        assert model.endpoint_weight(first, state) == 1.0
+
+        state.index[first] = 5
+        tied = model.log_posterior(state)
+        assert model.endpoint_weight(first, state) == 0.5
+        assert model.endpoint_weight(third, state) == 0.5
+        assert model.endpoint_weight(second, state) == 1.0
+        log_lik = model.log_likelihood[first]
+        assert tied - apart == pytest.approx(
+            float(log_lik[5] - log_lik[6]) - np.log(2.0))
+
+    def test_every_tie_a_date_has_is_its_own_half(self):
+        """
+        One half per tied ordering EDGE. A date tied to both dates of the
+        next Phase at one cell has two, not one: given only one half the
+        conditionals of its neighbours would disagree about the weight of the
+        configuration, and no joint distribution has them all.
+        """
+        model = self._ordered()
+        state = model.initial_state()
+        date_id = model.date_ids[0]
+        for cell, other in zip((8, 9, 8, 8), model.date_ids):
+            state.index[other] = cell
+        assert model.endpoint_weight(date_id, state) == 0.25
+
+    def test_a_date_at_the_edge_of_its_own_window_is_not_halved(self):
+        """
+        The interval a draw may use can end at the date's own TPQ/TAQ window as
+        well as at a neighbour. The likelihood table is already cut there, and
+        log_posterior gives that cell no half, so neither may the draw.
+        """
+        phase = _element('phase', 'Only')
+        tree = _element('sequence', 'Site', [
+            _element('boundary', 'Start'), phase, _element('boundary', 'End')])
+        dates = [_date(phase['id'], 3000 + 15 * i) for i in range(2)]
+        model = gibbs.Model(dates, tree)
+        state = model.initial_state()
+        older, younger, group = model.group_dates[0]
+        date_id = group[0]
+        peak = int(np.argmax(model.likelihood[date_id]))
+        lo, hi = peak - 4, peak + 5
+        state.index[younger], state.index[older] = lo - 3, hi + 3
+        model.window[date_id] = (lo, hi)
+        weights = model.likelihood[date_id][lo:hi + 1].astype(float)
+        expected = np.cumsum(weights) / weights.sum()
+        for u in np.linspace(1e-9, 1 - 1e-9, 200):
+            assert model.draw_date(date_id, state, float(u)) == (
+                lo + int(np.searchsorted(expected, u)))
+
+    def test_every_date_on_a_group_boundary_is_still_tied_to_it(self):
+        """What date_groups used to hold: the tie set contains every
+        (date, boundary) containment, and a date has each boundary once."""
+        model = gibbs.Model(ox.measurements(), ox.model_tree('ordered'))
+        for older, younger, dates in model.group_dates:
+            for date_id in dates:
+                assert older in model.tied_with[date_id]
+                assert younger in model.tied_with[date_id]
+                assert len(model.tied_with[date_id]) == len(set(model.tied_with[date_id]))
+
+    def _enumerated(self, model):
+        """The posterior over (older, younger, four dates), by summing every
+        configuration -- the weights log_posterior defines, written out
+        independently of it -- as marginals of the two Boundaries and dates."""
+        cells = model.M
+        likelihood = np.stack([model.likelihood[d] for d in model.date_ids])
+        group = model.group_dates[0]
+        span_row = model.span_prior_rows[0]
+        marginals = {name: np.zeros(cells) for name in ('older', 'younger')}
+        dates = np.zeros((4, cells))
+        total = 0.0
+        for o in range(cells):
+            for y in range(o):
+                n = o - y
+                ends = np.ones(n + 1)
+                ends[0] = ends[-1] = 0.5
+                weight = likelihood[:, y:o + 1] * ends
+                prefactor = np.exp(-4 * model.log_span_of_cells[n] + span_row[n])
+                axes = np.arange(n + 1)
+                a1, a2, b1, b2 = np.meshgrid(axes, axes, axes, axes, indexing='ij')
+                ordered = np.minimum(a1, a2) >= np.maximum(b1, b2)
+                ties = (a1 == b1).astype(int) + (a1 == b2) + (a2 == b1) + (a2 == b2)
+                w = (weight[0][a1] * weight[1][a2] * weight[2][b1] * weight[3][b2]
+                     * np.where(ordered, 0.5 ** ties, 0.0) * prefactor)
+                marginals['older'][o] += w.sum()
+                marginals['younger'][y] += w.sum()
+                total += w.sum()
+                for k, axis in enumerate((a1, a2, b1, b2)):
+                    dates[k, y:o + 1] += np.bincount(
+                        axis.ravel(), weights=w.ravel(), minlength=n + 1)
+        return (marginals['older'] / total, marginals['younger'] / total,
+                dates / total)
+
+    @staticmethod
+    def _tv(p, q):
+        return 0.5 * float(np.abs(p - q).sum())
+
+    def _histograms(self, model, move):
+        """Marginals of (older, younger, dates) over a chain that makes `move`
+        and nothing else, from the same start."""
+        older_id, younger_id = model.group_dates[0][:2]
+        older = np.zeros(model.M)
+        younger = np.zeros(model.M)
+        dates = np.zeros((4, model.M))
+        for step, state in move:
+            older[state.index[older_id]] += 1
+            younger[state.index[younger_id]] += 1
+            for k, d in enumerate(model.date_ids):
+                dates[k, state.index[d]] += 1
+        n = older.sum()
+        return older / n, younger / n, dates / n
+
+    def _gibbs_only(self, model, sweeps=40000, burn=2000, seed=0):
+        rng = np.random.default_rng(seed)
+        state = model.initial_state()
+
+        def chain():
+            for s in range(sweeps + burn):
+                for block in model.blocks:
+                    for date_id in block:
+                        state.index[date_id] = model.draw_date(
+                            date_id, state, float(rng.random()))
+                for boundary_id in model.boundary_ids:
+                    state.index[boundary_id] = model.draw_boundary(
+                        boundary_id, state, float(rng.random()))
+                if s >= burn:
+                    yield s, state
+        return self._histograms(model, chain())
+
+    def _mh_only(self, model, steps=400000, burn=20000, seed=0):
+        rng = np.random.default_rng(seed)
+        sets = [[p] for p in model.params] + model.move_sets()
+        holder = {'state': model.initial_state()}
+        holder['lp'] = model.log_posterior(holder['state'])
+
+        def chain():
+            for s in range(steps + burn):
+                params = sets[int(rng.integers(len(sets)))]
+                step = int(rng.integers(1, 4)) * (1 if rng.random() < 0.5 else -1)
+                proposal = holder['state'].copy()
+                inside = True
+                for param in params:
+                    moved = holder['state'].index[param] + step
+                    if not 0 <= moved < model.M:
+                        inside = False
+                        break
+                    proposal.index[param] = moved
+                if inside:
+                    lp = model.log_posterior(proposal)
+                    if np.isfinite(lp) and (
+                            lp >= holder['lp'] or rng.random() < np.exp(lp - holder['lp'])):
+                        holder['state'], holder['lp'] = proposal, lp
+                if s >= burn and s % 3 == 0:
+                    yield s, holder['state']
+        return self._histograms(model, chain())
+
+    def test_gibbs_alone_and_metropolis_alone_reach_the_same_distribution(self):
+        """
+        The two kernels run separately, each against the enumeration. Measured
+        on this grid (11 cells), both within 0.01 total variation of it
+        per marginal; before the weights agreed, 0.04-0.09 for Gibbs and
+        0.07-0.14 for MH on the same marginals -- the lopsided half they
+        disagreed about. 0.03 is what the noise of these run lengths allows
+        with room to spare and what that gap does not.
+        """
+        model = self._ordered(step=40.0)
+        target = self._enumerated(model)
+        for name, got in (('Gibbs', self._gibbs_only(model)),
+                          ('MH', self._mh_only(model))):
+            assert self._tv(got[0], target[0]) < 0.03, (name, 'older boundary')
+            assert self._tv(got[1], target[1]) < 0.03, (name, 'younger boundary')
+            for k in range(4):
+                assert self._tv(got[2][k], target[2][k]) < 0.03, (name, 'date', k)
+
+
 class TestBranchingModels:
     """
     The models this sampler exists for -- the ones exact_chain declines.
