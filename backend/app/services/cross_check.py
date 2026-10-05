@@ -38,8 +38,9 @@ Three, which between them cover what the sampler is most often given:
 
   * Either of those with ORDERED BLOCKS of dates inside a pair of Boundaries:
     Phases or Sequences in a Sequence with no Boundary between them, so that
-    every date of one is older than every date of the next -- OxCal's own
-    Nenthorn example, which the exact solver declines ("two groups are ordered
+    every date of one is older than every date of the next -- the shape of the
+    Nenthorn reference model (tests/oxcal_fixture.py), which the exact solver
+    declines ("two groups are ordered
     against each other with no Boundary between them"). The blocks are read off
     the sampler's own ordering (_blocks), and the group's integral over its
     dates (_log_ordered) replaces the product of interval integrals: cut the

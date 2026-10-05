@@ -187,8 +187,9 @@ class _Reach:
 class TestOrderedGroups:
     """
     Dates ordered against each other inside one pair of Boundaries -- the shape
-    OxCal's own Nenthorn example takes, and one the exact solver declines
-    ("two groups are ordered against each other with no Boundary between them").
+    of the Nenthorn reference model (a project run through OxCal and kept as a
+    fixture), and one the exact solver declines ("two groups are ordered against
+    each other with no Boundary between them").
     """
 
     def test_the_exact_solver_declines_it_and_the_check_reads_it_as_a_chain(self):
