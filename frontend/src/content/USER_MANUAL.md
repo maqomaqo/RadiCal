@@ -1313,8 +1313,9 @@ ratio alone. On a test model of several areas within a site, the two moves toget
 the 200,000-sweep ceiling to convergence in 50,000, and without the enclosure move a run converged
 with the wrong weight on a group's two lobes (0.27 against the exact 0.40).
 
-Two Boundaries never share a grid cell, a date may sit on one at half weight, and the sampler holds
-to this exactly as the exact solver does. The span correction below divides by the number of ways
+Two Boundaries never share a grid cell, a date may sit on one at half weight (as may two dates
+that are ordered against each other, inside one pair of Boundaries with none between them), and the
+sampler holds to this exactly as the exact solver does. The span correction below divides by the number of ways
 the interior Boundaries fit *strictly* inside a span, so letting two of them meet adds arrangements
 the correction never divides out, most of all at the smallest spans. An earlier version let
 Boundaries separated only by an empty Phase, or by a level of nesting, coincide; models with sterile
