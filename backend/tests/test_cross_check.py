@@ -69,7 +69,10 @@ def _parallel(outliers=False):
 class TestShape:
     def test_a_nested_chain_is_one_chain(self):
         dates, tree = _nested_chain()
-        assert ec.layout(tree, dates) is None
+        # Exactly solvable as written since the exact solver joined Sequences
+        # bracketed one after another (cf1f56b); the check reads it the same way.
+        chain = ec.layout(tree, dates)
+        assert chain is not None and len(chain.boundary_ids) == 4
         outer, branches = cross_check.shape(tree, dates)
         assert outer is None and len(branches) == 1
         assert len(branches[0].boundary_ids) == 4
