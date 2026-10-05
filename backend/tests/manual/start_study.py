@@ -712,6 +712,142 @@ def command_report(options):
                       f"{_pct([r['seconds'] for r in rs], 50):9.1f} {sweeps / base:12.2f}")
 
 
+# The lobe probe (the feature spec's S4): a short chain started with a lobe's
+# group placed IN that lobe. If the model rules the lobe out the chain leaves it;
+# if the lobe holds real posterior mass it stays. Tested against the exact answer.
+PROBE_SWEEPS = 3000
+PROBE_EARLY = 500          # sweeps; the "short probe" reads occupancy over [500, 1000)
+PROBE_LATE_FROM = 1000
+
+
+def probe_state(model, kind, target, lobe):
+    """
+    A starting state with the target's whole group in `lobe`, the rest by the
+    modes and repaired by the stratigraphy, or None if the target did not end
+    up in the lobe. Every date of a group the target belongs to (for a Boundary,
+    every group it bounds) takes the lobe nearest the lobe's peak, so a group
+    that can only be found in its other lobe is placed there together.
+    """
+    peak, _share, first, last = lobe
+    if kind == 'date':
+        members = next((dates for _o, _y, dates in model.group_dates if target in dates), [])
+    else:
+        members = [d for o, y, dates in model.group_dates if target in (o, y) for d in dates]
+    wishes = {}
+    for date_id in members:
+        lobes = model.lobes(date_id)
+        if lobes:
+            wishes[date_id] = [(l, None) for l in sorted(
+                lobes, key=lambda l: (abs(l[0] - peak), l[0]))]
+    if kind == 'date':
+        own = [l for l in model.lobes(target) if l[2] == first and l[3] == last]
+        if not own:
+            return None
+        wishes[target] = [(own[0], None)] + [w for w in wishes.get(target, [])
+                                              if w[0][2] != first]
+    model.start_lobes = lambda *args, **kwargs: wishes
+    try:
+        state = model.initial_state(None, (0, 1, 'position'))
+    except ValueError:
+        return None
+    finally:
+        del model.start_lobes
+    return state if first <= state.index[target] < last else None
+
+
+def probe_job(args):
+    key, seed = args
+    try:
+        measurements, tree = _inputs(key)
+        truth = _truth(key, measurements, tree)
+        dates_exact = date_truth(key, measurements, tree)
+        model = gibbs.Model(measurements, tree, grid=truth['grid'] if truth else None)
+        targets = []
+        for date_id in model.date_ids:
+            lobes = model.lobes(date_id)
+            for lobe in lobes:
+                if lobe[1] >= OCC_LIKELIHOOD_SHARE:
+                    exact = None
+                    if dates_exact and date_id in dates_exact:
+                        ages, mass = dates_exact[date_id]
+                        exact = float(mass[(ages >= model.grid[lobe[2]])
+                                           & (ages <= model.grid[lobe[3] - 1])].sum())
+                    targets.append(('date', date_id, lobe, exact))
+        for boundary_id, lobes in boundary_lobes(key, measurements, tree, model).items():
+            for lobe in lobes:
+                if lobe[1] >= OCC_LIKELIHOOD_SHARE:
+                    exact = (float(truth['boundaries'][boundary_id][lobe[2]:lobe[3]].sum())
+                             if truth and boundary_id in truth['boundaries'] else None)
+                    targets.append(('boundary', boundary_id, lobe, exact))
+        records = []
+        for i, (kind, target, lobe, exact) in enumerate(targets):
+            record = {'model': key, 'seed': seed, 'kind': kind, 'share': lobe[1],
+                      'exact': exact, 'placed': False}
+            state = probe_state(model, kind, target, lobe)
+            if state is not None:
+                record['placed'] = True
+                chain = gibbs._Chain(model, PROBE_SWEEPS, 7000 + 100 * seed + i, None,
+                                     PROBE_SWEEPS, 0)
+                chain.state = state
+                inside = []
+                for _ in range(PROBE_SWEEPS):
+                    chain.sweep()
+                    inside.append(lobe[2] <= chain.state.index[target] < lobe[3])
+                inside = np.array(inside, dtype=float)
+                record['occ_early'] = float(inside[:PROBE_EARLY].mean())
+                record['occ_short'] = float(inside[PROBE_EARLY:PROBE_LATE_FROM].mean())
+                record['occ_late'] = float(inside[PROBE_LATE_FROM:].mean())
+            records.append(record)
+        return records
+    except Exception as error:
+        return [{'model': key, 'seed': seed, 'error': f'{type(error).__name__}: {error}'[:300]}]
+
+
+def command_probe(options):
+    models = _models(options)
+    jobs = [(m, 1000 + s) for m in models for s in range(options.seeds)]
+    print(f'{len(jobs)} jobs', flush=True)
+    with open(options.out, 'w') as out, multiprocessing.Pool(options.workers) as pool:
+        for n, records in enumerate(pool.imap_unordered(probe_job, jobs), 1):
+            for record in records:
+                out.write(json.dumps(record) + '\n')
+            out.flush()
+            if n % 10 == 0 or n == len(jobs):
+                print(f'{n}/{len(jobs)}', flush=True)
+
+
+def command_probe_report(options):
+    rows = [r for r in _load(options.results)]
+    errors = [r for r in rows if 'error' in r]
+    rows = [r for r in rows if 'error' not in r and r['exact'] is not None]
+    print(f'{len(rows)} lobes with an exact answer, {len(errors)} errors')
+    for kind in ('date', 'boundary'):
+        lobes = [r for r in rows if r['kind'] == kind]
+        real = [r for r in lobes if r['exact'] >= OCC_REAL]
+        ruled = [r for r in lobes if r['exact'] < OCC_EMPTY]
+        between = len(lobes) - len(real) - len(ruled)
+        print(f"\n{kind.upper()} lobes (>= {OCC_LIKELIHOOD_SHARE} of the likelihood): {len(lobes)} "
+              f"-- {len(real)} real (exact >= {OCC_REAL}), {len(ruled)} ruled out "
+              f"(exact < {OCC_EMPTY}), {between} between")
+        for name, group in (('real', real), ('ruled out', ruled)):
+            placed = [r for r in group if r['placed']]
+            print(f"  {name}: {len(placed)} of {len(group)} could be started in the lobe")
+        for field, label in (('occ_late', f'occupancy over sweeps {PROBE_LATE_FROM}+'),
+                             ('occ_short', f'short probe, sweeps {PROBE_EARLY}-{PROBE_LATE_FROM}')):
+            print(f"  {label}: the probe says 'stays' when the chain is in the lobe at least T of the time")
+            print(f"    {'T':>6s} {'real that stay':>16s} {'ruled out that stay':>21s}")
+            for t in (0.02, 0.05, 0.1, 0.25, 0.5):
+                rs = [r for r in real if r['placed']]
+                ns = [r for r in ruled if r['placed']]
+                a = sum(r[field] >= t for r in rs)
+                b = sum(r[field] >= t for r in ns)
+                print(f"    {t:6.2f} {f'{a}/{len(rs)}':>16s} {f'{b}/{len(ns)}':>21s}")
+    # What it would mean where it is wanted: the flagged lobes are almost all ruled out.
+    print("\nIf a probe of sensitivity s and specificity c is run on flagged lobes, of which "
+          "0.5% (dates) / 1% (Boundaries) are real misses (the occupancy study), the share of "
+          "'not reached' verdicts that are real is s*p / (s*p + (1-c)*(1-p)).")
+
+
 def command_occupancy(options):
     """How the S2 lobe-occupancy flag does against the runs the faults made wrong."""
     rows = [r for r in _load(options.results) if 'error' not in r and r.get('has_truth')]
@@ -818,6 +954,15 @@ def main():
             p.add_argument('--drift', action='store_true', help='also measure burn-in drift')
         else:
             p.add_argument('--max-sweeps', type=int, default=gibbs.MAX_SWEEPS)
+    p = sub.add_parser('probe')
+    p.add_argument('--out', required=True)
+    p.add_argument('--models')
+    p.add_argument('--generated', type=int, default=8)
+    p.add_argument('--parallel', type=int, default=4)
+    p.add_argument('--seeds', type=int, default=6)
+    p.add_argument('--workers', type=int, default=max(1, (os.cpu_count() or 2) - 1))
+    p = sub.add_parser('probe-report')
+    p.add_argument('results')
     p = sub.add_parser('occupancy')
     p.add_argument('results')
     p = sub.add_parser('boundary-occupancy')
@@ -828,7 +973,8 @@ def main():
     options = parser.parse_args()
     {'run': command_run, 'cost': command_cost, 'report': command_report,
      'occupancy': command_occupancy,
-     'boundary-occupancy': command_boundary_occupancy}[options.command](options)
+     'boundary-occupancy': command_boundary_occupancy, 'probe': command_probe,
+     'probe-report': command_probe_report}[options.command](options)
 
 
 if __name__ == '__main__':
