@@ -340,6 +340,119 @@ def occupancy(model, histograms, truth):
     return out
 
 
+_BOUNDARY_LOBES = {}
+
+
+def boundary_lobes(key, measurements, tree, model):
+    """
+    The lobes of each Boundary, defined from its own dates and nothing else: a
+    Boundary has no likelihood, so each group it bounds is solved ALONE and
+    exactly (its Boundaries, its dates, no other stratigraphy, the direct
+    calculation of services/cross_check.py), and the Boundary's marginal in each
+    such group is a likelihood-implied picture of where it can be. A Boundary
+    shared by two groups takes the product of the two, which is where both
+    allow it. Mode-complete by construction (no sampler) and independent of the
+    answer. Lobes are those of that marginal (Model._lobes_of: peaks holding at
+    least LOBE_MIN_MASS), and only a Boundary with two or more has any.
+
+    {boundary id: [(peak cell, mass, first cell, one past the last)]} on the
+    model's grid. Groups the direct calculation will not take alone (one date
+    leaves a Boundary's tail unbounded) contribute nothing.
+    """
+    if key in _BOUNDARY_LOBES:
+        return _BOUNDARY_LOBES[key]
+    by_id = {m['id']: m for m in measurements}
+    elements = {}
+
+    def walk(element):
+        elements[element['id']] = element
+        for child in element.get('children') or []:
+            walk(child)
+
+    walk(tree)
+    pictures = {}
+    for older, younger, dates in model.group_dates:
+        if not dates:
+            continue
+        phase = _element('phase', 'Group')
+        group = [dict(by_id[d], element_id=phase['id']) for d in dates]
+        alone = _element('sequence', 'Group alone', [
+            dict(elements[older], children=[]), phase, dict(elements[younger], children=[])])
+        try:
+            reference = cross_check.reference(group, alone)
+        except Exception:
+            continue
+        grid = reference['grid']
+        for boundary_id in (older, younger):
+            density = reference['boundaries'].get(boundary_id)
+            if density is None:
+                continue
+            on_model = np.interp(model.grid, grid, density / (grid[1] - grid[0]),
+                                 left=0.0, right=0.0)
+            if on_model.sum() > 0:
+                pictures.setdefault(boundary_id, []).append(on_model / on_model.sum())
+    found = {}
+    for boundary_id, arrays in pictures.items():
+        row = np.prod(arrays, axis=0) if len(arrays) > 1 else arrays[0]
+        if row.sum() < 1e-12:
+            row = np.mean(arrays, axis=0)
+        lobes = gibbs.Model._lobes_of(row / row.sum())
+        if len(lobes) >= 2:
+            found[boundary_id] = lobes
+    _BOUNDARY_LOBES[key] = found
+    return found
+
+
+def boundary_occupancy(model, histograms, lobes_by_boundary, truth):
+    """
+    The S2 flags over Boundaries, with lobes from boundary_lobes: UNVISITED when
+    a lobe holding at least OCC_LIKELIHOOD_SHARE of the Boundary's likelihood-
+    implied picture gets no more than OCC_EMPTY of any chain's draws, and the
+    chains DISAGREE when they do not share a dominant lobe. With the direct
+    answer, an unvisited lobe is REAL when that answer puts OCC_REAL or more on
+    it, RULED OUT under OCC_EMPTY.
+
+    Separately, `occb_truth_missed` counts Boundaries whose DIRECT answer has a
+    lobe of OCC_LIKELIHOOD_SHARE or more that the pooled run gave under
+    OCC_EMPTY: how many wrong runs are missed-lobe failures at all, whatever
+    lobes a user could have known about beforehand.
+    """
+    out = {'occb_boundaries': len(lobes_by_boundary), 'occb_unvisited': 0,
+           'occb_unvisited_real': 0, 'occb_unvisited_ruled_out': 0,
+           'occb_disagree': 0, 'occb_truth_missed': 0}
+
+    def per_chain(boundary_id, lobes):
+        rows = []
+        for chain in histograms:
+            row = chain[boundary_id]
+            rows.append([float(row[first:last].sum() / row.sum())
+                         for _peak, _share, first, last in lobes])
+        return rows
+
+    for boundary_id, lobes in lobes_by_boundary.items():
+        masses = per_chain(boundary_id, lobes)
+        pooled = np.mean(masses, axis=0)
+        if len({int(np.argmax(m)) for m in masses}) > 1:
+            out['occb_disagree'] += 1
+        density = truth['boundaries'].get(boundary_id) if truth else None
+        for k, (_peak, share, first, last) in enumerate(lobes):
+            if (share >= OCC_LIKELIHOOD_SHARE and pooled[k] < OCC_EMPTY
+                    and max(m[k] for m in masses) <= OCC_EMPTY):
+                out['occb_unvisited'] += 1
+                if density is not None:
+                    exact = float(density[first:last].sum())
+                    out['occb_unvisited_real'] += exact >= OCC_REAL
+                    out['occb_unvisited_ruled_out'] += exact < OCC_EMPTY
+    if truth:
+        for boundary_id, density in truth['boundaries'].items():
+            for _peak, share, first, last in gibbs.Model._lobes_of(density):
+                pooled = sum(float(h[boundary_id][first:last].sum() / h[boundary_id].sum())
+                             for h in histograms) / len(histograms)
+                if share >= OCC_LIKELIHOOD_SHARE and pooled < OCC_EMPTY:
+                    out['occb_truth_missed'] += 1
+    return out
+
+
 def drift(model, starts, states, sweeps, seed):
     """Share of multi-lobe dates still in the lobe they started in after burn-in."""
     kept = []
@@ -388,7 +501,9 @@ def job(args):
         record = {'model': key, 'arm': arm, 'fault': fault, 'seed': seed,
                   'sweeps': sweeps, 'rhat': rhat, 'drift_kept': kept,
                   'has_truth': truth is not None, 'has_date_truth': dates_exact is not None,
-                  **quality, **occupancy(model, histograms, dates_exact)}
+                  **quality, **occupancy(model, histograms, dates_exact),
+                  **boundary_occupancy(model, histograms,
+                                       boundary_lobes(key, measurements, tree, model), truth)}
         if truth:
             low = float(truth['grid'][0])
             count = int(np.ceil((truth['grid'][-1] - low) / cross_check.REPORTING_STEP_YEARS)) + 1
@@ -642,6 +757,49 @@ def command_occupancy(options):
                   + (f"; on wrong runs {_pct(wrong, 50):.3f}" if wrong else ""))
 
 
+def command_boundary_occupancy(options):
+    """The S2 flags over Boundaries, lobes from boundary_lobes."""
+    rows = [r for r in _load(options.results)
+            if 'error' not in r and r.get('has_truth') and 'occb_boundaries' in r]
+    rhat_value = lambda r: float('inf') if r['rhat'] is None else r['rhat']
+    flags = {
+        'R-hat': lambda r: rhat_value(r) > RHAT_GATE,
+        'unvisited': lambda r: r['occb_unvisited'] > 0,
+        'disagree': lambda r: r['occb_disagree'] > 0,
+        'either': lambda r: r['occb_unvisited'] > 0 or r['occb_disagree'] > 0,
+        'either + R-hat': lambda r: (r['occb_unvisited'] > 0 or r['occb_disagree'] > 0
+                                     or rhat_value(r) > RHAT_GATE),
+    }
+    with_lobes = [r for r in rows if r['occb_boundaries']]
+    print(f"{len(rows)} runs with truth; {len(with_lobes)} have a Boundary with two or more lobes "
+          f"(runs of {sorted({r['model'] for r in with_lobes})})")
+    for fault in sorted({r['fault'] for r in rows}):
+        for arm in sorted({r['arm'] for r in rows}):
+            runs = [r for r in rows if r['fault'] == fault and r['arm'] == arm]
+            wrong = [r for r in runs if r['tv_truth'] > WRONG]
+            right = [r for r in runs if r['tv_truth'] <= WRONG]
+            print(f"\n{fault} / {arm}: {len(wrong)} wrong of {len(runs)}")
+            print(f"  {'flag':16s} {'catches wrong':>14s} {'false alarms':>13s} {'precision':>10s}")
+            for name, flag in flags.items():
+                caught, false = sum(flag(r) for r in wrong), sum(flag(r) for r in right)
+                fired = caught + false
+                print(f"  {name:16s} {f'{caught}/{len(wrong)}':>14s} {f'{false}/{len(right)}':>13s} "
+                      f"{(f'{caught}/{fired}' if fired else '-'):>10s}")
+    flagged = sum(r['occb_unvisited'] for r in rows)
+    print(f"\nUnvisited Boundary lobes: {flagged} flagged -- "
+          f"{sum(r['occb_unvisited_real'] for r in rows)} the direct answer puts at least {OCC_REAL} on, "
+          f"{sum(r['occb_unvisited_ruled_out'] for r in rows)} it puts under {OCC_EMPTY} on")
+    print("\nWHAT KIND OF FAILURE IS A WRONG RUN (direct answer has a lobe of "
+          f">= {OCC_LIKELIHOOD_SHARE} that the pooled run gave < {OCC_EMPTY})")
+    for fault in sorted({r['fault'] for r in rows}):
+        wrong = [r for r in rows if r['fault'] == fault and r['tv_truth'] > WRONG]
+        right = [r for r in rows if r['fault'] == fault and r['tv_truth'] <= WRONG]
+        if wrong:
+            print(f"  {fault}: {sum(r['occb_truth_missed'] > 0 for r in wrong)} of {len(wrong)} wrong runs "
+                  f"missed a lobe outright; {sum(r['occb_truth_missed'] > 0 for r in right)} of "
+                  f"{len(right)} correct runs did")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
     sub = parser.add_subparsers(dest='command', required=True)
@@ -662,12 +820,15 @@ def main():
             p.add_argument('--max-sweeps', type=int, default=gibbs.MAX_SWEEPS)
     p = sub.add_parser('occupancy')
     p.add_argument('results')
+    p = sub.add_parser('boundary-occupancy')
+    p.add_argument('results')
     p = sub.add_parser('report')
     p.add_argument('results')
     p.add_argument('cost', nargs='?')
     options = parser.parse_args()
     {'run': command_run, 'cost': command_cost, 'report': command_report,
-     'occupancy': command_occupancy}[options.command](options)
+     'occupancy': command_occupancy,
+     'boundary-occupancy': command_boundary_occupancy}[options.command](options)
 
 
 if __name__ == '__main__':
