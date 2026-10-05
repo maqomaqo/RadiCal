@@ -1318,6 +1318,67 @@ class TestBoundariesNeverShareACell:
             exact['boundaries'][start]['posterior']['posterior_mean'], abs=6.0)
 
 
+class TestParallelStartsOnCoarseGrids:
+    """
+    The start of a model with parallel branches leaves its outer span the
+    cells its interior boundaries need (Model._widen_span_pairs).
+
+    The walk keeps one cell per link of the LONGEST chain, so boundaries in
+    different branches share cells, and the span correction's C(cells - 1,
+    n - 2) is zero when the outer pair is narrower than n - 1 cells. On a
+    grid with few cells the start was infeasible: 'could not find a feasible
+    starting state' on generated site models solved on cross_check's grid.
+    """
+
+    def _site(self, areas=3):
+        measurements, children = [], []
+        for a in range(areas):
+            first, second = _element('phase', f'A{a}P0'), _element('phase', f'A{a}P1')
+            for phase, ages in ((first, (650, 660)), (second, (700, 710))):
+                measurements += [_date(phase['id'], age + 10 * a) for age in ages]
+            children.append(_element('sequence', f'Area {a}', [
+                _element('boundary', f's{a}'), first, _element('boundary', f'm{a}'),
+                second, _element('boundary', f'e{a}')]))
+        tree = _element('sequence', 'Site', [
+            _element('boundary', 'Start'), _element('phase', 'Activity', children),
+            _element('boundary', 'End')])
+        return measurements, tree
+
+    def _coarse_grid(self, measurements, tree, step, pad):
+        model = gibbs.Model(measurements, tree)
+        modes = [model.grid[int(np.argmax(model.likelihood[d]))]
+                 for d in model.date_ids]
+        return np.arange(min(modes) - pad, max(modes) + pad + step / 2, step)
+
+    @pytest.mark.parametrize('step,pad', [(5, 0), (10, 25)])
+    def test_a_coarse_grid_still_gives_a_feasible_start(self, step, pad):
+        measurements, tree = self._site()
+        grid = self._coarse_grid(measurements, tree, step, pad)
+        model = gibbs.Model(measurements, tree, grid=grid)
+        (oldest, youngest, interior), = model.span_priors
+        # The point of the test: fewer cells than boundaries is reachable.
+        assert len(grid) > interior + 1
+        for quantile in (None, 0.2, 0.8):
+            state = model.initial_state(quantile)
+            assert state.index[oldest] - state.index[youngest] >= interior + 1
+            assert np.isfinite(model.log_posterior(state))
+
+    def test_a_grid_with_no_room_for_the_boundaries_still_says_so(self):
+        measurements, tree = self._site()
+        grid = self._coarse_grid(measurements, tree, 25, 0)
+        model = gibbs.Model(measurements, tree, grid=grid)
+        with pytest.raises(ValueError):
+            model.initial_state()
+
+    def test_a_start_that_was_wide_enough_is_left_alone(self):
+        measurements, tree = self._site()
+        model = gibbs.Model(measurements, tree)
+        state = model.initial_state()
+        index = {p: state.index[p] for p in model.params}
+        model._widen_span_pairs(index)
+        assert index == {p: state.index[p] for p in model.params}
+
+
 class TestEnclosureMoves:
     """
     A group in one of several parallel branches is offered its translation

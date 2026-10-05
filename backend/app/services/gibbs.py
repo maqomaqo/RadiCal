@@ -1375,6 +1375,8 @@ class Model:
             index[param] = (start if start is not None
                             else int(np.clip(preferred[param], lo, hi)))
 
+        self._widen_span_pairs(index)
+
         # Mid-prior: with u uniform on its range there is no better guess, and
         # its conditional is drawn exactly on the first sweep.
         scale = {model: len(self.scale_grid[model]) // 2
@@ -1422,6 +1424,41 @@ class Model:
                             return cell
                     return a + int(np.argmax(inside))
         return None
+
+    def _widen_span_pairs(self, index: Dict[str, int]) -> None:
+        """
+        Leave every span-prior pair the cells its interior boundaries need.
+
+        The walk in initial_state keeps one cell per link of the LONGEST chain,
+        so boundaries in parallel branches share cells and an outer pair can
+        come out narrower than its n - 2 interior boundaries (n - 1 cells).
+        The span correction counts C(cells - 1, n - 2) placements, which is
+        zero there, so the start would have a log posterior of -inf. It shows
+        on a coarse grid, where a Site's whole span is few cells.
+
+        Widened by moving the pair itself outward, the older end older and the
+        younger end younger, as far as its own window and whatever is older or
+        younger than it allow. Everything between stays where the walk put it,
+        and a pair already wide enough is not touched, so a chain starts as it
+        always did. If the grid has no room the start stays infeasible and
+        initial_state says so.
+        """
+        for oldest_id, youngest_id, exponent in self.span_priors:
+            deficit = exponent + 1 - (index[oldest_id] - index[youngest_id])
+            if deficit <= 0:
+                continue
+            room_older = min(
+                [self.window[oldest_id][1]]
+                + [index[o] - 1 for o in self.below[oldest_id]]) - index[oldest_id]
+            room_younger = index[youngest_id] - max(
+                [self.window[youngest_id][0]]
+                + [index[y] + 1 for y in self.above[youngest_id]])
+            # Half each way, then whatever one end could not give from the other.
+            older = min(max(room_older, 0), (deficit + 1) // 2)
+            younger = min(max(room_younger, 0), deficit - older)
+            older = min(max(room_older, 0), deficit - younger)
+            index[oldest_id] += older
+            index[youngest_id] -= younger
 
     def move_sets(self) -> List[List[str]]:
         """
