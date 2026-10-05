@@ -1334,7 +1334,10 @@ other `n − 1` starts with every date at the same quantile `q_c` of its own lik
 from the `c`-th of `n − 1` equal strata of 0.025–0.975, and the ordering is then repaired from the
 oldest parameter down. One quantile for every date rather than one each, because the lobes that
 matter belong to whole groups: a Phase's dates calibrate on the same stretch of curve, and a group
-can only be found in its other lobe if its members start there together. They advance in step — the same burn-in, one round at a time — and the
+can only be found in its other lobe if its members start there together. Starting each chain in a
+chosen calibration lobe of every date that has several was also tried. It put a chain in more of
+the lobes at the start, but the chains left them during burn-in, and on generated test models it
+neither caught more wrong answers nor changed accuracy, so the quantile start is kept. The chains advance in step — the same burn-in, one round at a time — and the
 convergence measure above is read off their rounds *pooled*, so the run stops when the pooled
 histogram has converged rather than when each chain has on its own. The deficit in that measure is
 mostly Monte Carlo noise, which falls as `1/sqrt(draws)`, so four chains reach the target in about a

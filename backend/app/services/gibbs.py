@@ -225,6 +225,25 @@ PEAK_JUMP_JITTER_YEARS = 5.0
 PEAK_PROMINENCE = 0.05
 # Most distinct peak gaps kept per move set, the most common first.
 MAX_PEAK_GAPS = 12
+# A calibration lobe is somewhere a chain is worth starting once it holds this
+# share of its date's (inlier) likelihood. Below it the lobe is too light to
+# matter to any marginal, and would crowd out the lobes that do, since there
+# are only a few chains to start (see Model.start_lobes).
+LOBE_MIN_MASS = 0.05
+# A lobe still counts as open to a date's starting cell when the window its
+# neighbours leave reaches this fraction of the way up the lobe's peak.
+LOBE_HELD_FRACTION = 0.25
+# How a chain that does not start at the modes chooses a lobe for each date
+# that has several (Model.start_lobes). 'quantile' leaves them to the shared
+# quantile alone; the rest are in start_lobes. 'quantile' stays the default
+# until tests/manual/start_study.py shows another detecting a missed lobe more
+# often: the first pilot found no difference in detection or accuracy.
+START_STRATEGIES = ('quantile', 'position', 'calendar', 'equalised', 'random')
+DEFAULT_START_STRATEGY = 'quantile'
+# How far into a lobe the 'equalised' strategy keeps its start from the lobe's
+# edges, as a share of the lobe's own mass: the valley between two lobes is
+# in neither.
+EQUALISED_EDGE = 0.15
 # Sweeps the run starts with, and the ceiling it will extend to when the
 # convergence measure is not met. See run() for why the length is not fixed.
 DEFAULT_SWEEPS = 20000
@@ -1199,7 +1218,8 @@ class Model:
 
         return float(total)
 
-    def initial_state(self, quantile: Optional[float] = None) -> _State:
+    def initial_state(self, quantile: Optional[float] = None,
+                      lobe: Optional[Tuple] = None) -> _State:
         """
         A state satisfying every hard constraint, built by walking the ordering
         from oldest to youngest and giving each parameter the youngest position
@@ -1226,6 +1246,15 @@ class Model:
         a phase's dates calibrate on the same stretch of curve, and a group can
         only be found in its other range if its members start there together
         -- single-site moves cannot carry it across one date at a time.
+
+        `lobe` is (rank, ranks[, strategy[, seed]]): the chain's place among
+        the `ranks` chains that do not start at the modes, and how it chooses
+        (Model.start_lobes). A quantile reaches a lobe only in
+        proportion to its mass -- on a dune section with sterile layers, five
+        of nine multi-lobe dates had a lobe holding a third of their
+        likelihood that no chain started in -- so a date with more than one
+        lobe of its own (Model.lobes) starts in the one start_lobes wishes this
+        rank, and the quantile is left to dates with a single lobe.
         """
         # Longest chain of "must be older than" above each parameter, so every
         # constraint on it is already placed by the time it is.
@@ -1245,9 +1274,13 @@ class Model:
         for param in self.params:
             compute_depth(param)
 
+        wishes = self.start_lobes(*lobe) if lobe is not None else {}
         preferred: Dict[str, int] = {}
         for date_id in self.date_ids:
-            if quantile is None:
+            if date_id in wishes:
+                (peak, _m, _f, _l), target = wishes[date_id][0]
+                preferred[date_id] = peak if target is None else target
+            elif quantile is None:
                 preferred[date_id] = int(np.argmax(self.likelihood[date_id]))
             else:
                 cdf = self.cdf[date_id]
@@ -1270,6 +1303,20 @@ class Model:
                           if boundary_id in (older, younger) for d in dates]
             preferred[boundary_id] = (int(np.mean(neighbours)) if neighbours
                                       else self.M // 2)
+            if wishes:
+                # The mean pens the dates in. A Phase's Start at the mean of its
+                # dates' wishes has half of them older than itself, and the walk
+                # below then drags them into whatever lobe is younger than it
+                # -- on the OxCal fixture the older lobes were never started in.
+                # Just outside every date it bounds instead, where the
+                # posterior puts it anyway: older than all of them for a Start,
+                # younger than all of them for an End.
+                sides = [(max(preferred[d] for d in dates) + 1) if boundary_id == older
+                         else (min(preferred[d] for d in dates) - 1)
+                         for older, younger, dates in self.group_dates
+                         if dates and boundary_id in (older, younger)]
+                if sides:
+                    preferred[boundary_id] = int(np.mean(sides))
 
         # The youngest cell each parameter may take and still leave room for
         # everything that must be YOUNGER than it: one cell per link of the
@@ -1292,18 +1339,41 @@ class Model:
         for param in self.params:
             compute_floor(param)
 
+        # What each parameter must clear to leave the wished lobes of the dates
+        # younger than it open. The walk places the oldest first and only ever
+        # lowers a younger one to the cell above its older neighbour, so a
+        # younger date wishing for an old lobe finds it shut unless everything
+        # older has already been put at least that old: on the OxCal fixture
+        # the oldest lobe of three dates was never started in for want of it.
+        lobe_floor = {d: self._lobe_floor(d, wishes[d][0][0]) for d in wishes}
+        clears: Dict[str, int] = {}
+
+        def compute_clears(param: str) -> int:
+            if param not in clears:
+                # One cell clear of each younger neighbour, as the walk keeps
+                # every link strict.
+                clears[param] = max(
+                    [-1] + [max(lobe_floor.get(y, -1), compute_clears(y)) + 1
+                            for y in self.above[param]])
+            return clears[param]
+
         index: Dict[str, int] = {}
         for param in sorted(self.params, key=lambda p: depth[p]):
             lo, hi = floor[param], self.window[param][1]
             for older in self.below[param]:
                 hi = min(hi, index[older] - 1)
+            if wishes and lo < compute_clears(param) <= hi:
+                lo = compute_clears(param)
             if hi < lo:
                 raise ValueError(
                     'the model has no state satisfying all of its constraints: '
                     f"'{param}' must be older than {lo} and younger than {hi} "
                     'on the calendar grid at once'
                 )
-            index[param] = int(np.clip(preferred[param], lo, hi))
+            start = (self._start_in_lobe(param, wishes[param], lo, hi)
+                     if param in wishes else None)
+            index[param] = (start if start is not None
+                            else int(np.clip(preferred[param], lo, hi)))
 
         # Mid-prior: with u uniform on its range there is no better guess, and
         # its conditional is drawn exactly on the first sweep.
@@ -1314,6 +1384,44 @@ class Model:
         if not np.isfinite(self.log_posterior(state)):
             raise ValueError('could not find a feasible starting state for this model')
         return state
+
+    def _lobe_floor(self, date_id: str, lobe: Tuple[int, float, int, int]) -> int:
+        """The youngest cell of `lobe` that a start there may take: the first
+        the lobe reaches LOBE_HELD_FRACTION of its peak."""
+        peak, _mass, first, last = lobe
+        row = self._inlier_row(date_id)
+        held = np.nonzero(row[first:last] >= LOBE_HELD_FRACTION * row[peak])[0]
+        return first + int(held[0])
+
+    def _start_in_lobe(self, date_id: str,
+                       wished: List[Tuple[Tuple[int, float, int, int], Optional[int]]],
+                       lo: int, hi: int) -> Optional[int]:
+        """
+        The cell in [lo, hi] a date starts at: in the first lobe of `wished`
+        that the window still holds, or None if it holds none. Within the lobe
+        it is the wished cell if there is one (else the lobe's peak), moved to
+        the nearest cell the window allows, or the highest point the window
+        holds when that cell is too low in the lobe to count.
+
+        Merely clipping the wished peak into the window is what a stratigraphic
+        order defeats: a date wishing for an old lobe, placed after neighbours
+        that sit in a younger one, is dragged to the edge of the window, which
+        is in no lobe at all. Taking the next lobe the window does hold keeps
+        the start in a lobe, if not the wished one. A lobe counts as held when
+        the window reaches LOBE_HELD_FRACTION of the way up it.
+        """
+        row = self._inlier_row(date_id)
+        for (peak, _mass, first, last), target in wished:
+            a, b = max(lo, first), min(hi, last - 1)
+            if a <= b:
+                inside = row[a:b + 1]
+                if inside.max() >= LOBE_HELD_FRACTION * row[peak]:
+                    if target is not None:
+                        cell = int(np.clip(target, a, b))
+                        if row[cell] >= LOBE_HELD_FRACTION * row[peak]:
+                            return cell
+                    return a + int(np.argmax(inside))
+        return None
 
     def move_sets(self) -> List[List[str]]:
         """
@@ -1445,8 +1553,7 @@ class Model:
         for param in params:
             if param not in self.likelihood:
                 continue
-            row = (self.outlier_parts[param][0] if param in self.outlier_parts
-                   else self.likelihood[param])
+            row = self._inlier_row(param)
             peak = float(row.max())
             if peak <= 0:
                 continue
@@ -1458,6 +1565,117 @@ class Model:
         common = sorted(counts, key=lambda g: (-counts[g], g))[:MAX_PEAK_GAPS]
         cache[key] = np.array(sorted(common), dtype=np.int64)
         return cache[key]
+
+    def _inlier_row(self, date_id: str) -> np.ndarray:
+        """A date's likelihood without its outlier component, which is broad
+        and has no lobes of its own."""
+        return (self.outlier_parts[date_id][0] if date_id in self.outlier_parts
+                else self.likelihood[date_id])
+
+    @staticmethod
+    def _lobes_of(row: np.ndarray) -> List[Tuple[int, float, int, int]]:
+        """
+        (peak cell, share of `row`'s total, first cell, one past the last) for
+        each calibration lobe holding at least LOBE_MIN_MASS of it, in cell
+        order. A lobe runs from the valley before its peak to the one after, so
+        the shares add to one.
+        """
+        from scipy.signal import find_peaks
+        total, top = float(row.sum()), float(row.max())
+        if total <= 0 or top <= 0:
+            return []
+        peaks, _ = find_peaks(row, prominence=PEAK_PROMINENCE * top)
+        if len(peaks) == 0:
+            return []
+        valleys = [int(a) + int(np.argmin(row[a:b + 1]))
+                   for a, b in zip(peaks[:-1], peaks[1:])]
+        edges = [0] + valleys + [len(row)]
+        return [(int(peak), float(row[lo:hi].sum()) / total, lo, hi)
+                for peak, lo, hi in zip(peaks, edges[:-1], edges[1:])
+                if row[lo:hi].sum() / total >= LOBE_MIN_MASS]
+
+    def lobes(self, date_id: str) -> List[Tuple[int, float, int, int]]:
+        """
+        The calibration lobes worth starting a chain in, as (peak cell, mass,
+        first cell, one past the last), or [] unless the date has two or more
+        -- one lobe is where the mode already is. Cached.
+        """
+        cache = self.__dict__.setdefault('_lobes', {})
+        if date_id not in cache:
+            found = self._lobes_of(self._inlier_row(date_id))
+            cache[date_id] = found if len(found) >= 2 else []
+        return cache[date_id]
+
+    def start_lobes(self, rank: int, ranks: int,
+                    strategy: str = 'position', seed: int = 0
+                    ) -> Dict[str, List[Tuple[Tuple[int, float, int, int], Optional[int]]]]:
+        """
+        For each date that has several calibration lobes, its lobes in the order
+        chain `rank` of the `ranks` that do not start at the modes would like
+        to start in them, first choice first, each with the cell in it the
+        chain would like (None for the lobe's peak). Chain 0 sits in the modes.
+
+        The strategies differ in what they hold the same from date to date, which
+        is what keeps a start feasible under the stratigraphic order and lets a
+        phase's dates, which calibrate on the same stretch of curve, find their
+        other lobe together:
+
+        position   the same FRACTION f = (rank + 1/2) / ranks of the way along
+                   every date's lobes, oldest first, then the lobes nearest it.
+                   By position, not mass, so a light lobe is started in as often
+                   as a heavy one; three chains cover every lobe of a date with
+                   up to three.
+        calendar   the same fraction of the way along the range of calendar ages
+                   its GROUP's lobe peaks span, each date taking its lobe
+                   nearest that age. Dates with different numbers of lobes then
+                   still start together.
+        equalised  position, but through a likelihood re-weighted to give every
+                   lobe equal mass, so the chain starts part-way into the lobe
+                   rather than at its peak.
+        random     position, with each group's order of chains shifted by a
+                   draw of `seed`, so different groups are in different lobes
+                   in one chain: the combinations a single fraction never
+                   visits. Still stratified within each group.
+
+        Only a wish: a lobe may not be open to a date once its neighbours are
+        placed, and initial_state takes the first that is.
+        """
+        if strategy not in START_STRATEGIES or strategy == 'quantile':
+            raise ValueError(f'no lobe start for strategy {strategy!r}')
+        groups = [dates for _o, _y, dates in self.group_dates]
+        grouped = {d for dates in groups for d in dates}
+        groups += [[d] for d in self.date_ids if d not in grouped]
+
+        wishes = {}
+        for index, dates in enumerate(groups):
+            members = [d for d in dates if self.lobes(d)]
+            if not members:
+                continue
+            f = (rank + 0.5) / ranks
+            if strategy == 'random':
+                shift = int(np.random.default_rng([seed, index]).integers(ranks))
+                f = (((rank + shift) % ranks) + 0.5) / ranks
+            if strategy == 'calendar':
+                peaks = [lobe[0] for d in members for lobe in self.lobes(d)]
+                when = min(peaks) + f * (max(peaks) - min(peaks))
+            for date_id in members:
+                lobes = self.lobes(date_id)
+                if strategy == 'calendar':
+                    order = sorted(range(len(lobes)),
+                                   key=lambda i: (abs(lobes[i][0] - when), i))
+                else:
+                    first = min(len(lobes) - 1, int(len(lobes) * f))
+                    order = sorted(range(len(lobes)), key=lambda i: (abs(i - first), i))
+                targets = {i: None for i in order}
+                if strategy == 'equalised':
+                    inside = min(max(len(lobes) * f - first, EQUALISED_EDGE),
+                                 1 - EQUALISED_EDGE)
+                    row = self._inlier_row(date_id)
+                    for i, (_p, _m, lo, hi) in enumerate(lobes):
+                        cdf = np.cumsum(row[lo:hi])
+                        targets[i] = lo + int(np.searchsorted(cdf, inside * cdf[-1]))
+                wishes[date_id] = [(lobes[i], targets[i]) for i in order]
+        return wishes
 
     def shift(self, state: _State, rng, params: List[str], scale: float,
               current_lp: Optional[float] = None
@@ -1527,12 +1745,13 @@ class _Chain:
 
     def __init__(self, model: Model, sweeps: int, seed: int,
                  burn_in: Optional[int], max_sweeps: Optional[int],
-                 collect_draws: int, start_quantile: Optional[float] = None):
+                 collect_draws: int, start_quantile: Optional[float] = None,
+                 start_lobe: Optional[Tuple] = None):
         self.model = model
         self.rng = np.random.default_rng(seed)
         # Where in the dates' likelihoods the chain starts; None is the mode.
         # See Model.initial_state and solve_chains.
-        self.state = model.initial_state(start_quantile)
+        self.state = model.initial_state(start_quantile, start_lobe)
         self.burn_in = int(sweeps * BURN_IN_FRACTION) if burn_in is None else burn_in
         self.max_sweeps = max(sweeps, MAX_SWEEPS) if max_sweeps is None else max_sweeps
 
@@ -1768,13 +1987,17 @@ def run(model: Model, sweeps: int = DEFAULT_SWEEPS, seed: int = 42,
         max_sweeps: Optional[int] = None,
         collect_draws: int = 0,
         on_progress: Optional[Callable[[Dict], bool]] = None,
-        start_quantile: Optional[float] = None) -> Dict:
+        start_quantile: Optional[float] = None,
+        start_lobe: Optional[Tuple] = None) -> Dict:
     """
     Sweep the sampler and accumulate each parameter's marginal as a histogram
     over the calendar grid, extending the run until it has converged.
 
     `start_quantile` is where the chain starts (Model.initial_state); None,
     the likelihood modes, is the single-chain run and chain 0 of any wider one.
+    `start_lobe` is (rank, ranks) among the chains that do not start at the
+    modes, which decides the lobe it starts in for each date that has several;
+    see Model.start_lobes.
 
     Histograms rather than stored draw arrays: the grid is the natural
     resolution of the whole problem, a count per cell is all _summarize needs,
@@ -1816,7 +2039,7 @@ def run(model: Model, sweeps: int = DEFAULT_SWEEPS, seed: int = 42,
     ...} -- convergence being OxCal's own diagnostic, per parameter.
     """
     chain = _Chain(model, sweeps, seed, burn_in, max_sweeps, collect_draws,
-                   start_quantile)
+                   start_quantile, start_lobe)
 
     def report(phase: str, convergence: float) -> None:
         if on_progress is None:
@@ -1952,7 +2175,8 @@ def _chain_server(conn) -> None:
                               uniform_span_prior=payload['uniform_span_prior'])
                 chain = _Chain(model, payload['sweeps'], payload['seed'],
                                None, payload['max_sweeps'], payload['collect_draws'],
-                               payload.get('start_quantile'))
+                               payload.get('start_quantile'),
+                               payload.get('start_lobe'))
                 reply = {'params': list(model.params), 'burn_in': chain.burn_in,
                          'max_sweeps': chain.max_sweeps}
             elif command == 'burn':
@@ -2093,6 +2317,22 @@ def start_quantiles(chains: int, seed: int) -> List[Optional[float]]:
                      for c in range(chains - 1)]
 
 
+def chain_starts(chains: int, seed: int,
+                 strategy: str = DEFAULT_START_STRATEGY) -> List[Dict]:
+    """
+    run()'s start arguments for each chain of a multi-chain run: chain 0 at the
+    modes, the rest at a stratified quantile (start_quantiles) and, for dates
+    with several calibration lobes, in a lobe chosen by `strategy`
+    (Model.start_lobes; 'quantile' leaves them to the quantile).
+    """
+    if strategy not in START_STRATEGIES:
+        raise ValueError(f'unknown start strategy {strategy!r}')
+    return [{'start_quantile': quantile,
+             'start_lobe': (None if c == 0 or strategy == 'quantile'
+                            else (c - 1, chains - 1, strategy, seed))}
+            for c, quantile in enumerate(start_quantiles(chains, seed))]
+
+
 def solve_chains(measurements: List[Dict], root: Dict, chains: int,
                  sweeps: int = DEFAULT_SWEEPS, seed: int = 42,
                  uniform_span_prior: bool = True,
@@ -2100,7 +2340,8 @@ def solve_chains(measurements: List[Dict], root: Dict, chains: int,
                  target_convergence: float = TARGET_CONVERGENCE,
                  max_sweeps: Optional[int] = None,
                  collect_draws: int = 0,
-                 on_progress: Optional[Callable[[Dict], bool]] = None) -> Dict:
+                 on_progress: Optional[Callable[[Dict], bool]] = None,
+                 start_strategy: str = DEFAULT_START_STRATEGY) -> Dict:
     """
     run() over `chains` chains in parallel worker processes, under ONE
     stopping rule read off their pooled rounds, returned as one result of
@@ -2163,8 +2404,8 @@ def solve_chains(measurements: List[Dict], root: Dict, chains: int,
             'uniform_span_prior': uniform_span_prior, 'sweeps': sweeps,
             'seed': seed + c, 'max_sweeps': max_sweeps,
             'collect_draws': collect_draws, 'curves': curves,
-            'start_quantile': start,
-        } for c, start in enumerate(start_quantiles(chains, seed))])
+            **start,
+        } for c, start in enumerate(chain_starts(chains, seed, start_strategy))])
         params: List[str] = built[0]['params']
         burn_in: int = built[0]['burn_in']
 

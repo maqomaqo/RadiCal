@@ -999,8 +999,8 @@ class TestParallelChains:
                                     max_sweeps=1500, seed=7, grid=model.grid,
                                     target_convergence=1.01)
         alone = [gibbs.run(model, sweeps=1500, max_sweeps=1500, seed=7 + c,
-                           target_convergence=1.01, start_quantile=start)
-                 for c, start in enumerate(gibbs.start_quantiles(3, 7))]
+                           target_convergence=1.01, **start)
+                 for c, start in enumerate(gibbs.chain_starts(3, 7))]
         for param in model.params:
             expected = sum(r['histograms'][param] for r in alone)
             assert np.array_equal(pooled['histograms'][param], expected), param
@@ -1021,7 +1021,7 @@ class TestParallelChains:
                                     target_convergence=1.01)
         other = gibbs.run(model, sweeps=1500, max_sweeps=1500, seed=43,
                           target_convergence=1.01,
-                          start_quantile=gibbs.start_quantiles(2, 42)[1])
+                          **gibbs.chain_starts(2, 42)[1])
         for param in model.params:
             assert np.array_equal(pooled['histograms'][param],
                                   alone['histograms'][param] + other['histograms'][param])
@@ -1188,6 +1188,71 @@ class TestChainStarts:
         starts = [model.initial_state(q).index[model.date_ids[0]]
                   for q in gibbs.start_quantiles(4, 42)]
         assert len(set(starts)) == 4
+
+    def _dune(self):
+        return TestBoundariesNeverShareACell()._layers()
+
+    @staticmethod
+    def _lobe_of(lobes, cell):
+        return next(k for k, (_p, _m, first, last) in enumerate(lobes)
+                    if first <= cell < last)
+
+    def test_every_lobe_of_every_date_is_started_in_by_some_chain(self):
+        """
+        What a quantile start does not do: it lands in a lobe in proportion to
+        its mass. On this section, with sterile layers between dated ones, five
+        of nine dates with several lobes had a lobe holding a third of their
+        likelihood that no chain started in. Under the stratigraphic order, as
+        a start has to be, each lobe of each such date is now started in.
+        """
+        measurements, tree = self._dune()
+        model = gibbs.Model(measurements, tree)
+        quantiles = gibbs.start_quantiles(4, 42)
+        states = [model.initial_state(q, None if c == 0 else (c - 1, 3, 'position'))
+                  for c, q in enumerate(quantiles)]
+        several = [d for d in model.date_ids if model.lobes(d)]
+        assert len(several) >= 5
+        for date_id in several:
+            lobes = model.lobes(date_id)
+            started = {self._lobe_of(lobes, s.index[date_id]) for s in states}
+            assert started == set(range(len(lobes))), date_id
+
+    def test_a_lobe_start_is_feasible_and_chain_zero_is_unchanged(self):
+        measurements, tree = self._dune()
+        model = gibbs.Model(measurements, tree)
+        modes = model.initial_state()
+        assert modes.index == model.initial_state(None, None).index
+        for rank in range(3):
+            state = model.initial_state(0.5, (rank, 3, 'position'))
+            assert np.isfinite(model.log_posterior(state))
+            assert state.index != modes.index
+
+    def test_the_default_start_is_the_shared_quantile_alone(self):
+        """Lobe-aware starts are an option, not the default: the study in
+        tests/manual/start_study.py found no gain in detection or accuracy."""
+        assert gibbs.DEFAULT_START_STRATEGY == 'quantile'
+        starts = gibbs.chain_starts(4, 42)
+        assert [s['start_lobe'] for s in starts] == [None] * 4
+        assert [s['start_quantile'] for s in starts] == gibbs.start_quantiles(4, 42)
+        for strategy in gibbs.START_STRATEGIES[1:]:
+            lobes = gibbs.chain_starts(4, 42, strategy)
+            assert lobes[0]['start_lobe'] is None
+            assert lobes[2]['start_lobe'] == (1, 3, strategy, 42)
+        with pytest.raises(ValueError):
+            gibbs.chain_starts(4, 42, 'nonsense')
+
+    def test_a_date_with_one_lobe_still_starts_by_quantile(self):
+        # 9000 BP on IntCal20 calibrates to one stretch of curve.
+        phase = _element('phase', 'Only')
+        tree = _element('sequence', 'Site', [
+            _element('boundary', 'Start'), phase, _element('boundary', 'End')])
+        date = _date(phase['id'], 9000)
+        date.update(curve_id='intcal20', error_1sigma=15)
+        model = gibbs.Model([date], tree)
+        assert model.lobes(date['id']) == []
+        for rank in range(3):
+            assert (model.initial_state(0.9, (rank, 3, 'position')).index[date['id']]
+                    == model.initial_state(0.9).index[date['id']])
 
 
 class TestBoundariesNeverShareACell:
