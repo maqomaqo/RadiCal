@@ -1060,6 +1060,7 @@ def render_report(
     intervals: Optional[Dict] = None,
     summaries: Optional[Dict] = None,
     same_event: Optional[List[Dict]] = None,
+    p_before: Optional[Dict] = None,
     project_name: Optional[str] = None,
     date_format: Optional[str] = None,
     coordinate_precision: str = 'full',
@@ -1081,6 +1082,10 @@ def render_report(
 
     `summaries` is the analysis's summaries block (a kernel density
     estimate, services/kde.py), passed in on the same terms as `intervals`.
+
+    `p_before` is the results page's "P before" column when it was showing
+    ({cal_bp, samples, elements}, from api/results._p_before), which adds it
+    to the results table.
 
     `same_event` is a group calibration's same-event test
     (services/statistics.py), computed by the same call as the other exports.
@@ -1152,6 +1157,13 @@ def render_report(
 
     result_rows = [row.get('result') for row in ordered if row.get('result')]
     display_rows = [_display_row(row, date_format) for row in ordered]
+    if p_before:
+        for row, shown in zip(ordered, display_rows):
+            if row.get('kind') == 'date':
+                p = p_before['samples'].get((row.get('sample') or {}).get('id'))
+            else:
+                p = p_before['elements'].get(row.get('element_id'))
+            shown['p_before'] = statistics.format_probability(p)
 
     # --- method note
     story.append(Paragraph('Method', styles['heading']))
@@ -1195,9 +1207,11 @@ def render_report(
         row.get('tpq_age_bp') is not None or row.get('taq_age_bp') is not None
         for row in ordered
     )
-    story.append(
-        _results_table(display_rows, _columns(result_rows, is_bayesian, has_limiters), styles)
-    )
+    columns = _columns(result_rows, is_bayesian, has_limiters)
+    if p_before:
+        threshold = date_format_service.format_age(p_before['cal_bp'], date_format)
+        columns.append(('p_before', f'P before {threshold}', 1.3))
+    story.append(_results_table(display_rows, columns, styles))
 
     # --- context spans, where no explicit Boundary already reports them
     has_boundaries = any(row.get('kind') == 'boundary' for row in ordered)

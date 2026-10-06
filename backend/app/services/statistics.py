@@ -147,3 +147,57 @@ def same_event_for_samples(analysis_type: str, samples) -> List[Dict]:
     results page and every export share, so they cannot disagree."""
     measurements = [{f: getattr(s, f) for f in _SAMPLE_FIELDS} for s in samples]
     return same_event_report(analysis_type, measurements)
+
+
+# --------------------------------------------------------------------------
+# Threshold probabilities
+# --------------------------------------------------------------------------
+
+def p_before(distribution: Optional[Sequence[Sequence[float]]],
+             threshold_bp: float) -> Optional[float]:
+    """
+    The probability a posterior puts BEFORE a calendar age -- earlier in time,
+    so OLDER, a larger cal BP: P(t > threshold_bp). "P(Layer 11 began by AD
+    1360)" is p_before(start, 590).
+
+    Read from the stored [cal BP, density] series by the trapezoid rule, cut
+    exactly at the threshold and divided by the series' own total, since a
+    stored series is trimmed to where it has mass. That series is what every
+    view of a result already draws and ranges, so this needs no re-run; on the
+    feature spec's fixtures it gives REAL-Mp 0.999, REAL-Mp-E11 0.947,
+    REAL-Mp-NOE 0.989 and WkA-43681 unmodelled 0.489, as the reference does.
+
+    None where there is no distribution to read.
+    """
+    if not distribution or len(distribution) < 2:
+        return None
+    points = np.asarray(distribution, dtype=float)
+    order = np.argsort(points[:, 0])
+    ages, density = points[order, 0], np.clip(points[order, 1], 0.0, None)
+    total = float(np.trapezoid(density, ages))
+    if total <= 0:
+        return None
+    if threshold_bp <= ages[0]:
+        return 1.0
+    if threshold_bp >= ages[-1]:
+        return 0.0
+    older = ages > threshold_bp
+    at_threshold = float(np.interp(threshold_bp, ages, density))
+    above = float(np.trapezoid(np.r_[at_threshold, density[older]],
+                               np.r_[threshold_bp, ages[older]]))
+    return min(1.0, max(0.0, above / total))
+
+
+def format_probability(p: Optional[float]) -> str:
+    """
+    A probability to three places, as the results page prints it. The ends
+    read "<0.001" and ">0.999" rather than rounding to a certainty the
+    posterior does not claim.
+    """
+    if p is None:
+        return ''
+    if p < 0.0005:
+        return '0' if p == 0 else '<0.001'
+    if p > 0.9995:
+        return '1' if p == 1 else '>0.999'
+    return f'{p:.3f}'

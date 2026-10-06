@@ -19,7 +19,7 @@ export const DEFAULT_DATE_FORMAT: DateFormat = 'calBP'
 
 // Radiocarbon "Present" is fixed at 1950 by convention, whenever the
 // measurement was actually taken.
-const RADIOCARBON_PRESENT = 1950
+export const RADIOCARBON_PRESENT = 1950
 
 /**
  * cal BP to a proleptic Gregorian year in the conventional BC/AD numbering,

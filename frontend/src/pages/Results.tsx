@@ -33,6 +33,7 @@ import {
   Tooltip,
   ToggleButton,
   ToggleButtonGroup,
+  TextField,
 } from '@mui/material'
 import { alpha, useTheme } from '@mui/material/styles'
 import { useElementTypeColors } from '@/theme/diagramColors'
@@ -81,6 +82,13 @@ import { analysisTypeLabel } from '@/utils/analysisTypes'
 import { flattenStructure } from '@/utils/stratigraphy'
 import type { StructureRow } from '@/utils/stratigraphy'
 import type { SameEventTest } from '@/utils/sameEvent'
+import {
+  formatProbability,
+  loadThreshold,
+  parseCalendarAge,
+  saveThreshold,
+  type PBeforeValues,
+} from '@/utils/threshold'
 import {
   DateFormat,
   DATE_FORMAT_OPTIONS,
@@ -726,7 +734,7 @@ function DiagnosticsCell({
 function StructureTableRow({
   row, result, measurement, curveName,
   isBayesian, reporting, showAge, showCurve, showUnmodelled, showMean, showMedian,
-  showDiagnostics, confidence, dateFormat,
+  showDiagnostics, showPBefore, pBefore, confidence, dateFormat,
   unmodelledExpanded, posteriorExpanded,
   isCollapsible, isCollapsed, onToggleCollapse,
 }: {
@@ -746,6 +754,9 @@ function StructureTableRow({
   showMean: boolean
   showMedian: boolean
   showDiagnostics: boolean
+  /** The "P before" column, and this row's probability for it. */
+  showPBefore: boolean
+  pBefore?: number | null
   confidence: number
   dateFormat: DateFormat
   /** Whether each range column is showing every range or just its span. */
@@ -996,6 +1007,11 @@ function StructureTableRow({
              dashes as though the diagnostics had been attempted. */
           <TableCell align="right" sx={NUMERIC_CELL_SX} />
         ))}
+      {showPBefore && (
+        <TableCell align="right" sx={NUMERIC_CELL_SX}>
+          {isHeading ? '' : formatProbability(pBefore)}
+        </TableCell>
+      )}
     </TableRow>
   )
 }
@@ -1038,6 +1054,14 @@ export default function Results() {
     setColumnOverrides(analysisId ? loadResultColumnOverrides(analysisId) : {})
   }, [analysisId])
   const [columnsAnchor, setColumnsAnchor] = useState<HTMLElement | null>(null)
+  // The "P before" column: a threshold, remembered per analysis in cal BP and
+  // shown in the page's date format, and the probabilities the backend reads
+  // off each stored posterior for it (services/statistics.p_before). Hidden
+  // by default, so nothing is fetched until it is turned on.
+  const pBeforeShown = columnVisible(columnOverrides, 'p_before', false)
+  const [thresholdBp, setThresholdBp] = useState<number | null>(null)
+  const [thresholdText, setThresholdText] = useState('')
+  const [pBefore, setPBefore] = useState<PBeforeValues | null>(null)
   // On by default, the transitions usually being the point of the model. A
   // real sequence has a boundary between every pair of phases, though, so on a
   // large one they outnumber the dates -- this hides them without the dates.
@@ -1104,7 +1128,60 @@ export default function Results() {
     if (analysisId) {
       saveDateFormatPreference(analysisId, next)
     }
+    // The threshold is a calendar age, not the text that named it: re-label
+    // it in the new format rather than re-read "1360" as a different year.
+    if (thresholdBp != null) setThresholdText(formatCalendarAge(thresholdBp, next))
   }
+
+  useEffect(() => {
+    const stored = analysisId ? loadThreshold(analysisId) : null
+    setThresholdBp(stored)
+    setThresholdText(stored != null ? formatCalendarAge(stored, dateFormat) : '')
+    // dateFormat is read once, for the label; it has its own handler.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [analysisId])
+
+  const thresholdInvalid =
+    thresholdText.trim() !== '' && parseCalendarAge(thresholdText, dateFormat) == null
+  const handleThresholdChange = (text: string) => {
+    setThresholdText(text)
+    const calBP = text.trim() === '' ? null : parseCalendarAge(text, dateFormat)
+    if (text.trim() !== '' && calBP == null) return
+    setThresholdBp(calBP)
+    if (analysisId) saveThreshold(analysisId, calBP)
+  }
+
+  useEffect(() => {
+    if (!analysisId || !pBeforeShown || thresholdBp == null || analysis?.status !== 'completed') {
+      setPBefore(null)
+      return
+    }
+    const controller = new AbortController()
+    // A short wait, so typing a year asks once rather than at every digit.
+    const timer = window.setTimeout(() => {
+      fetch(`/api/results/${analysisId}/p-before?cal_bp=${thresholdBp}`, { signal: controller.signal })
+        .then(async (response) => {
+          const body = await response.json().catch(() => null)
+          if (!response.ok) throw new Error(formatApiError(body))
+          setPBefore(body.data as PBeforeValues)
+        })
+        .catch((err: Error) => {
+          if (err.name === 'AbortError') return
+          setPBefore(null)
+          notify('Could not compute P before: ' + err.message)
+        })
+    }, 250)
+    return () => {
+      window.clearTimeout(timer)
+      controller.abort()
+    }
+  }, [analysisId, pBeforeShown, thresholdBp, analysis, notify])
+  // Only the values for the threshold now set: a fetch for the previous one
+  // must not label the new column.
+  const pBeforeValues = pBefore && pBefore.cal_bp === thresholdBp ? pBefore : null
+  // Carried by every export while the column is showing, as the date format
+  // is, so a download has the column exactly when the screen does.
+  const thresholdParam = pBeforeShown && thresholdBp != null ? `p_before_bp=${thresholdBp}` : ''
 
   useEffect(() => {
     if (analysisId) {
@@ -1177,7 +1254,7 @@ export default function Results() {
       // Carry the displayed reporting format, so the download reads in the
       // same convention as the screen. The cal BP columns come regardless.
       await saveDownload(
-        `/api/results/${analysisId}/export/csv?date_format=${encodeURIComponent(dateFormat)}`,
+        `/api/results/${analysisId}/export/csv?date_format=${encodeURIComponent(dateFormat)}${thresholdParam ? `&${thresholdParam}` : ''}`,
         `analysis-${analysisId}.csv`
       )
     } catch (err) {
@@ -1190,7 +1267,10 @@ export default function Results() {
   const handleExportJSON = async () => {
     if (!analysisId) return
     try {
-      await saveDownload(`/api/results/${analysisId}/export/json`, `analysis-${analysisId}.json`)
+      await saveDownload(
+        `/api/results/${analysisId}/export/json${thresholdParam ? `?${thresholdParam}` : ''}`,
+        `analysis-${analysisId}.json`
+      )
     } catch (err) {
       notify('Failed to export JSON: ' + (err as Error).message)
     }
@@ -1204,7 +1284,7 @@ export default function Results() {
     setExportingPdf(true)
     try {
       await saveDownload(
-        `/api/results/${analysisId}/pdf?date_format=${encodeURIComponent(dateFormat)}`,
+        `/api/results/${analysisId}/pdf?date_format=${encodeURIComponent(dateFormat)}${thresholdParam ? `&${thresholdParam}` : ''}`,
         `analysis-${analysisId}-report.pdf`
       )
     } catch (err) {
@@ -1600,6 +1680,13 @@ export default function Results() {
           } as ResultColumn,
         ]
       : []),
+    {
+      id: 'p_before',
+      label: 'P before a date',
+      auto: false,
+      populated: someResult((r) => (r.probability_distribution?.length ?? 0) > 0),
+      emptyNote: 'No posteriors in this analysis',
+    },
   ]
 
   const labelOf = (id: string) => optionalColumns.find((c) => c.id === id)?.label ?? ''
@@ -1613,6 +1700,7 @@ export default function Results() {
   const showMean = shows('mean')
   const showMedian = shows('median')
   const showDiagnostics = shows('diagnostics')
+  const showPBefore = shows('p_before')
 
   const toggleColumn = (column: ResultColumn) => {
     setColumnOverrides((prev) => {
@@ -2598,6 +2686,22 @@ export default function Results() {
                 ))}
               </Select>
             </FormControl>
+            {/* The "P before" column's threshold, beside the two controls
+                that also change what a figure means. Only while the column
+                is showing. */}
+            {showPBefore && (
+              <TextField
+                size="small"
+                id="p-before-threshold"
+                label="P before"
+                placeholder={formatCalendarAge(590, dateFormat)}
+                value={thresholdText}
+                onChange={(e) => handleThresholdChange(e.target.value)}
+                error={thresholdInvalid}
+                helperText={thresholdInvalid ? `A year, e.g. ${formatCalendarAge(590, dateFormat)}` : undefined}
+                sx={{ width: 160 }}
+              />
+            )}
           </Stack>
 
           <Box sx={{ flex: 1 }} />
@@ -2890,6 +2994,11 @@ export default function Results() {
                     a hover, and a reader who had read one had no way to know
                     the other said nothing new. */}
                 {showDiagnostics && <TableCell align="right">Diagnostics</TableCell>}
+                {showPBefore && (
+                  <TableCell align="right" sx={NUMERIC_CELL_SX}>
+                    P before {thresholdBp != null ? formatCalendarAge(thresholdBp, dateFormat) : '…'}
+                  </TableCell>
+                )}
               </TableRow>
             </TableHead>
             <TableBody>
@@ -2920,6 +3029,12 @@ export default function Results() {
                       showMean={showMean}
                       showMedian={showMedian}
                       showDiagnostics={showDiagnostics}
+                      showPBefore={showPBefore}
+                      pBefore={
+                        row.kind === 'date'
+                          ? row.sampleId ? pBeforeValues?.samples[row.sampleId] : undefined
+                          : row.elementId ? pBeforeValues?.elements[row.elementId] : undefined
+                      }
                       confidence={confidence}
                       dateFormat={dateFormat}
                       unmodelledExpanded={unmodelledExpanded}
@@ -3026,6 +3141,11 @@ export default function Results() {
                               measurementBySampleId.get(result.sample_id)?.outlier_model
                             }
                           />
+                        )}
+                        {showPBefore && (
+                          <TableCell align="right" sx={NUMERIC_CELL_SX}>
+                            {formatProbability(pBeforeValues?.samples[result.sample_id])}
+                          </TableCell>
                         )}
                       </TableRow>
                     )

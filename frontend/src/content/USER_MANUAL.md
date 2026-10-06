@@ -459,6 +459,14 @@ either answer would have been fine.
   standard deviations. These are the exact coverages (68.269%, 95.450%, 99.730%), and the level
   determines which grid points enter the HPD region, so the digits matter.
 - **Show Mean / Show Median**: optional point estimates alongside the HPD ranges.
+- **P before a date**: an optional column, turned on under **Columns**. Type a year into the
+  **P before** field that appears beside HPD confidence — `AD 1360`, `1360 CE`, `500 BC` or
+  `590 cal BP`; a bare number is read in the page's date format. Each date and Boundary then shows
+  the probability it lies *before* that year (earlier, so older): P(Layer 11 began by AD 1360) is
+  the Boundary's figure in a column headed **P before AD 1360**. Figures are read off the stored
+  posteriors, so no re-run is needed. Values beyond three places read `>0.999` or `<0.001` rather
+  than rounding to certainty. The year is remembered per analysis, and the exports carry the column
+  while it is showing. See [A.4](#a4-summarising-a-posterior) for how it is computed.
 - Dates whose diagnostics are worth a second look (poor agreement or high outlier probability) are
   called out in a banner above the table.
 - **Durations and Differences**: above the results table when the run was asked for them. See
@@ -862,16 +870,19 @@ marked uncertain.
   produced durations and differences, they follow as a second block (blank line, own header — since
   every figure is a length, not a date, they share no column with the results table). A kernel
   density estimate follows in two more blocks: one row of metadata, then the curve at each calendar
-  year step. A Group Calibration's [same-event test](#same-event-test) comes last.
+  year step. A Group Calibration's [same-event test](#same-event-test) comes last. While the
+  **P before** column is showing, it is added as the table's last column, so no other column moves.
 - **Export JSON** (Results page): the full result, machine-readable. Carries every date and Boundary
   in model order, durations, differences, KDEs, a Group Calibration's same-event test, and the solver record (solver,
-  convergence, chains, agreement indices, cross-checks). Also at
+  convergence, chains, agreement indices, cross-checks). While the **P before** column is showing,
+  `p_before` carries its threshold and each date's and Boundary's probability. Also at
   `GET /api/results/{id}/export/json`.
 - **Curve data** (curve browser page): **Export this window** saves the visible stretch as CSV;
   **Export profile** saves the whole expected-resolution profile. A curve itself can be downloaded
   from the Curves page, byte-for-byte as imported.
 - **Export PDF** (Results page): a printable report of the whole analysis: metadata, curves with
-  references, solver, results table, durations, KDE, a Group Calibration's same-event test, and a plot per modelled
+  references, solver, results table (with the **P before** column while it is showing), durations,
+  KDE, a Group Calibration's same-event test, and a plot per modelled
   parameter with HPD ranges marked. Uses the currently selected date format. A large model takes a
   few seconds.
 - **Export CSV** (comparison page): every paired date with each run's median, HPD range and
@@ -1114,6 +1125,14 @@ is the honest resolution.
 
 The results page re-selects the region when you change the confidence selector, applying the same
 rebinning, so the table, plots, matrix, exports and stored result all agree.
+
+**Threshold probabilities** (the **P before** column) are P(t > T) for a threshold `T` in cal BP:
+the share of the posterior older than `T`. Each is integrated from the stored density by the
+trapezoid rule, cut exactly at `T` and divided by the series' own total, since a stored series is
+trimmed to where it has mass. One calculation serves the table and every export. A modelled
+posterior is stored on its solver grid, so a threshold between grid points is interpolated; on the
+AD 1250–1450 test fixtures this reproduces P(Start 11 before AD 1360) of 0.999, 0.947 and 0.989 for
+the three published-date models, and 0.49 for WkA-43681 (614 ± 20 BP) calibrated alone.
 
 ### A.5 The Bayesian model
 

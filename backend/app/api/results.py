@@ -606,6 +606,72 @@ def _same_event_tests(analysis, samples) -> List[Dict]:
     return statistics.same_event_for_samples(analysis.analysis_type, samples)
 
 
+# Calendar ages a threshold may be set at, in cal BP: the span of the shipped
+# curves, with room for a date after 1950.
+THRESHOLD_RANGE_BP = (-100.0, 60000.0)
+
+
+def _p_before(analysis_id: str, db: Session, threshold_bp: float) -> Dict:
+    """
+    P(before threshold_bp) for every date and modelled parameter of an
+    analysis (services/statistics.p_before): `samples` by sample id, read from
+    each result's stored distribution, and `elements` by element id for
+    everything in the stored tree that carries a posterior of its own -- a
+    Boundary, a wiggle match's reference, an undated level. The one assembly
+    behind the results page's column and every export, so they cannot differ.
+    """
+    samples = {
+        sample_id: statistics.p_before(distribution, threshold_bp)
+        for sample_id, distribution in db.query(
+            AnalysisResult.sample_id, AnalysisResult.probability_distribution
+        ).filter(AnalysisResult.analysis_id == analysis_id).all()
+    }
+    elements: Dict[str, Optional[float]] = {}
+    tree = rows_to_tree(
+        db.query(ModelElement).filter(ModelElement.analysis_id == analysis_id).all())
+    stack = [tree] if tree else []
+    while stack:
+        element = stack.pop()
+        posterior = element.get('posterior') or {}
+        if posterior.get('probability_distribution'):
+            elements[element['id']] = statistics.p_before(
+                posterior['probability_distribution'], threshold_bp)
+        stack.extend(element.get('children') or [])
+    return {'cal_bp': threshold_bp, 'samples': samples, 'elements': elements}
+
+
+def _threshold(p_before_bp: Optional[float]) -> Optional[float]:
+    """A threshold from a query string, refused when off every curve."""
+    if p_before_bp is None:
+        return None
+    lo, hi = THRESHOLD_RANGE_BP
+    if not lo <= p_before_bp <= hi:
+        raise HTTPException(
+            status_code=422,
+            detail=f'A threshold must lie between {lo:.0f} and {hi:.0f} cal BP.')
+    return float(p_before_bp)
+
+
+def _p_before_header(threshold_bp: float, date_format: str) -> str:
+    """The column's name, in the file's reporting format."""
+    return f"P Before {date_format_service.format_age(threshold_bp, date_format)}"
+
+
+def _p_before_cell(values: Optional[Dict], row: Dict) -> str:
+    """A row's threshold probability as a spreadsheet number, or blank for a
+    heading or anything with no posterior."""
+    if values is None:
+        return ''
+    if row.get('kind') == 'date':
+        sample = row.get('sample') or {}
+        p = values['samples'].get(sample.get('id') if isinstance(sample, dict) else None)
+    else:
+        p = values['elements'].get(row.get('element_id'))
+    # Six places, not the screen's three: a spreadsheet computes with it, and
+    # 0.99996 written as 1.0000 would be a certainty the posterior never gave.
+    return '' if p is None else f'{p:.6f}'
+
+
 def _write_same_event(writer, tests: List[Dict], date_format: str) -> None:
     """The same-event test, when the analysis has one."""
     if not tests:
@@ -650,7 +716,8 @@ def _write_intervals(writer, analysis) -> None:
         writer.writerow(row)
 
 
-def _build_csv(analysis_id: str, db: Session, date_format: Optional[str] = None) -> str:
+def _build_csv(analysis_id: str, db: Session, date_format: Optional[str] = None,
+               p_before_bp: Optional[float] = None) -> str:
     """
     One row per modelled entity -- sequences, phases, boundaries and dates --
     in the model's reading order, matching the results table row for row.
@@ -661,16 +728,23 @@ def _build_csv(analysis_id: str, db: Session, date_format: Optional[str] = None)
     `date_format` is the reporting format the results page is showing. When it
     is not cal BP, each calendar-age column gains a formatted counterpart (see
     _csv_header); the cal BP columns are always present.
+
+    `p_before_bp` is the threshold the results page's "P before" column is
+    set to, when it is showing. It adds that column last, so no other column
+    moves.
     """
     date_format = date_format_service.normalise(date_format)
     formatted = date_format in date_format_service.ERA_LABELS
+    threshold = _threshold(p_before_bp)
 
     data = _gather_export_rows(analysis_id, db)
     analysis = data['analysis']
+    p_values = _p_before(analysis_id, db, threshold) if threshold is not None else None
 
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(_csv_header(date_format))
+    writer.writerow(_csv_header(date_format)
+                    + ([_p_before_header(threshold, date_format)] if p_values else []))
 
     structure = _structure_rows(analysis_id, db, data['rows'], data['samples_by_id'])
     same_event = _same_event_tests(analysis, data['samples_by_id'].values())
@@ -682,6 +756,9 @@ def _build_csv(analysis_id: str, db: Session, date_format: Optional[str] = None)
     def extra(result, tpq, taq):
         return _formatted_cells(result, tpq, taq, date_format) if formatted else []
 
+    def threshold_cell(row):
+        return [_p_before_cell(p_values, row)] if p_values else []
+
     # No stored structure, so fall back to a flat list of dates rather than
     # coming back empty.
     if not structure:
@@ -692,6 +769,7 @@ def _build_csv(analysis_id: str, db: Session, date_format: Optional[str] = None)
                 + _posterior_cells(row) + ['', '']
                 + _coordinate_cells(row)
                 + extra(row, None, None)
+                + threshold_cell({'kind': 'date', 'sample': {'id': row['sample_id']}})
             )
         _write_intervals(writer, analysis)
         _write_age_depth(writer, analysis, date_format)
@@ -724,6 +802,7 @@ def _build_csv(analysis_id: str, db: Session, date_format: Optional[str] = None)
             # position, so this is blank for everything but a date.
             + _coordinate_cells(row.get('result') if row['kind'] == 'date' else None)
             + extra(result, row['tpq_age_bp'], row['taq_age_bp'])
+            + threshold_cell(row)
         )
 
     _write_intervals(writer, analysis)
@@ -750,12 +829,13 @@ def _owned_analysis(analysis_id: str, db: Session, user: User) -> Analysis:
 
 @router.get("/results/{analysis_id}/table")
 def export_table(analysis_id: str, date_format: Optional[str] = None,
+                 p_before_bp: Optional[float] = None,
                  db: Session = Depends(get_db),
                  user: User = Depends(current_user)):
     """Export results as a CSV table. Same content as /export/csv, kept as a
     separate route for backwards compatibility."""
     _owned_analysis(analysis_id, db, user)
-    csv_content = _build_csv(analysis_id, db, date_format)
+    csv_content = _build_csv(analysis_id, db, date_format, p_before_bp)
     return StreamingResponse(
         iter([csv_content]),
         media_type="text/csv",
@@ -765,6 +845,7 @@ def export_table(analysis_id: str, date_format: Optional[str] = None,
 
 @router.get("/results/{analysis_id}/export/csv")
 def export_csv(analysis_id: str, date_format: Optional[str] = None,
+               p_before_bp: Optional[float] = None,
                db: Session = Depends(get_db),
                user: User = Depends(current_user)):
     """
@@ -774,9 +855,12 @@ def export_csv(analysis_id: str, date_format: Optional[str] = None,
     page is showing; when it is not cal BP each calendar-age column gains a
     formatted counterpart. An unrecognised value falls back to cal BP rather
     than failing the download.
+
+    `p_before_bp` adds the results page's "P before" column, at that
+    threshold in cal BP, when the page is showing it.
     """
     _owned_analysis(analysis_id, db, user)
-    csv_content = _build_csv(analysis_id, db, date_format)
+    csv_content = _build_csv(analysis_id, db, date_format, p_before_bp)
     return StreamingResponse(
         iter([csv_content]),
         media_type="text/csv",
@@ -823,7 +907,8 @@ def _structure_payload(structure: List[Dict]) -> List[Dict]:
 
 
 @router.get("/results/{analysis_id}/export/json")
-def export_json(analysis_id: str, db: Session = Depends(get_db),
+def export_json(analysis_id: str, p_before_bp: Optional[float] = None,
+                db: Session = Depends(get_db),
                 user: User = Depends(current_user)):
     """
     Export an analysis's results as JSON, with sample details merged into
@@ -839,6 +924,7 @@ def export_json(analysis_id: str, db: Session = Depends(get_db),
     returns model_tree.
     """
     _owned_analysis(analysis_id, db, user)
+    threshold = _threshold(p_before_bp)
     data = _gather_export_rows(analysis_id, db)
     analysis = data['analysis']
     structure = _structure_rows(analysis_id, db, data['rows'], data['samples_by_id'])
@@ -871,6 +957,10 @@ def export_json(analysis_id: str, db: Session = Depends(get_db),
             # The same-event tests the Results page shows, from the same call.
             "same_event": _same_event_tests(
                 analysis, data['samples_by_id'].values()),
+            # The results page's "P before" column, when it was showing:
+            # {cal_bp, samples: {id: p}, elements: {id: p}}. Null otherwise.
+            "p_before": (_p_before(analysis_id, db, threshold)
+                         if threshold is not None else None),
         }
     }
 
@@ -894,8 +984,22 @@ def _context_spans(analysis_id: str, db: Session) -> List[Dict]:
     return spans
 
 
+@router.get("/results/{analysis_id}/p-before")
+def get_p_before(analysis_id: str, cal_bp: float, db: Session = Depends(get_db),
+                 user: User = Depends(current_user)):
+    """
+    The probability each date and modelled parameter puts before `cal_bp`
+    (services/statistics.p_before), for the results page's "P before"
+    column. Read from the stored posteriors, so it answers for any analysis
+    without a re-run.
+    """
+    _owned_analysis(analysis_id, db, user)
+    return {"success": True, "data": _p_before(analysis_id, db, _threshold(cal_bp))}
+
+
 @router.get("/results/{analysis_id}/pdf")
 def export_pdf(analysis_id: str, date_format: Optional[str] = None,
+               p_before_bp: Optional[float] = None,
                      db: Session = Depends(get_db),
                      user: User = Depends(current_user)):
     """
@@ -912,6 +1016,7 @@ def export_pdf(analysis_id: str, date_format: Optional[str] = None,
     if models grow.
     """
     _owned_analysis(analysis_id, db, user)
+    threshold = _threshold(p_before_bp)
     data = _gather_export_rows(analysis_id, db)
     analysis = data['analysis']
     structure = _structure_rows(analysis_id, db, data['rows'], data['samples_by_id'])
@@ -935,6 +1040,7 @@ def export_pdf(analysis_id: str, date_format: Optional[str] = None,
         intervals=analysis.intervals,
         summaries=analysis.summaries,
         same_event=_same_event_tests(analysis, data['samples_by_id'].values()),
+        p_before=_p_before(analysis_id, db, threshold) if threshold is not None else None,
         project_name=analysis.project.name if analysis.project else None,
         date_format=date_format,
         coordinate_precision=data['coordinate_precision'],
@@ -980,11 +1086,14 @@ def export_results(analysis_id: str, options: Dict, db: Session = Depends(get_db
     # Each delegate re-checks ownership itself, since they are also routes in
     # their own right. Passing `user` through rather than dropping it is what
     # keeps that true when this is called directly rather than over HTTP.
+    threshold = options.get('p_before_bp')
     if format_type == 'csv':
-        return export_csv(analysis_id, options.get('date_format'), db, user)
+        return export_csv(analysis_id, date_format=options.get('date_format'),
+                          p_before_bp=threshold, db=db, user=user)
     elif format_type == 'json':
-        return export_json(analysis_id, db, user)
+        return export_json(analysis_id, p_before_bp=threshold, db=db, user=user)
     elif format_type == 'pdf':
-        return export_pdf(analysis_id, options.get('date_format'), db, user)
+        return export_pdf(analysis_id, date_format=options.get('date_format'),
+                          p_before_bp=threshold, db=db, user=user)
     else:
         raise HTTPException(status_code=400, detail=f"Unsupported format: {format_type}")

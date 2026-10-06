@@ -246,3 +246,114 @@ class TestEndpoint:
         response = anonymous_client.post('/api/analysis/same-event', json={
             'measurements': [_measurement('A', 600, 20), _measurement('B', 610, 20)]})
         assert response.status_code == 401
+
+
+# --- threshold probabilities ---------------------------------------------
+
+import json
+import os
+
+from app.services.statistics import format_probability, p_before
+
+_FIXTURE = os.path.join(os.path.dirname(__file__), 'fixtures', 'thresholds',
+                        'real_mp_start11.json')
+AD_1360 = 590.0
+
+
+class TestPBefore:
+    @pytest.mark.parametrize('run, expected', [
+        ('REAL-Mp', 0.999), ('REAL-Mp-E11', 0.947), ('REAL-Mp-NOE', 0.989),
+    ])
+    def test_reproduces_the_spec_on_start_11(self, run, expected):
+        """Feature spec Q1, within the exact-solver tolerance of 0.01."""
+        with open(_FIXTURE) as fh:
+            distribution = json.load(fh)[run]
+        assert p_before(distribution, AD_1360) == pytest.approx(expected, abs=0.01)
+
+    def test_before_means_older(self):
+        # Uniform over 0-100 cal BP: a quarter of it lies before 75 cal BP.
+        uniform = [[age, 1.0] for age in range(0, 101)]
+        assert p_before(uniform, 75) == pytest.approx(0.25)
+        assert p_before(uniform, 25) == pytest.approx(0.75)
+
+    def test_a_threshold_outside_the_posterior(self):
+        uniform = [[age, 1.0] for age in range(500, 601)]
+        assert p_before(uniform, 400) == 1.0
+        assert p_before(uniform, 700) == 0.0
+
+    def test_no_distribution(self):
+        assert p_before(None, 590) is None
+        assert p_before([], 590) is None
+        assert p_before([[600, 0.0], [610, 0.0]], 590) is None
+
+    @pytest.mark.parametrize('p, text', [
+        (0.947, '0.947'), (0.9996, '>0.999'), (0.0002, '<0.001'), (1.0, '1'), (0.0, '0'),
+        (None, ''),
+    ])
+    def test_formats_without_rounding_to_certainty(self, p, text):
+        assert format_probability(p) == text
+
+
+class TestPBeforeRoutes:
+    def _calibration(self, client):
+        created = client.post('/api/analysis/calibrate', json={
+            **_measurement('WkA-43681', 614, 20), 'save': True})
+        assert created.status_code == 200, created.text
+        return created.json()['data']['id']
+
+    def test_an_unmodelled_date_on_the_reversal(self, client):
+        """Feature spec Q1: WkA-43681, 614 ± 20 BP on SHCal20, P(before AD
+        1360) = 0.49."""
+        analysis_id = self._calibration(client)
+        data = client.get(f'/api/results/{analysis_id}/p-before?cal_bp=590').json()['data']
+        [p] = data['samples'].values()
+        assert p == pytest.approx(0.49, abs=0.01)
+        assert data['elements'] == {}
+
+    def test_boundaries_are_reported_by_element(self, client):
+        tree = {
+            'id': 'pb_root', 'element_type': 'sequence', 'name': 'Site', 'children': [
+                {'id': 'pb_b0', 'element_type': 'boundary', 'name': 'Start', 'children': []},
+                {'id': 'pb_p1', 'element_type': 'phase', 'name': 'Phase', 'children': []},
+                {'id': 'pb_b1', 'element_type': 'boundary', 'name': 'End', 'children': []},
+            ],
+        }
+        created = client.post('/api/analysis/bayesian?wait=true', json={
+            'name': 'Thresholds',
+            'measurements': [{**_measurement(f'D{i}', a, 20), 'id': f'pb_d{i}',
+                              'element_id': 'pb_p1'} for i, a in enumerate((620, 640, 660))],
+            'model_tree': tree,
+            'bayesian_config': {'mcmc_samples': 200, 'mcmc_chains': 1},
+            'save': True,
+        })
+        assert created.status_code == 200, created.text
+        analysis_id = created.json()['data']['id']
+        data = client.get(f'/api/results/{analysis_id}/p-before?cal_bp=590').json()['data']
+        assert set(data['elements']) == {'pb_b0', 'pb_b1'}
+        assert len(data['samples']) == 3          # stored under the server's own ids
+        # The start comes before the end, so it is at least as likely to be
+        # before any year.
+        assert data['elements']['pb_b0'] >= data['elements']['pb_b1']
+
+    def test_csv_adds_the_column_last_only_when_asked(self, client):
+        analysis_id = self._calibration(client)
+        plain = list(csv.reader(io.StringIO(
+            client.get(f'/api/results/{analysis_id}/export/csv').text)))
+        shown = list(csv.reader(io.StringIO(client.get(
+            f'/api/results/{analysis_id}/export/csv?date_format=bcad&p_before_bp=590').text)))
+        assert not any(h.startswith('P Before') for h in plain[0])
+        assert shown[0][-1] == 'P Before AD 1360'
+        assert float(shown[1][-1]) == pytest.approx(0.49, abs=0.01)
+
+    def test_json_and_pdf_carry_it_when_asked(self, client):
+        analysis_id = self._calibration(client)
+        exported = client.get(f'/api/results/{analysis_id}/export/json?p_before_bp=590').json()
+        assert exported['data']['p_before']['cal_bp'] == 590
+        assert client.get(f'/api/results/{analysis_id}/export/json').json()['data']['p_before'] is None
+        text = pdf_text(client.get(
+            f'/api/results/{analysis_id}/pdf?date_format=bcad&p_before_bp=590').content)
+        assert 'P before AD 1360' in text
+
+    def test_refuses_a_threshold_off_every_curve(self, client):
+        analysis_id = self._calibration(client)
+        assert client.get(f'/api/results/{analysis_id}/p-before?cal_bp=99999').status_code == 422
