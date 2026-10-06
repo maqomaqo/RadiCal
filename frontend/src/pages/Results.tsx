@@ -59,6 +59,7 @@ import CurvePosteriorPlot from '@/components/CurvePosteriorPlot'
 import HarrisMatrixDiagram from '@/components/HarrisMatrixDiagram'
 import DurationsPanel from '@/components/DurationsPanel'
 import KdePanel from '@/components/KdePanel'
+import SameEventPanel from '@/components/SameEventPanel'
 import { modelCanReportIntervals } from '@/utils/intervalsAvailable'
 import WiggleMatchPanel from '@/components/WiggleMatchPanel'
 import { ELEMENT_TYPE_LABEL } from '@/utils/elementLabels'
@@ -80,6 +81,7 @@ import { analysisTypeLabel } from '@/utils/analysisTypes'
 import { flattenStructure } from '@/utils/stratigraphy'
 import type { StructureRow } from '@/utils/stratigraphy'
 import { describeThinBoundary, describeThinPhase, findThinPhases } from '@/utils/thinPhases'
+import { sameEventNotation, type SameEventTest } from '@/utils/sameEvent'
 import {
   DateFormat,
   DATE_FORMAT_OPTIONS,
@@ -247,6 +249,9 @@ interface AnalysisResult {
   intervals?: IntervalsBlock | null
   // Summaries of the dates as a set. Null when the run was not asked for any.
   summaries?: SummariesBlock | null
+  // Same-event tests: one for a group calibration, one per Phase with two or
+  // more dates for a Bayesian model. Absent from a server that predates them.
+  same_event?: SameEventTest[]
   results: SampleResult[]
 }
 
@@ -312,6 +317,29 @@ interface PlottableSeries {
   /** The radiocarbon measurement this date came from -- only the Curve view
    *  reads it, and only a date has one. */
   measurement?: SeriesMeasurement
+}
+
+/**
+ * Fetch an export and save it under `filename`. The status is checked before
+ * the body is read: an error response is JSON, which a spreadsheet opens
+ * happily as a one-cell file and a PDF reader fails on only when opened -- so
+ * unchecked, a failed export is noticed by whoever opens it looking for their
+ * results.
+ */
+async function saveDownload(url: string, filename: string): Promise<void> {
+  const response = await fetch(url)
+  if (!response.ok) {
+    throw new Error(formatApiError(await response.json().catch(() => null)))
+  }
+  const blob = await response.blob()
+  const href = window.URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = href
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  window.URL.revokeObjectURL(href)
+  document.body.removeChild(a)
 }
 
 /**
@@ -699,9 +727,9 @@ function DiagnosticsCell({
 function StructureTableRow({
   row, result, measurement, curveName,
   isBayesian, reporting, showAge, showCurve, showUnmodelled, showMean, showMedian,
-  showDiagnostics, confidence, dateFormat,
+  showDiagnostics, showSameEvent, confidence, dateFormat,
   unmodelledExpanded, posteriorExpanded,
-  isCollapsible, isCollapsed, onToggleCollapse, thinNote,
+  isCollapsible, isCollapsed, onToggleCollapse, thinNote, sameEvent,
 }: {
   row: StructureRow
   result?: SampleResult
@@ -719,6 +747,7 @@ function StructureTableRow({
   showMean: boolean
   showMedian: boolean
   showDiagnostics: boolean
+  showSameEvent: boolean
   confidence: number
   dateFormat: DateFormat
   /** Whether each range column is showing every range or just its span. */
@@ -732,6 +761,9 @@ function StructureTableRow({
   /** Why this row's figures are expected to be wide; absent when they are not.
    *  See utils/thinPhases. */
   thinNote?: string
+  /** A Phase's same-event test, when it holds two or more dates. See
+   *  utils/sameEvent. */
+  sameEvent?: SameEventTest
 }) {
   const theme = useTheme()
   // The same map the Harris matrix and the tree editor colour their nodes
@@ -990,6 +1022,17 @@ function StructureTableRow({
              dashes as though the diagnostics had been attempted. */
           <TableCell align="right" sx={NUMERIC_CELL_SX} />
         ))}
+      {showSameEvent && (
+        <TableCell align="right" sx={NUMERIC_CELL_SX}>
+          {sameEvent && (sameEvent.t != null ? (
+            sameEventNotation(sameEvent)
+          ) : (
+            <Box component="span" sx={{ color: 'text.secondary', fontSize: '0.75rem' }}>
+              {sameEvent.refused}
+            </Box>
+          ))}
+        </TableCell>
+      )}
     </TableRow>
   )
 }
@@ -1170,26 +1213,23 @@ export default function Results() {
     try {
       // Carry the displayed reporting format, so the download reads in the
       // same convention as the screen. The cal BP columns come regardless.
-      const response = await fetch(
-        `/api/results/${analysisId}/export/csv?date_format=${encodeURIComponent(dateFormat)}`
+      await saveDownload(
+        `/api/results/${analysisId}/export/csv?date_format=${encodeURIComponent(dateFormat)}`,
+        `analysis-${analysisId}.csv`
       )
-      // An error response is JSON, which a spreadsheet opens happily as a
-      // one-cell file -- so unchecked, a failed export saves as a .csv and is
-      // only noticed by whoever opens it looking for their results.
-      if (!response.ok) {
-        throw new Error(formatApiError(await response.json().catch(() => null)))
-      }
-      const blob = await response.blob()
-      const url = window.URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `analysis-${analysisId}.csv`
-      document.body.appendChild(a)
-      a.click()
-      window.URL.revokeObjectURL(url)
-      document.body.removeChild(a)
     } catch (err) {
       notify('Failed to export CSV: ' + (err as Error).message)
+    }
+  }
+
+  // Calendar ages in the JSON stay in cal BP whatever the page shows: it is
+  // read by programs, which want one convention, not a display format.
+  const handleExportJSON = async () => {
+    if (!analysisId) return
+    try {
+      await saveDownload(`/api/results/${analysisId}/export/json`, `analysis-${analysisId}.json`)
+    } catch (err) {
+      notify('Failed to export JSON: ' + (err as Error).message)
     }
   }
 
@@ -1200,23 +1240,10 @@ export default function Results() {
     if (!analysisId) return
     setExportingPdf(true)
     try {
-      const response = await fetch(
-        `/api/results/${analysisId}/pdf?date_format=${encodeURIComponent(dateFormat)}`
+      await saveDownload(
+        `/api/results/${analysisId}/pdf?date_format=${encodeURIComponent(dateFormat)}`,
+        `analysis-${analysisId}-report.pdf`
       )
-      // Checked before reading the body: an error response is JSON, and
-      // saving it as a .pdf hands the user a file that fails only on opening.
-      if (!response.ok) {
-        throw new Error(formatApiError(await response.json().catch(() => null)))
-      }
-      const blob = await response.blob()
-      const url = window.URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `analysis-${analysisId}-report.pdf`
-      document.body.appendChild(a)
-      a.click()
-      window.URL.revokeObjectURL(url)
-      document.body.removeChild(a)
     } catch (err) {
       notify('Failed to export PDF: ' + (err as Error).message)
     } finally {
@@ -1608,6 +1635,13 @@ export default function Results() {
             ),
             emptyNote: 'Not computed for this analysis',
           } as ResultColumn,
+          {
+            id: 'same_event',
+            label: 'Same-event test',
+            auto: false,
+            populated: (analysis.same_event?.length ?? 0) > 0,
+            emptyNote: 'No phase holds two or more dates',
+          } as ResultColumn,
         ]
       : []),
   ]
@@ -1623,6 +1657,7 @@ export default function Results() {
   const showMean = shows('mean')
   const showMedian = shows('median')
   const showDiagnostics = shows('diagnostics')
+  const showSameEvent = shows('same_event')
 
   const toggleColumn = (column: ResultColumn) => {
     setColumnOverrides((prev) => {
@@ -1668,6 +1703,16 @@ export default function Results() {
     }
     return undefined
   }
+
+  // Each Phase's same-event test, by element id. Group calibrations have one
+  // test with no element, shown in its own panel instead.
+  const sameEventByElementId = new Map<string, SameEventTest>()
+  for (const test of analysis.same_event ?? []) {
+    if (test.element_id) sameEventByElementId.set(test.element_id, test)
+  }
+  const groupSameEvent = analysis.analysis_type === 'group_calibration'
+    ? analysis.same_event?.find((test) => test.element_id == null)
+    : undefined
 
   // Element type by id, so a date row can say what KIND of thing contains it.
   // A date row carries its container's id, not its type; the element's own row
@@ -2548,6 +2593,9 @@ export default function Results() {
             <Button startIcon={<DownloadIcon />} onClick={handleExportCSV} variant="outlined">
               Export CSV
             </Button>
+            <Button startIcon={<DownloadIcon />} onClick={handleExportJSON} variant="outlined">
+              Export JSON
+            </Button>
             <Button
               startIcon={
                 exportingPdf ? <CircularProgress size={16} color="inherit" /> : <DownloadIcon />
@@ -2914,6 +2962,7 @@ export default function Results() {
                     a hover, and a reader who had read one had no way to know
                     the other said nothing new. */}
                 {showDiagnostics && <TableCell align="right">Diagnostics</TableCell>}
+                {showSameEvent && <TableCell align="right">{labelOf('same_event')}</TableCell>}
               </TableRow>
             </TableHead>
             <TableBody>
@@ -2944,6 +2993,7 @@ export default function Results() {
                       showMean={showMean}
                       showMedian={showMedian}
                       showDiagnostics={showDiagnostics}
+                      showSameEvent={showSameEvent}
                       confidence={confidence}
                       dateFormat={dateFormat}
                       unmodelledExpanded={unmodelledExpanded}
@@ -2968,6 +3018,11 @@ export default function Results() {
                           : undefined
                       }
                       thinNote={thinNoteFor(row)}
+                      sameEvent={
+                        row.kind === 'phase' && row.elementId
+                          ? sameEventByElementId.get(row.elementId)
+                          : undefined
+                      }
                     />
                   ))
                 : chronologicalResults.map((result, idx) => {
@@ -3052,6 +3107,9 @@ export default function Results() {
                             }
                           />
                         )}
+                        {/* A test belongs to a Phase row, which a flat list
+                            has none of. */}
+                        {showSameEvent && <TableCell />}
                       </TableRow>
                     )
                   })}
@@ -3354,6 +3412,16 @@ export default function Results() {
       {/* After the dates it summarises, before the lengths of time. */}
       {analysis.summaries?.kde && analysis.summaries.kde.length > 0 && (
         <KdePanel estimates={analysis.summaries.kde} dateFormat={dateFormat} />
+      )}
+
+      {/* Also about the dates as a set, so beside the KDE. */}
+      {groupSameEvent && (
+        <SameEventPanel
+          test={groupSameEvent}
+          confidence={confidence}
+          confidenceLabel={CONFIDENCE_LABEL}
+          dateFormat={dateFormat}
+        />
       )}
 
       {/* Durations and differences, last on the page. Every figure in it is a

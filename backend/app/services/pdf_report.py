@@ -46,7 +46,8 @@ from reportlab.platypus import (
 )
 
 from app.services import date_format as date_format_service
-from app.services.calibration import get_curve
+from app.services.calibration import SIGMA_2, get_curve
+from app.services import statistics
 from app.services.intervals import SHARED_BOUNDARY_TEXT
 
 # --- page geometry -------------------------------------------------------
@@ -713,6 +714,28 @@ def _differences_table(records: List[Dict], styles: Dict[str, ParagraphStyle]) -
     return _intervals_table(records, columns, cells, styles)
 
 
+def _same_event_table(tests: List[Dict], date_format: str,
+                      styles: Dict[str, ParagraphStyle]) -> Table:
+    """One row per same-event test: the group, its figures, the verdict, and
+    the pooled age where the dates pass."""
+    columns = [('Phase', 2.0), ('Dates', 0.8), ('Pooled age BP', 1.4),
+               ('T (5% critical)', 1.6), ('Result', 2.4), ('Pooled 95.4%', 2.6)]
+
+    def cells(test: Dict) -> List[Any]:
+        tested = test.get('t') is not None
+        pooled = statistics.pooled_ranges_at(test, SIGMA_2)
+        return [
+            test.get('name') or 'All dates',
+            test['n'],
+            f"{test['mean_bp']:.0f} ± {test['error_bp']:.0f}" if tested else '',
+            f"{test['t']:.1f} ({test['critical']:.2f}, df {test['df']})" if tested else '',
+            statistics.verdict(test),
+            _hpd_text(pooled, None, None, date_format) if pooled else '',
+        ]
+
+    return _intervals_table(tests, columns, cells, styles)
+
+
 def _band_text(band: Optional[Sequence[float]], date_format: str) -> str:
     """
     One age-depth band as text.
@@ -1037,6 +1060,7 @@ def render_report(
     context_spans: List[Dict],
     intervals: Optional[Dict] = None,
     summaries: Optional[Dict] = None,
+    same_event: Optional[List[Dict]] = None,
     project_name: Optional[str] = None,
     date_format: Optional[str] = None,
     coordinate_precision: str = 'full',
@@ -1058,6 +1082,9 @@ def render_report(
 
     `summaries` is the analysis's summaries block (a kernel density
     estimate, services/kde.py), passed in on the same terms as `intervals`.
+
+    `same_event` is the analysis's same-event tests (services/statistics.py),
+    computed once by the caller for every export.
 
     `coordinate_precision` is the project's setting, and is used only to SAY
     what it is: the positions in `rows` have already been rounded to it by
@@ -1282,6 +1309,18 @@ def render_report(
             styles['note'],
         ))
         story.extend(kde_blocks)
+
+    # --- whether each group of dates could be one event
+    if same_event:
+        story.append(Paragraph('Same-Event Tests', styles['heading']))
+        story.append(Paragraph(
+            "Ward and Wilson's (1978) test of whether a set of radiocarbon ages could "
+            "date one event, as OxCal's R_Combine: T against the chi-squared critical "
+            "value at 5%. The pooled age is the error-weighted mean, calibrated only "
+            "where the dates pass.",
+            styles['note'],
+        ))
+        story.append(_same_event_table(same_event, date_format, styles))
 
     # --- one figure per modelled parameter
     figures: List[Any] = []

@@ -21,6 +21,7 @@ from app.services import agreement as agreement_service
 from app.services import intervals
 from app.services import kde
 from app.services import failures
+from app.services import statistics
 from app.api.auth import current_user, owned_or_404
 from app.api.curves import authorise_curve_ids
 from app.services.model_tree import (
@@ -1520,6 +1521,11 @@ def get_analysis(analysis_id: str, db: Session = Depends(get_db),
             # Summaries of the dates as a set -- a kernel density estimate --
             # present only when the run was asked for one.
             "summaries": analysis.summaries,
+            # Whether each Phase's dates -- or a group calibration's -- could
+            # be one event (services/statistics.py). Computed on read from the
+            # stored ages, so an analysis saved before it existed has it too.
+            "same_event": statistics.same_event_for_samples(
+                analysis.analysis_type, model_tree, analysis.measurements),
             # The model structure, migrated from contexts + relationships on
             # first access. Boundary elements carry their own posterior once
             # the analysis has been run, as do a wiggle match and an undated

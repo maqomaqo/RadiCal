@@ -17,6 +17,17 @@ import pytest
 
 
 
+def _results_block(client, analysis_id):
+    """
+    The CSV's results table, header first: the rows before the first blank
+    line. Blocks after it (durations, KDE, same-event tests) have headers of
+    their own.
+    """
+    rows = csv.reader(io.StringIO(
+        client.get(f'/api/results/{analysis_id}/export/csv').text))
+    return list(itertools.takewhile(bool, rows))
+
+
 def _measurement(sample_id, age_bp=3000, **overrides):
     m = {
         "id": sample_id,
@@ -260,8 +271,7 @@ class TestEditRoundTrip:
         assert created.status_code == 200, created.text
         analysis_id = created.json()["data"]["id"]
 
-        rows = list(csv.reader(io.StringIO(
-            client.get(f"/api/results/{analysis_id}/export/csv").text)))
+        rows = _results_block(client, analysis_id)
         header = rows[0]
         material, curve = header.index('Material'), header.index('Curve')
         reported = {r[4]: (r[material], r[curve]) for r in rows[1:] if r[1] == 'Date'}
@@ -570,8 +580,7 @@ class TestRerunKeepsDiagnostics:
         return created.json()['data']['id']
 
     def _columns(self, client, analysis_id):
-        rows = list(csv.reader(io.StringIO(
-            client.get(f'/api/results/{analysis_id}/export/csv').text)))
+        rows = _results_block(client, analysis_id)
         header, data = rows[0], rows[1:]
         kind, name = header.index('Row Type'), header.index('Name')
         out = {}
@@ -667,8 +676,7 @@ class TestEditingKeepsTheOutlierSetting:
         }
 
     def _outlier_column(self, client, analysis_id):
-        rows = list(csv.reader(io.StringIO(
-            client.get(f'/api/results/{analysis_id}/export/csv').text)))
+        rows = _results_block(client, analysis_id)
         header, data = rows[0], rows[1:]
         column, name, kind = (header.index('Outlier %'), header.index('Name'),
                               header.index('Row Type'))
@@ -805,8 +813,7 @@ def test_outlier_values_survive_a_rerun_of_an_ordered_sibling_model(client):
     analysis_id = created.json()['data']['id']
 
     def outlier_column():
-        rows = list(csv.reader(io.StringIO(
-            client.get(f'/api/results/{analysis_id}/export/csv').text)))
+        rows = _results_block(client, analysis_id)
         header, data = rows[0], rows[1:]
         col, name, kind = (header.index('Outlier %'), header.index('Name'),
                            header.index('Row Type'))

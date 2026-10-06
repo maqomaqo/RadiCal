@@ -9,6 +9,7 @@ from app.services.calibration import SIGMA_1, SIGMA_2, get_curve
 from app.services import date_format as date_format_service
 from app.services import pdf_report
 from app.services import intervals as intervals_service
+from app.services import statistics
 from typing import Dict, List, Optional
 from decimal import Decimal, ROUND_HALF_EVEN
 import io
@@ -590,6 +591,53 @@ def _write_kde(writer, analysis, date_format: str) -> None:
             writer.writerow(row)
 
 
+# The same-event tests, as one more block: one row per test, the Phase it is
+# about (blank for a group calibration, which tests all its dates), and the
+# pooled age's calibration where the dates pass. The pooled range is a calendar
+# age and gains a formatted counterpart on the file's usual rule.
+SAME_EVENT_HEADER = [
+    'Row Type', 'Phase', 'Dates', 'Pooled Age BP', 'Pooled Error', 'T', 'df',
+    '5% Critical', 'One Event', 'Pooled 95.4% HPD', 'Note',
+]
+
+
+def _same_event_tests(analysis_id: str, analysis, samples, db: Session) -> List[Dict]:
+    """
+    The analysis's same-event tests, from the stored tree as _structure_rows
+    reads it -- an export does not migrate -- so the CSV, JSON and PDF report
+    the same tests the Results page does.
+    """
+    tree = rows_to_tree(
+        db.query(ModelElement).filter(ModelElement.analysis_id == analysis_id).all())
+    return statistics.same_event_for_samples(analysis.analysis_type, tree, samples)
+
+
+def _write_same_event(writer, tests: List[Dict], date_format: str) -> None:
+    """The same-event tests, when the analysis has any."""
+    if not tests:
+        return
+    era = date_format_service.ERA_LABELS.get(date_format)
+    writer.writerow([])
+    writer.writerow(SAME_EVENT_HEADER + ([f'Pooled 95.4% HPD ({era})'] if era else []))
+    for test in tests:
+        tested = test['t'] is not None
+        pooled = statistics.pooled_ranges_at(test, SIGMA_2)
+        row = [
+            'Same-Event Test', test.get('name') or '', test['n'],
+            f"{test['mean_bp']:.0f}" if tested else '',
+            f"{test['error_bp']:.0f}" if tested else '',
+            f"{test['t']:.2f}" if tested else '',
+            test['df'],
+            f"{test['critical']:.2f}" if tested else '',
+            ('yes' if test['consistent'] else 'no') if tested else '',
+            _format_hpd_ranges(pooled, None, None),
+            test.get('refused') or '',
+        ]
+        if era:
+            row.append(date_format_service.format_hpd_ranges(pooled, date_format) if pooled else '')
+        writer.writerow(row)
+
+
 def _write_intervals(writer, analysis) -> None:
     """
     The durations-and-differences table, appended below the results table with
@@ -631,6 +679,7 @@ def _build_csv(analysis_id: str, db: Session, date_format: Optional[str] = None)
     writer.writerow(_csv_header(date_format))
 
     structure = _structure_rows(analysis_id, db, data['rows'], data['samples_by_id'])
+    same_event = _same_event_tests(analysis_id, analysis, data['samples_by_id'].values(), db)
 
     if not data['rows'] and not structure:
         writer.writerow([f'No results for analysis "{analysis.name}" ({analysis.status})'])
@@ -653,6 +702,7 @@ def _build_csv(analysis_id: str, db: Session, date_format: Optional[str] = None)
         _write_intervals(writer, analysis)
         _write_age_depth(writer, analysis, date_format)
         _write_kde(writer, analysis, date_format)
+        _write_same_event(writer, same_event, date_format)
         return output.getvalue()
 
     for order, row in enumerate(structure, start=1):
@@ -685,6 +735,7 @@ def _build_csv(analysis_id: str, db: Session, date_format: Optional[str] = None)
     _write_intervals(writer, analysis)
     _write_age_depth(writer, analysis, date_format)
     _write_kde(writer, analysis, date_format)
+    _write_same_event(writer, same_event, date_format)
     return output.getvalue()
 
 
@@ -819,6 +870,13 @@ def export_json(analysis_id: str, db: Session = Depends(get_db),
             "intervals": analysis.intervals,
             # Null unless the run was asked for one (Analysis.summaries).
             "summaries": analysis.summaries,
+            # How the run was computed: method, convergence, chains, and the
+            # sampler's cross_check against a direct calculation. Null for an
+            # analysis run before it was recorded.
+            "solver": analysis.solver,
+            # The same-event tests the Results page shows, from the same call.
+            "same_event": _same_event_tests(
+                analysis_id, analysis, data['samples_by_id'].values(), db),
         }
     }
 
@@ -882,6 +940,7 @@ def export_pdf(analysis_id: str, date_format: Optional[str] = None,
         context_spans=_context_spans(analysis_id, db),
         intervals=analysis.intervals,
         summaries=analysis.summaries,
+        same_event=_same_event_tests(analysis_id, analysis, data['samples_by_id'].values(), db),
         project_name=analysis.project.name if analysis.project else None,
         date_format=date_format,
         coordinate_precision=data['coordinate_precision'],

@@ -13,15 +13,16 @@
 9. [Viewing Results](#viewing-results)
 10. [Durations and Differences](#durations-and-differences)
 11. [Kernel Density Estimates](#kernel-density-estimates)
-12. [Wiggle Matching](#wiggle-matching)
-13. [Age-Depth Modelling](#age-depth-modelling)
-14. [Geographic Analysis](#geographic-analysis)
-15. [Exporting Data](#exporting-data)
-16. [Projects and Date Collections](#projects-and-date-collections)
-17. [Comparing Analyses](#comparing-analyses)
-18. [Best Practices](#best-practices)
-19. [Appendix A: Mathematical Methods](#appendix-a-mathematical-methods)
-20. [Bibliography](#bibliography)
+12. [Same-Event Test](#same-event-test)
+13. [Wiggle Matching](#wiggle-matching)
+14. [Age-Depth Modelling](#age-depth-modelling)
+15. [Geographic Analysis](#geographic-analysis)
+16. [Exporting Data](#exporting-data)
+17. [Projects and Date Collections](#projects-and-date-collections)
+18. [Comparing Analyses](#comparing-analyses)
+19. [Best Practices](#best-practices)
+20. [Appendix A: Mathematical Methods](#appendix-a-mathematical-methods)
+21. [Bibliography](#bibliography)
 
 ## Getting Started
 
@@ -635,6 +636,81 @@ above, and it is the better way to summarise a bounded phase.
 
 A Group Calibration has one estimate of all its dates. Either way, at least two dates are needed.
 
+## Same-Event Test
+
+Whether a set of radiocarbon measurements could all date one event: several samples from one
+short-lived context, or repeat measurements of one sample. It is Ward and Wilson's (1978) χ² test,
+as OxCal reports it under `R_Combine`.
+
+**Reporting**
+
+- A **Group Calibration** tests all its dates together, in its own panel below the plots.
+- A **Bayesian analysis** tests each Phase holding two or more dates. Turn on **Same-event test**
+  under **Columns** to show the result on each Phase's row, reported as `T`, then the 5% critical value, e.g. `T=5.7(5% 14.1)`
+- **Export CSV** adds the tests as a block of their own below the results, and **Export PDF** as a
+  table. Both give the verdict and, where the dates pass, the pooled age and its calibration.
+
+**Reading it.** The test reduces the dates to one number, `T`, and compares it with a threshold,
+the **critical value**. Read the result by comparing those two numbers; the 5% is not one of them.
+
+- **`T`** is how far the dates sit from their pooled age, each measured in units of its own error.
+  A date one standard error from the pooled age adds 1 to `T`, two errors away adds 4, and three
+  away adds 9. Dates of one event usually give a `T` near the number of dates minus one, and a
+  single stray date pushes it up quickly.
+- **The critical value** is how large `T` can get from measurement error alone. It depends only
+  on how many dates there are, since more dates scatter more: 3.84 for two dates, 14.07 for eight
+  (see the table below). The panel's **df** (degrees of freedom) is the number of dates minus one,
+  which is what the critical value is looked up by.
+- **The 5%** is the risk the test runs of a false alarm. Dates that really are one event will still
+  scatter past the critical value one time in twenty.
+
+| `T` is | Result | What it means |
+|---|---|---|
+| below the critical value | Consistent with one event | The dates scatter no more than their errors explain. |
+| above the critical value | More scatter than one event allows | Scatter this wide would happen less than 5% of the time if the dates were one event. They date more than one event, or one of them is wrong: old wood, contamination, a laboratory error. |
+
+Two examples, written as the results table writes them, `T=` then the critical value in brackets:
+
+- `T=5.7(5% 14.1)`: eight dates from Nenthorn. 5.7 is below 14.1, so they are **consistent with
+  one event**.
+- `T=27.9(5% 11.1)`: six dates from Layers 11–7. 27.9 is above 11.1, so there is **more scatter than
+  one event allows**.
+
+How far `T` is from the critical value matters as much as which side it falls. The second example
+is more than twice the threshold, a clear result; a `T` of 11.5 against 11.1 would be a marginal
+one, and so would 10.5. Treat a near miss on either side as undecided, and look at the dates
+themselves for the one that sits apart.
+
+| Dates | df | Critical value (5%) |
+|---|---|---|
+| 2 | 1 | 3.84 |
+| 3 | 2 | 5.99 |
+| 4 | 3 | 7.81 |
+| 5 | 4 | 9.49 |
+| 6 | 5 | 11.07 |
+| 8 | 7 | 14.07 |
+| 10 | 9 | 16.92 |
+| 12 | 11 | 19.68 |
+| 16 | 15 | 25.00 |
+| 20 | 19 | 30.14 |
+
+A pass does not prove the dates are one event. It says only that the measurements cannot tell
+them apart, which is also true of events a few decades apart on a plateau of the curve.
+
+In a Bayesian model a Phase is a span of time, not an event, so a Phase failing the test is normal
+and says nothing is wrong with the model. A Phase that passes may be shorter than its Boundaries
+suggest, especially with few dates.
+
+**The pooled age.** Where the dates pass, the panel gives their error-weighted mean and its
+calibration at the confidence level selected on the page. Where they fail, there is no pooled age:
+averaging dates of different events is meaningless.
+
+**When it is not run.** The test compares conventional radiocarbon ages, so every date must be on
+one curve with one ΔR. Dates on different curves (a marine shell and a terrestrial seed in one
+Phase, say) are not tested. A ΔR shared by every date shifts them all equally
+and does not change `T`; it is applied once, when the pooled age is calibrated. See
+[A.18](#a18-same-event-test) for the arithmetic.
+
 ## Wiggle Matching
 
 For a series of dates whose separations are **counted** rather than inferred: blocks of tree rings
@@ -908,9 +984,12 @@ the origin is elsewhere, or the sites do not form a front; the residuals tell th
   column with the results table, since every figure in them is a length rather than a date. A kernel
   density estimate follows in two more blocks: one row saying how it was made (dates, draws, kernel
   width), then the curve itself, one row per calendar year step with its density and ±1σ, so it can
-  be redrawn in a spreadsheet.
-- **JSON**: available via the API (`GET /api/results/{id}/export/json`) for anyone who wants the
-  full result machine-readable; there's no button for it in the UI yet.
+  be redrawn in a spreadsheet. The [same-event tests](#same-event-test) come last, one row each.
+- **Export JSON** (on the Results page): the full result, machine-readable. It carries every date
+  and Boundary in the model's own order, the durations and differences and kernel density estimates
+  where there are any, the same-event tests, and the solver record: which solver ran, its
+  convergence and chains, the agreement indices, and the sampler's cross-check against a direct
+  calculation. The same file is at `GET /api/results/{id}/export/json`.
 - **Curve data** (on a curve's browser page): **Export this window** saves the visible stretch of
   the curve as CSV (calendar age, radiocarbon age, error, local gradient); **Export profile** saves
   its whole expected-resolution profile. A curve itself can be downloaded from the Curves page, and
@@ -918,7 +997,7 @@ the origin is elsewhere, or the sites do not form a front; the residuals tell th
 - **Export PDF** (on the Results page): a printable report of the whole analysis: what it is and
   when it was run, the curve(s) it was calibrated against with their references, which solver
   computed the posteriors, the results table in the model's own reading order, the durations and
-  differences where there are any, the kernel density estimate where there is one, and a plot of every date and Boundary with its HPD ranges marked. Like the CSV it reads in the date format currently
+  differences where there are any, the kernel density estimate where there is one, the same-event tests, and a plot of every date and Boundary with its HPD ranges marked. Like the CSV it reads in the date format currently
   selected. It is rendered on the server and draws a plot per modelled parameter, so a large model
   takes a few seconds, and the button says so while it works.
 - **Export CSV** (on a comparison page): every paired date with each run's median, HPD range and
@@ -1820,6 +1899,26 @@ grows with the span of the dates rather than with `n²`, and the result is withi
 direct sum. A date the kernel leaves with no neighbour in reach is summed directly, so it lowers the
 likelihood by the right amount rather than making it zero.
 
+### A.18 Same-event test
+
+Ward and Wilson (1978), case 1: several measurements of what may be one event. Given ages `x_i`
+with errors `s_i`, pool them with inverse-variance weights,
+
+```
+x̄   = sum(x_i / s_i²) / sum(1 / s_i²)
+s_x̄ = (sum(1 / s_i²))^(-1/2)
+T   = sum((x_i - x̄)² / s_i²)
+```
+
+If the dates are one event, `T` follows a χ² distribution with `n - 1` degrees of freedom, and
+they are reported as consistent with one event when `T` is below its 95th percentile (the 5%
+critical value). This is OxCal's `R_Combine` test.
+
+A ΔR shared by every date adds the same constant to each age, which leaves `x̄ - x_i`, and so `T`,
+unchanged. It is applied once, to the pooled age, with its error added in quadrature at
+calibration. Adding `σ_ΔR` to each date's error before pooling instead would count one uncertainty
+`n` times: it would shrink `T` and make the pooled age look more precise than it is.
+
 ## Bibliography
 
 - Ammerman, A. J., and Cavalli-Sforza, L. L. (1971). Measuring the rate of spread of early farming
@@ -1886,6 +1985,8 @@ likelihood by the right amount rather than making it zero.
 - Svetlik, I., Jull, A. J. T., Molnár, M., Povinec, P. P., Kolář, T., Demján, P., et al. (2019). The
   best possible time resolution: how precise could a radiocarbon dating method be? *Radiocarbon*
   61(6), 1729–1740.
+- Ward, G. K., and Wilson, S. R. (1978). Procedures for comparing and combining radiocarbon age
+  determinations: a critique. *Archaeometry* 20(1), 19–31.
 
 **Software.** Demján, P. `res14c` — reference implementation of the Svetlik et al. resolution
 method, https://github.com/demjanp/res14c_online. OxCal (C. Bronk Ramsey), against whose 4.4 output

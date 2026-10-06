@@ -281,8 +281,11 @@ class TestWhatItCanAndCannotSee:
     def _scores(self, client, analysis_id):
         import csv as _csv
         import io
-        rows = list(_csv.reader(io.StringIO(
-            client.get(f'/api/results/{analysis_id}/export/csv').text)))
+        import itertools
+        # The results table only: blocks after the first blank line (here,
+        # the same-event tests) have headers of their own.
+        rows = list(itertools.takewhile(bool, _csv.reader(io.StringIO(
+            client.get(f'/api/results/{analysis_id}/export/csv').text))))
         header, data = rows[0], rows[1:]
         col, name_col, kind = (header.index('Agreement %'), header.index('Name'),
                                header.index('Row Type'))
