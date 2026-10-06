@@ -80,7 +80,6 @@ import { useProjectMapTiles } from '@/hooks/useProjectMapTiles'
 import { analysisTypeLabel } from '@/utils/analysisTypes'
 import { flattenStructure } from '@/utils/stratigraphy'
 import type { StructureRow } from '@/utils/stratigraphy'
-import { describeThinBoundary, describeThinPhase, findThinPhases } from '@/utils/thinPhases'
 import type { SameEventTest } from '@/utils/sameEvent'
 import {
   DateFormat,
@@ -729,7 +728,7 @@ function StructureTableRow({
   isBayesian, reporting, showAge, showCurve, showUnmodelled, showMean, showMedian,
   showDiagnostics, confidence, dateFormat,
   unmodelledExpanded, posteriorExpanded,
-  isCollapsible, isCollapsed, onToggleCollapse, thinNote,
+  isCollapsible, isCollapsed, onToggleCollapse,
 }: {
   row: StructureRow
   result?: SampleResult
@@ -757,9 +756,6 @@ function StructureTableRow({
   isCollapsible: boolean
   isCollapsed: boolean
   onToggleCollapse?: () => void
-  /** Why this row's figures are expected to be wide; absent when they are not.
-   *  See utils/thinPhases. */
-  thinNote?: string
 }) {
   const theme = useTheme()
   // The same map the Harris matrix and the tree editor colour their nodes
@@ -920,24 +916,6 @@ function StructureTableRow({
           <Box component="span" sx={{ ml: 1, color: 'text.secondary', fontSize: '0.75rem' }}>
             ({limiters})
           </Box>
-        )}
-        {/* A phase with fewer than four dates, or a Boundary next to one.
-            Its range is correct and will be very wide, which reads as a
-            failed run unless something says otherwise. Same chip-in-a-
-            tooltip idiom as the outlier column: describeChild so the label
-            is heard first, tabIndex so the reason is reachable without a
-            hover. */}
-        {thinNote && (
-          <Tooltip title={thinNote} describeChild>
-            <Chip
-              size="small"
-              tabIndex={0}
-              variant="outlined"
-              color="warning"
-              label="Few dates"
-              sx={{ ml: 1, height: 20, fontSize: '0.6875rem' }}
-            />
-          </Tooltip>
         )}
       </TableCell>
       {/* Only a date was measured. A Sequence or Phase is a heading and a
@@ -1658,28 +1636,6 @@ export default function Results() {
   // for row (backend model_tree.flatten_structure). Empty for an analysis with
   // no stored structure, which falls back to the flat date list below.
   const structureRows = flattenStructure(analysis.model_tree, analysis.measurements || [])
-
-  // Phases too thin for their Boundaries to be informative, and the
-  // Boundaries either side of them. Bayesian only: a plain calibration has no
-  // Boundaries for the count to be about.
-  // Not memoised: this sits below the page's early returns, where a hook
-  // would change the hook count between renders. It is one walk of a tree of
-  // tens of elements, the same as flattenStructure just above.
-  const thinPhases = isBayesian
-    ? findThinPhases(analysis.model_tree, analysis.measurements || [])
-    : { phases: new Map(), boundaries: new Map() }
-  const thinNoteFor = (row: StructureRow): string | undefined => {
-    if (!row.elementId) return undefined
-    if (row.kind === 'phase') {
-      const phase = thinPhases.phases.get(row.elementId)
-      return phase ? describeThinPhase(phase) : undefined
-    }
-    if (row.kind === 'boundary') {
-      const neighbours = thinPhases.boundaries.get(row.elementId)
-      return neighbours ? describeThinBoundary(neighbours) : undefined
-    }
-    return undefined
-  }
 
   // A group calibration's dates tested as one event, in its own panel.
   const groupSameEvent = analysis.analysis_type === 'group_calibration'
@@ -2987,7 +2943,6 @@ export default function Results() {
                           ? () => toggleCollapsed(row.elementId!)
                           : undefined
                       }
-                      thinNote={thinNoteFor(row)}
                     />
                   ))
                 : chronologicalResults.map((result, idx) => {
