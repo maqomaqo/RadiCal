@@ -339,9 +339,10 @@ UNSUPPORTED = {
     ),
     'age': 'a relative-age parameter, which this app does not model.',
     'r_combine': (
-        'several measurements pooled into one before calibration. This app '
-        'calibrates each measurement separately; combine them in the lab '
-        'report and enter the pooled age and error as a single date.'
+        'several measurements pooled into one before calibration. Import the '
+        'measurements as separate dates in one Phase, then use Test as one '
+        'event in the model editor, which tests them and replaces them with '
+        'their pooled date.'
     ),
     'combine': 'a combination of likelihoods, which this app does not model.',
     'u_date': 'a uranium-series date, which this app does not calibrate.',

@@ -134,7 +134,8 @@ gives the same result every time. The date's notes record that it was simulated 
 OxCal's language is larger than what this app models. Anything that would change the posterior and
 cannot be honoured **fails the import** with a message naming it, rather than being read as the
 nearest thing that is implemented: `Tau_Boundary`, `Sigma_Boundary` and `Zero_Boundary`
-(non-uniform transitions), `C_Date`, `R_Combine`, `U_Sequence` (a different deposition prior from
+(non-uniform transitions), `C_Date`, `R_Combine` (import the dates separately and pool them with
+[Test as one event](#same-event-test)), `U_Sequence` (a different deposition prior from
 the `P_Sequence` this app does model), a curve the app does not have, or a custom `Outlier_Model`.
 A `D_Sequence` or `V_Sequence` nested inside a larger model fails too: this app solves a wiggle
 match on its own, and reading its members as ordinary dates in a phase would report a match that
@@ -647,7 +648,10 @@ as OxCal reports it under `R_Combine`.
 - **Before a Bayesian run**, in the model editor. Every Phase holding two or more dates has
   **Test as one event** below its dates. All the Phase's dates start ticked; untick any to test
   the rest. This is where the answer matters: it decides whether dates go into the Phase as
-  separate events, or are one event to pool into a single date first.
+  separate events, or are one event to pool into a single date first. Where the ticked dates pass,
+  **Replace with pooled date** puts their pooled age in the Phase in their place, as OxCal's
+  `R_Combine` would. Its notes list the dates it pooled. The originals leave the analysis, so
+  Undo cannot bring them back; dates deployed from a project's collection are still there.
 - A **Group Calibration** tests all its dates together, in its own panel below the plots.
   **Export CSV** adds the test as a block of its own below the results, and **Export PDF** as a
   table.
@@ -705,7 +709,7 @@ model's own duration answers that. What the test can tell you is whether some of
 should not be separate events at all. Replicate measurements of one sample, or several samples
 of one bone or one short-lived deposit, are one event. Entered as separate dates in a Phase, the
 model counts them as several events and claims to know more about the Phase's span than it does.
-Where they pass, pool them and enter the pooled age as one date.
+Where they pass, replace them with their pooled date.
 
 **The pooled age.** Where the dates pass, the panel gives their error-weighted mean and its
 calibration at the confidence level selected on the page. Where they fail, there is no pooled age:

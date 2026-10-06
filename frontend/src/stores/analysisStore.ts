@@ -150,6 +150,12 @@ interface AnalysisDraftState {
   setMeasurements: (measurements: DraftMeasurement[]) => void
   addMeasurement: (measurement: DraftMeasurement) => void
   removeMeasurement: (id: string) => void
+  /**
+   * Replace several dates with one -- a pooled date in place of the dates it
+   * pools. It takes the first date's place in the list and its phase; the
+   * others go, with their assignments and any relationship naming them.
+   */
+  replaceMeasurements: (ids: string[], replacement: DraftMeasurement) => void
   updateMeasurement: (id: string, updates: Partial<DraftMeasurement>) => void
 
   addGroup: (group: DraftGroup) => void
@@ -236,6 +242,30 @@ const createDraftState: StateCreator<AnalysisDraftState> = (set) => ({
         (r) => !((r.from_type === 'sample' && r.from_sample_id === id) || (r.to_type === 'sample' && r.to_sample_id === id))
       ),
     })),
+
+  replaceMeasurements: (ids, replacement) =>
+    set((state) => {
+      const gone = new Set(ids)
+      const at = state.measurements.findIndex((m) => gone.has(m.id))
+      const kept = state.measurements.filter((m) => !gone.has(m.id))
+      const insertAt = at < 0 ? kept.length : at
+      const phaseId = ids.map((id) => state.elementAssignments[id]).find(Boolean)
+      const assignments = Object.fromEntries(
+        Object.entries(state.elementAssignments).filter(([mid]) => !gone.has(mid))
+      )
+      if (phaseId) assignments[replacement.id] = phaseId
+      return {
+        measurements: [...kept.slice(0, insertAt), replacement, ...kept.slice(insertAt)],
+        elementAssignments: assignments,
+        relationships: state.relationships.filter(
+          (r) =>
+            !(
+              (r.from_type === 'sample' && gone.has(r.from_sample_id)) ||
+              (r.to_type === 'sample' && gone.has(r.to_sample_id))
+            )
+        ),
+      }
+    }),
 
   updateMeasurement: (id, updates) =>
     set((state) => ({

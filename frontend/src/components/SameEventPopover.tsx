@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
   Box,
+  Button,
   Checkbox,
   CircularProgress,
   FormControlLabel,
@@ -13,7 +14,7 @@ import type { MatrixMeasurement } from '@/types'
 import { DEFAULT_DATE_FORMAT } from '@/utils/dateFormat'
 import { SIGMA_2 } from '@/utils/hpd'
 import { formatApiError } from '@/utils/apiError'
-import type { SameEventTest } from '@/utils/sameEvent'
+import { pooledAge, type SameEventTest } from '@/utils/sameEvent'
 import { SAME_EVENT_HELP, SameEventSummary } from '@/components/SameEventPanel'
 
 /** A date as the editor holds it: the draft's own fields, which carry the
@@ -30,6 +31,9 @@ interface Props {
   onClose: () => void
   phaseName: string
   dates: TestableDate[]
+  /** Replace the ticked dates with their pooled date. Absent where the host
+   *  cannot change the dates, and then not offered. */
+  onReplace?: (measurementIds: string[], test: SameEventTest) => void
 }
 
 /**
@@ -38,16 +42,19 @@ interface Props {
  * that pass may be one event, to pool into one date, rather than separate
  * events in a Phase. Every date starts ticked; untick any to test the rest.
  */
-export default function SameEventPopover({ anchorEl, onClose, phaseName, dates }: Props) {
+export default function SameEventPopover({ anchorEl, onClose, phaseName, dates, onReplace }: Props) {
   const [excluded, setExcluded] = useState<Set<string>>(new Set())
   const [test, setTest] = useState<SameEventTest | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  // Replacing takes dates out of the analysis, so it asks once first.
+  const [confirming, setConfirming] = useState(false)
   const open = !!anchorEl
 
   const ticked = useMemo(() => dates.filter((m) => !excluded.has(m.id)), [dates, excluded])
 
   useEffect(() => {
+    setConfirming(false)
     if (!open || ticked.length < 2) {
       setTest(null)
       setError(null)
@@ -156,6 +163,41 @@ export default function SameEventPopover({ anchorEl, onClose, phaseName, dates }
                 confidenceLabel="95.4%"
                 dateFormat={DEFAULT_DATE_FORMAT}
               />
+              {onReplace && test.consistent && !confirming && (
+                <Button
+                  size="small"
+                  variant="outlined"
+                  disabled={loading}
+                  onClick={() => setConfirming(true)}
+                  sx={{ mt: 2 }}
+                >
+                  Replace with pooled date
+                </Button>
+              )}
+              {onReplace && test.consistent && confirming && (
+                <Box sx={{ mt: 2 }}>
+                  <Typography variant="body2">
+                    The {ticked.length} ticked dates become one date, {pooledAge(test)}, in{' '}
+                    {phaseName}. Undo cannot restore them; they would have to be added again.
+                  </Typography>
+                  <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
+                    <Button
+                      size="small"
+                      variant="contained"
+                      disabled={loading}
+                      onClick={() => {
+                        onReplace(ticked.map((m) => m.id), test)
+                        onClose()
+                      }}
+                    >
+                      Replace
+                    </Button>
+                    <Button size="small" onClick={() => setConfirming(false)}>
+                      Cancel
+                    </Button>
+                  </Stack>
+                </Box>
+              )}
             </Box>
           ) : (
             <CircularProgress size={20} aria-label="Testing" />

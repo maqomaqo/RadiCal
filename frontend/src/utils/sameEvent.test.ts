@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import {
   pooledAge,
+  pooledMeasurement,
   pooledRanges,
   sameEventFigures,
   sameEventVerdict,
   type SameEventTest,
 } from './sameEvent'
+import type { DraftMeasurement } from '@/types'
 
 // Nenthorn, old-wood dates excluded (feature spec Q2).
 const NENTHORN: SameEventTest = {
@@ -72,5 +74,61 @@ describe('same-event wording', () => {
   it('says why a set was not tested', () => {
     expect(sameEventVerdict(REFUSED)).toBe('Dates are on more than one curve.')
     expect(sameEventFigures(REFUSED)).toBe('')
+  })
+})
+
+describe('pooledMeasurement', () => {
+  const draft = (id: string, age: number, error: number, extra: Partial<DraftMeasurement> = {}) =>
+    ({
+      id,
+      sample_name: id,
+      age_bp: age,
+      error_1sigma: error,
+      material_type: 'charcoal',
+      sample_type: 'terrestrial',
+      curve_id: 'shcal20',
+      element_id: 'p1',
+      latitude: -45.4,
+      longitude: 170.6,
+      outlier_prior: 0.05,
+      ...extra,
+    }) as DraftMeasurement
+  const dates = [draft('A', 650, 20), draft('B', 662, 16, { material_type: 'eggshell' })]
+
+  it('takes the pooled age and keeps what the dates share', () => {
+    const pooled = pooledMeasurement(dates, NENTHORN, 'pooled_1')
+    expect(pooled).toMatchObject({
+      id: 'pooled_1',
+      sample_name: 'Pooled: A + B',
+      age_bp: 656.1,
+      error_1sigma: 7.8,
+      curve_id: 'shcal20',
+      element_id: 'p1',
+      latitude: -45.4,
+      material_type: 'mixed',
+      outlier_prior: 0,
+    })
+  })
+
+  it('records what was pooled', () => {
+    const { notes } = pooledMeasurement(dates, NENTHORN, 'x')
+    expect(notes).toContain('A 650 ± 20 BP; B 662 ± 16 BP')
+    expect(notes).toContain('T = 5.7')
+  })
+
+  it('leaves blank what the dates disagree on', () => {
+    const apart = [draft('A', 650, 20), draft('B', 662, 16, { latitude: -46 })]
+    expect(pooledMeasurement(apart, NENTHORN, 'x').latitude).toBeNull()
+  })
+
+  it('keeps a long name inside the field limit', () => {
+    const many = Array.from({ length: 30 }, (_, i) => draft(`WkA-5530${i}`, 650, 20))
+    const { sample_name } = pooledMeasurement(many, NENTHORN, 'x')
+    expect(sample_name.length).toBeLessThanOrEqual(200)
+    expect(sample_name).toMatch(/\(30 dates\)$/)
+  })
+
+  it('refuses dates that did not pass', () => {
+    expect(() => pooledMeasurement(dates, LAYERS, 'x')).toThrow()
   })
 })

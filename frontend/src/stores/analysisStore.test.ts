@@ -44,6 +44,15 @@ describe('analysis draft store phase assignments', () => {
     expect(useAnalysisDraftStore.getState().elementAssignments).toEqual({})
     expect(useAnalysisDraftStore.getState().measurements).toEqual([])
   })
+
+  it('puts a pooled date in the place and phase of the dates it replaces', () => {
+    const store = useAnalysisDraftStore.getState()
+    for (const id of ['a', 'b', 'c', 'd']) store.addMeasurement(date(id, id === 'd' ? null : 'Layer 1'))
+    store.replaceMeasurements(['b', 'c'], date('pooled', null))
+    const state = useAnalysisDraftStore.getState()
+    expect(state.measurements.map((m) => m.id)).toEqual(['a', 'pooled', 'd'])
+    expect(state.elementAssignments).toEqual({ a: 'p1', pooled: 'p1' })
+  })
 })
 
 describe('isUsableResolution', () => {

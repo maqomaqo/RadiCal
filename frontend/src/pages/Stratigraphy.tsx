@@ -37,6 +37,7 @@ import { bootstrapModelTree } from '@/utils/modelTreeDefaults'
 import { formatApiError } from '@/utils/apiError'
 import { summariseTree } from '@/utils/harrisLayout'
 import { sortMeasurements, type MeasurementSortKey } from '@/utils/sortMeasurements'
+import { pooledMeasurement, type SameEventTest } from '@/utils/sameEvent'
 
 // The element vocabulary, the drag gestures and the TPQ/TAQ definitions used
 // to be restated here as a ~105-word paragraph, immediately above a component
@@ -51,6 +52,7 @@ export default function Stratigraphy() {
     measurements,
     setMeasurements,
     removeMeasurement,
+    replaceMeasurements,
     modelTree: draftTree,
     elementAssignments: draftAssignments,
     setModelTree: setDraftTree,
@@ -269,6 +271,32 @@ export default function Stratigraphy() {
     }
   }
 
+  /**
+   * Replace dates that passed the same-event test with their pooled date
+   * (utils/sameEvent.pooledMeasurement): OxCal's R_Combine, entered as the
+   * date it produces. Written to the draft, on the same terms as removeDates
+   * above -- the dates change, so on the edit route the structure saves with
+   * Run Analysis.
+   */
+  const canPoolDates = draftHoldsDates && measurements.length > 1
+  const poolDates = (ids: string[], test: SameEventTest) => {
+    const wanted = new Set(ids)
+    const pooled = pooledMeasurement(
+      measurements.filter((m) => wanted.has(m.id)),
+      test,
+      'pooled_' + Math.random().toString(36).slice(2, 11)
+    )
+    replaceMeasurements(ids, pooled)
+    if (editRouteId) {
+      setAssignments((prev) => {
+        const phaseId = ids.map((id) => prev[id]).find(Boolean)
+        const next = Object.fromEntries(Object.entries(prev).filter(([mid]) => !wanted.has(mid)))
+        if (phaseId) next[pooled.id] = phaseId
+        return next
+      })
+    }
+  }
+
   const activeTree = editRouteId ? modelTree : draftTree
   const activeAssignments = editRouteId ? assignments : draftAssignments
   const activeMeasurements = draftHoldsDates ? measurements : savedMeasurements
@@ -413,6 +441,7 @@ export default function Stratigraphy() {
                 onSortDates={canSortDates ? sortDates : undefined}
                 onSetOrdinate={canSetOrdinates ? setOrdinate : undefined}
                 onRemoveDates={canRemoveDates ? removeDates : undefined}
+                onPoolDates={canPoolDates ? poolDates : undefined}
                 tiles={mapTiles}
               />
             ) : (
@@ -436,6 +465,7 @@ export default function Stratigraphy() {
                 onSortDates={canSortDates ? sortDates : undefined}
                 onSetOrdinate={canSetOrdinates ? setOrdinate : undefined}
                 onRemoveDates={canRemoveDates ? removeDates : undefined}
+                onPoolDates={canPoolDates ? poolDates : undefined}
                 tiles={mapTiles}
                 onChange={(nextTree, nextAssignments) => {
                   setModelTree(nextTree)

@@ -70,6 +70,7 @@ import { groupingPreview, siteModelTree } from '@/utils/siteGrouping'
 import type { SiteGroupingKey } from '@/utils/siteGrouping'
 import GuideBand from '@/components/GuideBand'
 import type { MeasurementSortKey } from '@/utils/sortMeasurements'
+import type { SameEventTest } from '@/utils/sameEvent'
 // Lives in utils because the starting structure built there (see
 // bootstrapModelTree) mints ids too, and both must mint the same kind.
 // Re-exported so this module stays the one place the editor is imported from.
@@ -884,6 +885,12 @@ interface Props {
    */
   onRemoveDates?: (measurementIds: string[]) => void
   /**
+   * Replace dates that passed the same-event test with their pooled date.
+   * Optional for the same reason as onRemoveDates: only a host that owns the
+   * measurements can change them.
+   */
+  onPoolDates?: (measurementIds: string[], test: SameEventTest) => void
+  /**
    * The project's basemap-tiles setting, for the one map this editor can
    * open -- the spatial-order proposal's.
    */
@@ -1276,6 +1283,7 @@ function ElementDates({
   onOpenPhaseMenu,
   onSetOrdinate,
   onOpenRingHelper,
+  onPoolDates,
 }: {
   element: ModelElement
   dates: MatrixMeasurement[]
@@ -1283,6 +1291,7 @@ function ElementDates({
   onOpenPhaseMenu: (measurementId: string, anchor: HTMLElement) => void
   onSetOrdinate?: (measurementId: string, patch: Partial<MatrixMeasurement>) => void
   onOpenRingHelper?: (elementId: string) => void
+  onPoolDates?: (measurementIds: string[], test: SameEventTest) => void
 }) {
   const type = element.element_type
   const ordered = useMemo(() => orderedForHolder(type, dates), [type, dates])
@@ -1371,6 +1380,7 @@ function ElementDates({
                 onClose={() => setTestAnchor(null)}
                 phaseName={element.name || TYPE_LABEL[type]}
                 dates={ordered}
+                onReplace={onPoolDates}
               />
             </Suspense>
           )}
@@ -1750,6 +1760,8 @@ interface TreeRowProps {
   onSetOrdinate?: (measurementId: string, patch: Partial<MatrixMeasurement>) => void
   /** Open the ring-number converter for this wiggle match. */
   onOpenRingHelper?: (elementId: string) => void
+  /** Replace dates that passed the same-event test with their pooled date. */
+  onPoolDates?: (measurementIds: string[], test: SameEventTest) => void
   onSetLimit: (id: string, field: 'tpq_age_bp' | 'taq_age_bp', value: string) => void
   limitersOpen: boolean
   onOpenLimiters: (id: string) => void
@@ -1813,6 +1825,7 @@ const TreeRow = memo(function TreeRow({
   onSetParam,
   onSetOrdinate,
   onOpenRingHelper,
+  onPoolDates,
   onSetLimit,
   limitersOpen,
   onOpenLimiters,
@@ -1992,6 +2005,7 @@ const TreeRow = memo(function TreeRow({
             onOpenPhaseMenu={onOpenPhaseMenu}
             onSetOrdinate={onSetOrdinate}
             onOpenRingHelper={onOpenRingHelper}
+            onPoolDates={onPoolDates}
           />
         )}
       </Paper>
@@ -2008,6 +2022,7 @@ export default function ModelTreeEditor({
   onSortDates,
   onSetOrdinate,
   onRemoveDates,
+  onPoolDates,
   tiles = false,
 }: Props) {
   const [addMenu, setAddMenu] = useState<{ anchor: HTMLElement; targetId: string } | null>(null)
@@ -2692,6 +2707,7 @@ export default function ModelTreeEditor({
   const rowSetOrdinate = useEvent(
     (measurementId: string, patch: Partial<MatrixMeasurement>) => onSetOrdinate?.(measurementId, patch)
   )
+  const rowPoolDates = useEvent((ids: string[], test: SameEventTest) => onPoolDates?.(ids, test))
   const rowSetLimit = useEvent(setLimit)
   const rowOpenLimiters = useEvent(showLimiters)
   const rowMoveUp = useEvent((id: string) => move(id, -1))
@@ -3080,6 +3096,7 @@ export default function ModelTreeEditor({
             onOpenPhaseMenu={rowOpenPhaseMenu}
             onSetOrdinate={onSetOrdinate}
             onOpenRingHelper={setRingHelperFor}
+            onPoolDates={onPoolDates}
           />
         </Paper>
       </Box>
@@ -3145,6 +3162,7 @@ export default function ModelTreeEditor({
                 onSetParam={rowSetParam}
                 onSetOrdinate={onSetOrdinate ? rowSetOrdinate : undefined}
                 onOpenRingHelper={setRingHelperFor}
+                onPoolDates={onPoolDates ? rowPoolDates : undefined}
                 onSetLimit={rowSetLimit}
                 limitersOpen={openLimiters.has(node.id)}
                 onOpenLimiters={rowOpenLimiters}
