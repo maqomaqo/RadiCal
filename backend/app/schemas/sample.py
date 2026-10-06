@@ -541,11 +541,23 @@ class BayesianConfigInput(BaseModel):
     # `gibbs` exists so an analyst can reproduce a published OxCal analysis,
     # or cross-check the exact solver against an independent route.
     solver: Literal["auto", "exact", "gibbs"] = "auto"
-    # How many samples each date's posterior is REPORTED with, not how long
-    # anything runs: a chain-shaped model is integrated exactly and has no run
-    # length, and services/gibbs.py extends its own run until it converges
-    # rather than taking a figure from here on trust.
+    # How many draws each posterior's stored sample holds -- drawn from the
+    # final density for storage, after the run. It changes no reported
+    # figure, since every range, estimate and probability is read from the
+    # density, and it does not lengthen the run: mcmc_min_sweeps does that.
+    # No longer offered in the form; kept so a saved analysis round-trips.
     mcmc_samples: int = Field(default=4000, ge=100, le=20000)
+    # The least number of sweeps each chain runs before the sampler may stop
+    # on convergence (gibbs.run's min_sweeps). 0, the default, runs until the
+    # convergence target is met. The one way to ask for a longer run: the
+    # sampler otherwise stops as soon as its halves agree. Ignored by the
+    # exact solver, which has no run.
+    mcmc_min_sweeps: int = Field(default=0, ge=0, le=1_000_000)
+    # The sampler's random seed (gibbs.DEFAULT_SEED when absent), chain c
+    # taking seed + c. The same seed and inputs reproduce a run exactly; a
+    # different seed is an independent replicate, which is how Monte Carlo
+    # error is measured. Ignored by the exact solver, which draws nothing.
+    seed: Optional[int] = Field(default=None, ge=0, le=2**31 - 1)
     # Unused by either solver. Retained so a saved analysis's bayesian_config
     # still round-trips through an edit rather than being rejected.
     mcmc_tune: int = Field(default=1000, ge=100, le=20000)

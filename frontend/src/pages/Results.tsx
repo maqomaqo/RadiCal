@@ -47,6 +47,7 @@ import AccountTreeIcon from '@mui/icons-material/AccountTree'
 import DeleteIcon from '@mui/icons-material/Delete'
 import ReplayIcon from '@mui/icons-material/Replay'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
+import CasinoIcon from '@mui/icons-material/Casino'
 import EditIcon from '@mui/icons-material/Edit'
 import ViewColumnIcon from '@mui/icons-material/ViewColumn'
 import KeyboardArrowRightIcon from '@mui/icons-material/KeyboardArrowRight'
@@ -189,6 +190,11 @@ interface AnalysisResult {
     // information only. The chain fields are null on a single chain, which
     // has nothing to disagree with. `sweeps` is the total over every chain.
     sweeps?: number
+    // Sampled path only: the seed the run took, and the minimum sweeps per
+    // chain it was held to (0 when none was set). Absent before they were
+    // recorded.
+    seed?: number
+    min_sweeps?: number
     convergence?: number
     converged?: boolean
     chains?: number
@@ -1042,6 +1048,7 @@ export default function Results() {
   const [jobId, setJobId] = useState<string | null>(null)
   const [cancelling, setCancelling] = useState(false)
   const [duplicating, setDuplicating] = useState(false)
+  const [replicating, setReplicating] = useState(false)
   const [exportingPdf, setExportingPdf] = useState(false)
   // Which optional columns the table draws, remembered per analysis. Only
   // columns the reader has explicitly turned on or off are stored: a column
@@ -1329,6 +1336,30 @@ export default function Results() {
       notify('Could not duplicate analysis: ' + describeFetchError(err))
     } finally {
       setDuplicating(false)
+    }
+  }
+
+  // An independent replicate of a sampled run: the same inputs under a fresh
+  // seed, run straight away, so it can be set beside this one in Compare
+  // Results to see how far Monte Carlo error moves the figures. A copy rather
+  // than a re-run, so this result is kept.
+  const handleReplicate = async () => {
+    if (!analysisId) return
+    setReplicating(true)
+    try {
+      const copied = await (
+        await fetch(`/api/analysis/${analysisId}/duplicate?new_seed=true`, { method: 'POST' })
+      ).json()
+      if (!copied.success) throw new Error(formatApiError(copied))
+      const queued = await (
+        await fetch(`/api/analysis/${copied.data.id}/rerun`, { method: 'POST' })
+      ).json()
+      if (!queued.success) throw new Error(formatApiError(queued))
+      navigate(`/results/${copied.data.id}`)
+    } catch (err) {
+      notify('Could not run with a new seed: ' + describeFetchError(err))
+    } finally {
+      setReplicating(false)
     }
   }
 
@@ -1950,8 +1981,10 @@ export default function Results() {
   const passes = analysis.solver?.sweeps?.toLocaleString()
   const rhat =
     typeof analysis.solver?.rhat === 'number' ? ` (R̂ ${analysis.solver.rhat.toFixed(2)})` : ''
+  const seedNote = typeof analysis.solver?.seed === 'number' ? `, seed ${analysis.solver.seed}` : ''
   const sampling =
-    chainCount > 1 ? `${chainCount} chains and ${passes} passes${rhat}` : `${passes} passes`
+    (chainCount > 1 ? `${chainCount} chains and ${passes} passes${rhat}` : `${passes} passes`) +
+    seedNote
   let solverChip: JSX.Element | null = null
   let solverAlert: JSX.Element | null = null
   const crossCheck = analysis.solver?.method === 'gibbs' ? analysis.solver.cross_check : null
@@ -2379,6 +2412,22 @@ export default function Results() {
                 </IconButton>
               </span>
             </Tooltip>
+            {/* Only a sampled run has a seed: an exact answer would come back
+                identical. */}
+            {analysis.solver?.method === 'gibbs' && (
+              <Tooltip title={replicating ? 'Starting…' : 'Run again with a new seed'}>
+                <span>
+                  <IconButton
+                    size="small"
+                    aria-label="Run a copy with a new seed"
+                    disabled={replicating}
+                    onClick={handleReplicate}
+                  >
+                    {replicating ? <CircularProgress size={18} /> : <CasinoIcon />}
+                  </IconButton>
+                </span>
+              </Tooltip>
+            )}
             <Tooltip title="Re-run">
               <IconButton
                 size="small"

@@ -1174,6 +1174,37 @@ class TestRunLength:
         assert sampled['converged'] is False
         assert sampled['convergence'] < 1.01
 
+    def test_min_sweeps_holds_a_converged_run_to_its_floor(self):
+        """
+        A floor above the length the run would have stopped at is the only
+        thing that keeps it going -- on one chain or several. Without it,
+        asking for a longer run did nothing at all.
+        """
+        measurements, tree = self._easy_model()
+        plain = gibbs.solve(measurements, tree, sweeps=6000, num_samples=50)
+        floor = plain['sweeps'] + 20000
+        held = gibbs.solve(measurements, tree, sweeps=6000, num_samples=50,
+                           min_sweeps=floor)
+        assert held['sweeps'] >= floor
+        assert held['converged'] is True
+
+        two = gibbs.solve(measurements, tree, sweeps=6000, num_samples=50, chains=2)
+        floor = max(two['sweeps_per_chain']) + 10000
+        held = gibbs.solve(measurements, tree, sweeps=6000, num_samples=50,
+                           chains=2, min_sweeps=floor)
+        assert min(held['sweeps_per_chain']) >= floor
+
+    def test_the_seed_reproduces_a_run_and_a_new_one_replicates_it(self):
+        measurements, tree = self._easy_model()
+        a = gibbs.solve(measurements, tree, sweeps=2000, num_samples=50, seed=11)
+        b = gibbs.solve(measurements, tree, sweeps=2000, num_samples=50, seed=11)
+        c = gibbs.solve(measurements, tree, sweeps=2000, num_samples=50, seed=12)
+        date = measurements[0]['id']
+        means = [r['measurements'][date]['posterior_mean'] for r in (a, b, c)]
+        assert means[0] == means[1]
+        assert means[0] != means[2]
+        assert means[2] == pytest.approx(means[0], abs=5)
+
     def test_burn_in_scales_with_the_run_rather_than_the_starting_budget(self):
         """
         The regression that made a longer run WORSE. The sweeps discarded up

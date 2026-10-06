@@ -344,7 +344,12 @@ rather than arranged by hand.
 - **Solver**: Automatic (recommended: exact integration where the model allows, sampling
   otherwise), Exact solver only (fast, but only works on chain-shaped models), or MH/Gibbs (works
   on all models). See [Choosing a solver](#choosing-a-solver).
-- **Posterior draws**: how many samples each date's posterior is reported with.
+- **Minimum sweeps per chain** (sampled runs only): blank by default, which runs each chain until
+  it converges. Set a number to make every chain run at least that long — the only way to ask for a
+  longer run, since a run otherwise stops as soon as it converges.
+- **Seed** (sampled runs only): blank uses the fixed default, 42, so re-running unchanged inputs
+  repeats the result exactly. A different seed gives an independent replicate. The seed a run took
+  is shown with its sampling details and recorded in the JSON export.
 - **Resolution (years)**: the calendar step for modelled ranges and durations. 5 years by default;
   1 or 2 suits dates from the last few centuries, 10 or 20 for the Pleistocene. Only reporting
   changes — posteriors, agreement indices and plots are the same at any setting (see
@@ -392,6 +397,15 @@ that no chain reaches is still invisible to R̂, so where a result has two well-
 the decision rests on which is right, check by another method as well. For two common model shapes
 the app runs this check automatically (see [A.6](#a6-solvers)). The chain count is set in the
 analysis options; one chain is the plain run.
+
+**Replicating a sampled run.** A sampled result carries Monte Carlo error: a second run with a
+different seed gives slightly different figures. **Run again with a new seed** (the dice button
+beside Duplicate on the Results page) copies the analysis under a fresh seed, names the copy after
+it, and runs it, leaving this result in place. Set the two side by side in
+[Comparing Analyses](#comparing-analyses): figures that move by more than you would report are not
+yet settled, and a longer run (**Minimum sweeps per chain**) is the remedy. Replicates share any
+bias the sampler has, so agreement between them does not show the answer is right; the direct
+calculation above is the check for that.
 
 Where both solvers can be used, they agree to under a year, and they are checked against each
 other on every model both can handle.

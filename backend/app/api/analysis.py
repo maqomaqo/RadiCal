@@ -40,6 +40,7 @@ from app.models import (
 )
 from typing import Callable, List, Dict, Optional, Tuple
 import numpy as np
+import secrets
 import uuid
 
 router = APIRouter()
@@ -759,9 +760,14 @@ def _run_bayesian(
     # iterate towards an answer, so it has no fraction to report and nothing
     # to interrupt between. A model solved exactly simply goes from queued to
     # completed, which is honest about how it was computed.
+    seed = bayesian_config.get('seed')
+    seed = gibbs.DEFAULT_SEED if seed is None else int(seed)
+    min_sweeps = int(bayesian_config.get('mcmc_min_sweeps') or 0)
     sampled = gibbs.solve(
         measurements, model_tree,
         num_samples=bayesian_config.get('mcmc_samples', 2000),
+        seed=seed,
+        min_sweeps=min_sweeps,
         uniform_span_prior=bayesian_config.get('uniform_span_prior', True),
         estimate_durations=estimate_durations,
         dispersal=dispersal_spec,
@@ -797,6 +803,10 @@ def _run_bayesian(
         # model COULD have been integrated exactly and was not, because doing
         # so would have changed it. A different statement from `reason`.
         'exact_needs_boundaries': exact_needs_boundaries,
+        # The seed the run took, so it can be repeated exactly or replicated
+        # with another, and the floor it was held to (0 when none was set).
+        'seed': seed,
+        'min_sweeps': min_sweeps,
         'sweeps': sampled['sweeps'],
         'convergence': sampled['convergence'],
         'converged': sampled['converged'],
@@ -2154,11 +2164,18 @@ def replace_model_tree(analysis_id: str, payload: Dict, db: Session = Depends(ge
 
 
 @router.post("/analysis/{analysis_id}/duplicate")
-def duplicate_analysis(analysis_id: str, db: Session = Depends(get_db),
+def duplicate_analysis(analysis_id: str, new_seed: bool = False,
+                       db: Session = Depends(get_db),
                        user: User = Depends(current_user)):
     """
     Deep-copy an analysis's INPUTS into a new analysis, so a variant can be
     built from an existing one -- "the same dates, but grouped differently".
+
+    `new_seed` gives the copy a fresh random seed (bayesian_config.seed) and
+    says so in its name: an independent replicate of a sampled run, to set
+    beside the original in Compare Results and see how far Monte Carlo error
+    moves its figures. Only for a Bayesian analysis, the only kind that
+    samples.
 
     Copies the samples, contexts and stratigraphic relationships, remapping
     ids to the new rows'. Results are NOT copied and status is 'pending', so
@@ -2169,11 +2186,19 @@ def duplicate_analysis(analysis_id: str, db: Session = Depends(get_db),
         db.query(Analysis).filter(Analysis.id == analysis_id).first(),
         user, 'That analysis')
 
+    name, config = f"{source.name} (copy)", source.bayesian_config
+    if new_seed:
+        if source.analysis_type != 'bayesian':
+            raise HTTPException(status_code=400,
+                                detail='Only a Bayesian analysis has a seed to change.')
+        seed = secrets.randbelow(2**31 - 1)
+        name, config = f"{source.name} (seed {seed})", {**(config or {}), 'seed': seed}
+
     copy = Analysis(
-        name=f"{source.name} (copy)",
+        name=name,
         analysis_type=source.analysis_type,
         status='pending',
-        bayesian_config=source.bayesian_config,
+        bayesian_config=config,
         project_id=source.project_id,
         # The copier's, not the source's. They are the same person today --
         # you can only duplicate what you can see -- and writing it explicitly

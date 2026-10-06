@@ -1503,8 +1503,8 @@ export default function NewAnalysis() {
                     )}
                   </>
                 )}
-                {/* Draws and the span prior are correct as they stand for
-                    almost every run, so they sit behind an expander rather
+                {/* Run length, seed and the span prior are right as they stand
+                    for almost every run, so they sit behind an expander rather
                     than in front of everyone who opens the page. */}
                 <Accordion
                   disableGutters
@@ -1520,14 +1520,41 @@ export default function NewAnalysis() {
                     <Typography variant="subtitle2" component="h3">Advanced settings</Typography>
                   </AccordionSummary>
                   <AccordionDetails>
+                    {/* Both apply to a sampled run only: the exact solver has
+                        no run length and draws nothing. */}
                     <TextField
                       fullWidth
                       size="small"
                       type="number"
-                      label="Posterior draws"
-                      value={mcmc.mcmc_samples}
-                      onChange={(e) => setMcmc({ mcmc_samples: Number(e.target.value) })}
-                      helperText="How many samples each date's posterior is reported with."
+                      label="Minimum sweeps per chain"
+                      value={mcmc.mcmc_min_sweeps || ''}
+                      placeholder="Until converged"
+                      onChange={(e) => {
+                        const value = Math.floor(Number(e.target.value))
+                        setMcmc({ mcmc_min_sweeps: Number.isFinite(value) && value > 0 ? Math.min(value, 1_000_000) : 0 })
+                      }}
+                      inputProps={{ min: 0, max: 1_000_000, step: 1000 }}
+                      helperText="Sampled runs stop once converged. Set this to make each chain run at least this long."
+                    />
+                    <TextField
+                      fullWidth
+                      size="small"
+                      type="number"
+                      label="Seed"
+                      sx={{ mt: 2 }}
+                      value={mcmc.seed ?? ''}
+                      placeholder="42"
+                      onChange={(e) => {
+                        const value = Math.floor(Number(e.target.value))
+                        setMcmc({
+                          seed:
+                            e.target.value.trim() === '' || !Number.isFinite(value) || value < 0
+                              ? null
+                              : Math.min(value, 2 ** 31 - 2),
+                        })
+                      }}
+                      inputProps={{ min: 0, step: 1 }}
+                      helperText="The same seed repeats a sampled run exactly. A different one gives an independent replicate."
                     />
                     <TextField
                       fullWidth

@@ -28,9 +28,18 @@ export interface McmcConfig {
   // Which solver to use: 'auto' picks per model, the others override it. See
   // BayesianConfigInput.solver on the backend for what each one does.
   solver: SolverChoice
+  // How many draws each stored posterior sample holds. Changes no reported
+  // figure and no run length; no longer offered in the form, but kept so a
+  // saved analysis round-trips. See BayesianConfigInput.mcmc_samples.
   mcmc_samples: number
   mcmc_tune: number
   mcmc_chains: number
+  // The least number of sweeps each chain runs before the sampler may stop on
+  // convergence; 0 runs until converged. The one way to ask for a longer run.
+  mcmc_min_sweeps: number
+  // The sampler's seed, or null for its fixed default. The same seed
+  // reproduces a run; a different one is an independent replicate.
+  seed: number | null
   // OxCal's UniformSpanPrior (Nicholls and Jones 2001) -- see
   // BayesianConfigInput.uniform_span_prior on the backend for what it does.
   // On by default there and here.
@@ -60,14 +69,16 @@ export interface McmcConfig {
   dispersal_origin: { lat: number; lon: number } | null
 }
 
-// How many posterior samples a result CARRIES, not how long the sampler runs:
-// services/gibbs.py extends its own run until it converges, and the exact
-// solver has no run length at all.
+// The sampler runs until it converges (services/gibbs.py), and the exact
+// solver has no run length at all; mcmc_min_sweeps is the only setting here
+// that lengthens a run.
 export const DEFAULT_MCMC: McmcConfig = {
   solver: 'auto',
   mcmc_samples: 4000,
   mcmc_tune: 1000,
   mcmc_chains: 4,
+  mcmc_min_sweeps: 0,
+  seed: null,
   uniform_span_prior: true,
   resolution: 5,
   estimate_durations: false,

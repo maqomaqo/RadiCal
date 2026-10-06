@@ -89,6 +89,8 @@ interface RunPayload {
   solver?: {
     method: 'exact' | 'gibbs' | 'smc'
     sweeps?: number
+    // The seed a sampled run took; absent before it was recorded.
+    seed?: number
     convergence?: number
     converged?: boolean
     resolution?: number
@@ -126,7 +128,9 @@ function solverLabel(run: RunPayload): string {
   if (!run.solver) return 'solver not recorded'
   if (run.solver.method === 'exact') return 'exact solver'
   const sweeps = run.solver.sweeps ? `, ${run.solver.sweeps.toLocaleString()} sweeps` : ''
-  return `MH/Gibbs${sweeps}`
+  // Named so two replicates of one model read as what they are.
+  const seed = typeof run.solver.seed === 'number' ? `, seed ${run.solver.seed}` : ''
+  return `MH/Gibbs${sweeps}${seed}`
 }
 
 export default function CompareResults() {

@@ -268,6 +268,11 @@ ROUNDS = 8
 # the machine. Only if they START apart (start_quantiles): four chains from
 # one state can settle in one lobe together and agree perfectly.
 DEFAULT_CHAINS = 4
+# The seed a run takes when the analysis names none. Fixed rather than drawn,
+# so re-running unchanged inputs reproduces the result exactly and a project
+# re-run moves only what changed; an analyst wanting an independent replicate
+# asks for a new seed (bayesian_config.seed). Chain c takes seed + c.
+DEFAULT_SEED = 42
 # Most worker processes the chain pool holds, whatever is asked for.
 MAX_CHAIN_WORKERS = 8
 # Gelman-Rubin R-hat the chains must agree to before a pooled run may stop.
@@ -2070,6 +2075,7 @@ def run(model: Model, sweeps: int = DEFAULT_SWEEPS, seed: int = 42,
         target_convergence: float = TARGET_CONVERGENCE,
         max_sweeps: Optional[int] = None,
         collect_draws: int = 0,
+        min_sweeps: int = 0,
         on_progress: Optional[Callable[[Dict], bool]] = None,
         start_quantile: Optional[float] = None,
         start_lobe: Optional[Tuple] = None) -> Dict:
@@ -2099,6 +2105,11 @@ def run(model: Model, sweeps: int = DEFAULT_SWEEPS, seed: int = 42,
     perfectly unbiased in principle, but it is what OxCal does and the effect is
     far below the Monte Carlo error it controls. `max_sweeps` bounds the work
     regardless, and the achieved convergence is always reported.
+
+    `min_sweeps` is the analyst's own floor: the run may not stop on
+    convergence before it has swept that many times. `sweeps` is not one --
+    it sets the round length, and a model that converges fast stops two or
+    three rounds in -- so this is the only way to ask for a longer run.
 
     `on_progress`, when given, is called with
     {'phase', 'sweeps', 'max_sweeps', 'convergence'} after burn-in and after
@@ -2144,7 +2155,9 @@ def run(model: Model, sweeps: int = DEFAULT_SWEEPS, seed: int = 42,
         report('sampling', worst)
         if kept < 2:
             continue
-        if worst >= target_convergence or chain.swept >= chain.max_sweeps:
+        if chain.swept >= chain.max_sweeps:
+            break
+        if worst >= target_convergence and chain.swept >= min_sweeps:
             break
 
     return chain.result(convergence)
@@ -2423,6 +2436,7 @@ def solve_chains(measurements: List[Dict], root: Dict, chains: int,
                  grid: Optional[np.ndarray] = None,
                  target_convergence: float = TARGET_CONVERGENCE,
                  max_sweeps: Optional[int] = None,
+                 min_sweeps: int = 0,
                  collect_draws: int = 0,
                  on_progress: Optional[Callable[[Dict], bool]] = None,
                  start_strategy: str = DEFAULT_START_STRATEGY) -> Dict:
@@ -2450,7 +2464,7 @@ def solve_chains(measurements: List[Dict], root: Dict, chains: int,
         raise ValueError('chains must be at least 1')
     chains = min(chains, worker_cap())
     if max_sweeps is None:
-        max_sweeps = max(sweeps, MAX_SWEEPS)
+        max_sweeps = max(sweeps, MAX_SWEEPS, min_sweeps)
     curves = _curve_payload(measurements)
 
     workers = _acquire(chains)
@@ -2521,6 +2535,9 @@ def solve_chains(measurements: List[Dict], root: Dict, chains: int,
             if min(swept) >= max_sweeps:
                 break
             if worst < target_convergence:
+                continue
+            # The analyst's floor, per chain: see run's `min_sweeps`.
+            if min(swept) < min_sweeps:
                 continue
             # Pooled halves agree; now the chains must agree with each
             # other, or a chain stuck in a lobe would be pooled in silence.
@@ -2708,6 +2725,7 @@ def solve(measurements: List[Dict], root: Dict, sweeps: int = DEFAULT_SWEEPS,
           grid: Optional[np.ndarray] = None,
           target_convergence: float = TARGET_CONVERGENCE,
           max_sweeps: Optional[int] = None,
+          min_sweeps: int = 0,
           estimate_durations: bool = False,
           dispersal: Optional[Dict] = None,
           interval_draws: int = intervals.DEFAULT_DRAWS,
@@ -2722,7 +2740,8 @@ def solve(measurements: List[Dict], root: Dict, sweeps: int = DEFAULT_SWEEPS,
     `sweeps` is where the run starts, not where it ends: it extends until the
     convergence measure reaches `target_convergence` or `max_sweeps` (see run).
     Both the achieved convergence and the length are reported, so a run that ran
-    out of budget is visible rather than silently under-converged.
+    out of budget is visible rather than silently under-converged. `min_sweeps`
+    is a floor per chain the run may not stop before; see run.
 
     `chains` > 1 runs that many INDEPENDENT chains, each in its own process
     with its own seed and its own self-extending run, and pools their
@@ -2769,10 +2788,12 @@ def solve(measurements: List[Dict], root: Dict, sweeps: int = DEFAULT_SWEEPS,
             measurements, root, chains=chains, sweeps=sweeps, seed=seed,
             uniform_span_prior=uniform_span_prior, grid=model.grid,
             target_convergence=target_convergence, max_sweeps=max_sweeps,
-            collect_draws=interval_draws,
+            min_sweeps=min_sweeps, collect_draws=interval_draws,
             on_progress=on_progress)
     else:
-        chain = run(model, sweeps=sweeps, seed=seed,
+        if max_sweeps is None and min_sweeps:
+            max_sweeps = max(sweeps, MAX_SWEEPS, min_sweeps)
+        chain = run(model, sweeps=sweeps, seed=seed, min_sweeps=min_sweeps,
                     target_convergence=target_convergence, max_sweeps=max_sweeps,
                     collect_draws=interval_draws,
                     on_progress=on_progress)
