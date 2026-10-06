@@ -3,7 +3,6 @@ import {
   pooledAge,
   pooledRanges,
   sameEventFigures,
-  sameEventNotation,
   sameEventVerdict,
   type SameEventTest,
 } from './sameEvent'
@@ -57,11 +56,6 @@ describe('same-event wording', () => {
     expect(sameEventVerdict(LAYERS)).toBe('More scatter than one event allows')
   })
 
-  it("writes OxCal's own notation", () => {
-    expect(sameEventNotation(NENTHORN)).toBe('T=5.7(5% 14.1)')
-    expect(sameEventNotation(LAYERS)).toBe('T=27.9(5% 11.1)')
-  })
-
   it('gives the critical value to two decimals', () => {
     expect(sameEventFigures(NENTHORN)).toBe('T = 5.7 · 5% critical 14.07 · df 7')
   })
@@ -77,7 +71,6 @@ describe('same-event wording', () => {
 
   it('says why a set was not tested', () => {
     expect(sameEventVerdict(REFUSED)).toBe('Dates are on more than one curve.')
-    expect(sameEventNotation(REFUSED)).toBe('')
     expect(sameEventFigures(REFUSED)).toBe('')
   })
 })

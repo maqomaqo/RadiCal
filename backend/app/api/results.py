@@ -591,29 +591,23 @@ def _write_kde(writer, analysis, date_format: str) -> None:
             writer.writerow(row)
 
 
-# The same-event tests, as one more block: one row per test, the Phase it is
-# about (blank for a group calibration, which tests all its dates), and the
-# pooled age's calibration where the dates pass. The pooled range is a calendar
-# age and gains a formatted counterpart on the file's usual rule.
+# A group calibration's same-event test, as one more block, with the pooled
+# age's calibration where the dates pass. The pooled range is a calendar age
+# and gains a formatted counterpart on the file's usual rule.
 SAME_EVENT_HEADER = [
-    'Row Type', 'Phase', 'Dates', 'Pooled Age BP', 'Pooled Error', 'T', 'df',
+    'Row Type', 'Dates', 'Pooled Age BP', 'Pooled Error', 'T', 'df',
     '5% Critical', 'One Event', 'Pooled 95.4% HPD', 'Note',
 ]
 
 
-def _same_event_tests(analysis_id: str, analysis, samples, db: Session) -> List[Dict]:
-    """
-    The analysis's same-event tests, from the stored tree as _structure_rows
-    reads it -- an export does not migrate -- so the CSV, JSON and PDF report
-    the same tests the Results page does.
-    """
-    tree = rows_to_tree(
-        db.query(ModelElement).filter(ModelElement.analysis_id == analysis_id).all())
-    return statistics.same_event_for_samples(analysis.analysis_type, tree, samples)
+def _same_event_tests(analysis, samples) -> List[Dict]:
+    """The analysis's same-event tests, from the call the Results page makes,
+    so every export reports what the page does."""
+    return statistics.same_event_for_samples(analysis.analysis_type, samples)
 
 
 def _write_same_event(writer, tests: List[Dict], date_format: str) -> None:
-    """The same-event tests, when the analysis has any."""
+    """The same-event test, when the analysis has one."""
     if not tests:
         return
     era = date_format_service.ERA_LABELS.get(date_format)
@@ -623,7 +617,7 @@ def _write_same_event(writer, tests: List[Dict], date_format: str) -> None:
         tested = test['t'] is not None
         pooled = statistics.pooled_ranges_at(test, SIGMA_2)
         row = [
-            'Same-Event Test', test.get('name') or '', test['n'],
+            'Same-Event Test', test['n'],
             f"{test['mean_bp']:.0f}" if tested else '',
             f"{test['error_bp']:.0f}" if tested else '',
             f"{test['t']:.2f}" if tested else '',
@@ -679,7 +673,7 @@ def _build_csv(analysis_id: str, db: Session, date_format: Optional[str] = None)
     writer.writerow(_csv_header(date_format))
 
     structure = _structure_rows(analysis_id, db, data['rows'], data['samples_by_id'])
-    same_event = _same_event_tests(analysis_id, analysis, data['samples_by_id'].values(), db)
+    same_event = _same_event_tests(analysis, data['samples_by_id'].values())
 
     if not data['rows'] and not structure:
         writer.writerow([f'No results for analysis "{analysis.name}" ({analysis.status})'])
@@ -876,7 +870,7 @@ def export_json(analysis_id: str, db: Session = Depends(get_db),
             "solver": analysis.solver,
             # The same-event tests the Results page shows, from the same call.
             "same_event": _same_event_tests(
-                analysis_id, analysis, data['samples_by_id'].values(), db),
+                analysis, data['samples_by_id'].values()),
         }
     }
 
@@ -940,7 +934,7 @@ def export_pdf(analysis_id: str, date_format: Optional[str] = None,
         context_spans=_context_spans(analysis_id, db),
         intervals=analysis.intervals,
         summaries=analysis.summaries,
-        same_event=_same_event_tests(analysis_id, analysis, data['samples_by_id'].values(), db),
+        same_event=_same_event_tests(analysis, data['samples_by_id'].values()),
         project_name=analysis.project.name if analysis.project else None,
         date_format=date_format,
         coordinate_precision=data['coordinate_precision'],

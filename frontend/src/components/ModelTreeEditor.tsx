@@ -850,6 +850,7 @@ function DropIndicator({ depth, label }: { depth: number; label: string }) {
  * unit tests, which never render anything.
  */
 const SpatialOrderDialog = lazy(() => import('@/components/SpatialOrderDialog'))
+const SameEventPopover = lazy(() => import('@/components/SameEventPopover'))
 
 interface Props {
   tree: ModelElement
@@ -1285,6 +1286,10 @@ function ElementDates({
 }) {
   const type = element.element_type
   const ordered = useMemo(() => orderedForHolder(type, dates), [type, dates])
+  // The same-event test of this Phase's dates, open or not. Offered here,
+  // before the run, because its answer decides the model: dates of one event
+  // are pooled into one date, not entered as separate events in a Phase.
+  const [testAnchor, setTestAnchor] = useState<HTMLElement | null>(null)
   // Length decides whether a wiggle match resolves at all; count only decides
   // how tightly. Said BEFORE the run, where it can still change what gets
   // commissioned, rather than after the answer comes back in two ranges.
@@ -1353,6 +1358,23 @@ function ElementDates({
             )}
           </Box>
         ))
+      )}
+      {type === 'phase' && dates.length >= 2 && (
+        <>
+          <Button size="small" onClick={(e) => setTestAnchor(e.currentTarget)} sx={{ mt: 0.5 }}>
+            Test as one event
+          </Button>
+          {testAnchor && (
+            <Suspense fallback={null}>
+              <SameEventPopover
+                anchorEl={testAnchor}
+                onClose={() => setTestAnchor(null)}
+                phaseName={element.name || TYPE_LABEL[type]}
+                dates={ordered}
+              />
+            </Suspense>
+          )}
+        </>
       )}
     </Box>
   )

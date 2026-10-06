@@ -642,13 +642,15 @@ Whether a set of radiocarbon measurements could all date one event: several samp
 short-lived context, or repeat measurements of one sample. It is Ward and Wilson's (1978) χ² test,
 as OxCal reports it under `R_Combine`.
 
-**Reporting**
+**Where to find it**
 
+- **Before a Bayesian run**, in the model editor. Every Phase holding two or more dates has
+  **Test as one event** below its dates. All the Phase's dates start ticked; untick any to test
+  the rest. This is where the answer matters: it decides whether dates go into the Phase as
+  separate events, or are one event to pool into a single date first.
 - A **Group Calibration** tests all its dates together, in its own panel below the plots.
-- A **Bayesian analysis** tests each Phase holding two or more dates. Turn on **Same-event test**
-  under **Columns** to show the result on each Phase's row, reported as `T`, then the 5% critical value, e.g. `T=5.7(5% 14.1)`
-- **Export CSV** adds the tests as a block of their own below the results, and **Export PDF** as a
-  table. Both give the verdict and, where the dates pass, the pooled age and its calibration.
+  **Export CSV** adds the test as a block of its own below the results, and **Export PDF** as a
+  table.
 
 **Reading it.** The test reduces the dates to one number, `T`, and compares it with a threshold,
 the **critical value**. Read the result by comparing those two numbers; the 5% is not one of them.
@@ -669,15 +671,15 @@ the **critical value**. Read the result by comparing those two numbers; the 5% i
 | below the critical value | Consistent with one event | The dates scatter no more than their errors explain. |
 | above the critical value | More scatter than one event allows | Scatter this wide would happen less than 5% of the time if the dates were one event. They date more than one event, or one of them is wrong: old wood, contamination, a laboratory error. |
 
-Two examples, written as the results table writes them, `T=` then the critical value in brackets:
+Two examples, as the test reports them:
 
-- `T=5.7(5% 14.1)`: eight dates from Nenthorn. 5.7 is below 14.1, so they are **consistent with
-  one event**.
-- `T=27.9(5% 11.1)`: six dates from Layers 11–7. 27.9 is above 11.1, so there is **more scatter than
-  one event allows**.
+- `T = 5.7 · 5% critical 14.07 · df 7`: eight dates from Nenthorn. 5.7 is below 14.07, so they are
+  **consistent with one event**.
+- `T = 27.9 · 5% critical 11.07 · df 5`: six dates from Layers 11–7. 27.9 is above 11.07, so there
+  is **more scatter than one event allows**.
 
 How far `T` is from the critical value matters as much as which side it falls. The second example
-is more than twice the threshold, a clear result; a `T` of 11.5 against 11.1 would be a marginal
+is more than twice the threshold, a clear result; a `T` of 11.5 against 11.07 would be a marginal
 one, and so would 10.5. Treat a near miss on either side as undecided, and look at the dates
 themselves for the one that sits apart.
 
@@ -697,9 +699,13 @@ themselves for the one that sits apart.
 A pass does not prove the dates are one event. It says only that the measurements cannot tell
 them apart, which is also true of events a few decades apart on a plateau of the curve.
 
-In a Bayesian model a Phase is a span of time, not an event, so a Phase failing the test is normal
-and says nothing is wrong with the model. A Phase that passes may be shorter than its Boundaries
-suggest, especially with few dates.
+**Why it is not run on a modelled Phase.** A Phase is a span of time holding separate events, not
+one event, so a Phase that lasted is expected to fail, and a pass is no sign it was short: the
+model's own duration answers that. What the test can tell you is whether some of the dates
+should not be separate events at all. Replicate measurements of one sample, or several samples
+of one bone or one short-lived deposit, are one event. Entered as separate dates in a Phase, the
+model counts them as several events and claims to know more about the Phase's span than it does.
+Where they pass, pool them and enter the pooled age as one date.
 
 **The pooled age.** Where the dates pass, the panel gives their error-weighted mean and its
 calibration at the confidence level selected on the page. Where they fail, there is no pooled age:
@@ -984,10 +990,10 @@ the origin is elsewhere, or the sites do not form a front; the residuals tell th
   column with the results table, since every figure in them is a length rather than a date. A kernel
   density estimate follows in two more blocks: one row saying how it was made (dates, draws, kernel
   width), then the curve itself, one row per calendar year step with its density and ±1σ, so it can
-  be redrawn in a spreadsheet. The [same-event tests](#same-event-test) come last, one row each.
+  be redrawn in a spreadsheet. A Group Calibration's [same-event test](#same-event-test) comes last.
 - **Export JSON** (on the Results page): the full result, machine-readable. It carries every date
   and Boundary in the model's own order, the durations and differences and kernel density estimates
-  where there are any, the same-event tests, and the solver record: which solver ran, its
+  where there are any, a Group Calibration's same-event test, and the solver record: which solver ran, its
   convergence and chains, the agreement indices, and the sampler's cross-check against a direct
   calculation. The same file is at `GET /api/results/{id}/export/json`.
 - **Curve data** (on a curve's browser page): **Export this window** saves the visible stretch of
@@ -997,7 +1003,7 @@ the origin is elsewhere, or the sites do not form a front; the residuals tell th
 - **Export PDF** (on the Results page): a printable report of the whole analysis: what it is and
   when it was run, the curve(s) it was calibrated against with their references, which solver
   computed the posteriors, the results table in the model's own reading order, the durations and
-  differences where there are any, the kernel density estimate where there is one, the same-event tests, and a plot of every date and Boundary with its HPD ranges marked. Like the CSV it reads in the date format currently
+  differences where there are any, the kernel density estimate where there is one, a Group Calibration's same-event test, and a plot of every date and Boundary with its HPD ranges marked. Like the CSV it reads in the date format currently
   selected. It is rendered on the server and draws a plot per modelled parameter, so a large model
   takes a few seconds, and the button says so while it works.
 - **Export CSV** (on a comparison page): every paired date with each run's median, HPD range and

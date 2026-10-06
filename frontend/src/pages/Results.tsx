@@ -81,7 +81,7 @@ import { analysisTypeLabel } from '@/utils/analysisTypes'
 import { flattenStructure } from '@/utils/stratigraphy'
 import type { StructureRow } from '@/utils/stratigraphy'
 import { describeThinBoundary, describeThinPhase, findThinPhases } from '@/utils/thinPhases'
-import { sameEventNotation, type SameEventTest } from '@/utils/sameEvent'
+import type { SameEventTest } from '@/utils/sameEvent'
 import {
   DateFormat,
   DATE_FORMAT_OPTIONS,
@@ -249,8 +249,8 @@ interface AnalysisResult {
   intervals?: IntervalsBlock | null
   // Summaries of the dates as a set. Null when the run was not asked for any.
   summaries?: SummariesBlock | null
-  // Same-event tests: one for a group calibration, one per Phase with two or
-  // more dates for a Bayesian model. Absent from a server that predates them.
+  // A group calibration's same-event test. Empty for every other analysis;
+  // absent from a server that predates it.
   same_event?: SameEventTest[]
   results: SampleResult[]
 }
@@ -727,9 +727,9 @@ function DiagnosticsCell({
 function StructureTableRow({
   row, result, measurement, curveName,
   isBayesian, reporting, showAge, showCurve, showUnmodelled, showMean, showMedian,
-  showDiagnostics, showSameEvent, confidence, dateFormat,
+  showDiagnostics, confidence, dateFormat,
   unmodelledExpanded, posteriorExpanded,
-  isCollapsible, isCollapsed, onToggleCollapse, thinNote, sameEvent,
+  isCollapsible, isCollapsed, onToggleCollapse, thinNote,
 }: {
   row: StructureRow
   result?: SampleResult
@@ -747,7 +747,6 @@ function StructureTableRow({
   showMean: boolean
   showMedian: boolean
   showDiagnostics: boolean
-  showSameEvent: boolean
   confidence: number
   dateFormat: DateFormat
   /** Whether each range column is showing every range or just its span. */
@@ -761,9 +760,6 @@ function StructureTableRow({
   /** Why this row's figures are expected to be wide; absent when they are not.
    *  See utils/thinPhases. */
   thinNote?: string
-  /** A Phase's same-event test, when it holds two or more dates. See
-   *  utils/sameEvent. */
-  sameEvent?: SameEventTest
 }) {
   const theme = useTheme()
   // The same map the Harris matrix and the tree editor colour their nodes
@@ -1022,17 +1018,6 @@ function StructureTableRow({
              dashes as though the diagnostics had been attempted. */
           <TableCell align="right" sx={NUMERIC_CELL_SX} />
         ))}
-      {showSameEvent && (
-        <TableCell align="right" sx={NUMERIC_CELL_SX}>
-          {sameEvent && (sameEvent.t != null ? (
-            sameEventNotation(sameEvent)
-          ) : (
-            <Box component="span" sx={{ color: 'text.secondary', fontSize: '0.75rem' }}>
-              {sameEvent.refused}
-            </Box>
-          ))}
-        </TableCell>
-      )}
     </TableRow>
   )
 }
@@ -1635,13 +1620,6 @@ export default function Results() {
             ),
             emptyNote: 'Not computed for this analysis',
           } as ResultColumn,
-          {
-            id: 'same_event',
-            label: 'Same-event test',
-            auto: false,
-            populated: (analysis.same_event?.length ?? 0) > 0,
-            emptyNote: 'No phase holds two or more dates',
-          } as ResultColumn,
         ]
       : []),
   ]
@@ -1657,7 +1635,6 @@ export default function Results() {
   const showMean = shows('mean')
   const showMedian = shows('median')
   const showDiagnostics = shows('diagnostics')
-  const showSameEvent = shows('same_event')
 
   const toggleColumn = (column: ResultColumn) => {
     setColumnOverrides((prev) => {
@@ -1704,12 +1681,7 @@ export default function Results() {
     return undefined
   }
 
-  // Each Phase's same-event test, by element id. Group calibrations have one
-  // test with no element, shown in its own panel instead.
-  const sameEventByElementId = new Map<string, SameEventTest>()
-  for (const test of analysis.same_event ?? []) {
-    if (test.element_id) sameEventByElementId.set(test.element_id, test)
-  }
+  // A group calibration's dates tested as one event, in its own panel.
   const groupSameEvent = analysis.analysis_type === 'group_calibration'
     ? analysis.same_event?.find((test) => test.element_id == null)
     : undefined
@@ -2962,7 +2934,6 @@ export default function Results() {
                     a hover, and a reader who had read one had no way to know
                     the other said nothing new. */}
                 {showDiagnostics && <TableCell align="right">Diagnostics</TableCell>}
-                {showSameEvent && <TableCell align="right">{labelOf('same_event')}</TableCell>}
               </TableRow>
             </TableHead>
             <TableBody>
@@ -2993,7 +2964,6 @@ export default function Results() {
                       showMean={showMean}
                       showMedian={showMedian}
                       showDiagnostics={showDiagnostics}
-                      showSameEvent={showSameEvent}
                       confidence={confidence}
                       dateFormat={dateFormat}
                       unmodelledExpanded={unmodelledExpanded}
@@ -3018,11 +2988,6 @@ export default function Results() {
                           : undefined
                       }
                       thinNote={thinNoteFor(row)}
-                      sameEvent={
-                        row.kind === 'phase' && row.elementId
-                          ? sameEventByElementId.get(row.elementId)
-                          : undefined
-                      }
                     />
                   ))
                 : chronologicalResults.map((result, idx) => {
@@ -3107,9 +3072,6 @@ export default function Results() {
                             }
                           />
                         )}
-                        {/* A test belongs to a Phase row, which a flat list
-                            has none of. */}
-                        {showSameEvent && <TableCell />}
                       </TableRow>
                     )
                   })}

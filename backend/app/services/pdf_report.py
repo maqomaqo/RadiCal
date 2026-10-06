@@ -716,16 +716,15 @@ def _differences_table(records: List[Dict], styles: Dict[str, ParagraphStyle]) -
 
 def _same_event_table(tests: List[Dict], date_format: str,
                       styles: Dict[str, ParagraphStyle]) -> Table:
-    """One row per same-event test: the group, its figures, the verdict, and
-    the pooled age where the dates pass."""
-    columns = [('Phase', 2.0), ('Dates', 0.8), ('Pooled age BP', 1.4),
-               ('T (5% critical)', 1.6), ('Result', 2.4), ('Pooled 95.4%', 2.6)]
+    """One row per same-event test: its figures, the verdict, and the pooled
+    age where the dates pass."""
+    columns = [('Dates', 0.8), ('Pooled age BP', 1.4), ('T (5% critical)', 1.8),
+               ('Result', 2.6), ('Pooled 95.4%', 3.0)]
 
     def cells(test: Dict) -> List[Any]:
         tested = test.get('t') is not None
         pooled = statistics.pooled_ranges_at(test, SIGMA_2)
         return [
-            test.get('name') or 'All dates',
             test['n'],
             f"{test['mean_bp']:.0f} ± {test['error_bp']:.0f}" if tested else '',
             f"{test['t']:.1f} ({test['critical']:.2f}, df {test['df']})" if tested else '',
@@ -1083,8 +1082,8 @@ def render_report(
     `summaries` is the analysis's summaries block (a kernel density
     estimate, services/kde.py), passed in on the same terms as `intervals`.
 
-    `same_event` is the analysis's same-event tests (services/statistics.py),
-    computed once by the caller for every export.
+    `same_event` is a group calibration's same-event test
+    (services/statistics.py), computed by the same call as the other exports.
 
     `coordinate_precision` is the project's setting, and is used only to SAY
     what it is: the positions in `rows` have already been rounded to it by
@@ -1310,9 +1309,9 @@ def render_report(
         ))
         story.extend(kde_blocks)
 
-    # --- whether each group of dates could be one event
+    # --- whether a group calibration's dates could be one event
     if same_event:
-        story.append(Paragraph('Same-Event Tests', styles['heading']))
+        story.append(Paragraph('Same-Event Test', styles['heading']))
         story.append(Paragraph(
             "Ward and Wilson's (1978) test of whether a set of radiocarbon ages could "
             "date one event, as OxCal's R_Combine: T against the chi-squared critical "

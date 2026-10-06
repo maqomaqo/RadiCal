@@ -605,6 +605,16 @@ class BayesianConfigInput(BaseModel):
     dispersal_origin: Optional[DispersalOrigin] = None
 
 
+class SameEventRequest(BaseModel):
+    """
+    Request body for POST /analysis/same-event: whether these measurements
+    could all date one event (services/statistics.same_event). Nothing is
+    saved -- the model editor asks it of a Phase's dates before they are run,
+    which is where the answer decides something.
+    """
+    measurements: List[MeasurementInput] = Field(..., min_length=2)
+
+
 class GroupCalibrationRequest(BaseModel):
     """
     Request body for POST /analysis/calibrate-group: unmodelled calibration

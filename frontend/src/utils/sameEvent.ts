@@ -29,12 +29,6 @@ export function sameEventVerdict(test: SameEventTest): string {
   return test.consistent ? 'Consistent with one event' : 'More scatter than one event allows'
 }
 
-/** OxCal's own notation, "T=5.7(5% 14.1)", for a compact label. */
-export function sameEventNotation(test: SameEventTest): string {
-  if (test.t == null || test.critical == null) return ''
-  return `T=${test.t.toFixed(1)}(${Math.round(test.level * 100)}% ${test.critical.toFixed(1)})`
-}
-
 /** The test's figures in one line: "T = 5.7 · 5% critical 14.07 · df 7". */
 export function sameEventFigures(test: SameEventTest): string {
   if (test.t == null || test.critical == null) return ''

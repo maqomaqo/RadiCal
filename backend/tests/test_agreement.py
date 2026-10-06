@@ -282,8 +282,8 @@ class TestWhatItCanAndCannotSee:
         import csv as _csv
         import io
         import itertools
-        # The results table only: blocks after the first blank line (here,
-        # the same-event tests) have headers of their own.
+        # The results table only: blocks after the first blank line
+        # (durations, KDE) have headers of their own.
         rows = list(itertools.takewhile(bool, _csv.reader(io.StringIO(
             client.get(f'/api/results/{analysis_id}/export/csv').text))))
         header, data = rows[0], rows[1:]

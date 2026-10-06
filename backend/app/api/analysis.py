@@ -3,7 +3,9 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session, selectinload
 from app.database import get_db
-from app.schemas.sample import CalibrateRequest, BayesianRequest, GroupCalibrationRequest
+from app.schemas.sample import (
+    CalibrateRequest, BayesianRequest, GroupCalibrationRequest, SameEventRequest,
+)
 from app.services.calibration import (
     REPORTING_CONFIDENCE_LEVELS,
     SIGMA_1,
@@ -1102,6 +1104,20 @@ def calibrate_group(request: GroupCalibrationRequest, db: Session = Depends(get_
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@router.post("/analysis/same-event")
+def test_same_event(request: SameEventRequest, user: User = Depends(current_user)):
+    """
+    Whether these measurements could all date one event (Ward and Wilson
+    1978; services/statistics.same_event), with the pooled age calibrated
+    where they pass. Nothing is saved: the model editor asks it of a Phase's
+    dates, before the run, to decide whether they are separate events or one
+    event to pool first.
+    """
+    authorise_curve_ids([m.curve_id for m in request.measurements], user.id)
+    return {"success": True,
+            "data": statistics.same_event([m.model_dump() for m in request.measurements])}
+
+
 @router.post("/analysis/bayesian")
 def bayesian_analysis(request: BayesianRequest, wait: bool = False,
                       db: Session = Depends(get_db),
@@ -1521,11 +1537,11 @@ def get_analysis(analysis_id: str, db: Session = Depends(get_db),
             # Summaries of the dates as a set -- a kernel density estimate --
             # present only when the run was asked for one.
             "summaries": analysis.summaries,
-            # Whether each Phase's dates -- or a group calibration's -- could
-            # be one event (services/statistics.py). Computed on read from the
-            # stored ages, so an analysis saved before it existed has it too.
+            # Whether a group calibration's dates could be one event
+            # (services/statistics.py). Computed on read from the stored ages,
+            # so an analysis saved before it existed has it too.
             "same_event": statistics.same_event_for_samples(
-                analysis.analysis_type, model_tree, analysis.measurements),
+                analysis.analysis_type, analysis.measurements),
             # The model structure, migrated from contexts + relationships on
             # first access. Boundary elements carry their own posterior once
             # the analysis has been run, as do a wiggle match and an undated

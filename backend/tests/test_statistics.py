@@ -94,31 +94,20 @@ class TestSameEvent:
 
 
 class TestReport:
-    TREE = {
-        'id': 'r', 'element_type': 'sequence', 'name': 'Site', 'children': [
-            {'id': 'b0', 'element_type': 'boundary', 'name': 'Start', 'children': []},
-            {'id': 'p1', 'element_type': 'phase', 'name': 'Lower', 'children': []},
-            {'id': 'b1', 'element_type': 'boundary', 'name': 'Mid', 'children': []},
-            {'id': 'p2', 'element_type': 'phase', 'name': 'Upper', 'children': []},
-            {'id': 'b2', 'element_type': 'boundary', 'name': 'End', 'children': []},
-        ],
-    }
-
-    def test_one_test_per_phase_with_two_or_more_dates(self):
-        dates = _dates([(700, 20), (690, 20), (600, 20)])
-        dates[0]['element_id'] = dates[1]['element_id'] = 'p1'
-        dates[2]['element_id'] = 'p2'
-        report = same_event_report('bayesian', self.TREE, dates)
-        assert [(r['element_id'], r['name'], r['n']) for r in report] == [('p1', 'Lower', 2)]
-
     def test_group_calibration_is_tested_as_one_set(self):
-        report = same_event_report('group_calibration', None, _dates(NENTHORN))
+        report = same_event_report('group_calibration', _dates(NENTHORN))
         assert len(report) == 1
         assert report[0]['element_id'] is None
         assert report[0]['n'] == len(NENTHORN)
 
+    def test_a_bayesian_model_reports_none(self):
+        """A Phase's dates are separate events by construction; the test is
+        asked of them in the model editor, before the run."""
+        dates = _dates(NEW_LAYERS_11_TO_7, element_id='p1')
+        assert same_event_report('bayesian', dates) == []
+
     def test_single_calibration_reports_nothing(self):
-        assert same_event_report('calibration', None, _dates([(600, 20)])) == []
+        assert same_event_report('calibration', _dates([(600, 20)])) == []
 
 
 def _measurement(name, age, error, **extra):
@@ -166,7 +155,7 @@ class TestRoutes:
         assert shown[0]['t'] == pytest.approx(5.7, abs=0.1)
         assert shown[0]['consistent'] is True
 
-    def test_bayesian_phases_report_the_test_and_export_the_solver(self, client):
+    def test_bayesian_results_export_the_solver_and_no_tests(self, client):
         tree = {
             'id': 'st_root', 'element_type': 'sequence', 'name': 'Site', 'children': [
                 {'id': 'st_b0', 'element_type': 'boundary', 'name': 'Start', 'children': []},
@@ -188,11 +177,9 @@ class TestRoutes:
 
         shown = client.get(f'/api/analysis/{analysis_id}').json()['data']
         exported = client.get(f'/api/results/{analysis_id}/export/json').json()['data']
-        assert exported['same_event'] == shown['same_event']
-        [phase] = shown['same_event']
-        assert phase['name'] == 'Layer 11'
-        assert phase['t'] == pytest.approx(27.9, abs=0.1)
-        assert phase['consistent'] is False
+        assert shown['same_event'] == exported['same_event'] == []
+        assert 'Same-Event Test' not in client.get(
+            f'/api/results/{analysis_id}/export/csv').text
 
         assert exported['solver'] == shown['solver']
         assert exported['solver']['method'] in ('exact', 'gibbs')
@@ -200,18 +187,18 @@ class TestRoutes:
     def test_csv_carries_a_same_event_block(self, client):
         analysis_id = _group(client)
         text = client.get(f'/api/results/{analysis_id}/export/csv?date_format=bcad').text
-        header, rows = _block(text, 'Phase')
-        assert header[:11] == [
-            'Row Type', 'Phase', 'Dates', 'Pooled Age BP', 'Pooled Error', 'T', 'df',
+        header, rows = _block(text, 'Dates')
+        assert header[:10] == [
+            'Row Type', 'Dates', 'Pooled Age BP', 'Pooled Error', 'T', 'df',
             '5% Critical', 'One Event', 'Pooled 95.4% HPD', 'Note']
         assert header[-1].startswith('Pooled 95.4% HPD (')
         [row] = rows
-        assert row[:9] == ['Same-Event Test', '', '8', '656', '8', '5.73', '7', '14.07', 'yes']
-        assert row[9] and row[11]          # pooled range, in cal BP and in AD
+        assert row[:8] == ['Same-Event Test', '8', '656', '8', '5.73', '7', '14.07', 'yes']
+        assert row[8] and row[10]          # pooled range, in cal BP and in AD
 
     def test_pdf_has_a_same_event_section(self, client):
         text = pdf_text(client.get(f'/api/results/{_group(client)}/pdf').content)
-        assert 'Same-Event Tests' in text
+        assert 'Same-Event Test' in text
         assert 'Consistent with one event' in text
 
     def test_single_calibration_exports_no_block(self, client):
@@ -220,3 +207,42 @@ class TestRoutes:
         analysis_id = created.json()['data']['id']
         assert 'Same-Event Test' not in client.get(
             f'/api/results/{analysis_id}/export/csv').text
+
+
+class TestEndpoint:
+    """POST /analysis/same-event: the model editor's test of a Phase's dates."""
+
+    def test_tests_the_dates_it_is_given(self, client):
+        response = client.post('/api/analysis/same-event', json={
+            'measurements': [_measurement(f'L{i}', a, e)
+                             for i, (a, e) in enumerate(NEW_LAYERS_11_TO_7)]})
+        assert response.status_code == 200, response.text
+        result = response.json()['data']
+        assert result['t'] == pytest.approx(27.9, abs=0.1)
+        assert result['consistent'] is False
+        assert result['pooled_hpd_ranges'] is None
+
+    def test_a_passing_set_comes_back_pooled_and_calibrated(self, client):
+        result = client.post('/api/analysis/same-event', json={
+            'measurements': [_measurement(f'N{i}', a, e)
+                             for i, (a, e) in enumerate(NENTHORN)]}).json()['data']
+        assert result['consistent'] is True
+        assert round(result['mean_bp']) == 656
+        assert result['pooled_hpd_ranges']
+
+    def test_says_why_mixed_curves_are_not_tested(self, client):
+        result = client.post('/api/analysis/same-event', json={'measurements': [
+            _measurement('A', 600, 20),
+            {**_measurement('B', 1000, 30), 'curve_id': 'marine20', 'sample_type': 'marine'},
+        ]}).json()['data']
+        assert result['refused'] and result['t'] is None
+
+    def test_needs_two_dates(self, client):
+        response = client.post('/api/analysis/same-event', json={
+            'measurements': [_measurement('A', 600, 20)]})
+        assert response.status_code == 422
+
+    def test_needs_a_signed_in_user(self, anonymous_client):
+        response = anonymous_client.post('/api/analysis/same-event', json={
+            'measurements': [_measurement('A', 600, 20), _measurement('B', 610, 20)]})
+        assert response.status_code == 401

@@ -20,8 +20,7 @@ import pytest
 def _results_block(client, analysis_id):
     """
     The CSV's results table, header first: the rows before the first blank
-    line. Blocks after it (durations, KDE, same-event tests) have headers of
-    their own.
+    line. Blocks after it (durations, KDE) have headers of their own.
     """
     rows = csv.reader(io.StringIO(
         client.get(f'/api/results/{analysis_id}/export/csv').text))

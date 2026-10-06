@@ -32,7 +32,6 @@ import numpy as np
 from scipy.stats import chi2
 
 from app.services.calibration import REPORTING_CONFIDENCE_LEVELS, get_curve
-from app.services.intervals import plan_durations
 
 # Significance level the test is reported at -- OxCal's, and Ward and Wilson's.
 SAME_EVENT_LEVEL = 0.05
@@ -105,32 +104,22 @@ def _pooled_ranges(reference: Mapping, mean: float, error: float) -> Optional[Li
             for level in REPORTING_CONFIDENCE_LEVELS]
 
 
-def same_event_report(analysis_type: str, model_tree: Optional[Dict],
-                      measurements: List[Dict]) -> List[Dict]:
+def same_event_report(analysis_type: str, measurements: List[Dict]) -> List[Dict]:
     """
-    Every same-event test an analysis reports, each carrying the element it
-    is about: one over the whole set for a group calibration (element_id
-    None), and one per Phase holding two or more dates for a Bayesian model.
-    The phases are the ones services/intervals.py reports a dated-events
-    duration for and services/kde.py a KDE for, so every section of the page
-    names the same groups. A single calibration has nothing to test.
-    """
-    if analysis_type == 'group_calibration':
-        test = same_event(measurements)
-        return [{'element_id': None, 'name': None, **test}] if test else []
-    if analysis_type != 'bayesian' or not model_tree:
-        return []
+    The same-event tests an analysis reports: one over a group calibration's
+    dates (element_id None), and none for anything else.
 
-    by_id = {m['id']: m for m in measurements}
-    report: List[Dict] = []
-    for spec in plan_durations(model_tree, measurements):
-        if spec['kind'] != 'sample_duration':
-            continue
-        dates = [by_id[d] for d in spec['dates'] if d in by_id]
-        test = same_event(dates)
-        if test:
-            report.append({'element_id': spec['element_id'], 'name': spec['name'], **test})
-    return report
+    A Bayesian Phase is not tested here. Its dates are separate events spread
+    between two Boundaries, so failing is what a Phase that lasted is expected
+    to do, and passing is no evidence it was short. The test belongs before
+    the run, where it decides whether dates are separate events in a Phase or
+    one event to pool first -- the model editor asks it of a Phase's dates
+    through POST /analysis/same-event.
+    """
+    if analysis_type != 'group_calibration':
+        return []
+    test = same_event(measurements)
+    return [{'element_id': None, 'name': None, **test}] if test else []
 
 
 def verdict(test: Mapping) -> str:
@@ -150,13 +139,11 @@ def pooled_ranges_at(test: Mapping, confidence: float) -> Optional[List[Dict]]:
     return None
 
 
-_SAMPLE_FIELDS = ('id', 'age_bp', 'error_1sigma', 'curve_id', 'delta_r',
-                  'delta_r_error', 'element_id')
+_SAMPLE_FIELDS = ('id', 'age_bp', 'error_1sigma', 'curve_id', 'delta_r', 'delta_r_error')
 
 
-def same_event_for_samples(analysis_type: str, model_tree: Optional[Dict],
-                           samples) -> List[Dict]:
+def same_event_for_samples(analysis_type: str, samples) -> List[Dict]:
     """same_event_report over stored RadiocarbonSample rows -- the one call the
-    results page and the JSON export share, so the two cannot disagree."""
+    results page and every export share, so they cannot disagree."""
     measurements = [{f: getattr(s, f) for f in _SAMPLE_FIELDS} for s in samples]
-    return same_event_report(analysis_type, model_tree, measurements)
+    return same_event_report(analysis_type, measurements)
