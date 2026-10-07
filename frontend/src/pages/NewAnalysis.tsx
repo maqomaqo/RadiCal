@@ -40,6 +40,7 @@ import LibraryAddIcon from '@mui/icons-material/LibraryAdd'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import SortDatesButton from '@/components/SortDatesButton'
 import { sortMeasurements } from '@/utils/sortMeasurements'
+import { projectSampleToMeasurement } from '@/utils/projectSampleToMeasurement'
 import PosteriorPlot from '@/components/PosteriorPlot'
 import { storedHpdBands } from '@/utils/hpd'
 import ImportDatesDialog, {
@@ -714,33 +715,6 @@ export default function NewAnalysis() {
   )
   const allAddableSelected =
     addableProjectSamples.length > 0 && addableProjectSamples.every((s) => pickerSelected.has(s.id))
-
-  function projectSampleToMeasurement(s: ProjectSample): Measurement {
-    return {
-      id: Math.random().toString(36).substr(2, 9),
-      sample_name: s.sample_name,
-      age_bp: s.age_bp,
-      error_1sigma: s.error_1sigma,
-      material_type: s.material_type || 'unknown',
-      sample_type: s.sample_type,
-      curve_id: s.curve_id || 'intcal20',
-      // Carried rather than blanked: a reservoir offset belongs to where the
-      // sample came from, so dropping it recalibrates a marine date without
-      // its local correction -- which moves the answer, not just a label.
-      delta_r: s.delta_r ?? null,
-      delta_r_error: s.delta_r_error ?? null,
-      outlier_prior: 0,
-      outlier_model: 'general',
-      notes: s.notes ?? null,
-      // The context the collection files this date under. Deploying turns
-      // these into the analysis's contexts, and adding one at a time means the
-      // same thing -- so it is carried, and bootstrapModelTree starts from it
-      // rather than dropping every date into one phase.
-      default_context_name: s.default_context_name ?? null,
-      tpq_age_bp: s.tpq_age_bp ?? null,
-      taq_age_bp: s.taq_age_bp ?? null,
-    }
-  }
 
   /**
    * Copy dates from this draft into the assigned project's date collection.
