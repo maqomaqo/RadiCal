@@ -947,6 +947,15 @@ ordinary URL, bookmarkable and shareable.
 than the model. Best practice: isolate one parameter per comparison (curve, ΔR, solver, or model
 structure).
 
+**Earlier runs.** Each analysis keeps its last three completed runs, so a re-run (most often after
+an update to RadiCal) does not lose the result it replaces. On the Results page, **Compare with an
+earlier run** (the clock button beside Re-run) lists them with when they ran, the version of the
+code and the seed, and opens one beside the current result. After **Re-run all** on a project, the
+page lists every analysis whose Boundaries or durations moved by 10 years or more against its
+previous run, or gained or lost a range, and says when its inputs had changed too. Unchanged
+inputs on unchanged code give the same result every time, so anything listed moved because
+something changed.
+
 ### Dates
 
 One row per date, one HPD bar per analysis, all on one calendar axis, with a hairline at the

@@ -44,6 +44,7 @@ import CompareArrowsIcon from '@mui/icons-material/CompareArrows'
 import DownloadIcon from '@mui/icons-material/Download'
 import { formatApiError, describeFetchError } from '@/utils/apiError'
 import { saveDownload } from '@/utils/saveDownload'
+import { describeRunChange, type RunDiff } from '@/utils/runDiff'
 import { useNotify } from '@/contexts/NotificationContext'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import AssignProjectDialog from '@/components/AssignProjectDialog'
@@ -111,7 +112,7 @@ function statusColor(status: string): string {
 // dismissible in-page Alert rather than the toast queue, which is sized and
 // timed for one line.
 interface RerunSummary {
-  severity: 'success' | 'warning' | 'error'
+  severity: 'success' | 'info' | 'warning' | 'error'
   headline: string
   details?: string[]
 }
@@ -207,9 +208,44 @@ export default function ProjectDetail() {
           headline: `${(finished.detail?.completed ?? 0) - failed.length} rerun successfully. ${failed.length} failed:`,
           details: failed.map((f) => `${f.name}: ${f.error}`),
         })
+      } else if (projectId) {
+        reportRunDiff(projectId)
       }
     },
   })
+
+  // What the re-run changed: every analysis whose Boundaries or durations
+  // moved by 10 years or more against its previous run, or gained or lost a
+  // range (api/run_history.py). The point of keeping earlier runs is to see
+  // what a change to the code did.
+  const reportRunDiff = async (id: string) => {
+    try {
+      const response = await fetch(`/api/projects/${id}/run-diff`)
+      const body = await response.json()
+      if (!response.ok || !body.success) return
+      const diff = body.data as RunDiff
+      if (diff.compared === 0) return
+      if (diff.changed.length === 0) {
+        setRerunSummary({
+          severity: 'success',
+          headline:
+            diff.compared === 1
+              ? `Re-run finished. The analysis matches its previous run to within ${diff.shift_years} years.`
+              : `Re-run finished. All ${diff.compared} analyses match their previous run to within ${diff.shift_years} years.`,
+        })
+        return
+      }
+      const lines = diff.changed.map(describeRunChange)
+      setRerunSummary({
+        severity: 'info',
+        headline: `Re-run finished. ${diff.changed.length} of ${diff.compared} analyses changed since their previous run:`,
+        details: lines.length > 20 ? [...lines.slice(0, 20), `and ${lines.length - 20} more`] : lines,
+      })
+    } catch {
+      // The re-run itself succeeded; a summary that cannot be fetched is
+      // simply not shown.
+    }
+  }
 
   const handleCancelRerun = async () => {
     if (!job) return

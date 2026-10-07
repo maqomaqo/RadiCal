@@ -181,12 +181,25 @@ export default function CompareResults() {
     setError(null)
     Promise.all(
       requestedIds.map(async (id) => {
-        const response = await fetch(`/api/analysis/${id}`)
+        // `analysis@run` is one of an analysis's kept earlier runs (backend
+        // api/run_history.py), served in the same shape as the analysis.
+        const [analysisId, runId] = id.split('@')
+        const response = await fetch(
+          runId ? `/api/analysis/${analysisId}/runs/${runId}` : `/api/analysis/${analysisId}`
+        )
         const data = await response.json()
         if (!response.ok || !data.success) {
           throw new Error(formatApiError(data))
         }
-        return data.data as RunPayload
+        const payload = data.data as RunPayload & { run?: { created_at?: string | null } }
+        // An earlier run is named for when it ran, in the reader's time zone,
+        // so it reads apart from the current result of the same analysis.
+        if (payload.run) {
+          const at = payload.run.created_at
+          const when = at ? new Date(at.endsWith('Z') ? at : `${at}Z`).toLocaleString() : 'earlier'
+          return { ...payload, name: `${payload.name} (run of ${when})` }
+        }
+        return payload
       })
     )
       .then((loaded) => {
@@ -430,7 +443,7 @@ export default function CompareResults() {
                 {/* A div, not the default p: the reference Chip renders a div,
                     which a paragraph cannot hold. */}
                 <Typography variant="body2" component="div" sx={{ fontWeight: 600 }}>
-                  <Link component={RouterLink} to={`/results/${run.id}`} color="inherit">
+                  <Link component={RouterLink} to={`/results/${run.id.split('@')[0]}`} color="inherit">
                     {run.name}
                   </Link>
                   {i === 0 && (

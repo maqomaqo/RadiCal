@@ -48,6 +48,7 @@ import DeleteIcon from '@mui/icons-material/Delete'
 import ReplayIcon from '@mui/icons-material/Replay'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import CasinoIcon from '@mui/icons-material/Casino'
+import HistoryIcon from '@mui/icons-material/History'
 import EditIcon from '@mui/icons-material/Edit'
 import ViewColumnIcon from '@mui/icons-material/ViewColumn'
 import KeyboardArrowRightIcon from '@mui/icons-material/KeyboardArrowRight'
@@ -267,6 +268,27 @@ interface AnalysisResult {
   // absent from a server that predates it.
   same_event?: SameEventTest[]
   results: SampleResult[]
+}
+
+/** One kept run, as GET /analysis/{id}/runs lists it. */
+interface RunSummary {
+  id: string
+  created_at: string | null
+  app_commit: string | null
+  current: boolean
+  solver: string | null
+  seed: number | null
+}
+
+/** A run's line in the menu: when, on what code, under what seed. */
+function describeRun(run: RunSummary): string {
+  const when = run.created_at
+    ? new Date(run.created_at + (run.created_at.endsWith('Z') ? '' : 'Z')).toLocaleString()
+    : 'Earlier run'
+  const parts = [when]
+  if (run.app_commit) parts.push(`code ${run.app_commit.slice(0, 7)}`)
+  if (run.seed != null) parts.push(`seed ${run.seed}`)
+  return parts.join(' · ')
 }
 
 interface SampleResult {
@@ -1027,6 +1049,10 @@ export default function Results() {
   const [cancelling, setCancelling] = useState(false)
   const [duplicating, setDuplicating] = useState(false)
   const [replicating, setReplicating] = useState(false)
+  // This analysis's kept runs, newest (the current result) first, and the
+  // menu that offers each earlier one for comparison (api/run_history.py).
+  const [runs, setRuns] = useState<RunSummary[]>([])
+  const [runsAnchor, setRunsAnchor] = useState<HTMLElement | null>(null)
   const [exportingPdf, setExportingPdf] = useState(false)
   // Which optional columns the table draws, remembered per analysis. Only
   // columns the reader has explicitly turned on or off are stored: a column
@@ -1173,6 +1199,26 @@ export default function Results() {
       fetchAnalysis(analysisId)
     }
   }, [analysisId])
+
+  // Re-read whenever the analysis does, so a re-run's new entry appears.
+  useEffect(() => {
+    if (!analysisId || analysis?.status !== 'completed') {
+      setRuns([])
+      return
+    }
+    let active = true
+    fetch(`/api/analysis/${analysisId}/runs`)
+      .then((response) => (response.ok ? response.json() : null))
+      .then((body) => {
+        if (active) setRuns(body?.data?.runs ?? [])
+      })
+      .catch(() => {
+        if (active) setRuns([])
+      })
+    return () => {
+      active = false
+    }
+  }, [analysisId, analysis])
 
   /**
    * Load the analysis, distinguishing "this one is gone" from "the server is
@@ -2420,6 +2466,48 @@ export default function Results() {
                 <ReplayIcon />
               </IconButton>
             </Tooltip>
+            {/* Earlier runs of this analysis, kept so a re-run after a change
+                to the code can be set beside the run before it. Only once
+                there is one to compare with. */}
+            {runs.length > 1 && (
+              <>
+                <Tooltip title="Compare with an earlier run">
+                  <IconButton
+                    size="small"
+                    aria-label="Compare with an earlier run"
+                    aria-haspopup="true"
+                    onClick={(e) => setRunsAnchor(e.currentTarget)}
+                  >
+                    <HistoryIcon />
+                  </IconButton>
+                </Tooltip>
+                <Menu
+                  anchorEl={runsAnchor}
+                  open={!!runsAnchor}
+                  onClose={() => setRunsAnchor(null)}
+                  MenuListProps={{ 'aria-label': 'Earlier runs' }}
+                >
+                  {runs
+                    .filter((run) => !run.current)
+                    .map((run) => (
+                      <MenuItem
+                        key={run.id}
+                        onClick={() => {
+                          setRunsAnchor(null)
+                          navigate(
+                            `/projects/${analysis.project_id ?? 'unassigned'}/compare?runs=${analysisId},${analysisId}@${run.id}`
+                          )
+                        }}
+                      >
+                        <ListItemText
+                          primary={describeRun(run)}
+                          secondary="Compare with the current result"
+                        />
+                      </MenuItem>
+                    ))}
+                </Menu>
+              </>
+            )}
             {/* The one destructive action, held off from the three that are
                 not by a rule. The rule does the separating, not the colour:
                 red at rest reads as an alarm on a page where nothing is wrong,

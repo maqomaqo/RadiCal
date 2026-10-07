@@ -24,6 +24,7 @@ from app.services import intervals
 from app.services import kde
 from app.services import failures
 from app.services import statistics
+from app.api import run_history
 from app.api.auth import current_user, owned_or_404
 from app.api.curves import authorise_curve_ids
 from app.services.model_tree import (
@@ -1022,6 +1023,7 @@ def calibrate_single(measurement: CalibrateRequest, db: Session = Depends(get_db
         db.add(analysis_result)
         db.commit()
         db.refresh(analysis)
+        run_history.record_run(analysis.id, db)
 
         response_data["id"] = str(analysis.id)
         response_data["saved"] = True
@@ -1094,6 +1096,7 @@ def calibrate_group(request: GroupCalibrationRequest, db: Session = Depends(get_
 
         db.commit()
         db.refresh(analysis)
+        run_history.record_run(analysis.id, db)
 
         return {
             "success": True,
@@ -1326,6 +1329,7 @@ def bayesian_analysis(request: BayesianRequest, wait: bool = False,
                 analysis.summaries = _relabel_summaries(summary_block, groups_map)
                 analysis.status = 'completed'
                 db.commit()
+                run_history.record_run(analysis.id, db)
             return results, context_results, solver, interval_block, summary_block
 
         if save and not wait:
@@ -1991,6 +1995,7 @@ def _rerun_analysis(analysis: Analysis, db: Session,
     analysis.status = 'completed'
     analysis.error_message = None
     db.commit()
+    run_history.record_run(analysis.id, db)
 
 
 def _run_analysis_job(analysis_id: str):

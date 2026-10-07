@@ -434,6 +434,37 @@ class Analysis(Base):
         order_by='(RadiocarbonSample.sort_order, RadiocarbonSample.created_at, RadiocarbonSample.id)',
     )
     results = relationship('AnalysisResult', back_populates='analysis', cascade='all, delete-orphan')
+    # The last few completed runs, newest first (services/run_history.py).
+    runs = relationship('AnalysisRun', back_populates='analysis',
+                        cascade='all, delete-orphan',
+                        order_by='(AnalysisRun.created_at.desc(), AnalysisRun.id.desc())')
+
+class AnalysisRun(Base):
+    """
+    One completed run of an analysis, kept so a re-run -- usually after a
+    change to the code -- can be compared with what came before it rather than
+    overwriting it (feature spec W6). Only the last few are kept per analysis
+    (services/run_history.RUNS_KEPT).
+
+    `payload` is what GET /analysis/{id} returned once the run finished: the
+    results, the model with its posteriors, the solver record and the inputs
+    they came from. Kept whole, in that shape, so the pages that read an
+    analysis read an old run with the same code. `app_commit` is the code it
+    ran on, where that is known; `inputs_hash` tells a re-run of the same
+    inputs from a run of different ones.
+    """
+    __tablename__ = "analysis_runs"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    analysis_id = Column(String, ForeignKey('analyses.id', ondelete='CASCADE'),
+                         nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    app_commit = Column(String, nullable=True)
+    inputs_hash = Column(String, nullable=True)
+    payload = deferred(Column(JSON, nullable=False))
+
+    analysis = relationship('Analysis', back_populates='runs')
+
 
 class RadiocarbonSample(Base):
     """Represents a radiocarbon measurement"""
