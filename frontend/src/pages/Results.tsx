@@ -70,6 +70,7 @@ import DispersalPanel from '@/components/DispersalPanel'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import GuideBand from '@/components/GuideBand'
 import { formatApiError, describeFetchError } from '@/utils/apiError'
+import { saveDownload } from '@/utils/saveDownload'
 import {
   columnVisible,
   loadResultColumnOverrides,
@@ -330,29 +331,6 @@ interface PlottableSeries {
   /** The radiocarbon measurement this date came from -- only the Curve view
    *  reads it, and only a date has one. */
   measurement?: SeriesMeasurement
-}
-
-/**
- * Fetch an export and save it under `filename`. The status is checked before
- * the body is read: an error response is JSON, which a spreadsheet opens
- * happily as a one-cell file and a PDF reader fails on only when opened -- so
- * unchecked, a failed export is noticed by whoever opens it looking for their
- * results.
- */
-async function saveDownload(url: string, filename: string): Promise<void> {
-  const response = await fetch(url)
-  if (!response.ok) {
-    throw new Error(formatApiError(await response.json().catch(() => null)))
-  }
-  const blob = await response.blob()
-  const href = window.URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = href
-  a.download = filename
-  document.body.appendChild(a)
-  a.click()
-  window.URL.revokeObjectURL(href)
-  document.body.removeChild(a)
 }
 
 /**
@@ -2094,6 +2072,9 @@ export default function Results() {
             {analysis.solver.reason
               ? ', but writing in the Boundary the model implies would let it be solved exactly without changing anything.'
               : '.'}
+            {crossCheck?.status === 'not_checked' && crossCheck.reason
+              ? ` The direct calculation covers other model shapes: ${crossCheck.reason}.`
+              : ''}
           </Typography>
         </Alert>
       )
@@ -2124,6 +2105,8 @@ export default function Results() {
             } over ${sampling}.` +
             (crossCheck?.status === 'agrees'
               ? ' A direct calculation of the same model agrees.'
+              : crossCheck?.status === 'not_checked' && crossCheck.reason
+              ? ` The direct calculation covers other model shapes: ${crossCheck.reason}.`
               : '')
           }
         >

@@ -891,6 +891,13 @@ marked uncertain.
   convergence, chains, agreement indices, cross-checks). While the **P before** column is showing,
   `p_before` carries its threshold and each date's and Boundary's probability. Also at
   `GET /api/results/{id}/export/json`.
+- **Export all (zip)** (a project's ⋮ menu): the whole project in one file. `analyses/` holds every
+  analysis exactly as its own Export JSON gives it, and `inputs/` what each was run from: settings,
+  dates and model structure. `samples.csv` is the project's date collection in the columns the CSV
+  import reads, so it goes straight back in. `summary.csv` has one row per modelled Boundary and
+  duration of every analysis, with the solver, convergence, R̂, seed and cross-check beside it.
+  Calendar ages there are cal BP and lengths of time are years, in separate columns. An analysis with
+  nothing modelled still gets a row. PDFs are not included.
 - **Curve data** (curve browser page): **Export this window** saves the visible stretch as CSV;
   **Export profile** saves the whole expected-resolution profile. A curve itself can be downloaded
   from the Curves page, byte-for-byte as imported.

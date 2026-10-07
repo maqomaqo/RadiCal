@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException, Depends
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from app.database import get_db
@@ -7,6 +7,7 @@ from app.models import Project, ProjectSample, Analysis, RadiocarbonSample, User
 from app.schemas.project import ProjectCreate, ProjectUpdate
 from app.api.analysis import _rerun_analysis
 from app.api.auth import current_user, owned_or_404
+from app.api import project_export
 from app.services import jobs
 from app.services import failures
 from typing import Dict, Optional
@@ -378,6 +379,47 @@ def rerun_project(
         "success": True,
         "data": {"project_id": project_id, "status": "queued", "job_id": job_id},
     })
+
+
+@router.get("/projects/{project_id}/export")
+def export_project(
+    project_id: str,
+    date_format: Optional[str] = None,
+    p_before_bp: Optional[float] = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+):
+    """
+    The whole project as one zip (api/project_export.build_zip): every
+    analysis's Export JSON, what each was run from, the date collection and a
+    summary table across them. `date_format` and `p_before_bp` read as they do
+    on a single analysis's exports.
+    """
+    project = owned_or_404(
+        db.query(Project).filter(Project.id == project_id).first(),
+        user, 'That project')
+    analyses = (
+        db.query(Analysis)
+        .filter(Analysis.project_id == project_id)
+        .filter(Analysis.owner_id == user.id)
+        .order_by(Analysis.created_at, Analysis.id)
+        .all()
+    )
+    samples = (
+        db.query(ProjectSample)
+        .filter(ProjectSample.project_id == project_id)
+        .order_by(ProjectSample.created_at, ProjectSample.id)
+        .all()
+    )
+    content = project_export.build_zip(
+        project, analyses, samples, db, user,
+        date_format=date_format, p_before_bp=p_before_bp)
+    name = project_export._slug(project.name or 'project')
+    return Response(
+        content=content,
+        media_type='application/zip',
+        headers={'Content-Disposition': f'attachment; filename=project-{name}.zip'},
+    )
 
 
 @router.delete("/projects/{project_id}")

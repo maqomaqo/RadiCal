@@ -41,7 +41,9 @@ import DriveFileMoveIcon from '@mui/icons-material/DriveFileMove'
 import ReplayIcon from '@mui/icons-material/Replay'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import CompareArrowsIcon from '@mui/icons-material/CompareArrows'
+import DownloadIcon from '@mui/icons-material/Download'
 import { formatApiError, describeFetchError } from '@/utils/apiError'
+import { saveDownload } from '@/utils/saveDownload'
 import { useNotify } from '@/contexts/NotificationContext'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import AssignProjectDialog from '@/components/AssignProjectDialog'
@@ -119,6 +121,21 @@ export default function ProjectDetail() {
   const navigate = useNavigate()
   const notify = useNotify()
   const isUnassigned = projectId === 'unassigned'
+
+  // The whole project as one zip: every analysis's Export JSON, what each was
+  // run from, the collection, and a summary table (api/project_export.py).
+  // Built in one request -- stored results only, no solver or plots -- so a
+  // large project is seconds, said once while it builds.
+  const handleExportAll = async () => {
+    if (!projectId || isUnassigned) return
+    notify('Building the project export…', 'info')
+    try {
+      const name = (project?.name || 'project').replace(/[^A-Za-z0-9._-]+/g, '-')
+      await saveDownload(`/api/projects/${projectId}/export`, `project-${name}.zip`)
+    } catch (err) {
+      notify('Could not export the project: ' + describeFetchError(err))
+    }
+  }
 
   const [project, setProject] = useState<ProjectDetailData | null>(null)
   const [loading, setLoading] = useState(true)
@@ -662,6 +679,17 @@ export default function ProjectDetail() {
             <EditIcon fontSize="small" />
           </ListItemIcon>
           <ListItemText>Edit project</ListItemText>
+        </MenuItem>
+        <MenuItem
+          onClick={() => {
+            setProjectMenuAnchor(null)
+            handleExportAll()
+          }}
+        >
+          <ListItemIcon>
+            <DownloadIcon fontSize="small" />
+          </ListItemIcon>
+          <ListItemText>Export all (zip)</ListItemText>
         </MenuItem>
         <Divider />
         <MenuItem
