@@ -186,6 +186,13 @@ COLUMN_ALIASES: Dict[str, tuple] = {
         'ring_offset_error', 'ring_error', 'gap_error', 'offset_error',
         'ring_offset_sd', 'gap_sd',
     ),
+    # How much older than its event the material may be (feature spec M1):
+    # the maximum of a uniform allowance, or the mean of an exponential one.
+    'inbuilt_years': (
+        'inbuilt_years', 'inbuilt_max', 'inbuilt', 'inbuilt_age', 'max_inbuilt',
+        'inbuilt_max_years', 'inbuilt_mean',
+    ),
+    'inbuilt_shape': ('inbuilt_shape', 'inbuilt_kernel', 'inbuilt_model'),
     # WGS84 decimal degrees, and only that. Degrees-and-minutes in any
     # spelling is refused by _coordinate rather than parsed -- see there.
     'latitude': ('latitude', 'lat', 'y', 'dec_lat', 'decimal_latitude', 'lat_dd'),
@@ -438,6 +445,19 @@ def _outlier_model(value: str, line: int, errors: List[str]) -> Optional[str]:
     return None
 
 
+def _inbuilt_shape(value: str, line: int, errors: List[str]) -> Optional[str]:
+    text = _clean(value).lower()
+    if not text:
+        return None
+    if text in ('uniform', 'exponential'):
+        return text
+    errors.append(
+        f"Row {line}: unknown inbuilt-age shape '{_clean(value)}' "
+        "(expected 'uniform' or 'exponential')"
+    )
+    return None
+
+
 def _outlier_prior(value: str, line: int, errors: List[str]) -> Optional[float]:
     """
     An outlier prior as a probability. Accepts a percentage ('5%') as well as
@@ -632,6 +652,8 @@ def _row_to_date(values: Dict[str, Any], line: int, errors: List[str],
         'ring_offset': _number(values.get('ring_offset'), 'ring offset', line, errors),
         'ring_offset_error': _number(
             values.get('ring_offset_error'), 'ring offset error', line, errors),
+        'inbuilt_years': _number(values.get('inbuilt_years'), 'inbuilt age', line, errors),
+        'inbuilt_shape': _inbuilt_shape(values.get('inbuilt_shape'), line, errors),
         'location': _clean(values.get('location')) or None,
         'notes': _clean(values.get('notes')) or None,
         'outlier_model': _outlier_model(values.get('outlier_model'), line, errors) or 'general',

@@ -64,8 +64,8 @@ function shared<T>(dates: DraftMeasurement[], pick: (m: DraftMeasurement) => T):
  * OxCal's R_Combine, entered as the date it produces. The pooled age and error
  * are kept to a tenth of a year, well inside the error itself.
  *
- * The curve and ΔR are the dates' own -- the test refuses dates that do not
- * share them. Anything else they share (material, place, context, limits) is
+ * The curve, ΔR and inbuilt-age allowance are the dates' own -- the test
+ * refuses dates that do not share them. Anything else they share (material, place, context, limits) is
  * kept; anything they do not is left blank rather than taken from one of them.
  * The notes say what was pooled, so the date can be traced back.
  */
@@ -99,6 +99,10 @@ export function pooledMeasurement(
     curve_id: first.curve_id,
     delta_r: first.delta_r ?? null,
     delta_r_error: first.delta_r_error ?? null,
+    // The allowance the dates share: the test refuses dates whose allowances
+    // differ, so one date standing for them carries the same one.
+    inbuilt_years: first.inbuilt_years ?? null,
+    inbuilt_shape: first.inbuilt_shape ?? null,
     element_id: shared(dates, (m) => m.element_id ?? null),
     default_context_name: shared(dates, (m) => m.default_context_name ?? null),
     tpq_age_bp: shared(dates, (m) => m.tpq_age_bp ?? null),

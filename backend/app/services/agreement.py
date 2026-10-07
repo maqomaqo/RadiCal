@@ -119,6 +119,7 @@ from app.services.calibration import get_curve
 from app.services.exact_chain import (
     DEFAULT_OUTLIER_MODEL, OUTLIER_KERNEL_HALF_WIDTH_YEARS,
     _outlier_kernel, _outlier_kernel_at_scale, convolve_on_grid,
+    event_likelihood, inbuilt_reach,
 )
 
 # Step integral(L^2) and the outlier component are tabulated at. Calibration
@@ -215,11 +216,20 @@ class _Normalised:
         else:
             lo, hi = _support(measurement)
         pad = OUTLIER_MARGIN_YEARS if self.prior > 0 else 0.0
-        lo = min(lo, float(points.min())) - pad
+        # An inbuilt-age allowance lets the event sit younger than its
+        # material, so the comparison reaches that much further that way.
+        reach = inbuilt_reach(measurement) if unmodelled is None else 0.0
+        lo = min(lo - reach, float(points.min())) - pad
         hi = max(hi, float(points.max())) + pad
         step = COMPARISON_STEP_YEARS
         start = np.floor(lo / step) * step
         self.grid = start + step * np.arange(int(np.ceil((hi - start) / step)) + 1)
+        # The likelihood the solvers used is the EVENT's: with an allowance,
+        # the calibration averaged over it (exact_chain.event_likelihood).
+        # A convolution needs a regular grid, so it is tabulated here and read
+        # between nodes, as the outlier component is.
+        self._event = (event_likelihood(self.grid, measurement)
+                       if reach > 0 else None)
         calibration = self._calibration(self.grid)
         # Normalised to a DENSITY, not to unit sum over the grid: the index is a
         # ratio of integrals, and the outlier component below is a density too.
@@ -230,6 +240,8 @@ class _Normalised:
     def _calibration(self, t: np.ndarray) -> np.ndarray:
         if self.supplied is not None:
             return np.interp(t, self.supplied[:, 0], self.supplied[:, 1], left=0.0, right=0.0)
+        if self._event is not None:
+            return np.interp(t, self.grid, self._event, left=0.0, right=0.0)
         return unmodelled_likelihood(self.measurement, t)
 
     def _component(self, log_scale: Optional[float]) -> Tuple[np.ndarray, np.ndarray, float]:

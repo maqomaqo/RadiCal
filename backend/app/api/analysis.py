@@ -436,6 +436,8 @@ def _sample_row(
         depth_cm=measurement.depth_cm,
         ring_offset=getattr(measurement, 'ring_offset', None),
         ring_offset_error=getattr(measurement, 'ring_offset_error', None),
+        inbuilt_years=getattr(measurement, 'inbuilt_years', None),
+        inbuilt_shape=getattr(measurement, 'inbuilt_shape', None),
         location=measurement.location,
         notes=measurement.notes,
         group_id=group_id,
@@ -675,6 +677,11 @@ def _run_bayesian(
     estimate_durations = bool(bayesian_config.get('estimate_durations'))
     estimate_kde = bool(bayesian_config.get('estimate_kde'))
     dispersal_spec = _dispersal_spec(bayesian_config)
+
+    # "Apply inbuilt-age allowances" off runs the model as if every allowance
+    # were zero, so a run with and a run without differ in that alone.
+    if bayesian_config.get('apply_inbuilt') is False:
+        measurements = [{**m, 'inbuilt_years': None} for m in measurements]
 
     # Refused here as well as at the request schema, because a rerun comes
     # from the database rather than from a request and has to be held to the
@@ -1602,6 +1609,10 @@ def get_analysis(analysis_id: str, db: Session = Depends(get_db),
                     # series with every gap blank.
                     "ring_offset": s.ring_offset,
                     "ring_offset_error": s.ring_offset_error,
+                    # Same reason: an edit that dropped an allowance would
+                    # quietly run a different model.
+                    "inbuilt_years": s.inbuilt_years,
+                    "inbuilt_shape": s.inbuilt_shape,
                     "location": s.location,
                     "notes": s.notes,
                     "group_id": s.group_id,
@@ -1935,6 +1946,8 @@ def _rerun_analysis(analysis: Analysis, db: Session,
                 'depth_cm': s.depth_cm,
                 'ring_offset': s.ring_offset,
                 'ring_offset_error': s.ring_offset_error,
+                'inbuilt_years': s.inbuilt_years,
+                'inbuilt_shape': s.inbuilt_shape,
             }
             for s in samples
         ]
@@ -2170,6 +2183,7 @@ def replace_model_tree(analysis_id: str, payload: Dict, db: Session = Depends(ge
 
 @router.post("/analysis/{analysis_id}/duplicate")
 def duplicate_analysis(analysis_id: str, new_seed: bool = False,
+                       apply_inbuilt: Optional[bool] = None,
                        db: Session = Depends(get_db),
                        user: User = Depends(current_user)):
     """
@@ -2181,6 +2195,10 @@ def duplicate_analysis(analysis_id: str, new_seed: bool = False,
     beside the original in Compare Results and see how far Monte Carlo error
     moves its figures. Only for a Bayesian analysis, the only kind that
     samples.
+
+    `apply_inbuilt` sets the copy's "Apply inbuilt-age allowances" switch
+    (bayesian_config.apply_inbuilt) and says so in its name: the same model
+    with and without the dates' allowances, to compare side by side.
 
     Copies the samples, contexts and stratigraphic relationships, remapping
     ids to the new rows'. Results are NOT copied and status is 'pending', so
@@ -2198,6 +2216,12 @@ def duplicate_analysis(analysis_id: str, new_seed: bool = False,
                                 detail='Only a Bayesian analysis has a seed to change.')
         seed = secrets.randbelow(2**31 - 1)
         name, config = f"{source.name} (seed {seed})", {**(config or {}), 'seed': seed}
+    if apply_inbuilt is not None:
+        if source.analysis_type != 'bayesian':
+            raise HTTPException(status_code=400,
+                                detail='Inbuilt-age allowances apply only in a Bayesian model.')
+        name = f"{source.name} (inbuilt age {'on' if apply_inbuilt else 'off'})"
+        config = {**(config or {}), 'apply_inbuilt': apply_inbuilt}
 
     copy = Analysis(
         name=name,

@@ -132,6 +132,11 @@ export interface MatrixMeasurement {
   // The gap's own 1-sigma uncertainty, where it was measured rather than
   // counted (OxCal's V_Sequence). Absent or zero means the gaps are exact.
   ring_offset_error?: number | null
+  // How much older than its event the material may be, in years: the maximum
+  // of a uniform allowance or the mean of an exponential one (utils/inbuiltAge).
+  // Absent or 0 is none. Applied in Bayesian models.
+  inbuilt_years?: number | null
+  inbuilt_shape?: 'uniform' | 'exponential' | null
   // Where the sample is from -- as a coordinate, and as the placename and
   // context it was filed under. Declared here, not only on DraftMeasurement,
   // because the tree editor groups dates into SITES on them

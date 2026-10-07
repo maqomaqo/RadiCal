@@ -508,6 +508,17 @@ def validate_ordinates(root: Optional[Dict], measurements: List[Dict]) -> None:
             # required output here rather than a nicety. Accepting the setting
             # and dropping it would be the silent substitution this app
             # refuses everywhere else.
+            # The same for an inbuilt-age allowance: the members are rings of
+            # one tree, a measured series, and an offset applied to each on its
+            # own would let the series slide apart.
+            allowed = [label(m) for m in members if (m.get('inbuilt_years') or 0) > 0]
+            if allowed:
+                raise ValueError(
+                    f"the wiggle match '{name}' has dates carrying an inbuilt-"
+                    f"age allowance ({', '.join(sorted(allowed)[:4])}), which it "
+                    "cannot apply: its members are rings of one series at "
+                    "measured gaps. Remove the allowance from those dates"
+                )
             flagged = [label(m) for m in members if (m.get('outlier_prior') or 0) > 0]
             if flagged:
                 raise ValueError(

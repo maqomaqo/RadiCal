@@ -40,6 +40,9 @@ export interface McmcConfig {
   // The sampler's seed, or null for its fixed default. The same seed
   // reproduces a run; a different one is an independent replicate.
   seed: number | null
+  // Whether the dates' inbuilt-age allowances are applied. On by default: an
+  // allowance entered is meant. See BayesianConfigInput.apply_inbuilt.
+  apply_inbuilt: boolean
   // OxCal's UniformSpanPrior (Nicholls and Jones 2001) -- see
   // BayesianConfigInput.uniform_span_prior on the backend for what it does.
   // On by default there and here.
@@ -79,6 +82,7 @@ export const DEFAULT_MCMC: McmcConfig = {
   mcmc_chains: 4,
   mcmc_min_sweeps: 0,
   seed: null,
+  apply_inbuilt: true,
   uniform_span_prior: true,
   resolution: 5,
   estimate_durations: false,

@@ -13,6 +13,7 @@ import {
 } from '@mui/material'
 import type { DraftMeasurement } from '@/types'
 import { curveLabel, curveOptions, curvesForSampleType, type CurveSpec } from '@/api/curves'
+import { INBUILT_SHAPES, describeInbuilt, type InbuiltShape } from '@/utils/inbuiltAge'
 import { useCurves } from '@/hooks/useCurves'
 
 /**
@@ -453,6 +454,46 @@ export default function MeasurementFields({
                   ? 'For old wood and reworked material: the sample can be older than the context it was found in, never younger.'
                   : 'For a date wrong in an unknown way — lab error, contamination, a mislabelled bag.'
               : 'Off. The date is taken at face value, and the model will move it to fit its neighbours however far that is.'}
+          </Typography>
+        </Box>
+      )}
+
+      {/* Inbuilt age travels with the outlier setting: both are about how the
+          dated material relates to the event it is modelled as, and both
+          apply only where there is a model. */}
+      {showOutlier && (
+        <Box sx={{ mb: 2 }}>
+          <Box sx={{ display: 'flex', gap: 1 }}>
+            <TextField
+              type="number"
+              label="Inbuilt age (yr)"
+              value={value.inbuilt_years ?? ''}
+              onChange={(e) => {
+                const years = e.target.value === '' ? null : parseFloat(e.target.value)
+                set({ inbuilt_years: years != null && Number.isFinite(years) && years > 0 ? years : null })
+              }}
+              size="small"
+              sx={{ flex: 1 }}
+              inputProps={{ min: 0, max: 1000, step: 1 }}
+            />
+            <FormControl size="small" sx={{ flex: 1 }} disabled={!value.inbuilt_years}>
+              <InputLabel id="inbuilt-shape-label">Allowance</InputLabel>
+              <Select
+                labelId="inbuilt-shape-label"
+                value={value.inbuilt_shape || 'uniform'}
+                label="Allowance"
+                onChange={(e) => set({ inbuilt_shape: e.target.value as InbuiltShape })}
+              >
+                {INBUILT_SHAPES.map((option) => (
+                  <MenuItem key={option.value} value={option.value}>
+                    {option.label}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Box>
+          <Typography variant="caption" color="textSecondary" component="div" sx={{ mt: 0.5 }}>
+            {describeInbuilt(value.inbuilt_years, value.inbuilt_shape)}
           </Typography>
         </Box>
       )}

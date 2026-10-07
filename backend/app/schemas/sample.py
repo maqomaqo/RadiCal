@@ -123,6 +123,16 @@ class MeasurementInput(BaseModel):
     # is a D_Sequence: the gaps are asserted exactly.
     ring_offset_error: Optional[float] = Field(default=None, ge=0, le=10000)
 
+    # Inbuilt age (feature spec M1): how much older than its event the dated
+    # material may be -- charcoal from heartwood dates the wood, not the fire.
+    # `inbuilt_years` is the MAXIMUM for a uniform allowance (any offset from
+    # 0 to it, equally likely: a published maximum inbuilt age) and the MEAN
+    # for an exponential one (small offsets likeliest, no ceiling). Absent or
+    # 0 is none. Applied in Bayesian models, where the event is what is
+    # modelled; see exact_chain.inbuilt_kernel.
+    inbuilt_years: Optional[float] = Field(default=None, ge=0, le=1000)
+    inbuilt_shape: Optional[Literal["uniform", "exponential"]] = None
+
     location: Optional[str] = Field(default=None, max_length=500)
     notes: Optional[str] = Field(default=None, max_length=2000)
 
@@ -254,6 +264,9 @@ class ProjectSampleUpdate(BaseModel):
     # See MeasurementInput for the sign convention.
     ring_offset: Optional[float] = Field(default=None, ge=-50000, le=50000)
     ring_offset_error: Optional[float] = Field(default=None, ge=0, le=10000)
+    # See MeasurementInput.
+    inbuilt_years: Optional[float] = Field(default=None, ge=0, le=1000)
+    inbuilt_shape: Optional[Literal["uniform", "exponential"]] = None
     location: Optional[str] = Field(default=None, max_length=500)
     notes: Optional[str] = Field(default=None, max_length=2000)
     default_context_name: Optional[str] = Field(default=None, max_length=200)
@@ -553,6 +566,11 @@ class BayesianConfigInput(BaseModel):
     # sampler otherwise stops as soon as its halves agree. Ignored by the
     # exact solver, which has no run.
     mcmc_min_sweeps: int = Field(default=0, ge=0, le=1_000_000)
+    # Whether the dates' inbuilt-age allowances are applied (feature spec M1).
+    # On by default: an allowance entered is meant. Off runs the same model as
+    # if every allowance were zero, which is how "with and without" is
+    # compared without editing every date.
+    apply_inbuilt: bool = True
     # The sampler's random seed (gibbs.DEFAULT_SEED when absent), chain c
     # taking seed + c. The same seed and inputs reproduce a run exactly; a
     # different seed is an independent replicate, which is how Monte Carlo

@@ -8,21 +8,22 @@
 4. [Importing Dates from a File](#importing-dates-from-a-file)
 5. [Calibration Curves](#calibration-curves)
 6. [Marine Reservoir Offsets](#marine-reservoir-offsets)
-7. [Model Structure (Bayesian only)](#model-structure-bayesian-only)
-8. [Running an Analysis](#running-an-analysis)
-9. [Viewing Results](#viewing-results)
-10. [Durations and Differences](#durations-and-differences)
-11. [Kernel Density Estimates](#kernel-density-estimates)
-12. [Same-Event Test](#same-event-test)
-13. [Wiggle Matching](#wiggle-matching)
-14. [Age-Depth Modelling](#age-depth-modelling)
-15. [Geographic Analysis](#geographic-analysis)
-16. [Exporting Data](#exporting-data)
-17. [Projects and Date Collections](#projects-and-date-collections)
-18. [Comparing Analyses](#comparing-analyses)
-19. [Best Practices](#best-practices)
-20. [Appendix A: Mathematical Methods](#appendix-a-mathematical-methods)
-21. [Bibliography](#bibliography)
+7. [Inbuilt Age](#inbuilt-age)
+8. [Model Structure (Bayesian only)](#model-structure-bayesian-only)
+9. [Running an Analysis](#running-an-analysis)
+10. [Viewing Results](#viewing-results)
+11. [Durations and Differences](#durations-and-differences)
+12. [Kernel Density Estimates](#kernel-density-estimates)
+13. [Same-Event Test](#same-event-test)
+14. [Wiggle Matching](#wiggle-matching)
+15. [Age-Depth Modelling](#age-depth-modelling)
+16. [Geographic Analysis](#geographic-analysis)
+17. [Exporting Data](#exporting-data)
+18. [Projects and Date Collections](#projects-and-date-collections)
+19. [Comparing Analyses](#comparing-analyses)
+20. [Best Practices](#best-practices)
+21. [Appendix A: Mathematical Methods](#appendix-a-mathematical-methods)
+22. [Bibliography](#bibliography)
 
 ## Getting Started
 
@@ -311,6 +312,41 @@ the same coordinate, since a centroid of two sites is a place neither of them is
 (snapshot id, centre, *N*, points used and excluded, suspension-only alternative). This record
 travels with the date into every analysis.
 
+## Inbuilt Age
+
+A charcoal date gives the age of the wood when that wood stopped taking up carbon, not when it was
+burnt. A twig is about as old as the fire. Heartwood from a long-lived tree may have stopped growing
+decades before anyone burnt it. That gap is the **inbuilt age**. It can only make a date look
+*older* than the event, never younger.
+
+By default RadiCal assumes no gap: each date is read as dating its event exactly. A date can carry
+an **inbuilt-age allowance** instead: **Inbuilt age (yr)** and **Allowance** on the date's form,
+in the date collection, or as `inbuilt_years` and `inbuilt_shape` columns in a CSV. It applies in
+Bayesian models, where the event is what is modelled. Allowing a gap moves the modelled events
+*later*, and usually shortens a phase whose earliest dates are charcoal.
+
+| Allowance | What it tells the model | Effect on the event | When it fits |
+| --- | --- | --- | --- |
+| None | The material is the same age as the event. | No shift. | Short-lived material: twigs, seeds, eggshell, bone, shell. |
+| **Up to N years** (uniform) | The material is somewhere between fresh and N years old, any age in that range equally likely, never older. | Anywhere from 0 to N years later than the date alone implies; N/2 on average, never more than N. | You have a stated **maximum**, such as a published inbuilt age from species and ring counts. |
+| **About N years** (exponential) | The material is most likely young; older is possible but increasingly unlikely, with no limit. | On average N years later. Most offsets are small, but a long tail allows the occasional much older one: with N = 15, about 1 date in 7 is offset by more than 30 years. | You know a *typical* age but have no ceiling, such as mixed charcoal of unknown species. |
+
+An allowance is not the **Charcoal outlier model**. An allowance applies to its date every time, as
+a modest offset. The outlier model is a small chance (say 5%) that a date is badly old, possibly by
+centuries, which the model may or may not take up. The two can be combined on one date.
+
+**Comparing with and without.** **Apply inbuilt-age allowances** (Advanced settings, on by default)
+runs the model as if no date had one when it is off. On a Bayesian result whose dates carry
+allowances, **Compare with and without inbuilt age** (the tree button beside Re-run) runs a copy
+with the switch the other way and opens the two side by side. The Shag River Mouth dates show why
+it matters: with WkA-56765 left out, the probability that Layer 11 began before AD 1360 is 0.97 with
+no allowance and about 0.1 with the published maxima.
+
+Allowances do not apply in a group or single calibration, which calibrate the material itself, nor
+in a wiggle match, whose members are rings of one series. Dates can be pooled with **Replace with
+pooled date** only if they share the same allowance, which the pooled date then carries. See
+[A.19](#a19-inbuilt-age) for the arithmetic.
+
 ## Model Structure (Bayesian only)
 
 Optional, but this is what distinguishes a Bayesian analysis from a Group Calibration. Build the
@@ -357,6 +393,8 @@ rather than arranged by hand.
 - **Uniform span prior**: OxCal's `UniformSpanPrior` correction (on by default), keeping a
   sequence's overall span prior independent of how finely it is subdivided. Only affects a
   sequence with three or more Boundaries.
+- **Apply inbuilt-age allowances**: on by default. Off runs the model as if no date had an
+  [inbuilt-age allowance](#inbuilt-age).
 - **Durations and differences**: off by default; see
   [Durations and Differences](#durations-and-differences) for what it adds and when to enable it.
   A Group Calibration has the same option under **Reporting**, labelled **Differences between
@@ -1646,6 +1684,30 @@ the 95th percentile (the 5% critical value). This is OxCal's `R_Combine` test.
 A shared ΔR shifts all ages equally, leaving `T` unchanged. It is applied once, to the pooled age,
 with its error added in quadrature at calibration. Adding `σ_ΔR` to each date's error before
 pooling would count one uncertainty `n` times.
+
+### A.19 Inbuilt age
+
+A date whose material may be older than its event by an offset `s ≥ 0` with density `k(s)` has,
+for an event at calendar age `t` (cal BP, so older is larger), the likelihood
+
+```
+L_event(t) = ∫ k(s) L(t + s) ds
+```
+
+where `L` is the date's ordinary calibration likelihood. For an allowance **up to N years**,
+`k(s) = 1/N` on `[0, N]`; for **about N years**, `k(s) = e^(-s/N) / N`, followed to `10N`. The
+offset touches only its own date, so it is integrated out of that date's likelihood once, like the
+outlier kernels of A.7, and both solvers, the direct cross-check and the agreement index use the
+result. On the solver grid each lag cell takes the allowance's probability over that cell from its
+distribution function, so an allowance that is not a whole number of grid steps keeps its mean. The
+calibration is evaluated past the grid's old end by the allowance's reach before smoothing, so an
+event near the edge still sees all of its material's likelihood. TPQ and TAQ limiters bound the
+event, so they are applied after the smoothing.
+
+Against the sampler-free reference built for the Shag River Mouth corpus (Petchey et al.'s Layer
+11–4 model, published maxima on the charcoal), P(Start 11 before AD 1360) agrees within 0.1 with
+and without allowances, for the published dates, with WkA-56765 moved to Layer 11, and with it left
+out.
 
 ## Bibliography
 

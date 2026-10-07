@@ -49,6 +49,7 @@ import ReplayIcon from '@mui/icons-material/Replay'
 import ContentCopyIcon from '@mui/icons-material/ContentCopy'
 import CasinoIcon from '@mui/icons-material/Casino'
 import HistoryIcon from '@mui/icons-material/History'
+import ParkIcon from '@mui/icons-material/Park'
 import EditIcon from '@mui/icons-material/Edit'
 import ViewColumnIcon from '@mui/icons-material/ViewColumn'
 import KeyboardArrowRightIcon from '@mui/icons-material/KeyboardArrowRight'
@@ -264,6 +265,8 @@ interface AnalysisResult {
   intervals?: IntervalsBlock | null
   // Summaries of the dates as a set. Null when the run was not asked for any.
   summaries?: SummariesBlock | null
+  // The settings the run took; only the inbuilt-age switch is read here.
+  bayesian_config?: { apply_inbuilt?: boolean } | null
   // A group calibration's same-event test. Empty for every other analysis;
   // absent from a server that predates it.
   same_event?: SameEventTest[]
@@ -1049,6 +1052,7 @@ export default function Results() {
   const [cancelling, setCancelling] = useState(false)
   const [duplicating, setDuplicating] = useState(false)
   const [replicating, setReplicating] = useState(false)
+  const [pairingInbuilt, setPairingInbuilt] = useState(false)
   // This analysis's kept runs, newest (the current result) first, and the
   // menu that offers each earlier one for comparison (api/run_history.py).
   const [runs, setRuns] = useState<RunSummary[]>([])
@@ -1384,6 +1388,34 @@ export default function Results() {
       notify('Could not run with a new seed: ' + describeFetchError(err))
     } finally {
       setReplicating(false)
+    }
+  }
+
+  // The same model with the dates' inbuilt-age allowances switched the other
+  // way, run and set beside this one in Compare Results (feature spec M1).
+  // The comparison page waits for the copy to finish.
+  const handleCompareInbuilt = async () => {
+    if (!analysisId || !analysis) return
+    setPairingInbuilt(true)
+    try {
+      const applied = analysis.bayesian_config?.apply_inbuilt !== false
+      const copied = await (
+        await fetch(`/api/analysis/${analysisId}/duplicate?apply_inbuilt=${!applied}`, {
+          method: 'POST',
+        })
+      ).json()
+      if (!copied.success) throw new Error(formatApiError(copied))
+      const queued = await (
+        await fetch(`/api/analysis/${copied.data.id}/rerun`, { method: 'POST' })
+      ).json()
+      if (!queued.success) throw new Error(formatApiError(queued))
+      navigate(
+        `/projects/${analysis.project_id ?? 'unassigned'}/compare?runs=${analysisId},${copied.data.id}`
+      )
+    } catch (err) {
+      notify('Could not compare with and without inbuilt age: ' + describeFetchError(err))
+    } finally {
+      setPairingInbuilt(false)
     }
   }
 
@@ -2466,6 +2498,25 @@ export default function Results() {
                 <ReplayIcon />
               </IconButton>
             </Tooltip>
+            {/* Only where a date carries an allowance: otherwise the two runs
+                would be the same model. */}
+            {isBayesian &&
+              (analysis.measurements ?? []).some((m) => (m.inbuilt_years ?? 0) > 0) && (
+                <Tooltip
+                  title={pairingInbuilt ? 'Starting…' : 'Compare with and without inbuilt age'}
+                >
+                  <span>
+                    <IconButton
+                      size="small"
+                      aria-label="Compare with and without inbuilt age"
+                      disabled={pairingInbuilt}
+                      onClick={handleCompareInbuilt}
+                    >
+                      {pairingInbuilt ? <CircularProgress size={18} /> : <ParkIcon />}
+                    </IconButton>
+                  </span>
+                </Tooltip>
+              )}
             {/* Earlier runs of this analysis, kept so a re-run after a change
                 to the code can be set beside the run before it. Only once
                 there is one to compare with. */}

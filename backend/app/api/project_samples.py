@@ -73,6 +73,10 @@ def _serialize(sample: ProjectSample) -> dict:
         # than to any one analysis, and deploying carries it across.
         "ring_offset": sample.ring_offset,
         "ring_offset_error": sample.ring_offset_error,
+        # Also a property of the sample -- what it is made of and how old that
+        # material may be -- so the collection holds it and deploying carries it.
+        "inbuilt_years": sample.inbuilt_years,
+        "inbuilt_shape": sample.inbuilt_shape,
         "location": sample.location,
         "notes": sample.notes,
         "default_context_name": sample.default_context_name,
@@ -134,6 +138,8 @@ def create_project_samples(
             depth_cm=item.depth_cm,
             ring_offset=item.ring_offset,
             ring_offset_error=item.ring_offset_error,
+            inbuilt_years=item.inbuilt_years,
+            inbuilt_shape=item.inbuilt_shape,
             location=item.location,
             notes=item.notes,
             default_context_name=item.default_context_name,
@@ -530,6 +536,10 @@ def deploy_samples_to_analysis(
             # deployed date that lost it is no longer a member of one.
             ring_offset=src.ring_offset,
             ring_offset_error=src.ring_offset_error,
+            # And the inbuilt-age allowance: how old the material may be is a
+            # fact about the sample, wherever it is modelled.
+            inbuilt_years=src.inbuilt_years,
+            inbuilt_shape=src.inbuilt_shape,
             location=src.location,
             notes=src.notes,
             group_id=groups_by_name.get(name),

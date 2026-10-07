@@ -377,23 +377,119 @@ def _stitched(segments: List[List[SpanGroup]], plan) -> Optional[List[SpanGroup]
 # Solving
 # --------------------------------------------------------------------------
 
-def _date_likelihood(grid: np.ndarray, measurement: Dict,
-                     bounds: Tuple[Optional[float], Optional[float]]) -> np.ndarray:
+# Inbuilt age (feature spec M1): how much older than its event a sample's
+# material may be. Charcoal from heartwood dates the wood, not the fire. A
+# date's allowance is `inbuilt_years` and `inbuilt_shape`:
+#
+#   uniform      any offset from 0 to inbuilt_years, equally likely, never more
+#                -- a published MAXIMUM inbuilt age, as Petchey et al. give.
+#   exponential  offsets with mean inbuilt_years, small ones likeliest, a long
+#                tail and no ceiling -- a TYPICAL age with no maximum known.
+#
+# The offset touches only its own date, so it is integrated out of that date's
+# likelihood here, as the outlier kernels are, and both solvers, the direct
+# cross-check and the agreement index see the same term.
+INBUILT_SHAPES = ('uniform', 'exponential')
+# How far an exponential allowance is followed, in means: 10 keeps all but
+# 0.005% of it.
+INBUILT_EXPONENTIAL_REACH = 10.0
+
+
+def inbuilt_reach(measurement: Dict) -> float:
+    """How much younger, in years, a date's event may be than its material."""
+    years = float(measurement.get('inbuilt_years') or 0.0)
+    if years <= 0:
+        return 0.0
+    if (measurement.get('inbuilt_shape') or 'uniform') == 'exponential':
+        return INBUILT_EXPONENTIAL_REACH * years
+    return years
+
+
+def inbuilt_kernel(step: float, measurement: Dict) -> Optional[np.ndarray]:
     """
-    One date's calibration likelihood on `grid`, with its reservoir offset
-    applied and its TPQ/TAQ limiters imposed as a hard truncation.
+    A date's inbuilt-age allowance as a convolution kernel on a grid of `step`
+    years, or None for a date with none.
+
+    The event is the material's age MINUS the offset, so an event at t is
+    supported by the material's likelihood at t + s:
+
+        L_event(t) = integral k(s) L(t + s) ds,    s >= 0
+
+    which puts the kernel's mass at NEGATIVE lag in convolve_on_grid's
+    convention -- the side the Charcoal outlier kernel uses, for the same
+    reason. Each lag cell takes the allowance's probability over that cell
+    exactly (from its CDF), so an allowance that is not a whole number of
+    steps, or is shorter than one, still has the right mean.
     """
+    years = float(measurement.get('inbuilt_years') or 0.0)
+    if years <= 0:
+        return None
+    shape = measurement.get('inbuilt_shape') or 'uniform'
+    if shape not in INBUILT_SHAPES:
+        raise ValueError(
+            f"sample '{measurement.get('sample_name', measurement.get('id'))}' has unknown "
+            f"inbuilt-age shape '{shape}'; expected one of {', '.join(INBUILT_SHAPES)}")
+    reach = inbuilt_reach(measurement)
+    lags = np.arange(0.0, reach + step, step)
+    lo = np.clip(lags - step / 2.0, 0.0, reach)
+    hi = np.clip(lags + step / 2.0, 0.0, reach)
+    if shape == 'uniform':
+        weights = (hi - lo) / years
+    else:
+        weights = np.exp(-lo / years) - np.exp(-hi / years)
+    keep = weights > 0
+    lags_used = int(np.nonzero(keep)[0][-1]) + 1
+    weights = weights[:lags_used]
+    weights = weights / weights.sum()
+    return np.concatenate([weights[::-1], np.zeros(len(weights) - 1)])
+
+
+def _calibration_likelihood(points: np.ndarray, measurement: Dict) -> np.ndarray:
+    """The measurement's own likelihood at each calendar age: the age of the
+    MATERIAL, with its reservoir offset applied."""
     curve = get_curve(measurement.get('curve_id') or 'intcal20')
     delta_r = measurement.get('delta_r') or 0.0
     delta_r_error = measurement.get('delta_r_error') or 0.0
 
-    c14, curve_error = curve.interpolate(grid)
+    c14, curve_error = curve.interpolate(points)
     sigma2 = curve_error ** 2 + measurement['error_1sigma'] ** 2 + delta_r_error ** 2
     lik = np.exp(-0.5 * (c14 - (measurement['age_bp'] - delta_r)) ** 2 / sigma2) / np.sqrt(sigma2)
     # interpolate() CLAMPS beyond the curve's ends rather than extrapolating,
     # which would give a grid point past the curve the finite likelihood of
     # its last point. The curve says nothing there, so neither does the date.
-    lik = np.where((grid >= curve.cal_ages[0]) & (grid <= curve.cal_ages[-1]), lik, 0.0)
+    return np.where((points >= curve.cal_ages[0]) & (points <= curve.cal_ages[-1]), lik, 0.0)
+
+
+def event_likelihood(grid: np.ndarray, measurement: Dict) -> np.ndarray:
+    """
+    The likelihood of the EVENT a date stands for, at each age on a regular
+    `grid`: its calibration, averaged over its inbuilt-age allowance where it
+    has one (inbuilt_kernel).
+
+    The material may be older than anything on the grid, so the calibration
+    is evaluated past the grid's old end by the allowance's reach before it is
+    smoothed, and only then cut back to the grid.
+    """
+    grid = np.asarray(grid, dtype=float)
+    step = float(grid[1] - grid[0]) if len(grid) > 1 else 1.0
+    kernel = inbuilt_kernel(step, measurement)
+    if kernel is None:
+        return _calibration_likelihood(grid, measurement)
+    extra = int(np.ceil(inbuilt_reach(measurement) / step)) + 1
+    wide = grid[0] + step * np.arange(len(grid) + extra)
+    smoothed = convolve_on_grid(_calibration_likelihood(wide, measurement), kernel)
+    return smoothed[:len(grid)]
+
+
+def _date_likelihood(grid: np.ndarray, measurement: Dict,
+                     bounds: Tuple[Optional[float], Optional[float]]) -> np.ndarray:
+    """
+    One date's likelihood on `grid`: its calibration, with its reservoir
+    offset applied and its inbuilt-age allowance integrated out
+    (event_likelihood), and its TPQ/TAQ limiters imposed as a hard truncation.
+    The limiters bound the EVENT, so they cut after the allowance, not before.
+    """
+    lik = event_likelihood(grid, measurement)
 
     taq, tpq = bounds
     if taq is not None:
@@ -611,7 +707,9 @@ def _build_grid(measurements: List[Dict], element_bounds: Dict,
                                     m.get('delta_r'), m.get('delta_r_error'))
         significant = np.where(prob >= prob.max() * SUPPORT_THRESHOLD)[0]
         if len(significant):
-            lo = min(lo, float(cal[significant[0]]))
+            # An inbuilt-age allowance lets the event be younger than its
+            # material, so the grid reaches that much further on the young side.
+            lo = min(lo, float(cal[significant[0]]) - inbuilt_reach(m))
             hi = max(hi, float(cal[significant[-1]]))
         taq, tpq = _effective_date_bounds(m, element_bounds)
         if taq is not None:

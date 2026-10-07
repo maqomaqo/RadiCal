@@ -45,6 +45,11 @@ def _reservoir_key(m: Mapping):
     return (m.get('delta_r') or 0.0, m.get('delta_r_error') or 0.0)
 
 
+def _inbuilt_key(m: Mapping):
+    years = m.get('inbuilt_years') or 0.0
+    return (years, (m.get('inbuilt_shape') or 'uniform') if years else None)
+
+
 def same_event(measurements: Sequence[Mapping]) -> Optional[Dict]:
     """
     The Ward and Wilson test over `measurements` (dicts carrying age_bp,
@@ -65,6 +70,11 @@ def same_event(measurements: Sequence[Mapping]) -> Optional[Dict]:
         return {**base, 'refused': 'Dates are on more than one curve.'}
     if len({_reservoir_key(m) for m in measurements}) > 1:
         return {**base, 'refused': 'Dates have different ΔR values.'}
+    # Pooled dates take one allowance between them, so they must share it.
+    # Pooling separate samples does not change T (the offset shifts the event,
+    # not the measurement), but the pooled date has to carry one allowance.
+    if len({_inbuilt_key(m) for m in measurements}) > 1:
+        return {**base, 'refused': 'Dates have different inbuilt-age allowances.'}
 
     ages = np.array([float(m['age_bp']) for m in measurements])
     errors = np.array([float(m['error_1sigma']) for m in measurements])
@@ -139,7 +149,8 @@ def pooled_ranges_at(test: Mapping, confidence: float) -> Optional[List[Dict]]:
     return None
 
 
-_SAMPLE_FIELDS = ('id', 'age_bp', 'error_1sigma', 'curve_id', 'delta_r', 'delta_r_error')
+_SAMPLE_FIELDS = ('id', 'age_bp', 'error_1sigma', 'curve_id', 'delta_r', 'delta_r_error',
+                  'inbuilt_years', 'inbuilt_shape')
 
 
 def same_event_for_samples(analysis_type: str, samples) -> List[Dict]:

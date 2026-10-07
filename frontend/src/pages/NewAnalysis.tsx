@@ -731,6 +731,10 @@ export default function NewAnalysis() {
       delta_r_error: s.delta_r_error ?? null,
       outlier_prior: 0,
       outlier_model: 'general',
+      // Carried for the same reason: how old the material may be is a fact
+      // about the sample, and dropping it would model a different date.
+      inbuilt_years: s.inbuilt_years ?? null,
+      inbuilt_shape: s.inbuilt_shape ?? null,
       notes: s.notes ?? null,
       // The context the collection files this date under. Deploying turns
       // these into the analysis's contexts, and adding one at a time means the
@@ -789,6 +793,8 @@ export default function NewAnalysis() {
             depth_cm: d.depth_cm ?? null,
             ring_offset: d.ring_offset ?? null,
             ring_offset_error: d.ring_offset_error ?? null,
+            inbuilt_years: d.inbuilt_years ?? null,
+            inbuilt_shape: d.inbuilt_shape ?? null,
             latitude: d.latitude ?? null,
             longitude: d.longitude ?? null,
             location: d.location ?? null,
@@ -859,6 +865,8 @@ export default function NewAnalysis() {
       depth_cm: d.depth_cm,
       ring_offset: d.ring_offset,
       ring_offset_error: d.ring_offset_error,
+      inbuilt_years: d.inbuilt_years ?? null,
+      inbuilt_shape: d.inbuilt_shape ?? null,
       latitude: d.latitude,
       longitude: d.longitude,
       location: d.location,
@@ -1590,6 +1598,21 @@ export default function NewAnalysis() {
                     <FormHelperText sx={{ mt: 0, ml: 0 }}>
                       OxCal&rsquo;s UniformSpanPrior correction (Nicholls and Jones 2001), on
                       by default. Only affects a sequence with three or more boundaries.
+                    </FormHelperText>
+                    <FormControlLabel
+                      sx={{ mt: 1, display: 'flex' }}
+                      control={
+                        <Switch
+                          checked={mcmc.apply_inbuilt}
+                          onChange={(e) => setMcmc({ apply_inbuilt: e.target.checked })}
+                        />
+                      }
+                      label={<span>Apply inbuilt-age allowances</span>}
+                    />
+                    <FormHelperText sx={{ mt: 0, ml: 0 }}>
+                      {measurements.some((m) => (m.inbuilt_years ?? 0) > 0)
+                        ? 'Off runs the model as if no date had an allowance.'
+                        : 'No date here has an inbuilt-age allowance.'}
                     </FormHelperText>
                   </AccordionDetails>
                 </Accordion>

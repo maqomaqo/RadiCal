@@ -36,8 +36,8 @@ _INPUT_FIELDS = (
     'id', 'sample_name', 'age_bp', 'error_1sigma', 'material_type', 'sample_type',
     'curve_id', 'delta_r', 'delta_r_error', 'delta_r_source', 'reservoir_age',
     'latitude', 'longitude', 'location', 'notes', 'depth_cm', 'ring_offset',
-    'ring_offset_error', 'outlier_prior', 'outlier_model', 'group_id', 'element_id',
-    'tpq_age_bp', 'taq_age_bp',
+    'ring_offset_error', 'inbuilt_years', 'inbuilt_shape', 'outlier_prior',
+    'outlier_model', 'group_id', 'element_id', 'tpq_age_bp', 'taq_age_bp',
 )
 
 # The collection as the CSV importer reads it (date_import.TEMPLATE_COLUMNS),
@@ -53,7 +53,8 @@ _SAMPLE_COLUMNS = [
     ('tpq_age_bp', 'tpq_age_bp'), ('taq_age_bp', 'taq_age_bp'),
     ('latitude', 'latitude'), ('longitude', 'longitude'), ('notes', 'notes'),
     ('sample_type', 'sample_type'), ('location', 'location'),
-    ('depth_cm', 'depth_cm'),
+    ('depth_cm', 'depth_cm'), ('inbuilt_years', 'inbuilt_years'),
+    ('inbuilt_shape', 'inbuilt_shape'),
 ]
 
 # One row per modelled transition or duration, per analysis: long rather than

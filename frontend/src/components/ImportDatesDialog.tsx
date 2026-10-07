@@ -56,6 +56,9 @@ export interface ImportedDate {
   // .oxcal file arrives with these filled in from its Gap() statements.
   ring_offset: number | null
   ring_offset_error: number | null
+  // A date's inbuilt-age allowance, when the file has one (utils/inbuiltAge).
+  inbuilt_years?: number | null
+  inbuilt_shape?: 'uniform' | 'exponential' | null
   // WGS84 decimal degrees, and only that: a file writing them in degrees and
   // minutes is refused by name rather than converted, so a date that arrives
   // here placed is placed in the one form the app reads.

@@ -154,6 +154,10 @@ class ProjectSample(Base):
     # copy; see there for the sign convention and why it is not depth_cm.
     ring_offset = Column(Float, nullable=True)
     ring_offset_error = Column(Float, nullable=True)
+    # How much older than its event the material may be, in years, and the
+    # shape of that allowance (feature spec M1; exact_chain.inbuilt_kernel).
+    inbuilt_years = Column(Float, nullable=True)
+    inbuilt_shape = Column(String, nullable=True)
 
     location = Column(String, nullable=True)
     notes = Column(String, nullable=True)
@@ -535,6 +539,10 @@ class RadiocarbonSample(Base):
     # V_Sequence, where each gap is measured rather than counted. Null (or
     # zero) is a D_Sequence: the gaps are asserted exactly.
     ring_offset_error = Column(Float, nullable=True)
+    # How much older than its event the material may be, in years, and the
+    # shape of that allowance (feature spec M1; exact_chain.inbuilt_kernel).
+    inbuilt_years = Column(Float, nullable=True)
+    inbuilt_shape = Column(String, nullable=True)
 
     location = Column(String, nullable=True)
     notes = Column(String, nullable=True)

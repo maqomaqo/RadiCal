@@ -81,6 +81,8 @@ export default function SameEventPopover({ anchorEl, onClose, phaseName, dates, 
           sample_type: m.sample_type ?? undefined,
           delta_r: m.delta_r ?? null,
           delta_r_error: m.delta_r_error ?? null,
+          inbuilt_years: m.inbuilt_years ?? null,
+          inbuilt_shape: m.inbuilt_shape ?? null,
         })),
       }),
     })

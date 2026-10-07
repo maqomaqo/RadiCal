@@ -147,6 +147,9 @@ export default function CompareResults() {
   }, [searchParams])
 
   const [runs, setRuns] = useState<RunPayload[] | null>(null)
+  // Bumped to re-read the runs while any is still running, so a comparison
+  // opened as its second run starts fills in when that run finishes.
+  const [reload, setReload] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -177,7 +180,8 @@ export default function CompareResults() {
       return
     }
 
-    setLoading(true)
+    // A re-read while waiting for a run keeps what is on screen.
+    if (reload === 0) setLoading(true)
     setError(null)
     Promise.all(
       requestedIds.map(async (id) => {
@@ -216,12 +220,18 @@ export default function CompareResults() {
     return () => {
       active = false
     }
-  }, [requestedIds])
+  }, [requestedIds, reload])
 
   const unfinished = useMemo(
     () => (runs ?? []).filter((run) => run.status !== 'completed'),
     [runs]
   )
+  const waiting = unfinished.some((run) => run.status === 'pending' || run.status === 'running')
+  useEffect(() => {
+    if (!waiting) return
+    const timer = setTimeout(() => setReload((n) => n + 1), 3000)
+    return () => clearTimeout(timer)
+  }, [waiting, runs])
 
   const modelled = useMemo(
     () => (runs ?? []).map((run) => reportingOf(run)),
@@ -517,8 +527,8 @@ export default function CompareResults() {
       </Paper>
 
       {unfinished.length > 0 && (
-        <Alert severity="error" sx={{ mb: 3 }}>
-          <AlertTitle>Nothing to compare yet</AlertTitle>
+        <Alert severity={waiting ? 'info' : 'error'} sx={{ mb: 3 }}>
+          <AlertTitle>{waiting ? 'Waiting for a run to finish' : 'Nothing to compare yet'}</AlertTitle>
           {unfinished.map((run) => (
             <div key={run.id}>
               {run.name} is {run.status}

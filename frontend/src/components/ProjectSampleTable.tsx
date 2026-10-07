@@ -47,6 +47,7 @@ import {
   deltaRErrorMissing,
   isMarineMeasurement,
 } from '@/components/MeasurementFields'
+import { INBUILT_SHAPES, describeInbuilt, inbuiltCell } from '@/utils/inbuiltAge'
 import {
   columnVisible,
   loadColumnOverrides,
@@ -88,6 +89,11 @@ export interface ProjectSample {
   // timber it came from -- not of any one analysis.
   ring_offset: number | null
   ring_offset_error: number | null
+  // How much older than its event the material may be (utils/inbuiltAge).
+  // A property of the sample, so the collection holds it and deploying
+  // carries it.
+  inbuilt_years: number | null
+  inbuilt_shape: 'uniform' | 'exponential' | null
   // Where the sample came from, in WGS84 decimal degrees. Always the stored
   // value: the project's coordinate_precision governs what leaves in an export
   // or a figure, not what its own owner reads back in the table.
@@ -136,6 +142,8 @@ type DraftForm = {
   depth_cm: string
   ring_offset: string
   ring_offset_error: string
+  inbuilt_years: string
+  inbuilt_shape: 'uniform' | 'exponential'
   latitude: string
   longitude: string
   location: string
@@ -157,6 +165,8 @@ const EMPTY_FORM: DraftForm = {
   depth_cm: '',
   ring_offset: '',
   ring_offset_error: '',
+  inbuilt_years: '',
+  inbuilt_shape: 'uniform',
   latitude: '',
   longitude: '',
   location: '',
@@ -179,6 +189,8 @@ function toForm(s: ProjectSample): DraftForm {
     depth_cm: s.depth_cm == null ? '' : String(s.depth_cm),
     ring_offset: s.ring_offset == null ? '' : String(s.ring_offset),
     ring_offset_error: s.ring_offset_error == null ? '' : String(s.ring_offset_error),
+    inbuilt_years: s.inbuilt_years == null ? '' : String(s.inbuilt_years),
+    inbuilt_shape: s.inbuilt_shape ?? 'uniform',
     latitude: s.latitude == null ? '' : String(s.latitude),
     longitude: s.longitude == null ? '' : String(s.longitude),
     location: s.location ?? '',
@@ -209,6 +221,8 @@ function formToPayload(form: DraftForm) {
     depth_cm: numOrNull(form.depth_cm),
     ring_offset: numOrNull(form.ring_offset),
     ring_offset_error: numOrNull(form.ring_offset_error),
+    inbuilt_years: numOrNull(form.inbuilt_years),
+    inbuilt_shape: numOrNull(form.inbuilt_years) ? form.inbuilt_shape : null,
     latitude: numOrNull(form.latitude),
     longitude: numOrNull(form.longitude),
     location: form.location.trim() || null,
@@ -440,6 +454,8 @@ export default function ProjectSampleTable({ projectId, mapTilesEnabled = false 
             depth_cm: d.depth_cm,
             ring_offset: d.ring_offset,
             ring_offset_error: d.ring_offset_error,
+            inbuilt_years: d.inbuilt_years,
+            inbuilt_shape: d.inbuilt_shape,
             latitude: d.latitude,
             longitude: d.longitude,
             location: d.location,
@@ -782,6 +798,17 @@ export default function ProjectSampleTable({ projectId, mapTilesEnabled = false 
             : s.ring_offset_error
               ? `${s.ring_offset} ± ${s.ring_offset_error}`
               : s.ring_offset,
+      },
+      {
+        id: 'inbuilt',
+        label: 'Inbuilt age',
+        auto: anyOf((s) => (s.inbuilt_years ?? 0) > 0),
+        populated: anyOf((s) => (s.inbuilt_years ?? 0) > 0),
+        align: 'right',
+        numeric: true,
+        headTitle:
+          'How much older than its event the dated material may be: ≤ a maximum (uniform), or ~ a typical age (exponential). Applied in Bayesian models.',
+        render: (s) => inbuiltCell(s.inbuilt_years, s.inbuilt_shape) || muted('—'),
       },
       {
         id: 'location',
@@ -1402,6 +1429,30 @@ export default function ProjectSampleTable({ projectId, mapTilesEnabled = false 
               onChange={(e) => setForm({ ...form, ring_offset_error: e.target.value })}
               helperText="Only where the gap was measured rather than counted."
             />
+            <TextField
+              label="Inbuilt age (yr)"
+              type="number"
+              value={form.inbuilt_years}
+              inputProps={{ min: 0, max: 1000 }}
+              onChange={(e) => setForm({ ...form, inbuilt_years: e.target.value })}
+              helperText={describeInbuilt(numOrNull(form.inbuilt_years), form.inbuilt_shape)}
+            />
+            <TextField
+              select
+              label="Allowance"
+              value={form.inbuilt_shape}
+              disabled={!numOrNull(form.inbuilt_years)}
+              onChange={(e) =>
+                setForm({ ...form, inbuilt_shape: e.target.value as 'uniform' | 'exponential' })
+              }
+              helperText="Up to a maximum, or about a typical age."
+            >
+              {INBUILT_SHAPES.map((option) => (
+                <MenuItem key={option.value} value={option.value}>
+                  {option.label}
+                </MenuItem>
+              ))}
+            </TextField>
             <TextField
               label="Notes"
               multiline
