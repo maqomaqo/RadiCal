@@ -267,7 +267,10 @@ class TestDegenerateCases:
             sigma2 = curve_error ** 2 + m['error_1sigma'] ** 2
             product *= np.exp(-0.5 * (c14 - m['age_bp']) ** 2 / sigma2) / np.sqrt(sigma2)
         mass = product / product.sum()
-        expected_median = float(np.interp(0.5, np.cumsum(mass), grid))
+        # Each grid point stands for a one-year cell, so the cumulative mass
+        # through a cell is reached at its far edge, not its centre.
+        edges = np.concatenate([[grid[0] - 0.5], grid + 0.5])
+        expected_median = float(np.interp(0.5, np.concatenate([[0.0], np.cumsum(mass)]), edges))
 
         assert result['reference']['posterior_median'] == pytest.approx(
             expected_median, abs=1.0)

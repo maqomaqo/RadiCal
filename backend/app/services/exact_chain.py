@@ -85,9 +85,26 @@ MAX_GRID_POINTS = 2000
 # array of doubles is 32 MB at M = 2000 and one is held per group, so a long
 # sequence trades calendar resolution for staying inside the memory budget.
 GROUPS_AT_FULL_RESOLUTION = 6
-# Finest calendar step worth using. IntCal20/SHCal20 are themselves tabulated
-# at 1-20 year intervals, so going below a year buys nothing real.
+# Finest calendar step the first pass uses. IntCal20/SHCal20 are themselves
+# tabulated at 1-20 year intervals.
 MIN_GRID_STEP_YEARS = 1.0
+# The second pass (see solve and _refined_grid) may go finer, because the
+# DISCRETISATION, not the curve, sets how fine is worth having: on the
+# Nenthorn shared-boundary reference model the separation of the two ordered
+# groups moved 15.2 -> 14.2 -> 13.8 -> 13.6 years at steps of 2.5, 1.0, 0.45 and
+# 0.23, converging near the 13.2 OxCal gives, and still 1 year off at 1.0.
+REFINED_MIN_STEP_YEARS = 0.25
+# Where the second pass's grid must reach: every posterior out to this much mass
+# in either tail, every date's own likelihood support, and a margin of this
+# fraction of that width, or this many first-pass steps if more.
+REFINE_TAIL_MASS = 1e-6
+REFINE_MARGIN_FRACTION = 0.05
+REFINE_MARGIN_STEPS = 3
+# A second pass is only run when it is at least this much finer, and only kept
+# when no distribution has more than REFINED_EDGE_MASS in the outermost 1% of
+# its grid (a margin that cut a tail off would show there).
+REFINE_MIN_GAIN = 1.5
+REFINED_EDGE_MASS = 1e-4
 # How far beyond the dates' own likelihood support the boundaries are allowed
 # to range, as a multiple of that support's width. Boundaries genuinely
 # extend past the outermost date -- that is what they are for -- and the tail
@@ -687,15 +704,11 @@ def date_tables(
     return likelihood, cumulative, outlier_parts
 
 
-def _build_grid(measurements: List[Dict], element_bounds: Dict,
-                num_groups: int = 1) -> np.ndarray:
+def _dates_extent(measurements: List[Dict], element_bounds: Dict
+                  ) -> Tuple[float, float, float, float]:
     """
-    A calendar grid wide enough for the dates and the boundaries either side of
-    them, at the finest step the memory budget allows.
-
-    One M x M array of doubles is 32 MB at M = 2000 and a transfer matrix is
-    held per group, so the point count scales down as the model grows: a long
-    sequence gets a coarser calendar step rather than an out-of-memory kill.
+    (youngest, oldest) calendar age any date's likelihood reaches, cal BP, and
+    the (youngest, oldest) the curves in use cover.
     """
     curve_lo, curve_hi = np.inf, -np.inf
     lo, hi = np.inf, -np.inf
@@ -719,16 +732,81 @@ def _build_grid(measurements: List[Dict], element_bounds: Dict,
 
     if not np.isfinite(lo) or not np.isfinite(hi) or hi <= lo:
         raise ValueError('the dates have no overlapping calendar range to solve over')
+    return lo, hi, curve_lo, curve_hi
+
+
+def _point_budget(num_groups: int) -> float:
+    """Grid points the memory budget allows for a chain of `num_groups` groups:
+    the full count up to GROUPS_AT_FULL_RESOLUTION, fewer beyond."""
+    return MAX_GRID_POINTS / max(1.0, np.sqrt(num_groups / GROUPS_AT_FULL_RESOLUTION))
+
+
+def _build_grid(measurements: List[Dict], element_bounds: Dict,
+                num_groups: int = 1) -> np.ndarray:
+    """
+    A calendar grid wide enough for the dates and the boundaries either side of
+    them, at the finest step the memory budget allows.
+
+    One M x M array of doubles is 32 MB at M = 2000 and a transfer matrix is
+    held per group, so the point count scales down as the model grows: a long
+    sequence gets a coarser calendar step rather than an out-of-memory kill.
+
+    This is the FIRST pass's grid, padded blind for the boundaries' tails;
+    solve() then narrows it to where the posterior is (_refined_grid).
+    """
+    lo, hi, curve_lo, curve_hi = _dates_extent(measurements, element_bounds)
 
     pad = max(MIN_BOUNDARY_PAD_YEARS, BOUNDARY_WINDOW_FACTOR * (hi - lo))
     lo = max(curve_lo, lo - pad)
     hi = min(curve_hi, hi + pad)
 
     # Up to GROUPS_AT_FULL_RESOLUTION groups the full point count fits.
-    budget = MAX_GRID_POINTS / max(1.0, np.sqrt(num_groups / GROUPS_AT_FULL_RESOLUTION))
+    budget = _point_budget(num_groups)
     step = _reporting_aligned_step(max(MIN_GRID_STEP_YEARS, (hi - lo) / budget))
     # An explicit count rather than np.arange(lo, hi + step, step), whose
     # length depends on floating-point rounding at the end point.
+    count = int(np.ceil((hi - lo) / step - 1e-9)) + 1
+    return lo + step * np.arange(count)
+
+
+def _refined_grid(grid: np.ndarray, densities: List[np.ndarray],
+                  measurements: List[Dict], element_bounds: Dict,
+                  num_groups: int) -> Optional[np.ndarray]:
+    """
+    The second pass's grid, or None when it would not be meaningfully finer.
+
+    The first pass pads the dates by six times their own width for the
+    boundaries' tails, blind, so on a long model most of its points lie where
+    no posterior is: a twenty-phase sequence over 1,500 years was solved at a
+    15-year step across 14,800 years. Having solved it once, the tails are
+    known. This grid covers every first-pass posterior out to REFINE_TAIL_MASS
+    in either tail and every date's own likelihood support, with a margin, at
+    the finest step the same point budget allows.
+
+    The dates' supports are included so each date's likelihood is normalised,
+    and its outlier component convolved, over all of it, exactly as on the
+    first grid; only the empty padding goes.
+    """
+    lo, hi = np.inf, -np.inf
+    for density in densities:
+        total = float(density.sum())
+        if total <= 0:
+            continue
+        cdf = np.cumsum(density) / total
+        lo = min(lo, float(grid[min(len(grid) - 1, np.searchsorted(cdf, REFINE_TAIL_MASS))]))
+        hi = max(hi, float(grid[min(len(grid) - 1,
+                                    np.searchsorted(cdf, 1.0 - REFINE_TAIL_MASS))]))
+    dates_lo, dates_hi, _curve_lo, _curve_hi = _dates_extent(measurements, element_bounds)
+    lo, hi = min(lo, dates_lo), max(hi, dates_hi)
+    if not np.isfinite(lo) or not np.isfinite(hi) or hi <= lo:
+        return None
+    first_step = float(grid[1] - grid[0])
+    margin = max(REFINE_MARGIN_STEPS * first_step, REFINE_MARGIN_FRACTION * (hi - lo))
+    lo, hi = max(float(grid[0]), lo - margin), min(float(grid[-1]), hi + margin)
+    step = _reporting_aligned_step(max(REFINED_MIN_STEP_YEARS,
+                                       (hi - lo) / _point_budget(num_groups)))
+    if step * REFINE_MIN_GAIN > first_step:
+        return None
     count = int(np.ceil((hi - lo) / step - 1e-9)) + 1
     return lo + step * np.arange(count)
 
@@ -751,6 +829,12 @@ def _reporting_aligned_step(step: float) -> float:
     if step >= reporting:
         return float(np.ceil(step / reporting - 1e-9) * reporting)
     return float(reporting / np.floor(reporting / step + 1e-9))
+
+
+def _finite_peak(log_weights: np.ndarray) -> float:
+    """The finite maximum _rescaled takes out, 0 when there is none."""
+    finite = np.isfinite(log_weights)
+    return float(log_weights[finite].max()) if np.any(finite) else 0.0
 
 
 def _rescaled(log_weights: np.ndarray) -> np.ndarray:
@@ -1158,18 +1242,34 @@ def _messages(chain: Chain, allowed: Dict, transfer):
     """
     Forward/backward over the boundaries, the O(M^2) case.
 
-    Returns (pair_weight, boundary_density, draw_boundaries): pair_weight(k) is
-    everything outside group k as a matrix indexed [younger boundary, older
-    boundary], boundary_density(i) is boundary i's unnormalised marginal, and
-    draw_boundaries(rng, count) returns joint draws -- see below.
+    Returns (pair_weight, boundary_density, draw_boundaries, log_mass):
+    pair_weight(k) is everything outside group k as a matrix indexed [younger
+    boundary, older boundary], boundary_density(i) is boundary i's unnormalised
+    marginal, draw_boundaries(rng, count) returns joint draws -- see below --
+    and log_mass is the log of the total weight of the chain as `transfer`
+    scales it, which solve turns into the model's evidence.
+
+    Each message is scaled to a peak of one as it is formed, and the scales
+    kept in the log, so a long chain can neither underflow nor overflow and the
+    total survives the rescaling.
     """
+    log_scale = 0.0
     alpha = [np.where(allowed[chain.boundary_ids[0]], 1.0, 0.0)]
     for i in range(len(chain.groups)):
-        alpha.append((alpha[i][None, :] * transfer(i)).sum(axis=1))
+        message = (alpha[i][None, :] * transfer(i)).sum(axis=1)
+        peak = float(message.max())
+        if peak > 0:
+            message = message / peak
+            log_scale += np.log(peak)
+        alpha.append(message)
     beta = [None] * len(chain.boundary_ids)
     beta[-1] = np.where(allowed[chain.boundary_ids[-1]], 1.0, 0.0)
     for i in range(len(chain.groups) - 1, -1, -1):
-        beta[i] = (transfer(i) * beta[i + 1][:, None]).sum(axis=0)
+        message = (transfer(i) * beta[i + 1][:, None]).sum(axis=0)
+        peak = float(message.max())
+        beta[i] = message / peak if peak > 0 else message
+    total = float((alpha[-1] * beta[-1]).sum())
+    log_mass = (np.log(total) + log_scale) if total > 0 else -np.inf
 
     def draw_boundaries(rng, count: int) -> np.ndarray:
         """
@@ -1201,15 +1301,21 @@ def _messages(chain: Chain, allowed: Dict, transfer):
 
     return (lambda k: alpha[k][None, :] * beta[k + 1][:, None],
             lambda i: alpha[i] * beta[i],
-            draw_boundaries)
+            draw_boundaries, log_mass)
 
 
 def _normalised(matrix: np.ndarray) -> np.ndarray:
     """Scale a matrix by its own peak, so a chain of matrix products does not
     underflow. Everything built from these is normalised per-distribution at
     the end, so the discarded factors do not matter."""
-    peak = matrix.max()
-    return matrix / peak if peak > 0 else matrix
+    return _scaled_by_peak(matrix)[0]
+
+
+def _scaled_by_peak(matrix: np.ndarray) -> Tuple[np.ndarray, float]:
+    """(matrix scaled to a peak of one, log of the peak), for a caller that
+    needs the discarded factor back -- the evidence does."""
+    peak = float(matrix.max())
+    return (matrix / peak, float(np.log(peak))) if peak > 0 else (matrix, 0.0)
 
 
 def _messages_with_span_prior(chain: Chain, allowed: Dict, transfer,
@@ -1240,14 +1346,16 @@ def _messages_with_span_prior(chain: Chain, allowed: Dict, transfer,
     first_ok = np.where(allowed[chain.boundary_ids[0]], 1.0, 0.0)
     last_ok = np.where(allowed[chain.boundary_ids[-1]], 1.0, 0.0)
     # C indexed [oldest, youngest], restricted to allowed ends.
-    C = _normalised(correction.T * first_ok[:, None] * last_ok[None, :])
+    C, log_scale = _scaled_by_peak(correction.T * first_ok[:, None] * last_ok[None, :])
 
     # A[k]: from the first boundary to boundary k. A[0] is the identity, so
     # that a chain of one group reduces to the plain case.
     identity = np.diag(first_ok)
     A = [identity]
     for i in range(num_groups):
-        A.append(_normalised(A[i] @ transfer(i).T))
+        product, factor = _scaled_by_peak(A[i] @ transfer(i).T)
+        A.append(product)
+        log_scale += factor
     # D[k]: from boundary k to the last.
     D = [None] * (num_groups + 1)
     D[num_groups] = np.diag(last_ok)
@@ -1260,6 +1368,8 @@ def _messages_with_span_prior(chain: Chain, allowed: Dict, transfer,
     L = [A[k].T @ C for k in range(num_groups + 1)]
     A_last = A[num_groups]
     del A
+    total = float((C * A_last).sum())
+    log_mass = (np.log(total) + log_scale) if total > 0 else -np.inf
 
     def pair_weight(k):
         # [older, younger] -> transposed to the [younger, older] the caller uses.
@@ -1303,11 +1413,13 @@ def _messages_with_span_prior(chain: Chain, allowed: Dict, transfer,
                 indices[start:stop, i + 1] = _sample_columns(rng, rows)
         return indices
 
-    return pair_weight, boundary_density, draw_boundaries
+    return pair_weight, boundary_density, draw_boundaries, log_mass
 
 
 def _draw_dates(rng, chain: Chain, cumulative: Dict[str, np.ndarray],
-                boundary_draws: np.ndarray) -> Dict[str, np.ndarray]:
+                boundary_draws: np.ndarray,
+                likelihood: Optional[Dict[str, np.ndarray]] = None,
+                step: Optional[float] = None) -> Dict[str, np.ndarray]:
     """
     A calendar index for every date, one per joint boundary draw.
 
@@ -1316,10 +1428,11 @@ def _draw_dates(rng, chain: Chain, cumulative: Dict[str, np.ndarray],
     are then conditionally independent, so each is an inverse-CDF draw on the
     interval.
 
-    The truncation uses the plain cumulative rather than the trapezoidal
-    _interval_integral the solver's weights use. The two differ by half a grid
-    cell at each end, which moves a drawn date by at most one cell, far below
-    the five-year step these draws are reported at.
+    With `likelihood` and `step` the two end cells, where the date sits on a
+    boundary, count half, as in the interval integral the solver's weights use
+    (_interval_integral) and in the date marginals, so the draws come from the
+    same joint posterior the marginals describe. Without them every cell of the
+    interval counts whole, which moves a drawn date by at most a cell.
     """
     draws: Dict[str, np.ndarray] = {}
     for index, date_ids in enumerate(chain.groups):
@@ -1330,13 +1443,28 @@ def _draw_dates(rng, chain: Chain, cumulative: Dict[str, np.ndarray],
         for date_id in date_ids:
             cum = cumulative[date_id]
             below = np.concatenate([[0.0], cum])
-            floor, ceiling = below[low], cum[high]
             uniform = rng.random(len(low))
-            picked = np.searchsorted(cum, floor + uniform * (ceiling - floor))
+            if likelihood is not None and step is not None:
+                density = likelihood[date_id]
+                low_end = 0.5 * step * density[low]
+                high_end = 0.5 * step * density[high]
+                # Interior cells low+1 .. high-1, whole.
+                interior = np.where(high > low + 1, cum[np.maximum(high - 1, 0)] - cum[low], 0.0)
+                total = low_end + interior + high_end
+                target = uniform * total
+                inside = np.searchsorted(cum, cum[low] + (target - low_end), side='right')
+                picked = np.where(target < low_end, low,
+                                  np.where(target < low_end + interior,
+                                           np.clip(inside, low + 1, np.maximum(high - 1, low + 1)),
+                                           high))
+                empty = total <= 0
+            else:
+                floor, ceiling = below[low], cum[high]
+                picked = np.searchsorted(cum, floor + uniform * (ceiling - floor))
+                empty = ceiling <= floor
             # An interval holding no likelihood at all (a date whose support
             # lies entirely outside where its boundaries landed) still has to
             # yield a value inside it rather than an out-of-range index.
-            empty = ceiling <= floor
             if np.any(empty):
                 spread = (low + uniform * (high - low + 1)).astype(np.int64)
                 picked = np.where(empty, spread, picked)
@@ -1381,10 +1509,43 @@ def solve(measurements: List[Dict], root: Dict, chain: Chain,
 
     `resolution` is the calendar step, in years, the HPD ranges and any
     durations are reported at -- see REPORTING_STEP_YEARS.
+
+    Solved twice where it pays: once on a grid padded blind for the boundaries'
+    tails, then on one covering only where that found posterior mass, at a
+    finer step (_refined_grid). `grid` reports the one used, with
+    `first_pass_step` when it was refined. `log_evidence` is the model's
+    evidence on that grid, for comparing solves of the same dates on the same
+    grid.
     """
     element_bounds = inherited_bounds(root)
-    by_id = {m['id']: m for m in measurements}
+    options = dict(num_samples=num_samples, seed=seed,
+                   uniform_span_prior=uniform_span_prior,
+                   estimate_durations=estimate_durations, dispersal=dispersal,
+                   interval_draws=interval_draws, resolution=resolution)
+    # Two passes. The first grid is padded blind for the boundaries' tails;
+    # the second covers only where the first found posterior mass, at the
+    # finer step the same point budget then allows (_refined_grid). Kept only
+    # if nothing runs off its edge, else the first pass stands.
     grid = _build_grid(measurements, element_bounds, len(chain.groups))
+    results, densities = _solve_on_grid(grid, measurements, root, chain,
+                                        element_bounds, **options)
+    refined = _refined_grid(grid, densities, measurements, element_bounds,
+                            len(chain.groups))
+    if refined is not None:
+        second, _densities = _solve_on_grid(refined, measurements, root, chain,
+                                            element_bounds, **options)
+        if second['edge_mass'] <= REFINED_EDGE_MASS:
+            second['grid']['first_pass_step'] = results['grid']['step']
+            return second
+    return results
+
+
+def _solve_on_grid(grid: np.ndarray, measurements: List[Dict], root: Dict,
+                   chain: Chain, element_bounds: Dict, num_samples: int,
+                   seed: int, uniform_span_prior: bool, estimate_durations: bool,
+                   dispersal: Optional[Dict], interval_draws: int,
+                   resolution: float) -> Tuple[Dict, List[np.ndarray]]:
+    """solve() on one grid: (results, every posterior density it reported)."""
     dt = float(grid[1] - grid[0])
     M = len(grid)
 
@@ -1443,17 +1604,29 @@ def solve(measurements: List[Dict], root: Dict, chain: Chain,
             # this every single-phase model would take the O(M^3) path.
             log_T[0] = log_T[0] + np.where(np.isfinite(log_correction),
                                            log_correction, -np.inf)
-            pair_weight, boundary_density, draw_boundaries = _messages(
+            pair_weight, boundary_density, draw_boundaries, log_mass = _messages(
                 chain, allowed, transfer)
+            correction_offset = 0.0
         else:
+            correction_offset = _finite_peak(log_correction)
             correction = np.where(np.isfinite(log_correction),
                                   np.exp(_rescaled(log_correction)), 0.0)
             correction = np.where(np.isfinite(correction), correction, 0.0)
-            pair_weight, boundary_density, draw_boundaries = _messages_with_span_prior(
-                chain, allowed, transfer, correction)
+            pair_weight, boundary_density, draw_boundaries, log_mass = \
+                _messages_with_span_prior(chain, allowed, transfer, correction)
     else:
-        pair_weight, boundary_density, draw_boundaries = _messages(
+        pair_weight, boundary_density, draw_boundaries, log_mass = _messages(
             chain, allowed, transfer)
+        correction_offset = 0.0
+    # The model's evidence, p(data | model), in the log: the chain's total
+    # weight with every factor the rescaling took out put back. Up to a constant
+    # that depends only on the dates and the grid -- each likelihood is
+    # normalised over the grid (date_tables) and the boundaries' prior is flat
+    # over it -- so it compares solves of the SAME dates on the SAME grid, such
+    # as one per value of a shared outlier scale, not models with different
+    # windows.
+    log_evidence = (log_mass + correction_offset
+                    + sum(_finite_peak(term) for term in log_T))
 
     rng = np.random.default_rng(seed)
     results = {'measurements': {}, 'boundaries': {}}
@@ -1474,6 +1647,12 @@ def solve(measurements: List[Dict], root: Dict, chain: Chain,
             G = np.exp(_rescaled(weights))
             G = np.where(np.isfinite(G), G, 0.0)
             W = G * outside
+            # The weight with the date ON the younger boundary (row t: the
+            # younger boundary at t, any older one) and ON the older (column t).
+            # W is zero wherever the older boundary is not strictly older, so a
+            # whole row or column sum is exactly that.
+            on_younger = W.sum(axis=1)
+            on_older = W.sum(axis=0)
             # Sum over {older boundary >= t} x {younger boundary <= t}, which
             # a pair of cumulative sums leaves on the diagonal. Both in place:
             # at M = 2000 each M x M temporary is 32 MB, and the sums are the
@@ -1481,7 +1660,15 @@ def solve(measurements: List[Dict], root: Dict, chain: Chain,
             np.cumsum(W, axis=0, out=W)
             reversed_view = W[:, ::-1]
             np.cumsum(reversed_view, axis=1, out=reversed_view)
-            density = likelihood[date_id] * np.diagonal(W)
+            # A date sitting on one of its boundaries counts HALF, as it does in
+            # the interval integral T was built from (_interval_integral) and in
+            # the sampler (gibbs.Model.endpoint_weight). Counted whole, the
+            # date's marginal was not the marginal of the joint the boundaries
+            # come from: modelled dates moved up to 3.7 years on the test models,
+            # and on the unordered Nenthorn reference run they were 0.64 years rms
+            # from the posteriors OxCal gave against 0.17 with the half.
+            enclosed = np.diagonal(W) - 0.5 * (on_younger + on_older)
+            density = likelihood[date_id] * np.clip(enclosed, 0.0, None)
             densities.append(density)
             summary = _summarize(grid, density, rng, num_samples, resolution)
             if date_id in outlier_parts:
@@ -1512,7 +1699,8 @@ def solve(measurements: List[Dict], root: Dict, chain: Chain,
     # bit-for-bit identical to what it was before any of this was collected.
     joint_rng = np.random.default_rng(seed + 1)
     boundary_draws = draw_boundaries(joint_rng, interval_draws)
-    date_draws = _draw_dates(joint_rng, chain, cumulative, boundary_draws)
+    date_draws = _draw_dates(joint_rng, chain, cumulative, boundary_draws,
+                             likelihood, dt)
     joint = {bid: grid[boundary_draws[:, i]]
              for i, bid in enumerate(chain.boundary_ids)}
     joint.update({date_id: grid[idx] for date_id, idx in date_draws.items()})
@@ -1526,10 +1714,11 @@ def solve(measurements: List[Dict], root: Dict, chain: Chain,
             durations=estimate_durations, dispersal=dispersal, step=resolution)
 
     results['method'] = 'exact'
+    results['log_evidence'] = float(log_evidence)
     results['uniform_span_prior'] = log_correction is not None
     results['grid'] = {'lower': float(grid[0]), 'upper': float(grid[-1]), 'step': dt}
     results['edge_mass'] = _edge_mass(densities, grid)
-    return results
+    return results, densities
 
 
 def _outlier_probability(density: np.ndarray, mixture: np.ndarray,
@@ -1649,13 +1838,18 @@ def _summarize(grid: np.ndarray, density: np.ndarray, rng, num_samples: int,
 
     mean = float((grid * mass).sum())
     variance = float(((grid - mean) ** 2 * mass).sum())
-    cdf = np.cumsum(mass)
-    median = float(np.interp(0.5, cdf, grid))
+    # Each grid point stands for the cell [t - dt/2, t + dt/2], so the
+    # cumulative mass THROUGH a cell is reached at its far edge, not its centre.
+    # Read against the centres, the median and every draw came out half a cell
+    # young: 22.5 for a density symmetric about 25 on a five-year grid.
+    cell_edges = np.concatenate([[grid[0] - dt / 2.0], grid + dt / 2.0])
+    cdf = np.concatenate([[0.0], np.cumsum(mass)])
+    median = float(np.interp(0.5, cdf, cell_edges))
 
     hpd_68 = _reported_ranges(grid, mass, SIGMA_1, step)
     hpd_95 = _reported_ranges(grid, mass, SIGMA_2, step)
 
-    draws = np.interp(rng.random(num_samples), cdf, grid)
+    draws = np.interp(rng.random(num_samples), cdf, cell_edges)
 
     return {
         'posterior_mean': mean,

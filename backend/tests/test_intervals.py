@@ -368,7 +368,7 @@ class TestTheJointSampler:
         matrix = rng.random((size, size)) + 0.05      # [younger, older]
         chain = self._chain(['b0', 'b1'], [['d']])
         allowed = {'b0': np.ones(size, bool), 'b1': np.ones(size, bool)}
-        _pair, _density, draw = ec._messages(chain, allowed, lambda i: matrix)
+        _pair, _density, draw, _log_mass = ec._messages(chain, allowed, lambda i: matrix)
 
         drawn = draw(np.random.default_rng(1), 200000)
         empirical = np.zeros((size, size))
@@ -385,7 +385,7 @@ class TestTheJointSampler:
         transfers = [first, second]
         chain = self._chain(['b0', 'b1', 'b2'], [['d1'], ['d2']])
         allowed = {b: np.ones(size, bool) for b in chain.boundary_ids}
-        _pair, _density, draw = ec._messages(
+        _pair, _density, draw, _log_mass = ec._messages(
             chain, allowed, lambda i: transfers[i])
 
         drawn = draw(np.random.default_rng(3), 300000)
@@ -404,7 +404,7 @@ class TestTheJointSampler:
         chain = self._chain(['b0', 'b1'], [['d']])
         allowed = {'b0': np.array([False, False, True, True, True, True]),
                    'b1': np.ones(size, bool)}
-        _pair, _density, draw = ec._messages(chain, allowed, lambda i: matrix)
+        _pair, _density, draw, _log_mass = ec._messages(chain, allowed, lambda i: matrix)
         drawn = draw(np.random.default_rng(4), 5000)
         assert drawn[:, 0].min() >= 2
 
@@ -422,7 +422,7 @@ class TestTheJointSampler:
         transfers = [first, second]
         chain = self._chain(['b0', 'b1', 'b2'], [['d1'], ['d2']])
         allowed = {b: np.ones(size, bool) for b in chain.boundary_ids}
-        _pair, _density, draw = ec._messages_with_span_prior(
+        _pair, _density, draw, _log_mass = ec._messages_with_span_prior(
             chain, allowed, lambda i: transfers[i], correction)
 
         drawn = draw(np.random.default_rng(6), 300000)
@@ -442,7 +442,7 @@ class TestDatesLandWhereTheyAreAllowed:
         measurements = _dates(('d1', 3000, 30, 'p'), ('d2', 3060, 30, 'p'))
         chain = ec.layout(tree, measurements)
         grid = ec._build_grid(measurements, {}, 1)
-        _lik, cumulative, _outliers = ec.date_tables(grid, measurements, {})
+        likelihood, cumulative, _outliers = ec.date_tables(grid, measurements, {})
 
         rng = np.random.default_rng(7)
         # Boundary index pairs picked directly, so this tests the truncation
@@ -452,7 +452,8 @@ class TestDatesLandWhereTheyAreAllowed:
         boundaries[:, 0] = rng.integers(len(grid) // 2, len(grid), count)
         boundaries[:, 1] = rng.integers(0, len(grid) // 2, count)
 
-        drawn = ec._draw_dates(rng, chain, cumulative, boundaries)
+        drawn = ec._draw_dates(rng, chain, cumulative, boundaries,
+                               likelihood, float(grid[1] - grid[0]))
         for date_id in ('d1', 'd2'):
             assert np.all(drawn[date_id] >= boundaries[:, 1])
             assert np.all(drawn[date_id] <= boundaries[:, 0])

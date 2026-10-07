@@ -168,10 +168,12 @@ def _brute_force(curve, grid, dates):
     implementation of
 
         p(t_j) ∝ L_j(t_j) * sum over {tb <= t_j <= ta} of
-                 (ta-tb)^(-K) * prod over i != j of F_i(tb, ta)
+                 h(t_j) (ta-tb)^(-K) * prod over i != j of F_i(tb, ta)
 
-    so that agreement with the vectorised solver is evidence about the code
-    rather than a restatement of it.
+    with h = 1/2 when t_j sits on tb or ta and 1 otherwise, so that agreement
+    with the vectorised solver is evidence about the code rather than a
+    restatement of it. The half is what makes these the marginals of the joint
+    the trapezoidal F integrates: summed over t_j, L_j h gives F_j back.
 
     What it checks is the MESSAGE PASSING, not the quadrature: F below uses the
     same trapezoidal interval integral the solver does, because a different
@@ -224,7 +226,9 @@ def _brute_force(curve, grid, dates):
                     if i != j:
                         weight *= fs[i]
                 if weight > 0:
-                    out[j, b:a + 1] += weight
+                    out[j, b + 1:a] += weight
+                    out[j, b] += 0.5 * weight
+                    out[j, a] += 0.5 * weight
     out = L * out
     return out / (out.sum(axis=1, keepdims=True) * dt)
 
@@ -497,8 +501,23 @@ class TestOrderedGroupsAgreeWithOxCal:
 
         run               OxCal   exact   gibbs        was (exact/gibbs)
         unordered          -0.1     0.0    -0.1
-        ordered            11.7    12.9    12.4        15.8 / 14.4
-        shared_boundary    13.2    12.9    14.0        15.8 / 15.9
+        ordered            11.7    14.0    12.4        15.8 / 14.4
+        shared_boundary    13.2    14.0    14.0        15.8 / 15.9
+
+    The exact column moved from 12.9 to 14.0 when two things were corrected at
+    once. A date sitting on one of its Boundaries now counts half, as it does in
+    the interval integral the Boundaries come from, where it used to count whole
+    and the modelled dates were not the marginals of the joint posterior. And a
+    second pass refines the grid. The 12.9 was partly the first error flattering
+    a grid that had not converged: on shared_boundary the separation runs 15.2,
+    14.2, 13.8 and 13.6 years at steps of 2.5, 1.0, 0.45 and 0.23 with the half,
+    and both weightings meet near OxCal's 13.2 only below half a year.
+
+    `ordered` has no Boundary between its groups, and this solver supplies one
+    (with_implicit_boundaries), so it solves the SAME model as shared_boundary
+    and gives the same answer. OxCal does not: its two runs differ by 1.5 years.
+    So the excess on `ordered` is partly a different model, not a solver error;
+    services/cross_check.py can integrate the boundary-free model directly.
 
     The history is worth keeping, because the residual was blamed on several things
     it was not. Four separate causes, each found by measurement:
@@ -518,8 +537,7 @@ class TestOrderedGroupsAgreeWithOxCal:
 
     What is NOT the cause, also by measurement: the implicit-boundary rewrite (the
     gap was the same size with the middle Boundary written out), OxCal's own
-    convergence (kIterations 30 -> 60 moves it 0.23 years), and the grid (what is
-    left survives halving the step twice).
+    convergence (kIterations 30 -> 60 moves it 0.23 years).
     """
 
     def _separation(self, run, **kwargs):
@@ -549,16 +567,17 @@ class TestOrderedGroupsAgreeWithOxCal:
         assert self._separation('unordered') == pytest.approx(
             self._oxcals('unordered'), abs=0.5)
 
-    @pytest.mark.parametrize('run', ['ordered', 'shared_boundary'])
-    def test_ordered_groups_agree_to_about_a_year(self, run):
+    @pytest.mark.parametrize('run,bound', [('ordered', 3.0), ('shared_boundary', 1.5)])
+    def test_ordered_groups_agree_to_about_a_year(self, run, bound):
         """
-        Measured at +1.19 on `ordered` and -0.34 on `shared_boundary`, from +4.10 and
-        +2.57 before the limits factor and +5.03/+3.50 before the binomial count.
-        Two years is the bound because the two runs now straddle OxCal rather than
-        both sitting above it.
+        Measured at +2.37 on `ordered` and +0.84 on `shared_boundary`; +1.19 and
+        -0.34 before the half weight and the second pass (see the class note),
+        +4.10 and +2.57 before the limits factor and +5.03/+3.50 before the
+        binomial count. `ordered` gets the wider bound because this solver gives
+        it a Boundary OxCal's model does not have.
         """
         excess = self._separation(run) - self._oxcals(run)
-        assert abs(excess) < 2.0, (run, excess)
+        assert abs(excess) < bound, (run, excess)
 
     def test_both_refinements_earn_their_place(self):
         """
@@ -743,7 +762,10 @@ class TestUniformSpanPrior:
                     pair = (T[0][None, :, :] * G[:, :, None] * corr[:, None, :]).sum(axis=2)
                 q = np.cumsum(pair, axis=0)
                 q = np.cumsum(q[:, ::-1], axis=1)[:, ::-1]
-                expected = lik[d] * np.diagonal(q)
+                # A date ON one of its boundaries counts half, as in the
+                # trapezoidal interval integral the transfers are built from.
+                on_a_boundary = 0.5 * (pair.sum(axis=1) + pair.sum(axis=0))
+                expected = lik[d] * (np.diagonal(q) - on_a_boundary)
                 expected = expected / expected.sum()
 
                 pairs = np.array(solved['measurements'][d]['probability_distribution'])
@@ -752,6 +774,99 @@ class TestUniformSpanPrior:
                 mine = expected[where] / expected[where].sum()
                 overlap = float(np.minimum(got, mine).sum())
                 assert overlap > 0.999, f'{d} overlap {overlap}'
+
+
+class TestEvidence:
+    """
+    The model's evidence (solve's log_evidence): the chain's total weight with
+    every factor the message scaling and the transfer rescaling took out put
+    back. Checked against explicit sums on grids small enough to enumerate,
+    with nothing rescaled, so a factor dropped or counted twice would show.
+    """
+
+    @staticmethod
+    def _small_grid():
+        import unittest.mock as mock
+        return (mock.patch.object(ec, 'MAX_GRID_POINTS', 70),
+                mock.patch.object(ec, 'MIN_BOUNDARY_PAD_YEARS', 250.0),
+                mock.patch.object(ec, 'BOUNDARY_WINDOW_FACTOR', 1.0))
+
+    @staticmethod
+    def _tables(solved, dates, tree):
+        from app.services.model_tree import inherited_bounds
+        grid = np.arange(solved['grid']['lower'],
+                         solved['grid']['upper'] + solved['grid']['step'] / 2,
+                         solved['grid']['step'])
+        lik, cum, _parts = ec.date_tables(grid, dates, inherited_bounds(tree))
+        return grid, lik, cum
+
+    @staticmethod
+    def _log_limits(grid, lik):
+        support = [np.where(l >= l.max() * ec.SUPPORT_THRESHOLD)[0] for l in lik.values()]
+        young_bound = max(grid[sup[0]] for sup in support)
+        old_bound = min(grid[sup[-1]] for sup in support)
+        g = (grid[None, :] - grid[:, None]) - (young_bound - old_bound)   # [b_last, b_first]
+        return np.where(g > 0, -np.log(np.where(g > 0, g, 1.0)), 0.0)
+
+    def test_one_group_matches_an_explicit_sum(self):
+        dates = _dates(('ev1', 3000, 30, 'p'), ('ev2', 3040, 30, 'p'), ('ev3', 3080, 30, 'p'))
+        tree = _sequence('s', [_boundary('b0'), _phase('p'), _boundary('b1')])
+        patches = self._small_grid()
+        with patches[0], patches[1], patches[2]:
+            solved = ec.solve(dates, tree, ec.layout(tree, dates), num_samples=50)
+            grid, lik, cum = self._tables(solved, dates, tree)
+        dt = grid[1] - grid[0]
+        span = grid[None, :] - grid[:, None]                         # [younger, older]
+        with np.errstate(divide='ignore', invalid='ignore'):
+            log_t = np.where(span > 0, -len(dates) * np.log(np.where(span > 0, span, 1.0)), -np.inf)
+        for d in dates:
+            log_t = log_t + ec._log_interval_integral(cum[d['id']], lik[d['id']], dt)
+        log_t = log_t + self._log_limits(grid, lik)
+        finite = np.isfinite(log_t)
+        peak = log_t[finite].max()
+        expected = peak + np.log(np.exp(log_t[finite] - peak).sum())
+        assert solved['log_evidence'] == pytest.approx(expected, abs=1e-8)
+
+    def test_two_groups_with_the_span_correction_match_the_cube(self):
+        dates = _dates(('ew_a', 3300, 30, 'p0'), ('ew_b', 3270, 30, 'p0'),
+                       ('ew_c', 3050, 30, 'p1'), ('ew_d', 3020, 30, 'p1'))
+        tree = _sequence('s', [_boundary('b0'), _phase('p0'), _boundary('b1'),
+                               _phase('p1'), _boundary('b2')])
+        chain = ec.layout(tree, dates)
+        patches = self._small_grid()
+        with patches[0], patches[1], patches[2]:
+            solved = ec.solve(dates, tree, chain, num_samples=50)
+            grid, lik, cum = self._tables(solved, dates, tree)
+        dt = grid[1] - grid[0]
+        M = len(grid)
+        span = grid[None, :] - grid[:, None]
+        log_t = []
+        for ids in chain.groups:
+            with np.errstate(divide='ignore', invalid='ignore'):
+                t = np.where(span > 0, -len(ids) * np.log(np.where(span > 0, span, 1.0)), -np.inf)
+            for i in ids:
+                t = t + ec._log_interval_integral(cum[i], lik[i], dt)
+            log_t.append(t)
+        cells = np.arange(M)[None, :] - np.arange(M)[:, None]          # [b2, b0]
+        with np.errstate(divide='ignore', invalid='ignore'):
+            log_corr = np.where(cells > 1, -np.log(np.where(cells > 1, cells - 1, 1.0)), -np.inf)
+        log_corr = log_corr + self._log_limits(grid, lik)
+        # The cube, axes (b2, b1, b0), in the log.
+        cube = log_t[0][None, :, :] + log_t[1][:, :, None] + log_corr[:, None, :]
+        finite = np.isfinite(cube)
+        peak = cube[finite].max()
+        expected = peak + np.log(np.exp(cube[finite] - peak).sum())
+        assert solved['log_evidence'] == pytest.approx(expected, abs=1e-8)
+
+    def test_a_long_chain_neither_underflows_nor_overflows(self):
+        children, dates = [_boundary('l0')], []
+        for i in range(40):
+            children += [_phase(f'lp{i}'), _boundary(f'l{i + 1}')]
+            dates += _dates((f'ld{i}', 4000 - 40 * i, 30, f'lp{i}'))
+        tree = _sequence('s', children)
+        solved = ec.solve(dates, tree, ec.layout(tree, dates), num_samples=20,
+                          uniform_span_prior=False, interval_draws=50)
+        assert np.isfinite(solved['log_evidence'])
 
 
 class TestTheCorrectionIsExact:
@@ -792,14 +907,18 @@ class TestTheCorrectionIsExact:
         """
         grid = np.linspace(self.LO, self.HI, M)
         flat = np.ones(M)
-        saved = (ec._date_likelihood, ec._build_grid, ec.containment_limits)
+        saved = (ec._date_likelihood, ec._build_grid, ec.containment_limits,
+                 ec._refined_grid)
         ec._date_likelihood = lambda g, m, b: flat.copy()
         ec._build_grid = lambda ms, eb, ng=1: grid.copy()
         ec.containment_limits = lambda g, inl, ids: (-np.inf, np.inf)
+        # This grid and no other: the likelihood above is sized to it.
+        ec._refined_grid = lambda *args, **kwargs: None
         return grid, saved
 
     def _restore(self, saved):
-        ec._date_likelihood, ec._build_grid, ec.containment_limits = saved
+        (ec._date_likelihood, ec._build_grid, ec.containment_limits,
+         ec._refined_grid) = saved
 
     def _model(self, n, dates_per_group):
         children, dates = [], []
@@ -897,9 +1016,10 @@ class TestTheLimitsFactor:
     def _flat(self):
         grid = np.linspace(self.LO, self.HI, self.M)
         flat = np.ones(self.M)
-        saved = (ec._date_likelihood, ec._build_grid)
+        saved = (ec._date_likelihood, ec._build_grid, ec._refined_grid)
         ec._date_likelihood = lambda g, m, b: flat.copy()
         ec._build_grid = lambda ms, eb, ng=1: grid.copy()
+        ec._refined_grid = lambda *args, **kwargs: None
         return grid, saved
 
     def _model(self, tpq=None, taq=None):
@@ -976,7 +1096,7 @@ class TestTheLimitsFactor:
             want = want / want.sum()
             assert 0.5 * np.abs(got - want).sum() < 1e-6
         finally:
-            ec._date_likelihood, ec._build_grid = saved
+            ec._date_likelihood, ec._build_grid, ec._refined_grid = saved
 
     def test_which_term_of_the_min_wins_sets_the_direction(self):
         """
@@ -1208,19 +1328,28 @@ class TestOutlierModel:
 
         So the same dates solved on a much wider grid must give much the
         same probabilities.
+
+        The second pass (solve's _refined_grid) narrows the grid to where the
+        posterior is, which is the same question again, so it is held to the
+        same standard: the refined answer must match the first pass's.
         """
         sf, res = solved
         import unittest.mock as mock
         samples, tree = sf.measurements(), sf.model_tree()
         chain = ec.layout(tree, samples)
-        with mock.patch.object(ec, 'BOUNDARY_WINDOW_FACTOR', 30.0):
-            wide = ec.solve(samples, tree, chain, num_samples=500)
+        with mock.patch.object(ec, '_refined_grid', lambda *args, **kwargs: None):
+            narrow = ec.solve(samples, tree, chain, num_samples=500)
+            with mock.patch.object(ec, 'BOUNDARY_WINDOW_FACTOR', 30.0):
+                wide = ec.solve(samples, tree, chain, num_samples=500)
         assert wide['grid']['upper'] - wide['grid']['lower'] > \
-            2 * (res['grid']['upper'] - res['grid']['lower'])
+            2 * (narrow['grid']['upper'] - narrow['grid']['lower'])
+        assert 'first_pass_step' in res['grid']
         for m in samples:
-            narrow_p = res['measurements'][m['id']]['outlier_probability']
+            narrow_p = narrow['measurements'][m['id']]['outlier_probability']
             wide_p = wide['measurements'][m['id']]['outlier_probability']
+            refined_p = res['measurements'][m['id']]['outlier_probability']
             assert wide_p == pytest.approx(narrow_p, abs=0.05), m['id']
+            assert refined_p == pytest.approx(narrow_p, abs=0.05), m['id']
 
     def test_off_by_default(self):
         """It changes reported dates, so it is the analyst's call."""

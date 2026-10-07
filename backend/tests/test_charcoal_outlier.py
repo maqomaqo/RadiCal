@@ -331,9 +331,11 @@ class TestPhaseWidth:
     def test_this_fixture_still_overshoots(self):
         """
         The remaining disagreement, pinned so it cannot drift unnoticed. With
-        three dates declared residual outright, this model's span comes out 54.9
-        years against OxCal's 29.2 -- now too WIDE, where before the quadrature
-        fix everything was too narrow.
+        three dates declared residual outright, this model's span comes out too
+        WIDE against OxCal's 29.2, where before the quadrature fix everything was
+        too narrow: 54.9 years once, 40.4 on the first-pass grid (a 1.67-year
+        step), and 38.6 since the second pass refines it (0.83 years; 37.7 at
+        0.38), so part of what was left was the grid.
 
         Asserted as a band: this fails if someone closes the gap, which is the
         signal to revisit the fixture's note.
@@ -345,7 +347,7 @@ class TestPhaseWidth:
         oxcal_span = (fx.posterior_means()['Start Nenthorn']
                       - fx.posterior_means()['End Nenthorn'])
         assert oxcal_span == pytest.approx(29.2, abs=1.0), oxcal_span
-        assert 40.0 < span < 70.0, span
+        assert 34.0 < span < 70.0, span
 
     def test_absorbing_the_declared_outliers_narrows_the_span_monotonically(self):
         """
