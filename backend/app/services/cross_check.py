@@ -49,6 +49,21 @@ Three, which between them cover what the sampler is most often given:
     Dates in the same block are unordered, and one block alone is the plain
     unordered group.
 
+  * Any of those with dates OUTSIDE EVERY BOUNDARY at either end: Phases or
+    Sequences of dates before the first Boundary of the model's Sequence, or
+    after its last. They are ordered against that Boundary but have no span
+    term -- their prior is flat, as OxCal's is for a date outside every
+    Boundary -- so given the end Boundary F they are independent of the rest,
+    and enter as a weight on F alone:
+
+        g(F) = the integral of their likelihoods over placements older than F
+               (younger, at the other end), in their own order (_blocks)
+
+    which is the ordered-group integral above with no span factor and the
+    grid's edge as the other end. Their outlier components, if they carried
+    any, would reach past this module's grid where the sampler's goes further,
+    so a date out there with an outlier model is not checked.
+
 Anything else is reported as not checked, with the reason.
 
 The same model, not a neighbour
@@ -135,19 +150,58 @@ def _ids(element: Dict, found: Optional[set] = None) -> set:
     return found
 
 
-def shape(root: Dict, measurements: List[Dict]
-          ) -> Tuple[Optional[Tuple[str, str, List[str]]], List[exact_chain.Chain]]:
+Tails = Tuple[List[str], List[str]]
+
+
+def _has_boundary(element: Dict) -> bool:
+    return element.get('element_type') == 'boundary' or any(
+        _has_boundary(child) for child in element.get('children') or [])
+
+
+def _tails(flat: Dict, measurements: List[Dict]) -> Tuple[Dict, Tails]:
     """
-    (outer pair, branches): the outer pair as (S, E, dates directly between
-    them), or None for a single chain; the branches as exact_chain Chains.
-    Raises NotChecked for any other shape.
+    The flattened model with any dates OUTSIDE EVERY BOUNDARY at its two ends
+    taken off -- the children before its first Boundary and after its last --
+    and those dates, (older end, younger end). See the module docstring.
+    """
+    children = flat.get('children') or []
+    positions = [i for i, c in enumerate(children) if _has_boundary(c)]
+    if not positions:
+        raise NotChecked('the model has no Boundary to check')
+    first, last = positions[0], positions[-1]
+
+    def dates_of(elements: List[Dict]) -> List[str]:
+        inside = set()
+        for element in elements:
+            inside |= _ids(element)
+        return [m['id'] for m in measurements if m.get('element_id') in inside]
+
+    older, younger = dates_of(children[:first]), dates_of(children[last + 1:])
+    flagged = [m for m in measurements if m['id'] in set(older) | set(younger)
+               and (m.get('outlier_prior') or 0) > 0]
+    if flagged:
+        raise NotChecked('a date outside every Boundary carries an outlier model')
+    trimmed = dict(flat)
+    trimmed['children'] = children[first:last + 1]
+    return trimmed, (older, younger)
+
+
+def shape(root: Dict, measurements: List[Dict]
+          ) -> Tuple[Optional[Tuple[str, str, List[str]]], List[exact_chain.Chain], Tails]:
+    """
+    (outer pair, branches, tails): the outer pair as (S, E, dates directly
+    between them), or None for a single chain; the branches as exact_chain
+    Chains; and the dates outside every Boundary at the model's older and
+    younger ends (_tails). Raises NotChecked for any other shape.
     """
     if root.get('element_type') != 'sequence':
         raise NotChecked('the model is not a Sequence')
-    flat = _flattened(root)
+    flat, tails = _tails(_flattened(root), measurements)
+    inside = [m for m in measurements if m['id'] not in set(tails[0]) | set(tails[1])]
+    measurements = inside
     chain = exact_chain.layout(flat, measurements, allow_inner_order=True)
     if chain is not None:
-        return None, [chain]
+        return None, [chain], tails
 
     children = flat['children']
     kinds = [c.get('element_type') for c in children]
@@ -174,7 +228,7 @@ def shape(root: Dict, measurements: List[Dict]
     if stray:
         raise NotChecked('some dates sit outside every branch')
     loose = [m['id'] for m in measurements if m.get('element_id') == outer_phase['id']]
-    return (children[0]['id'], children[2]['id'], loose), branches
+    return (children[0]['id'], children[2]['id'], loose), branches, tails
 
 
 def _blocks(model: gibbs.Model, dates: List[str]) -> List[List[str]]:
@@ -231,7 +285,8 @@ def _blocks(model: gibbs.Model, dates: List[str]) -> List[List[str]]:
     return blocks
 
 
-def _same_model(model: gibbs.Model, outer, branches: List[exact_chain.Chain]) -> None:
+def _same_model(model: gibbs.Model, outer, branches: List[exact_chain.Chain],
+                tails: Tails = ([], [])) -> None:
     """
     Raise NotChecked unless the shape is the model AS WRITTEN: the same span
     groups, each with the same two Boundaries and the same dates, and the
@@ -290,6 +345,17 @@ def _same_model(model: gibbs.Model, outer, branches: List[exact_chain.Chain]) ->
             order(start, date_id)
             order(date_id, end)
         inner(loose)
+    # Dates outside every Boundary: older than the model's first Boundary or
+    # younger than its last, and ordered among themselves as blocks.
+    first = outer[0] if outer is not None else branches[0].boundary_ids[0]
+    last = outer[1] if outer is not None else branches[-1].boundary_ids[-1]
+    older_tail, younger_tail = tails
+    for date_id in older_tail:
+        order(date_id, first)
+    for date_id in younger_tail:
+        order(last, date_id)
+    inner(older_tail)
+    inner(younger_tail)
 
     closed: Dict[str, set] = {}
 
@@ -343,7 +409,8 @@ def _grid(measurements: List[Dict], root: Dict) -> np.ndarray:
 class _Direct:
     """The integration itself, on one grid, for one model."""
 
-    def __init__(self, model: gibbs.Model, outer, branches: List[exact_chain.Chain]):
+    def __init__(self, model: gibbs.Model, outer, branches: List[exact_chain.Chain],
+                 tails: Tails = ([], [])):
         self.model = model
         self.outer = outer
         self.branches = branches
@@ -355,6 +422,46 @@ class _Direct:
         self.older = self.cells > 0
         self.ok = {b: (index >= model.window[b][0]) & (index <= model.window[b][1])
                    for b in model.boundary_ids}
+        # The weights the dates outside every Boundary put on the model's
+        # first and last Boundary (module docstring); none of them carries an
+        # outlier model, so they do not change with the scales.
+        older_tail, younger_tail = tails
+        self.tail_older = self._tail_weight(older_tail, oldest_end=True)
+        self.tail_younger = self._tail_weight(younger_tail, oldest_end=False)
+
+    def _tail_weight(self, dates: List[str], oldest_end: bool) -> Optional[np.ndarray]:
+        """
+        g over the end Boundary: the dates' integral with all of them older
+        than it (`oldest_end`) or all younger, in their own order, with a flat
+        prior -- no span factor. Scaled to a peak of one; it is the same for
+        every outlier scale, so the scale does not touch the evidence ratios.
+        """
+        if not dates:
+            return None
+        blocks = _blocks(self.model, dates) if len(dates) > 1 else [list(dates)]
+        if len(blocks) > 1:
+            log_z = self._log_ordered(blocks, {})
+        else:
+            log_z = np.zeros((self.M, self.M))
+            for date_id in blocks[0]:
+                row = self._likelihood(date_id, {})
+                log_z = log_z + _log_interval_integral(np.cumsum(row) * self.dt, row, self.dt).T
+        # [older bound, younger bound]: the grid's top edge over the Boundary,
+        # or the Boundary over the grid's bottom edge.
+        log_g = log_z[self.M - 1, :] if oldest_end else log_z[:, 0]
+        finite = np.isfinite(log_g)
+        if not finite.any():
+            raise NotChecked('a date outside every Boundary has no room beside it')
+        peak = float(log_g[finite].max())
+        return np.where(finite, np.exp(np.where(finite, log_g, 0.0) - peak), 0.0)
+
+    def _with_tails(self, weight: np.ndarray) -> np.ndarray:
+        """`weight` over [first Boundary, last Boundary] times the tails' g."""
+        if self.tail_older is not None:
+            weight = weight * self.tail_older[:, None]
+        if self.tail_younger is not None:
+            weight = weight * self.tail_younger[None, :]
+        return weight
 
     # -- building blocks ---------------------------------------------------
 
@@ -571,6 +678,7 @@ class _Direct:
             log_c = np.where(self._ends_ok(first, last),
                              self._span_correction(first, last), -np.inf)
             W, w_scale = self._exp(log_c)
+            W = self._with_tails(W)
             total = float((W * part['J']).sum())
             if total <= 0:
                 return -np.inf, {}
@@ -581,6 +689,7 @@ class _Direct:
             log_a = (self._span_correction(S, E) + self._log_group(loose, nodes))
             log_a = np.where(self._ends_ok(S, E), log_a, -np.inf)
             A0, a_scale = self._exp(log_a)
+            A0 = self._with_tails(A0)
             within = []
             log_evidence = a_scale
             for part in parts:
@@ -618,13 +727,13 @@ def reference(measurements: List[Dict], root: Dict,
     The direct calculation: {'grid', 'shape', 'boundaries': {id: density}}.
     Raises NotChecked when the model is not one this can integrate.
     """
-    outer, branches = shape(root, measurements)
+    outer, branches, tails = shape(root, measurements)
     grid = _grid(measurements, root)
     model = gibbs.Model(measurements, root, grid=grid,
                         uniform_span_prior=uniform_span_prior)
     if model.depositions or model.level_ids:
         raise NotChecked('the model has a deposition sequence')
-    _same_model(model, outer, branches)
+    _same_model(model, outer, branches, tails)
     expected = sum(len(c.boundary_ids) for c in branches) + (2 if outer else 0)
     if set(model.boundary_ids) != (
             {b for c in branches for b in c.boundary_ids}
@@ -636,7 +745,7 @@ def reference(measurements: List[Dict], root: Dict,
             (o, y) for o, y, _n in model.span_priors] != [ends]:
         raise NotChecked('the span correction does not span the whole model')
 
-    direct = _Direct(model, outer, branches)
+    direct = _Direct(model, outer, branches, tails)
     outlier_models = model.outlier_models
     node_counts = [len(model.scale_grid[m]) for m in outlier_models]
     combinations = list(itertools.product(*[range(n) for n in node_counts]))
@@ -676,6 +785,7 @@ def reference(measurements: List[Dict], root: Dict,
             raise NotChecked('a Boundary runs off the edge of the calculation')
         boundaries[boundary_id] = density
     return {'grid': grid, 'shape': 'parallel' if outer else 'chain',
+            'outside': len(tails[0]) + len(tails[1]),
             'boundaries': boundaries,
             'names': dict(model.plan.boundary_names)}
 

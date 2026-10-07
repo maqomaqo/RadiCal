@@ -1320,6 +1320,10 @@ without sampling for two common shapes:
 - Parallel chains between an outer pair (e.g. a site's Start and End surrounding one Sequence per
   area).
 - Either of the above with Phases or Sequences that have no Boundary between them.
+- Any of these with dates outside every Boundary: Phases or Sequences of dates before the model's
+  first Boundary or after its last. They have no span term (their prior is flat), so given that
+  Boundary they enter as one weight on it: the integral of their likelihoods beyond it, in their
+  own order. A date out there carrying an outlier model is not checked.
 
 Given the outer pair, the branches are independent:
 

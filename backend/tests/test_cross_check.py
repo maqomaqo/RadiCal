@@ -73,13 +73,13 @@ class TestShape:
         # bracketed one after another (cf1f56b); the check reads it the same way.
         chain = ec.layout(tree, dates)
         assert chain is not None and len(chain.boundary_ids) == 4
-        outer, branches = cross_check.shape(tree, dates)
+        outer, branches, _tails = cross_check.shape(tree, dates)
         assert outer is None and len(branches) == 1
         assert len(branches[0].boundary_ids) == 4
 
     def test_parallel_areas_are_branches_inside_an_outer_pair(self):
         dates, tree = _parallel()
-        outer, branches = cross_check.shape(tree, dates)
+        outer, branches, _tails = cross_check.shape(tree, dates)
         assert outer[0] == tree['children'][0]['id']
         assert outer[1] == tree['children'][2]['id']
         assert outer[2] == []
@@ -195,7 +195,7 @@ class TestOrderedGroups:
     def test_the_exact_solver_declines_it_and_the_check_reads_it_as_a_chain(self):
         dates, tree = _ordered_phases()
         assert ec.layout(tree, dates) is None
-        outer, branches = cross_check.shape(tree, dates)
+        outer, branches, _tails = cross_check.shape(tree, dates)
         assert outer is None and len(branches) == 1
         assert len(branches[0].boundary_ids) == 2
         assert len(branches[0].groups) == 1 and len(branches[0].groups[0]) == 4
@@ -300,3 +300,98 @@ class TestItFlagsAWrongAnswer:
         record = cross_check.check(dates, tree, {'boundaries': {}})
         assert record['status'] == 'not_checked'
         assert 'Loose phase' in record['reason']
+
+
+def _with_tails(older=(), younger=(), ordered_older=False):
+    """
+    A phase between Start and End, with dates outside every Boundary: before
+    Start (older) and after End (younger). `ordered_older` writes the older
+    dates as two Phases one after the other, so they are blocks.
+    """
+    middle = _element('phase', 'Occupation')
+    children = []
+    dates = []
+    if older:
+        if ordered_older:
+            first, second = _element('phase', 'Earliest'), _element('phase', 'Earlier')
+            children += [first, second]
+            dates += [_date(first['id'], older[0]), *[_date(second['id'], a) for a in older[1:]]]
+        else:
+            pre = _element('phase', 'Before')
+            children.append(pre)
+            dates += [_date(pre['id'], a) for a in older]
+    children += [_element('boundary', 'Start'), middle, _element('boundary', 'End')]
+    dates += [_date(middle['id'], a) for a in (660, 640, 620)]
+    if younger:
+        post = _element('phase', 'After')
+        children.append(post)
+        dates += [_date(post['id'], a) for a in younger]
+    return dates, _element('sequence', 'Site', children)
+
+
+class TestDatesOutsideEveryBoundary:
+    def test_they_are_taken_off_as_tails(self):
+        dates, tree = _with_tails(older=(720, 700), younger=(560,))
+        outer, branches, tails = cross_check.shape(tree, dates)
+        assert outer is None and len(branches[0].boundary_ids) == 2
+        assert len(tails[0]) == 2 and len(tails[1]) == 1
+
+    def test_a_tail_moves_its_boundary(self):
+        """
+        A date older than Start but close to the occupation pulls Start
+        younger than the occupation alone would put it: the tail's weight is
+        doing work, so it is not being ignored.
+        """
+        alone_dates, alone_tree = _with_tails()
+        tail_dates, tail_tree = _with_tails(older=(665,))
+        alone = cross_check.reference(alone_dates, alone_tree)
+        tailed = cross_check.reference(tail_dates, tail_tree)
+        start_alone = alone_tree['children'][0]['id']
+        start_tailed = tail_tree['children'][1]['id']
+
+        def mean(direct, boundary_id):
+            return float((direct['grid'] * direct['boundaries'][boundary_id]).sum())
+
+        assert mean(tailed, start_tailed) < mean(alone, start_alone) - 5
+        assert tailed['outside'] == 1
+
+    @pytest.mark.parametrize('older, younger, ordered', [
+        ((720, 700), (), False),
+        ((), (560, 590), False),
+        ((730, 700, 690), (570,), True),
+    ])
+    def test_it_agrees_with_the_sampler(self, older, younger, ordered):
+        dates, tree = _with_tails(older=older, younger=younger, ordered_older=ordered)
+        sampled = gibbs.solve(dates, tree, sweeps=20000, max_sweeps=20000,
+                              num_samples=200, chains=4)
+        record = cross_check.check(dates, tree, sampled)
+        assert record['status'] == 'agrees', record
+        assert record['checked'] == 2
+        assert record['worst']['distance'] < 0.08
+
+    def test_a_wrong_answer_is_still_flagged(self):
+        dates, tree = _with_tails(older=(720,), younger=(560,))
+        sampled = gibbs.solve(dates, tree, sweeps=8000, max_sweeps=8000,
+                              num_samples=200, chains=1)
+        moved = copy.deepcopy(sampled['boundaries'])
+        start = tree['children'][1]['id']
+        points = moved[start]['posterior']['probability_distribution']
+        moved[start]['posterior']['probability_distribution'] = [[x + 60.0, p] for x, p in points]
+        record = cross_check.check(dates, tree, {'boundaries': moved})
+        assert record['status'] == 'differs'
+        assert [row['id'] for row in record['differing']] == [start]
+
+    def test_one_with_an_outlier_model_is_not_checked(self):
+        dates, tree = _with_tails(older=(720,))
+        dates[0].update(outlier_model='general', outlier_prior=0.05)
+        record = cross_check.check(dates, tree, {'boundaries': {}})
+        assert record['status'] == 'not_checked'
+        assert 'outlier' in record['reason']
+
+    def test_a_model_with_no_boundary_says_so(self):
+        phase = _element('phase', 'Only')
+        tree = _element('sequence', 'Dates', [phase])
+        dates = [_date(phase['id'], 700), _date(phase['id'], 650)]
+        record = cross_check.check(dates, tree, {'boundaries': {}})
+        assert record['status'] == 'not_checked'
+        assert 'no Boundary' in record['reason']
