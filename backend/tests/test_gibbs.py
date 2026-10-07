@@ -1693,3 +1693,65 @@ class TestEnclosureMoves:
         nen_dates = {m['id'] for m in measurements[:2]}
         assert any(nen_dates <= s and start['id'] in s and end['id'] not in s for s in sets)
         assert any(nen_dates <= s and end['id'] in s and start['id'] not in s for s in sets)
+
+
+class TestLobeProbe:
+    """
+    gibbs.probe_unvisited_lobes: a chain started in a calibration lobe the run
+    left empty stays there when the sampler was trapped away from it, and
+    leaves when the model rules it out.
+    """
+
+    def _petchey(self):
+        # Petchey et al.'s Layers 11-4 with WkA-56765 left out and inbuilt ages
+        # allowed (tests/test_inbuilt_age.py), where four chains can all sit in
+        # the late solution while the exact answer gives the early one 0.08.
+        from test_inbuilt_age import LAYERS, PUBLISHED
+        children = [_element('boundary', 'Start 11')]
+        layers = {}
+        for layer in LAYERS:
+            if layer not in ('10', '8', '6L'):
+                layers[layer] = _element('phase', f'Layer {layer}')
+                children.append(layers[layer])
+            children.append(_element('boundary', f'After {layer}'))
+        measurements = []
+        for layer, code, cra, sigma, inbuilt in PUBLISHED:
+            if code == 'WkA-56765':
+                continue
+            date = _date(layers[layer]['id'], cra, name=code)
+            date.update(error_1sigma=sigma, curve_id='shcal20', inbuilt_years=inbuilt or None)
+            measurements.append(date)
+        return measurements, _element('sequence', 'SM/C:Dune', children)
+
+    def test_a_run_trapped_in_the_late_solution_is_reported(self):
+        measurements, tree = self._petchey()
+        model = gibbs.Model(measurements, tree)
+        # A run that only ever saw each date's youngest lobe: every other lobe
+        # holding a tenth of a likelihood is left empty and probed.
+        histograms = {}
+        for param in model.params:
+            row = np.zeros(model.M)
+            lobes = model.lobes(param) if param in model.likelihood else []
+            cell = (lobes[0][0] if lobes else int(np.argmax(model.likelihood[param]))
+                    if param in model.likelihood else model.M // 2)
+            row[cell] = 1.0
+            histograms[param] = row
+        record = gibbs.probe_unvisited_lobes(model, histograms, seed=3)
+        names = {row['name'] for row in record['not_reached']}
+        assert {'WkA-43681', 'WkA-43682'} <= names, record
+
+    def test_lobes_the_model_rules_out_are_left(self):
+        """A run at the exact answer leaves only lobes the model rules out
+        empty, and the probe reports none of them."""
+        measurements, tree = TestBoundariesNeverShareACell()._layers()
+        exact = ec.solve(measurements, tree, ec.layout(tree, measurements), num_samples=50)
+        model = gibbs.Model(measurements, tree)
+        histograms = {}
+        for param in model.params:
+            source = (exact['measurements'].get(param) or
+                      (exact['boundaries'].get(param) or {}).get('posterior'))
+            points = np.array(source['probability_distribution'], float)
+            histograms[param] = np.interp(model.grid, points[:, 0], points[:, 1], left=0.0, right=0.0)
+        record = gibbs.probe_unvisited_lobes(model, histograms, seed=3)
+        assert record['probed'] > 0
+        assert record['not_reached'] == [], record

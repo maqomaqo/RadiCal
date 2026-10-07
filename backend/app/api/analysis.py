@@ -795,6 +795,10 @@ def _run_bayesian(
         # model, where the model's shape allows one (services/cross_check.py):
         # the one check that does not compare the sampler with itself.
         'cross_check': _cross_check(measurements, model_tree, sampled, bayesian_config),
+        # Calibration lobes the run left empty that a chain started in them
+        # does not leave: lobes the sampler was trapped away from, which no
+        # convergence measure can see (gibbs.probe_unvisited_lobes).
+        'lobe_probe': sampled.get('lobe_probe'),
         'requested': requested,
         'resolution': resolution,
         # As on the exact path: Aoverall from the per-date indices, Amodel from

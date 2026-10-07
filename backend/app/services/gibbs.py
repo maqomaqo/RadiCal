@@ -1271,7 +1271,8 @@ class Model:
         return float(total)
 
     def initial_state(self, quantile: Optional[float] = None,
-                      lobe: Optional[Tuple] = None) -> _State:
+                      lobe: Optional[Tuple] = None,
+                      wishes: Optional[Dict] = None) -> _State:
         """
         A state satisfying every hard constraint, built by walking the ordering
         from oldest to youngest and giving each parameter the youngest position
@@ -1326,7 +1327,10 @@ class Model:
         for param in self.params:
             compute_depth(param)
 
-        wishes = self.start_lobes(*lobe) if lobe is not None else {}
+        # `wishes` given directly is the lobe probe's (probe_start): the
+        # same structure start_lobes returns, for chosen dates only.
+        if wishes is None:
+            wishes = self.start_lobes(*lobe) if lobe is not None else {}
         preferred: Dict[str, int] = {}
         for date_id in self.date_ids:
             if date_id in wishes:
@@ -1765,6 +1769,32 @@ class Model:
                         targets[i] = lo + int(np.searchsorted(cdf, inside * cdf[-1]))
                 wishes[date_id] = [(lobes[i], targets[i]) for i in order]
         return wishes
+
+    def probe_start(self, date_id: str, lobe: Tuple[int, float, int, int]
+                    ) -> Optional[_State]:
+        """
+        A starting state with `date_id` in `lobe` and the rest of its group in
+        their own lobes nearest it, everything else by the modes and repaired to
+        fit the stratigraphy; None if the date did not end up in the lobe. The
+        whole group goes because a group can only be found in its other lobe
+        together. See probe_unvisited_lobes.
+        """
+        peak, _share, first, last = lobe
+        members = next((dates for _o, _y, dates in self.group_dates if date_id in dates),
+                       [date_id])
+        wishes = {}
+        for member in members:
+            lobes = self.lobes(member)
+            if lobes:
+                wishes[member] = [(l, None) for l in sorted(
+                    lobes, key=lambda l: (abs(l[0] - peak), l[0]))]
+        wishes[date_id] = [(lobe, None)] + [w for w in wishes.get(date_id, [])
+                                            if w[0][2] != first]
+        try:
+            state = self.initial_state(None, None, wishes)
+        except ValueError:
+            return None
+        return state if first <= state.index[date_id] < last else None
 
     def shift(self, state: _State, rng, params: List[str], scale: float,
               current_lp: Optional[float] = None
@@ -2719,6 +2749,92 @@ def _deposition_report(model: 'Model', chain: Dict) -> List[Dict]:
     return report
 
 
+# The lobe probe (probe_unvisited_lobes). A lobe holding at least PROBE_SHARE
+# of a date's likelihood but under PROBE_EMPTY of its pooled posterior is
+# probed with a short chain started in it, read over sweeps PROBE_READ_FROM to
+# PROBE_SWEEPS; staying at least PROBE_STAYS of that time means the run is
+# TRAPPED away from a lobe with posterior mass. On 1,968 lobes tested against
+# exact answers (tests/manual/start_study.py probe) a chain left 353 of 354
+# ruled-out lobes. The bar is high because a lobe with a little real mass is
+# also left eventually, and reporting that would be noise: on one generated
+# model a lobe the exact answer gives 0.009 kept its chain 17% of the time,
+# while the trapped Layer 11 lobes of Petchey et al.'s dune model kept theirs
+# 89-99%.
+PROBE_SHARE = 0.10
+PROBE_EMPTY = 0.01
+PROBE_SWEEPS = 1000
+PROBE_READ_FROM = 500
+PROBE_STAYS = 0.5
+MAX_PROBES = 12
+# A probe chain counts as in its lobe only in the lobe's CORE, where the date's
+# likelihood is at least this fraction of the lobe's peak. A lobe runs from
+# valley to valley, and the oldest or youngest runs on to the grid's edge, so
+# without this a chain wandering in that tail read as staying: on one
+# generated model a lobe the exact answer gives 0.009 was reported reached.
+PROBE_CORE = 0.1
+
+
+def probe_unvisited_lobes(model: Model, histograms: Dict[str, np.ndarray],
+                          seed: int) -> Dict:
+    """
+    Whether calibration lobes the run left empty are empty because the model
+    rules them out or because no chain reached them.
+
+    R-hat and the overlap measures compare the sampler with itself, so a lobe
+    no chain visited is invisible to them; on Petchey et al.'s dune model of
+    Layers 11-4 four chains sat in the late lobe, put P(Start before AD 1360) at
+    0.00 against an exact 0.08, and passed. A lobe that is merely unvisited
+    cannot be told from one the model rules out by looking at the run -- in a
+    test 99.5% of such lobes were ruled out -- but a chain STARTED in it can:
+    it leaves a lobe the model rules out and stays in one with real mass.
+
+    {'probed': n, 'not_reached': [{'id', 'name', 'from_bp', 'to_bp',
+     'likelihood_share', 'occupancy'}], 'left': n, 'untestable': n,
+     'skipped': n beyond MAX_PROBES}. A lobe counted as left is one the probe
+    chain did not stay in -- ruled out, or with too little mass to matter.
+    """
+    names = {m['id']: m.get('sample_name') or m['id'] for m in model.measurements}
+    targets = []
+    for date_id in model.date_ids:
+        row = histograms.get(date_id)
+        if row is None or row.sum() <= 0:
+            continue
+        total = float(row.sum())
+        for lobe in model.lobes(date_id):
+            _peak, share, first, last = lobe
+            if share >= PROBE_SHARE and float(row[first:last].sum()) < PROBE_EMPTY * total:
+                targets.append((share, date_id, lobe))
+    targets.sort(key=lambda t: -t[0])
+    record = {'probed': 0, 'not_reached': [], 'left': 0, 'untestable': 0,
+              'skipped': max(0, len(targets) - MAX_PROBES)}
+    for i, (share, date_id, lobe) in enumerate(targets[:MAX_PROBES]):
+        peak, _share, first, last = lobe
+        row = model._inlier_row(date_id)
+        core = np.zeros(model.M, dtype=bool)
+        core[first:last] = row[first:last] >= PROBE_CORE * row[peak]
+        state = model.probe_start(date_id, lobe)
+        if state is None:
+            record['untestable'] += 1
+            continue
+        chain = _Chain(model, PROBE_SWEEPS, seed + 7919 + i, None, PROBE_SWEEPS, 0)
+        chain.state = state
+        inside = 0
+        for sweep in range(PROBE_SWEEPS):
+            chain.sweep()
+            if sweep >= PROBE_READ_FROM and core[chain.state.index[date_id]]:
+                inside += 1
+        occupancy = inside / float(PROBE_SWEEPS - PROBE_READ_FROM)
+        record['probed'] += 1
+        if occupancy >= PROBE_STAYS:
+            record['not_reached'].append({
+                'id': date_id, 'name': names.get(date_id, date_id),
+                'from_bp': float(model.grid[first]), 'to_bp': float(model.grid[last - 1]),
+                'likelihood_share': float(share), 'occupancy': float(occupancy)})
+        else:
+            record['left'] += 1
+    return record
+
+
 def solve(measurements: List[Dict], root: Dict, sweeps: int = DEFAULT_SWEEPS,
           num_samples: int = 4000, seed: int = 42,
           uniform_span_prior: bool = True,
@@ -2833,6 +2949,8 @@ def solve(measurements: List[Dict], root: Dict, sweeps: int = DEFAULT_SWEEPS,
         }
 
     results['method'] = 'gibbs'
+    # Lobes the run left empty, probed: see probe_unvisited_lobes.
+    results['lobe_probe'] = probe_unvisited_lobes(model, chain['histograms'], seed)
     results['deposition'] = _deposition_report(model, chain)
     results['uniform_span_prior'] = bool(model.span_priors)
     results['sweeps'] = chain['sweeps']

@@ -294,6 +294,33 @@ class TestItFlagsAWrongAnswer:
         assert record['status'] == 'differs'
         assert [row['id'] for row in record['differing']] == [site_start]
 
+    def test_a_small_lobe_moved_is_reported_though_total_variation_passes(self):
+        """
+        Total variation cannot see a small calibration lobe the sampler
+        misplaces; the largest difference in the probability of being older
+        than a given year can. Move 8% of the Site start's mass 250 years older,
+        well clear of the rest: total variation stays under its 0.15 limit,
+        the threshold gap does not.
+        """
+        dates, tree = _parallel()
+        sampled = gibbs.solve(dates, tree, sweeps=8000, max_sweeps=8000,
+                              num_samples=200, chains=1)
+        moved = copy.deepcopy(sampled['boundaries'])
+        site_start = tree['children'][0]['id']
+        points = np.array(moved[site_start]['posterior']['probability_distribution'])
+        step = float(np.median(np.diff(points[:, 0])))
+        ages = np.arange(points[0, 0], points[-1, 0] + 250.0 + step, step)
+        original = np.interp(ages, points[:, 0], points[:, 1], left=0.0, right=0.0)
+        older = np.interp(ages - 250.0, points[:, 0], points[:, 1], left=0.0, right=0.0)
+        moved[site_start]['posterior']['probability_distribution'] = [
+            [float(x), float(p)] for x, p in zip(ages, 0.92 * original + 0.08 * older)]
+        # As from a run of several chains, the only kind the gap is held on.
+        record = cross_check.check(dates, tree, {'boundaries': moved, 'chains': 4})
+        row = next(r for r in record['differing'] if r['id'] == site_start)
+        assert row['distance'] < cross_check.DISAGREEMENT
+        assert row['threshold_gap'] > cross_check.THRESHOLD_DISAGREEMENT
+        assert record['status'] == 'differs'
+
     def test_a_model_it_cannot_integrate_says_why(self):
         dates, tree = _parallel()
         tree['children'][1]['children'].append(_element('phase', 'Loose phase'))

@@ -107,6 +107,18 @@ from app.services.model_tree import inherited_bounds
 # test models sit under 0.08 -- Monte Carlo noise plus the grid -- and
 # the lobe failure this exists for sat at 0.6 to 1.0.
 DISAGREEMENT = 0.15
+# The largest difference, over every calendar year, in the probability of a
+# Boundary being older than that year, above which the two are also reported
+# as differing. Total variation cannot see a small calibration lobe the
+# sampler under-weights: on Petchey et al.'s dune model of Layers 11-4 the
+# sampler put P(Start before AD 1360) at 0.00-0.03 against the direct 0.08, at a
+# total variation of 0.08, under 0.15. This is that error read directly, as the
+# probability an analyst would quote. Runs that mix well sat at 0.027 or less
+# on thirteen test models and two seeds each; the failures at 0.06-0.08.
+# Applied only to runs of several chains: one short chain's own Monte Carlo
+# noise reaches it (0.069 on a single 8,000-sweep chain, 0.022 or less on the
+# default four).
+THRESHOLD_DISAGREEMENT = 0.05
 # Most cells on the direct calculation's grid. The cost is a few M x M matrix
 # products per group per scale combination, so it goes as M^3.
 MAX_CELLS = 800
@@ -799,7 +811,9 @@ def _binned(xs: np.ndarray, mass: np.ndarray, low: float, count: int) -> np.ndar
 def compare(direct: Dict, sampled_boundaries: Dict[str, Dict]) -> List[Dict]:
     """
     Per Boundary, the total variation distance between the sampled marginal
-    and the direct one on REPORTING_STEP_YEARS bins, worst first.
+    and the direct one on REPORTING_STEP_YEARS bins, worst first, and the
+    largest difference between them in the probability of being older than a
+    given year (`threshold_gap`).
 
     The sampled side is the results' plotted density, which drops only cells
     under exact_chain.DISPLAY_THRESHOLD of the peak. Mass it puts outside the
@@ -822,10 +836,12 @@ def compare(direct: Dict, sampled_boundaries: Dict[str, Dict]) -> List[Dict]:
         theirs = _binned(xs, mass / mass.sum(), low, count)
         ours = _binned(grid, density, low, count)
         distance = 0.5 * (float(np.abs(theirs - ours).sum()) + max(0.0, 1.0 - theirs.sum()))
+        threshold_gap = float(np.abs(np.cumsum(theirs) - np.cumsum(ours)).max())
         rows.append({
             'id': boundary_id,
             'name': direct['names'].get(boundary_id, 'Boundary'),
             'distance': distance,
+            'threshold_gap': threshold_gap,
             'sampled_mean': float((xs * mass).sum() / mass.sum()),
             'direct_mean': float((grid * density).sum()),
         })
@@ -842,14 +858,17 @@ def check(measurements: List[Dict], root: Dict, sampled: Dict,
          'reason': why not checked, else None,
          'shape': 'chain' | 'parallel' | None,
          'threshold': DISAGREEMENT,
+         'threshold_gap_limit': THRESHOLD_DISAGREEMENT, or None on a run of one
+                   chain, where only total variation is held to a limit,
          'checked': how many Boundaries were compared,
          'worst': the worst row of compare(), or None,
-         'differing': every row over the threshold,
+         'differing': every row over either limit,
          'seconds': how long the direct calculation took}
     """
     started = time.perf_counter()
     record = {'status': 'not_checked', 'reason': None, 'shape': None,
-              'threshold': DISAGREEMENT, 'checked': 0, 'worst': None,
+              'threshold': DISAGREEMENT, 'threshold_gap_limit': THRESHOLD_DISAGREEMENT,
+              'checked': 0, 'worst': None,
               'differing': [], 'seconds': None}
     try:
         direct = reference(measurements, root, uniform_span_prior)
@@ -858,11 +877,14 @@ def check(measurements: List[Dict], root: Dict, sampled: Dict,
         record['seconds'] = time.perf_counter() - started
         return record
     rows = compare(direct, sampled.get('boundaries') or {})
+    gap_limit = THRESHOLD_DISAGREEMENT if (sampled.get('chains') or 1) > 1 else None
+    record['threshold_gap_limit'] = gap_limit
     record.update({
         'shape': direct['shape'],
         'checked': len(rows),
         'worst': rows[0] if rows else None,
-        'differing': [r for r in rows if r['distance'] > DISAGREEMENT],
+        'differing': [r for r in rows if r['distance'] > DISAGREEMENT
+                      or (gap_limit is not None and r['threshold_gap'] > gap_limit)],
         'seconds': time.perf_counter() - started,
     })
     record['status'] = ('differs' if record['differing']

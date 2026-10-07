@@ -210,6 +210,14 @@ interface AnalysisResult {
     // Sampled path only: the sampled Boundaries against a direct calculation
     // of the same model (services/cross_check.py), where the model's shape
     // allows one. Null when the analysis turned it off.
+    // Sampled path only: calibration lobes the run left empty that a chain
+    // started in them did not leave (gibbs.probe_unvisited_lobes).
+    lobe_probe?: {
+      probed: number
+      not_reached: { id: string; name: string; from_bp: number; to_bp: number }[]
+      left: number
+      untestable: number
+    } | null
     cross_check?: {
       status: 'agrees' | 'differs' | 'not_checked'
       reason: string | null
@@ -2056,6 +2064,19 @@ export default function Results() {
         </Typography>
       </Alert>
     ) : null
+  const lobeProbe = analysis.solver?.method === 'gibbs' ? analysis.solver.lobe_probe : null
+  const lobeProbeAlert =
+    isBayesian && lobeProbe && lobeProbe.not_reached.length > 0 ? (
+      <Alert severity="warning">
+        <Typography variant="subtitle2" gutterBottom>
+          Some calibration ranges were not reached
+        </Typography>
+        <Typography variant="body2">
+          {lobeProbe.not_reached.map((row) => row.name).join(', ')}. See the manual on checking a
+          sampled result.
+        </Typography>
+      </Alert>
+    ) : null
   if (isBayesian && analysis.status !== 'failed') {
     if (!analysis.solver) {
       solverChip = (
@@ -2605,6 +2626,7 @@ export default function Results() {
           lands here. */}
       {solverAlert && <Box sx={{ mb: 3 }}>{solverAlert}</Box>}
       {crossCheckAlert && <Box sx={{ mb: 3 }}>{crossCheckAlert}</Box>}
+      {lobeProbeAlert && <Box sx={{ mb: 3 }}>{lobeProbeAlert}</Box>}
 
       {/* Boundaries are not listed separately: they sit in the results table
           in their place in the structure, between the phases they separate,

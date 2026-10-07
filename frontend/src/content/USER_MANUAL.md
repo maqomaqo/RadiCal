@@ -1331,9 +1331,25 @@ Given the outer pair, the branches are independent:
 p(S, E) ∝ C(S, E) · T0(S, E) · Π_b Z_b(S, E)
 ```
 
-Each Boundary is compared on 5-year bins by total variation distance. Over 0.15 is reported as a
-difference, naming the Boundaries. Runs that agree sit under about 0.08. A difference should be
-read as the direct calculation being right. Other shapes are not checked, and the solver record
+Each Boundary is compared on 5-year bins in two ways: by total variation distance, and by the
+largest difference in the probability of the Boundary being older than any given year. Over 0.15 on
+the first, or over 0.05 on the second, is reported as a difference, naming the Boundaries. The second
+exists because total variation cannot see a small calibration range the sampler under-weights: on
+one dune sequence the sampler put the probability of an early start at 0.00–0.03 against the
+direct 0.08, at a total variation of only 0.08. The second is held only on runs of several chains,
+since a single short chain's own noise can reach it. Runs that agree sit under about 0.08 and 0.03. A
+difference should be read as the direct calculation being right.
+
+**Calibration ranges no chain reached.** After every sampled run, each calibration range holding at
+least a tenth of a date's likelihood but almost none of its posterior is probed: a short chain is
+started with the date's phase placed in that range. A range the model rules out is left at once; a
+range the sampler was trapped away from is not, and the run is then reported as having missed it,
+naming the dates. This works on any model shape, which the direct calculation does not. On a dune
+sequence whose four chains all sat in the late range, missing an early start with probability 0.08,
+the probe chains stayed in the early range 89–99% of the time; across about 2,000 tested ranges the
+model ruled out, they left all but one. A missed range should be read as the sampled answer being
+unreliable there: the exact solver, where the model allows it, or a longer run with more chains is
+the remedy. Other shapes are not checked, and the solver record
 says why.
 
 ### A.7 Outlier models
