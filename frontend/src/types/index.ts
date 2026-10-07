@@ -160,6 +160,10 @@ export interface DraftMeasurement extends MatrixMeasurement {
   // from it. The error is required whenever the offset is set.
   delta_r?: number | null
   delta_r_error?: number | null
+  // Where a looked-up ΔR came from, or null for one somebody typed. Carried
+  // through the draft so a date picked from a collection keeps its offset's
+  // derivation; the API stores it on the analysis's own copy of the date.
+  delta_r_source?: Record<string, unknown> | null
   // Recorded against the date but not used in the calculation. Carried
   // through the draft so editing a saved analysis resubmits them instead
   // of blanking them -- dates deployed from a project collection arrive
