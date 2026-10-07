@@ -783,6 +783,9 @@ def _run_bayesian(
         # Independent chains in parallel processes, pooled; see
         # gibbs.solve_chains for what the extra chains are for.
         chains=int(bayesian_config.get('mcmc_chains') or gibbs.DEFAULT_CHAINS),
+        # Tempered copies per chain; see gibbs._Chain.
+        temperatures=int(bayesian_config.get('mcmc_temperatures')
+                         or gibbs.DEFAULT_TEMPERATURES),
         resolution=resolution,
     )
     overall = agreement_service.attach(

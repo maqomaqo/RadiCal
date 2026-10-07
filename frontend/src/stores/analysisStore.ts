@@ -34,6 +34,7 @@ export interface McmcConfig {
   mcmc_samples: number
   mcmc_tune: number
   mcmc_chains: number
+  mcmc_temperatures: number
   // The least number of sweeps each chain runs before the sampler may stop on
   // convergence; 0 runs until converged. The one way to ask for a longer run.
   mcmc_min_sweeps: number
@@ -80,6 +81,7 @@ export const DEFAULT_MCMC: McmcConfig = {
   mcmc_samples: 4000,
   mcmc_tune: 1000,
   mcmc_chains: 4,
+  mcmc_temperatures: 3,
   mcmc_min_sweeps: 0,
   seed: null,
   apply_inbuilt: true,

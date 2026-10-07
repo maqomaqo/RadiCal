@@ -338,9 +338,9 @@ centuries, which the model may or may not take up. The two can be combined on on
 **Comparing with and without.** **Apply inbuilt-age allowances** (Advanced settings, on by default)
 runs the model as if no date had one when it is off. On a Bayesian result whose dates carry
 allowances, **Compare with and without inbuilt age** (the tree button beside Re-run) runs a copy
-with the switch the other way and opens the two side by side. The Shag River Mouth dates show why
-it matters: with WkA-56765 left out, the probability that Layer 11 began before AD 1360 is 0.97 with
-no allowance and about 0.1 with the published maxima.
+with the switch the other way and opens the two side by side. It can matter a great deal: on one
+test sequence of charcoal dates, the probability that the first layer began before a given year was
+0.97 with no allowance and about 0.1 with the published maximum inbuilt ages.
 
 Allowances do not apply in a group or single calibration, which calibrate the material itself, nor
 in a wiggle match, whose members are rings of one series. Dates can be pooled with **Replace with
@@ -377,9 +377,9 @@ Position carries meaning (a context sits centred beneath its group), so the diag
 rather than arranged by hand.
 
 **Model settings** (on the New Analysis form):
-- **Solver**: Automatic (recommended: exact integration where the model allows, sampling
-  otherwise), Exact solver only (fast, but only works on chain-shaped models), or MH/Gibbs (works
-  on all models). See [Choosing a solver](#choosing-a-solver).
+- **Solver**: Automatic (recommended: the exact solver where the model allows, sampling
+  otherwise), Exact solver only (fast, but only for models built as a single line of Phases and
+  Boundaries), or MH/Gibbs (works on all models). See [Choosing a solver](#choosing-a-solver).
 - **Minimum sweeps per chain** (sampled runs only): blank by default, which runs each chain until
   it converges. Set a number to make every chain run at least that long — the only way to ask for a
   longer run, since a run otherwise stops as soon as it converges.
@@ -406,101 +406,127 @@ rather than arranged by hand.
 
 ### Choosing a solver
 
-Only a Bayesian analysis requires a solver choice. A Single or Group Calibration asserts no
-relationship between dates, so there is nothing to solve jointly. **Automatic is the right answer
-for almost every run**: it integrates the posterior exactly where possible and samples otherwise. The
-Results page always shows which method actually ran. The overrides exist for the cases below.
+A Bayesian analysis needs a *solver*: the method that works out how the model's ordering narrows
+each date. Single and Group Calibrations relate no dates to one another, so they have nothing to
+solve. The **Solver** menu has three settings. **Automatic is the right choice for almost every
+run**, and the Results page always says which method was used.
 
-**Exact integration** applies to *chain-shaped* models — a single line of Phases separated by
-Boundaries, with every date inside a bounded group and no ordering the chain does not already imply.
-A Sequence of Sequences qualifies, as long as each inner Sequence starts and ends with its own
-Boundary. It computes the posterior on a calendar grid by message passing: deterministic, no sampler
-to converge, no calibration lobe to miss. It is also faster, usually by a wide margin — a single
-pass with no progress bar because there is no iteration.
+**The two methods.**
 
-**MH/Gibbs sampling** follows OxCal's Metropolis-Hastings approach (see A.6) and handles any model:
-branching structures, parallel groups, two groups ordered against each other with no Boundary
-between them. It is budgeted 20,000 sweeps, stops as soon as the worst parameter reaches 95%
-convergence, and extends up to 200,000 if needed; the achieved figure is reported with results, and
-an unconverged run is flagged.
+- **Exact solver.** Calculates the answer directly. The same model always gives the same numbers,
+  it is usually much faster, and there is nothing to check afterwards. It works only on models
+  built as a single line: Phases one after another, each with a Boundary before and after it. A
+  Sequence of Sequences counts, as long as each inner Sequence begins and ends with its own
+  Boundary. It shows no progress bar and cannot be cancelled, but it rarely takes long.
+- **MH/Gibbs sampler.** The method OxCal uses. It builds up the answer by trying many thousands of
+  possible dates for every item in the model and keeping the ones the model favours. It works on
+  any model: branching sequences, groups side by side, groups ordered with no Boundary between them.
+  Its figures carry a little random variation, so two runs differ slightly, and a run can
+  occasionally fall short. The app checks for this and warns you (see
+  [Checking a sampled result](#checking-a-sampled-result)). Progress is shown, and a run can be
+  cancelled.
 
-By default four independent chains run in parallel on separate cores and stop together: convergence
-is read off their pooled draws, reaching the target in about a quarter of the sweeps per chain and
-finishing about three times sooner. The first chain starts with every date at its calibration peak;
-the others start spread across the dates' calibrated ranges. The chains must also agree with one
-another (Gelman–Rubin R̂ under 1.05) — a check a single chain cannot make on itself: a chain
-settled into one of a date's two calendar ranges looks converged, and only another chain in the
-other range can reveal the discrepancy. Agreement is strong evidence, not proof. A calendar range
-that no chain reaches is still invisible to R̂, so where a result has two well-separated ranges and
-the decision rests on which is right, check by another method as well. For two common model shapes
-the app runs this check automatically (see [A.6](#a6-solvers)). The chain count is set in the
-analysis options; one chain is the plain run.
+Where both methods can be used, they give the same date ranges to within about a year.
 
-**Replicating a sampled run.** A sampled result carries Monte Carlo error: a second run with a
-different seed gives slightly different figures. **Run again with a new seed** (the dice button
-beside Duplicate on the Results page) copies the analysis under a fresh seed, names the copy after
-it, and runs it, leaving this result in place. Set the two side by side in
-[Comparing Analyses](#comparing-analyses): figures that move by more than you would report are not
-yet settled, and a longer run (**Minimum sweeps per chain**) is the remedy. Replicates share any
-bias the sampler has, so agreement between them does not show the answer is right; the direct
-calculation above is the check for that.
+**The settings.**
 
-Where both solvers can be used, they agree to under a year, and they are checked against each
-other on every model both can handle.
+- **Automatic** uses the exact solver whenever the model is built as a single line, and the sampler
+  otherwise.
+- **MH/Gibbs sampler (as OxCal)** always samples. Choose it when:
+  - you are reproducing a published OxCal analysis and want the same method as well as the same
+    model;
+  - you want a second, independent opinion on an exact result. Run the analysis both ways and
+    **Compare** shows how far they differ (see [Comparing Analyses](#comparing-analyses));
+  - several dates carry outlier models because you suspect a shared cause (old wood, residual
+    material, a doubtful laboratory batch), and their *outlier probabilities* are what you want
+    to know. The sampler, like OxCal, lets those dates jointly decide how large a typical offset
+    is; the exact solver weighs each date on its own. The date ranges barely change either way, but
+    the outlier probabilities can differ by a percentage point or two. If one or two dates carry a
+    small outlier prior as a precaution, this does not matter.
+- **Exact solver only** never samples. Choose it when you need figures that repeat exactly. On a
+  model that is not built as a single line, the run fails and says why, with one exception,
+  described next.
 
-| | Exact solver | MH/Gibbs sampler |
-|---|---|---|
-| Model shapes | chain-shaped only; fails on others | all |
-| Result | deterministic; same input, same numbers | stochastic; converges to the same posterior |
-| Speed | one pass; typically much faster | up to 200,000 sweeps per chain; chains run in parallel |
-| Convergence | n/a | reported per run, within and between chains; can fall short |
-| Multi-lobe calibration | resolved exactly | handled by whole-group translation moves (sampled) |
-| Duration/difference draws | independent draws from the joint posterior | draws from an MCMC chain (correlated) |
-| Outlier models | offset size integrated over prior range per date (an approximation) | one offset size shared across the model and estimated from the data, as OxCal does |
-| Progress and cancellation | neither: it completes or fails | progress reported, run cancellable |
+**Forcing the exact solver on a Sequence with a missing Boundary.** The commonest reason a model is
+not a single line is a Sequence that puts one group after another with no Boundary between them.
+**Exact solver only** will still solve it, by adding the Boundary that the order implies. That
+changes the model, and the date ranges move as a result: in tests against OxCal, sampling such
+models as written came closer to OxCal's answer than solving them with the added Boundary.
+Automatic therefore samples these models. If you do want the exact solver here, add the Boundary to
+the model yourself, so the change is visible and deliberate. Hovering over **Exact solver** on the
+Results page shows how many Boundaries were added for you.
 
-**Choose MH/Gibbs deliberately when:**
+### Checking a sampled result
 
-- You are **reproducing a published OxCal analysis** and want the method to match as well as the
-  model.
-- You want an **independent cross-check** of an exactly-integrated result: two different routes to
-  the same posterior disagreeing by more than a year or two is worth investigating, and **Compare**
-  can measure the difference (see [Comparing Analyses](#comparing-analyses)).
-- Several dates carry **outlier models** and the run is about *which* dates are outliers. OxCal
-  treats the outlier offset size as a single unknown shared by every date using the model and lets
-  the data estimate it, so three charcoal dates that all read old together inform the model about
-  what an old-wood offset looks like in *this* assemblage. The exact solver works the offset size
-  out over its prior range separately for each date. The difference shows up mainly in the
-  **reported outlier probabilities**, and it stays small when the outlier priors are small. On a
-  real OxCal comparison the exact path's outlier probabilities sat 0.017 from OxCal's where the
-  sampler reached 0.002.
+A result from the exact solver needs no checking. A sampled result is labelled **MH/Gibbs (auto)**
+or **MH/Gibbs (chosen)** at the top of the Results page, with its convergence; hover over the label
+for the rest.
 
-  In practice: **it matters** if you have put outlier models on a group of dates expecting a shared
-  cause (old wood, residuality, a suspect laboratory batch) and the outlier probabilities are the
-  answer you are after. **It does not matter** if one or two dates carry a small outlier prior as
-  insurance and what you are reading off the run is the modelled date ranges.
+- **Convergence** (e.g. *98% converged*). The run is split in half and the two halves compared:
+  100% would mean they give identical answers. The run continues until every date and Boundary
+  reaches at least 95%, the level OxCal also aims for.
+- **Chains and R̂** (e.g. *4 chains and 80,000 passes (R̂ 1.00)*). Several independent runs, called
+  *chains*, start from different places and run side by side, and their results are pooled. R̂
+  measures how closely the chains agree: 1.00 is full agreement, and the run must get below 1.05
+  before it stops. A *pass* updates every date and Boundary once; the figure is the total over all
+  chains.
+- **Seed.** The number the run's random choices start from. The same seed repeats a run exactly; a
+  different seed gives an independent repeat.
 
-**Choose Exact solver only when:**
+**How a sampled run can go wrong.** Because the calibration curve wiggles, a date often has two or
+more separate possible calendar ranges. The sampler has to move between them to weigh them fairly,
+and on some models it can settle in one and stay there, giving a result that looks steady but
+leaves out a real possibility. The app works to prevent this: chains start in different places,
+R̂ requires them to agree, and each chain is helped by companion runs that move between ranges more
+freely. It then checks the finished result, and tells you if something is wrong with one of the
+warnings below.
 
-- You need a **reproducible, deterministic** number with no convergence caveat.
-- You want to **force exact integration on a model Automatic declined to integrate**, accepting
-  that this changes the model. See the warning below.
+**Sampled, but not fully converged.** The run reached its length limit before reaching 95%
+convergence, or before its chains agreed. The message gives the figures reached.
 
-**Warning about forcing Exact.** Automatic integrates exactly only where the model supports it.
-A model that is not chain-shaped as authored — most often a Sequence that orders two groups with
-no Boundary between them — can be made solvable by supplying the transitions its ordering implies.
-Choosing **Exact solver only** does exactly that. This changes the model: it splits one span term
-over K dates into two terms over K₁ + K₂ dates, and K is the exponent that holds a date to its
-group, so the modelled ranges genuinely move. Measured against OxCal on the app's own fixtures (rms
-of the modelled dates, in years), sampling the model as written outperformed integrating the patched
-model both times: 1.49 against 2.51 on the `ordered` fixture, and 4.53 against 10.63 on the
-charcoal fixture. The Results page shows how many transitions were supplied. If exact integration is
-what you want, the better fix is usually to write the missing Boundary into the model yourself —
-this makes it exactly solvable and states the structural claim explicitly.
+- A convergence a little short of 95% usually means ranges a few years out, not wrong ones.
+- Chains that never agreed (R̂ above 1.05) usually settled in different calendar ranges
+  of some date. Treat the result as unreliable.
 
-If a model cannot be integrated exactly even with transitions supplied, **Exact solver only** fails
-the run and names the reason. That is the point of the setting: Automatic is what you want if
-either answer would have been fine.
+To fix it, run again with **Minimum sweeps per chain** set higher than each chain reached (the
+passes shown, divided by the number of chains). If the message says the model could be solved
+exactly by adding a Boundary, adding it is the better fix.
+
+**The exact solver gives a different answer.** For the most common model shapes, once the sampler
+has finished, the app also runs the exact solver on the same model in the background and compares
+the two results. For this check the exact solver is stretched to cover a few shapes that **Exact
+solver only** will not accept. Its figures are used only for the check and are not shown. If the two
+agree, hovering over the solver label says so; if they disagree, this warning appears. The shapes
+checked are a single line of Phases and Boundaries; several such lines side by side between one
+shared start and end; and either of these with groups that have no Boundary between them, or with
+dates before the first Boundary or after the last. When a model's shape is not one of these, the
+hover text says so.
+
+The warning names the Boundaries where the answers differ. The exact solver's answer is the one to
+trust: the sampled figures for those Boundaries, and for the dates between them, are unreliable. If
+you chose the sampler, switch to **Automatic**: these shapes are often ones the exact solver can
+handle. If the model is missing a Boundary that would make it a single line, add it. Otherwise run
+again with a higher **Minimum sweeps per chain** and see whether the warning clears.
+
+**Some calibration ranges were not reached.** After every sampled run, the app also checks in the
+background for calendar ranges that a date's calibration allows but the result left empty. It starts
+a short trial run inside each one. If the model rules the range out, the trial leaves it at once and
+nothing is reported. If the trial stays, the range is possible but the run never got there, and this
+warning names the dates concerned. Their reported ranges may be missing an alternative, as may any
+Boundary, duration or difference that depends on them. The remedies are the same as above:
+**Automatic** if you chose the sampler, a missing Boundary added if there is one, otherwise a higher
+**Minimum sweeps per chain**. If the warning persists, report the named dates' ranges as uncertain.
+Unlike the exact solver's check, this one covers every model shape.
+
+**Repeating a sampled run.** Because of the random variation, a second run gives slightly
+different figures. **Run again with a new seed** (the dice button beside Duplicate on the Results
+page) copies the analysis under a fresh seed and runs it, leaving this result in place. Set the two
+side by side in [Comparing Analyses](#comparing-analyses). Figures that change by more than you
+would report need a longer run (**Minimum sweeps per chain**). Agreement between repeats shows that
+the random variation is small. It does not show that the answer is right, because both runs share
+whatever the sampler gets wrong; the checks above cover that.
+
+The methods, and the thresholds behind each check, are described in [A.6](#a6-solvers).
 
 ## Viewing Results
 
@@ -514,7 +540,7 @@ either answer would have been fine.
 - **P before a date**: an optional column, turned on under **Columns**. Type a year into the
   **P before** field that appears beside HPD confidence — `AD 1360`, `1360 CE`, `500 BC` or
   `590 cal BP`; a bare number is read in the page's date format. Each date and Boundary then shows
-  the probability it lies *before* that year (earlier, so older): P(Layer 11 began by AD 1360) is
+  the probability it lies *before* that year (earlier, so older): P(Phase 2 began by AD 1360) is
   the Boundary's figure in a column headed **P before AD 1360**. Figures are read off the stored
   posteriors, so no re-run is needed. Values beyond three places read `>0.999` or `<0.001` rather
   than rounding to certainty. The year is remembered per analysis, and the exports carry the column
@@ -663,10 +689,10 @@ not one of the numbers to compare.
 
 Two examples, as the test reports them:
 
-- `T = 5.7 · 5% critical 14.07 · df 7`: eight dates from Nenthorn. 5.7 < 14.07 → **consistent with
-  one event**.
-- `T = 27.9 · 5% critical 11.07 · df 5`: six dates from Layers 11–7. 27.9 > 11.07 → **more scatter
-  than one event allows**.
+- `T = 5.7 · 5% critical 14.07 · df 7`: eight dates from one feature. 5.7 < 14.07 → **consistent
+  with one event**.
+- `T = 27.9 · 5% critical 11.07 · df 5`: six dates from several layers. 27.9 > 11.07 → **more
+  scatter than one event allows**.
 
 How far `T` is from the critical value matters as much as which side it falls on. The second example
 is more than twice the threshold — a clear result. A `T` of 11.5 against 11.07 would be marginal,
@@ -1198,9 +1224,9 @@ rebinning, so the table, plots, matrix, exports and stored result all agree.
 the share of the posterior older than `T`. Each is integrated from the stored density by the
 trapezoid rule, cut exactly at `T` and divided by the series' own total, since a stored series is
 trimmed to where it has mass. One calculation serves the table and every export. A modelled
-posterior is stored on its solver grid, so a threshold between grid points is interpolated; on the
-AD 1250–1450 test fixtures this reproduces P(Start 11 before AD 1360) of 0.999, 0.947 and 0.989 for
-the three published-date models, and 0.49 for WkA-43681 (614 ± 20 BP) calibrated alone.
+posterior is stored on its solver grid, so a threshold between grid points is interpolated. On
+test models this reproduces independently computed threshold probabilities, for Boundaries and for
+dates calibrated alone.
 
 ### A.5 The Bayesian model
 
@@ -1271,7 +1297,9 @@ alpha_i+1(b)    = sum over b_i > b  of  alpha_i(b_i) T_i(b_i, b)
 beta_i(b)       = sum over b_i+1 < b of  T_i(b, b_i+1) beta_i+1(b_i+1)
 ```
 
-This is O(M²) per group on an M-point grid, deterministic, and exact up to the grid step.
+This is O(M²) per group on an M-point grid, deterministic, and exact up to the grid step. Duration
+and difference draws are independent draws from the joint posterior, taken backwards along the same
+chain.
 
 The interval integrals `F` are **trapezoidal**, with half weight on each endpoint cell. A plain
 cumulative difference gives an interval spanning `k` cells the mass of `k+1` cells, while the span
@@ -1295,8 +1323,11 @@ interior Boundaries fit *strictly* inside a span, so letting two coincide adds a
 correction never divides out, especially at the smallest spans.
 
 **Convergence** uses the same diagnostic as OxCal: the overlap integral between the first-half and
-second-half distributions, per parameter, targeting 0.95. The run extends until the worst parameter
-meets the target or the sweep ceiling is reached.
+second-half distributions, per parameter, targeting 0.95. A run is budgeted 20,000 sweeps per chain
+and extends until the worst parameter meets the target or the ceiling of 200,000 sweeps per chain is
+reached (raised to **Minimum sweeps per chain** where that is higher). The reported sweep count is
+the total over all chains. Duration and difference draws come from the chains themselves, so
+successive draws are correlated.
 
 **Several chains, one stopping rule.** By default four chains run in parallel, each seeded
 differently. Chain 0 starts with every date at its likelihood mode; the others start at calibration
@@ -1309,12 +1340,29 @@ must also pass the Gelman–Rubin R̂ (Gelman and Rubin 1992):
 R-hat = sqrt( ((n-1)/n * W + B/n) / W )
 ```
 
-held under 1.05 for every parameter. A run that hits the sweep ceiling with chains still
-disagreeing is reported as unconverged regardless of the pooled overlap.
+held under 1.05 for every parameter, and every chain must agree with the pooled answer, to within
+0.05, on the probability of each parameter being older than any given year. R̂ compares means and
+the overlap allows a few percent of mass in the wrong place, so neither holds a small calendar
+range's weight on its own. A run that hits the sweep ceiling with chains still disagreeing is
+reported as unconverged regardless of the pooled overlap.
+
+**Parallel tempering.** Each chain runs at three temperatures: itself, and two copies whose dates'
+likelihoods are raised to the powers 0.22 and 0.05. Every sweep, neighbouring temperatures propose
+to swap states, accepted with probability min(1, exp((b_i − b_j)(L_j − L_i))) for powers b and
+untempered log likelihoods L, which leaves each copy's own target, and so the recorded chain's
+posterior, unchanged. Only the power-1 chain is recorded. Translations cannot carry a sequence
+between solutions that differ by stretching it. On a test sequence whose Start Boundary has two
+separated calendar ranges, untempered chains crossed between them 0–2 times in 20,000 sweeps and
+each reported whichever range it started in, putting the probability of the early range at
+0.00–0.03 against an exact 0.08. With tempering they crossed 900–1,600 times, with swap acceptance
+near 35%. Across the models tested, tempered runs landed within 0.03 of the exact answer on the
+probability of any parameter being older than any given year, at about twice the run time on models
+that did not need tempering.
 
 **Checking a sampled result.** Both convergence measures compare the sampler against itself and
-cannot detect a lobe no chain has reached. The app therefore directly calculates the same posterior
-without sampling for two common shapes:
+cannot detect a lobe no chain has reached. The app therefore calculates the same posterior without
+sampling, using the exact solver's grid, interval integrals and message passing, extended to shapes
+the exact solver does not accept as a model:
 
 - A chain of Phases and Boundaries created using nested Sequences.
 - Parallel chains between an outer pair (e.g. a site's Start and End surrounding one Sequence per
@@ -1335,22 +1383,29 @@ Each Boundary is compared on 5-year bins in two ways: by total variation distanc
 largest difference in the probability of the Boundary being older than any given year. Over 0.15 on
 the first, or over 0.05 on the second, is reported as a difference, naming the Boundaries. The second
 exists because total variation cannot see a small calibration range the sampler under-weights: on
-one dune sequence the sampler put the probability of an early start at 0.00–0.03 against the
-direct 0.08, at a total variation of only 0.08. The second is held only on runs of several chains,
+the test sequence above, untempered, the sampler put the probability of the early range at
+0.00–0.03 against the direct 0.08, at a total variation of only 0.08. The second is held only on
+runs of several chains,
 since a single short chain's own noise can reach it. Runs that agree sit under about 0.08 and 0.03. A
-difference should be read as the direct calculation being right.
+difference should be read as the exact calculation being right.
 
 **Calibration ranges no chain reached.** After every sampled run, each calibration range holding at
-least a tenth of a date's likelihood but almost none of its posterior is probed: a short chain is
-started with the date's phase placed in that range. A range the model rules out is left at once; a
-range the sampler was trapped away from is not, and the run is then reported as having missed it,
-naming the dates. This works on any model shape, which the direct calculation does not. On a dune
-sequence whose four chains all sat in the late range, missing an early start with probability 0.08,
-the probe chains stayed in the early range 89–99% of the time; across about 2,000 tested ranges the
-model ruled out, they left all but one. A missed range should be read as the sampled answer being
-unreliable there: the exact solver, where the model allows it, or a longer run with more chains is
-the remedy. Other shapes are not checked, and the solver record
-says why.
+least a tenth of a date's likelihood but under 1% of its posterior is probed: a 1,000-sweep chain,
+at the run's own temperatures, is started with the date's phase placed in that range. A range the
+model rules out is left at once; a range the sampler was trapped away from is not. If the probe
+chain spends at least half of its last 500 sweeps in the range, the run is reported as having
+missed it, naming the dates. This works on any model shape, which the exact solver's check does not.
+On the test sequence above, with untempered chains that all sat in the late range, the probe chains
+stayed in the early range 89–99% of the time; across about 2,000 tested ranges the model ruled out,
+they left all but one.
+
+**Forcing exact integration.** A Sequence that orders two groups with no Boundary between them is
+not chain-shaped. **Exact solver only** makes it so by supplying the Boundary the order implies.
+That splits one span term over K dates into two over K₁ + K₂ dates, and K is the exponent that
+holds a date to its group, so the modelled ranges genuinely move. Measured against OxCal on two
+test models (rms of the modelled dates, in years), sampling the model as written outperformed
+integrating the patched model both times: 1.49 against 2.51, and 4.53 against 10.63. Automatic
+therefore samples such models.
 
 ### A.7 Outlier models
 
@@ -1724,9 +1779,9 @@ calibration is evaluated past the grid's old end by the allowance's reach before
 event near the edge still sees all of its material's likelihood. TPQ and TAQ limiters bound the
 event, so they are applied after the smoothing.
 
-Against the sampler-free reference built for the Shag River Mouth corpus (Petchey et al.'s Layer
-11–4 model, published maxima on the charcoal), P(Start 11 before AD 1360) agrees within 0.1 with
-and without allowances, for the published dates, with WkA-56765 moved to Layer 11, and with it left
+Against a sampler-free reference built for a test sequence of charcoal dates carrying published
+maximum inbuilt ages, the probability of the first Boundary falling before a test year agrees within
+0.1, with and without allowances, and with the most influential date moved to another layer or left
 out.
 
 ## Bibliography

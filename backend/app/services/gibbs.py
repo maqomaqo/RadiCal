@@ -204,6 +204,17 @@ BURN_IN_FRACTION = 0.2
 GROUP_SHIFT_YEARS = 60.0
 # Translation proposals per move set per sweep.
 MOVES_PER_SWEEP = 2
+# Parallel tempering (see _Chain): how many temperatures each chain runs at,
+# counting its own (1 is no tempering), and the lowest power the likelihood of
+# the hottest copy is raised to. The copies run on a flattened likelihood where
+# calibration lobes are easy to cross, and pass what they find down to the
+# chain that counts by swapping. On Petchey et al.'s dune model, where untempered
+# chains each stayed in one lobe, three temperatures crossed 900-1,600 times
+# in 20,000 sweeps and pooled runs landed within 0.03 of the exact answer on
+# every model tried; it roughly doubles a run's time on models that mixed
+# anyway.
+DEFAULT_TEMPERATURES = 3
+COLDEST_HOT_BETA = 0.05
 # Acceptance rate the proposal scales are tuned towards during burn-in. The
 # usual random-walk target; the exact value matters much less than not sitting
 # at 1% (too wide) or 95% (too narrow to go anywhere).
@@ -281,6 +292,14 @@ MAX_CHAIN_WORKERS = 8
 # guards against is unmistakable at any threshold in the usual range. What it
 # cannot see is a lobe NO chain is in.
 TARGET_RHAT = 1.05
+# The largest difference any chain may show from the pooled answer in the
+# probability of a parameter being older than a given year before a pooled run
+# may stop (_chain_threshold_gap). R-hat compares means, and the overlap
+# measure tolerates a few percent of mass in the wrong place, so neither holds
+# a small calibration lobe's weight: tempered chains on Petchey et al.'s dune
+# model stopped at 12,000 sweeps with P(Start before AD 1360) at 0.17 against an
+# exact 0.08, every chain mixing and R-hat 1.04.
+TARGET_CHAIN_THRESHOLD_GAP = 0.05
 # The span of the dates' likelihoods the extra chains start across (see
 # start_quantiles). Short of the extreme tails, where an outlier model's broad
 # component puts a date centuries from anything it is plausibly near.
@@ -672,6 +691,41 @@ class Model:
         model = self.model_of_date.get(date_id)
         return None if model is None else state.scale.get(model, 0)
 
+    # The power the date likelihoods are raised to: 1 for the posterior, less
+    # for a tempered copy of the chain (_Chain). Set around a tempered copy's
+    # sweep and restored after; everything that reads a date's likelihood goes
+    # through it -- the date and level draws, the scale draw and log_posterior.
+    beta = 1.0
+
+    def _likelihood_tables(self, date_id: str, node: Optional[int]
+                           ) -> Tuple[np.ndarray, np.ndarray]:
+        """(density, cumulative) of a date's likelihood at the current power,
+        cached per power."""
+        density = (self.likelihood[date_id] if node is None
+                   else self.likelihood_at[date_id][node])
+        if self.beta == 1.0:
+            cdf = self.cdf[date_id] if node is None else self.cdf_at[date_id][node]
+            return density, cdf
+        cache = self.__dict__.setdefault('_tempered_tables', {})
+        key = (date_id, node, self.beta)
+        if key not in cache:
+            powered = np.power(density, self.beta)
+            cache[key] = (powered, np.cumsum(powered))
+        return cache[key]
+
+    def log_likelihood_sum(self, state: _State) -> float:
+        """The dates' log likelihood at their current positions, untempered:
+        what a swap between tempered copies is decided on."""
+        total = 0.0
+        scale = state.scale
+        model_of = self.model_of_date
+        for date_id in self.drawable_ids:
+            model = model_of.get(date_id)
+            table = (self.log_likelihood[date_id] if model is None
+                     else self.log_likelihood_at[date_id][scale.get(model, 0)])
+            total += table[state.index[date_id]]
+        return float(total)
+
     def draw_scale(self, model: str, state: _State, u: float) -> int:
         """
         Exact draw of one outlier model's shared scale from its full
@@ -685,7 +739,7 @@ class Model:
             return state.scale.get(model, 0)
         log_weights = np.zeros(len(nodes))
         for date_id in dates:
-            log_weights += self.log_likelihood_at[date_id][:, state.index[date_id]]
+            log_weights += self.beta * self.log_likelihood_at[date_id][:, state.index[date_id]]
         log_weights -= log_weights.max()
         weights = np.exp(log_weights)
         total = weights.sum()
@@ -1077,9 +1131,7 @@ class Model:
         if date_id in self.deposition_of:
             return self._draw_deposition_level(date_id, state, u, lo, hi)
         node = self._scale_of(date_id, state)
-        cdf = self.cdf[date_id] if node is None else self.cdf_at[date_id][node]
-        density = (self.likelihood[date_id] if node is None
-                   else self.likelihood_at[date_id][node])
+        density, cdf = self._likelihood_tables(date_id, node)
 
         # Whatever sits ON an end is something this date is ordered against:
         # a younger neighbour cannot be above lo, an older one below hi.
@@ -1135,7 +1187,7 @@ class Model:
         density = (self.likelihood[level_id] if node is None
                    else self.likelihood_at[level_id][node])
         with np.errstate(divide='ignore'):
-            log_dens = np.log(np.maximum(density[lo:hi + 1], 1e-300))
+            log_dens = self.beta * np.log(np.maximum(density[lo:hi + 1], 1e-300))
         terms = self._log_deposition_terms(level_id, state, candidates)
         if terms is not None:
             log_dens = log_dens + terms
@@ -1226,14 +1278,9 @@ class Model:
                 index[self.edge_younger] + self.edge_gap > index[self.edge_older]).any():
             return -np.inf
 
-        total = 0.0
-        scale = state.scale
-        model_of = self.model_of_date
-        for date_id in self.drawable_ids:
-            model = model_of.get(date_id)
-            table = (self.log_likelihood[date_id] if model is None
-                     else self.log_likelihood_at[date_id][scale.get(model, 0)])
-            total += table[state.index[date_id]]
+        # The dates' likelihood at the current power (1 for the posterior;
+        # see beta), and everything else -- the prior -- untouched.
+        total = self.beta * self.log_likelihood_sum(state)
         # log of endpoint_weight, summed: -log 2 per tied ordering edge, a date
         # on a boundary or on another date.
         halves = int((index[self.tie_younger] == index[self.tie_older]).sum())
@@ -1865,12 +1912,25 @@ class _Chain:
     def __init__(self, model: Model, sweeps: int, seed: int,
                  burn_in: Optional[int], max_sweeps: Optional[int],
                  collect_draws: int, start_quantile: Optional[float] = None,
-                 start_lobe: Optional[Tuple] = None):
+                 start_lobe: Optional[Tuple] = None,
+                 temperatures: int = DEFAULT_TEMPERATURES):
         self.model = model
         self.rng = np.random.default_rng(seed)
         # Where in the dates' likelihoods the chain starts; None is the mode.
         # See Model.initial_state and solve_chains.
         self.state = model.initial_state(start_quantile, start_lobe)
+        # Parallel tempering: `temperatures` - 1 copies of the chain on the
+        # likelihood raised to geometrically smaller powers, down to
+        # COLDEST_HOT_BETA. They sweep alongside this one and swap states with
+        # their neighbours; only this chain (power 1) is ever recorded. On a
+        # flattened likelihood a calibration lobe the real chain cannot cross
+        # into is easy to reach, and a swap carries it down. See sweep.
+        count = max(1, int(temperatures))
+        self.betas = ([1.0] if count == 1 else
+                      list(COLDEST_HOT_BETA ** (np.arange(count) / (count - 1))))
+        self.hot_states = [self.state.copy() for _ in self.betas[1:]]
+        self.swaps_proposed = [0] * max(0, count - 1)
+        self.swaps_accepted = [0] * max(0, count - 1)
         self.burn_in = int(sweeps * BURN_IN_FRACTION) if burn_in is None else burn_in
         self.max_sweeps = max(sweeps, MAX_SWEEPS) if max_sweeps is None else max_sweeps
 
@@ -1920,7 +1980,43 @@ class _Chain:
         self.round_length = max(1, (sweeps - self.burn_in) // ROUNDS)
 
     def sweep(self) -> None:
-        model, state, rng = self.model, self.state, self.rng
+        """
+        One sweep of the chain, and of each tempered copy with a swap attempted
+        between every neighbouring pair of them.
+
+        A swap between powers b_i > b_j exchanges the two states with
+        probability min(1, exp((b_i - b_j)(L_j - L_i))), L being the dates'
+        untempered log likelihood (Model.log_likelihood_sum) -- the standard
+        parallel-tempering rule, which leaves every copy's own target, and so
+        this chain's posterior, invariant.
+        """
+        self.state = self._sweep_state(self.state, adapt=True)
+        if not self.hot_states:
+            self.swept += 1
+            return
+        model = self.model
+        try:
+            for k, beta in enumerate(self.betas[1:]):
+                model.beta = float(beta)
+                self.hot_states[k] = self._sweep_state(self.hot_states[k], adapt=False)
+        finally:
+            model.beta = 1.0
+        states = [self.state] + self.hot_states
+        for k in range(len(states) - 1):
+            self.swaps_proposed[k] += 1
+            colder, hotter = states[k], states[k + 1]
+            exponent = (self.betas[k] - self.betas[k + 1]) * (
+                model.log_likelihood_sum(hotter) - model.log_likelihood_sum(colder))
+            if exponent >= 0 or self.rng.random() < np.exp(exponent):
+                states[k], states[k + 1] = hotter, colder
+                self.swaps_accepted[k] += 1
+        self.state, self.hot_states = states[0], states[1:]
+        self.swept += 1
+
+    def _sweep_state(self, state: _State, adapt: bool) -> _State:
+        """One sweep of `state` at the model's current power, returning the new
+        state; `adapt` lets the translation scales tune during burn-in."""
+        model, rng = self.model, self.rng
         # Dates, one blocked update per colour class.
         for block in model.blocks:
             draws = rng.random(len(block))
@@ -1953,21 +2049,23 @@ class _Chain:
             for _ in range(MOVES_PER_SWEEP):
                 state, current_lp, took, wide = model.shift(
                     state, rng, params, self.scales[index], current_lp)
+                if not adapt:
+                    continue
                 self.proposed[index] += 1
                 self.accepted[index] += int(took)
                 if not wide:
                     self.since_adapt[index] += 1
                     self.took_since_adapt[index] += int(took)
 
-            if self.swept < self.burn_in and self.since_adapt[index] >= ADAPT_INTERVAL:
+            if (adapt and self.swept < self.burn_in
+                    and self.since_adapt[index] >= ADAPT_INTERVAL):
                 rate = self.took_since_adapt[index] / self.since_adapt[index]
                 # Standard random-walk tuning, floored at one grid step since
                 # a proposal rounding to zero can never move anything.
                 self.scales[index] = max(1.0, self.scales[index] * (
                     1.3 if rate > TARGET_ACCEPTANCE else 0.75))
                 self.since_adapt[index] = self.took_since_adapt[index] = 0
-        self.state = state
-        self.swept += 1
+        return state
 
     def burn(self, count: int) -> None:
         """`count` sweeps with nothing accumulated."""
@@ -2108,7 +2206,8 @@ def run(model: Model, sweeps: int = DEFAULT_SWEEPS, seed: int = 42,
         min_sweeps: int = 0,
         on_progress: Optional[Callable[[Dict], bool]] = None,
         start_quantile: Optional[float] = None,
-        start_lobe: Optional[Tuple] = None) -> Dict:
+        start_lobe: Optional[Tuple] = None,
+        temperatures: int = DEFAULT_TEMPERATURES) -> Dict:
     """
     Sweep the sampler and accumulate each parameter's marginal as a histogram
     over the calendar grid, extending the run until it has converged.
@@ -2164,7 +2263,7 @@ def run(model: Model, sweeps: int = DEFAULT_SWEEPS, seed: int = 42,
     ...} -- convergence being OxCal's own diagnostic, per parameter.
     """
     chain = _Chain(model, sweeps, seed, burn_in, max_sweeps, collect_draws,
-                   start_quantile, start_lobe)
+                   start_quantile, start_lobe, temperatures)
 
     def report(phase: str, convergence: float) -> None:
         if on_progress is None:
@@ -2303,7 +2402,8 @@ def _chain_server(conn) -> None:
                 chain = _Chain(model, payload['sweeps'], payload['seed'],
                                None, payload['max_sweeps'], payload['collect_draws'],
                                payload.get('start_quantile'),
-                               payload.get('start_lobe'))
+                               payload.get('start_lobe'),
+                               payload.get('temperatures', DEFAULT_TEMPERATURES))
                 reply = {'params': list(model.params), 'burn_in': chain.burn_in,
                          'max_sweeps': chain.max_sweeps}
             elif command == 'burn':
@@ -2469,7 +2569,8 @@ def solve_chains(measurements: List[Dict], root: Dict, chains: int,
                  min_sweeps: int = 0,
                  collect_draws: int = 0,
                  on_progress: Optional[Callable[[Dict], bool]] = None,
-                 start_strategy: str = DEFAULT_START_STRATEGY) -> Dict:
+                 start_strategy: str = DEFAULT_START_STRATEGY,
+                 temperatures: int = DEFAULT_TEMPERATURES) -> Dict:
     """
     run() over `chains` chains in parallel worker processes, under ONE
     stopping rule read off their pooled rounds, returned as one result of
@@ -2532,6 +2633,7 @@ def solve_chains(measurements: List[Dict], root: Dict, chains: int,
             'uniform_span_prior': uniform_span_prior, 'sweeps': sweeps,
             'seed': seed + c, 'max_sweeps': max_sweeps,
             'collect_draws': collect_draws, 'curves': curves,
+            'temperatures': temperatures,
             **start,
         } for c, start in enumerate(chain_starts(chains, seed, start_strategy))])
         params: List[str] = built[0]['params']
@@ -2573,7 +2675,8 @@ def solve_chains(measurements: List[Dict], root: Dict, chains: int,
             # other, or a chain stuck in a lobe would be pooled in silence.
             totals = [{p: sum(r[p] for r in rounds) for p in params} for rounds in kept]
             _overlap, rhat = _between_chains(totals, params)
-            if rhat is not None and rhat <= TARGET_RHAT:
+            if (rhat is not None and rhat <= TARGET_RHAT
+                    and _chain_threshold_gap(totals, params) <= TARGET_CHAIN_THRESHOLD_GAP):
                 break
 
         results = everyone('finish', [None] * chains)
@@ -2620,6 +2723,7 @@ def _pool_chains(results: List[Dict]) -> Dict:
     draws = [r['draws'] for r in results if r['draws'] is not None]
     within = {p: min(r['convergence'].get(p, 0.0) for r in results) for p in params}
     between, rhat = _between_chains([r['histograms'] for r in results], params)
+    chain_gap = _chain_threshold_gap([r['histograms'] for r in results], params)
 
     return {
         'histograms': histograms,
@@ -2641,7 +2745,29 @@ def _pool_chains(results: List[Dict]) -> Dict:
         'chains': len(results),
         'between_chain_convergence': between,
         'rhat': rhat,
+        'chain_threshold_gap': chain_gap,
     }
+
+
+def _chain_threshold_gap(histograms: List[Dict[str, np.ndarray]], params: List[str]
+                         ) -> Optional[float]:
+    """
+    The largest difference, over every parameter, chain and calendar year,
+    between one chain's and the pooled probability of the parameter being older
+    than that year; None with a single chain. See TARGET_CHAIN_THRESHOLD_GAP.
+    """
+    if len(histograms) < 2:
+        return None
+    worst = 0.0
+    for p in params:
+        chains = [h[p] for h in histograms]
+        totals = [float(c.sum()) for c in chains]
+        if any(t <= 0 for t in totals):
+            return 1.0
+        pooled = np.cumsum(sum(chains)) / sum(totals)
+        for c, t in zip(chains, totals):
+            worst = max(worst, float(np.abs(np.cumsum(c) / t - pooled).max()))
+    return worst
 
 
 def _between_chains(histograms: List[Dict[str, np.ndarray]], params: List[str]
@@ -2775,7 +2901,7 @@ PROBE_CORE = 0.1
 
 
 def probe_unvisited_lobes(model: Model, histograms: Dict[str, np.ndarray],
-                          seed: int) -> Dict:
+                          seed: int, temperatures: int = DEFAULT_TEMPERATURES) -> Dict:
     """
     Whether calibration lobes the run left empty are empty because the model
     rules them out or because no chain reached them.
@@ -2787,6 +2913,9 @@ def probe_unvisited_lobes(model: Model, histograms: Dict[str, np.ndarray],
     cannot be told from one the model rules out by looking at the run -- in a
     test 99.5% of such lobes were ruled out -- but a chain STARTED in it can:
     it leaves a lobe the model rules out and stays in one with real mass.
+
+    The probe chains run at the same `temperatures` as the run they check: a
+    run that could not reach a lobe is probed with the sampler that missed it.
 
     {'probed': n, 'not_reached': [{'id', 'name', 'from_bp', 'to_bp',
      'likelihood_share', 'occupancy'}], 'left': n, 'untestable': n,
@@ -2816,7 +2945,8 @@ def probe_unvisited_lobes(model: Model, histograms: Dict[str, np.ndarray],
         if state is None:
             record['untestable'] += 1
             continue
-        chain = _Chain(model, PROBE_SWEEPS, seed + 7919 + i, None, PROBE_SWEEPS, 0)
+        chain = _Chain(model, PROBE_SWEEPS, seed + 7919 + i, None, PROBE_SWEEPS, 0,
+                       temperatures=temperatures)
         chain.state = state
         inside = 0
         for sweep in range(PROBE_SWEEPS):
@@ -2847,7 +2977,8 @@ def solve(measurements: List[Dict], root: Dict, sweeps: int = DEFAULT_SWEEPS,
           interval_draws: int = intervals.DEFAULT_DRAWS,
           on_progress: Optional[Callable[[Dict], bool]] = None,
           chains: int = 1,
-          resolution: float = REPORTING_STEP_YEARS) -> Dict:
+          resolution: float = REPORTING_STEP_YEARS,
+          temperatures: int = DEFAULT_TEMPERATURES) -> Dict:
     """
     Posterior summaries for every date and boundary, in the same shape
     exact_chain.solve returns -- so a caller does not need to know which
@@ -2905,14 +3036,14 @@ def solve(measurements: List[Dict], root: Dict, sweeps: int = DEFAULT_SWEEPS,
             uniform_span_prior=uniform_span_prior, grid=model.grid,
             target_convergence=target_convergence, max_sweeps=max_sweeps,
             min_sweeps=min_sweeps, collect_draws=interval_draws,
-            on_progress=on_progress)
+            on_progress=on_progress, temperatures=temperatures)
     else:
         if max_sweeps is None and min_sweeps:
             max_sweeps = max(sweeps, MAX_SWEEPS, min_sweeps)
         chain = run(model, sweeps=sweeps, seed=seed, min_sweeps=min_sweeps,
                     target_convergence=target_convergence, max_sweeps=max_sweeps,
                     collect_draws=interval_draws,
-                    on_progress=on_progress)
+                    on_progress=on_progress, temperatures=temperatures)
     rng = np.random.default_rng(seed)
 
     results: Dict = {'measurements': {}, 'boundaries': {}}
@@ -2950,7 +3081,8 @@ def solve(measurements: List[Dict], root: Dict, sweeps: int = DEFAULT_SWEEPS,
 
     results['method'] = 'gibbs'
     # Lobes the run left empty, probed: see probe_unvisited_lobes.
-    results['lobe_probe'] = probe_unvisited_lobes(model, chain['histograms'], seed)
+    results['lobe_probe'] = probe_unvisited_lobes(model, chain['histograms'], seed,
+                                                  temperatures)
     results['deposition'] = _deposition_report(model, chain)
     results['uniform_span_prior'] = bool(model.span_priors)
     results['sweeps'] = chain['sweeps']
@@ -2975,8 +3107,14 @@ def solve(measurements: List[Dict], root: Dict, sweeps: int = DEFAULT_SWEEPS,
     # With several chains the run also had to bring R-hat under its target
     # (solve_chains); a run that hit the cap first with the chains still
     # apart is unconverged whatever its pooled overlap says.
+    chain_gap = chain.get('chain_threshold_gap')
+    results['chain_threshold_gap'] = chain_gap
+    results['chain_threshold_gap_target'] = (TARGET_CHAIN_THRESHOLD_GAP
+                                              if chain_gap is not None else None)
+    results['temperatures'] = temperatures
     results['converged'] = within >= target_convergence and (
-        rhat is None or rhat <= TARGET_RHAT)
+        rhat is None or rhat <= TARGET_RHAT) and (
+        chain_gap is None or chain_gap <= TARGET_CHAIN_THRESHOLD_GAP)
     results['acceptance'] = chain['acceptance']
     # Each outlier model's shared offset scale, in the log10(years) OxCal
     # reports its U(0,n) posterior in, so the two compare directly.

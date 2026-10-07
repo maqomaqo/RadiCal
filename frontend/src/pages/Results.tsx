@@ -2056,7 +2056,7 @@ export default function Results() {
     isBayesian && crossCheck?.status === 'differs' ? (
       <Alert severity="warning">
         <Typography variant="subtitle2" gutterBottom>
-          A direct calculation gives a different answer
+          The exact solver gives a different answer
         </Typography>
         <Typography variant="body2">
           Differs at {crossCheck.differing.map((row) => row.name).join(', ')}. See the
@@ -2172,7 +2172,7 @@ export default function Results() {
               ? ', but writing in the Boundary the model implies would let it be solved exactly without changing anything.'
               : '.'}
             {crossCheck?.status === 'not_checked' && crossCheck.reason
-              ? ` The direct calculation covers other model shapes: ${crossCheck.reason}.`
+              ? ` The exact solver’s check covers other model shapes: ${crossCheck.reason}.`
               : ''}
           </Typography>
         </Alert>
@@ -2203,9 +2203,9 @@ export default function Results() {
                 : 'the 95% target'
             } over ${sampling}.` +
             (crossCheck?.status === 'agrees'
-              ? ' A direct calculation of the same model agrees.'
+              ? ' The exact solver, run on the same model as a check, agrees.'
               : crossCheck?.status === 'not_checked' && crossCheck.reason
-              ? ` The direct calculation covers other model shapes: ${crossCheck.reason}.`
+              ? ` The exact solver’s check covers other model shapes: ${crossCheck.reason}.`
               : '')
           }
         >

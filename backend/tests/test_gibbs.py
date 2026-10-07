@@ -549,6 +549,28 @@ class TestEveryKernelTargetsOneDistribution:
                 assert self._tv(got[2][k], target[2][k]) < 0.03, (name, 'date', k)
 
 
+    def test_the_recorded_chain_of_a_tempered_ladder_reaches_the_same_distribution(self):
+        """
+        Parallel tempering (gibbs._Chain) adds hot copies and swaps; only the
+        power-1 chain is recorded, and the swap rule must leave ITS target
+        alone. Its marginals against the enumeration, at the same tolerance.
+        """
+        model = self._ordered(step=40.0)
+        target = self._enumerated(model)
+        chain = gibbs._Chain(model, 30000, 5, 2000, 30000, 0, temperatures=3)
+        chain.burn(2000)
+
+        def run():
+            for s in range(30000):
+                chain.sweep()
+                yield s, chain.state
+        got = self._histograms(model, run())
+        assert self._tv(got[0], target[0]) < 0.03
+        assert self._tv(got[1], target[1]) < 0.03
+        for k in range(4):
+            assert self._tv(got[2][k], target[2][k]) < 0.03, k
+        assert all(a > 0 for a in chain.swaps_accepted)
+
 class TestBranchingModels:
     """
     The models this sampler exists for -- the ones exact_chain declines.
@@ -855,13 +877,16 @@ class TestTheChainCanActuallyMove:
         because those two currently disagree for an unrelated reason (see
         TestAgreesWithTheExactSolver). Seed-to-seed spread is what the wide
         proposal fixes, so that is what is measured.
+
+        Untempered: parallel tempering also carries chains between lobes, and
+        with it on the wide proposal's own effect no longer shows.
         """
         measurements = ox.measurements()
         tree = ox.model_tree('unordered')
 
         def means(seed):
             sampled = _fixed(measurements, tree, sweeps=20000, num_samples=100,
-                             seed=seed)
+                             seed=seed, temperatures=1)
             return np.array([sampled['measurements'][m['id']]['posterior_mean']
                              for m in measurements])
 
@@ -1736,7 +1761,8 @@ class TestLobeProbe:
                     if param in model.likelihood else model.M // 2)
             row[cell] = 1.0
             histograms[param] = row
-        record = gibbs.probe_unvisited_lobes(model, histograms, seed=3)
+        # Untempered, as the run that produced such histograms would have been.
+        record = gibbs.probe_unvisited_lobes(model, histograms, seed=3, temperatures=1)
         names = {row['name'] for row in record['not_reached']}
         assert {'WkA-43681', 'WkA-43682'} <= names, record
 
@@ -1755,3 +1781,37 @@ class TestLobeProbe:
         record = gibbs.probe_unvisited_lobes(model, histograms, seed=3)
         assert record['probed'] > 0
         assert record['not_reached'] == [], record
+
+
+class TestParallelTempering:
+    """
+    Untempered chains on Petchey et al.'s dune model of Layers 11-4 each stayed
+    in whichever calibration range of the Start they began in, so the pooled
+    P(Start before AD 1360) depended on where the chains started. Tempered
+    copies cross easily and swap what they find into the recorded chain.
+    """
+
+    def test_tempered_chains_cross_between_the_starts_two_ranges(self):
+        measurements, tree = TestLobeProbe()._petchey()
+        model = gibbs.Model(measurements, tree)
+        start = model.boundary_ids[0]
+        cut = int(np.searchsorted(model.grid, 590.0))            # AD 1360
+        crossings = {}
+        for temperatures in (1, 3):
+            chain = gibbs._Chain(model, 6000, 43, None, 6000, 0, temperatures=temperatures)
+            early = []
+            for _ in range(6000):
+                chain.sweep()
+                early.append(chain.state.index[start] >= cut)
+            crossings[temperatures] = int(np.abs(np.diff(np.array(early, int))).sum())
+        assert crossings[1] < 20, crossings
+        assert crossings[3] > 100, crossings
+
+    def test_it_is_on_by_default_and_reported(self):
+        assert gibbs.DEFAULT_TEMPERATURES == 3
+        dates = [_date('p', 3000), _date('p', 3040)]
+        tree = _element('sequence', 'S', [_element('boundary', 'a'),
+                                          {**_element('phase', 'P'), 'id': 'p'},
+                                          _element('boundary', 'b')])
+        result = gibbs.solve(dates, tree, sweeps=2000, max_sweeps=2000, num_samples=50)
+        assert result['temperatures'] == 3

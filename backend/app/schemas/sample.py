@@ -585,6 +585,11 @@ class BayesianConfigInput(BaseModel):
     # one chain is the plain run. Ignored by the exact solver, which has no
     # chain.
     mcmc_chains: int = Field(default=4, ge=1, le=16)
+    # Tempered copies each chain runs alongside itself, counting itself
+    # (gibbs._Chain): they cross between calibration lobes on a flattened
+    # likelihood and swap what they find into the chain that is recorded. One
+    # turns tempering off. Ignored by the exact solver.
+    mcmc_temperatures: int = Field(default=3, ge=1, le=8)
     # OxCal's UniformSpanPrior, on by default there and here: it stops a
     # sequence's span prior depending on how many sub-groups it is divided
     # into (Nicholls and Jones 2001), and is the identity below three
