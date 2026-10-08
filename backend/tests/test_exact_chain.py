@@ -1221,6 +1221,52 @@ class TestTheLimitsFactor:
         assert ec._log_limits_factor(grid, (3400.0, -np.inf),
                                      (3400.0, -np.inf)) is None
 
+    def test_a_gap_that_is_zero_up_to_rounding_counts_as_zero(self):
+        """
+        The span and the limits are both differences of grid ages, so where they
+        are equal g is zero only in exact arithmetic. On steps binary cannot
+        represent it came out at +/-1e-13, and the positive half weighted that
+        span by up to e^31, where a real gap is never less than one step.
+        """
+        for step in (5.0 / 3.0, 5.0 / 6.0, 5.0 / 7.0, 5.0 / 9.0):
+            grid = 236.41666666666669 + step * np.arange(600)
+            span = grid[None, :] - grid[:, None]
+            for young, old in ((50, 250), (120, 400), (33, 333)):
+                # Limits as the dates set them: the older Boundary no younger
+                # than grid[old], the younger no older than grid[young].
+                factor = ec.log_limits_factor_of_span(
+                    span, (np.inf, grid[old]), (grid[young], -np.inf))
+                assert factor[span > 0].max() <= max(0.0, -np.log(step)) + 1e-9, \
+                    (step, young, old)
+
+    def test_a_phase_is_not_squeezed_onto_a_rounding_error(self):
+        """
+        What that did to an ordinary model: eleven dates in one phase, the
+        oldest and youngest too far apart to overlap, on the 5/3-year step the
+        solver picks for it. The spike held the two Boundaries 86 years apart
+        rather than 445, and Start came back at 3882 cal BP instead of 4071.
+        Checked against the same model on a step binary represents exactly,
+        where no difference of grid ages rounds.
+        """
+        ages = [3391, 3460, 3470, 3533, 3566, 3566, 3589, 3639, 3645, 3650, 3732]
+        dates = _dates(*[(f'rz{i}', age, 20, 'rz_p') for i, age in enumerate(ages)])
+        tree = _sequence('rz', [_boundary('rz_b0', 'Start'), _phase('rz_p'),
+                                _boundary('rz_b1', 'End')])
+        chain = ec.layout(tree, dates)
+        solved = ec.solve(dates, tree, chain, num_samples=50, interval_draws=50)
+
+        step = 1.25
+        lower, upper = solved['grid']['lower'], solved['grid']['upper']
+        exact = np.round(lower / step) * step + step * np.arange(int((upper - lower) / step) + 1)
+        reference, _densities = ec._solve_on_grid(
+            exact, dates, tree, chain, inherited_bounds(tree), num_samples=50, seed=1,
+            uniform_span_prior=True, estimate_durations=False, dispersal=None,
+            interval_draws=50, resolution=5.0)
+        for bid in chain.boundary_ids:
+            got = solved['boundaries'][bid]['posterior']['posterior_mean']
+            want = reference['boundaries'][bid]['posterior']['posterior_mean']
+            assert got == pytest.approx(want, abs=2.0), bid
+
 
 class TestReportingIsIndependentOfTheInternalGrid:
     """

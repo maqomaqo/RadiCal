@@ -154,6 +154,9 @@ PLOT_MARGIN_YEARS = 50.0
 # The weight of two neighbouring Boundaries in one grid cell: a half, the
 # trapezoid's end, as for a date on a Boundary. See _boundary_pair_term.
 BOUNDARY_TIE_WEIGHT = 0.5
+# A limits-factor g this close to zero, in years, IS zero: rounding of two equal
+# differences of grid ages, not a gap. See log_limits_factor_of_span.
+LIMITS_ROUNDING_YEARS = 1e-6
 
 
 class Chain:
@@ -1059,8 +1062,18 @@ def log_limits_factor_of_span(spans: np.ndarray,
     # model, and must not veto the state: weight 1 there, not zero. Returning
     # -inf instead makes the sampler's starting state infeasible on a model
     # with a stratigraphic inversion.
+    #
+    # "Non-positive" has to allow for rounding. The span and the limits are
+    # both differences of grid ages, so where they are equal g is zero only in
+    # exact arithmetic. On a step binary cannot represent -- the 5/3 or 5/6
+    # years _reporting_aligned_step often picks -- it comes out as +/-1e-13,
+    # and the positive half of that weighted one span by 1e13. On an
+    # eleven-date phase whose outermost dates do not overlap, that span then
+    # carried the posterior: Start came back with a mean of 3882 cal BP rather
+    # than 4071, which the same model on a 1.25-year step agrees with, and the
+    # dates moved up to 158 years.
     out = np.zeros(g.shape)
-    positive = g > 0
+    positive = g > LIMITS_ROUNDING_YEARS
     out[positive] = -np.log(g[positive])
     return out
 
