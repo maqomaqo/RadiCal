@@ -55,8 +55,10 @@ described in tests/hillside_charcoal_fixture's PHASE WIDTH note, not the phase
 model. services/gibbs.py carries the same rule as Model.endpoint_weight, and the
 two agree to about 0.6 years on the chain fixtures.
 
-`layout()` returns None for anything that is not a single chain, and the caller
-falls back to the sampler. In particular a Sequence that orders two groups with
+`layout()` returns None for anything that is not a single chain. The caller
+then tries services/exact_parallel.py, which integrates a chain whose stages
+hold areas side by side with this module's own pieces, and falls back to the
+sampler only when that declines too. In particular a Sequence that orders two groups with
 NO boundary between them is not a chain: its dates share one enclosing boundary
 pair while an extra constraint orders them against each other, and that
 constraint does not factorise along the chain. Adding an explicit Boundary
@@ -208,25 +210,9 @@ def layout_with_reason(
     if root is None:
         return None, 'the analysis has no model structure'
     plan = plan_model(root, measurements)
-
-    # Both of these couple the dates to EACH OTHER rather than only through
-    # their Boundaries, which is the one thing the message passing below
-    # cannot express -- the same obstruction the module docstring records for
-    # the outlier scale, and with the same resolution: say so, and let the
-    # caller take the sampler or the closed form.
-    if plan.deposition_groups:
-        return None, (
-            'this model contains a deposition sequence, whose ages are coupled '
-            'to each other by the deposition rate rather than only through '
-            'their Boundaries, so it cannot be integrated exactly'
-        )
-    if plan.wiggle_groups:
-        return None, (
-            'this model contains a wiggle match, whose dates are one calendar '
-            'age with the measured gaps added to it rather than separate '
-            'parameters, so it is not a chain of Boundaries. It is solved in '
-            'closed form instead (services/wiggle_match.py)'
-        )
+    coupled = coupled_dates_reason(plan)
+    if coupled is not None:
+        return None, coupled
 
     if not plan.span_groups:
         return None, (
@@ -329,6 +315,32 @@ def layout_with_reason(
 
     return Chain(boundary_ids, [list(g.date_ids) for g in ordered_groups],
                  dict(plan.boundary_names)), None
+
+
+def coupled_dates_reason(plan) -> Optional[str]:
+    """
+    Why `plan` cannot be integrated exactly whatever its shape, or None.
+
+    Both of these couple the dates to EACH OTHER rather than only through
+    their Boundaries, which is the one thing the message passing below cannot
+    express -- the same obstruction the module docstring records for the
+    outlier scale, and with the same resolution: say so, and let the caller
+    take the sampler or the closed form. Shared with services/exact_parallel.py.
+    """
+    if plan.deposition_groups:
+        return (
+            'this model contains a deposition sequence, whose ages are coupled '
+            'to each other by the deposition rate rather than only through '
+            'their Boundaries, so it cannot be integrated exactly'
+        )
+    if plan.wiggle_groups:
+        return (
+            'this model contains a wiggle match, whose dates are one calendar '
+            'age with the measured gaps added to it rather than separate '
+            'parameters, so it is not a chain of Boundaries. It is solved in '
+            'closed form instead (services/wiggle_match.py)'
+        )
+    return None
 
 
 def _stitched(segments: List[List[SpanGroup]], plan) -> Optional[List[SpanGroup]]:
@@ -1456,6 +1468,47 @@ def _scaled_by_peak(matrix: np.ndarray) -> Tuple[np.ndarray, float]:
     return (matrix / peak, float(np.log(peak))) if peak > 0 else (matrix, 0.0)
 
 
+class _ChainProducts:
+    """
+    The part of _messages_with_span_prior that does not depend on the factor
+    coupling a chain's two ends: the prefix products A and suffix products D
+    over its transfer matrices (see that function for their definitions).
+
+    Formed once per chain. services/exact_parallel.py needs a chain's
+    end-to-end product before it knows the chain's end factor, which there is
+    the weight of everything outside the chain and depends on that product
+    through the rest of the model; _messages_with_end_factor folds the factor
+    in afterwards and consumes these.
+    """
+
+    def __init__(self, chain: Chain, allowed: Dict, transfer):
+        self.chain = chain
+        self.transfer = transfer
+        num_groups = len(chain.groups)
+        self.first_ok = np.where(allowed[chain.boundary_ids[0]], 1.0, 0.0)
+        self.last_ok = np.where(allowed[chain.boundary_ids[-1]], 1.0, 0.0)
+        # A[k]: from the first boundary to boundary k. A[0] is the identity, so
+        # that a chain of one group reduces to the plain case.
+        self.log_scale = 0.0
+        A = [np.diag(self.first_ok)]
+        for i in range(num_groups):
+            product, factor = _scaled_by_peak(A[i] @ transfer(i).T)
+            A.append(product)
+            self.log_scale += factor
+        # D[k]: from boundary k to the last.
+        D = [None] * (num_groups + 1)
+        D[num_groups] = np.diag(self.last_ok)
+        for i in range(num_groups - 1, -1, -1):
+            D[i] = _normalised(transfer(i).T @ D[i + 1])
+        self.A, self.D = A, D
+
+    @property
+    def end_to_end(self) -> np.ndarray:
+        """A[n], indexed [first boundary, last boundary]: the chain's weight
+        with both ends held, scaled down by exp(log_scale)."""
+        return self.A[-1]
+
+
 def _messages_with_span_prior(chain: Chain, allowed: Dict, transfer,
                               correction: np.ndarray):
     """
@@ -1480,35 +1533,33 @@ def _messages_with_span_prior(chain: Chain, allowed: Dict, transfer,
     but its diagonal. Measured on the shared-boundary Hillside fixture the
     solve went from 5.1 s to about 2 s for identical output.
     """
-    num_groups = len(chain.groups)
-    first_ok = np.where(allowed[chain.boundary_ids[0]], 1.0, 0.0)
-    last_ok = np.where(allowed[chain.boundary_ids[-1]], 1.0, 0.0)
-    # C indexed [oldest, youngest], restricted to allowed ends.
-    C, log_scale = _scaled_by_peak(correction.T * first_ok[:, None] * last_ok[None, :])
+    return _messages_with_end_factor(_ChainProducts(chain, allowed, transfer), correction)
 
-    # A[k]: from the first boundary to boundary k. A[0] is the identity, so
-    # that a chain of one group reduces to the plain case.
-    identity = np.diag(first_ok)
-    A = [identity]
-    for i in range(num_groups):
-        product, factor = _scaled_by_peak(A[i] @ transfer(i).T)
-        A.append(product)
-        log_scale += factor
-    # D[k]: from boundary k to the last.
-    D = [None] * (num_groups + 1)
-    D[num_groups] = np.diag(last_ok)
-    for i in range(num_groups - 1, -1, -1):
-        D[i] = _normalised(transfer(i).T @ D[i + 1])
+
+def _messages_with_end_factor(products: _ChainProducts, correction: np.ndarray):
+    """
+    _messages_with_span_prior's results from a chain's products and the factor
+    coupling its ends, `correction`, indexed [last boundary, first boundary]:
+    the span correction on a chain, the weight of everything outside an area
+    in services/exact_parallel.py. Consumes `products`.
+    """
+    chain, transfer, D = products.chain, products.transfer, products.D
+    num_groups = len(chain.groups)
+    # C indexed [oldest, youngest], restricted to allowed ends.
+    C, log_scale = _scaled_by_peak(
+        correction.T * products.first_ok[:, None] * products.last_ok[None, :])
+    log_scale += products.log_scale
 
     # L[k] = A[k]^T C, indexed [b_k, b_last]: everything before boundary k
-    # with the end-to-end correction folded in. Only A[n] is needed after
-    # this (by draw_boundaries), so the rest of A is released.
+    # with the end-to-end factor folded in. Only A[n] is needed after this
+    # (by draw_boundaries), so the rest of A is released.
+    A = products.A
     A_last = A[num_groups]
     L = []
     for k in range(num_groups + 1):
         L.append(A[k].T @ C)
         A[k] = None                       # never both lists whole at once
-    del A
+    products.A = None
     total = float((C * A_last).sum())
     log_mass = (np.log(total) + log_scale) if total > 0 else -np.inf
 
@@ -1520,9 +1571,10 @@ def _messages_with_span_prior(chain: Chain, allowed: Dict, transfer,
         # diag(L[i] @ D[i].T) without forming the product.
         return np.einsum('ij,ij->i', L[i], D[i])
 
-    def draw_boundaries(rng, count: int) -> np.ndarray:
+    def draw_boundaries(rng, count: int,
+                        ends: Optional[Tuple[np.ndarray, np.ndarray]] = None) -> np.ndarray:
         """
-        Joint draws, as in the plain case, but the correction makes the chain
+        Joint draws, as in the plain case, but the end factor makes the chain
         non-Markov so the sampling order changes.
 
         C couples b_first to b_last, so there is no backward pass over single
@@ -1532,18 +1584,24 @@ def _messages_with_span_prior(chain: Chain, allowed: Dict, transfer,
         from T_i(b_i, b_(i+1)) D_(i+1)(b_(i+1), b_last) given the one before it
         and the far end.
 
+        `ends`, as (first, last) grid indices one per draw, skips the first
+        step: services/exact_parallel.py draws an area's ends from the rest of
+        the model and has only its interior filled in here.
+
         The last step needs no special case: D[n] is diagonal on the allowed
         last boundary, so the final draw can only land on the b_last already
         drawn, which is the consistency check falling out of the maths rather
         than being imposed on it.
         """
-        num_groups = len(chain.groups)
-        joint = C * A_last                            # [b_first, b_last]
-        width = joint.shape[1]
-        flat = _sample_indices(rng, joint.ravel(), count)
         indices = np.empty((count, num_groups + 1), dtype=np.int64)
-        indices[:, 0] = flat // width
-        indices[:, num_groups] = flat % width
+        if ends is None:
+            joint = C * A_last                        # [b_first, b_last]
+            width = joint.shape[1]
+            flat = _sample_indices(rng, joint.ravel(), count)
+            indices[:, 0] = flat // width
+            indices[:, num_groups] = flat % width
+        else:
+            indices[:, 0], indices[:, num_groups] = ends
         for i in range(num_groups - 1):
             # Contiguous copies, so each row gathered from them is one read
             # rather than M reads a matrix-width apart.
@@ -1676,20 +1734,31 @@ def solve(measurements: List[Dict], root: Dict, chain: Chain,
     # place the second grid by themselves. Its date marginals, summaries and
     # joint draws were 33-48% of a solve, discarded whenever the second pass
     # was kept, so they are formed only when the first pass is the answer.
-    grid = _build_grid(measurements, element_bounds, len(chain.groups))
-    _results, boundary_densities = _solve_on_grid(
-        grid, measurements, root, chain, element_bounds, boundaries_only=True,
-        **options)
+    return _two_pass(
+        lambda grid, boundaries_only: _solve_on_grid(
+            grid, measurements, root, chain, element_bounds,
+            boundaries_only=boundaries_only, **options),
+        measurements, element_bounds, len(chain.groups))
+
+
+def _two_pass(solve_on_grid, measurements: List[Dict], element_bounds: Dict,
+              num_groups: int) -> Dict:
+    """
+    solve()'s two passes for any solver of this shape: `solve_on_grid(grid,
+    boundaries_only)` returns (results, densities) as _solve_on_grid does, and
+    with `boundaries_only` the densities of Boundaries that between them bound
+    every date -- all a first pass needs to place the second grid.
+    """
+    grid = _build_grid(measurements, element_bounds, num_groups)
+    _results, boundary_densities = solve_on_grid(grid, True)
     refined = _refined_grid(grid, boundary_densities, measurements, element_bounds,
-                            len(chain.groups))
+                            num_groups)
     if refined is not None:
-        second, _densities = _solve_on_grid(refined, measurements, root, chain,
-                                            element_bounds, **options)
+        second, _densities = solve_on_grid(refined, False)
         if second['edge_mass'] <= REFINED_EDGE_MASS:
             second['grid']['first_pass_step'] = float(grid[1] - grid[0])
             return second
-    results, _densities = _solve_on_grid(grid, measurements, root, chain,
-                                         element_bounds, **options)
+    results, _densities = solve_on_grid(grid, False)
     return results
 
 
@@ -1713,36 +1782,12 @@ def _solve_on_grid(grid: np.ndarray, measurements: List[Dict], root: Dict,
 
     likelihood, cumulative, outlier_parts = date_tables(
         grid, measurements, element_bounds)
-
-    # Each boundary may carry its own TPQ/TAQ, which restricts where it can sit.
-    allowed = {}
-    for bid in chain.boundary_ids:
-        taq, tpq = element_bounds.get(bid, (None, None))
-        ok = np.ones(M, dtype=bool)
-        if taq is not None:
-            ok &= grid >= taq
-        if tpq is not None:
-            ok &= grid <= tpq
-        allowed[bid] = ok
-
-    # T_i over each group, dates integrated out. Its two boundaries may share
-    # a cell, at half weight (_boundary_pair_term).
-    log_T = []
-    for index, date_ids in enumerate(chain.groups):
-        term = _boundary_pair_term(grid, len(date_ids))
-        for date_id in date_ids:
-            term += _log_date_factor(cumulative[date_id], likelihood[date_id], dt,
-                                     out=scratch)
-        older_ok = allowed[chain.boundary_ids[index]]
-        younger_ok = allowed[chain.boundary_ids[index + 1]]
-        if not (older_ok.all() and younger_ok.all()):
-            term[~(younger_ok[:, None] & older_ok[None, :])] = -np.inf
-        log_T.append(term)
-
-    def transfer(i):
-        """T_i, exponentiated on demand rather than kept alongside log_T."""
-        weights = _rescaled(log_T[i])
-        return np.exp(weights, out=weights)            # exp(-inf) is 0
+    allowed = _allowed_windows(grid, element_bounds, chain.boundary_ids)
+    log_T = [_group_log_transfer(grid, date_ids, cumulative, likelihood,
+                                 allowed[chain.boundary_ids[index]],
+                                 allowed[chain.boundary_ids[index + 1]], scratch)
+             for index, date_ids in enumerate(chain.groups)]
+    transfer = _exponentiated(log_T)
 
     all_dates = [d for group in chain.groups for d in group]
     inliers = {d: (outlier_parts[d][0] if d in outlier_parts else likelihood[d])
@@ -1792,11 +1837,81 @@ def _solve_on_grid(grid: np.ndarray, measurements: List[Dict], root: Dict,
         boundary_densities = [boundary_density(i) for i in range(len(chain.boundary_ids))]
         return None, [density for density in boundary_densities if density.sum() > 0]
 
-    rng = np.random.default_rng(seed)
-    results = {'measurements': {}, 'boundaries': {}}
-    densities: List[np.ndarray] = []
+    date_densities = _date_marginals(chain.groups, log_T, pair_weight, cumulative,
+                                     likelihood, dt, scratch)
+    boundary_densities = {bid: boundary_density(i)
+                          for i, bid in enumerate(chain.boundary_ids)}
 
-    for index, date_ids in enumerate(chain.groups):
+    def draw_joint(rng, count):
+        boundary_draws = draw_boundaries(rng, count)
+        date_draws = _draw_dates(rng, chain, cumulative, boundary_draws, likelihood, dt)
+        return ({bid: boundary_draws[:, i] for i, bid in enumerate(chain.boundary_ids)},
+                date_draws)
+
+    return _results(grid, root, measurements, date_densities, boundary_densities,
+                    chain.boundary_names, likelihood, outlier_parts, draw_joint,
+                    num_samples=num_samples, seed=seed,
+                    estimate_durations=estimate_durations, dispersal=dispersal,
+                    interval_draws=interval_draws, resolution=resolution,
+                    log_evidence=log_evidence, span_prior_applied=span_prior_applied)
+
+
+def _allowed_windows(grid: np.ndarray, element_bounds: Dict,
+                     boundary_ids: Sequence[str]) -> Dict[str, np.ndarray]:
+    """Where each boundary may sit: inside its own TPQ/TAQ, if it has them."""
+    allowed = {}
+    for bid in boundary_ids:
+        taq, tpq = element_bounds.get(bid, (None, None))
+        ok = np.ones(len(grid), dtype=bool)
+        if taq is not None:
+            ok &= grid >= taq
+        if tpq is not None:
+            ok &= grid <= tpq
+        allowed[bid] = ok
+    return allowed
+
+
+def _group_log_transfer(grid: np.ndarray, date_ids: Sequence[str],
+                        cumulative: Dict[str, np.ndarray],
+                        likelihood: Dict[str, np.ndarray],
+                        older_ok: np.ndarray, younger_ok: np.ndarray,
+                        scratch: np.ndarray) -> np.ndarray:
+    """
+    T_i over one group, dates integrated out, in the log and indexed
+    [younger, older]. Its two boundaries may share a cell, at half weight
+    (_boundary_pair_term); -inf where either boundary may not sit.
+    """
+    dt = float(grid[1] - grid[0])
+    term = _boundary_pair_term(grid, len(date_ids))
+    for date_id in date_ids:
+        term += _log_date_factor(cumulative[date_id], likelihood[date_id], dt,
+                                 out=scratch)
+    if not (older_ok.all() and younger_ok.all()):
+        term[~(younger_ok[:, None] & older_ok[None, :])] = -np.inf
+    return term
+
+
+def _exponentiated(log_T: List[np.ndarray]):
+    """transfer(i): T_i, exponentiated on demand rather than kept alongside
+    log_T."""
+    def transfer(i):
+        weights = _rescaled(log_T[i])
+        return np.exp(weights, out=weights)            # exp(-inf) is 0
+    return transfer
+
+
+def _date_marginals(groups: List[List[str]], log_T: List[np.ndarray], pair_weight,
+                    cumulative: Dict[str, np.ndarray], likelihood: Dict[str, np.ndarray],
+                    dt: float, scratch: np.ndarray) -> Dict[str, np.ndarray]:
+    """
+    {date id: unnormalised marginal density} for every date in `groups`, in
+    their order, from each group's log transfer and pair_weight(k), the weight
+    of everything outside group k indexed [younger, older].
+    """
+    densities: Dict[str, np.ndarray] = {}
+    for index, date_ids in enumerate(groups):
+        if not date_ids:
+            continue
         # Everything about this group's two boundaries, the weight outside the
         # group and the transfer inside it, in the log and once per group: on
         # the span-prior path the outside is two M x M matrix products, and
@@ -1840,24 +1955,53 @@ def _solve_on_grid(grid: np.ndarray, measurements: List[Dict], root: Dict,
             #
             # With both boundaries at t the date can only be at t too, and the
             # whole of that weight is its: the half on each side would take it
-            # twice, so it is put back once.
+            # twice, so it is put back once -- divided by the step. Everywhere
+            # else W is the pair's weight over the date's interval integral,
+            # so L * W is a density; on the diagonal the date's own factor was
+            # its likelihood, so L * W there is the tie's whole weight, a mass
+            # in one cell, and a density needs it over the cell's width.
+            # Counted as it was, the result depended on the unit of the grid:
+            # right at one year, and on a 32-year test grid 0.07 from the
+            # sampler's answer for a two-date phase where this gets 0.001.
             enclosed = (_straddling(on_younger, on_older)
-                        - 0.5 * (on_younger + on_older) + on_both)
+                        - 0.5 * (on_younger + on_older) + on_both / dt)
             density = likelihood[date_id] * np.clip(enclosed, 0.0, None)
-            densities.append(density)
-            summary = _summarize(grid, density, rng, num_samples, resolution)
-            if date_id in outlier_parts:
-                summary['outlier_probability'] = _outlier_probability(
-                    density, likelihood[date_id], *outlier_parts[date_id])
-            results['measurements'][date_id] = summary
+            densities[date_id] = density
+    return densities
 
-    for i, bid in enumerate(chain.boundary_ids):
-        density = boundary_density(i)
+
+def _results(grid: np.ndarray, root: Dict, measurements: List[Dict],
+             date_densities: Dict[str, np.ndarray],
+             boundary_densities: Dict[str, np.ndarray],
+             boundary_names: Dict[str, str], likelihood: Dict[str, np.ndarray],
+             outlier_parts: Dict, draw_joint, *, num_samples: int, seed: int,
+             estimate_durations: bool, dispersal: Optional[Dict],
+             interval_draws: int, resolution: float, log_evidence: float,
+             span_prior_applied: bool) -> Tuple[Dict, List[np.ndarray]]:
+    """
+    A solve's results from its marginals, in the shape services/gibbs.py
+    returns: every date's then every Boundary's summary, in the order given,
+    and the joint draws `draw_joint(rng, count)` takes -- ({boundary id: grid
+    indices}, {date id: grid indices}), one per draw. (results, densities).
+    """
+    dt = float(grid[1] - grid[0])
+    rng = np.random.default_rng(seed)
+    results = {'measurements': {}, 'boundaries': {}}
+    densities: List[np.ndarray] = []
+    for date_id, density in date_densities.items():
+        densities.append(density)
+        summary = _summarize(grid, density, rng, num_samples, resolution)
+        if date_id in outlier_parts:
+            summary['outlier_probability'] = _outlier_probability(
+                density, likelihood[date_id], *outlier_parts[date_id])
+        results['measurements'][date_id] = summary
+
+    for bid, density in boundary_densities.items():
         if density.sum() <= 0:
             continue
         densities.append(density)
         results['boundaries'][bid] = {
-            'name': chain.boundary_names.get(bid, 'Boundary'),
+            'name': boundary_names.get(bid, 'Boundary'),
             'posterior': _summarize(grid, density, rng, num_samples, resolution),
         }
 
@@ -1873,16 +2017,13 @@ def _solve_on_grid(grid: np.ndarray, measurements: List[Dict], root: Dict,
     # Seeded apart from the generator above, so every other number here stays
     # bit-for-bit identical to what it was before any of this was collected.
     joint_rng = np.random.default_rng(seed + 1)
-    boundary_draws = draw_boundaries(joint_rng, interval_draws)
-    date_draws = _draw_dates(joint_rng, chain, cumulative, boundary_draws,
-                             likelihood, dt)
-    joint = {bid: grid[boundary_draws[:, i]]
-             for i, bid in enumerate(chain.boundary_ids)}
+    boundary_draws, date_draws = draw_joint(joint_rng, interval_draws)
+    joint = {bid: grid[idx] for bid, idx in boundary_draws.items()}
     joint.update({date_id: grid[idx] for date_id, idx in date_draws.items()})
     results['joint_draws'] = {date_id: grid[idx] for date_id, idx in date_draws.items()}
     # The Boundaries in the same states, for a per-phase KDE to reflect at
     # (services/kde.report_phases).
-    results['joint_boundaries'] = {bid: joint[bid] for bid in chain.boundary_ids}
+    results['joint_boundaries'] = {bid: joint[bid] for bid in boundary_draws}
     if estimate_durations or dispersal is not None:
         results['intervals'] = intervals.report(
             root, measurements, joint, independent=True,

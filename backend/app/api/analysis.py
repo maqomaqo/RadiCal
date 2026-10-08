@@ -15,6 +15,7 @@ from app.services.calibration import (
 )
 from app.services import cross_check
 from app.services import exact_chain
+from app.services import exact_parallel
 from app.services import gibbs
 from app.services import model_tree as model_tree_service
 from app.services import wiggle_match
@@ -614,6 +615,23 @@ def _cross_check(measurements: List[Dict], model_tree: Dict, sampled: Dict,
                 'worst': None, 'differing': [], 'seconds': None}
 
 
+def _exact_layout(tree: Dict, measurements: List[Dict]):
+    """
+    (layout, None) when the exact solver can integrate `tree` -- an
+    exact_chain.Chain, or exact_parallel.Stages for a model with areas side by
+    side -- else (None, why not). The reason is exact_parallel's for a model
+    whose areas sit side by side, which says more about such a model than
+    exact_chain's "the model branches", and exact_chain's otherwise.
+    """
+    chain, reason = exact_chain.layout_with_reason(tree, measurements)
+    if chain is not None:
+        return chain, None
+    stages, stages_reason = exact_parallel.layout_with_reason(tree, measurements)
+    if stages is not None:
+        return stages, None
+    return None, stages_reason or reason
+
+
 def _run_bayesian(
     measurements: List[Dict],
     model_tree: Dict,
@@ -636,11 +654,13 @@ def _run_bayesian(
     A chain-shaped model -- a Sequence of Phases separated by Boundaries, the
     ordinary archaeological shape -- is integrated EXACTLY by
     services/exact_chain.py: there is no sampler to converge and no
-    calibration lobe to miss. Everything else goes to services/gibbs.py,
+    calibration lobe to miss. So is a chain whose stages hold areas side by
+    side, each its own Sequence between Boundaries the site shares, by
+    services/exact_parallel.py. Everything else goes to services/gibbs.py,
     OxCal's own MH/Gibbs scheme, which reproduces the exact solver to under a
     year wherever the exact solver can be asked.
 
-    A model that is not a chain AS AUTHORED is sampled even when supplying the
+    A model that is not exactly solvable AS AUTHORED is sampled even when supplying the
     transitions its ordering implies would make it exactly solvable, because
     that insertion changes the model: it splits one span term over K dates
     into two over K1 + K2, and K is the exponent in (span)^(-K) that resists a
@@ -700,19 +720,19 @@ def _run_bayesian(
     # since it cannot integrate anything else. The two are therefore not
     # always the same tree -- see the docstring for why that is preferred to
     # the accuracy it would cost, and the results page says when it happens.
-    chain, reason = exact_chain.layout_with_reason(model_tree, measurements)
-    authored_is_chain = chain is not None
+    layout, reason = _exact_layout(model_tree, measurements)
+    authored_is_exact = layout is not None
     exact_tree = model_tree
     exact_needs_boundaries = 0
-    if chain is None:
+    if layout is None:
         # A Sequence that orders two groups with no Boundary between them is
         # not a chain. Supplying the transition it implies makes it solvable
         # here -- at a price. See model_tree.with_implicit_boundaries.
         candidate, inserted = with_implicit_boundaries(model_tree)
         if inserted:
-            patched, patched_reason = exact_chain.layout_with_reason(candidate, measurements)
+            patched, patched_reason = _exact_layout(candidate, measurements)
             if patched is not None:
-                chain, exact_tree = patched, candidate
+                layout, exact_tree = patched, candidate
                 exact_needs_boundaries = len(inserted)
             else:
                 # Why it is still not a chain AFTER the transitions were
@@ -721,7 +741,7 @@ def _run_bayesian(
                 # fixed.
                 reason = patched_reason
 
-    if requested == 'exact' and chain is None:
+    if requested == 'exact' and layout is None:
         raise ValueError(
             'this model cannot be integrated exactly, so the exact solver was '
             f'not used: {reason}. Either fix that, or choose the MH/Gibbs '
@@ -731,10 +751,11 @@ def _run_bayesian(
     # `auto` takes the exact answer only where it needs no help. Asking for it
     # explicitly still gets it, transitions and all -- that is what the override
     # is for.
-    if chain is not None and (requested == 'exact'
-                              or (requested != 'gibbs' and authored_is_chain)):
-        solved = exact_chain.solve(
-            measurements, exact_tree, chain,
+    if layout is not None and (requested == 'exact'
+                               or (requested != 'gibbs' and authored_is_exact)):
+        parallel = isinstance(layout, exact_parallel.Stages)
+        solved = (exact_parallel.solve if parallel else exact_chain.solve)(
+            measurements, exact_tree, layout,
             num_samples=bayesian_config.get('mcmc_samples', 2000),
             uniform_span_prior=bayesian_config.get('uniform_span_prior', True),
             estimate_durations=estimate_durations,
@@ -748,6 +769,9 @@ def _run_bayesian(
         return solved['measurements'], solved['boundaries'], {
             'method': 'exact',
             'requested': requested,
+            # Which exact solver: one line of Boundaries, or a line whose
+            # stages hold areas side by side (services/exact_parallel.py).
+            'shape': 'parallel' if parallel else 'chain',
             # The calendar step the ranges were reported at, which the results
             # page re-selects them at -- see _reporting_resolution.
             'resolution': resolution,

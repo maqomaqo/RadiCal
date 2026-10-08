@@ -172,7 +172,8 @@ def _brute_force(curve, grid, dates):
 
     with h = 1/2 when t_j sits on tb or ta and 1 otherwise -- and where tb and
     ta share a cell, a tie at half weight with every date in it, the term
-    1/2 prod over i != j of L_i(tb) -- so that agreement
+    1/2 prod over i != j of L_i(tb), over the step: it is the whole weight of
+    that one cell where the rest are densities -- so that agreement
     with the vectorised solver is evidence about the code rather than a
     restatement of it. The half is what makes these the marginals of the joint
     the trapezoidal F integrates: summed over t_j, L_j h gives F_j back.
@@ -222,7 +223,7 @@ def _brute_force(curve, grid, dates):
         # The two boundaries in one cell: a tie, at half weight, and every date
         # there with them -- the limit of span^(-K) prod F, which is prod L.
         for j in range(K):
-            out[j, b] += 0.5 * limits(b, b) * np.prod([L[i, b] for i in range(K) if i != j])
+            out[j, b] += 0.5 * limits(b, b) * np.prod([L[i, b] for i in range(K) if i != j]) / dt
         for a in range(b + 1, M):
             base = (grid[a] - grid[b]) ** (-K) * limits(b, a)
             fs = [F(j, b, a) for j in range(K)]
@@ -365,6 +366,35 @@ class TestMatchesBruteForce:
             # Overlapping coefficient over the shared support; 1.0 is identical.
             overlap = float(np.minimum(got / got.sum(), mine / mine.sum()).sum())
             assert overlap > 0.999, f'{d["id"]} overlap {overlap}'
+
+    def test_a_date_marginal_is_the_marginal_of_the_joint_draws(self):
+        """
+        Where a group's two Boundaries share a cell, the date in that group is
+        in that cell too, and its marginal takes that configuration's whole
+        weight. That weight is a mass in one cell where every other term is a
+        density, so it is divided by the step; counted whole, the answer
+        depended on the grid's unit, correct only at a one-year step.
+
+        The joint draws never had that problem -- they place the date in the
+        cell its Boundaries share -- so on a coarse grid, where such ties carry
+        real weight, the reported marginal must be their histogram. It was 0.07
+        away on this model, and the sampler agreed with the draws.
+        """
+        dates = _dates(('jd_a', 3000, 30, 'p'), ('jd_b', 2950, 35, 'p'))
+        tree = _sequence('jd', [_boundary('jd0'), _phase('p'), _boundary('jd1')])
+        chain = ec.layout(tree, dates)
+        grid = np.linspace(3000.0, 3350.0, 12)
+        solved, _densities = ec._solve_on_grid(
+            grid, dates, tree, chain, inherited_bounds(tree), num_samples=50, seed=1,
+            uniform_span_prior=True, estimate_durations=False, dispersal=None,
+            interval_draws=40000, resolution=5.0)
+        for d in dates:
+            reported = np.zeros(len(grid))
+            for age, density in solved['measurements'][d['id']]['probability_distribution']:
+                reported[np.argmin(np.abs(grid - age))] = density
+            drawn = np.bincount(np.searchsorted(grid, solved['joint_draws'][d['id']]),
+                                minlength=len(grid))
+            assert np.abs(reported / reported.sum() - drawn / drawn.sum()).max() < 0.012, d['id']
 
 
 # What the solver actually produces on the shared_boundary fixture, with OxCal's
@@ -784,9 +814,10 @@ class TestUniformSpanPrior:
                 q = np.cumsum(q[:, ::-1], axis=1)[:, ::-1]
                 # A date ON one of its boundaries counts half, as in the
                 # trapezoidal interval integral the transfers are built from;
-                # ON both, the two boundaries tied, it is the whole weight.
+                # ON both, the two boundaries tied, it is the whole weight of
+                # that cell -- a mass, so over the step to sit with densities.
                 on_a_boundary = 0.5 * (pair.sum(axis=1) + pair.sum(axis=0))
-                expected = lik[d] * (np.diagonal(q) - on_a_boundary + np.diagonal(pair))
+                expected = lik[d] * (np.diagonal(q) - on_a_boundary + np.diagonal(pair) / dt)
                 expected = expected / expected.sum()
 
                 pairs = np.array(solved['measurements'][d]['probability_distribution'])

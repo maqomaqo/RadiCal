@@ -379,7 +379,8 @@ rather than arranged by hand.
 **Model settings** (on the New Analysis form):
 - **Solver**: Automatic (recommended: the exact solver where the model allows, sampling
   otherwise), Exact solver only (fast, but only for models built as a single line of Phases and
-  Boundaries), or MH/Gibbs (works on all models). See [Choosing a solver](#choosing-a-solver).
+  Boundaries, or as areas side by side between shared Boundaries), or MH/Gibbs (works on all
+  models). See [Choosing a solver](#choosing-a-solver).
 - **Minimum sweeps per chain** (sampled runs only): blank by default, which runs each chain until
   it converges. Set a number to make every chain run at least that long — the only way to ask for a
   longer run, since a run otherwise stops as soon as it converges.
@@ -414,13 +415,18 @@ run**, and the Results page always says which method was used.
 **The two methods.**
 
 - **Exact solver.** Calculates the answer directly. The same model always gives the same numbers,
-  it is usually much faster, and there is nothing to check afterwards. It works only on models
-  built as a single line: Phases one after another, each with a Boundary before and after it. A
-  Sequence of Sequences counts, as long as each inner Sequence begins and ends with its own
-  Boundary. It shows no progress bar and cannot be cancelled, but it rarely takes long.
+  it is usually much faster, and there is nothing to check afterwards. It works on models built as
+  a single line: Phases one after another, each with a Boundary before and after it. A Sequence of
+  Sequences counts, as long as each inner Sequence begins and ends with its own Boundary. It also
+  works on a site with areas side by side: a Phase holding several Sequences (trenches or areas,
+  each built as a single line), with a Boundary before and after it that the areas share. That
+  Phase can be one step in a longer Sequence. It shows no progress bar and cannot be cancelled,
+  but it rarely takes long.
 - **MH/Gibbs sampler.** The method OxCal uses. It builds up the answer by trying many thousands of
   possible dates for every item in the model and keeping the ones the model favours. It works on
-  any model: branching sequences, groups side by side, groups ordered with no Boundary between them.
+  any model, including the ones the exact solver cannot take: groups ordered with no Boundary
+  between them, dates outside every Boundary, and Sequences side by side with no shared Boundary
+  before and after them.
   Its figures carry a little random variation, so two runs differ slightly, and a run can
   occasionally fall short. The app checks for this and warns you (see
   [Checking a sampled result](#checking-a-sampled-result)). Progress is shown, and a run can be
@@ -430,8 +436,8 @@ Where both methods can be used, they give the same date ranges to within about a
 
 **The settings.**
 
-- **Automatic** uses the exact solver whenever the model is built as a single line, and the sampler
-  otherwise.
+- **Automatic** uses the exact solver whenever the model is built as a single line or as areas side
+  by side between shared Boundaries, and the sampler otherwise.
 - **MH/Gibbs sampler (as OxCal)** always samples. Choose it when:
   - you are reproducing a published OxCal analysis and want the same method as well as the same
     model;
@@ -444,11 +450,11 @@ Where both methods can be used, they give the same date ranges to within about a
     the outlier probabilities can differ by a percentage point or two. If one or two dates carry a
     small outlier prior as a precaution, this does not matter.
 - **Exact solver only** never samples. Choose it when you need figures that repeat exactly. On a
-  model that is not built as a single line, the run fails and says why, with one exception,
-  described next.
+  model it cannot take, the run fails and says why, with one exception, described next.
 
-**Forcing the exact solver on a Sequence with a missing Boundary.** The commonest reason a model is
-not a single line is a Sequence that puts one group after another with no Boundary between them.
+**Forcing the exact solver on a Sequence with a missing Boundary.** The commonest reason the exact
+solver cannot take a model is a Sequence that puts one group after another with no Boundary between
+them.
 **Exact solver only** will still solve it, by adding the Boundary that the order implies. That
 changes the model, and the date ranges move as a result: in tests against OxCal, sampling such
 models as written came closer to OxCal's answer than solving them with the added Boundary.
@@ -1306,6 +1312,26 @@ alpha_i+1(b)    = sum over b_i > b  of  alpha_i(b_i) T_i(b_i, b)
 beta_i(b)       = sum over b_i+1 < b of  T_i(b, b_i+1) beta_i+1(b_i+1)
 ```
 
+**Areas side by side** (a Phase of Sequences, each such a chain, between two Boundaries of an outer
+Sequence, possibly as one stage of a longer one). Given the stage's two Boundaries S and E, each
+area is independent of everything else, so it enters the outer chain through one matrix over that
+pair:
+
+```
+J_a(f, l) = the area's own chain, its first Boundary at f and its last at l
+Z_a(S, E) = sum over f <= S and l >= E of J_a(f, l)
+T_k(S, E) = (the stage's own dates' term) * prod over its areas of Z_a(S, E)
+```
+
+and the outer chain is solved as above. Each area is then solved given everything outside it: the
+weight on its ends, W_a(f, l), the sum over S >= f and E <= l of the outer chain's weight outside
+the stage times the stage's own term and the other areas' Z, takes the place of the span correction
+in the area's own message passing. An area's end on S or E is a tie between neighbouring
+Boundaries, at half weight; S and E are not neighbours once an area lies between them, so their
+meeting carries no tie of its own. The span correction counts every Boundary in the model, the
+areas' included, over the outermost pair, as the sampler does. Joint draws take the outer
+Boundaries first, then each area's two ends given its stage, then its interior and its dates.
+
 This is O(M²) per group on an M-point grid, deterministic, and exact up to the grid step. Duration
 and difference draws are independent draws from the joint posterior, taken backwards along the same
 chain.
@@ -1376,8 +1402,8 @@ that did not need tempering.
 
 **Checking a sampled result.** Both convergence measures compare the sampler against itself and
 cannot detect a lobe no chain has reached. The app therefore calculates the same posterior without
-sampling, using the exact solver's grid, interval integrals and message passing, extended to shapes
-the exact solver does not accept as a model:
+sampling, using the exact solver's grid, interval integrals and message passing, with the sampler's
+shared outlier scale, over these shapes (the last two the exact solver itself does not accept):
 
 - A chain of Phases and Boundaries created using nested Sequences.
 - Parallel chains between an outer pair (e.g. a site's Start and End surrounding one Sequence per
