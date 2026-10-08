@@ -44,6 +44,7 @@ this file exists to produce, and it is recorded in the plan's feature entry
 beside the wiggle-match and age-depth ones.
 """
 import math
+import multiprocessing
 import os
 from concurrent.futures import ProcessPoolExecutor
 
@@ -60,6 +61,16 @@ FRONTS = int(os.environ.get('RADICAL_COVERAGE_FRONTS', '32'))
 # Fronts for the sampled path, which costs several times more per front and is
 # checked for gross miscalibration rather than to a tight band.
 SAMPLED_FRONTS = int(os.environ.get('RADICAL_COVERAGE_SAMPLED_FRONTS', '12'))
+# Processes the fronts are spread over.
+WORKERS = min(4, os.cpu_count() or 1)
+# OpenBLAS threads per worker: the worker's share of the machine. The exact
+# path's grid-sized matrix products run in every worker at once, and an
+# OpenBLAS sized to the whole machine in each of them oversubscribes it.
+# Measured 2026-10-08 in the 12-vCPU dev container, the exact test took 77 s
+# with every worker at twelve threads, 53 s at one and 36-39 s at three.
+# OpenBLAS is what the Linux and Windows wheels use; Accelerate, on macOS, is
+# left alone, being slower capped (18 s against 16).
+BLAS_THREADS = max(1, (os.cpu_count() or 1) // WORKERS)
 
 NOMINAL = 0.95
 N_SITES = 8
@@ -152,9 +163,18 @@ def _covered_sampled(seed):
 
 
 def _run(worker, count):
-    """`count` fronts, across processes because one core would be tedious."""
-    with ProcessPoolExecutor(max_workers=min(4, os.cpu_count() or 1)) as pool:
-        return list(pool.map(worker, range(count)))
+    """
+    `count` fronts, across processes because one core would be tedious.
+
+    Spawned rather than forked: OpenBLAS sizes its thread pool once, as numpy
+    loads, and a forked worker inherits the parent's already sized. The
+    variable is set only while the pool exists, and put back.
+    """
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setenv('OPENBLAS_NUM_THREADS', str(BLAS_THREADS))
+        with ProcessPoolExecutor(max_workers=WORKERS,
+                                 mp_context=multiprocessing.get_context('spawn')) as pool:
+            return list(pool.map(worker, range(count)))
 
 
 def _band(count):
