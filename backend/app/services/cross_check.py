@@ -39,7 +39,7 @@ Three, which between them cover what the sampler is most often given:
   * Either of those with ORDERED BLOCKS of dates inside a pair of Boundaries:
     Phases or Sequences in a Sequence with no Boundary between them, so that
     every date of one is older than every date of the next -- the shape of the
-    Nenthorn reference model (tests/oxcal_fixture.py), which the exact solver
+    Hillside reference model (tests/oxcal_fixture.py), which the exact solver
     declines ("two groups are ordered
     against each other with no Boundary between them"). The blocks are read off
     the sampler's own ordering (_blocks), and the group's integral over its
@@ -110,7 +110,7 @@ DISAGREEMENT = 0.15
 # The largest difference, over every calendar year, in the probability of a
 # Boundary being older than that year, above which the two are also reported
 # as differing. Total variation cannot see a small calibration lobe the
-# sampler under-weights: on Petchey et al.'s dune model of Layers 11-4 the
+# sampler under-weights: on the dune reference model of Layers 11-4 the
 # sampler put P(Start before AD 1360) at 0.00-0.03 against the direct 0.08, at a
 # total variation of 0.08, under 0.15. This is that error read directly, as the
 # probability an analyst would quote. Runs that mix well sat at 0.027 or less

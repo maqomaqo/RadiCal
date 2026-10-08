@@ -25,12 +25,12 @@ describe('describeMoved', () => {
 describe('describeRunChange', () => {
   it('lists every change in one line', () => {
     const change: RunChange = {
-      analysis_id: 'a', name: 'REAL-Mp-NOE', same_inputs: true,
+      analysis_id: 'a', name: 'REF-A-NOE', same_inputs: true,
       moved: [boundary(-4, [2, 1])], only_before: [], only_after: [],
       converged_before: true, converged_after: false, convergence_changed: true,
     }
     expect(describeRunChange(change)).toBe(
-      'REAL-Mp-NOE: Start 4 yr younger, 2 → 1 ranges; no longer converged'
+      'REF-A-NOE: Start 4 yr younger, 2 → 1 ranges; no longer converged'
     )
   })
 

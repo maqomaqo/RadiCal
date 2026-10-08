@@ -1,9 +1,9 @@
 """
 Agreement indices (services/agreement.py), against OxCal 4.4 runs:
-tests/fixtures/oxcal (Nenthorn, three models, OxCal's default five-year
-resolution), tests/fixtures/oxcal_outlier (Shag River Mouth, an outlier model,
-five years) and tests/fixtures/oxcal_resolution (Nenthorn, Shag River Mouth
-and SRM rerun at Resolution=1, which is what the definition is held to -- see
+tests/fixtures/oxcal (Hillside, three models, OxCal's default five-year
+resolution), tests/fixtures/oxcal_outlier (Dune Section, an outlier model,
+five years) and tests/fixtures/oxcal_resolution (Hillside, Dune Section
+and DS rerun at Resolution=1, which is what the definition is held to -- see
 the module docstring for why).
 
 Two separate things are checked and it matters not to conflate them:
@@ -59,16 +59,16 @@ def _as_pairs(calbp, prob):
 
 class TestReproducesOxCalAtOneYear:
     """
-    OxCal's posterior in, OxCal's index out, on the Nenthorn `ordered` model
+    OxCal's posterior in, OxCal's index out, on the Hillside `ordered` model
     rerun at Resolution=1 -- OxCal's index at the resolution where it has
     converged, which is the quantity the definition computes.
     """
 
     def _errors(self, own_likelihood):
-        dists = rf.distributions(rf.NENTHORN)
-        table, _amodel, _aoverall = rf.table(rf.NENTHORN)
+        dists = rf.distributions(rf.HILLSIDE)
+        table, _amodel, _aoverall = rf.table(rf.HILLSIDE)
         indices, errors = [], []
-        for m in rf.measurements(rf.NENTHORN):
+        for m in rf.measurements(rf.HILLSIDE):
             got = agreement.agreement_index(
                 m, dists[m['id']]['posterior'],
                 unmodelled=None if own_likelihood else dists[m['id']]['likelihood'])
@@ -94,7 +94,7 @@ class TestReproducesOxCalAtOneYear:
 
     def test_overall_index(self):
         indices, _errors = self._errors(own_likelihood=True)
-        _table, _amodel, aoverall = rf.table(rf.NENTHORN)
+        _table, _amodel, aoverall = rf.table(rf.HILLSIDE)
         assert agreement.overall_agreement(indices) == pytest.approx(aoverall, abs=0.5)
 
 
@@ -116,7 +116,7 @@ def test_oxcals_default_resolution_reads_lower(run):
     assert np.abs(errors - errors.mean()).max() < 0.6
 
 
-@pytest.mark.parametrize('stem', [rf.NENTHORN, rf.SHAG, rf.SRM, rf.SRM_ONE_YEAR])
+@pytest.mark.parametrize('stem', [rf.HILLSIDE, rf.DUNE, rf.DS, rf.DS_ONE_YEAR])
 def test_the_combination_reproduces_oxcals_aoverall(stem):
     """
     Isolating the combining rule from the per-date one: fed OxCal's own
@@ -336,7 +336,7 @@ class TestWhatItCanAndCannotSee:
 class TestAgainstTheOutlierFixture:
     """
     services/agreement.py against the SECOND OxCal run
-    (tests/fixtures/oxcal_outlier: Shag River Mouth, 16 dates, one phase,
+    (tests/fixtures/oxcal_outlier: Dune Section, 16 dates, one phase,
     Outlier_Model active). An independent site, structure and curve region
     from the fixture the formula was identified on.
 
@@ -349,7 +349,7 @@ class TestAgainstTheOutlierFixture:
     """
 
     def test_agreement_flags_the_outlier_and_nothing_else(self):
-        import shag_fixture as sf
+        import dune_section_fixture as sf
         dists, table = sf.distributions(), sf.table()
         scores = {
             m['id']: agreement.agreement_index(
@@ -375,7 +375,7 @@ class TestAgainstTheOutlierFixture:
         and we are not. Feeding a mixture in closes most of it -- measured
         mean +0.6 against -4.9 -- which is what identified the cause.
         """
-        import shag_fixture as sf
+        import dune_section_fixture as sf
         dists, table = sf.distributions(), sf.table()
         errors = []
         for m in sf.measurements():
@@ -400,7 +400,7 @@ class TestAgainstTheOutlierFixture:
         OxCal's own value, 15.6 from the raw one. That gap is what scoring the
         outlier model's own likelihood term closes (TestOutlierModels).
         """
-        import shag_fixture as sf
+        import dune_section_fixture as sf
         dists, table = sf.distributions(), sf.table()
         m = next(x for x in sf.measurements() if x['id'] == sf.OUTLIER)
         got = agreement.agreement_index(
@@ -419,14 +419,14 @@ class TestOutlierScaleTerms:
     """
     OxCal counts each outlier model's scale parameter -- A = 100 in its table
     -- in the n of Aoverall and Amodel. Without it, OxCal's own per-date
-    indices give 82.3 on Shag River Mouth against its reported 82.9, and 44.5
-    on SRM against 45.9; test_the_combination_reproduces_oxcals_aoverall holds
+    indices give 82.3 on Dune Section against its reported 82.9, and 44.5
+    on DS against 45.9; test_the_combination_reproduces_oxcals_aoverall holds
     the rule on every run with an outlier model.
     """
 
     def test_leaving_the_term_out_misses(self):
-        table, _amodel, aoverall = rf.table(rf.SRM)
-        indices = [table[m['id']][0] for m in rf.measurements(rf.SRM)]
+        table, _amodel, aoverall = rf.table(rf.DS)
+        indices = [table[m['id']][0] for m in rf.measurements(rf.DS)]
         assert agreement.overall_agreement(indices) < aoverall - 1.0
 
     def test_one_term_per_outlier_model_in_use(self):
@@ -583,7 +583,7 @@ class TestModelIndexAgainstOxCal:
     def test_reproduces_oxcals_amodel(self):
         """Against OxCal at one year, 100.6: measured 100.9."""
         got = _amodel(self._solved('ordered'), ox.measurements())
-        _table, amodel, _aoverall = rf.table(rf.NENTHORN)
+        _table, amodel, _aoverall = rf.table(rf.HILLSIDE)
         assert got == pytest.approx(amodel, abs=1.5), got
 
     @pytest.mark.parametrize('run', RUNS)
@@ -721,7 +721,7 @@ class TestOutlierModels:
         """
         Left where its likelihood puts it, a date under a 5% outlier model
         scores its bare index lifted by the share of the likelihood term the
-        inlier branch holds -- about 4%, as OxCal's own run shows (Shag River
+        inlier branch holds -- about 4%, as OxCal's own run shows (Dune Section
         Mouth's fifteen sound dates, 1.0426 +/- 0.002).
         """
         flagged = self._measurement(prior=0.05, model='general')
@@ -758,8 +758,8 @@ class TestOutlierModels:
     def test_reproduces_oxcal_on_its_one_year_outlier_runs(self, stem):
         """
         OxCal's posteriors and its scale posterior in, OxCal's indices out --
-        the flagged dates included. Measured per-date rms 0.47 on Shag River
-        Mouth (NZ7756 5.2 against 5.4) and 0.42 on SRM. The scale is taken as
+        the flagged dates included. Measured per-date rms 0.47 on Dune Section
+        Mouth (LB10002 5.2 against 5.4) and 0.42 on DS. The scale is taken as
         independent of each date here, which the exports force; a run pairs
         them draw by draw.
         """
@@ -781,12 +781,12 @@ class TestOutlierModels:
 
     def test_a_run_scores_the_flagged_date_as_oxcal_does(self):
         """
-        End to end on Shag River Mouth, RadiCal's own run: NZ7756 is scored off
+        End to end on Dune Section, RadiCal's own run: LB10002 is scored off
         the joint draws under the scale each state held, and the model's
         indices land on OxCal's one-year run (Amodel 83.9, Aoverall 84.2).
-        Integrating the shift out instead gave NZ7756 0.5 and Aoverall 48.9.
+        Integrating the shift out instead gave LB10002 0.5 and Aoverall 48.9.
         """
-        import shag_fixture as sf
+        import dune_section_fixture as sf
         from app.services import gibbs
         measurements = sf.measurements()
         solved = gibbs.solve(measurements, sf.model_tree(), num_samples=200,
@@ -794,7 +794,7 @@ class TestOutlierModels:
         overall = agreement.attach(solved['measurements'], measurements,
                                    solved['joint_draws'], solved['joint_scales'])
         flagged = solved['measurements'][sf.OUTLIER]['agreement_index']
-        _table, amodel, aoverall = rf.table(rf.SHAG)
+        _table, amodel, aoverall = rf.table(rf.DUNE)
         assert 3.5 < flagged < 7.5, flagged
         assert overall == pytest.approx(aoverall, abs=4.0)
         assert _amodel(solved, measurements) == pytest.approx(amodel, abs=4.0)

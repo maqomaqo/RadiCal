@@ -1,6 +1,6 @@
 // Normalising two distributions onto a common footing.
 //
-// The bug these pin, measured on the 'SRM SM/C Dune' analysis: the stacked
+// The bug these pin, measured on the dune-layers analysis: the stacked
 // plot drew a date's unmodelled calibration behind its posterior and scaled
 // both by the POSTERIOR's peak, on the assumption they shared units. They did
 // not. Integrating each series over its own grid gave 1.000 for every
@@ -66,7 +66,7 @@ describe('toUnitArea', () => {
 
   it('reproduces the failure it was written for', () => {
     // A prior normalised as per-point mass on a 10-year grid, against a
-    // posterior that is a proper density -- the NZ7806 row.
+    // posterior that is a proper density -- the LB10011 row.
     const posterior: Distribution = Array.from({ length: 51 }, (_, i) => [
       500 + i * 4.45,
       0.02,

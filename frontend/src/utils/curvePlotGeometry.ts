@@ -129,7 +129,7 @@ export const MEASUREMENT_LOBE_FRACTION = 0.09
  * apart genuinely belong five years apart, and separating them would be a
  * lie about the data. But at LOBE_FRACTION each, sixty dates ask for six and
  * a half axis heights of lobe stacked into whatever radiocarbon range they
- * happen to occupy, and on a real model (Wairau, 59 terrestrial dates inside
+ * happen to occupy, and on a real model (59 terrestrial dates inside
  * 160 radiocarbon years) that buried the calibration curve completely: the
  * one mark the whole view exists to show.
  *

@@ -1,6 +1,6 @@
 """
 The charcoal/residual outlier model, against a real OxCal 4.4 run of it
-(tests/fixtures/oxcal_charcoal -- see nenthorn_charcoal_fixture for the model).
+(tests/fixtures/oxcal_charcoal -- see hillside_charcoal_fixture for the model).
 
 This is the first test anywhere to check the charcoal kernel against OxCal
 rather than against its own direction or against the general model. Its absence
@@ -28,7 +28,7 @@ from app.services import exact_chain as ec
 from app.services import gibbs
 from app.services.model_tree import with_implicit_boundaries
 
-import nenthorn_charcoal_fixture as fx
+import hillside_charcoal_fixture as fx
 from oxcal_fixture import ad_to_calbp
 
 
@@ -38,7 +38,7 @@ def _solved():
     solver."""
     measurements = fx.measurements()
     tree, inserted = with_implicit_boundaries(fx.model_tree())
-    assert len(inserted) == 1, 'one transition, between Quarry and Rockshelter'
+    assert len(inserted) == 1, 'one transition, between North and South'
     chain = ec.layout(tree, measurements)
     assert chain is not None
     return measurements, tree, ec.solve(measurements, tree, chain, num_samples=200)
@@ -299,20 +299,20 @@ class TestPhaseWidth:
 
     def test_a_single_phase_now_matches_oxcals_width(self):
         """
-        Shag River: one phase, sixteen dates, a 5% General prior. Our span was 4.2
+        Dune Section: one phase, sixteen dates, a 5% General prior. Our span was 4.2
         years against OxCal's 19.3 and is now 20.7 -- from a factor of five out to
         7%. This is the headline result of the quadrature fix and the reason to
         pin it here rather than only in test_exact_chain.
         """
         import csv
 
-        import shag_fixture as sf
+        import dune_section_fixture as sf
 
         measurements, tree = sf.measurements(), sf.model_tree()
         solved = ec.solve(measurements, tree, ec.layout(tree, measurements),
                           num_samples=200)
-        span = (solved['boundaries']['shag_start']['posterior']['posterior_mean']
-                - solved['boundaries']['shag_end']['posterior']['posterior_mean'])
+        span = (solved['boundaries']['dune_start']['posterior']['posterior_mean']
+                - solved['boundaries']['dune_end']['posterior']['posterior_mean'])
 
         rows = {}
         with open(sf.RAW, encoding='utf-8-sig') as handle:
@@ -347,8 +347,8 @@ class TestPhaseWidth:
         boundaries = [b['posterior']['posterior_mean']
                       for b in solved['boundaries'].values()]
         span = max(boundaries) - min(boundaries)
-        oxcal_span = (fx.posterior_means()['Start Nenthorn']
-                      - fx.posterior_means()['End Nenthorn'])
+        oxcal_span = (fx.posterior_means()['Start Hillside']
+                      - fx.posterior_means()['End Hillside'])
         assert oxcal_span == pytest.approx(29.2, abs=1.0), oxcal_span
         assert 34.0 < span < 70.0, span
 
@@ -392,7 +392,7 @@ class TestPhaseWidth:
     def test_the_excess_is_a_young_tail_and_not_a_uniform_widening(self):
         """
         Where the extra width actually sits, which is what any future fix has to
-        move. Averaged over the seven Rockshelter dates, our marginals carry a
+        move. Averaged over the seven South dates, our marginals carry a
         young tail OxCal does not have and are correspondingly short in the oldest
         lobe:
 
@@ -406,17 +406,17 @@ class TestPhaseWidth:
         """
         measurements, _tree, solved = _solved()
         oxcal = fx.distributions()
-        rockshelter = [m['id'] for m in measurements
+        south = [m['id'] for m in measurements
                        if m['element_id'] in ('K', 'A')]
         axis = np.arange(520.0, 700.0, 1.0)
 
         def stacked(pairs_for):
             total = np.zeros_like(axis)
-            for date_id in rockshelter:
+            for date_id in south:
                 cal, prob = pairs_for(date_id)
                 density = np.interp(axis, cal, prob, left=0.0, right=0.0)
                 total += density / density.sum()
-            return total / len(rockshelter)
+            return total / len(south)
 
         def ours(date_id):
             pairs = np.asarray(
@@ -441,12 +441,12 @@ class TestPhaseWidth:
         OxCal exports about 250 years around each parameter; _plottable trims ours
         at 1e-4 of the peak. For a date with a broad outlier component those rules
         keep very different amounts of tail, so comparing the two curves' standard
-        deviations on their OWN supports compares truncation rules. On Shag River
+        deviations on their OWN supports compares truncation rules. On Dune Section
         that reads as 0.70x OxCal's width; on a common window the same solve is
         0.97x. Comparing the unmodelled likelihoods cannot expose it -- they have
         no broad component and agree either way.
         """
-        import shag_fixture as sf
+        import dune_section_fixture as sf
 
         measurements, tree = sf.measurements(), sf.model_tree()
         solved = ec.solve(measurements, tree, ec.layout(tree, measurements),

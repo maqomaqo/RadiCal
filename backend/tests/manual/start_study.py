@@ -152,8 +152,8 @@ def dune():
 
 
 def fixture(name):
-    module = {'oxcal': 'oxcal_fixture', 'nenthorn': 'nenthorn_charcoal_fixture',
-              'shag': 'shag_fixture'}[name]
+    module = {'oxcal': 'oxcal_fixture', 'hillside': 'hillside_charcoal_fixture',
+              'dunesec': 'dune_section_fixture'}[name]
     mod = __import__(module)
     return mod.measurements(), mod.model_tree()
 
@@ -942,7 +942,7 @@ def main():
     for name in ('run', 'cost'):
         p = sub.add_parser(name)
         p.add_argument('--out', required=True)
-        p.add_argument('--models', help='comma list: dune, gen0.., oxcal, nenthorn, shag')
+        p.add_argument('--models', help='comma list: dune, gen0.., oxcal, hillside, dunesec')
         p.add_argument('--generated', type=int, default=8, help='how many generated chains')
         p.add_argument('--parallel', type=int, default=4, help='how many generated parallel-branch models')
         p.add_argument('--arms', default=','.join(ARMS))

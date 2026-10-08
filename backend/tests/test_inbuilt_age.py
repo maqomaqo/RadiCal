@@ -5,7 +5,7 @@ older than its event, integrated out of its likelihood
 request, the stored date, a re-run, the collection, the importer and the
 same-event test.
 
-The acceptance check is the spec's: Petchey et al.'s model of SM/C:Dune
+The acceptance check is the spec's: The dune reference model of DS/C:Dune
 Layers 11-4 must match the sampler-free reference (corpus_analogues.py, model
 C0) to within 0.10 in P(Start 11 before AD 1360), with the published maxima
 applied and without them.
@@ -65,23 +65,23 @@ class TestKernel:
             ec.inbuilt_kernel(1.0, {'inbuilt_years': 10, 'inbuilt_shape': 'gamma'})
 
 
-# --- Petchey et al.'s model of Layers 11-4 --------------------------------
+# --- The dune reference model of Layers 11-4 --------------------------------
 
 # (layer, lab code, CRA, error, published maximum inbuilt age)
 PUBLISHED = [
-    ('11', 'WkA-43681', 614, 20, 0), ('11', 'WkA-43682', 627, 20, 0),
-    ('9', 'WkA-55312', 694, 16, 30), ('9', 'WkA-56765', 709, 16, 0),
-    ('7', 'WkA-55309', 623, 16, 30), ('7', 'WkA-55308', 645, 16, 30),
-    ('6', 'WkA-55307', 546, 15, 25), ('6', 'WkA-56764', 565, 16, 30),
-    ('5', 'WkA-60533', 597, 18, 0), ('5', 'WkA-56203', 590, 15, 0),
-    ('5', 'WkA-55305', 620, 15, 25), ('4', 'WkA-56763', 543, 20, 5),
+    ('11', 'Le-10002', 614, 20, 0), ('11', 'Le-10003', 627, 20, 0),
+    ('9', 'Le-10008', 694, 16, 30), ('9', 'Le-10012', 709, 16, 0),
+    ('7', 'Le-10007', 623, 16, 30), ('7', 'Le-10006', 645, 16, 30),
+    ('6', 'Le-10005', 546, 15, 25), ('6', 'Le-10011', 565, 16, 30),
+    ('5', 'Le-10013', 597, 18, 0), ('5', 'Le-10009', 590, 15, 0),
+    ('5', 'Le-10004', 620, 15, 25), ('4', 'Le-10010', 543, 20, 5),
 ]
 # Oldest first; 10, 8 and 6L are sterile sand with no dates -- a gap between
 # two Boundaries, as the reference has an empty interval.
 LAYERS = ['11', '10', '9', '8', '7', '6L', '6', '5', '4']
 
 
-def _petchey(client, variant, apply_inbuilt):
+def _dune_layers(client, variant, apply_inbuilt):
     tag = f'pk{next(_IDS)}'
     children = [{'id': f'{tag}_b0', 'element_type': 'boundary', 'name': 'Start 11', 'children': []}]
     for i, layer in enumerate(LAYERS):
@@ -92,7 +92,7 @@ def _petchey(client, variant, apply_inbuilt):
                          'name': f'After {layer}', 'children': []})
     measurements = []
     for layer, code, cra, sigma, inbuilt in PUBLISHED:
-        if code == 'WkA-56765':
+        if code == 'Le-10012':
             if variant == 'NOE':
                 continue
             if variant == 'E11':
@@ -104,8 +104,8 @@ def _petchey(client, variant, apply_inbuilt):
             'inbuilt_years': inbuilt or None,
         })
     created = client.post('/api/analysis/bayesian?wait=true', json={
-        'name': f'Petchey {variant} {apply_inbuilt}', 'measurements': measurements,
-        'model_tree': {'id': f'{tag}_root', 'element_type': 'sequence', 'name': 'SM/C:Dune',
+        'name': f'Dune layers {variant} {apply_inbuilt}', 'measurements': measurements,
+        'model_tree': {'id': f'{tag}_root', 'element_type': 'sequence', 'name': 'DS/C:Dune',
                        'children': children},
         'bayesian_config': {'apply_inbuilt': apply_inbuilt},
         'save': True,
@@ -124,8 +124,8 @@ class TestAgainstTheReference:
         ('orig', 0.998, 0.881),
     ])
     def test_matches_c0_with_and_without_the_published_maxima(self, client, variant, off, on):
-        without, _ = _petchey(client, variant, apply_inbuilt=False)
-        with_allowance, _ = _petchey(client, variant, apply_inbuilt=True)
+        without, _ = _dune_layers(client, variant, apply_inbuilt=False)
+        with_allowance, _ = _dune_layers(client, variant, apply_inbuilt=True)
         assert without == pytest.approx(off, abs=0.10)
         assert with_allowance == pytest.approx(on, abs=0.10)
 
@@ -139,9 +139,9 @@ def _measurement(name, age, **extra):
 
 class TestCarriedThrough:
     def test_stored_with_the_date_and_kept_by_a_rerun(self, client):
-        _p, analysis_id = _petchey(client, 'NOE', apply_inbuilt=True)
+        _p, analysis_id = _dune_layers(client, 'NOE', apply_inbuilt=True)
         dates = client.get(f'/api/analysis/{analysis_id}').json()['data']['measurements']
-        assert {d['sample_name']: d['inbuilt_years'] for d in dates}['WkA-55312'] == 30
+        assert {d['sample_name']: d['inbuilt_years'] for d in dates}['Le-10008'] == 30
         before = client.get(f'/api/results/{analysis_id}/p-before?cal_bp=590').json()['data']
         assert client.post(f'/api/analysis/{analysis_id}/rerun?wait=true').status_code == 200
         after = client.get(f'/api/results/{analysis_id}/p-before?cal_bp=590').json()['data']
@@ -157,7 +157,7 @@ class TestCarriedThrough:
 
     def test_the_importer_reads_it(self, client):
         content = (b'sample_name,age_bp,error_1sigma,curve_id,inbuilt_max,inbuilt_shape\n'
-                   b'WkA-55312,694,16,shcal20,30,uniform\n')
+                   b'Le-10008,694,16,shcal20,30,uniform\n')
         response = client.post('/api/import/dates',
                                files={'file': ('d.csv', io.BytesIO(content), 'text/plain')})
         assert response.status_code == 200, response.text
@@ -187,7 +187,7 @@ class TestCarriedThrough:
         assert same_event(shared)['refused'] is None
 
     def test_with_and_without_duplicates_name_the_switch(self, client):
-        _p, analysis_id = _petchey(client, 'NOE', apply_inbuilt=True)
+        _p, analysis_id = _dune_layers(client, 'NOE', apply_inbuilt=True)
         response = client.post(f'/api/analysis/{analysis_id}/duplicate?apply_inbuilt=false')
         assert response.status_code == 200, response.text
         copy = client.get(f"/api/analysis/{response.json()['data']['id']}").json()['data']

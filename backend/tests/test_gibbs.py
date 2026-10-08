@@ -124,8 +124,8 @@ class TestAgreesWithTheExactSolver:
             return np.mean([1950 - results['measurements'][i]['posterior_mean']
                             for i in ids])
 
-        exact_gap = mean_ad(exact, ox.ROCKSHELTER) - mean_ad(exact, ox.QUARRY)
-        sampled_gap = mean_ad(sampled, ox.ROCKSHELTER) - mean_ad(sampled, ox.QUARRY)
+        exact_gap = mean_ad(exact, ox.SOUTH) - mean_ad(exact, ox.NORTH)
+        sampled_gap = mean_ad(sampled, ox.SOUTH) - mean_ad(sampled, ox.NORTH)
         assert abs(sampled_gap - exact_gap) < 5.0, (sampled_gap, exact_gap)
 
     def test_interior_boundaries_match(self):
@@ -919,8 +919,8 @@ class TestTheChainCanActuallyMove:
 class TestOutlierModel:
     """
     The outlier model, against the same OxCal 4.4 run the exact solver is held
-    to: tests/fixtures/oxcal_outlier, Shag River Mouth, 16 dates in one phase
-    with NZ7756 at 970 +/- 47 BP against the rest at 537-660, a 5% prior on
+    to: tests/fixtures/oxcal_outlier, Dune Section, 16 dates in one phase
+    with LB10002 at 970 +/- 47 BP against the rest at 537-660, a 5% prior on
     each and Outlier_Model("General", T(5), U(0,4), "t").
 
     That model is a chain, so all three answers are available at once -- OxCal's
@@ -938,7 +938,7 @@ class TestOutlierModel:
 
     @pytest.fixture(scope='class')
     def solved(self):
-        import shag_fixture as sf
+        import dune_section_fixture as sf
         samples, tree = sf.measurements(), sf.model_tree()
         chain = ec.layout(tree, samples)
         assert chain is not None
@@ -995,7 +995,7 @@ class TestOutlierModel:
         """
         The shared scale is a parameter with a posterior, and OxCal exports its
         own -- so this is a direct comparison of an inferred quantity rather than
-        of an answer it feeds into. On the Nenthorn charcoal fixture the two agree
+        of an answer it feeds into. On the Hillside charcoal fixture the two agree
         to 0.03 in log10; here the General model's 5% priors leave the data barely
         able to constrain it, so all that can be asked is that it stays inside its
         U(0,4) prior.
@@ -1393,7 +1393,7 @@ class TestParallelChains:
         deficit is mostly Monte Carlo noise, which falls with the draws
         pooled, so four chains reach the target in well under the sweeps one
         chain needs -- and that, not the extra draws, is what makes the idle
-        cores into wall time. Measured on the Nenthorn fixture: 54,000 on one
+        cores into wall time. Measured on the Hillside fixture: 54,000 on one
         chain against about 14,000 each on four.
         """
         measurements = ox.measurements()
@@ -1778,8 +1778,8 @@ class TestLobeProbe:
     leaves when the model rules it out.
     """
 
-    def _petchey(self):
-        # Petchey et al.'s Layers 11-4 with WkA-56765 left out and inbuilt ages
+    def _dune_layers(self):
+        # The dune reference Layers 11-4 with Le-10012 left out and inbuilt ages
         # allowed (tests/test_inbuilt_age.py), where four chains can all sit in
         # the late solution while the exact answer gives the early one 0.08.
         from test_inbuilt_age import LAYERS, PUBLISHED
@@ -1792,15 +1792,15 @@ class TestLobeProbe:
             children.append(_element('boundary', f'After {layer}'))
         measurements = []
         for layer, code, cra, sigma, inbuilt in PUBLISHED:
-            if code == 'WkA-56765':
+            if code == 'Le-10012':
                 continue
             date = _date(layers[layer]['id'], cra, name=code)
             date.update(error_1sigma=sigma, curve_id='shcal20', inbuilt_years=inbuilt or None)
             measurements.append(date)
-        return measurements, _element('sequence', 'SM/C:Dune', children)
+        return measurements, _element('sequence', 'DS/C:Dune', children)
 
     def test_a_run_trapped_in_the_late_solution_is_reported(self):
-        measurements, tree = self._petchey()
+        measurements, tree = self._dune_layers()
         model = gibbs.Model(measurements, tree)
         # A run that only ever saw each date's youngest lobe: every other lobe
         # holding a tenth of a likelihood is left empty and probed.
@@ -1815,7 +1815,7 @@ class TestLobeProbe:
         # Untempered, as the run that produced such histograms would have been.
         record = gibbs.probe_unvisited_lobes(model, histograms, seed=3, temperatures=1)
         names = {row['name'] for row in record['not_reached']}
-        assert {'WkA-43681', 'WkA-43682'} <= names, record
+        assert {'Le-10002', 'Le-10003'} <= names, record
 
     def test_lobes_the_model_rules_out_are_left(self):
         """A run at the exact answer leaves only lobes the model rules out
@@ -1836,14 +1836,14 @@ class TestLobeProbe:
 
 class TestParallelTempering:
     """
-    Untempered chains on Petchey et al.'s dune model of Layers 11-4 each stayed
+    Untempered chains on the dune reference model of Layers 11-4 each stayed
     in whichever calibration range of the Start they began in, so the pooled
     P(Start before AD 1360) depended on where the chains started. Tempered
     copies cross easily and swap what they find into the recorded chain.
     """
 
     def test_tempered_chains_cross_between_the_starts_two_ranges(self):
-        measurements, tree = TestLobeProbe()._petchey()
+        measurements, tree = TestLobeProbe()._dune_layers()
         model = gibbs.Model(measurements, tree)
         start = model.boundary_ids[0]
         cut = int(np.searchsorted(model.grid, 590.0))            # AD 1360

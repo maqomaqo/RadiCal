@@ -8,7 +8,7 @@ import { PNG_EXPORT_SCALE, exportFilename } from './plotExport'
 
 describe('exportFilename', () => {
   it('keeps an ordinary lab code recognisable', () => {
-    expect(exportFilename('posterior-WK50104')).toBe('posterior-wk50104')
+    expect(exportFilename('posterior-LD10010')).toBe('posterior-ld10010')
   })
 
   it('replaces everything an OS would reject', () => {
@@ -17,7 +17,7 @@ describe('exportFilename', () => {
   })
 
   it('never leaves a leading or trailing separator', () => {
-    expect(exportFilename('  Start Nenthorn  ')).toBe('start-nenthorn')
+    expect(exportFilename('  Start Hillside  ')).toBe('start-hillside')
     expect(exportFilename('...Boundary...')).toBe('boundary')
   })
 

@@ -1,0 +1,85 @@
+ // Dune_Section.oxcal, unchanged except for the Options block: calculated at
+ // one-year resolution instead of OxCal's default five, to test whether
+ // RadiCal's per-date agreement-index bias comes from comparing on a
+ // five-year grid.
+ Options()
+ {
+  Resolution=1;
+ };
+ Plot()
+ {
+  Curve("SHCal20","SHCal20.14c");
+  Outlier_Model("General",T(5),U(0,4),"t");
+  Sequence("Dune Section")
+  {
+   Boundary("Start");
+   Phase("Start Phase 1")
+   {
+    R_Date("LB10002", 970, 47)
+    {
+     Outlier("General", 0.05);
+    };
+    R_Date("LB10010", 660, 46)
+    {
+     Outlier("General", 0.05);
+    };
+    R_Date("LB10008", 647, 47)
+    {
+     Outlier("General", 0.05);
+    };
+    R_Date("LB10001", 646, 47)
+    {
+     Outlier("General", 0.05);
+    };
+    R_Date("LD10003", 630, 35)
+    {
+     Outlier("General", 0.05);
+    };
+    R_Date("LB10005", 627, 40)
+    {
+     Outlier("General", 0.05);
+    };
+    R_Date("LC10001", 626, 95)
+    {
+     Outlier("General", 0.05);
+    };
+    R_Date("LB10007", 600, 50)
+    {
+     Outlier("General", 0.05);
+    };
+    R_Date("LD10001", 600, 50)
+    {
+     Outlier("General", 0.05);
+    };
+    R_Date("LB10009", 592, 48)
+    {
+     Outlier("General", 0.05);
+    };
+    R_Date("LC10002", 585, 93)
+    {
+     Outlier("General", 0.05);
+    };
+    R_Date("LB10006", 582, 47)
+    {
+     Outlier("General", 0.05);
+    };
+    R_Date("LB10004", 580, 47)
+    {
+     Outlier("General", 0.05);
+    };
+    R_Date("LD10004", 570, 45)
+    {
+     Outlier("General", 0.05);
+    };
+    R_Date("LD10002", 560, 40)
+    {
+     Outlier("General", 0.05);
+    };
+    R_Date("LB10003", 537, 44)
+    {
+     Outlier("General", 0.05);
+    };
+   };
+   Boundary("End");
+  };
+ };

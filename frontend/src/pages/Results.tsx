@@ -3126,7 +3126,7 @@ export default function Results() {
           {/* Full width, with every column nowrap.
               
               The name column used to take 396px of 1104 (36%) for codes like
-              "WK50104", because it was the only column that could wrap and so
+              "LD10010", because it was the only column that could wrap and so
               the only one that could absorb the table's slack. Making it
               nowrap too means no column can grow by wrapping, and the browser
               spreads the surplus across all of them instead of pooling it in
@@ -3164,7 +3164,7 @@ export default function Results() {
                     table: the browser cannot honour it, so the column falls to
                     its min-content width and every other column shares the
                     surplus. Without it this column absorbed all of it -- 36% of
-                    the table for codes like "WK50104", and 220px of nothing
+                    the table for codes like "LD10010", and 220px of nothing
                     between a date and its own result. It settles at 27%, which
                     is the deepest-indented name plus its type label, and the
                     gap halves to 124px. */}

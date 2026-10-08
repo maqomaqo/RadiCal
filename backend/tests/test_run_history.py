@@ -167,7 +167,7 @@ class TestDiffRuns:
         assert diff['moved'] == []
 
     def test_a_lost_mode_is_listed_however_small_the_shift(self):
-        """REAL-Mp-NOE lost its short mode while its median moved under 10 yr."""
+        """REF-A-NOE lost its short mode while its median moved under 10 yr."""
         diff = run_history.diff_runs(self._payload(600, 1), self._payload(603, 2))
         [moved] = diff['moved']
         assert (moved['modes_before'], moved['modes_after']) == (2, 1)

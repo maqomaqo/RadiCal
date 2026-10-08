@@ -421,7 +421,7 @@ def _phase_name(value: str) -> Optional[str]:
     """
     A context/phase name. A value holding a '>' is read as a structure PATH
     and reduced to its last segment, which is how the app's own results
-    export writes a date's position ('Nenthorn > Quarry > Fire_Feature_J') --
+    export writes a date's position ('Hillside > North > Fire_Feature_J') --
     the innermost element is the phase the date actually sits in.
     """
     text = _clean(value)
@@ -846,15 +846,15 @@ TEMPLATE_COLUMNS = [
 ]
 
 TEMPLATE_ROWS = [
-    ['Wk-51189', '685', '25', 'charcoal', 'shcal20', 'Fire Feature J',
+    ['Ld-10012', '685', '25', 'charcoal', 'shcal20', 'Fire Feature J',
      '', '', 'general', '0.05', '', '', '', '', 'short-lived twig'],
-    ['Wk-50104', '842', '21', 'charcoal', 'shcal20', 'Fire Feature J',
+    ['Ld-10010', '842', '21', 'charcoal', 'shcal20', 'Fire Feature J',
      '', '', 'charcoal', '1.0', '', '', '', '', 'old wood -- declared residual'],
     # Placed as well as corrected: this row is the one a reader copies when
     # they have a marine date, so it shows the coordinate in the form the
     # importer accepts -- decimal degrees, minus for west -- beside the offset
     # that a coordinate will one day be able to look up.
-    ['NZ-7756', '970', '47', 'marine shell', 'marine20', 'Midden 1',
+    ['LB-10002', '970', '47', 'marine shell', 'marine20', 'Midden 1',
      '-7', '45', 'general', '0.05', '', '', '-45.8742', '170.5036',
      'delta_r needs its error; decimal degrees only'],
 ]

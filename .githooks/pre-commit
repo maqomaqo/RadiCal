@@ -1,0 +1,3 @@
+#!/bin/sh
+# Refuses a commit that adds names from the research project. See CONTRIBUTING.md.
+exec python3 "$(git rev-parse --show-toplevel)/scripts/check_dataset_names.py" --staged

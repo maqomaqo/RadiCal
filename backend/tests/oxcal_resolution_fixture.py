@@ -2,19 +2,19 @@
 Reader for tests/fixtures/oxcal_resolution/ -- OxCal 4.4 runs made to pin the
 agreement indices, which OxCal computes at its calculation resolution:
 
-  Nenthorn_sites_3_res1   tests/fixtures/oxcal's `ordered` model, no outlier
+  Hillside_sites_3_res1   tests/fixtures/oxcal's `ordered` model, no outlier
                           model, at Resolution=1
-  Shag_River_res1         tests/fixtures/oxcal_outlier's model (General
+  Dune_Section_res1     tests/fixtures/oxcal_outlier's model (General
                           outlier model, prior 0.05 on all sixteen dates) at
                           Resolution=1
-  SRM_Petchey             Shag River Mouth dune sequence (Petchey): ten
+  DS_Layers             Dune Section layered sequence: ten
                           boundaries, an undated phase, General outlier model
                           at 0.05 on twelve dates -- at OxCal's default five
                           years, and reproducing the original run (Amodel
                           38.3 against 38.4, Aoverall 45.9)
-  SRM_Petchey_res1        the same at Resolution=1
+  DS_Layers_res1        the same at Resolution=1
 
-OxCal's own indices move with the resolution -- Nenthorn's Aoverall is 100.4
+OxCal's own indices move with the resolution -- Hillside's Aoverall is 100.4
 at five years and 105.4 at one -- and the one-year values are the ones
 services/agreement.py is held to (see its module docstring).
 
@@ -33,11 +33,11 @@ from oxcal_fixture import ad_to_calbp
 FIXTURES = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                         'fixtures', 'oxcal_resolution')
 
-NENTHORN = 'Nenthorn_sites_3_res1'
-SHAG = 'Shag_River_res1'
-SRM = 'SRM_Petchey'
-SRM_ONE_YEAR = 'SRM_Petchey_res1'
-ONE_YEAR_OUTLIER_RUNS = (SHAG, SRM_ONE_YEAR)
+HILLSIDE = 'Hillside_sites_3_res1'
+DUNE = 'Dune_Section_res1'
+DS = 'DS_Layers'
+DS_ONE_YEAR = 'DS_Layers_res1'
+ONE_YEAR_OUTLIER_RUNS = (DUNE, DS_ONE_YEAR)
 
 
 def _path(stem, suffix):
@@ -67,7 +67,7 @@ def measurements(stem):
 def table(stem):
     """
     ({name: (A, inlier percent or None)}, Amodel, Aoverall) from the results
-    table. P is the INLIER probability (see shag_fixture).
+    table. P is the INLIER probability (see dune_section_fixture).
     """
     per_date = {}
     with open(_path(stem, ' Table.csv'), encoding='utf-8-sig') as fh:

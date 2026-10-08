@@ -93,7 +93,7 @@ def tokenize(text: str) -> List[Token]:
 class Node:
     """
     One CQL2 statement: a command, its arguments, and its block if it has one.
-    `Sequence("Nenthorn") { ... };` and `Boundary("Start");` are both this.
+    `Sequence("Hillside") { ... };` and `Boundary("Start");` are both this.
     """
 
     def __init__(self, command: str, args: List[Any], block: Optional[List['Node']], line: int):

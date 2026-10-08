@@ -1,0 +1,4 @@
+# Files that quote public reference data verbatim, which legitimately names
+# authors or lab codes. Anything else needs a `names-ok` marker on its line.
+calibration_data/*
+backend/tests/fixtures/calib_marine/*

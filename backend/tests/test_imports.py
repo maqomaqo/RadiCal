@@ -3,7 +3,7 @@ Reading dates in from a file -- services/date_import.py (CSV),
 services/oxcal_script.py (OxCal's CQL2), and api/imports.py.
 
 The load-bearing tests are in TestOxcalMatchesTheHandBuiltFixtures. The three
-Nenthorn .oxcal files in tests/fixtures/oxcal/ are ALSO transcribed by hand in
+Hillside .oxcal files in tests/fixtures/oxcal/ are ALSO transcribed by hand in
 tests/oxcal_fixture.model_tree(), and those hand-built trees are what
 test_oxcal_agreement.py holds against OxCal's own published output for the same
 runs. So checking the parse against them chains the importer onto an oracle
@@ -99,9 +99,9 @@ class TestOxcalMatchesTheHandBuiltFixtures:
     """
 
     @pytest.mark.parametrize('run,filename', [
-        ('ordered', 'Nenthorn_sites_3.oxcal'),
-        ('unordered', 'Nenthorn_sites_3_unordered.oxcal'),
-        ('shared_boundary', 'Nenthorn_sites_3_shared_boundary.oxcal'),
+        ('ordered', 'Hillside_sites_3.oxcal'),
+        ('unordered', 'Hillside_sites_3_unordered.oxcal'),
+        ('shared_boundary', 'Hillside_sites_3_shared_boundary.oxcal'),
     ])
     def test_the_structure_is_the_one_the_fixture_builds(self, run, filename):
         result = parse_oxcal(read_fixture('oxcal', filename), filename)
@@ -110,9 +110,9 @@ class TestOxcalMatchesTheHandBuiltFixtures:
         assert shape(result.model_tree) == shape(ox.model_tree(run))
 
     @pytest.mark.parametrize('run,filename', [
-        ('ordered', 'Nenthorn_sites_3.oxcal'),
-        ('unordered', 'Nenthorn_sites_3_unordered.oxcal'),
-        ('shared_boundary', 'Nenthorn_sites_3_shared_boundary.oxcal'),
+        ('ordered', 'Hillside_sites_3.oxcal'),
+        ('unordered', 'Hillside_sites_3_unordered.oxcal'),
+        ('shared_boundary', 'Hillside_sites_3_shared_boundary.oxcal'),
     ])
     def test_every_date_lands_in_the_phase_the_fixture_puts_it_in(self, run, filename):
         result = parse_oxcal(read_fixture('oxcal', filename), filename)
@@ -129,8 +129,8 @@ class TestOxcalMatchesTheHandBuiltFixtures:
 
     def test_the_measurements_match_the_c14_csv(self):
         """Ages and errors as OxCal was actually given them."""
-        result = parse_oxcal(read_fixture('oxcal', 'Nenthorn_sites_3.oxcal'),
-                             'Nenthorn_sites_3.oxcal')
+        result = parse_oxcal(read_fixture('oxcal', 'Hillside_sites_3.oxcal'),
+                             'Hillside_sites_3.oxcal')
 
         expected = {
             ox.key(m['sample_name']): (m['age_bp'], m['error_1sigma'])
@@ -144,25 +144,25 @@ class TestOxcalMatchesTheHandBuiltFixtures:
 
     def test_the_curve_is_taken_from_the_file_not_defaulted(self):
         """
-        The Nenthorn models declare Curve("SHCal20") once, at the top. Every
+        The Hillside models declare Curve("SHCal20") once, at the top. Every
         date must come back on it -- silently defaulting to IntCal20 would
         calibrate a Southern Hemisphere site against the wrong curve and still
         produce a plausible-looking answer.
         """
-        result = parse_oxcal(read_fixture('oxcal', 'Nenthorn_sites_3.oxcal'), 'x.oxcal')
+        result = parse_oxcal(read_fixture('oxcal', 'Hillside_sites_3.oxcal'), 'x.oxcal')
 
         assert {d['curve_id'] for d in result.dates} == {'shcal20'}
 
 
 class TestTheCharcoalModel:
     """
-    tests/fixtures/oxcal_charcoal/Nenthorn_Seq.oxcal -- two outlier models,
+    tests/fixtures/oxcal_charcoal/Hillside_Seq.oxcal -- two outlier models,
     declared and applied per date, and a nested Curve("=SHCal20").
     """
 
     def setup_method(self):
         self.result = parse_oxcal(
-            read_fixture('oxcal_charcoal', 'Nenthorn_Seq.oxcal'), 'Nenthorn_Seq.oxcal'
+            read_fixture('oxcal_charcoal', 'Hillside_Seq.oxcal'), 'Hillside_Seq.oxcal'
         )
 
     def test_it_imports(self):
@@ -174,11 +174,11 @@ class TestTheCharcoalModel:
 
         # Outlier("Charcoal", 1.00) -- material DECLARED residual, not merely
         # suspected. The prior of 1.0 is the point of the model.
-        for name in ('WK50104', 'WK50098', 'ANU55207'):
+        for name in ('LD10010', 'LD10005', 'LA10002'):
             assert by_name[name]['outlier_model'] == 'charcoal'
             assert by_name[name]['outlier_prior'] == 1.0
 
-        for name in ('WK51189', 'WK50099', 'ANU55206'):
+        for name in ('LD10012', 'LD10006', 'LA10001'):
             assert by_name[name]['outlier_model'] == 'general'
             assert by_name[name]['outlier_prior'] == 0.05
 
@@ -195,16 +195,16 @@ class TestTheCharcoalModel:
         assert self.result.warnings == []
 
 
-class TestTheShagRiverModel:
+class TestTheDuneSectionModel:
     def test_sixteen_dates_in_one_phase(self):
         result = parse_oxcal(
-            read_fixture('oxcal_outlier', 'Shag_River.oxcal'), 'Shag_River.oxcal'
+            read_fixture('oxcal_outlier', 'Dune_Section.oxcal'), 'Dune_Section.oxcal'
         )
 
         assert result.ok, result.errors
         assert len(result.dates) == 16
         assert shape(result.model_tree) == {
-            'type': 'sequence', 'name': 'Shag River Mouth', 'children': [
+            'type': 'sequence', 'name': 'Dune Section', 'children': [
                 {'type': 'boundary', 'name': 'Start', 'children': []},
                 {'type': 'phase', 'name': 'Start Phase 1', 'children': []},
                 {'type': 'boundary', 'name': 'End', 'children': []},
@@ -1003,15 +1003,15 @@ class TestCsvStructure:
 
 class TestARealLabTable:
     """
-    tests/fixtures/oxcal/Nenthorn_c14.csv is a real input table for the
-    Nenthorn models -- headed 'R_Date,BP,Error,Material,Phase', which is what
+    tests/fixtures/oxcal/Hillside_c14.csv is a real input table for the
+    Hillside models -- headed 'R_Date,BP,Error,Material,Phase', which is what
     a table written to be fed to OxCal actually looks like. It found a gap:
     'R_Date' is OxCal's own name for the lab-code column and was not among the
     spellings understood.
     """
 
     def test_it_imports_without_being_edited_first(self):
-        result = parse_csv(read_fixture('oxcal', 'Nenthorn_c14.csv'), 'Nenthorn_c14.csv')
+        result = parse_csv(read_fixture('oxcal', 'Hillside_c14.csv'), 'Hillside_c14.csv')
 
         assert result.ok, result.errors
         assert result.warnings == []
@@ -1020,9 +1020,9 @@ class TestARealLabTable:
     def test_it_agrees_with_the_dates_the_oxcal_model_carries(self):
         """The .csv and the .oxcal are two views of one set of measurements,
         so importing either must give the same eight dates."""
-        from_csv = parse_csv(read_fixture('oxcal', 'Nenthorn_c14.csv'), 'x.csv')
+        from_csv = parse_csv(read_fixture('oxcal', 'Hillside_c14.csv'), 'x.csv')
         from_model = parse_oxcal(
-            read_fixture('oxcal', 'Nenthorn_sites_3.oxcal'), 'x.oxcal'
+            read_fixture('oxcal', 'Hillside_sites_3.oxcal'), 'x.oxcal'
         )
 
         def summarise(result):
@@ -1162,7 +1162,7 @@ class TestCsvCoordinates:
         assert result.ok, result.errors
         placed = [d for d in result.dates if d['latitude'] is not None]
         assert len(placed) == 1
-        assert placed[0]['sample_name'] == 'NZ-7756'
+        assert placed[0]['sample_name'] == 'LB-10002'
         assert placed[0]['longitude'] == 170.5036
 
 
@@ -1185,16 +1185,16 @@ class TestReImportingOurOwnExports:
         """
         text = (
             'Order,Row Type,Structure Path,Name,Age BP,1-Sigma Error,Curve,Posterior Mean\n'
-            '1,sequence,Nenthorn,Nenthorn,,,,\n'
-            '2,phase,Nenthorn > Quarry,Quarry,,,,\n'
-            '3,date,Nenthorn > Quarry,WK51189,685,25,shcal20,650.5\n'
-            '4,date,Nenthorn > Quarry,WK50102,671,21,shcal20,640.1\n'
+            '1,sequence,Hillside,Hillside,,,,\n'
+            '2,phase,Hillside > North,North,,,,\n'
+            '3,date,Hillside > North,LD10012,685,25,shcal20,650.5\n'
+            '4,date,Hillside > North,LD10009,671,21,shcal20,640.1\n'
         )
         result = parse_csv(text)
 
         assert result.ok, result.errors
         assert len(result.dates) == 2
-        assert phase_of(result) == {'WK51189': 'Quarry', 'WK50102': 'Quarry'}
+        assert phase_of(result) == {'LD10012': 'North', 'LD10009': 'North'}
         assert any('structural row' in n for n in result.notes)
 
     def test_posterior_columns_are_not_mistaken_for_input(self):
@@ -1338,8 +1338,8 @@ class TestImportApi:
         )
 
     def test_uploading_an_oxcal_model(self, client):
-        content = read_fixture('oxcal', 'Nenthorn_sites_3.oxcal').encode()
-        response = self._upload(client, 'Nenthorn_sites_3.oxcal', content)
+        content = read_fixture('oxcal', 'Hillside_sites_3.oxcal').encode()
+        response = self._upload(client, 'Hillside_sites_3.oxcal', content)
 
         assert response.status_code == 200, response.text
         data = response.json()['data']
@@ -1412,12 +1412,12 @@ class TestImportedDatesRunAsAnAnalysis:
 
     def test_an_imported_oxcal_model_runs(self, client):
         result = parse_oxcal(
-            read_fixture('oxcal', 'Nenthorn_sites_3.oxcal'), 'Nenthorn_sites_3.oxcal'
+            read_fixture('oxcal', 'Hillside_sites_3.oxcal'), 'Hillside_sites_3.oxcal'
         )
         assert result.ok, result.errors
 
         response = client.post('/api/analysis/bayesian?wait=true', json={
-            'name': 'Imported Nenthorn',
+            'name': 'Imported Hillside',
             'measurements': [
                 {k: v for k, v in d.items() if k != 'phase_name'} for d in result.dates
             ],

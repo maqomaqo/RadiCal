@@ -24,13 +24,13 @@ const names = (items: { name: string }[]) => items.map((i) => i.name)
 
 describe('clusterByPeriod', () => {
   it('keeps one axis while the corpus is one period', () => {
-    // The real Wairau Bar / Tikoraki corpus: 616 years end to end, narrowest
+    // A real four-model corpus: 616 years end to end, narrowest
     // member 80 -- a ratio of 7.7, inside the readable limit.
     const { clusters } = clusterByPeriod([
-      at('tikoraki', [145, 491], '2026-08-22T12:33:47'),
-      at('nenthorn', [542, 761], '2026-08-22T12:07:11'),
-      at('wairau', [555, 655], '2026-08-20T01:04:37'),
-      at('jacomb', [555, 635], '2026-08-20T00:46:06'),
+      at('model-a', [145, 491], '2026-08-22T12:33:47'),
+      at('model-b', [542, 761], '2026-08-22T12:07:11'),
+      at('model-c', [555, 655], '2026-08-20T01:04:37'),
+      at('model-d', [555, 635], '2026-08-20T00:46:06'),
     ])
     expect(clusters).toHaveLength(1)
     expect(clusters[0].span).toEqual([145, 761])

@@ -210,7 +210,7 @@ MOVES_PER_SWEEP = 2
 # counting its own (1 is no tempering), and the lowest power the likelihood of
 # the hottest copy is raised to. The copies run on a flattened likelihood where
 # calibration lobes are easy to cross, and pass what they find down to the
-# chain that counts by swapping. On Petchey et al.'s dune model, where untempered
+# chain that counts by swapping. On the dune reference model, where untempered
 # chains each stayed in one lobe, three temperatures crossed 900-1,600 times
 # in 20,000 sweeps and pooled runs landed within 0.03 of the exact answer on
 # every model tried; it roughly doubles a run's time on models that mixed
@@ -298,7 +298,7 @@ TARGET_RHAT = 1.05
 # probability of a parameter being older than a given year before a pooled run
 # may stop (_chain_threshold_gap). R-hat compares means, and the overlap
 # measure tolerates a few percent of mass in the wrong place, so neither holds
-# a small calibration lobe's weight: tempered chains on Petchey et al.'s dune
+# a small calibration lobe's weight: tempered chains on the dune reference
 # model stopped at 12,000 sweeps with P(Start before AD 1360) at 0.17 against an
 # exact 0.08, every chain mixing and R-hat 1.04.
 TARGET_CHAIN_THRESHOLD_GAP = 0.05
@@ -1568,7 +1568,7 @@ class Model:
         absolute translation leaves every span, and so the whole phase prior,
         unchanged, so nothing resists it but the likelihoods -- and single-site
         Gibbs explores that mode one date at a time against the containment of
-        the others. On the Nenthorn fixture, adding it took convergence at
+        the others. On the Hillside fixture, adding it took convergence at
         20,000 sweeps from 0.62 to over 0.95.
 
         A group's set includes its boundaries so it can move without being
@@ -2350,7 +2350,7 @@ def _convergence(rounds: List[Dict[str, np.ndarray]],
 # so the run stops when the pooled histogram has converged, not when each
 # chain has on its own. The deficit in that measure is mostly Monte Carlo
 # noise, which falls as 1/sqrt(draws), and four chains reach a given deficit
-# in about a quarter of the sweeps each -- measured on the Nenthorn fixture as
+# in about a quarter of the sweeps each -- measured on the Hillside fixture as
 # 54,000 sweeps on one chain against about 14,000 each on four. That is what
 # turns the idle cores into wall time.
 #
@@ -2879,7 +2879,7 @@ def _deposition_report(model: 'Model', chain: Dict) -> List[Dict]:
 # ruled-out lobes. The bar is high because a lobe with a little real mass is
 # also left eventually, and reporting that would be noise: on one generated
 # model a lobe the exact answer gives 0.009 kept its chain 17% of the time,
-# while the trapped Layer 11 lobes of Petchey et al.'s dune model kept theirs
+# while the trapped Layer 11 lobes of the dune reference model kept theirs
 # 89-99%.
 PROBE_SHARE = 0.10
 PROBE_EMPTY = 0.01
@@ -2902,7 +2902,7 @@ def probe_unvisited_lobes(model: Model, histograms: Dict[str, np.ndarray],
     rules them out or because no chain reached them.
 
     R-hat and the overlap measures compare the sampler with itself, so a lobe
-    no chain visited is invisible to them; on Petchey et al.'s dune model of
+    no chain visited is invisible to them; on the dune reference model of
     Layers 11-4 four chains sat in the late lobe, put P(Start before AD 1360) at
     0.00 against an exact 0.08, and passed. A lobe that is merely unvisited
     cannot be told from one the model rules out by looking at the run -- in a
