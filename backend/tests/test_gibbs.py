@@ -446,12 +446,19 @@ class TestEveryKernelTargetsOneDistribution:
         dates = np.zeros((4, cells))
         total = 0.0
         for o in range(cells):
-            for y in range(o):
+            for y in range(o + 1):
                 n = o - y
                 ends = np.ones(n + 1)
-                ends[0] = ends[-1] = 0.5
+                # A date on a Boundary is tied to it, a half; with both
+                # Boundaries in its cell it is tied to each, a quarter.
+                ends[0] *= 0.5
+                ends[-1] *= 0.5
                 weight = likelihood[:, y:o + 1] * ends
-                prefactor = np.exp(-4 * model.log_span_of_cells[n] + span_row[n])
+                # The Boundaries' own tie, a half, and the span a group meeting
+                # in one cell is charged: a quarter of a cell per date, so the
+                # group is its dates' likelihoods there at the tie's half.
+                span = n * model.dt if n else model.dt / 4
+                prefactor = (0.5 if n == 0 else 1.0) * np.exp(-4 * np.log(span) + span_row[n])
                 axes = np.arange(n + 1)
                 a1, a2, b1, b2 = np.meshgrid(axes, axes, axes, axes, indexing='ij')
                 ordered = np.minimum(a1, a2) >= np.maximum(b1, b2)
@@ -1506,7 +1513,7 @@ class TestChainStarts:
         assert len(set(starts)) == 4
 
     def _dune(self):
-        return TestBoundariesNeverShareACell()._layers()
+        return TestBoundaryTiesCountHalf()._layers()
 
     @staticmethod
     def _lobe_of(lobes, cell):
@@ -1571,17 +1578,19 @@ class TestChainStarts:
                     == model.initial_state(0.9).index[date['id']])
 
 
-class TestBoundariesNeverShareACell:
+class TestBoundaryTiesCountHalf:
     """
-    Two Boundaries are at least one cell apart, as in the exact solver.
+    Two neighbouring Boundaries may share a grid cell, at half weight, as in
+    the exact solver (exact_chain._boundary_pair_term).
 
-    The span correction divides by C(cells - 1, n - 2), the ways n - 2
-    interior Boundaries fit STRICTLY inside a span, so a sampler that lets
-    them coincide has more arrangements at each span than it divides out, the
-    excess largest at the smallest spans. It could only happen where nothing
-    but an empty Phase or a level of nesting separated two Boundaries, and on
-    a real multi-area site model it put a whole site into a late calibration lobe holding
-    under 1% of the posterior, with four chains agreeing at R-hat 1.001.
+    The span correction divides by the ways n - 2 interior Boundaries fit
+    across a span, counted with each tie at a half
+    (exact_chain.log_interior_placements), so the ties add nothing it does
+    not divide out. Counted whole against a count of strictly separated
+    Boundaries, they once put a whole multi-area site model into a late
+    calibration lobe holding under 1% of the posterior, with four chains
+    agreeing at R-hat 1.001; forbidding them fixed that at the price of an
+    error of first order in the grid step.
     """
 
     def _layers(self):
@@ -1600,23 +1609,52 @@ class TestBoundariesNeverShareACell:
             children.append(_element('boundary', f'Top {i}'))
         return measurements, _element('sequence', 'Dune', children)
 
-    def test_two_boundaries_either_side_of_an_empty_phase_cannot_meet(self):
-        measurements, tree = self._layers()
+    def test_a_boundary_between_two_empty_phases_may_meet_either_neighbour(self):
+        # Start, dated, Mid-1, empty, Mid-2, empty, Mid-3, dated, End: Mid-2
+        # bounds only empty phases, so moving it changes nothing but its ties.
+        children, measurements = [_element('boundary', 'Start')], []
+        for i, ages in enumerate([[640, 660], [], [], [600, 620]]):
+            phase = _element('phase', f'Layer {i}')
+            children.append(phase)
+            measurements += [_date(phase['id'], age) for age in ages]
+            children.append(_element('boundary', f'Top {i}'))
+        tree = _element('sequence', 'Site', children)
         model = gibbs.Model(measurements, tree)
+        older, middle, younger = (children[k]['id'] for k in (2, 4, 6))
         state = model.initial_state()
-        # Either side of Layer 1, which is empty.
-        older, younger = tree['children'][2]['id'], tree['children'][4]['id']
-        assert model.allowed(younger, state)[1] == state.index[older] - 1
-        assert model.allowed(older, state)[0] == state.index[younger] + 1
-        touching = state.copy()
-        touching.index[younger] = state.index[older]
-        assert model.log_posterior(touching) == -np.inf
+        # The outer two as far apart as their dated neighbours allow.
+        state.index[older] = min(state.index[d] for d in model.group_dates[0][2])
+        state.index[younger] = max(state.index[d] for d in model.group_dates[3][2])
+        assert state.index[older] - state.index[younger] >= 2
+        state.index[middle] = (state.index[older] + state.index[younger]) // 2
+        assert model.allowed(middle, state) == (state.index[younger], state.index[older])
+        apart = model.log_posterior(state)
+        state.index[middle] = state.index[older]
+        assert model.log_posterior(state) == pytest.approx(apart - np.log(2.0))
+        state.index[middle] = state.index[younger]
+        assert model.log_posterior(state) == pytest.approx(apart - np.log(2.0))
+
+    def test_only_neighbouring_boundaries_are_tied(self):
+        # A Sequence's Start is ordered against an inner Sequence's End as
+        # well as its Start; only the Start is its neighbour.
+        inner = _element('sequence', 'Area', [
+            _element('boundary', 'Area start'), _element('phase', 'Work'),
+            _element('boundary', 'Area end')])
+        tree = _element('sequence', 'Site', [
+            _element('boundary', 'Site start'), inner, _element('boundary', 'Site end')])
+        model = gibbs.Model([_date(inner['children'][1]['id'], 600)], tree)
+        site_start, site_end = tree['children'][0]['id'], tree['children'][2]['id']
+        area_start, area_end = inner['children'][0]['id'], inner['children'][2]['id']
+        boundary_ties = {pair for pair in model.tie_pairs
+                         if set(pair) <= set(model.boundary_ids)}
+        assert boundary_ties == {(area_start, site_start), (area_end, area_start),
+                                 (site_end, area_end)}
 
     def test_it_agrees_with_the_exact_solver_across_empty_phases(self):
         """
-        Exact Start 617.0. With coincident Boundaries allowed the same runs
-        gave 606.3 and 562.4 -- the second a whole lobe out -- and with them
-        kept apart 619.5 and 621.7.
+        Exact Start 617.0. With coincident Boundaries counted whole the same
+        runs gave 606.3 and 562.4 -- the second a whole lobe out -- and with
+        them kept apart 619.5 and 621.7.
         """
         measurements, tree = self._layers()
         chain = ec.layout(tree, measurements)
@@ -1636,14 +1674,15 @@ class TestBoundariesNeverShareACell:
 
 class TestParallelStartsOnCoarseGrids:
     """
-    The start of a model with parallel branches leaves its outer span the
-    cells its interior boundaries need (Model._widen_span_pairs).
+    The start of a model with parallel branches is feasible on a coarse grid.
 
-    The walk keeps one cell per link of the LONGEST chain, so boundaries in
-    different branches share cells, and the span correction's C(cells - 1,
-    n - 2) is zero when the outer pair is narrower than n - 1 cells. On a
-    grid with few cells the start was infeasible: 'could not find a feasible
-    starting state' on generated site models solved on cross_check's grid.
+    The walk keeps one cell per link of the LONGEST chain, so the outer pair
+    can come out narrower than the n - 2 boundaries inside it. When the span
+    correction counted only strictly separated boundaries, C(cells - 1, n - 2)
+    was zero there and the start infeasible -- 'could not find a feasible
+    starting state' on generated site models solved on cross_check's grid --
+    and the start was widened to suit. Counting ties at a half, it is finite
+    at every span (exact_chain.log_interior_placements).
     """
 
     def _site(self, areas=3):
@@ -1676,7 +1715,6 @@ class TestParallelStartsOnCoarseGrids:
         assert len(grid) > interior + 1
         for quantile in (None, 0.2, 0.8):
             state = model.initial_state(quantile)
-            assert state.index[oldest] - state.index[youngest] >= interior + 1
             assert np.isfinite(model.log_posterior(state))
 
     def test_a_grid_with_no_room_for_the_boundaries_still_says_so(self):
@@ -1685,14 +1723,6 @@ class TestParallelStartsOnCoarseGrids:
         model = gibbs.Model(measurements, tree, grid=grid)
         with pytest.raises(ValueError):
             model.initial_state()
-
-    def test_a_start_that_was_wide_enough_is_left_alone(self):
-        measurements, tree = self._site()
-        model = gibbs.Model(measurements, tree)
-        state = model.initial_state()
-        index = {p: state.index[p] for p in model.params}
-        model._widen_span_pairs(index)
-        assert index == {p: state.index[p] for p in model.params}
 
 
 class TestEnclosureMoves:
@@ -1769,7 +1799,7 @@ class TestLobeProbe:
     def test_lobes_the_model_rules_out_are_left(self):
         """A run at the exact answer leaves only lobes the model rules out
         empty, and the probe reports none of them."""
-        measurements, tree = TestBoundariesNeverShareACell()._layers()
+        measurements, tree = TestBoundaryTiesCountHalf()._layers()
         exact = ec.solve(measurements, tree, ec.layout(tree, measurements), num_samples=50)
         model = gibbs.Model(measurements, tree)
         histograms = {}

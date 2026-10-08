@@ -148,7 +148,7 @@ def parallel(index):
 
 def dune():
     import test_gibbs
-    return test_gibbs.TestBoundariesNeverShareACell()._layers()
+    return test_gibbs.TestBoundaryTiesCountHalf()._layers()
 
 
 def fixture(name):

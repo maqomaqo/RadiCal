@@ -1258,15 +1258,18 @@ them) and reported as a Hiatus duration.
 **Uniform span prior.** Placing `n` ordered Boundaries across a span leaves the `n-2` interior
 ones free, and the induced prior favours long sequences purely for having more room to arrange them.
 Dividing that out is the correction of Nicholls and Jones (2001), OxCal's default. The app divides
-by the exact discrete count
+by the exact discrete count of the ways `k = n - 2` interior Boundaries can be placed across a span
+of `j` grid cells, each tie between neighbours (two Boundaries in one cell) counting a half, as the
+solvers weigh it:
 
 ```
-C(span in grid cells - 1, n - 2)
+W(j, k) = sum over z of  C(k + 1, z) 2^-z C(j - 1, k - z)       (z = how many neighbours tie)
+W(0, k) = 2^-k
 ```
 
 rather than the continuum `span^(n-2)`. The two agree only as the span grows large, and the prior
-concentrates mass at small spans where they differ most; with likelihoods switched off, the binomial
-reproduces the answer to 0.00% total-variation distance where the power form was in error by
+concentrates mass at small spans where they differ most; with likelihoods switched off, an exact
+count reproduces the answer to 0.00% total-variation distance where the power form was in error by
 0.4–1.6%.
 
 The same option carries the limits factor `1/g` of Bronk Ramsey (2008, appendix A.31; 2009a
@@ -1318,10 +1321,16 @@ between calibration lobes. Half the wide proposals jump by one of the distances 
 own calibration peaks (both directions, blurred by a few years), rather than from a fixed 120-year
 kernel. The proposal stays symmetric, so the acceptance ratio is the posterior ratio alone.
 
-Two Boundaries never share a grid cell; a date may sit on a Boundary at half weight. The sampler
-enforces this exactly as the exact solver does. The span correction divides by the number of ways
-interior Boundaries fit *strictly* inside a span, so letting two coincide adds arrangements the
-correction never divides out, especially at the smallest spans.
+**Ties on the grid.** A date may sit on a Boundary, and two neighbouring Boundaries may share a grid
+cell, each at half weight: the trapezoid rule's end, applied the same way by both solvers and the
+cross-check. Where a group's two Boundaries meet, its span factor and interval integrals are replaced
+by their limit, the dates' likelihoods in that cell. The span correction counts tied arrangements at
+the same half (`W` above), so ties add nothing it does not divide out. Counting ties whole against a
+count of strictly separated Boundaries packed sequences together; forbidding ties fixed that but left
+an error of first order in the grid step that grew with the number of Boundaries. On a test sequence
+of ten Boundaries the largest error in the probability of a Boundary being older than a given year,
+at a 1.25-year step, fell from 0.036 to 0.007 with half-weight ties, and it now shrinks with the
+square of the step.
 
 **Convergence** uses the same diagnostic as OxCal: the overlap integral between the first-half and
 second-half distributions, per parameter, targeting 0.95. A run is budgeted 20,000 sweeps per chain

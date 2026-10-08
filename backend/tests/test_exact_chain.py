@@ -170,7 +170,9 @@ def _brute_force(curve, grid, dates):
         p(t_j) ∝ L_j(t_j) * sum over {tb <= t_j <= ta} of
                  h(t_j) (ta-tb)^(-K) * prod over i != j of F_i(tb, ta)
 
-    with h = 1/2 when t_j sits on tb or ta and 1 otherwise, so that agreement
+    with h = 1/2 when t_j sits on tb or ta and 1 otherwise -- and where tb and
+    ta share a cell, a tie at half weight with every date in it, the term
+    1/2 prod over i != j of L_i(tb) -- so that agreement
     with the vectorised solver is evidence about the code rather than a
     restatement of it. The half is what makes these the marginals of the joint
     the trapezoidal F integrates: summed over t_j, L_j h gives F_j back.
@@ -217,6 +219,10 @@ def _brute_force(curve, grid, dates):
 
     out = np.zeros((K, M))
     for b in range(M):
+        # The two boundaries in one cell: a tie, at half weight, and every date
+        # there with them -- the limit of span^(-K) prod F, which is prod L.
+        for j in range(K):
+            out[j, b] += 0.5 * limits(b, b) * np.prod([L[i, b] for i in range(K) if i != j])
         for a in range(b + 1, M):
             base = (grid[a] - grid[b]) ** (-K) * limits(b, a)
             fs = [F(j, b, a) for j in range(K)]
@@ -716,26 +722,41 @@ class TestUniformSpanPrior:
         span = grid[None, :] - grid[:, None]
         valid = span > 0
 
+        def own(i):
+            # A date's factor: its interval integral, and where the two
+            # boundaries share a cell, its likelihood there -- the limit of
+            # F / span as the span closes.
+            f = ec._log_interval_integral(cum[i], lik[i], dt)
+            with np.errstate(divide='ignore'):
+                np.fill_diagonal(f, np.log(lik[i]))
+            return f
+
         def log_transfer(ids):
             with np.errstate(divide='ignore', invalid='ignore'):
                 t = np.where(valid, -len(ids) * np.log(np.where(valid, span, 1.0)), -np.inf)
+            # Two boundaries in one cell: a tie, at half weight.
+            np.fill_diagonal(t, np.log(0.5))
             for i in ids:
-                t = t + ec._log_interval_integral(cum[i], lik[i], dt)
+                t = t + own(i)
             return t
 
         logT = [log_transfer(g) for g in chain.groups]
         T = [np.where(np.isfinite(np.exp(ec._rescaled(t))), np.exp(ec._rescaled(t)), 0.0)
              for t in logT]
         # The correction the solver applies, written out independently: one over
-        # the COUNT of places the single interior boundary can sit strictly
-        # inside the outer pair, which for k = 1 is (span in cells) - 1. Not
-        # 1/(span in years) -- see exact_chain._span_prior_correction for why the
-        # continuum power is wrong on a grid, and note that a brute force
-        # carrying the same mistake as the solver is exactly how the earlier
-        # interval-quadrature bug survived this suite.
+        # the COUNT of places the single interior boundary can sit across the
+        # outer pair, a place on either end counting a half as a tie does: for
+        # a span of j cells, j - 1 inside and two halves, j. With all three in
+        # one cell the count is the two ties' quarter, divided out but for the
+        # outer pair's own half, so 2. Not 1/(span in years) -- see
+        # exact_chain._span_prior_correction for why the continuum power is
+        # wrong on a grid, and note that a brute force carrying the same
+        # mistake as the solver is exactly how the earlier interval-quadrature
+        # bug survived this suite.
         cells = np.arange(M)[None, :] - np.arange(M)[:, None]   # [b2, b0]
         with np.errstate(divide='ignore', invalid='ignore'):
-            corr = np.where(cells > 1, 1.0 / np.where(cells > 1, cells - 1, 1.0), 0.0)
+            corr = np.where(cells > 0, 1.0 / np.where(cells > 0, cells, 1.0),
+                            np.where(cells == 0, 2.0, 0.0))
 
         # ...times the limits factor, A.31's second term, which is the only finite
         # one when nothing constrains the outer sides. Written out here rather than
@@ -752,8 +773,7 @@ class TestUniformSpanPrior:
         for gi, ids in enumerate(chain.groups):
             for d in ids:
                 with np.errstate(invalid='ignore'):
-                    lg = np.where(np.isfinite(logT[gi]),
-                                  logT[gi] - ec._log_interval_integral(cum[d], lik[d], dt), -np.inf)
+                    lg = np.where(np.isfinite(logT[gi]), logT[gi] - own(d), -np.inf)
                 G = np.exp(ec._rescaled(lg))
                 G = np.where(np.isfinite(G), G, 0.0)
                 if gi == 0:
@@ -763,9 +783,10 @@ class TestUniformSpanPrior:
                 q = np.cumsum(pair, axis=0)
                 q = np.cumsum(q[:, ::-1], axis=1)[:, ::-1]
                 # A date ON one of its boundaries counts half, as in the
-                # trapezoidal interval integral the transfers are built from.
+                # trapezoidal interval integral the transfers are built from;
+                # ON both, the two boundaries tied, it is the whole weight.
                 on_a_boundary = 0.5 * (pair.sum(axis=1) + pair.sum(axis=0))
-                expected = lik[d] * (np.diagonal(q) - on_a_boundary)
+                expected = lik[d] * (np.diagonal(q) - on_a_boundary + np.diagonal(pair))
                 expected = expected / expected.sum()
 
                 pairs = np.array(solved['measurements'][d]['probability_distribution'])
@@ -774,6 +795,68 @@ class TestUniformSpanPrior:
                 mine = expected[where] / expected[where].sum()
                 overlap = float(np.minimum(got, mine).sum())
                 assert overlap > 0.999, f'{d} overlap {overlap}'
+
+
+class TestBoundaryTies:
+    """
+    Neighbouring Boundaries may share a grid cell at half weight
+    (_boundary_pair_term), and the span correction counts arrangements the
+    same way (log_interior_placements).
+    """
+
+    @pytest.mark.parametrize('k', [1, 2, 3, 4])
+    def test_the_count_is_every_arrangement_with_each_tie_a_half(self, k):
+        import itertools
+        for j in range(0, 7):
+            total = 0.0
+            for inside in itertools.combinations_with_replacement(range(j + 1), k):
+                places = (0,) + inside + (j,)
+                ties = sum(a == b for a, b in zip(places, places[1:]))
+                total += 0.5 ** ties
+            if j == 0:
+                total *= 2.0          # the outer pair's own half is not divided out
+            assert np.exp(ec.log_interior_placements(np.array([j]), k)[0]) == \
+                pytest.approx(total)
+
+    def test_a_long_sequence_converges_with_the_square_of_the_step(self):
+        """
+        Nine phases, four of them empty, ten Boundaries: the shape where
+        keeping Boundaries a cell apart cost the most. The worst gap in the
+        probability of a Boundary being older than a given year, against a
+        solve at a quarter of the step, falls fourfold as the step halves;
+        kept apart it fell twofold, from 0.036 at 1.25 years.
+        """
+        layers = [[615, 630, 705], [], [690], [], [625, 645], [],
+                  [550, 565], [595, 590, 620], [545]]
+        children, specs = [_boundary('t_b0', 'Start')], []
+        for i, ages in enumerate(layers):
+            children.append(_phase(f't_p{i}', f'Layer {i}'))
+            specs += [(f't_d{i}_{j}', age, 18, f't_p{i}') for j, age in enumerate(ages)]
+            children.append(_boundary(f't_b{i + 1}', f'Top {i}'))
+        tree = _sequence('t', children)
+        dates = _dates(*specs)
+        chain = ec.layout(tree, dates)
+        bounds = inherited_bounds(tree)
+
+        def cdfs(step):
+            grid = np.arange(216.0, 846.0 + step / 2, step)
+            _r, densities = ec._solve_on_grid(
+                grid, dates, tree, chain, bounds, num_samples=50, seed=1,
+                uniform_span_prior=True, estimate_durations=False, dispersal=None,
+                interval_draws=50, resolution=5.0)
+            years = np.arange(150.0, 1000.0, 0.05)
+            out = []
+            for mass in densities[-len(chain.boundary_ids):]:
+                # Each point's mass spread over its own cell.
+                edges = np.concatenate([[grid[0] - step / 2], grid + step / 2])
+                cumulative = np.concatenate([[0.0], np.cumsum(mass / mass.sum())])
+                out.append(np.interp(years, edges, cumulative))
+            return np.array(out)
+
+        fine = cdfs(0.3125)
+        gaps = [float(np.abs(cdfs(step) - fine).max()) for step in (2.5, 1.25)]
+        assert gaps[1] < 0.025, gaps
+        assert gaps[0] / gaps[1] > 3.0, gaps
 
 
 class TestEvidence:
@@ -821,6 +904,9 @@ class TestEvidence:
             log_t = np.where(span > 0, -len(dates) * np.log(np.where(span > 0, span, 1.0)), -np.inf)
         for d in dates:
             log_t = log_t + ec._log_interval_integral(cum[d['id']], lik[d['id']], dt)
+        # Both boundaries in one cell: the tie's half, and the dates there.
+        with np.errstate(divide='ignore'):
+            np.fill_diagonal(log_t, np.log(0.5) + sum(np.log(lik[d['id']]) for d in dates))
         log_t = log_t + self._log_limits(grid, lik)
         finite = np.isfinite(log_t)
         peak = log_t[finite].max()
@@ -846,10 +932,16 @@ class TestEvidence:
                 t = np.where(span > 0, -len(ids) * np.log(np.where(span > 0, span, 1.0)), -np.inf)
             for i in ids:
                 t = t + ec._log_interval_integral(cum[i], lik[i], dt)
+            with np.errstate(divide='ignore'):
+                np.fill_diagonal(t, np.log(0.5) + sum(np.log(lik[i]) for i in ids))
             log_t.append(t)
         cells = np.arange(M)[None, :] - np.arange(M)[:, None]          # [b2, b0]
+        # One interior boundary across j cells, a place on either end a tie at
+        # a half: j places. All three in one cell: 2 (see
+        # TestBoundaryTies for the count in general).
         with np.errstate(divide='ignore', invalid='ignore'):
-            log_corr = np.where(cells > 1, -np.log(np.where(cells > 1, cells - 1, 1.0)), -np.inf)
+            log_corr = np.where(cells > 0, -np.log(np.where(cells > 0, cells, 1.0)),
+                                np.where(cells == 0, np.log(2.0), -np.inf))
         log_corr = log_corr + self._log_limits(grid, lik)
         # The cube, axes (b2, b1, b0), in the log.
         cube = log_t[0][None, :, :] + log_t[1][:, :, None] + log_corr[:, None, :]
@@ -882,12 +974,16 @@ class TestTheCorrectionIsExact:
     (b_first, b_last) UNIFORM, so the oldest boundary's marginal simply counts its
     admissible partners:
 
-        p(i) proportional to (i - k),   k = n - 2
+        p(i) proportional to (i + 1/2)
 
-    -- i - k and not i, because the younger boundary has to leave room for the k
-    interior ones. That distinction is the whole point: a continuum reference
-    would predict p(i) ∝ i and be wrong by a mean of k*step/3, which is what the
-    old (b_first - b_last)^-(n-2) form was quietly delivering.
+    -- every cell below it, and its own at the half a tie between the two
+    carries, whatever the number of boundaries between them: the k interior
+    ones may share cells with them and with each other, at the same half, and
+    the correction counts them so (log_interior_placements). With boundaries
+    kept a cell apart, as they once were, it was i - k, the younger boundary
+    leaving room for the k interior ones. A continuum reference would predict
+    p(i) ∝ i, a mean step/6 away; the old (b_first - b_last)^-(n-2) form was
+    quietly delivering k*step/3.
 
     This is the test that would have caught that form immediately, and it is
     cheap, so it is here rather than in a scratch script.
@@ -952,8 +1048,7 @@ class TestTheCorrectionIsExact:
     ])
     def test_the_induced_prior_is_the_closed_form(self, n, dates_per_group):
         grid, got = self._oldest_marginal(n, dates_per_group)
-        k = n - 2
-        want = np.clip(np.arange(len(grid)) - k, 0.0, None)
+        want = np.arange(len(grid)) + 0.5
         want = want / want.sum()
         # Total variation, and the mean in years -- the second because a fraction
         # of a percent of the first says nothing about whether it can move an
@@ -974,21 +1069,19 @@ class TestTheCorrectionIsExact:
     def test_a_continuum_reference_would_have_missed_it(self):
         """
         Guard on the test above. The closed form differs from its continuum limit
-        by a mean of k*step/3, so if someone 'simplifies' the reference to p ∝ i
-        the check silently weakens to a tolerance of a couple of years.
+        by a mean of step/6, so if someone 'simplifies' the reference to p ∝ i
+        the check silently weakens to a tolerance of a fraction of a year.
         """
         M = 301
         grid, saved = self._flat(M)
         self._restore(saved)
         step = grid[1] - grid[0]
-        for n in (3, 4, 5):
-            k = n - 2
-            discrete = np.clip(np.arange(M) - k, 0.0, None)
-            discrete /= discrete.sum()
-            continuum = np.arange(M, dtype=float)
-            continuum /= continuum.sum()
-            gap = float((grid * discrete).sum() - (grid * continuum).sum())
-            assert gap == pytest.approx(k * step / 3.0, rel=0.05), (n, gap)
+        discrete = np.arange(M) + 0.5
+        discrete /= discrete.sum()
+        continuum = np.arange(M, dtype=float)
+        continuum /= continuum.sum()
+        gap = float((grid * discrete).sum() - (grid * continuum).sum())
+        assert gap == pytest.approx(-step / 6.0, rel=0.05), gap
 
 
 class TestTheLimitsFactor:
@@ -1068,7 +1161,8 @@ class TestTheLimitsFactor:
         Where the factor does apply, against a reference built from the model
         statement rather than from this solver: flat likelihoods make each group's
         date volume exactly span^K, cancelling its span factor, so the prior over
-        the boundary pair is 1/g and nothing else.
+        the boundary pair is 1/g and nothing else -- the pair in one cell at
+        the half a tie carries.
         """
         tpq, taq = 3400.0, 3000.0
         tree, dates = self._model(tpq=tpq, taq=taq)
@@ -1090,8 +1184,10 @@ class TestTheLimitsFactor:
             weight = np.where(np.isfinite(factor), np.exp(factor), 0.0)
             span = grid[None, :] - grid[:, None]
             inside = (grid >= taq) & (grid <= tpq)
-            weight = np.where((span > 0) & inside[None, :] & inside[:, None],
-                              weight, 0.0)
+            # The pair in one cell is a tie, at half weight.
+            weight = np.where(inside[None, :] & inside[:, None],
+                              weight * np.where(span > 0, 1.0, np.where(span == 0, 0.5, 0.0)),
+                              0.0)
             want = weight.sum(axis=0)
             want = want / want.sum()
             assert 0.5 * np.abs(got - want).sum() < 1e-6
@@ -1758,7 +1854,6 @@ class TestJointDraws:
 
         solved = ec.solve(dates, tree, chain, num_samples=200)
 
-        # Every draw is a possible state: each boundary strictly older than
-        # the next.
+        # Every draw is a possible state: no boundary younger than the next.
         ages = np.array([solved['joint_boundaries'][b] for b in chain.boundary_ids])
-        assert np.all(np.diff(ages, axis=0) < 0)
+        assert np.all(np.diff(ages, axis=0) <= 0)

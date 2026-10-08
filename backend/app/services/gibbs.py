@@ -40,10 +40,12 @@ and the Metropolis shift moves target different distributions and a run's
 answer depends on how much of each it used. TestEveryKernelTargetsOneDistribution
 holds them to each other.
 
-The same counting argument keeps two BOUNDARIES at least a cell apart (see
-Model.allowed): the span correction divides by the placements strictly inside
-a span, so boundaries that may meet have arrangements it never divides out.
-TestBoundariesNeverShareACell pins that one.
+Two neighbouring BOUNDARIES may share a cell at the same half weight (see
+Model.allowed and exact_chain._boundary_pair_term), and the span correction
+counts their arrangements the same way (exact_chain.log_interior_placements),
+so a tie adds nothing it does not divide out. Kept a cell apart, as they once
+were, the boundaries carried an error of first order in the grid step that
+grew with their number. TestBoundaryTiesCountHalf pins it.
 
 The maths
 ---------
@@ -827,6 +829,13 @@ class Model:
         # call and a fifth of the run.
         with np.errstate(divide='ignore'):
             self.log_span_of_cells = np.log(np.arange(self.M) * self.dt)
+        # Both boundaries of a group in one cell, every date there with them:
+        # the continuum's span^(-K) prod F tends to prod L, times the tie's
+        # half, and that is what the cell must weigh (exact_chain's
+        # _boundary_pair_term and _log_date_factor). Here each date there is
+        # also tied to both boundaries, a quarter each, so the span that
+        # leaves the group at its limit is a quarter of a cell.
+        self.log_span_of_cells[0] = np.log(self.dt / 4.0)
 
         # From the boundary's side: which groups and which span priors it is
         # an end of, and which end. draw_boundary then touches only its own
@@ -849,18 +858,14 @@ class Model:
                  for p in self.params for o in self.below[p]]
         self.edge_younger = np.array([a for a, _b in pairs], dtype=np.intp)
         self.edge_older = np.array([b for _a, b in pairs], dtype=np.intp)
-        # How far apart each edge's ends must be, in cells: one between two
-        # boundaries, none otherwise. See allowed() for why.
         boundaries = set(self.boundary_ids)
-        self.edge_gap = np.array(
-            [int(self.params[a] in boundaries and self.params[b] in boundaries)
-             for a, b in pairs], dtype=np.int64)
         self.window_lo = np.array([self.window[p][0] for p in self.params])
         self.window_hi = np.array([self.window[p][1] for p in self.params])
 
         # The ties that carry a half weight (see endpoint_weight): each
         # ordering edge ONCE, however many times the plan listed it, with a
-        # date at one end at least and no deposition level at either.
+        # date at one end at least and no deposition level at either -- and
+        # each pair of NEIGHBOURING boundaries (_neighbouring_boundaries).
         self.tied_with: Dict[str, List[str]] = {p: [] for p in self.params}
         tie_pairs = set()
         for younger, older in ((self.params[a], self.params[b]) for a, b in pairs):
@@ -869,6 +874,9 @@ class Model:
                     or (younger, older) in tie_pairs):
                 continue
             tie_pairs.add((younger, older))
+        tie_pairs |= self._neighbouring_boundaries()
+        self.tie_pairs = tie_pairs
+        for younger, older in tie_pairs:
             self.tied_with[younger].append(older)
             self.tied_with[older].append(younger)
         self.tie_younger = np.array([self.param_row[y] for y, _o in tie_pairs],
@@ -895,6 +903,30 @@ class Model:
                 row = row + limits
             rows.append(row)
         return rows
+
+    def _neighbouring_boundaries(self) -> set:
+        """
+        (younger, older) for every pair of boundaries with no boundary between
+        them in the ordering: the pairs whose meeting in one cell is a tie,
+        counted a half (allowed, endpoint_weight).
+
+        Neighbours only, not every ordered pair. On a chain they are the pairs
+        either side of each group, dated or empty, which is what exact_chain's
+        transfer matrices tie, and what log_interior_placements counts. A
+        nesting level lists more -- a Sequence's Start ordered against an
+        inner Sequence's End as well as its Start -- and counting those again
+        would weigh three boundaries in one cell differently from the exact
+        solver for no reason the continuum gives.
+        """
+        reachable = self._younger_reachable()
+        boundaries = set(self.boundary_ids)
+        below = {b: reachable[b] & boundaries for b in self.boundary_ids}
+        pairs = set()
+        for older in self.boundary_ids:
+            for younger in below[older]:
+                if not any(younger in below[between] for between in below[older]):
+                    pairs.add((younger, older))
+        return pairs
 
     def _younger_reachable(self) -> Dict[str, set]:
         """
@@ -1051,26 +1083,26 @@ class Model:
         """
         The index range `param` may currently occupy, constraints included.
 
-        Two BOUNDARIES are kept at least one cell apart; anything else may
-        share a cell with what it is ordered against. The span prior counts
-        the ways n - 2 interior boundaries fit inside a span of j cells as
-        C(j - 1, n - 2) -- strictly inside and strictly ordered, which is also
-        what exact_chain's transfer matrices integrate (span > 0 for every
-        group, an empty one included). Letting boundaries coincide gives a
-        span more arrangements than it is divided by, and as with the endpoint
-        weighting the excess is largest at the SMALLEST spans, so the chain
-        packs everything together. Wherever an empty phase or a nesting level
-        separated two boundaries -- a Sequence of layers with sterile sand
-        between them, or Sequences inside a Phase -- they could meet. On a
-        real dune section of that kind it took the start of the sequence from
-        615 to 563 cal BP, P(< 585) from 0.09 to 1.0, and every chain agreed.
+        Anything may share a cell with what it is ordered against, a boundary
+        with a neighbouring boundary included, at the half weight a tie
+        carries (endpoint_weight, _neighbouring_boundaries). What that weight
+        must agree with is the span correction's count of arrangements: it
+        divides by the ways n - 2 interior boundaries fit across a span, and
+        exact_chain.log_interior_placements counts each tie there at a half
+        too. Ties counted WHOLE against a count of strictly separated
+        boundaries -- as this once did wherever an empty phase or a nesting
+        level separated two boundaries -- give a span more arrangements than
+        it is divided by, most at the smallest spans, and pack the chain
+        together: on a real dune section it took the start of the sequence
+        from 615 to 563 cal BP, and every chain agreed. Forbidding ties
+        instead fixed that at the price of an error of first order in the
+        grid step.
         """
         lo, hi = self.window[param]
-        gap = 1 if param in self.boundary_set else 0
         for older in self.below[param]:
-            hi = min(hi, state.index[older] - (gap if older in self.boundary_set else 0))
+            hi = min(hi, state.index[older])
         for younger in self.above[param]:
-            lo = max(lo, state.index[younger] + (gap if younger in self.boundary_set else 0))
+            lo = max(lo, state.index[younger])
         return lo, hi
 
     def endpoint_weight(self, date_id: str, state: _State) -> float:
@@ -1218,22 +1250,22 @@ class Model:
             older_id, younger_id, dates = self.group_dates[gi]
             K = len(dates)
             # The span in cells is an integer in [0, M), so its log is a
-            # gather; a non-positive span reads -inf from the table's zero
-            # cell, or is masked where the candidate has crossed over.
+            # gather; a zero span reads the table's tied cell, and a negative
+            # one is masked where the candidate has crossed over.
             if is_older:
                 cells = candidate_indices - state.index[younger_id]
             else:
                 cells = state.index[older_id] - candidate_indices
             log_dens += np.where(
-                cells > 0, -K * self.log_span_of_cells.take(cells, mode='clip'),
+                cells >= 0, -K * self.log_span_of_cells.take(cells, mode='clip'),
                 -np.inf)
 
-        # A date sitting exactly ON the candidate is tied to it, so it counts a
-        # half (endpoint_weight). Only coincidences with THIS boundary vary
-        # with the candidate; the other boundary's cancel in the normalisation
-        # below.
-        for date_id in self.tied_with[boundary_id]:
-            index = state.index[date_id]
+        # A date or a neighbouring boundary sitting exactly ON the candidate is
+        # tied to it, so it counts a half (endpoint_weight). Only coincidences
+        # with THIS boundary vary with the candidate; the others' cancel in the
+        # normalisation below.
+        for other in self.tied_with[boundary_id]:
+            index = state.index[other]
             if lo <= index <= hi:
                 log_dens[index - lo] -= np.log(2.0)
 
@@ -1275,14 +1307,14 @@ class Model:
         if ((index < self.window_lo) | (index > self.window_hi)).any():
             return -np.inf
         if len(self.edge_younger) and (
-                index[self.edge_younger] + self.edge_gap > index[self.edge_older]).any():
+                index[self.edge_younger] > index[self.edge_older]).any():
             return -np.inf
 
         # The dates' likelihood at the current power (1 for the posterior;
         # see beta), and everything else -- the prior -- untouched.
         total = self.beta * self.log_likelihood_sum(state)
         # log of endpoint_weight, summed: -log 2 per tied ordering edge, a date
-        # on a boundary or on another date.
+        # on a boundary or on another date, or two neighbouring boundaries.
         halves = int((index[self.tie_younger] == index[self.tie_older]).sum())
         total -= halves * np.log(2.0)
 
@@ -1302,7 +1334,7 @@ class Model:
             if K == 0:
                 continue
             cells = state.index[older_id] - state.index[younger_id]
-            if cells <= 0:
+            if cells < 0:
                 return -np.inf
             total -= K * self.log_span_of_cells[cells]
 
@@ -1332,8 +1364,8 @@ class Model:
         then collapses to a single allowed index and the chain cannot move.
 
         Topological order fixes it by construction: each step leaves at least
-        one grid cell of separation, so every span is positive and the starting
-        log posterior finite.
+        one grid cell of separation, so every constraint holds and the
+        starting log posterior is finite.
 
         WHERE a date prefers to be is its likelihood mode by default, and with
         `quantile` the point that fraction of the way through its likelihood
@@ -1478,8 +1510,6 @@ class Model:
             index[param] = (start if start is not None
                             else int(np.clip(preferred[param], lo, hi)))
 
-        self._widen_span_pairs(index)
-
         # Mid-prior: with u uniform on its range there is no better guess, and
         # its conditional is drawn exactly on the first sweep.
         scale = {model: len(self.scale_grid[model]) // 2
@@ -1527,41 +1557,6 @@ class Model:
                             return cell
                     return a + int(np.argmax(inside))
         return None
-
-    def _widen_span_pairs(self, index: Dict[str, int]) -> None:
-        """
-        Leave every span-prior pair the cells its interior boundaries need.
-
-        The walk in initial_state keeps one cell per link of the LONGEST chain,
-        so boundaries in parallel branches share cells and an outer pair can
-        come out narrower than its n - 2 interior boundaries (n - 1 cells).
-        The span correction counts C(cells - 1, n - 2) placements, which is
-        zero there, so the start would have a log posterior of -inf. It shows
-        on a coarse grid, where a Site's whole span is few cells.
-
-        Widened by moving the pair itself outward, the older end older and the
-        younger end younger, as far as its own window and whatever is older or
-        younger than it allow. Everything between stays where the walk put it,
-        and a pair already wide enough is not touched, so a chain starts as it
-        always did. If the grid has no room the start stays infeasible and
-        initial_state says so.
-        """
-        for oldest_id, youngest_id, exponent in self.span_priors:
-            deficit = exponent + 1 - (index[oldest_id] - index[youngest_id])
-            if deficit <= 0:
-                continue
-            room_older = min(
-                [self.window[oldest_id][1]]
-                + [index[o] - 1 for o in self.below[oldest_id]]) - index[oldest_id]
-            room_younger = index[youngest_id] - max(
-                [self.window[youngest_id][0]]
-                + [index[y] + 1 for y in self.above[youngest_id]])
-            # Half each way, then whatever one end could not give from the other.
-            older = min(max(room_older, 0), (deficit + 1) // 2)
-            younger = min(max(room_younger, 0), deficit - older)
-            older = min(max(room_older, 0), deficit - younger)
-            index[oldest_id] += older
-            index[youngest_id] -= younger
 
     def move_sets(self) -> List[List[str]]:
         """

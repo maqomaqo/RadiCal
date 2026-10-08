@@ -151,6 +151,9 @@ REPORTING_STEP_YEARS = 5.0
 # this much padding is kept either side of what remains -- see _plottable.
 DISPLAY_THRESHOLD = 1e-4
 PLOT_MARGIN_YEARS = 50.0
+# The weight of two neighbouring Boundaries in one grid cell: a half, the
+# trapezoid's end, as for a date on a Boundary. See _boundary_pair_term.
+BOUNDARY_TIE_WEIGHT = 0.5
 
 
 class Chain:
@@ -892,15 +895,85 @@ def _log_interval_integral(cumulative: np.ndarray, density: np.ndarray,
         return np.where(F > 0, np.log(np.where(F > 0, F, 1.0)), -np.inf)
 
 
+def _log_date_factor(cumulative: np.ndarray, density: np.ndarray,
+                     step: float) -> np.ndarray:
+    """
+    One date's factor in its group's transfer matrix, in the log, indexed
+    [younger, older]: its interval integral F where the boundaries are apart,
+    and its likelihood where they share a cell.
+
+    The second is the continuum's limit. A group of K dates enters as
+    span^(-K) prod F_j, and F_j / span tends to L_j(b) as the span closes, so
+    two boundaries meeting at b leave the dates' likelihoods at b -- times the
+    tie's own weight, which _boundary_pair_term carries. Kept as one matrix
+    per date so a date's own factor can be divided back out of the transfer
+    (the date marginals in _solve_on_grid) on and off the diagonal alike.
+    """
+    log_f = _log_interval_integral(cumulative, density, step)
+    with np.errstate(divide='ignore'):
+        np.fill_diagonal(log_f, np.log(density))
+    return log_f
+
+
+def _boundary_pair_term(grid: np.ndarray, num_dates: int) -> np.ndarray:
+    """
+    A group's span factor, in the log, indexed [younger, older]: -K log(span)
+    where the older boundary is older, log BOUNDARY_TIE_WEIGHT where the two
+    share a cell, -inf where they cross.
+
+    Two boundaries may share a cell at half weight. In the continuum their
+    meeting is a set of measure zero, and on a grid the sum over ordered pairs
+    is the integral over a triangle, whose diagonal the trapezoid rule weighs
+    by a half -- the same rule as a date on a boundary (_interval_integral).
+    Keeping them a cell apart instead drops that edge altogether, an error of
+    first order in the step that grows with the number of boundaries: on a
+    test sequence of ten, the modelled Boundaries moved 0.035 in the
+    probability of being older than a given year between a 1.25-year step and
+    the converged answer, 0.0065 with the half. Counting the tie whole is as
+    wrong the other way. The span correction counts arrangements the same way
+    (log_interior_placements), so ties add nothing it does not divide out --
+    the reason they were once forbidden.
+
+    The span factor at a shared cell is the tie weight alone: the dates'
+    likelihoods there stand in for span^(-K) prod F (_log_date_factor).
+    """
+    span = grid[None, :] - grid[:, None]               # [younger, older]
+    apart = span > 0
+    with np.errstate(divide='ignore', invalid='ignore'):
+        term = np.where(apart, -num_dates * np.log(np.where(apart, span, 1.0)), -np.inf)
+    np.fill_diagonal(term, np.log(BOUNDARY_TIE_WEIGHT))
+    return term
+
+
 def log_interior_placements(span_cells: np.ndarray, num_interior: int) -> np.ndarray:
     """
-    log of the number of ways `num_interior` ordered boundaries fit strictly
-    inside a span of `span_cells` grid cells, i.e. log C(span_cells - 1,
-    num_interior). -inf where the span is too narrow to hold them at all.
+    log of the number of ways `num_interior` ordered boundaries fit inside a
+    span of `span_cells` grid cells, each TIE between neighbours -- two
+    boundaries in one cell, an interior one on an end included -- counting a
+    half (BOUNDARY_TIE_WEIGHT). -inf for a negative span.
 
     The exact discrete version of the volume the UniformSpanPrior correction
     divides out, and a COUNT rather than a power -- see _span_prior_correction
-    for why a power is wrong on a grid.
+    for why a power is wrong on a grid. Sorting the arrangements by how many of
+    the k + 1 gaps between neighbours are empty, z of them:
+
+        W(j, k) = sum over z of  C(k + 1, z) 2^-z C(j - 1, k - z)     j >= 1
+        W(0, k) = 2^-k
+
+    W(0, k) is every boundary in one cell, k + 1 ties, counted at twice their
+    weight: the outer pair's own tie is the end of the trapezoid over the span,
+    and dividing by it would undo that half. Brute-forced in
+    tests/test_exact_chain.py.
+
+    Counted with half-weight ties because that is how the solvers place
+    boundaries (see _boundary_pair_term): the count has to be of the same
+    arrangements the posterior sums over, or the correction leaves the excess
+    in. Strictly separated boundaries -- C(j - 1, k) -- converge on the
+    continuum's j^k / k! only to first order in the step, and that error
+    reached the answers: on a test sequence of ten Boundaries the modelled
+    Boundaries moved 0.035 in the probability of being older than a given year
+    between a 1.25-year step and the converged answer. Half-weight ties make
+    it second order (0.0065 there).
 
     Shared with services/gibbs.py so the two solvers cannot drift apart. Defined
     only up to a constant factor, like the correction itself: the
@@ -908,10 +981,22 @@ def log_interior_placements(span_cells: np.ndarray, num_interior: int) -> np.nda
     normalisation.
     """
     j = np.asarray(span_cells, dtype=float)
-    k = float(num_interior)
+    k = int(num_interior)
     out = np.full(np.shape(j), -np.inf)
-    room = j >= k + 1.0
-    out[room] = gammaln(j[room]) - gammaln(k + 1.0) - gammaln(j[room] - k)
+    out[j == 0] = -k * np.log(2.0)
+    some = j >= 1
+    if some.any():
+        terms = []
+        for z in range(k + 1):
+            m = k - z                                  # gaps left to fill
+            term = np.full(int(some.sum()), -np.inf)
+            fits = j[some] - 1 >= m
+            js = j[some][fits]
+            term[fits] = (gammaln(k + 2.0) - gammaln(z + 1.0) - gammaln(k + 2.0 - z)
+                          + z * np.log(BOUNDARY_TIE_WEIGHT)
+                          + gammaln(js) - gammaln(m + 1.0) - gammaln(js - m))
+            terms.append(term)
+        out[some] = np.logaddexp.reduce(np.stack(terms), axis=0)
     return out
 
 
@@ -1068,7 +1153,7 @@ def _span_prior_correction(grid: np.ndarray, num_boundaries: int, enabled: bool,
     indexed [youngest boundary, oldest boundary], or None when it would do
     nothing and the cheap chain can be used.
 
-        1 / C(span in cells - 1, n - 2)
+        1 / W(span in cells, n - 2)
 
     Placing n boundaries in order across a span leaves the n-2 interior ones
     uniform within it, so the induced prior carries a factor for that freedom
@@ -1076,18 +1161,20 @@ def _span_prior_correction(grid: np.ndarray, num_boundaries: int, enabled: bool,
     Dividing it out makes the span prior independent of how finely the sequence
     is subdivided -- Nicholls and Jones (2001), and OxCal's default.
 
-    WHY A BINOMIAL AND NOT (b_first - b_last)^-(n-2). The continuum factor is
-    span^(n-2), but the model this solver integrates is discrete, and on a grid
-    the number of ways to place k ordered interior boundaries strictly inside a
-    span of j cells is C(j-1, k), not (j*step)^k. The two agree only as j grows:
-    at k = 1 they are 1/(j-1) against 1/j, a first-order error, and the span
-    prior concentrates mass at SMALL j where it is largest.
+    WHY A COUNT AND NOT (b_first - b_last)^-(n-2). The continuum factor is
+    span^(n-2), but the model this solver integrates is discrete, and what has
+    to be divided out is the number of ways the grid lets k ordered interior
+    boundaries sit across a span of j cells -- W(j, k) of
+    log_interior_placements, which counts a tie between neighbours at the half
+    the transfer matrices give it -- not (j*step)^k. The power is wrong most at
+    SMALL j, where the span prior concentrates its mass.
 
     Measured with the likelihoods switched off, so the reported posterior IS the
     prior and the answer is known in closed form. Total-variation distance of the
     oldest boundary's marginal from that, at a step of 1.33 years, power ->
-    binomial: 0.39% -> 0.00% at n = 3, 0.93% -> 0.00% at n = 4, 1.56% -> 0.00%
-    at n = 5. The error was first-order in the step and so shrank under
+    count: 0.39% -> 0.00% at n = 3, 0.93% -> 0.00% at n = 4, 1.56% -> 0.00%
+    at n = 5 (with boundaries then kept a cell apart, and the count C(j-1, k)
+    to match). The error was first-order in the step and so shrank under
     refinement, which is why it looked like a modelling difference from OxCal.
 
     THE LIMITS FACTOR. OxCal's UniformSpanPrior also carries 1/g of Bronk Ramsey
@@ -1169,8 +1256,10 @@ def _span_prior_correction(grid: np.ndarray, num_boundaries: int, enabled: bool,
     if exponent > 0:
         index = np.arange(len(grid))
         cells = index[None, :] - index[:, None]
-        # 1 / (ways the interior boundaries fit) -- A.29, 2001 eq 6.
-        log_count = log_interior_placements(cells, exponent)
+        # 1 / (ways the interior boundaries fit) -- A.29, 2001 eq 6. A function
+        # of the span in cells alone, so evaluated once per span and gathered.
+        by_span = log_interior_placements(index, exponent)
+        log_count = np.where(cells >= 0, by_span[np.maximum(cells, 0)], -np.inf)
         total = np.where(np.isfinite(log_count), total - log_count, -np.inf)
 
     if oldest_limits is not None and youngest_limits is not None:
@@ -1552,9 +1641,6 @@ def _solve_on_grid(grid: np.ndarray, measurements: List[Dict], root: Dict,
     likelihood, cumulative, outlier_parts = date_tables(
         grid, measurements, element_bounds)
 
-    span = grid[None, :] - grid[:, None]              # [younger, older]
-    valid = span > 0
-
     # Each boundary may carry its own TPQ/TAQ, which restricts where it can sit.
     allowed = {}
     for bid in chain.boundary_ids:
@@ -1566,14 +1652,13 @@ def _solve_on_grid(grid: np.ndarray, measurements: List[Dict], root: Dict,
             ok &= grid <= tpq
         allowed[bid] = ok
 
-    # T_i over each group, dates integrated out.
+    # T_i over each group, dates integrated out. Its two boundaries may share
+    # a cell, at half weight (_boundary_pair_term).
     log_T = []
     for index, date_ids in enumerate(chain.groups):
-        K = len(date_ids)
-        with np.errstate(divide='ignore', invalid='ignore'):
-            term = np.where(valid, -K * np.log(np.where(valid, span, 1.0)), -np.inf)
+        term = _boundary_pair_term(grid, len(date_ids))
         for date_id in date_ids:
-            term = term + _log_interval_integral(
+            term = term + _log_date_factor(
                 cumulative[date_id], likelihood[date_id], dt)
         older_ok = allowed[chain.boundary_ids[index]]
         younger_ok = allowed[chain.boundary_ids[index + 1]]
@@ -1638,10 +1723,12 @@ def _solve_on_grid(grid: np.ndarray, measurements: List[Dict], root: Dict,
         # shares it.
         outside = pair_weight(index)
         for date_id in date_ids:
-            # This date's own integral divided back out, leaving it free.
+            # This date's own factor divided back out, leaving it free: its
+            # integral where the boundaries are apart, its likelihood where
+            # they share a cell (_log_date_factor).
             with np.errstate(invalid='ignore'):
                 weights = np.where(np.isfinite(log_T[index]),
-                                   log_T[index] - _log_interval_integral(
+                                   log_T[index] - _log_date_factor(
                                        cumulative[date_id], likelihood[date_id], dt),
                                    -np.inf)
             G = np.exp(_rescaled(weights))
@@ -1649,10 +1736,12 @@ def _solve_on_grid(grid: np.ndarray, measurements: List[Dict], root: Dict,
             W = G * outside
             # The weight with the date ON the younger boundary (row t: the
             # younger boundary at t, any older one) and ON the older (column t).
-            # W is zero wherever the older boundary is not strictly older, so a
-            # whole row or column sum is exactly that.
+            # W is zero wherever the older boundary is younger, so a whole row
+            # or column sum is exactly that -- the diagonal, both boundaries at
+            # t, included in each.
             on_younger = W.sum(axis=1)
             on_older = W.sum(axis=0)
+            on_both = np.diagonal(W).copy()
             # Sum over {older boundary >= t} x {younger boundary <= t}, which
             # a pair of cumulative sums leaves on the diagonal. Both in place:
             # at M = 2000 each M x M temporary is 32 MB, and the sums are the
@@ -1667,7 +1756,11 @@ def _solve_on_grid(grid: np.ndarray, measurements: List[Dict], root: Dict,
             # come from: modelled dates moved up to 3.7 years on the test models,
             # and on the unordered Nenthorn reference run they were 0.64 years rms
             # from the posteriors OxCal gave against 0.17 with the half.
-            enclosed = np.diagonal(W) - 0.5 * (on_younger + on_older)
+            #
+            # With both boundaries at t the date can only be at t too, and the
+            # whole of that weight is its: the half on each side would take it
+            # twice, so it is put back once.
+            enclosed = np.diagonal(W) - 0.5 * (on_younger + on_older) + on_both
             density = likelihood[date_id] * np.clip(enclosed, 0.0, None)
             densities.append(density)
             summary = _summarize(grid, density, rng, num_samples, resolution)

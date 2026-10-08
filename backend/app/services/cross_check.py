@@ -30,8 +30,8 @@ Three, which between them cover what the sampler is most often given:
 
     where C is the span correction over the outer pair, T0 the span factor and
     likelihoods of any dates sitting directly in the Phase, and Z_b(S, E) the
-    integral of branch b with its first Boundary strictly younger than S and
-    its last strictly older than E. Z_b is a cumulative sum of the branch's
+    integral of branch b with its first Boundary younger than S and its last
+    older than E, a tie with either at half weight. Z_b is a cumulative sum of the branch's
     end-to-end transfer product, so the whole thing is a few matrix products
     per branch. Each branch's interior is then exact_chain's own chain with an
     end-to-end factor W_b in place of its span correction.
@@ -486,7 +486,12 @@ class _Direct:
     def _log_group(self, dates: List[str], nodes: Dict[str, int]) -> np.ndarray:
         """
         A group's span factor and its dates' interval integrals, in the log,
-        indexed [older boundary, younger boundary] and -inf unless older > younger.
+        indexed [older boundary, younger boundary]: -inf where they cross, and
+        where they share a cell the tie's half times the dates' likelihoods
+        there (exact_chain._boundary_pair_term, _log_date_factor), with a half
+        more for each pair of the dates the sampler ties to each other --
+        dates ordered inside the pair, all in that one cell, at the weight the
+        sampler gives them (Model.endpoint_weight).
         """
         K = len(dates)
         with np.errstate(divide='ignore'):
@@ -495,11 +500,19 @@ class _Direct:
         term = np.where(self.older, -K * log_span if K else 0.0, -np.inf)
         blocks = _blocks(self.model, dates) if K > 1 else []
         if len(blocks) > 1:
-            return term + self._log_ordered(blocks, nodes)
-        for date_id in dates:
-            row = self._likelihood(date_id, nodes)
-            # exact_chain's is indexed [younger, older].
-            term = term + _log_interval_integral(np.cumsum(row) * self.dt, row, self.dt).T
+            term = term + self._log_ordered(blocks, nodes)
+        else:
+            for date_id in dates:
+                row = self._likelihood(date_id, nodes)
+                # exact_chain's is indexed [younger, older].
+                term = term + _log_interval_integral(np.cumsum(row) * self.dt, row, self.dt).T
+        members = set(dates)
+        tied = sum(1 for y, o in self.model.tie_pairs if y in members and o in members)
+        tie = np.log(exact_chain.BOUNDARY_TIE_WEIGHT) - tied * np.log(2.0)
+        with np.errstate(divide='ignore'):
+            for date_id in dates:
+                tie = tie + np.log(self._likelihood(date_id, nodes))
+        np.fill_diagonal(term, tie)
         return term
 
     def _log_block_oldest(self, block: List[str], nodes: Dict[str, int]) -> np.ndarray:
@@ -609,10 +622,10 @@ class _Direct:
                                                self.model.span_prior_rows)
                 if (o, y) == (oldest, youngest)]
         if not rows:
-            # No correction: every strictly ordered pair counts the same.
-            return np.where(self.older, 0.0, -np.inf)
+            # No correction: every ordered pair counts the same.
+            return np.where(self.cells >= 0, 0.0, -np.inf)
         row = rows[0]
-        return np.where(self.older, row[np.clip(self.cells, 0, self.M - 1)], -np.inf)
+        return np.where(self.cells >= 0, row[np.clip(self.cells, 0, self.M - 1)], -np.inf)
 
     def _ends_ok(self, first: str, last: str) -> np.ndarray:
         return self.ok[first][:, None] & self.ok[last][None, :]
@@ -648,23 +661,28 @@ class _Direct:
             out['suffix'] = suffix[::-1]
         return out
 
+    @staticmethod
+    def _tied_cumsum(matrix: np.ndarray, axis: int) -> np.ndarray:
+        """Cumulative sum along `axis` with the last term at the tie's weight:
+        sum over i < n, plus a half of term n."""
+        return (np.cumsum(matrix, axis=axis)
+                - (1.0 - exact_chain.BOUNDARY_TIE_WEIGHT) * matrix)
+
     def _within(self, J: np.ndarray) -> Tuple[np.ndarray, float]:
         """
-        Z[S, E] = sum over first < S and last > E of J[first, last]: the branch
-        with its ends strictly inside the outer pair.
+        Z[S, E] = sum over first <= S and last >= E of J[first, last]: the
+        branch with its ends inside the outer pair, an end on S or on E at the
+        half a tie between neighbouring Boundaries carries.
         """
-        below_s = np.cumsum(J, axis=0)
-        below_s = np.vstack([np.zeros((1, self.M)), below_s[:-1]])
-        above_e = np.cumsum(below_s[:, ::-1], axis=1)[:, ::-1]
-        above_e = np.hstack([above_e[:, 1:], np.zeros((self.M, 1))])
+        below_s = self._tied_cumsum(J, axis=0)
+        above_e = self._tied_cumsum(below_s[:, ::-1], axis=1)[:, ::-1]
         return self._scaled(above_e)
 
     def _outside(self, A: np.ndarray) -> np.ndarray:
-        """W[first, last] = sum over S > first and E < last of A[S, E]."""
-        older = np.cumsum(A[::-1], axis=0)[::-1]
-        older = np.vstack([older[1:], np.zeros((1, self.M))])
-        younger = np.cumsum(older, axis=1)
-        return np.hstack([np.zeros((self.M, 1)), younger[:, :-1]])
+        """W[first, last] = sum over S >= first and E <= last of A[S, E], a
+        tie at either end at half weight."""
+        older = self._tied_cumsum(A[::-1], axis=0)[::-1]
+        return self._tied_cumsum(older, axis=1)
 
     # -- one combination of outlier scales -----------------------------------
 
