@@ -91,7 +91,6 @@ any date back out. Each is compared on REPORTING_STEP_YEARS bins by total
 variation distance, which reads directly as the probability mass in the wrong
 place.
 """
-import copy
 import itertools
 import time
 from typing import Dict, List, Optional, Tuple
@@ -100,6 +99,9 @@ import numpy as np
 
 from app.services import exact_chain, gibbs
 from app.services.exact_chain import REPORTING_STEP_YEARS, _log_interval_integral
+# The tree helpers and the sums over an area's ends are the exact solver's for
+# side-by-side areas, so the check and that solver cannot drift apart.
+from app.services.exact_parallel import _flattened, _ids, outside, within
 from app.services.model_tree import inherited_bounds
 
 # Total variation distance between a sampled Boundary's marginal and the direct
@@ -139,27 +141,6 @@ EDGE_MASS = 1e-3
 
 class NotChecked(Exception):
     """The model is not one this module can integrate; the message says why."""
-
-
-def _flattened(element: Dict) -> Dict:
-    """A copy of `element` with every nested Sequence spelled out in place."""
-    out = copy.copy(element)
-    children = []
-    for child in element.get('children') or []:
-        if child.get('element_type') == 'sequence':
-            children.extend(_flattened(child)['children'])
-        else:
-            children.append(child)
-    out['children'] = children
-    return out
-
-
-def _ids(element: Dict, found: Optional[set] = None) -> set:
-    found = set() if found is None else found
-    found.add(element['id'])
-    for child in element.get('children') or []:
-        _ids(child, found)
-    return found
 
 
 Tails = Tuple[List[str], List[str]]
@@ -661,28 +642,10 @@ class _Direct:
             out['suffix'] = suffix[::-1]
         return out
 
-    @staticmethod
-    def _tied_cumsum(matrix: np.ndarray, axis: int) -> np.ndarray:
-        """Cumulative sum along `axis` with the last term at the tie's weight:
-        sum over i < n, plus a half of term n."""
-        return (np.cumsum(matrix, axis=axis)
-                - (1.0 - exact_chain.BOUNDARY_TIE_WEIGHT) * matrix)
-
     def _within(self, J: np.ndarray) -> Tuple[np.ndarray, float]:
-        """
-        Z[S, E] = sum over first <= S and last >= E of J[first, last]: the
-        branch with its ends inside the outer pair, an end on S or on E at the
-        half a tie between neighbouring Boundaries carries.
-        """
-        below_s = self._tied_cumsum(J, axis=0)
-        above_e = self._tied_cumsum(below_s[:, ::-1], axis=1)[:, ::-1]
-        return self._scaled(above_e)
-
-    def _outside(self, A: np.ndarray) -> np.ndarray:
-        """W[first, last] = sum over S >= first and E <= last of A[S, E], a
-        tie at either end at half weight."""
-        older = self._tied_cumsum(A[::-1], axis=0)[::-1]
-        return self._tied_cumsum(older, axis=1)
+        """exact_parallel.within, scaled to a peak of one, with the log of
+        that peak."""
+        return self._scaled(within(J))
 
     # -- one combination of outlier scales -----------------------------------
 
@@ -717,6 +680,11 @@ class _Direct:
         else:
             S, E, loose = self.outer
             log_a = (self._span_correction(S, E) + self._log_group(loose, nodes))
+            # S and E are not neighbouring Boundaries when branches lie between
+            # them, so their meeting is no tie of their own: the branches'
+            # Boundaries, all in that cell, carry it (as exact_parallel does).
+            diagonal = np.arange(self.M)
+            log_a[diagonal, diagonal] -= np.log(exact_chain.BOUNDARY_TIE_WEIGHT)
             log_a = np.where(self._ends_ok(S, E), log_a, -np.inf)
             A0, a_scale = self._exp(log_a)
             A0 = self._with_tails(A0)
@@ -740,7 +708,7 @@ class _Direct:
                     for o, Z in enumerate(within):
                         if o != b:
                             others = others * Z
-                    weights.append(self._outside(others))
+                    weights.append(outside(others))
 
         if with_marginals:
             for chain, part, W in zip(self.branches, parts, weights):

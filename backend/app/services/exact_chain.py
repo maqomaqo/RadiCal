@@ -55,8 +55,10 @@ described in tests/hillside_charcoal_fixture's PHASE WIDTH note, not the phase
 model. services/gibbs.py carries the same rule as Model.endpoint_weight, and the
 two agree to about 0.6 years on the chain fixtures.
 
-`layout()` returns None for anything that is not a single chain, and the caller
-falls back to the sampler. In particular a Sequence that orders two groups with
+`layout()` returns None for anything that is not a single chain. The caller
+then tries services/exact_parallel.py, which integrates a chain whose stages
+hold areas side by side with this module's own pieces, and falls back to the
+sampler only when that declines too. In particular a Sequence that orders two groups with
 NO boundary between them is not a chain: its dates share one enclosing boundary
 pair while an extra constraint orders them against each other, and that
 constraint does not factorise along the chain. Adding an explicit Boundary
@@ -208,25 +210,9 @@ def layout_with_reason(
     if root is None:
         return None, 'the analysis has no model structure'
     plan = plan_model(root, measurements)
-
-    # Both of these couple the dates to EACH OTHER rather than only through
-    # their Boundaries, which is the one thing the message passing below
-    # cannot express -- the same obstruction the module docstring records for
-    # the outlier scale, and with the same resolution: say so, and let the
-    # caller take the sampler or the closed form.
-    if plan.deposition_groups:
-        return None, (
-            'this model contains a deposition sequence, whose ages are coupled '
-            'to each other by the deposition rate rather than only through '
-            'their Boundaries, so it cannot be integrated exactly'
-        )
-    if plan.wiggle_groups:
-        return None, (
-            'this model contains a wiggle match, whose dates are one calendar '
-            'age with the measured gaps added to it rather than separate '
-            'parameters, so it is not a chain of Boundaries. It is solved in '
-            'closed form instead (services/wiggle_match.py)'
-        )
+    coupled = coupled_dates_reason(plan)
+    if coupled is not None:
+        return None, coupled
 
     if not plan.span_groups:
         return None, (
@@ -329,6 +315,32 @@ def layout_with_reason(
 
     return Chain(boundary_ids, [list(g.date_ids) for g in ordered_groups],
                  dict(plan.boundary_names)), None
+
+
+def coupled_dates_reason(plan) -> Optional[str]:
+    """
+    Why `plan` cannot be integrated exactly whatever its shape, or None.
+
+    Both of these couple the dates to EACH OTHER rather than only through
+    their Boundaries, which is the one thing the message passing below cannot
+    express -- the same obstruction the module docstring records for the
+    outlier scale, and with the same resolution: say so, and let the caller
+    take the sampler or the closed form. Shared with services/exact_parallel.py.
+    """
+    if plan.deposition_groups:
+        return (
+            'this model contains a deposition sequence, whose ages are coupled '
+            'to each other by the deposition rate rather than only through '
+            'their Boundaries, so it cannot be integrated exactly'
+        )
+    if plan.wiggle_groups:
+        return (
+            'this model contains a wiggle match, whose dates are one calendar '
+            'age with the measured gaps added to it rather than separate '
+            'parameters, so it is not a chain of Boundaries. It is solved in '
+            'closed form instead (services/wiggle_match.py)'
+        )
+    return None
 
 
 def _stitched(segments: List[List[SpanGroup]], plan) -> Optional[List[SpanGroup]]:
