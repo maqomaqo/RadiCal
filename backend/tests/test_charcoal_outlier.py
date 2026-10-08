@@ -203,6 +203,9 @@ class TestTheSharedScale:
     This fixture is what made the difference visible and is the only place it can
     be checked against an inferred quantity rather than an answer: OxCal exports
     the posterior of the scale itself.
+
+    Sampled untempered (temperatures=1). Tempering is for crossing calibration
+    lobes, which test_gibbs.py tests, and it triples the cost of these runs.
     """
 
     def test_it_recovers_the_scale_oxcal_inferred(self):
@@ -215,7 +218,7 @@ class TestTheSharedScale:
         """
         measurements = fx.measurements()
         tree, _inserted = with_implicit_boundaries(fx.model_tree())
-        sampled = gibbs.solve(measurements, tree, num_samples=200)
+        sampled = gibbs.solve(measurements, tree, num_samples=200, temperatures=1)
 
         charcoal = sampled['outlier_scale']['charcoal']
         assert charcoal['log10_mean'] == pytest.approx(1.79, abs=0.15), charcoal
@@ -261,7 +264,7 @@ class TestTheSharedScale:
         solver's 9.9.
         """
         measurements, tree, exact = _solved()
-        sampled = gibbs.solve(measurements, tree, num_samples=200)
+        sampled = gibbs.solve(measurements, tree, num_samples=200, temperatures=1)
         exact_rms, _e = _rms_against_oxcal(measurements, exact)
         sampled_rms, _s = _rms_against_oxcal(measurements, sampled)
         assert sampled_rms < exact_rms, (sampled_rms, exact_rms)
@@ -272,7 +275,7 @@ class TestTheSharedScale:
         density, since it depends on the sampled scale. At prior 1.00 it must
         still come back as certainty."""
         measurements, tree, _exact = _solved()
-        sampled = gibbs.solve(measurements, tree, num_samples=200)
+        sampled = gibbs.solve(measurements, tree, num_samples=200, temperatures=1)
         for m in measurements:
             probability = sampled['measurements'][m['id']]['outlier_probability']
             if m['id'] in fx.CHARCOAL:

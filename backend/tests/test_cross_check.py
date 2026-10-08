@@ -4,6 +4,9 @@ The direct calculation a sampled model is checked against (services/cross_check.
 It is only worth anything if it is the SAME model as the sampler's, so it is
 held to the exact solver on a chain, to the sampler on parallel branches, and
 shown to flag a sampled answer that is in the wrong place.
+
+The sampler runs untempered (temperatures=1) throughout: these models mix
+without it, and it would triple every run.
 """
 import copy
 import itertools
@@ -153,7 +156,7 @@ class TestTheSameModel:
         # Four chains: one chain of this length puts the median Boundary 0.5
         # to 3.4 years from the direct answer, either side, by noise alone.
         sampled = gibbs.solve(dates, tree, sweeps=20000, max_sweeps=20000,
-                              num_samples=200, chains=4)
+                              num_samples=200, chains=4, temperatures=1)
         record = cross_check.check(dates, tree, sampled)
         assert record['status'] == 'agrees', record
         assert record['checked'] == 7
@@ -252,7 +255,7 @@ class TestOrderedGroups:
         dates, tree = ox.measurements(), ox.model_tree('ordered')
         assert ec.layout(tree, dates) is None
         sampled = gibbs.solve(dates, tree, sweeps=20000, max_sweeps=20000,
-                              num_samples=200, chains=4)
+                              num_samples=200, chains=4, temperatures=1)
         record = cross_check.check(dates, tree, sampled)
         assert record['status'] == 'agrees', record
         assert record['checked'] == 2
@@ -262,7 +265,7 @@ class TestOrderedGroups:
         import oxcal_fixture as ox
         dates, tree = ox.measurements(), ox.model_tree('unordered')
         sampled = gibbs.solve(dates, tree, sweeps=20000, max_sweeps=20000,
-                              num_samples=200, chains=4)
+                              num_samples=200, chains=4, temperatures=1)
         record = cross_check.check(dates, tree, sampled)
         assert record['status'] == 'agrees', record
         assert record['worst']['distance'] < 0.08
@@ -270,7 +273,7 @@ class TestOrderedGroups:
     def test_a_flagged_answer_is_reported_on_the_ordered_model(self):
         dates, tree = _ordered_phases()
         sampled = gibbs.solve(dates, tree, sweeps=8000, max_sweeps=8000,
-                              num_samples=200, chains=1)
+                              num_samples=200, chains=1, temperatures=1)
         moved = copy.deepcopy(sampled['boundaries'])
         end = tree['children'][3]['id']
         points = moved[end]['posterior']['probability_distribution']
@@ -284,7 +287,7 @@ class TestItFlagsAWrongAnswer:
     def test_a_boundary_in_the_wrong_place_is_reported(self):
         dates, tree = _parallel()
         sampled = gibbs.solve(dates, tree, sweeps=8000, max_sweeps=8000,
-                              num_samples=200, chains=1)
+                              num_samples=200, chains=1, temperatures=1)
         moved = copy.deepcopy(sampled['boundaries'])
         site_start = tree['children'][0]['id']
         points = moved[site_start]['posterior']['probability_distribution']
@@ -304,7 +307,7 @@ class TestItFlagsAWrongAnswer:
         """
         dates, tree = _parallel()
         sampled = gibbs.solve(dates, tree, sweeps=8000, max_sweeps=8000,
-                              num_samples=200, chains=1)
+                              num_samples=200, chains=1, temperatures=1)
         moved = copy.deepcopy(sampled['boundaries'])
         site_start = tree['children'][0]['id']
         points = np.array(moved[site_start]['posterior']['probability_distribution'])
@@ -390,7 +393,7 @@ class TestDatesOutsideEveryBoundary:
     def test_it_agrees_with_the_sampler(self, older, younger, ordered):
         dates, tree = _with_tails(older=older, younger=younger, ordered_older=ordered)
         sampled = gibbs.solve(dates, tree, sweeps=20000, max_sweeps=20000,
-                              num_samples=200, chains=4)
+                              num_samples=200, chains=4, temperatures=1)
         record = cross_check.check(dates, tree, sampled)
         assert record['status'] == 'agrees', record
         assert record['checked'] == 2
@@ -399,7 +402,7 @@ class TestDatesOutsideEveryBoundary:
     def test_a_wrong_answer_is_still_flagged(self):
         dates, tree = _with_tails(older=(720,), younger=(560,))
         sampled = gibbs.solve(dates, tree, sweeps=8000, max_sweeps=8000,
-                              num_samples=200, chains=1)
+                              num_samples=200, chains=1, temperatures=1)
         moved = copy.deepcopy(sampled['boundaries'])
         start = tree['children'][1]['id']
         points = moved[start]['posterior']['probability_distribution']

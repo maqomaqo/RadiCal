@@ -16,6 +16,10 @@ Four things are checked, in increasing order of what they'd catch:
     phase is at least as long as the spread of the dates inside it.
   * the two solvers against each other, which is how every other quantity in
     this app is cross-checked.
+
+The sampler runs untempered (temperatures=1) wherever it appears: tempering is
+for crossing calibration lobes, which test_gibbs.py tests, and it triples the
+cost of a run.
 """
 import csv
 import io
@@ -621,7 +625,8 @@ class TestTheTwoSolversAgree:
         chain = ec.layout(tree, measurements)
         exact = ec.solve(measurements, tree, chain, estimate_durations=True)
         sampled = gibbs.solve(measurements, tree, sweeps=8000,
-                              estimate_durations=True, interval_draws=8000)
+                              estimate_durations=True, interval_draws=8000,
+                              temperatures=1)
 
         def mean_of(solved, record_id):
             return next(d['years']['mean'] for d in solved['intervals']['durations']
@@ -693,7 +698,7 @@ class TestThroughTheApi:
                  'error_1sigma': 30, 'element_id': phases[1]},
             ],
             'model_tree': tree,
-            'bayesian_config': {'mcmc_samples': 200,
+            'bayesian_config': {'mcmc_samples': 200, 'mcmc_temperatures': 1,
                                 'estimate_durations': estimate},
             'save': True,
         }
@@ -990,7 +995,8 @@ class TestDispersalThroughTheSolvers:
     def test_the_sampler_reports_it_too(self):
         tree, measurements = _front_model()
         solved = gibbs.solve(measurements, tree, sweeps=4000,
-                             dispersal={'origin': self.ORIGIN}, interval_draws=4000)
+                             dispersal={'origin': self.ORIGIN}, interval_draws=4000,
+                             temperatures=1)
 
         fit = solved['intervals']['dispersal']['wave']
         assert fit['refused'] is None
@@ -1221,5 +1227,6 @@ class TestTheTrendSurfaceThroughTheSolvers:
     def test_the_sampler_reports_the_trend_too(self):
         tree, measurements = self._region('trg')
         solved = gibbs.solve(measurements, tree, sweeps=4000,
-                             dispersal={'origin': None}, interval_draws=4000)
+                             dispersal={'origin': None}, interval_draws=4000,
+                             temperatures=1)
         assert solved['intervals']['dispersal']['trend']['refused'] is None

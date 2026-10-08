@@ -19,6 +19,10 @@ that make "how old is 47 cm" answerable, and the one thing that would be
 quietly wrong -- a deposition sequence's dates ALSO being treated as a uniform
 scatter between the enclosing Boundaries, which would leave phase widths wrong
 by a factor nobody could eyeball.
+
+Every run here is untempered (temperatures=1, or mcmc_temperatures through
+the API). Tempering is for crossing calibration lobes, which test_gibbs.py
+tests, and it triples the cost of runs that ask nothing of it.
 """
 import itertools
 
@@ -150,7 +154,7 @@ class TestAgainstBruteForce:
         alpha = np.array([self.K * 20.0, self.K * 20.0])
         exact = brute_force(measurements, root, grid, alpha)
         sampled = gibbs.solve(measurements, root, grid=grid, sweeps=8000,
-                              num_samples=500, max_sweeps=60000, seed=7)
+                              num_samples=500, max_sweeps=60000, seed=7, temperatures=1)
 
         for parameter_id, mean, sd in exact:
             got = sampled['measurements'][parameter_id]
@@ -205,7 +209,7 @@ class TestTheRigidityLimits:
         root['id'] = measurements[0]['element_id']
 
         solved = gibbs.solve(measurements, root, sweeps=6000, num_samples=500,
-                             max_sweeps=40000, seed=11)
+                             max_sweeps=40000, seed=11, temperatures=1)
         ages = np.array([solved['measurements'][m['id']]['posterior_median']
                          for m in measurements])
         z = np.array([m['depth_cm'] for m in measurements])
@@ -233,7 +237,7 @@ class TestUndatedLevels:
         root['id'] = measurements[0]['element_id']
 
         solved = gibbs.solve(measurements, root, sweeps=6000, num_samples=500,
-                             max_sweeps=40000, seed=3)
+                             max_sweeps=40000, seed=3, temperatures=1)
         level = solved['boundaries'][root['children'][0]['id']]
         assert level['posterior']['posterior_median'] == pytest.approx(
             true_age(47.0), abs=30.0)
@@ -257,7 +261,7 @@ class TestUndatedLevels:
         root['id'] = measurements[0]['element_id']
 
         solved = gibbs.solve(measurements, root, sweeps=8000, num_samples=500,
-                             max_sweeps=60000, seed=5)
+                             max_sweeps=60000, seed=5, temperatures=1)
         dated = next(m for m in measurements if m['depth_cm'] == 60.0)
         modelled = solved['measurements'][dated['id']]['posterior_median']
         interpolated = solved['boundaries'][
@@ -338,9 +342,9 @@ class TestTheSpanPriorIsNotAppliedTwice:
         prefix = f'sp{next(_IDS)}'
         measurements, bounded_root, inner = self._bounded(prefix)
         bare = gibbs.solve(measurements, inner, sweeps=6000, num_samples=500,
-                           max_sweeps=40000, seed=13)
+                           max_sweeps=40000, seed=13, temperatures=1)
         bounded = gibbs.solve(measurements, bounded_root, sweeps=6000,
-                              num_samples=500, max_sweeps=40000, seed=13)
+                              num_samples=500, max_sweeps=40000, seed=13, temperatures=1)
 
         for measurement in measurements:
             assert (bounded['measurements'][measurement['id']]['posterior_median']
@@ -363,7 +367,7 @@ class TestTheRigidityItself:
         root['id'] = measurements[0]['element_id']
 
         solved = gibbs.solve(measurements, root, sweeps=6000, num_samples=500,
-                             max_sweeps=40000, seed=17)
+                             max_sweeps=40000, seed=17, temperatures=1)
         report = solved['deposition'][0]
         assert report['variable'] is True
         assert report['k_mean'] > 0
@@ -384,7 +388,7 @@ class TestTheRigidityItself:
         root['id'] = measurements[0]['element_id']
 
         solved = gibbs.solve(measurements, root, sweeps=6000, num_samples=500,
-                             max_sweeps=40000, seed=19)
+                             max_sweeps=40000, seed=19, temperatures=1)
         assert solved['deposition'][0]['pinned'] is True
 
     def test_a_fixed_rigidity_is_reported_as_fixed(self):
@@ -393,7 +397,7 @@ class TestTheRigidityItself:
         root['id'] = measurements[0]['element_id']
 
         solved = gibbs.solve(measurements, root, sweeps=4000, num_samples=200,
-                             max_sweeps=20000, seed=23)
+                             max_sweeps=20000, seed=23, temperatures=1)
         report = solved['deposition'][0]
         assert report['variable'] is False
         assert report['k_mean'] == pytest.approx(0.5)
@@ -436,7 +440,7 @@ class TestThroughTheApi:
         response = client.post('/api/analysis/bayesian?wait=true', json={
             'name': f'Core {tag}', 'measurements': measurements,
             'model_tree': root, 'save': True,
-            'bayesian_config': {'mcmc_samples': 500},
+            'bayesian_config': {'mcmc_samples': 500, 'mcmc_temperatures': 1},
         })
         assert response.status_code == 200, response.text
 
@@ -517,7 +521,7 @@ class TestTheAgeDepthBand:
         root['id'] = measurements[0]['element_id']
         return measurements, root, gibbs.solve(
             measurements, root, sweeps=6000, num_samples=500,
-            max_sweeps=40000, seed=seed)
+            max_sweeps=40000, seed=seed, temperatures=1)
 
     def test_the_band_is_produced_without_being_asked_for(self):
         """
@@ -579,7 +583,7 @@ class TestTheAgeDepthBand:
         created = client.post('/api/analysis/bayesian?wait=true', json={
             'name': f'Core {tag}', 'measurements': measurements,
             'model_tree': root, 'save': True,
-            'bayesian_config': {'mcmc_samples': 500},
+            'bayesian_config': {'mcmc_samples': 500, 'mcmc_temperatures': 1},
         })
         assert created.status_code == 200, created.text
         analysis_id = created.json()['data']['id']
@@ -604,7 +608,7 @@ class TestTheAgeDepthBand:
         created = client.post('/api/analysis/bayesian?wait=true', json={
             'name': f'Core {tag}', 'measurements': measurements,
             'model_tree': root, 'save': True,
-            'bayesian_config': {'mcmc_samples': 500},
+            'bayesian_config': {'mcmc_samples': 500, 'mcmc_temperatures': 1},
         })
         assert created.status_code == 200, created.text
 

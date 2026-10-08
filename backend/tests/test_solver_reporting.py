@@ -12,6 +12,10 @@ parallel excavation areas.
 The exact path is pure numpy, so most of this needs no sampler. The one test
 that covers the fallback's bookkeeping stubs the sampler out rather than running
 it: what is being checked is the record, not the sampling.
+
+Where the sampler does run it runs untempered (mcmc_temperatures 1), for the
+same reason: a tempered run costs three times as much and records nothing a
+plain one does not.
 """
 import itertools
 
@@ -62,7 +66,8 @@ def _run(client, tag, tree, measurements):
         'name': f'Solver {tag}',
         'measurements': measurements,
         'model_tree': tree,
-        'bayesian_config': {'mcmc_samples': 200, 'mcmc_tune': 200, 'mcmc_chains': 1},
+        'bayesian_config': {'mcmc_samples': 200, 'mcmc_tune': 200, 'mcmc_chains': 1,
+                            'mcmc_temperatures': 1},
         'save': True,
     })
 
@@ -150,7 +155,7 @@ class TestFallbackIsRecorded:
             _measurement(f'{tag}s3', f'{tag}p3', age_bp=3000),
         ]
         results, boundaries, solver, _intervals, _summaries = analysis_api._run_bayesian(
-            measurements, tree, {'mcmc_samples': 200},
+            measurements, tree, {'mcmc_samples': 200, 'mcmc_temperatures': 1},
         )
         return measurements, tree, results, boundaries, solver
 
@@ -204,7 +209,7 @@ class TestSolverOverride:
         from app.api import analysis as analysis_api
 
         tag = tag or f'so{next(_IDS)}'
-        config = {'mcmc_samples': 200}
+        config = {'mcmc_samples': 200, 'mcmc_temperatures': 1}
         if solver is not None:
             config['solver'] = solver
         measurements = [
@@ -301,7 +306,8 @@ class TestSolverOverride:
         records = {}
         for choice in ('exact', 'gibbs'):
             _r, _b, records[choice], _i, _s = analysis_api._run_bayesian(
-                measurements, tree, {'mcmc_samples': 200, 'solver': choice})
+                measurements, tree, {'mcmc_samples': 200, 'solver': choice,
+                                     'mcmc_temperatures': 1})
         assert records['exact']['implicit_boundaries'] == 1
         assert records['gibbs']['implicit_boundaries'] == 0
         assert records['gibbs']['exact_needs_boundaries'] == 1
@@ -314,7 +320,8 @@ class TestSolverOverride:
             'name': f'Override {tag}',
             'measurements': [_measurement(f'{tag}s1', f'{tag}p1')],
             'model_tree': _chain_tree(tag),
-            'bayesian_config': {'solver': 'gibbs', 'mcmc_samples': 200},
+            'bayesian_config': {'solver': 'gibbs', 'mcmc_samples': 200,
+                                'mcmc_temperatures': 1},
             'save': True,
         })
         assert created.status_code == 200, created.text
@@ -364,7 +371,7 @@ class TestSolverOverride:
             'name': f'Then broken {tag}',
             'measurements': measurements,
             'model_tree': _unbounded_tree(tag),
-            'bayesian_config': {'mcmc_samples': 200},
+            'bayesian_config': {'mcmc_samples': 200, 'mcmc_temperatures': 1},
             'save': True,
         })
         assert created.status_code == 200, created.text

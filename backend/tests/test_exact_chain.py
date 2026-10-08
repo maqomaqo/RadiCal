@@ -1870,7 +1870,7 @@ class TestSequenceOfSequences:
         grid = np.arange(exact['grid']['lower'], exact['grid']['upper'] + 1e-9,
                          exact['grid']['step'])
         sampled = gibbs.solve(dates, tree, sweeps=20000, max_sweeps=20000,
-                              num_samples=100, grid=grid)
+                              num_samples=100, grid=grid, temperatures=1)
         errors = np.array([
             sampled['measurements'][m['id']]['posterior_mean']
             - exact['measurements'][m['id']]['posterior_mean'] for m in dates])

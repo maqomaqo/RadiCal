@@ -297,8 +297,10 @@ class TestAModel:
         created = client.post('/api/analysis/bayesian?wait=true', json={
             'name': prefix, 'measurements': measurements,
             'model_tree': _two_phase_tree(prefix), 'save': True,
+            # Untempered where the sampler runs: what is tested is the record,
+            # not the sampling.
             'bayesian_config': {'mcmc_samples': 200, 'solver': solver,
-                                'estimate_kde': estimate_kde},
+                                'estimate_kde': estimate_kde, 'mcmc_temperatures': 1},
         })
         assert created.status_code == 200, created.text
         return created.json()['data']['id']
