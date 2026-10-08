@@ -670,7 +670,7 @@ as OxCal reports it under `R_Combine`.
   with notes listing the dates pooled. The originals leave the analysis and Undo cannot restore
   them; dates deployed from a project's collection remain in the collection.
 - A **Group Calibration** tests all its dates together, in its own panel below the plots.
-  **Export CSV** adds the test as a block below the results, and **Export PDF** as a table.
+  **Export → CSV** adds the test as a block below the results, and **Export → PDF** as a table.
 
 **Reading it.** Compare `T` against the **critical value**; the 5% is the risk of a false alarm,
 not one of the numbers to compare.
@@ -945,19 +945,29 @@ marked uncertain.
 
 ## Exporting Data
 
-- **Export CSV** (Results page): the full results table in the selected date format. Where a run
+Results page **Export** offers three formats:
+
+- **CSV**: the full results table in the selected date format. Where a run
   produced durations and differences, they follow as a second block (blank line, own header — since
   every figure is a length, not a date, they share no column with the results table). A kernel
   density estimate follows in two more blocks: one row of metadata, then the curve at each calendar
   year step. A Group Calibration's [same-event test](#same-event-test) comes last. While the
   **P before** column is showing, it is added as the table's last column, so no other column moves.
-- **Export JSON** (Results page): the full result, machine-readable. Carries every date and Boundary
+- **JSON**: the full result, machine-readable. Carries every date and Boundary
   in model order, durations, differences, KDEs, a Group Calibration's same-event test, and the solver record (solver,
   convergence, chains, agreement indices, cross-checks). While the **P before** column is showing,
   `p_before` carries its threshold and each date's and Boundary's probability. Also at
   `GET /api/results/{id}/export/json`.
+- **PDF**: a printable report of the whole analysis: metadata, curves with
+  references, solver, results table (with the **P before** column while it is showing), durations,
+  KDE, a Group Calibration's same-event test, and a plot per modelled
+  parameter with HPD ranges marked. Uses the currently selected date format. A large model takes a
+  few seconds.
+
+Elsewhere:
+
 - **Export all (zip)** (a project's ⋮ menu): the whole project in one file. `analyses/` holds every
-  analysis exactly as its own Export JSON gives it, and `inputs/` what each was run from: settings,
+  analysis exactly as its own **Export → JSON** gives it, and `inputs/` what each was run from: settings,
   dates and model structure. `samples.csv` is the project's date collection in the columns the CSV
   import reads, so it goes straight back in. `summary.csv` has one row per modelled Boundary and
   duration of every analysis, with the solver, convergence, R̂, seed and cross-check beside it.
@@ -966,11 +976,6 @@ marked uncertain.
 - **Curve data** (curve browser page): **Export this window** saves the visible stretch as CSV;
   **Export profile** saves the whole expected-resolution profile. A curve itself can be downloaded
   from the Curves page, byte-for-byte as imported.
-- **Export PDF** (Results page): a printable report of the whole analysis: metadata, curves with
-  references, solver, results table (with the **P before** column while it is showing), durations,
-  KDE, a Group Calibration's same-event test, and a plot per modelled
-  parameter with HPD ranges marked. Uses the currently selected date format. A large model takes a
-  few seconds.
 - **Export CSV** (comparison page): every paired date with each run's median, HPD range and
   agreement index, then shift and width ratio against the reference. Below it, derived quantities
   in separate blocks (transitions, durations, separations) — each block names its own units and

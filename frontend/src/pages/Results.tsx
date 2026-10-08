@@ -1066,6 +1066,7 @@ export default function Results() {
   const [runs, setRuns] = useState<RunSummary[]>([])
   const [runsAnchor, setRunsAnchor] = useState<HTMLElement | null>(null)
   const [exportingPdf, setExportingPdf] = useState(false)
+  const [exportAnchor, setExportAnchor] = useState<HTMLElement | null>(null)
   // Which optional columns the table draws, remembered per analysis. Only
   // columns the reader has explicitly turned on or off are stored: a column
   // they have never touched keeps following the run, exactly as the date
@@ -2804,24 +2805,45 @@ export default function Results() {
           <Typography variant="h6" component="h2">
             Results summary
           </Typography>
-          <Stack direction="row" spacing={1}>
-            <Button startIcon={<DownloadIcon />} onClick={handleExportCSV} variant="outlined">
-              Export CSV
-            </Button>
-            <Button startIcon={<DownloadIcon />} onClick={handleExportJSON} variant="outlined">
-              Export JSON
-            </Button>
-            <Button
-              startIcon={
-                exportingPdf ? <CircularProgress size={16} color="inherit" /> : <DownloadIcon />
-              }
-              onClick={handleExportPDF}
-              variant="outlined"
-              disabled={exportingPdf}
-            >
-              {exportingPdf ? 'Building PDF…' : 'Export PDF'}
-            </Button>
-          </Stack>
+          {/* One button for the three formats: they are one decision, taking
+              the result away, and three outlined buttons read as three. */}
+          <Button
+            startIcon={
+              exportingPdf ? <CircularProgress size={16} color="inherit" /> : <DownloadIcon />
+            }
+            endIcon={exportingPdf ? undefined : <KeyboardArrowDownIcon />}
+            onClick={(e) => setExportAnchor(e.currentTarget)}
+            variant="outlined"
+            disabled={exportingPdf}
+            aria-haspopup="true"
+            aria-expanded={!!exportAnchor}
+          >
+            {exportingPdf ? 'Building PDF…' : 'Export'}
+          </Button>
+          <Menu
+            anchorEl={exportAnchor}
+            open={!!exportAnchor}
+            onClose={() => setExportAnchor(null)}
+            anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+            transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+            MenuListProps={{ 'aria-label': 'Export format' }}
+          >
+            {[
+              { label: 'CSV', secondary: 'Spreadsheet', onSelect: handleExportCSV },
+              { label: 'JSON', secondary: 'Machine-readable', onSelect: handleExportJSON },
+              { label: 'PDF', secondary: 'Printable report', onSelect: handleExportPDF },
+            ].map((format) => (
+              <MenuItem
+                key={format.label}
+                onClick={() => {
+                  setExportAnchor(null)
+                  format.onSelect()
+                }}
+              >
+                <ListItemText primary={format.label} secondary={format.secondary} />
+              </MenuItem>
+            ))}
+          </Menu>
         </Box>
 
         <Divider sx={{ my: 2 }} />

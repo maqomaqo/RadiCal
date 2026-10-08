@@ -254,8 +254,8 @@ def build_zip(project: Project, analyses: List[Analysis], samples: List[ProjectS
             'analyses': listed,
             'samples': len(samples),
             'notes': (
-                'analyses/ holds each analysis exactly as its Export JSON button '
-                'gives it; inputs/ what it was run from. Calendar ages are cal BP '
+                'analyses/ holds each analysis exactly as its Results page '
+                'Export > JSON gives it; inputs/ what it was run from. Calendar ages are cal BP '
                 'unless a column says otherwise; durations are in years.'
             ),
         }, indent=1))
