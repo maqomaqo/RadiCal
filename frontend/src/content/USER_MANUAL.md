@@ -495,12 +495,13 @@ exactly by adding a Boundary, adding it is the better fix.
 **The exact solver gives a different answer.** For the most common model shapes, once the sampler
 has finished, the app also runs the exact solver on the same model in the background and compares
 the two results. For this check the exact solver is stretched to cover a few shapes that **Exact
-solver only** will not accept. Its figures are used only for the check and are not shown. If the two
-agree, hovering over the solver label says so; if they disagree, this warning appears. The shapes
-checked are a single line of Phases and Boundaries; several such lines side by side between one
-shared start and end; and either of these with groups that have no Boundary between them, or with
-dates before the first Boundary or after the last. When a model's shape is not one of these, the
-hover text says so.
+solver only** will not accept, and it treats outlier models exactly as the sampler does, so a
+difference always points to the sampler rather than to the two methods' different handling of
+outliers. Its figures are used only for the check and are not shown. If the two agree, hovering over
+the solver label says so; if they disagree, this warning appears. The shapes checked are a single
+line of Phases and Boundaries; several such lines side by side between one shared start and end; and
+either of these with groups that have no Boundary between them, or with dates before the first
+Boundary or after the last. When a model's shape is not one of these, the hover text says so.
 
 The warning names the Boundaries where the answers differ. The exact solver's answer is the one to
 trust: the sampled figures for those Boundaries, and for the dates between them, are unreliable. If

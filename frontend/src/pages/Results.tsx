@@ -2059,8 +2059,11 @@ export default function Results() {
           The exact solver gives a different answer
         </Typography>
         <Typography variant="body2">
-          Differs at {crossCheck.differing.map((row) => row.name).join(', ')}. See the
-          manual on checking a sampled result.
+          Differs at {crossCheck.differing.map((row) => row.name).join(', ')}. See{' '}
+          <Link component={RouterLink} to="/help#checking-a-sampled-result">
+            checking a sampled result
+          </Link>{' '}
+          in the manual.
         </Typography>
       </Alert>
     ) : null
@@ -2072,8 +2075,11 @@ export default function Results() {
           Some calibration ranges were not reached
         </Typography>
         <Typography variant="body2">
-          {lobeProbe.not_reached.map((row) => row.name).join(', ')}. See the manual on checking a
-          sampled result.
+          {lobeProbe.not_reached.map((row) => row.name).join(', ')}. See{' '}
+          <Link component={RouterLink} to="/help#checking-a-sampled-result">
+            checking a sampled result
+          </Link>{' '}
+          in the manual.
         </Typography>
       </Alert>
     ) : null
