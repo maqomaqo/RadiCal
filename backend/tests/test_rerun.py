@@ -363,7 +363,10 @@ class TestEditRoundTrip:
                     _measurement(f"{tag}s1", sample_name="Loose one"),
                     _measurement(f"{tag}s2", age_bp=3100, sample_name="Loose two"),
                 ],
-                "bayesian_config": {"mcmc_samples": 200, "mcmc_tune": 200, "mcmc_chains": 1},
+                # Loose dates are a phase with no Boundary, which is sampled;
+                # untempered, since this is about the stored tree.
+                "bayesian_config": {"mcmc_samples": 200, "mcmc_tune": 200, "mcmc_chains": 1,
+                                    "mcmc_temperatures": 1},
                 "save": True,
             },
         )
@@ -805,7 +808,10 @@ def test_outlier_values_survive_a_rerun_of_an_ordered_sibling_model(client):
     ]
     created = client.post('/api/analysis/bayesian?wait=true', json={
         'name': tag, 'measurements': measurements, 'model_tree': tree,
-        'bayesian_config': {'mcmc_samples': 300, 'mcmc_tune': 200, 'mcmc_chains': 1},
+        # Sampled, the model not being a chain; untempered, since what is
+        # tested is that the values survive a rerun.
+        'bayesian_config': {'mcmc_samples': 300, 'mcmc_tune': 200, 'mcmc_chains': 1,
+                            'mcmc_temperatures': 1},
         'save': True,
     })
     assert created.status_code == 200, created.text

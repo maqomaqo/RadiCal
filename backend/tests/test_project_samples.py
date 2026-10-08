@@ -945,7 +945,10 @@ class TestReplaceInputs:
             ],
             "groups": [],
             "relationships": [],
-            "bayesian_config": {"mcmc_samples": 200, "mcmc_tune": 200, "mcmc_chains": 1},
+            # Loose dates are sampled when rerun; untempered, since what is
+            # tested is the replacement.
+            "bayesian_config": {"mcmc_samples": 200, "mcmc_tune": 200, "mcmc_chains": 1,
+                                "mcmc_temperatures": 1},
         }
         body.update(overrides)
         return body

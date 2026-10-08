@@ -32,12 +32,15 @@ def _payload(tag, name='Job test', count=3, solver='gibbs'):
 
     `tag` namespaces every id: the suite shares one database, and model
     element ids are a primary key (see conftest).
+
+    Untempered (mcmc_temperatures 1): what is tested here is the queue, and a
+    tempered run costs three times as much to say nothing more about it.
     """
     phases = [f'{tag}p{i}' for i in range(2)]
     return {
         'name': name,
         'save': True,
-        'bayesian_config': {'solver': solver},
+        'bayesian_config': {'solver': solver, 'mcmc_temperatures': 1},
         'measurements': [
             {
                 'id': f'{tag}m{i}',
@@ -289,7 +292,7 @@ class TestCancellation:
             return len(calls) < 2
 
         with pytest.raises(gibbs.Cancelled):
-            gibbs.run(model, on_progress=stop_after_two)
+            gibbs.run(model, on_progress=stop_after_two, temperatures=1)
         assert len(calls) == 2
 
 

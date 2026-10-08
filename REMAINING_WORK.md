@@ -92,7 +92,7 @@ onto the job queue if models grow.
 ### 10. CI runs no tests
 `.github/workflows/publish-image.yml` builds and publishes the image and
 nothing else. Neither `pytest` nor `vitest` runs on a push or a PR. The backend
-suite takes about 32 minutes in the dev container.
+suite takes about 16 minutes in the dev container.
 
 ### 11. No automated end-to-end tests
 Flows are verified by hand against the running stack. The obvious first

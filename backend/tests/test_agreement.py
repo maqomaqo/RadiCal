@@ -13,6 +13,10 @@ Two separate things are checked and it matters not to conflate them:
   * feeding the app's posterior in gives a number that differs by however
     much the app's posterior differs from OxCal's. That is not a test of the
     formula and is asserted loosely.
+
+Where the sampler supplies that posterior it runs untempered (temperatures=1):
+tempering is for crossing calibration lobes, which test_gibbs.py tests, and it
+triples the cost of a run.
 """
 import csv
 import re
@@ -566,7 +570,7 @@ class TestModelIndexAgainstOxCal:
         if run not in self.SOLVED:
             from app.services import gibbs
             self.SOLVED[run] = gibbs.solve(
-                ox.measurements(), ox.model_tree(run), num_samples=200)
+                ox.measurements(), ox.model_tree(run), num_samples=200, temperatures=1)
         return self.SOLVED[run]
 
     def _our_indices(self, solved):
@@ -650,7 +654,7 @@ def test_a_lone_phase_leaves_amodel_and_aoverall_together():
             'tpq_age_bp': None, 'taq_age_bp': None,
             'children': [{'id': 'lone_phase', 'element_type': 'phase', 'name': 'Phase',
                           'tpq_age_bp': None, 'taq_age_bp': None, 'children': []}]}
-    solved = gibbs.solve(measurements, tree, num_samples=200)
+    solved = gibbs.solve(measurements, tree, num_samples=200, temperatures=1)
     overall = agreement.overall_agreement([
         agreement.agreement_index(
             m, solved['measurements'][m['id']]['probability_distribution'])
@@ -785,7 +789,8 @@ class TestOutlierModels:
         import dune_section_fixture as sf
         from app.services import gibbs
         measurements = sf.measurements()
-        solved = gibbs.solve(measurements, sf.model_tree(), num_samples=200)
+        solved = gibbs.solve(measurements, sf.model_tree(), num_samples=200,
+                             temperatures=1)
         overall = agreement.attach(solved['measurements'], measurements,
                                    solved['joint_draws'], solved['joint_scales'])
         flagged = solved['measurements'][sf.OUTLIER]['agreement_index']

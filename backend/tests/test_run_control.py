@@ -12,8 +12,8 @@ _IDS = itertools.count()
 
 
 def _sampled(client, **config):
-    """A three-date phase, sampled on one chain: the cheapest run that takes a
-    seed at all (the exact solver draws nothing)."""
+    """A three-date phase, sampled on one untempered chain: the cheapest run
+    that takes a seed at all (the exact solver draws nothing)."""
     tag = f'rc{next(_IDS)}'
     tree = {'id': f'{tag}_root', 'element_type': 'sequence', 'name': 'Site', 'children': [
         {'id': f'{tag}_b0', 'element_type': 'boundary', 'name': 'Start', 'children': []},
@@ -27,7 +27,8 @@ def _sampled(client, **config):
              'curve_id': 'intcal20', 'element_id': f'{tag}_p'}
             for i, age in enumerate((3000, 3020, 3040))],
         'model_tree': tree,
-        'bayesian_config': {'solver': 'gibbs', 'mcmc_chains': 1, **config},
+        'bayesian_config': {'solver': 'gibbs', 'mcmc_chains': 1, 'mcmc_temperatures': 1,
+                            **config},
         'save': True,
     })
     assert created.status_code == 200, created.text

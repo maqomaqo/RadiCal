@@ -13,6 +13,14 @@ Sweep counts are kept modest so the suite stays quick, with tolerances set from
 the measured agreement rather than from what happens to pass -- see the
 docstrings for the numbers each was chosen against. No pymc anywhere: the
 sampler is pure numpy.
+
+Runs are untempered (temperatures=1) unless they need tempering: each tempered
+copy costs a whole sweep, so the default of three temperatures triples a run,
+and most of these models mix without it. The tempered ones are the ladder in
+TestEveryKernelTargetsOneDistribution, which holds the recorded chain to its
+target; TestParallelTempering and TestLobeProbe, which are about crossing
+lobes; and the dune-shaped model in TestBoundaryTiesCountHalf, where
+untempered chains stay in one lobe.
 """
 import itertools
 
@@ -45,17 +53,17 @@ def _exact_grid(exact):
                      exact['grid']['step'])
 
 
-def _fixed(measurements, tree, sweeps=20000, **kwargs):
+def _fixed(measurements, tree, sweeps=20000, temperatures=1, **kwargs):
     """
     Run exactly `sweeps` sweeps, with the convergence-driven extension disabled.
 
     solve() extends until it converges, which is what production wants and what
     TestRunLength covers -- but it makes every other test's runtime depend on how
     hard its model happens to be, and the tolerances here are calibrated against
-    a known length.
+    a known length. Untempered, as the module docstring says.
     """
     return gibbs.solve(measurements, tree, sweeps=sweeps, max_sweeps=sweeps,
-                       **kwargs)
+                       temperatures=temperatures, **kwargs)
 
 
 class TestAgreesWithTheExactSolver:
@@ -1190,7 +1198,8 @@ class TestRunLength:
 
     def test_it_reports_the_length_it_actually_ran(self):
         measurements, tree = self._easy_model()
-        sampled = gibbs.solve(measurements, tree, sweeps=2000, num_samples=50)
+        sampled = gibbs.solve(measurements, tree, sweeps=2000, num_samples=50,
+                              temperatures=1)
         assert sampled['sweeps'] >= 2000
         assert sampled['converged'] is True
         assert sampled['convergence'] >= gibbs.TARGET_CONVERGENCE
@@ -1200,7 +1209,8 @@ class TestRunLength:
         at the cap and say so rather than running forever or claiming success."""
         measurements, tree = self._easy_model()
         sampled = gibbs.solve(measurements, tree, sweeps=2000, num_samples=50,
-                              target_convergence=1.01, max_sweeps=8000)
+                              target_convergence=1.01, max_sweeps=8000,
+                              temperatures=1)
         assert sampled['sweeps'] > 2000
         assert sampled['sweeps'] <= 8000 + 2000, sampled['sweeps']
         assert sampled['converged'] is False
@@ -1213,24 +1223,29 @@ class TestRunLength:
         asking for a longer run did nothing at all.
         """
         measurements, tree = self._easy_model()
-        plain = gibbs.solve(measurements, tree, sweeps=6000, num_samples=50)
+        plain = gibbs.solve(measurements, tree, sweeps=6000, num_samples=50,
+                            temperatures=1)
         floor = plain['sweeps'] + 20000
         held = gibbs.solve(measurements, tree, sweeps=6000, num_samples=50,
-                           min_sweeps=floor)
+                           min_sweeps=floor, temperatures=1)
         assert held['sweeps'] >= floor
         assert held['converged'] is True
 
-        two = gibbs.solve(measurements, tree, sweeps=6000, num_samples=50, chains=2)
+        two = gibbs.solve(measurements, tree, sweeps=6000, num_samples=50, chains=2,
+                          temperatures=1)
         floor = max(two['sweeps_per_chain']) + 10000
         held = gibbs.solve(measurements, tree, sweeps=6000, num_samples=50,
-                           chains=2, min_sweeps=floor)
+                           chains=2, min_sweeps=floor, temperatures=1)
         assert min(held['sweeps_per_chain']) >= floor
 
     def test_the_seed_reproduces_a_run_and_a_new_one_replicates_it(self):
         measurements, tree = self._easy_model()
-        a = gibbs.solve(measurements, tree, sweeps=2000, num_samples=50, seed=11)
-        b = gibbs.solve(measurements, tree, sweeps=2000, num_samples=50, seed=11)
-        c = gibbs.solve(measurements, tree, sweeps=2000, num_samples=50, seed=12)
+        a = gibbs.solve(measurements, tree, sweeps=2000, num_samples=50, seed=11,
+                        temperatures=1)
+        b = gibbs.solve(measurements, tree, sweeps=2000, num_samples=50, seed=11,
+                        temperatures=1)
+        c = gibbs.solve(measurements, tree, sweeps=2000, num_samples=50, seed=12,
+                        temperatures=1)
         date = measurements[0]['id']
         means = [r['measurements'][date]['posterior_mean'] for r in (a, b, c)]
         assert means[0] == means[1]
@@ -1252,7 +1267,7 @@ class TestRunLength:
         measurements, tree = self._easy_model()
         model = gibbs.Model(measurements, tree)
         chain = gibbs.run(model, sweeps=4000, target_convergence=1.01,
-                          max_sweeps=16000)
+                          max_sweeps=16000, temperatures=1)
         assert chain['sweeps'] > 4000
         assert chain['sweeps_kept'] < chain['sweeps'] * (1 - gibbs.BURN_IN_FRACTION / 2)
 
@@ -1320,9 +1335,9 @@ class TestParallelChains:
         model = gibbs.Model(measurements, tree)
         pooled = gibbs.solve_chains(measurements, tree, chains=3, sweeps=1500,
                                     max_sweeps=1500, seed=7, grid=model.grid,
-                                    target_convergence=1.01)
+                                    target_convergence=1.01, temperatures=1)
         alone = [gibbs.run(model, sweeps=1500, max_sweeps=1500, seed=7 + c,
-                           target_convergence=1.01, **start)
+                           target_convergence=1.01, temperatures=1, **start)
                  for c, start in enumerate(gibbs.chain_starts(3, 7))]
         for param in model.params:
             expected = sum(r['histograms'][param] for r in alone)
@@ -1338,12 +1353,12 @@ class TestParallelChains:
         measurements, tree = self._model()
         model = gibbs.Model(measurements, tree)
         alone = gibbs.run(model, sweeps=1500, max_sweeps=1500, seed=42,
-                          target_convergence=1.01)
+                          target_convergence=1.01, temperatures=1)
         pooled = gibbs.solve_chains(measurements, tree, chains=2, sweeps=1500,
                                     max_sweeps=1500, seed=42, grid=model.grid,
-                                    target_convergence=1.01)
+                                    target_convergence=1.01, temperatures=1)
         other = gibbs.run(model, sweeps=1500, max_sweeps=1500, seed=43,
-                          target_convergence=1.01,
+                          target_convergence=1.01, temperatures=1,
                           **gibbs.chain_starts(2, 42)[1])
         for param in model.params:
             assert np.array_equal(pooled['histograms'][param],
@@ -1383,8 +1398,10 @@ class TestParallelChains:
         """
         measurements = ox.measurements()
         tree = ox.model_tree('unordered')
-        one = gibbs.solve(measurements, tree, num_samples=50, sweeps=4000)
-        four = gibbs.solve(measurements, tree, num_samples=50, sweeps=4000, chains=4)
+        one = gibbs.solve(measurements, tree, num_samples=50, sweeps=4000,
+                          temperatures=1)
+        four = gibbs.solve(measurements, tree, num_samples=50, sweeps=4000, chains=4,
+                           temperatures=1)
         assert one['converged'] and four['converged']
         assert max(four['sweeps_per_chain']) < one['sweeps'] * 0.6, (
             four['sweeps_per_chain'], one['sweeps'])
@@ -1417,7 +1434,7 @@ class TestParallelChains:
         measurements, tree = self._model()
         seen = []
         gibbs.solve_chains(measurements, tree, chains=2, sweeps=1500,
-                           max_sweeps=1500,
+                           max_sweeps=1500, temperatures=1,
                            on_progress=lambda info: seen.append(info) or True)
         assert seen, 'no progress reported'
         assert all(info['chains'] == 2 for info in seen)
@@ -1436,10 +1453,10 @@ class TestParallelChains:
 
         with pytest.raises(gibbs.Cancelled):
             gibbs.solve_chains(measurements, tree, chains=2, sweeps=4000,
-                               max_sweeps=4000, on_progress=stop)
+                               max_sweeps=4000, on_progress=stop, temperatures=1)
         # ...and the pool is still usable afterwards.
         again = gibbs.solve_chains(measurements, tree, chains=2, sweeps=1000,
-                                   max_sweeps=1000)
+                                   max_sweeps=1000, temperatures=1)
         assert again['sweeps'] == 2000
 
     def test_a_failing_chain_raises_its_error_here(self):
@@ -1467,7 +1484,7 @@ class TestParallelChains:
                 gibbs.solve_chains(broken, tree, chains=3, sweeps=1000, max_sweeps=1000)
             good = gibbs.solve_chains(measurements, tree, chains=3, sweeps=1000,
                                       max_sweeps=1000, target_convergence=1.01,
-                                      on_progress=lambda info: True)
+                                      on_progress=lambda info: True, temperatures=1)
             assert good['sweeps'] == 3000
 
 
@@ -1655,6 +1672,10 @@ class TestBoundaryTiesCountHalf:
         Exact Start 617.0. With coincident Boundaries counted whole the same
         runs gave 606.3 and 562.4 -- the second a whole lobe out -- and with
         them kept apart 619.5 and 621.7.
+
+        Tempered, at the default. Untempered, these two runs put the Start 14.9
+        years young, and five other pairs of seeds 8 to 42; tempered, all six
+        pairs land within 3.5.
         """
         measurements, tree = self._layers()
         chain = ec.layout(tree, measurements)

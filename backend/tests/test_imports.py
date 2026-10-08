@@ -1422,6 +1422,9 @@ class TestImportedDatesRunAsAnAnalysis:
                 {k: v for k, v in d.items() if k != 'phase_name'} for d in result.dates
             ],
             'model_tree': result.model_tree,
+            # Sampled, the model not being a chain; untempered, since what
+            # is tested is that the import runs at all.
+            'bayesian_config': {'mcmc_temperatures': 1},
         })
 
         assert response.status_code == 200, response.text
@@ -1722,7 +1725,8 @@ class TestDepositionSequences:
         assert result.ok, result.errors
 
         solved = gibbs.solve(result.dates, result.model_tree, sweeps=6000,
-                             num_samples=300, max_sweeps=40000, seed=31)
+                             num_samples=300, max_sweeps=40000, seed=31,
+                             temperatures=1)
         for date in result.dates:
             expected = 1000.0 + 10.0 * date['depth_cm']
             got = solved['measurements'][date['id']]['posterior_median']
