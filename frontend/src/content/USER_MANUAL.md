@@ -392,8 +392,9 @@ rather than arranged by hand.
   changes — posteriors, agreement indices and plots are the same at any setting (see
   [A.4](#a4-summarising-a-posterior)).
 - **Uniform span prior**: OxCal's `UniformSpanPrior` correction (on by default), keeping a
-  sequence's overall span prior independent of how finely it is subdivided. Only affects a
-  sequence with three or more Boundaries.
+  sequence's overall span prior independent of how finely it is subdivided. It matters most on a
+  sequence with three or more Boundaries, but it also narrows a single Phase between two
+  Boundaries (see [A.5](#a5-the-bayesian-model)).
 - **Apply inbuilt-age allowances**: on by default. Off runs the model as if no date had an
   [inbuilt-age allowance](#inbuilt-age).
 - **Durations and differences**: off by default; see
@@ -454,9 +455,8 @@ Where both methods can be used, they give the same date ranges to within about a
 
 **Forcing the exact solver on a Sequence with a missing Boundary.** The commonest reason the exact
 solver cannot take a model is a Sequence that puts one group after another with no Boundary between
-them.
-**Exact solver only** will still solve it, by adding the Boundary that the order implies. That
-changes the model, and the date ranges move as a result: in tests against OxCal, sampling such
+them. **Exact solver only** will still solve it, by adding the Boundary that the order implies.
+That changes the model, and the date ranges move as a result: in tests against OxCal, sampling such
 models as written came closer to OxCal's answer than solving them with the added Boundary.
 Automatic therefore samples these models. If you do want the exact solver here, add the Boundary to
 the model yourself, so the change is visible and deliberate. Hovering over **Exact solver** on the
@@ -866,7 +866,8 @@ Placed dates sitting in the starting phase every analysis begins with are not ye
 On the Model Structure page, **Build from data › Group dates into sites** replaces the model with
 one bracketed Sequence per site, keyed on **location** name, **context**, or **position** (dates
 within 5 km). The menu shows how many sites each key would produce and how many dates lack a value.
-No order between sites is asserted.
+No order between sites is asserted. The result, the sites side by side between a shared Start and
+End, is a model the exact solver takes, so **Automatic** solves it without sampling.
 
 A Phase whose dates are more than 10 km apart is refused: two sites in one phase is a modelling
 error, and silently placing the phase between them would report a front passing through somewhere
@@ -1242,7 +1243,7 @@ dates calibrated alone.
 
 ### A.5 The Bayesian model
 
-The model of Buck et al. (1991, 1992; 1996), following OxCal (Bronk Ramsey 1995, 2009a):
+The model of Buck et al. (1991, 1992; 1996), following OxCal (Bronk Ramsey 1995, 1998, 2009a):
 
 ```
 p(t, b)  proportional to  prod_dates L_d(t_d)
@@ -1298,8 +1299,9 @@ reported span, and it narrows.
 
 ### A.6 Solvers
 
-The app chooses between two solvers by model shape. Both target the same posterior and are checked
-against each other on every model both can handle.
+The app chooses between two solvers by model shape. Both target the same posterior. After a sampled
+run, a background check compares the sampler with a direct calculation wherever the model's shape
+allows one (below); the test suite holds the two solvers to each other on the shapes both can take.
 
 **Exact integration** (chain-shaped models: a Sequence of Phases separated by Boundaries, or a
 Sequence of such Sequences, each bracketed by its own Boundaries). Every date other than the one
@@ -1332,9 +1334,12 @@ meeting carries no tie of its own. The span correction counts every Boundary in 
 areas' included, over the outermost pair, as the sampler does. Joint draws take the outer
 Boundaries first, then each area's two ends given its stage, then its interior and its dates.
 
-This is O(M²) per group on an M-point grid, deterministic, and exact up to the grid step. Duration
-and difference draws are independent draws from the joint posterior, taken backwards along the same
-chain.
+This costs O(M²) per group on an M-point grid while nothing couples a chain's two ends, as on a
+single Phase, and O(M³) per group once the span correction does: a chain of three or more
+Boundaries, and every area side by side. Either way it is deterministic and exact up to the grid
+step. Duration and difference draws are independent draws from the joint posterior: backwards
+along the chain when its ends are uncoupled, otherwise the two ends together and then the interior
+forwards, and for areas side by side in the order given above.
 
 The interval integrals `F` are **trapezoidal**, with half weight on each endpoint cell. A plain
 cumulative difference gives an interval spanning `k` cells the mass of `k+1` cells, while the span
@@ -1342,7 +1347,7 @@ factor charges `k`, so near-coincident configurations gain `2^K` and every model
 too narrow.
 
 **Metropolis-Hastings / Gibbs sampling** (everything else) follows OxCal's scheme (Metropolis et
-al. 1953; Hastings 1970; Buck et al. 1992; Bronk Ramsey 1995). Each full conditional is
+al. 1953; Hastings 1970; Geman and Geman 1984; Buck et al. 1992; Bronk Ramsey 1995). Each full conditional is
 one-dimensional and exactly samplable: a date's conditional is its likelihood over the interval its
 neighbours and boundaries allow; a Boundary's is the product of the span factors of the groups it
 bounds. The app draws by inverse CDF on a precomputed cumulative table rather than by
@@ -1397,8 +1402,8 @@ separated calendar ranges, untempered chains crossed between them 0–2 times in
 each reported whichever range it started in, putting the probability of the early range at
 0.00–0.03 against an exact 0.08. With tempering they crossed 900–1,600 times, with swap acceptance
 near 35%. Across the models tested, tempered runs landed within 0.03 of the exact answer on the
-probability of any parameter being older than any given year, at about twice the run time on models
-that did not need tempering.
+probability of any parameter being older than any given year. On a model that did not need it,
+tempering tripled the run time (21 s against 7).
 
 **Checking a sampled result.** Both convergence measures compare the sampler against itself and
 cannot detect a lobe no chain has reached. The app therefore calculates the same posterior without
@@ -1406,19 +1411,17 @@ sampling, using the exact solver's grid, interval integrals and message passing,
 shared outlier scale, over these shapes (the last two the exact solver itself does not accept):
 
 - A chain of Phases and Boundaries created using nested Sequences.
-- Parallel chains between an outer pair (e.g. a site's Start and End surrounding one Sequence per
-  area).
+- Parallel chains between one outer pair (e.g. a site's Start and End surrounding one Sequence per
+  area), but not as one stage of a longer Sequence.
 - Either of the above with Phases or Sequences that have no Boundary between them.
 - Any of these with dates outside every Boundary: Phases or Sequences of dates before the model's
   first Boundary or after its last. They have no span term (their prior is flat), so given that
   Boundary they enter as one weight on it: the integral of their likelihoods beyond it, in their
   own order. A date out there carrying an outlier model is not checked.
 
-Given the outer pair, the branches are independent:
-
-```
-p(S, E) ∝ C(S, E) · T0(S, E) · Π_b Z_b(S, E)
-```
+Given the outer pair the branches are independent, so the pair's weight is the span correction
+C(S, E) times the stage term T_k(S, E) of areas side by side above, and each branch is then
+solved within it as an area is.
 
 Each Boundary is compared on 5-year bins in two ways: by total variation distance, and by the
 largest difference in the probability of the Boundary being older than any given year. Over 0.15 on
@@ -1612,7 +1615,7 @@ end before they start (A.9). A difference of medians and a ratio of widths need 
 
 ### A.13 Wiggle matching
 
-A series with counted separations has **one** free parameter. Writing `t` for the reference-point
+A series with counted separations has **one** free parameter (Galimberti et al. 2004). Writing `t` for the reference-point
 calendar age and `g_i` for member `i`'s gap:
 
 ```
@@ -1717,7 +1720,8 @@ Sites are the elements of A.5 opened by their own Boundary, at their dates' cent
 age is that Boundary's posterior. All three fits are made **per joint draw** and pooled, so
 chronological uncertainty is inside the estimate rather than bolted on afterwards (see A.9).
 
-**Wave of advance.** For site *i* at great-circle distance `d_i` from an origin:
+**Wave of advance** (Ammerman and Cavalli-Sforza 1971). For site *i* at great-circle distance
+`d_i` from an origin:
 
 ```
 t_i  =  t₀ − d_i / v  +  ε_i
@@ -1780,7 +1784,8 @@ likelihood uses plain kernels, as the paper states. Solver draws (grid years) ar
 across their grid cell first, since dates of a short phase can otherwise share one year and have no
 spread.
 
-**Computation.** Each joint draw's `g` is drawn directly from `L(g | t)`, evaluated on 32 cells
+**Computation.** OxCal moves `g` by Metropolis-Hastings inside its MCMC (Bronk Ramsey 2021). Here
+each joint draw's `g` is drawn directly from `L(g | t)`, evaluated on 32 cells
 across (0, 1) then refined to 16 across the best. 500 draws are used. Kernel sums use linear
 binning and convolution (cost grows with span, not n²), within ~0.1% of the direct sum.
 
