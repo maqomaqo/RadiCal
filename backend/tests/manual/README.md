@@ -31,17 +31,17 @@ Figures below are from the model as it stood under SMC:
 | `order` (pure ordering) | 1.01 | <1 yr | 1.0 |
 | `multiphase` (3 phases × 4 dates) | 0.94 | 21 yr | 1.02 |
 
-## `nenthorn`: against a real OxCal 4.4 run
+## `hillside`: against a real OxCal 4.4 run
 
 `tests/fixtures/oxcal/` holds three actual OxCal 4.4 analyses of the same
-eight dates (Nenthorn, Otago; SHCal20; default UniformSpanPrior and
+eight dates (Hillside; SHCal20; default UniformSpanPrior and
 resolution; no outlier model), each with its `.oxcal` definition and the full
 exported distributions. They differ only in how the two branches relate:
 
-- **ordered** — the original. `Quarry` and `Rockshelter` are sibling
-  Sequences inside `Sequence("Nenthorn")`, carrying no boundaries of their own.
+- **ordered** — the original. `North` and `South` are sibling
+  Sequences inside `Sequence("Hillside")`, carrying no boundaries of their own.
 - **unordered** — both wrapped in one `Phase("Sites")`.
-- **shared_boundary** — a `Boundary("Quarry to Rockshelter")` between them.
+- **shared_boundary** — a `Boundary("North to South")` between them.
 
 The UNMODELLED half is asserted in `tests/test_oxcal_agreement.py` and passes
 tightly: distribution overlap 0.978-0.983, every reported range edge within 2
@@ -62,8 +62,8 @@ The MODELLED comparison then localises the app's error precisely:
 
 With no ordering constraint the app reproduces OxCal to within 4 years. Add
 one and it over-separates the groups by three to four times, satisfying the
-constraint by pushing Quarry entirely into the early calibration lobe
-(secondary-lobe mass 0.000-0.001) and Rockshelter into the late one
+constraint by pushing North entirely into the early calibration lobe
+(secondary-lobe mass 0.000-0.001) and South into the late one
 (0.27-0.77) — a chronological break at AD 1350 that is an artefact of the
 SHCal20 wiggle, not of the data.
 
@@ -72,7 +72,7 @@ SHCal20 wiggle, not of the data.
 a boundary, exactly what `sequence_marginals` computes, so the exact answer
 for the app's own model is available:
 
-| | Quarry mean AD | Rockshelter mean AD | separation | Rockshelter late-lobe mass |
+| | North mean AD | South mean AD | separation | South late-lobe mass |
 |---|---|---|---|---|
 | OxCal 4.4 | 1335.7 | 1348.9 | 13.2 yr | 0.169 |
 | exact reference | 1334.6 | 1354.1 | 19.4 yr | 0.262 |
@@ -99,7 +99,7 @@ on top of it.
 `_run_bayesian` uses it whenever `exact_chain.layout()` recognises the model.
 On the `shared_boundary` fixture, against OxCal:
 
-| | mean error vs OxCal | group separation | Rockshelter late-lobe mass |
+| | mean error vs OxCal | group separation | South late-lobe mass |
 |---|---|---|---|
 | OxCal 4.4 | — | 13.2 yr | 0.169 |
 | pm.sample_smc | 25.3 yr rms | 57.3 yr | 0.71 |
@@ -167,7 +167,7 @@ the app itself, both now fixed and pinned in `tests/test_exact_chain.py`:
   group count (1.0 to 7.7 years across the cases here) -- so a published
   range depended on an implementation detail. Worse, a modelled posterior on
   a wiggly curve is genuinely multi-peaked, so a 1-year grid picks out the
-  peak tops and skips the dips: Wk-51189's 68.3% region came back as three
+  peak tops and skips the dips: Ld-10012's 68.3% region came back as three
   fragments totalling 24 years, two of them split by a single excluded year,
   where OxCal reports 35. Reporting now happens at a fixed 5 years, OxCal's
   own default. Rebinned that way the eight dates' 95.4% widths average 51.2
@@ -177,7 +177,7 @@ the app itself, both now fixed and pinned in `tests/test_exact_chain.py`:
 
 For a SINGLE group the exact solver and the samplers disagree, and the
 disagreement grows with group size: they agree within a year at K = 3-4, and
-by K = 8 the solver says the eight Nenthorn dates average AD 1348.3 while
+by K = 8 the solver says the eight Hillside dates average AD 1348.3 while
 SMC, a random-walk Metropolis chain and importance sampling all say ~1341.
 The evidence says the solver is right — it converges under grid refinement,
 matches an explicit double loop, and is bracketed by both analytic limits

@@ -1,6 +1,6 @@
 """
 Reader for the checked-in OxCal runs in tests/fixtures/oxcal/ -- a real
-analysis (Nenthorn, Otago; SHCal20; OxCal 4.4, default UniformSpanPrior and
+analysis (Hillside; SHCal20; OxCal 4.4, default UniformSpanPrior and
 resolution, no outlier model) exported from OxCal itself, so the app can be
 held against the field-standard tool rather than only against its own maths.
 
@@ -8,14 +8,14 @@ Not named test_* on purpose: it is a helper, used by test_oxcal_agreement.py
 and by tests/test_gibbs.py.
 
 THREE runs of the same eight dates, differing only in how the two branches
-(Quarry and Rockshelter) relate to each other:
+(North and South) relate to each other:
 
-  ordered          the original. Quarry and Rockshelter are sibling Sequences
-                   inside Sequence("Nenthorn") and carry no boundaries of
+  ordered          the original. North and South are sibling Sequences
+                   inside Sequence("Hillside") and carry no boundaries of
                    their own, so the ordering is implied by the structure.
   unordered        both branches wrapped in one Phase("Sites"), so nothing
                    orders them.
-  shared_boundary  a Boundary("Quarry to Rockshelter") added between them, so
+  shared_boundary  a Boundary("North to South") added between them, so
                    the transition is one explicit shared parameter.
 
 `ordered` and `shared_boundary` come out nearly identical (Fire_Feature_J at
@@ -30,10 +30,10 @@ Each run has four files:
                likelihood and posterior distributions at 5-year steps, in AD
   * Table.csv  the summary ranges OxCal reports, unmodelled and modelled, at
                68.3% and 95.4%, also in AD
-plus one shared Nenthorn_c14.csv holding the input dates.
+plus one shared Hillside_c14.csv holding the input dates.
 
 Note on Table.csv: its from/to columns are the ENVELOPE of the HPD region,
-not one range per lobe. OxCal's own raw distribution for WK51189 is
+not one range per lobe. OxCal's own raw distribution for LD10012 is
 AD 1293-1328 plus 1333-1393, which the table reports as 1291-1394. Compare
 envelopes against it, or compare range-by-range against the raw export.
 """
@@ -43,13 +43,13 @@ import re
 import numpy as np
 
 FIXTURES = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'fixtures', 'oxcal')
-C14 = os.path.join(FIXTURES, 'Nenthorn_c14.csv')
+C14 = os.path.join(FIXTURES, 'Hillside_c14.csv')
 
 # run name -> the stem its three files share
 RUNS = {
-    'ordered': 'Nenthorn_sites_3',
-    'unordered': 'Nenthorn_sites_3_unordered',
-    'shared_boundary': 'Nenthorn_sites_3_shared_boundary',
+    'ordered': 'Hillside_sites_3',
+    'unordered': 'Hillside_sites_3_unordered',
+    'shared_boundary': 'Hillside_sites_3_shared_boundary',
 }
 DEFAULT_RUN = 'ordered'
 
@@ -63,16 +63,16 @@ def paths(run=DEFAULT_RUN):
 
 
 # The dates' grouping, read off the .oxcal files -- identical in all three
-# runs; only the relationship between Quarry and Rockshelter changes.
-FIRE_FEATURE_J = ['WK51189', 'WK50102', 'WK50105']
-FIRE_FEATURE_K = ['WK50099', 'WK50100', 'WK50101']
-FIRE_FEATURE_A = ['ANU55209', 'ANU55206']
-QUARRY = FIRE_FEATURE_J
-ROCKSHELTER = FIRE_FEATURE_K + FIRE_FEATURE_A
+# runs; only the relationship between North and South changes.
+FIRE_FEATURE_J = ['LD10012', 'LD10009', 'LD10011']
+FIRE_FEATURE_K = ['LD10006', 'LD10007', 'LD10008']
+FIRE_FEATURE_A = ['LA10003', 'LA10001']
+NORTH = FIRE_FEATURE_J
+SOUTH = FIRE_FEATURE_K + FIRE_FEATURE_A
 
 
 def key(name):
-    """OxCal drops punctuation from lab codes: 'Wk-51189' -> 'WK51189'."""
+    """OxCal drops punctuation from lab codes: 'Ld-10012' -> 'LD10012'."""
     return re.sub(r'[^A-Za-z0-9]', '', name).upper()
 
 
@@ -80,7 +80,7 @@ def key(name):
 # midpoint, so 0 cal BP -- the year AD 1950 -- sits at 1950.5, and its raw
 # exports fall on x.5 AD, i.e. on whole cal BP years. Converting them with
 # 1950 instead shifts every OxCal distribution half a year young (measured on
-# SRM: best-fit constant 1950.54 across all twelve likelihoods).
+# DS: best-fit constant 1950.54 across all twelve likelihoods).
 OXCAL_PRESENT = 1950.5
 
 
@@ -127,28 +127,28 @@ def model_tree(run=DEFAULT_RUN):
         return {'id': eid, 'element_type': etype, 'name': name,
                 'tpq_age_bp': None, 'taq_age_bp': None, 'children': children or []}
 
-    quarry = el('quarry', 'sequence', 'Quarry',
+    north = el('north', 'sequence', 'North',
                 [el('ff_j', 'phase', 'Fire_Feature_J')])
-    rockshelter = el('rock', 'sequence', 'Rockshelter', [
+    south = el('rock', 'sequence', 'South', [
         el('fires', 'phase', 'Fires', [
             el('ff_k', 'phase', 'Fire_Feature_K'),
             el('ff_a', 'phase', 'Fire_Feature_A'),
         ]),
     ])
     if run == 'ordered':
-        middle = [quarry, rockshelter]
+        middle = [north, south]
     elif run == 'unordered':
-        middle = [el('sites', 'phase', 'Sites', [quarry, rockshelter])]
+        middle = [el('sites', 'phase', 'Sites', [north, south])]
     elif run == 'shared_boundary':
-        middle = [quarry,
-                  el('b_mid', 'boundary', 'Quarry to Rockshelter'),
-                  rockshelter]
+        middle = [north,
+                  el('b_mid', 'boundary', 'North to South'),
+                  south]
     else:
         raise ValueError(f'unknown run {run!r}')
-    return el('nenthorn', 'sequence', 'Nenthorn', [
-        el('b_start', 'boundary', 'Start Nenthorn'),
+    return el('hillside', 'sequence', 'Hillside', [
+        el('b_start', 'boundary', 'Start Hillside'),
         *middle,
-        el('b_end', 'boundary', 'End Nenthorn'),
+        el('b_end', 'boundary', 'End Hillside'),
     ])
 
 
@@ -191,7 +191,7 @@ def table_ranges(run=DEFAULT_RUN):
         name = row[0].strip()
         cells = [c.strip() for c in row[1:9]]
         if name:
-            parts = name.split(None, 1)          # "R_Date WK51189" -> op, label
+            parts = name.split(None, 1)          # "R_Date LD10012" -> op, label
             label = parts[1] if len(parts) > 1 else name
             current = key(label)
             if not any(cells):

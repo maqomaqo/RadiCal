@@ -218,7 +218,7 @@ class TestDeletion:
             db.flush()
             db.add(ProjectSample(
                 project_id=project.id,
-                sample_name='NZ-7756',
+                sample_name='LB-10002',
                 age_bp=970, error_1sigma=47,
                 material_type='marine shell', sample_type='marine',
                 curve_id='marine20',

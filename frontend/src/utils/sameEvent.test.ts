@@ -9,8 +9,8 @@ import {
 } from './sameEvent'
 import type { DraftMeasurement } from '@/types'
 
-// Nenthorn, old-wood dates excluded (feature spec Q2).
-const NENTHORN: SameEventTest = {
+// Hillside, old-wood dates excluded (feature spec Q2).
+const HILLSIDE: SameEventTest = {
   element_id: null,
   name: null,
   n: 8,
@@ -30,7 +30,7 @@ const NENTHORN: SameEventTest = {
 
 // New dates, Layers 11-7.
 const LAYERS: SameEventTest = {
-  ...NENTHORN,
+  ...HILLSIDE,
   n: 6,
   df: 5,
   mean_bp: 656.3,
@@ -42,7 +42,7 @@ const LAYERS: SameEventTest = {
 }
 
 const REFUSED: SameEventTest = {
-  ...NENTHORN,
+  ...HILLSIDE,
   mean_bp: null,
   error_bp: null,
   t: null,
@@ -54,20 +54,20 @@ const REFUSED: SameEventTest = {
 
 describe('same-event wording', () => {
   it('states the verdict either way', () => {
-    expect(sameEventVerdict(NENTHORN)).toBe('Consistent with one event')
+    expect(sameEventVerdict(HILLSIDE)).toBe('Consistent with one event')
     expect(sameEventVerdict(LAYERS)).toBe('More scatter than one event allows')
   })
 
   it('gives the critical value to two decimals', () => {
-    expect(sameEventFigures(NENTHORN)).toBe('T = 5.7 · 5% critical 14.07 · df 7')
+    expect(sameEventFigures(HILLSIDE)).toBe('T = 5.7 · 5% critical 14.07 · df 7')
   })
 
   it('writes the pooled age', () => {
-    expect(pooledAge(NENTHORN)).toBe('656 ± 8 BP')
+    expect(pooledAge(HILLSIDE)).toBe('656 ± 8 BP')
   })
 
   it('picks the calibrated ranges at the page confidence', () => {
-    expect(pooledRanges(NENTHORN, 0.9544997361)[0].max).toBe(660)
+    expect(pooledRanges(HILLSIDE, 0.9544997361)[0].max).toBe(660)
     expect(pooledRanges(LAYERS, 0.9544997361)).toEqual([])
   })
 
@@ -96,7 +96,7 @@ describe('pooledMeasurement', () => {
   const dates = [draft('A', 650, 20), draft('B', 662, 16, { material_type: 'eggshell' })]
 
   it('takes the pooled age and keeps what the dates share', () => {
-    const pooled = pooledMeasurement(dates, NENTHORN, 'pooled_1')
+    const pooled = pooledMeasurement(dates, HILLSIDE, 'pooled_1')
     expect(pooled).toMatchObject({
       id: 'pooled_1',
       sample_name: 'Pooled: A + B',
@@ -111,19 +111,19 @@ describe('pooledMeasurement', () => {
   })
 
   it('records what was pooled', () => {
-    const { notes } = pooledMeasurement(dates, NENTHORN, 'x')
+    const { notes } = pooledMeasurement(dates, HILLSIDE, 'x')
     expect(notes).toContain('A 650 ± 20 BP; B 662 ± 16 BP')
     expect(notes).toContain('T = 5.7')
   })
 
   it('leaves blank what the dates disagree on', () => {
     const apart = [draft('A', 650, 20), draft('B', 662, 16, { latitude: -46 })]
-    expect(pooledMeasurement(apart, NENTHORN, 'x').latitude).toBeNull()
+    expect(pooledMeasurement(apart, HILLSIDE, 'x').latitude).toBeNull()
   })
 
   it('keeps a long name inside the field limit', () => {
-    const many = Array.from({ length: 30 }, (_, i) => draft(`WkA-5530${i}`, 650, 20))
-    const { sample_name } = pooledMeasurement(many, NENTHORN, 'x')
+    const many = Array.from({ length: 30 }, (_, i) => draft(`Le-10001${i}`, 650, 20))
+    const { sample_name } = pooledMeasurement(many, HILLSIDE, 'x')
     expect(sample_name.length).toBeLessThanOrEqual(200)
     expect(sample_name).toMatch(/\(30 dates\)$/)
   })

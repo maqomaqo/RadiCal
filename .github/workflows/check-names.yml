@@ -1,0 +1,35 @@
+# Keeps the repository free of names from the research project that motivated
+# it: datasets, sites, lab codes, publications. The blocked terms are stored
+# as salted hashes (scripts/dataset_names.sha256); see CONTRIBUTING.md.
+name: Check dataset names
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  names:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Check the tree
+        run: python3 scripts/check_dataset_names.py
+
+      # Commit messages are part of the record too. Only the commits this
+      # push or pull request adds are checked, so older history stays as it is.
+      - name: Check new commit messages
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            range="${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}"
+          elif [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]; then
+            range="${{ github.event.before }}..${{ github.sha }}"
+          else
+            exit 0
+          fi
+          git log --format=%B "$range" | python3 scripts/check_dataset_names.py --message -

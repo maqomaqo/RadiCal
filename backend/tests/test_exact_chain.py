@@ -67,18 +67,18 @@ class TestLayout:
         """
         A Sequence wrapping a single Phase, and a Phase holding two parallel
         Phases, constrain nothing extra -- so the model is still a chain even
-        though its tree is not flat. This is the Nenthorn shared_boundary
+        though its tree is not flat. This is the Hillside shared_boundary
         shape, and rejecting it would send a solvable model to the sampler.
         """
         chain = ec.layout(ox.model_tree('shared_boundary'), ox.measurements())
         assert chain is not None
         assert chain.boundary_ids == ['b_start', 'b_mid', 'b_end']
         assert [sorted(g) for g in chain.groups] == [
-            sorted(ox.FIRE_FEATURE_J), sorted(ox.ROCKSHELTER)]
+            sorted(ox.FIRE_FEATURE_J), sorted(ox.SOUTH)]
 
     def test_groups_ordered_without_a_boundary_between_them_is_not_a_chain(self):
         """
-        The Nenthorn original: two branches ordered against each other while
+        The Hillside original: two branches ordered against each other while
         sharing ONE enclosing boundary pair. Their dates are all in a single
         span group, and the extra ordering does not factorise along the
         chain, so the solver must decline it rather than quietly drop the
@@ -440,29 +440,29 @@ class TestAgainstOxCalModelled:
         """
         def mean_ad(ids):
             return np.mean([1950 - solved['measurements'][i]['posterior_mean'] for i in ids])
-        separation = mean_ad(ox.ROCKSHELTER) - mean_ad(ox.QUARRY)
+        separation = mean_ad(ox.SOUTH) - mean_ad(ox.NORTH)
         low, high = SPAN_PRIOR_EXPECTED[span_prior]['separation']
         assert low < separation < high
 
     def test_no_spurious_lobe_split(self, solved, span_prior):
         """
-        SMC satisfied the ordering by pushing Quarry into the early
-        calibration lobe and Rockshelter into the late one -- 0.00 and 0.71
+        SMC satisfied the ordering by pushing North into the early
+        calibration lobe and South into the late one -- 0.00 and 0.71
         of the mass around AD 1370-1420 against OxCal's 0.12 and 0.17. Both
         groups must keep a comparable, modest share.
         """
         lo, hi = 1950 - 1420, 1950 - 1370
         share = {}
-        for group, ids in (('quarry', ox.QUARRY), ('rockshelter', ox.ROCKSHELTER)):
+        for group, ids in (('north', ox.NORTH), ('south', ox.SOUTH)):
             masses = []
             for i in ids:
                 dist = np.array(solved['measurements'][i]['probability_distribution'])
                 inside = (dist[:, 0] >= lo) & (dist[:, 0] <= hi)
                 masses.append(dist[inside, 1].sum() / dist[:, 1].sum())
             share[group] = float(np.mean(masses))
-        assert 0.02 < share['quarry'] < 0.35
-        assert 0.02 < share['rockshelter'] < 0.35
-        assert abs(share['quarry'] - share['rockshelter']) < \
+        assert 0.02 < share['north'] < 0.35
+        assert 0.02 < share['south'] < 0.35
+        assert abs(share['north'] - share['south']) < \
             SPAN_PRIOR_EXPECTED[span_prior]['lobe_gap']
 
     def test_boundary_ranges_match_oxcal(self, solved, span_prior):
@@ -471,7 +471,7 @@ class TestAgainstOxCalModelled:
         got = solved['boundaries']['b_mid']['posterior']
         envelope = (min(r['min'] for r in got['hpd_95_ranges']),
                     max(r['max'] for r in got['hpd_95_ranges']))
-        want_from, want_to = table['QUARRYTOROCKSHELTER']['modelled'][95][0]
+        want_from, want_to = table['NORTHTOSOUTH']['modelled'][95][0]
         assert 1950 - envelope[1] == pytest.approx(want_from, abs=10.0)
         assert 1950 - envelope[0] == pytest.approx(want_to, abs=10.0)
 
@@ -558,14 +558,14 @@ class TestOrderedGroupsAgreeWithOxCal:
         solved = ec.solve(measurements, tree, chain, num_samples=100, **kwargs)
         mean = lambda ids: np.mean(
             [solved['measurements'][i]['posterior_mean'] for i in ids])
-        return mean(ox.QUARRY) - mean(ox.ROCKSHELTER)
+        return mean(ox.NORTH) - mean(ox.SOUTH)
 
     def _oxcals(self, run):
         dists = ox.distributions(run)
         mean = lambda ids: np.mean([
             float((cal * prob / prob.sum()).sum())
             for i in ids for cal, prob in [dists[ox.key(i)]['posterior']]])
-        return mean(ox.QUARRY) - mean(ox.ROCKSHELTER)
+        return mean(ox.NORTH) - mean(ox.SOUTH)
 
     def test_with_nothing_ordering_them_we_agree_exactly(self):
         """The control. Same dates, same curve, same priors, only the ordering
@@ -1493,8 +1493,8 @@ class TestReportingResolution:
 class TestOutlierModel:
     """
     The outlier model, against the OxCal 4.4 run in
-    tests/fixtures/oxcal_outlier -- Shag River Mouth, 16 dates in one phase,
-    NZ7756 at 970 +/- 47 BP against the rest at 537-660, with
+    tests/fixtures/oxcal_outlier -- Dune Section, 16 dates in one phase,
+    LB10002 at 970 +/- 47 BP against the rest at 537-660, with
     Outlier_Model("General", T(5), U(0,4), "t") and a 5% prior on each date.
 
     A Bernoulli indicator per date, integrated out exactly, which is what
@@ -1504,7 +1504,7 @@ class TestOutlierModel:
 
     @pytest.fixture(scope='class')
     def solved(self):
-        import shag_fixture as sf
+        import dune_section_fixture as sf
         samples, tree = sf.measurements(), sf.model_tree()
         chain = ec.layout(tree, samples)
         assert chain is not None
@@ -1717,7 +1717,7 @@ class TestImplicitBoundaries:
 
         def mean_ad(ids):
             return np.mean([1950 - solved['measurements'][i]['posterior_mean'] for i in ids])
-        separation = mean_ad(ox.ROCKSHELTER) - mean_ad(ox.QUARRY)
+        separation = mean_ad(ox.SOUTH) - mean_ad(ox.NORTH)
         assert 0.0 < separation < 20.0, separation
 
     def test_the_outlier_model_now_works_on_such_a_model(self):
@@ -1753,7 +1753,7 @@ def _spelled_out(element):
 
 class TestSequenceOfSequences:
     """
-    Sequence['Nenthorn then SRM': Sequence[B, P, B], Sequence[B, P, B, P, B]]
+    Sequence['Hillside then DS': Sequence[B, P, B], Sequence[B, P, B, P, B]]
     -- each inner Sequence bracketed by its own Boundaries. It plans as two
     paths of groups with only an ordering across the gap between them, which
     is exactly an empty group there, so it is the same chain as the children
@@ -1762,12 +1762,12 @@ class TestSequenceOfSequences:
     """
 
     def _nested(self):
-        first = _sequence('nen', [_boundary('b0', 'Start N'), _phase('pn', 'Nenthorn'),
-                                  _boundary('b1', 'End N')], name='Nenthorn')
-        second = _sequence('srm', [_boundary('b2', 'Start S'), _phase('ps1', 'SRM 1'),
-                                   _boundary('b3', 'Mid S'), _phase('ps2', 'SRM 2'),
-                                   _boundary('b4', 'End S')], name='SRM')
-        tree = _sequence('root', [first, second], name='Nenthorn then SRM')
+        first = _sequence('nen', [_boundary('b0', 'Start N'), _phase('pn', 'Hillside'),
+                                  _boundary('b1', 'End N')], name='Hillside')
+        second = _sequence('ds', [_boundary('b2', 'Start S'), _phase('ps1', 'DS 1'),
+                                   _boundary('b3', 'Mid S'), _phase('ps2', 'DS 2'),
+                                   _boundary('b4', 'End S')], name='DS')
+        tree = _sequence('root', [first, second], name='Hillside then DS')
         dates = _dates(('n1', 3230, 30, 'pn'), ('n2', 3190, 30, 'pn'),
                        ('s1', 3060, 30, 'ps1'), ('s2', 3090, 30, 'ps1'),
                        ('s3', 2960, 30, 'ps2'), ('s4', 2990, 30, 'ps2'))

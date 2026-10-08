@@ -287,7 +287,7 @@ describe('the reporting levels', () => {
 //
 // The page then threw that away and re-selected from the full-resolution
 // distribution, because only 68.3% and 95.4% are stored and the selector also
-// offers 99.7%. The Tikoraki one-phase model is the fixture below: Wk55150's
+// offers 99.7%. A one-phase model is the fixture below: Ld10013's
 // 95.4% region came back as five pieces on a 1.785-year grid, two of them
 // single points holding 0.3%, where the stored region is three pieces on
 // whole fives. Nothing failed -- the table simply disagreed with the export,

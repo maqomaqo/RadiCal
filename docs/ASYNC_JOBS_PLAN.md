@@ -38,7 +38,7 @@ paths, so this is the *mild* case):
 ```
 GET /api/curves, warm, server idle                     0.0023 s
 GET /api/curves, warm, issued during a PDF render      3.85   s     <-- queued behind it
-GET /api/results/{id}/pdf  ("Nenthorn > Shag (all areas)")   4.88 s
+GET /api/results/{id}/pdf  ("Hillside > Dune (all areas)")   4.88 s
 ```
 
 A request that costs 2.3 ms took 3.85 seconds because something else was computing. Nothing is
@@ -52,8 +52,8 @@ Wall-clock for `gibbs.run()`, each model run to its own convergence target:
 | Model | Params | Sweeps | Wall clock | ms/sweep |
 |---|---|---|---|---|
 | `oxcal_fixture` ordered — 8 dates, no outlier model | 10 | 66,000 | **12.7 s** | 0.19 |
-| `nenthorn_charcoal_fixture` — 11 dates, 2 outlier models | 13 | 38,000 | **28.7 s** | 0.76 |
-| `shag_fixture` — 16 dates, 1 phase, outlier model | 18 | 28,000 | **28.6 s** | 1.02 |
+| `hillside_charcoal_fixture` — 11 dates, 2 outlier models | 13 | 38,000 | **28.7 s** | 0.76 |
+| `dune_section_fixture` — 16 dates, 1 phase, outlier model | 18 | 28,000 | **28.6 s** | 1.02 |
 | synthetic — 30 dates / 6 phases | 37 | 30,000 | **18.4 s** | 0.61 |
 | synthetic — 60 dates / 12 phases | 73 | 30,000 | **43.4 s** | 1.45 |
 

@@ -1,0 +1,76 @@
+ // Delta_R values updated for Marine20
+ Plot()
+ {
+  Curve("SHCal20","SHCal20.14c");
+  Outlier_Model("General",T(5),U(0,4),"t");
+  Outlier_Model("Charcoal",Exp(1,-10,0),U(0,3),"t");
+  Sequence("Hillside")
+  {
+   Boundary("Start Hillside");
+   Sequence("North")
+   {
+    Phase("Fire_Feature_J")
+    {
+     Curve("=SHCal20");
+     R_Date("LD10010", 842, 21)
+     {
+      Outlier("Charcoal", 1.00);
+     };
+     R_Date("LD10012", 685, 25)
+     {
+      Outlier("General", 0.05);
+     };
+     R_Date("LD10009", 671, 21)
+     {
+      Outlier("General", 0.05);
+     };
+     R_Date("LD10011", 635, 21)
+     {
+      Outlier("General", 0.05);
+     };
+    };
+   };
+   Sequence("South")
+   {
+    Phase("Fires")
+    {
+     Phase("Fire_Feature_K")
+     {
+      R_Date("LD10005", 756, 20)
+      {
+       Outlier("Charcoal", 1.00);
+      };
+      R_Date("LD10006", 671, 20)
+      {
+       Outlier("General", 0.05);
+      };
+      R_Date("LD10007", 647, 21)
+      {
+       Outlier("General", 0.05);
+      };
+      R_Date("LD10008", 636, 21)
+      {
+       Outlier("General", 0.05);
+      };
+     };
+     Phase("Fire_Feature_A")
+     {
+      Curve("=SHCal20");
+      R_Date("LA10002", 746, 24)
+      {
+       Outlier("Charcoal", 1.00);
+      };
+      R_Date("LA10003", 676, 26)
+      {
+       Outlier("General", 0.05);
+      };
+      R_Date("LA10001", 637, 24)
+      {
+       Outlier("General", 0.05);
+      };
+     };
+    };
+   };
+   Boundary("End Hillside");
+  };
+ };

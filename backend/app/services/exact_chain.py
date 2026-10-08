@@ -51,7 +51,7 @@ PHASE WIDTH depends on the interval quadrature being right to second order --
 see _interval_integral, which carries the measurements. On models with a date
 declared an outright outlier (tests/fixtures/oxcal_charcoal) the span
 OVERSHOOTS, 54.9 years against OxCal's 29.2; that is the degenerate mode
-described in tests/nenthorn_charcoal_fixture's PHASE WIDTH note, not the phase
+described in tests/hillside_charcoal_fixture's PHASE WIDTH note, not the phase
 model. services/gibbs.py carries the same rule as Model.endpoint_weight, and the
 two agree to about 0.6 years on the chain fixtures.
 
@@ -90,7 +90,7 @@ GROUPS_AT_FULL_RESOLUTION = 6
 MIN_GRID_STEP_YEARS = 1.0
 # The second pass (see solve and _refined_grid) may go finer, because the
 # DISCRETISATION, not the curve, sets how fine is worth having: on the
-# Nenthorn shared-boundary reference model the separation of the two ordered
+# Hillside shared-boundary reference model the separation of the two ordered
 # groups moved 15.2 -> 14.2 -> 13.8 -> 13.6 years at steps of 2.5, 1.0, 0.45 and
 # 0.23, converging near the 13.2 OxCal gives, and still 1 year off at 1.0.
 REFINED_MIN_STEP_YEARS = 0.25
@@ -131,7 +131,7 @@ OUTLIER_KERNEL_HALF_WIDTH_YEARS = 20000.0
 # four. Integrating that scale is not a refinement: at a single fixed scale
 # only 12% of the offset mass lands within 20 years against OxCal's 55%, so a
 # flagged date drifts onto its neighbours instead of pulling the group towards
-# itself. On the Nenthorn charcoal fixture, integrating it moved the modelled
+# itself. On the Hillside charcoal fixture, integrating it moved the modelled
 # dates from 16.1 to 9.9 years rms of OxCal's answer.
 CHARCOAL_LOG_SCALE_MAX = 3.0
 CHARCOAL_KERNEL_SPAN_TAUS = 10.0
@@ -405,7 +405,7 @@ def _stitched(segments: List[List[SpanGroup]], plan) -> Optional[List[SpanGroup]
 # date's allowance is `inbuilt_years` and `inbuilt_shape`:
 #
 #   uniform      any offset from 0 to inbuilt_years, equally likely, never more
-#                -- a published MAXIMUM inbuilt age, as Petchey et al. give.
+#                -- a published MAXIMUM inbuilt age, as a published source can give.
 #   exponential  offsets with mean inbuilt_years, small ones likeliest, a long
 #                tail and no ceiling -- a TYPICAL age with no maximum known.
 #
@@ -647,7 +647,7 @@ def _with_outlier_component(
     # calendar age could be anywhere. Rescaling what remains to one would
     # inflate the component by the reciprocal of the retained mass and make the
     # outlier probability depend on the grid width: it put the fifteen sound
-    # Shag River dates at 9-14% against OxCal's 0.6-1.5%. The mixture is
+    # Dune Section dates at 9-14% against OxCal's 0.6-1.5%. The mixture is
     # therefore sub-unit here, the missing mass being the outlier possibility
     # the window does not cover.
     return (1.0 - prior) * inlier + prior * broad, broad
@@ -1233,8 +1233,8 @@ def _span_prior_correction(grid: np.ndarray, num_boundaries: int, enabled: bool,
         oxcal/unordered         0.20 -> 0.13     34.9 -> 30.4
         oxcal/ordered           2.42 -> 2.05     36.7 -> 31.5
         oxcal/shared_boundary   0.76 -> 0.30     36.7 -> 31.5
-        outlier/Shag            0.18 -> 0.16     20.7 -> 18.5
-        charcoal/Nenthorn      10.12 -> 8.37     51.4 -> 40.3
+        outlier/Dune            0.18 -> 0.16     20.7 -> 18.5
+        charcoal/Hillside      10.12 -> 8.37     51.4 -> 40.3
 
     WHAT IS STILL OPEN. On one phase of eight overlapping dates the span is 29.2
     against OxCal's 26.3, and 54.8 against 48.9 on four -- a constant proportion
@@ -1268,7 +1268,7 @@ def _span_prior_correction(grid: np.ndarray, num_boundaries: int, enabled: bool,
     About 1.5 years of extra separation remains, and is not this factor's doing:
     it survives refining the grid fourfold, appears whenever two groups are
     ORDERED whether the middle Boundary is written or implied, and is absent
-    when nothing orders them. See tests/nenthorn_charcoal_fixture's WHAT IS LEFT
+    when nothing orders them. See tests/hillside_charcoal_fixture's WHAT IS LEFT
     note.
     """
     if not enabled:
@@ -1477,7 +1477,7 @@ def _messages_with_span_prior(chain: Chain, allowed: Dict, transfer,
     is formed once per boundary here and reused; the marginal is then the
     diagonal of (A_i^T C) D_i^T, which is a row-wise dot product and costs
     O(M^2) rather than the O(M^3) of forming the product and discarding all
-    but its diagonal. Measured on the shared-boundary Nenthorn fixture the
+    but its diagonal. Measured on the shared-boundary Hillside fixture the
     solve went from 5.1 s to about 2 s for identical output.
     """
     num_groups = len(chain.groups)
@@ -1835,7 +1835,7 @@ def _solve_on_grid(grid: np.ndarray, measurements: List[Dict], root: Dict,
             # the sampler (gibbs.Model.endpoint_weight). Counted whole, the
             # date's marginal was not the marginal of the joint the boundaries
             # come from: modelled dates moved up to 3.7 years on the test models,
-            # and on the unordered Nenthorn reference run they were 0.64 years rms
+            # and on the unordered Hillside reference run they were 0.64 years rms
             # from the posteriors OxCal gave against 0.17 with the half.
             #
             # With both boundaries at t the date can only be at t too, and the
@@ -1970,7 +1970,7 @@ def _reported_ranges(grid: np.ndarray, mass: np.ndarray, confidence: float,
     implementation detail -- the same dates in a longer sequence would come back
     with different widths. And a modelled posterior on a wiggly curve is
     genuinely multi-peaked, so a fine grid picks out the peak tops and skips the
-    dips: at 1 year Wk-51189's 68.3% region came back as three fragments
+    dips: at 1 year Ld-10012's 68.3% region came back as three fragments
     totalling 24 years where OxCal reports 35, and rebinned to 5 years it gives
     30.
 

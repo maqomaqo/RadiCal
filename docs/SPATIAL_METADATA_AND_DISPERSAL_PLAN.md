@@ -402,7 +402,7 @@ Two new `COLUMN_ALIASES` entries:
               'decimal_longitude', 'lon_dd'),
 ```
 
-and both appended to `TEMPLATE_COLUMNS`, with the existing marine example row (`NZ-7756`,
+and both appended to `TEMPLATE_COLUMNS`, with the existing marine example row (`LB-10002`,
 marine20, ΔR −7 ± 45) given real coordinates so the template demonstrates the ΔR lookup as well as
 the ΔR column.
 
@@ -672,7 +672,7 @@ prevent.
    crosses land. A kriged ΔR between two sides of a peninsula is interpolating across a barrier the
    model does not know exists. Over-water distance is the fix and is **not** in scope (§9).
 
-Reference method: Ulm, S., O'Grady, D., Petchey, F., Hua, Q., Jacobsen, G., Linnenlucke, L., David,
+Reference method: Ulm, S., O'Grady, D., Petchey, F., Hua, Q., Jacobsen, G., Linnenlucke, L., David,  <!-- names-ok: public reference -->
 B., Rosendahl, D., Bunbury, M.M.E., Bird, M.I., and Reimer, P.J. (2023) *Australian marine
 radiocarbon reservoir effects: ΔR atlas and ΔR calculator for Australian mainland coasts and
 near-shore islands.* Radiocarbon 65(5), 1139–1159. doi:10.1017/RDC.2023.95. Their calculator is
@@ -1147,7 +1147,7 @@ refused, both accepted, out-of-range refused.
 `delta_r`. `tests/test_project_samples.py`: a deployed date carries its coordinates.
 
 **1d. Import.** `backend/app/services/date_import.py`: two `COLUMN_ALIASES` entries (`:146`), two
-`TEMPLATE_COLUMNS` (`:726`), the template's `NZ-7756` row given real coordinates, a DMS detector
+`TEMPLATE_COLUMNS` (`:726`), the template's `LB-10002` row given real coordinates, a DMS detector
 that fails the file naming the cell and the format wanted, and the `(0, 0)` warning through the
 existing `result.warnings`. `tests/test_imports.py`: aliases resolve in any order, DMS in each of
 the four spellings refused, `(0,0)` warns, template round-trips.

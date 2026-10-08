@@ -147,7 +147,7 @@ class TestPlanner:
         assert any(len(g.date_ids) == 0 for g in gapped_plan.span_groups)
 
     def test_undated_phase_does_not_unorder_the_boundaries_either_side(self):
-        # Shag River Mouth's "Layer 8": an undated phase between End 9 and
+        # Dune Section's "Layer 8": an undated phase between End 9 and
         # Start 7. With nothing in it to order against, those two boundaries
         # were left unordered and the one sequence sampled as two halves.
         tree = _sequence("r", "Site", [

@@ -42,7 +42,7 @@ exactly at each posterior point -- a joint draw, or a node of a tabulated
 posterior -- and only integral(L^2), a one-dimensional integral of a known
 function, is done on a grid, at COMPARISON_STEP_YEARS. The index is a ratio of
 integrals and the right value is the one a finer grid converges to; OxCal's
-own index moves with its calculation resolution (Nenthorn's Aoverall is 100.4
+own index moves with its calculation resolution (Hillside's Aoverall is 100.4
 at its default five years, 105.4 at one), and at one year this module
 reproduces it: per-date rms 0.23-0.30, Aoverall 105.5 against 105.4
 (tests/fixtures/oxcal_resolution). Against OxCal at its default five years it
@@ -75,8 +75,8 @@ about 100 p / (1 - p)^2, near 5 at the usual 0.05. Weighting by the posterior
 outlier probability instead would let the model rescue a moved date after the
 fact and make the index confirm itself.
 
-This is also what OxCal does. Scored off RadiCal's own run, Shag River Mouth's
-NZ7756 -- which both programs call an outlier with 99.9% -- comes out 5.2
+This is also what OxCal does. Scored off RadiCal's own run, Dune Section's
+LB10002 -- which both programs call an outlier with 99.9% -- comes out 5.2
 against OxCal's 5.4, where integrating delta out gives 0.5 and takes the
 model's Aoverall to 48.9 against OxCal's 84.2; with delta it is 84.9.
 

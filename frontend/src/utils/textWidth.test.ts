@@ -1,6 +1,6 @@
 // The estimator is calibrated against canvas measureText, run in the app's
 // own browser at 10px on the strings the Harris matrix actually draws -- the
-// Nenthorn boundary names and their formatted ranges. Those measurements are
+// boundary names and their formatted ranges. Those measurements are
 // the numbers in `ROBOTO_10PX` below.
 //
 // What is held to is not exactness, which a class-based estimate cannot have,
@@ -21,7 +21,6 @@ const ROBOTO_10PX: Array<[string, number, boolean]> = [
   ['Site sequence', 62.4, false],
   ['Fire_Feature_K', 65.4, false],
   ['Boundary', 42.3, false],
-  ['Start Nenthorn', 65.4, false],
   ['642–560 cal BP (95.4%)', 107.1, false],
   ['1450–1520 cal AD (95.4%)', 118.9, false],
   ['12345–11000 cal BC (99.7%)', 129.8, false],

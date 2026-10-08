@@ -1,0 +1,97 @@
+ // DS (Dune Section layered sequence), rebuilt from the OxCal
+ // results table for DS_Layers: same elements, names, order and dates.
+ // Default resolution: a control that should reproduce Amodel 38.4,
+ // Aoverall 45.9 to within OxCal's run-to-run noise.
+ Plot()
+ {
+  Outlier_Model("General",T(5),U(0,4),"t");
+  Curve("SHCal20","SHCal20.14c");
+  Sequence("DS Dune")
+  {
+   Boundary("Start 11");
+   Phase("DS Layer 11")
+   {
+    R_Date("Le-10002 egg", 614, 20)
+    {
+     Outlier("General", 0.05);
+    };
+    R_Date("Le-10003 egg", 627, 20)
+    {
+     Outlier("General", 0.05);
+    };
+   };
+   Boundary("DS End 11");
+   Interval("Interval L9/11");
+   Boundary("DS Start 9");
+   Phase("DS Layer 9")
+   {
+    R_Date("Le-10008 ch", 694, 16)
+    {
+     Outlier("General", 0.05);
+    };
+    R_Date("Le-10012 egg", 709, 16)
+    {
+     Outlier("General", 0.05);
+    };
+   };
+   Boundary("DS End 9");
+   Phase("DS Layer 8")
+   {
+    Interval("Interval L8/9");
+   };
+   Boundary("DS Start 7");
+   Phase("DS Layer 7")
+   {
+    R_Date("Le-10007 ch", 623, 16)
+    {
+     Outlier("General", 0.05);
+    };
+    R_Date("Le-10006 ch", 645, 16)
+    {
+     Outlier("General", 0.05);
+    };
+   };
+   Boundary("DS Layer 6 lower");
+   Interval("Interval L7/6");
+   Boundary("DS Layer 6 upper");
+   Phase("DS Layer 6")
+   {
+    R_Date("Le-10005 ch", 546, 15)
+    {
+     Outlier("General", 0.05);
+    };
+    R_Date("Le-10011 ch", 565, 16)
+    {
+     Outlier("General", 0.05);
+    };
+   };
+   Boundary("DS Start 5");
+   Phase("DS Layer 5")
+   {
+    R_Date("Le-10013 egg", 597, 18)
+    {
+     Outlier("General", 0.05);
+    };
+    R_Date("Le-10009 pigeon bone", 590, 15)
+    {
+     Outlier("General", 0.05);
+    };
+    R_Date("Le-10004 ch", 620, 15)
+    {
+     Outlier("General", 0.05);
+    };
+   };
+   Boundary("DS Start 4");
+   Phase("DS Layer 4")
+   {
+    R_Date("Le-10010 ch", 543, 20)
+    {
+     Outlier("General", 0.05);
+    };
+   };
+   Boundary("DS End 3");
+   Span("Span DS");
+  };
+  Difference("Difference 11/9","DS Start 9","DS End 11");
+  Difference("Difference 9/7","DS Start 7","DS End 9");
+ };

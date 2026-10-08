@@ -175,7 +175,7 @@ def diff_runs(newer: Dict, older: Dict, shift_years: float = DEFAULT_SHIFT_YEARS
     """
     What changed between two runs of one analysis: every quantity whose median
     moved by `shift_years` or more, or whose 95% region gained or lost a part
-    (a mode appearing or going, which can matter more than a shift -- REAL-Mp-
+    (a mode appearing or going, which can matter more than a shift -- REF-A-
     NOE lost its short mode while its median moved under ten years), and any
     change in whether the run converged.
     """

@@ -42,18 +42,18 @@ function date(id: string, elementId: string): MatrixMeasurement {
   return { id, sample_name: id, age_bp: 3000, element_id: elementId }
 }
 
-/** The real Nenthorn model -- the one the complaint was raised against. */
-function nenthorn(): ModelElement {
-  return el('nenthorn', 'sequence', 'Nenthorn', [
-    el('b_start', 'boundary', 'Start Nenthorn'),
-    el('quarry', 'sequence', 'Quarry', [el('ff_j', 'phase', 'Fire_Feature_J')]),
-    el('rock', 'sequence', 'Rockshelter', [
+/** The real Hillside model -- the one the complaint was raised against. */
+function hillside(): ModelElement {
+  return el('hillside', 'sequence', 'Hillside', [
+    el('b_start', 'boundary', 'Start Hillside'),
+    el('north', 'sequence', 'North', [el('ff_j', 'phase', 'Fire_Feature_J')]),
+    el('rock', 'sequence', 'South', [
       el('fires', 'phase', 'Fires', [
         el('ff_k', 'phase', 'Fire_Feature_K'),
         el('ff_a', 'phase', 'Fire_Feature_A'),
       ]),
     ]),
-    el('b_end', 'boundary', 'End Nenthorn'),
+    el('b_end', 'boundary', 'End Hillside'),
   ])
 }
 
@@ -92,17 +92,17 @@ const centreX = (layout: HarrisLayout, id: string) =>
 
 describe('implied edges', () => {
   it('draws one arrow between adjacent blocks, not one per contained phase', () => {
-    const layout = layoutHarrisMatrix(nenthorn(), [])
+    const layout = layoutHarrisMatrix(hillside(), [])
 
-    // Quarry and Rockshelter are adjacent with no Boundary between them, so
+    // North and South are adjacent with no Boundary between them, so
     // exactly one arrow carries that order -- not one per contained phase,
     // which would be three.
     expect(layout.edges).toHaveLength(1)
-    expect(layout.edges[0]).toMatchObject({ source: 'rock', target: 'quarry' })
+    expect(layout.edges[0]).toMatchObject({ source: 'rock', target: 'north' })
   })
 
   it('never connects a phase to something its container already orders', () => {
-    const layout = layoutHarrisMatrix(nenthorn(), [])
+    const layout = layoutHarrisMatrix(hillside(), [])
     const touched = new Set(layout.edges.flatMap((e) => [e.source, e.target]))
 
     for (const id of ['ff_j', 'ff_k', 'ff_a', 'fires']) {
@@ -143,17 +143,17 @@ describe('implied edges', () => {
 
 describe('containment is a box, not an edge', () => {
   it('nests a phase inside the phase that contains it', () => {
-    const layout = layoutHarrisMatrix(nenthorn(), [])
+    const layout = layoutHarrisMatrix(hillside(), [])
     const nodes = byId(layout)
 
     expect(nodes.get('ff_k')!.parentId).toBe('fires')
     expect(nodes.get('ff_a')!.parentId).toBe('fires')
     expect(nodes.get('fires')!.parentId).toBe('rock')
-    expect(nodes.get('rock')!.parentId).toBe('nenthorn')
+    expect(nodes.get('rock')!.parentId).toBe('hillside')
   })
 
   it('draws a grouping phase as a container and a dated phase as a context', () => {
-    const layout = layoutHarrisMatrix(nenthorn(), [])
+    const layout = layoutHarrisMatrix(hillside(), [])
     const nodes = byId(layout)
 
     // "Fires" contains the fire features; it is not one of them.
@@ -179,17 +179,17 @@ describe('containment is a box, not an edge', () => {
 
 describe('descendants align with their parent', () => {
   it('centres a stacked child on the sequence that holds it', () => {
-    const layout = layoutHarrisMatrix(nenthorn(), [])
+    const layout = layoutHarrisMatrix(hillside(), [])
 
-    // Quarry and Rockshelter are different widths -- Rockshelter nests two
+    // North and South are different widths -- South nests two
     // phases -- so this only holds if each is centred rather than placed at
     // an index.
-    expect(centreX(layout, 'quarry')).toBeCloseTo(centreX(layout, 'nenthorn'), 6)
-    expect(centreX(layout, 'rock')).toBeCloseTo(centreX(layout, 'nenthorn'), 6)
+    expect(centreX(layout, 'north')).toBeCloseTo(centreX(layout, 'hillside'), 6)
+    expect(centreX(layout, 'rock')).toBeCloseTo(centreX(layout, 'hillside'), 6)
   })
 
   it('centres a row of parallel phases on their container', () => {
-    const layout = layoutHarrisMatrix(nenthorn(), [])
+    const layout = layoutHarrisMatrix(hillside(), [])
     const nodes = byId(layout)
 
     const left = absolute(layout, 'ff_k').x
@@ -217,15 +217,15 @@ describe('reading direction and spacing', () => {
   it('puts the oldest at the bottom', () => {
     // The tree runs oldest first; a Harris matrix reads oldest at the bottom,
     // so the first child must end up with the LARGEST y.
-    const layout = layoutHarrisMatrix(nenthorn(), [])
+    const layout = layoutHarrisMatrix(hillside(), [])
 
     const start = absolute(layout, 'b_start').y
-    const quarry = absolute(layout, 'quarry').y
+    const north = absolute(layout, 'north').y
     const rock = absolute(layout, 'rock').y
     const end = absolute(layout, 'b_end').y
 
-    expect(start).toBeGreaterThan(quarry)
-    expect(quarry).toBeGreaterThan(rock)
+    expect(start).toBeGreaterThan(north)
+    expect(north).toBeGreaterThan(rock)
     expect(rock).toBeGreaterThan(end)
   })
 
@@ -256,9 +256,9 @@ describe('reading direction and spacing', () => {
   })
 
   it('spans a boundary rule across its parent content width', () => {
-    const layout = layoutHarrisMatrix(nenthorn(), [])
+    const layout = layoutHarrisMatrix(hillside(), [])
     const nodes = byId(layout)
-    const root = nodes.get('nenthorn')!
+    const root = nodes.get('hillside')!
 
     for (const id of ['b_start', 'b_end']) {
       const rule = nodes.get(id)!
@@ -269,13 +269,13 @@ describe('reading direction and spacing', () => {
   })
 })
 
-// The complaint these were written for: on Nenthorn J > A > K every rule
+// The complaint these were written for: on Hillside J > A > K every rule
 // carried a name and a modelled range, the box was sized for the contexts
 // alone, and 47px of red text hung outside it.
 describe('a boundary rule is wide enough for its own label', () => {
   /** The model the overflow was reported on: three contexts in one sequence,
    *  divided by boundaries whose names are longer than the boxes. */
-  function nenthornJAK(): ModelElement {
+  function hillsideJAK(): ModelElement {
     return el('site', 'sequence', 'Site sequence', [
       el('b0', 'boundary', 'Start of sequence'),
       el('ff_j', 'phase', 'Fire_Feature_J'),
@@ -305,7 +305,7 @@ describe('a boundary rule is wide enough for its own label', () => {
   }
 
   it('fits the name and the modelled range on the rule', () => {
-    const layout = layoutHarrisMatrix(nenthornJAK(), [], {}, ranges)
+    const layout = layoutHarrisMatrix(hillsideJAK(), [], {}, ranges)
     const nodes = byId(layout)
 
     for (const [id, range] of Object.entries(ranges)) {
@@ -319,14 +319,14 @@ describe('a boundary rule is wide enough for its own label', () => {
   it('fits a long name even before the analysis has run', () => {
     // No ranges: the draft model in the Model Structure editor. The names
     // alone can still outrun a 172px context box.
-    const layout = layoutHarrisMatrix(nenthornJAK(), [])
+    const layout = layoutHarrisMatrix(hillsideJAK(), [])
     const rule = byId(layout).get('b1')!
 
     expect(rule.width).toBeGreaterThanOrEqual(labelSpan(rule.name, undefined))
   })
 
   it('carries the range it was measured for through to the node', () => {
-    const nodes = byId(layoutHarrisMatrix(nenthornJAK(), [], {}, ranges))
+    const nodes = byId(layoutHarrisMatrix(hillsideJAK(), [], {}, ranges))
 
     expect(nodes.get('b1')!.rangeLabel).toBe(ranges.b1)
     // Nothing else has one -- a context is not a modelled transition.
@@ -334,7 +334,7 @@ describe('a boundary rule is wide enough for its own label', () => {
   })
 
   it('widens the container rather than the boxes inside it', () => {
-    const layout = layoutHarrisMatrix(nenthornJAK(), [], {}, ranges)
+    const layout = layoutHarrisMatrix(hillsideJAK(), [], {}, ranges)
     const nodes = byId(layout)
 
     // The contexts keep their own size and stay centred; it is the sequence
@@ -361,7 +361,7 @@ describe('a boundary rule is wide enough for its own label', () => {
 describe('dates and what is missing', () => {
   it('counts each context’s own dates', () => {
     const dates = [date('d1', 'ff_j'), date('d2', 'ff_j'), date('d3', 'ff_k')]
-    const layout = layoutHarrisMatrix(nenthorn(), dates)
+    const layout = layoutHarrisMatrix(hillside(), dates)
     const nodes = byId(layout)
 
     expect(nodes.get('ff_j')!.dateCount).toBe(2)
@@ -371,7 +371,7 @@ describe('dates and what is missing', () => {
   })
 
   it('reports a date pointing at nothing rather than dropping it', () => {
-    const layout = layoutHarrisMatrix(nenthorn(), [date('d1', 'ff_j'), date('d2', 'gone')])
+    const layout = layoutHarrisMatrix(hillside(), [date('d1', 'ff_j'), date('d2', 'gone')])
 
     expect(layout.unassignedCount).toBe(1)
   })
@@ -380,7 +380,7 @@ describe('dates and what is missing', () => {
     // The draft store keeps assignments separately while a model is being
     // built, and they win -- otherwise moving a date between phases in the
     // editor would not move it in the diagram.
-    const layout = layoutHarrisMatrix(nenthorn(), [date('d1', 'ff_j')], { d1: 'ff_a' })
+    const layout = layoutHarrisMatrix(hillside(), [date('d1', 'ff_j')], { d1: 'ff_a' })
     const nodes = byId(layout)
 
     expect(nodes.get('ff_j')!.dateCount).toBe(0)
@@ -393,7 +393,7 @@ describe('what a node is, as distinct from how it is drawn', () => {
   // and a Phase holding other elements are both boxes. The diagram colours
   // a Phase differently from a Sequence, so it needs the distinction back.
   it('keeps the element type a grouping Phase shares with a Sequence', () => {
-    const nodes = byId(layoutHarrisMatrix(nenthorn(), []))
+    const nodes = byId(layoutHarrisMatrix(hillside(), []))
 
     expect(nodes.get('fires')!.kind).toBe('group')
     expect(nodes.get('rock')!.kind).toBe('group')
@@ -402,14 +402,14 @@ describe('what a node is, as distinct from how it is drawn', () => {
   })
 
   it('reports a context as the Phase it is', () => {
-    const nodes = byId(layoutHarrisMatrix(nenthorn(), [date('d1', 'ff_k')]))
+    const nodes = byId(layoutHarrisMatrix(hillside(), [date('d1', 'ff_k')]))
 
     expect(nodes.get('ff_k')!.kind).toBe('context')
     expect(nodes.get('ff_k')!.elementType).toBe('phase')
   })
 
   it('reports a boundary as itself', () => {
-    const nodes = byId(layoutHarrisMatrix(nenthorn(), []))
+    const nodes = byId(layoutHarrisMatrix(hillside(), []))
 
     expect(nodes.get('b_start')!.elementType).toBe('boundary')
   })
@@ -464,9 +464,9 @@ describe('degenerate structures', () => {
 
 describe('summariseTree', () => {
   it('counts what the model asserts, not what the diagram draws', () => {
-    // Nenthorn: 3 phases (Fire_Feature_J/K/A) plus the grouping phase Fires,
+    // Hillside: 3 phases (Fire_Feature_J/K/A) plus the grouping phase Fires,
     // 2 boundaries, and 3 adjacent pairs in the root sequence.
-    expect(summariseTree(nenthorn())).toEqual({
+    expect(summariseTree(hillside())).toEqual({
       phaseCount: 4,
       orderingCount: 3,
       boundaryCount: 2,

@@ -1,0 +1,57 @@
+ // Hillside_sites_3, with the North -> South ordering made EXPLICIT.
+ // Identical to Hillside_sites_3.oxcal except for one added Boundary between
+ // the two branch Sequences, so the transition between them is a single
+ // shared parameter rather than something the outer Sequence has to infer
+ // from two groups that carry no boundaries of their own.
+ Plot()
+ {
+  Curve("SHCal20","SHCal20.14c");
+  Sequence("Hillside")
+  {
+   Boundary("Start Hillside");
+   Sequence("North")
+   {
+    Phase("Fire_Feature_J")
+    {
+     R_Date("LD10012", 685, 25)
+     {
+     };
+     R_Date("LD10009", 671, 21)
+     {
+     };
+     R_Date("LD10011", 635, 21)
+     {
+     };
+    };
+   };
+   Boundary("North to South");
+   Sequence("South")
+   {
+    Phase("Fires")
+    {
+     Phase("Fire_Feature_K")
+     {
+      R_Date("LD10006", 671, 20)
+      {
+      };
+      R_Date("LD10007", 647, 21)
+      {
+      };
+      R_Date("LD10008", 636, 21)
+      {
+      };
+     };
+     Phase("Fire_Feature_A")
+     {
+      R_Date("LA10003", 676, 26)
+      {
+      };
+      R_Date("LA10001", 637, 24)
+      {
+      };
+     };
+    };
+   };
+   Boundary("End Hillside");
+  };
+ };

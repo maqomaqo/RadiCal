@@ -3,7 +3,7 @@ Tests for services/statistics.py: the Ward and Wilson same-event test, and
 where it reaches the Results page and the JSON export.
 
 The five groups are the acceptance table of the October 2026 feature spec
-(Q2), from the Shag River Mouth corpus; the reference implementation is
+(Q2), from the Dune Section corpus; the reference implementation is
 `chi2` in corpus/corpus_checks.py of the AD1250-1450 test bundle. Tolerances
 are the spec's: T within 0.1, critical values to two decimal places.
 """
@@ -15,7 +15,7 @@ import pytest
 from app.services.statistics import same_event, same_event_report
 from tests.test_pdf_report import pdf_text
 
-NENTHORN = [  # old-wood dates (Wk-50104, Wk-50098, ANU-55207) excluded
+HILLSIDE = [  # old-wood dates (Ld-10010, Ld-10005, LA-10002) excluded
     (685, 25), (671, 21), (635, 21), (671, 20), (647, 21), (636, 21), (676, 26), (637, 24)]
 LEGACY_AND_OTHER_AREAS = [
     (660, 46), (646, 47), (630, 35), (670, 47), (600, 50), (580, 47), (537, 44), (560, 40),
@@ -36,7 +36,7 @@ def _dates(pairs, curve_id='shcal20', **extra):
 
 class TestSameEvent:
     @pytest.mark.parametrize('pairs, curve, mean, error, t, critical, consistent', [
-        (NENTHORN, 'shcal20', 656, 8, 5.7, 14.07, True),
+        (HILLSIDE, 'shcal20', 656, 8, 5.7, 14.07, True),
         (LEGACY_AND_OTHER_AREAS, 'shcal20', 607, 12, 10.7, 25.00, True),
         (LAYER_4_SHELLS, 'marine20', 1002, 11, 11.2, 22.36, True),
         (NEW_LAYERS_11_TO_7, 'shcal20', 656, 7, 27.9, 11.07, False),
@@ -59,7 +59,7 @@ class TestSameEvent:
         assert same_event([]) is None
 
     def test_pooled_date_is_calibrated_only_when_consistent(self):
-        passed = same_event(_dates(NENTHORN))
+        passed = same_event(_dates(HILLSIDE))
         levels = [entry['confidence'] for entry in passed['pooled_hpd_ranges']]
         assert len(levels) == 3 and levels == sorted(levels)
         assert all(entry['ranges'] for entry in passed['pooled_hpd_ranges'])
@@ -95,10 +95,10 @@ class TestSameEvent:
 
 class TestReport:
     def test_group_calibration_is_tested_as_one_set(self):
-        report = same_event_report('group_calibration', _dates(NENTHORN))
+        report = same_event_report('group_calibration', _dates(HILLSIDE))
         assert len(report) == 1
         assert report[0]['element_id'] is None
-        assert report[0]['n'] == len(NENTHORN)
+        assert report[0]['n'] == len(HILLSIDE)
 
     def test_a_bayesian_model_reports_none(self):
         """A Phase's dates are separate events by construction; the test is
@@ -132,12 +132,12 @@ _GROUP: dict = {}
 
 
 def _group(client) -> str:
-    """One Nenthorn group calibration, shared: sample ids are global keys."""
+    """One Hillside group calibration, shared: sample ids are global keys."""
     if not _GROUP:
         created = client.post('/api/analysis/calibrate-group', json={
-            'name': 'Nenthorn',
+            'name': 'Hillside',
             'measurements': [{**_measurement(f'N{i}', a, e), 'id': f'sg_d{i}'}
-                             for i, (a, e) in enumerate(NENTHORN)],
+                             for i, (a, e) in enumerate(HILLSIDE)],
         })
         assert created.status_code == 200, created.text
         _GROUP['id'] = created.json()['data']['id']
@@ -225,7 +225,7 @@ class TestEndpoint:
     def test_a_passing_set_comes_back_pooled_and_calibrated(self, client):
         result = client.post('/api/analysis/same-event', json={
             'measurements': [_measurement(f'N{i}', a, e)
-                             for i, (a, e) in enumerate(NENTHORN)]}).json()['data']
+                             for i, (a, e) in enumerate(HILLSIDE)]}).json()['data']
         assert result['consistent'] is True
         assert round(result['mean_bp']) == 656
         assert result['pooled_hpd_ranges']
@@ -256,13 +256,13 @@ import os
 from app.services.statistics import format_probability, p_before
 
 _FIXTURE = os.path.join(os.path.dirname(__file__), 'fixtures', 'thresholds',
-                        'real_mp_start11.json')
+                        'ref_start11.json')
 AD_1360 = 590.0
 
 
 class TestPBefore:
     @pytest.mark.parametrize('run, expected', [
-        ('REAL-Mp', 0.999), ('REAL-Mp-E11', 0.947), ('REAL-Mp-NOE', 0.989),
+        ('REF-A', 0.999), ('REF-A-E11', 0.947), ('REF-A-NOE', 0.989),
     ])
     def test_reproduces_the_spec_on_start_11(self, run, expected):
         """Feature spec Q1, within the exact-solver tolerance of 0.01."""
@@ -297,12 +297,12 @@ class TestPBefore:
 class TestPBeforeRoutes:
     def _calibration(self, client):
         created = client.post('/api/analysis/calibrate', json={
-            **_measurement('WkA-43681', 614, 20), 'save': True})
+            **_measurement('Le-10002', 614, 20), 'save': True})
         assert created.status_code == 200, created.text
         return created.json()['data']['id']
 
     def test_an_unmodelled_date_on_the_reversal(self, client):
-        """Feature spec Q1: WkA-43681, 614 ± 20 BP on SHCal20, P(before AD
+        """Feature spec Q1: Le-10002, 614 ± 20 BP on SHCal20, P(before AD
         1360) = 0.49."""
         analysis_id = self._calibration(client)
         data = client.get(f'/api/results/{analysis_id}/p-before?cal_bp=590').json()['data']

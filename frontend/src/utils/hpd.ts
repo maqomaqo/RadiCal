@@ -144,7 +144,7 @@ function modelledStep(reporting: RangeReporting): number | null {
  * published range depend on an implementation detail -- the same dates in a
  * longer sequence come back with different bounds. And a modelled posterior is
  * sharply multi-peaked, so selecting at that step takes the peak tops and
- * skips the dips: on the Tikoraki one-phase model, Wk55150's 95.4% region came
+ * skips the dips: on a one-phase model, Ld10013's 95.4% region came
  * back as five pieces including two single grid points holding 0.3% each,
  * where the rebinned region is three.
  *

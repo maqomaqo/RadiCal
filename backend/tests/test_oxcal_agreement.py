@@ -1,6 +1,6 @@
 """
 Hold the app's calibration against a real OxCal 4.4 run (tests/fixtures/oxcal:
-Nenthorn, SHCal20, default settings, no outlier model).
+Hillside, SHCal20, default settings, no outlier model).
 
 Only the UNMODELLED path is tested here, and deliberately so: it needs no
 MCMC, so it runs in milliseconds and can be asserted tightly. It is also the
@@ -113,7 +113,7 @@ class TestAgainstOxCalLikelihoods:
 def test_sub_resolution_slivers_are_reported():
     """
     One of these dates comes back with a THIRD HPD range carrying under 1% of
-    the probability -- ANU-55206's 95.4% region is reported as AD 1306-1308,
+    the probability -- LA-10001's 95.4% region is reported as AD 1306-1308,
     1313-1360, 1381-1408.
 
     This is not a calibration error: the app searches the curve's own grid,
@@ -124,7 +124,7 @@ def test_sub_resolution_slivers_are_reported():
     that suppressing slivers below some probability or width shows up as a
     deliberate change to this test.
 
-    Wk-50100 used to carry a second sliver, zero years wide at AD 1304. That
+    Ld-10007 used to carry a second sliver, zero years wide at AD 1304. That
     was a three-way TIE in probability at the region's edge, broken by
     whichever point an unstable argsort happened to put first; the ranking
     is now stable, so the tie goes to the lowest index and the point joins
@@ -140,7 +140,7 @@ def test_sub_resolution_slivers_are_reported():
             found[m['sample_name']] = [(r['max'] - r['min'], r['probability_percent'])
                                        for r in slivers]
 
-    assert sorted(found) == ['ANU-55206']
+    assert sorted(found) == ['LA-10001']
     for slivers in found.values():
         for width, share in slivers:
             assert width <= 5.0 and share < 1.0
@@ -163,20 +163,20 @@ class TestFixtureIntegrity:
     def test_boundaries_present_and_posterior_only(self, oxcal):
         """A Boundary has no likelihood of its own -- it is pure prior."""
         dists, table = oxcal
-        for name in ('STARTNENTHORN', 'ENDNENTHORN'):
+        for name in ('STARTHILLSIDE', 'ENDHILLSIDE'):
             assert 'posterior' in dists[name]
             assert 'likelihood' not in dists[name]
             assert table[name]['op'] == 'Boundary'
             assert not table[name]['unmodelled'][95]
 
-    # WK50099 and ANU55209 sit right on the 68.3% cut: their late lobe (around
+    # LD10006 and LA10003 sit right on the 68.3% cut: their late lobe (around
     # AD 1380-1395) is just barely inside it by our HPD search and just
     # outside it by OxCal's, so our envelope runs to 1393 where the table
     # stops at 1356. The older edge still agrees (1323 vs 1322), and both
     # agree at 95.4%, so this is a tie at the threshold rather than a
     # disagreement about the distribution. Listed rather than tolerated
     # generally, so a third case appearing would fail.
-    BORDERLINE_68 = {('WK50099', 'modelled'), ('ANU55209', 'modelled')}
+    BORDERLINE_68 = {('LD10006', 'modelled'), ('LA10003', 'modelled')}
 
     def test_table_ranges_reproduce_the_raw_export(self, oxcal):
         """
@@ -232,16 +232,16 @@ class TestFixtureIntegrity:
         validate_tree(root, ox.measurements())
 
         expected = {
-            'ordered': ['Nenthorn', 'Start Nenthorn', 'Quarry', 'Fire_Feature_J',
-                        'Rockshelter', 'Fires', 'Fire_Feature_K', 'Fire_Feature_A',
-                        'End Nenthorn'],
-            'unordered': ['Nenthorn', 'Start Nenthorn', 'Sites', 'Quarry',
-                          'Fire_Feature_J', 'Rockshelter', 'Fires', 'Fire_Feature_K',
-                          'Fire_Feature_A', 'End Nenthorn'],
-            'shared_boundary': ['Nenthorn', 'Start Nenthorn', 'Quarry',
-                                'Fire_Feature_J', 'Quarry to Rockshelter',
-                                'Rockshelter', 'Fires', 'Fire_Feature_K',
-                                'Fire_Feature_A', 'End Nenthorn'],
+            'ordered': ['Hillside', 'Start Hillside', 'North', 'Fire_Feature_J',
+                        'South', 'Fires', 'Fire_Feature_K', 'Fire_Feature_A',
+                        'End Hillside'],
+            'unordered': ['Hillside', 'Start Hillside', 'Sites', 'North',
+                          'Fire_Feature_J', 'South', 'Fires', 'Fire_Feature_K',
+                          'Fire_Feature_A', 'End Hillside'],
+            'shared_boundary': ['Hillside', 'Start Hillside', 'North',
+                                'Fire_Feature_J', 'North to South',
+                                'South', 'Fires', 'Fire_Feature_K',
+                                'Fire_Feature_A', 'End Hillside'],
         }[run]
         assert [e['name'] for e in iter_elements(root)] == expected
 

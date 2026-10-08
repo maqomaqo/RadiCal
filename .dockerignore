@@ -16,6 +16,9 @@ uploads
 backend/uploads
 postgres_data
 docs
+# The pytest suite and its reference-run fixtures are development material;
+# the dev compose stack builds backend/ on its own and bind-mounts the source.
+backend/tests
 *.md
 .env
 .env.*

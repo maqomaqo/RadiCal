@@ -140,7 +140,7 @@ describe('diffTrees', () => {
         {
           id: 'g',
           element_type: 'phase',
-          name: 'Rockshelters',
+          name: 'Souths',
           children: [{ id: 'p1', element_type: 'phase', name: 'J' }],
         },
       ],
@@ -154,7 +154,7 @@ describe('diffTrees', () => {
     const { elements } = diffTrees([nested, flat])
     const j = elements.find((e) => e.name === 'J')!
     expect(j.status).toBe('moved')
-    expect(j.parents).toEqual(['Rockshelters', 'Site'])
+    expect(j.parents).toEqual(['Souths', 'Site'])
   })
 
   it('counts unnamed elements instead of matching them by position', () => {

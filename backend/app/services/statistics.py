@@ -175,8 +175,8 @@ def p_before(distribution: Optional[Sequence[Sequence[float]]],
     exactly at the threshold and divided by the series' own total, since a
     stored series is trimmed to where it has mass. That series is what every
     view of a result already draws and ranges, so this needs no re-run; on the
-    feature spec's fixtures it gives REAL-Mp 0.999, REAL-Mp-E11 0.947,
-    REAL-Mp-NOE 0.989 and WkA-43681 unmodelled 0.489, as the reference does.
+    feature spec's fixtures it gives REF-A 0.999, REF-A-E11 0.947,
+    REF-A-NOE 0.989 and Le-10002 unmodelled 0.489, as the reference does.
 
     None where there is no distribution to read.
     """

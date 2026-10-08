@@ -187,7 +187,7 @@ class _Reach:
 class TestOrderedGroups:
     """
     Dates ordered against each other inside one pair of Boundaries -- the shape
-    of the Nenthorn reference model (a project run through OxCal and kept as a
+    of the Hillside reference model (a project run through OxCal and kept as a
     fixture), and one the exact solver declines ("two groups are ordered against
     each other with no Boundary between them").
     """
@@ -247,7 +247,7 @@ class TestOrderedGroups:
             ours = cross_check._binned(grid, direct['boundaries'][boundary_id], low, count)
             assert 0.5 * np.abs(theirs - ours).sum() < 0.04
 
-    def test_it_agrees_with_the_sampler_on_the_oxcal_nenthorn_model(self):
+    def test_it_agrees_with_the_sampler_on_the_oxcal_hillside_model(self):
         import oxcal_fixture as ox
         dates, tree = ox.measurements(), ox.model_tree('ordered')
         assert ec.layout(tree, dates) is None
