@@ -1268,6 +1268,78 @@ class TestTheLimitsFactor:
             assert got == pytest.approx(want, abs=2.0), bid
 
 
+class TestTheShortcutsChangeNothing:
+    """
+    Two ways the solver avoids work it used to do, each held to giving the
+    answer the longer way gave.
+    """
+
+    @staticmethod
+    def _three_phases(outlier_prior=0.0):
+        """Three phases of three dates: small, and refined to a finer second grid."""
+        specs = []
+        for k, ages in enumerate([(3010, 2995, 3020), (2950, 2965, 2940), (2900, 2890, 2915)]):
+            specs += [(f'tp_{k}{j}', age, 25, f'tp_p{k}') for j, age in enumerate(ages)]
+        dates = [dict(d, outlier_prior=outlier_prior) for d in _dates(*specs)]
+        tree = _sequence('tp', [_boundary('tp_b0'), _phase('tp_p0'), _boundary('tp_b1'),
+                                _phase('tp_p1'), _boundary('tp_b2'), _phase('tp_p2'),
+                                _boundary('tp_b3')])
+        return tree, dates
+
+    def test_the_straddling_weight_is_the_double_cumulative_sum(self):
+        """
+        A date's marginal needs, for each cell, the weight of the boundary pairs
+        either side of it. That was the diagonal of two M x M cumulative sums;
+        it is now read from the row and column sums, which holds because no
+        pair has its older boundary below its younger.
+        """
+        rng = np.random.default_rng(3)
+        size = 300
+        W = np.triu(rng.random((size, size)) * (rng.random((size, size)) > 0.5))
+        W *= np.exp(-0.05 * np.arange(size))[None, :]     # falling six decades towards the old end
+        want = np.cumsum(np.cumsum(W, axis=0)[:, ::-1], axis=1)[:, ::-1].diagonal()
+        got = ec._straddling(W.sum(axis=1), W.sum(axis=0))
+        np.testing.assert_allclose(got, want, rtol=1e-9, atol=1e-12 * want.max())
+
+    @pytest.mark.parametrize('outlier_prior', [0.0, 0.02])
+    def test_the_boundaries_alone_place_the_second_grid(self, outlier_prior):
+        """
+        solve()'s first pass reports only the Boundaries. Every date lies between
+        the outermost two, so their tails reach at least as far as any date's,
+        and the second grid comes out exactly where every density would put it.
+        """
+        tree, dates = self._three_phases(outlier_prior)
+        chain = ec.layout(tree, dates)
+        bounds = inherited_bounds(tree)
+        grid = ec._build_grid(dates, bounds, len(chain.groups))
+        options = dict(num_samples=50, seed=1, uniform_span_prior=True,
+                       estimate_durations=False, dispersal=None, interval_draws=50,
+                       resolution=5.0)
+        _none, boundaries = ec._solve_on_grid(grid, dates, tree, chain, bounds,
+                                              boundaries_only=True, **options)
+        _full, everything = ec._solve_on_grid(grid, dates, tree, chain, bounds, **options)
+        assert len(boundaries) == len(chain.boundary_ids) < len(everything)
+        from_boundaries = ec._refined_grid(grid, boundaries, dates, bounds, len(chain.groups))
+        from_everything = ec._refined_grid(grid, everything, dates, bounds, len(chain.groups))
+        assert from_boundaries is not None
+        assert np.array_equal(from_boundaries, from_everything)
+
+    def test_a_rejected_second_grid_returns_the_whole_first_pass(self, monkeypatch):
+        """The first pass is solved in full only when it is the answer."""
+        tree, dates = self._three_phases()
+        chain = ec.layout(tree, dates)
+        refined = ec.solve(dates, tree, chain, num_samples=50, interval_draws=50)
+        assert 'first_pass_step' in refined['grid']
+
+        monkeypatch.setattr(ec, 'REFINED_EDGE_MASS', -1.0)
+        solved = ec.solve(dates, tree, chain, num_samples=50, interval_draws=50)
+        assert 'first_pass_step' not in solved['grid']
+        assert solved['grid']['step'] == refined['grid']['first_pass_step']
+        assert set(solved['measurements']) == {d['id'] for d in dates}
+        assert set(solved['boundaries']) == set(chain.boundary_ids)
+        assert all(len(draws) == 50 for draws in solved['joint_draws'].values())
+
+
 class TestReportingIsIndependentOfTheInternalGrid:
     """
     Two defects found by running the recommended shared-Boundary model
@@ -1861,16 +1933,41 @@ class TestJointDraws:
         weights = np.zeros((6, width))
         weights[0::2, 150:] = 19.0 / 250          # rows totalling about 19
         weights[1::2, 300:320] = 1e-13 / 20       # ...and about 1e-13
-        picked = ec._sample_columns(np.random.default_rng(0), np.tile(weights, (100, 1)))
-        assert np.all(np.tile(weights, (100, 1))[np.arange(len(picked)), picked] > 0)
+        keys = np.tile(np.arange(6), 100)
+        picked = ec._draw_from_rows(np.random.default_rng(0), lambda rows: weights[rows], keys)
+        assert np.all(weights[keys, picked] > 0)
         small = picked.reshape(100, 6)[:, 1::2]
         assert small.min() >= 300 and small.max() < 320
 
     def test_draws_are_spread_as_the_weights_say(self):
-        weights = np.tile(np.array([[0.0, 1e-30, 3e-30, 0.0, 6e-30, 0.0]]), (20000, 1))
-        picked = ec._sample_columns(np.random.default_rng(1), weights)
+        row = np.array([[0.0, 1e-30, 3e-30, 0.0, 6e-30, 0.0]])
+        picked = ec._draw_from_rows(np.random.default_rng(1), lambda rows: row[rows],
+                                    np.zeros(20000, dtype=np.int64))
         counts = np.bincount(picked, minlength=6) / len(picked)
         np.testing.assert_allclose(counts, [0, 0.1, 0.3, 0, 0.6, 0], atol=0.015)
+
+    def test_draws_sharing_a_row_are_the_draws_they_would_be_alone(self):
+        """
+        Draws that condition on the same row share one cumulative sum. That is
+        a saving and must be nothing else: with the same generator, every draw
+        is the one a row of its own would have given, more distinct rows than
+        a block holds included.
+        """
+        rng = np.random.default_rng(7)
+        weights = rng.random((700, 50)) * (rng.random((700, 50)) > 0.3)
+        weights[:, 0] += 1e-3                         # no row is empty
+        weights *= 10.0 ** rng.uniform(-60, 0, (700, 1))
+        keys = rng.integers(0, 700, 5000)
+
+        grouped = ec._draw_from_rows(np.random.default_rng(8), lambda rows: weights[rows], keys)
+
+        uniforms = np.random.default_rng(8).random(len(keys))
+        alone = np.empty(len(keys), dtype=np.int64)
+        for k, key in enumerate(keys):
+            cumulative = np.cumsum(weights[key])
+            found = np.searchsorted(cumulative, uniforms[k] * cumulative[-1], side='right')
+            alone[k] = min(found, np.flatnonzero(weights[key])[-1])
+        assert np.array_equal(grouped, alone)
 
     def test_a_long_sequence_with_empty_phases_and_outliers(self):
         """

@@ -785,9 +785,11 @@ def _refined_grid(grid: np.ndarray, densities: List[np.ndarray],
     boundaries' tails, blind, so on a long model most of its points lie where
     no posterior is: a twenty-phase sequence over 1,500 years was solved at a
     15-year step across 14,800 years. Having solved it once, the tails are
-    known. This grid covers every first-pass posterior out to REFINE_TAIL_MASS
-    in either tail and every date's own likelihood support, with a margin, at
-    the finest step the same point budget allows.
+    known. This grid covers every first-pass posterior in `densities` out to
+    REFINE_TAIL_MASS in either tail and every date's own likelihood support,
+    with a margin, at the finest step the same point budget allows. solve()
+    passes the Boundaries' alone: every date lies between the outermost two,
+    so no date's tail reaches past theirs.
 
     The dates' supports are included so each date's likelihood is normalised,
     and its outlier component convolved, over all of it, exactly as on the
@@ -840,7 +842,10 @@ def _reporting_aligned_step(step: float) -> float:
 def _finite_peak(log_weights: np.ndarray) -> float:
     """The finite maximum _rescaled takes out, 0 when there is none."""
     finite = np.isfinite(log_weights)
-    return float(log_weights[finite].max()) if np.any(finite) else 0.0
+    if not np.any(finite):
+        return 0.0
+    # where= rather than log_weights[finite]: no copy of an M x M array.
+    return float(np.max(log_weights, where=finite, initial=-np.inf))
 
 
 def _rescaled(log_weights: np.ndarray) -> np.ndarray:
@@ -853,11 +858,11 @@ def _rescaled(log_weights: np.ndarray) -> np.ndarray:
     finite = np.isfinite(log_weights)
     if not np.any(finite):
         return np.where(finite, log_weights, -np.inf)
-    return np.where(finite, log_weights - log_weights[finite].max(), -np.inf)
+    return np.where(finite, log_weights - _finite_peak(log_weights), -np.inf)
 
 
 def _interval_integral(cumulative: np.ndarray, density: np.ndarray,
-                       step: float) -> np.ndarray:
+                       step: float, out: Optional[np.ndarray] = None) -> np.ndarray:
     """
     F[y, o] = integral of one date's likelihood over [grid[y], grid[o]],
     TRAPEZOIDALLY -- half weight on each endpoint cell.
@@ -884,22 +889,28 @@ def _interval_integral(cumulative: np.ndarray, density: np.ndarray,
 
     `density` and `step` are required rather than optional, because the
     uncorrected form is wrong wherever it is used.
+
+    `out`, an M x M array, takes the result in place of a new one: the solver
+    forms this once per date per group and again per date marginal, and at
+    M = 2000 every fresh M x M array is 32 MB to allocate and fault in.
     """
     padded = np.concatenate([[0.0], cumulative])
     half = 0.5 * step * density
-    F = (padded[None, 1:] - padded[:-1, None]) - half[None, :] - half[:, None]
-    return np.clip(F, 0.0, None)
+    # (C[o] - h[o]) - (C[y-1] + h[y]): each end's half folded into its own
+    # vector first, so the matrix is one subtraction rather than four passes.
+    F = np.subtract((padded[1:] - half)[None, :], (padded[:-1] + half)[:, None], out=out)
+    return np.maximum(F, 0.0, out=F)
 
 
 def _log_interval_integral(cumulative: np.ndarray, density: np.ndarray,
-                           step: float) -> np.ndarray:
-    F = _interval_integral(cumulative, density, step)
+                           step: float, out: Optional[np.ndarray] = None) -> np.ndarray:
+    F = _interval_integral(cumulative, density, step, out=out)
     with np.errstate(divide='ignore'):
-        return np.where(F > 0, np.log(np.where(F > 0, F, 1.0)), -np.inf)
+        return np.log(F, out=F)                  # an empty interval is -inf
 
 
 def _log_date_factor(cumulative: np.ndarray, density: np.ndarray,
-                     step: float) -> np.ndarray:
+                     step: float, out: Optional[np.ndarray] = None) -> np.ndarray:
     """
     One date's factor in its group's transfer matrix, in the log, indexed
     [younger, older]: its interval integral F where the boundaries are apart,
@@ -910,9 +921,11 @@ def _log_date_factor(cumulative: np.ndarray, density: np.ndarray,
     two boundaries meeting at b leave the dates' likelihoods at b -- times the
     tie's own weight, which _boundary_pair_term carries. Kept as one matrix
     per date so a date's own factor can be divided back out of the transfer
-    (the date marginals in _solve_on_grid) on and off the diagonal alike.
+    (the date marginals in _solve_on_grid) on and off the diagonal alike --
+    which needs it formed by this one function both times, so a cell that is
+    -inf in the factor is -inf in the transfer too.
     """
-    log_f = _log_interval_integral(cumulative, density, step)
+    log_f = _log_interval_integral(cumulative, density, step, out=out)
     with np.errstate(divide='ignore'):
         np.fill_diagonal(log_f, np.log(density))
     return log_f
@@ -1302,12 +1315,25 @@ def _sample_indices(rng, weights: np.ndarray, count: int) -> np.ndarray:
                    0, len(weights) - 1)
 
 
-def _sample_columns(rng, weights: np.ndarray) -> np.ndarray:
-    """
-    One column index per ROW of a (rows x M) weight matrix -- a batch of
-    independent inverse-CDF draws, each from its own row.
+# Distinct conditioning rows formed at a time when sampling the joint
+# posterior. One block holds a (block x M) float matrix, so this is a memory
+# knob rather than a statistical one: 512 x 2000 doubles is 8 MB.
+JOINT_DRAW_BLOCK = 512
 
-    Each row is compared only against its own cumulative, so rows on wildly
+
+def _draw_from_rows(rng, rows_for, keys: np.ndarray) -> np.ndarray:
+    """
+    One column index per draw, draw k an inverse-CDF draw from the weights of
+    row keys[k]; rows_for(distinct keys) returns those rows as a (len x M)
+    matrix.
+
+    Draws that condition on the same row share its cumulative sum. There are
+    far fewer distinct rows than draws -- under 1% of the 20,000 joint draws
+    on a plain chain, and 5-44% on the span-prior path, where a row is a
+    (boundary, last boundary) pair -- and one cumulative per DRAW was half of
+    a twenty-phase solve.
+
+    Each row is searched against its own cumulative only, so rows on wildly
     different scales cannot interfere. They do differ: a conditional's rows
     are products of message entries that run from 1 down to 1e-60. This used
     to lift every row by its row number times the largest total and run one
@@ -1316,28 +1342,39 @@ def _sample_columns(rng, weights: np.ndarray) -> np.ndarray:
     0, a cell of zero weight, so a boundary was drawn where it cannot be. On
     the span-prior path the next conditional then came out empty; on the plain
     path the impossible draw went through silently.
+
+    The uniforms are taken one per draw in draw order, and each row's weights
+    and cumulative are formed exactly as a row per draw would form them, so
+    the draws are exactly those of a row-per-draw loop on the same generator:
+    grouping changes the cost and nothing else.
     """
-    cumulative = np.cumsum(weights, axis=1)
-    totals = cumulative[:, -1]
-    if np.any(totals <= 0) or not np.all(np.isfinite(totals)):
-        raise ValueError('a conditional came out empty while drawing from the '
-                         'joint posterior; the model may be contradictory')
-    draw = rng.random(len(totals)) * totals
-    # The first column whose cumulative EXCEEDS the draw, which always carries
-    # weight: a zero cell repeats its predecessor's cumulative, so it cannot
-    # be the first to exceed anything.
-    found = (cumulative <= draw[:, None]).sum(axis=1)
-    # draw < total in exact arithmetic, but u * total can round up to it; the
-    # last column with weight is where such a draw belongs.
-    width = weights.shape[1]
-    last_with_weight = width - 1 - np.argmax(weights[:, ::-1] > 0, axis=1)
-    return np.minimum(found, last_with_weight)
-
-
-# Draws taken at a time when sampling the joint posterior. One block holds a
-# (block x M) float matrix, so this is a memory knob rather than a statistical
-# one: 512 x 2000 doubles is 8 MB.
-JOINT_DRAW_BLOCK = 512
+    count = len(keys)
+    uniforms = rng.random(count)
+    picked = np.empty(count, dtype=np.int64)
+    distinct, which = np.unique(keys, return_inverse=True)
+    which = which.ravel()
+    order = np.argsort(which, kind='stable')
+    starts = np.searchsorted(which[order], np.arange(len(distinct) + 1))
+    for first in range(0, len(distinct), JOINT_DRAW_BLOCK):
+        last = min(first + JOINT_DRAW_BLOCK, len(distinct))
+        weights = rows_for(distinct[first:last])
+        cumulative = np.cumsum(weights, axis=1)
+        totals = cumulative[:, -1]
+        if np.any(totals <= 0) or not np.all(np.isfinite(totals)):
+            raise ValueError('a conditional came out empty while drawing from the '
+                             'joint posterior; the model may be contradictory')
+        # u * total < total in exact arithmetic, but can round up to it; the
+        # last column with weight is where such a draw belongs.
+        last_with_weight = weights.shape[1] - 1 - np.argmax(weights[:, ::-1] > 0, axis=1)
+        for row in range(last - first):
+            draws = order[starts[first + row]:starts[first + row + 1]]
+            # The first column whose cumulative EXCEEDS the target, which
+            # always carries weight: a zero cell repeats its predecessor's
+            # cumulative, so it cannot be the first to exceed anything.
+            found = np.searchsorted(cumulative[row], uniforms[draws] * totals[row],
+                                    side='right')
+            picked[draws] = np.minimum(found, last_with_weight[row])
+    return picked
 
 
 def _messages(chain: Chain, allowed: Dict, transfer):
@@ -1358,7 +1395,7 @@ def _messages(chain: Chain, allowed: Dict, transfer):
     log_scale = 0.0
     alpha = [np.where(allowed[chain.boundary_ids[0]], 1.0, 0.0)]
     for i in range(len(chain.groups)):
-        message = (alpha[i][None, :] * transfer(i)).sum(axis=1)
+        message = transfer(i) @ alpha[i]
         peak = float(message.max())
         if peak > 0:
             message = message / peak
@@ -1367,7 +1404,7 @@ def _messages(chain: Chain, allowed: Dict, transfer):
     beta = [None] * len(chain.boundary_ids)
     beta[-1] = np.where(allowed[chain.boundary_ids[-1]], 1.0, 0.0)
     for i in range(len(chain.groups) - 1, -1, -1):
-        message = (transfer(i) * beta[i + 1][:, None]).sum(axis=0)
+        message = beta[i + 1] @ transfer(i)
         peak = float(message.max())
         beta[i] = message / peak if peak > 0 else message
     total = float((alpha[-1] * beta[-1]).sum())
@@ -1395,10 +1432,9 @@ def _messages(chain: Chain, allowed: Dict, transfer):
             rng, alpha[num_groups] * beta[num_groups], count)
         for i in range(num_groups - 1, -1, -1):
             matrix = transfer(i)                       # [younger, older]
-            for start in range(0, count, JOINT_DRAW_BLOCK):
-                stop = min(start + JOINT_DRAW_BLOCK, count)
-                rows = matrix[indices[start:stop, i + 1]] * alpha[i][None, :]
-                indices[start:stop, i] = _sample_columns(rng, rows)
+            indices[:, i] = _draw_from_rows(
+                rng, lambda rows, m=matrix, a=alpha[i]: m[rows] * a[None, :],
+                indices[:, i + 1])
         return indices
 
     return (lambda k: alpha[k][None, :] * beta[k + 1][:, None],
@@ -1467,15 +1503,18 @@ def _messages_with_span_prior(chain: Chain, allowed: Dict, transfer,
     # L[k] = A[k]^T C, indexed [b_k, b_last]: everything before boundary k
     # with the end-to-end correction folded in. Only A[n] is needed after
     # this (by draw_boundaries), so the rest of A is released.
-    L = [A[k].T @ C for k in range(num_groups + 1)]
     A_last = A[num_groups]
+    L = []
+    for k in range(num_groups + 1):
+        L.append(A[k].T @ C)
+        A[k] = None                       # never both lists whole at once
     del A
     total = float((C * A_last).sum())
     log_mass = (np.log(total) + log_scale) if total > 0 else -np.inf
 
     def pair_weight(k):
-        # [older, younger] -> transposed to the [younger, older] the caller uses.
-        return (L[k] @ D[k + 1].T).T
+        # [younger, older], formed that way round rather than transposed after.
+        return D[k + 1] @ L[k].T
 
     def boundary_density(i):
         # diag(L[i] @ D[i].T) without forming the product.
@@ -1506,13 +1545,16 @@ def _messages_with_span_prior(chain: Chain, allowed: Dict, transfer,
         indices[:, 0] = flat // width
         indices[:, num_groups] = flat % width
         for i in range(num_groups - 1):
-            older_to_younger = transfer(i).T          # [older, younger]
-            reach = D[i + 1].T                        # [b_last, b_(i+1)]
-            for start in range(0, count, JOINT_DRAW_BLOCK):
-                stop = min(start + JOINT_DRAW_BLOCK, count)
-                rows = (older_to_younger[indices[start:stop, i]]
-                        * reach[indices[start:stop, num_groups]])
-                indices[start:stop, i + 1] = _sample_columns(rng, rows)
+            # Contiguous copies, so each row gathered from them is one read
+            # rather than M reads a matrix-width apart.
+            older_to_younger = np.ascontiguousarray(transfer(i).T)   # [older, younger]
+            reach = np.ascontiguousarray(D[i + 1].T)                 # [b_last, b_(i+1)]
+            # The row a draw conditions on is the PAIR (b_i, b_last).
+            width = reach.shape[0]
+            indices[:, i + 1] = _draw_from_rows(
+                rng,
+                lambda pairs, a=older_to_younger, r=reach, w=width: a[pairs // w] * r[pairs % w],
+                indices[:, i] * width + indices[:, num_groups])
         return indices
 
     return pair_weight, boundary_density, draw_boundaries, log_mass
@@ -1612,12 +1654,12 @@ def solve(measurements: List[Dict], root: Dict, chain: Chain,
     `resolution` is the calendar step, in years, the HPD ranges and any
     durations are reported at -- see REPORTING_STEP_YEARS.
 
-    Solved twice where it pays: once on a grid padded blind for the boundaries'
-    tails, then on one covering only where that found posterior mass, at a
-    finer step (_refined_grid). `grid` reports the one used, with
-    `first_pass_step` when it was refined. `log_evidence` is the model's
-    evidence on that grid, for comparing solves of the same dates on the same
-    grid.
+    Solved twice where it pays: the Boundaries alone on a grid padded blind
+    for their tails, then everything on one covering only where they found
+    posterior mass, at a finer step (_refined_grid). `grid` reports the one
+    used, with `first_pass_step` when it was refined. `log_evidence` is the
+    model's evidence on that grid, for comparing solves of the same dates on
+    the same grid.
     """
     element_bounds = inherited_bounds(root)
     options = dict(num_samples=num_samples, seed=seed,
@@ -1628,17 +1670,26 @@ def solve(measurements: List[Dict], root: Dict, chain: Chain,
     # the second covers only where the first found posterior mass, at the
     # finer step the same point budget then allows (_refined_grid). Kept only
     # if nothing runs off its edge, else the first pass stands.
+    #
+    # The first pass solves the Boundaries alone. Every date lies between the
+    # outermost two, so their tails reach at least as far as any date's and
+    # place the second grid by themselves. Its date marginals, summaries and
+    # joint draws were 33-48% of a solve, discarded whenever the second pass
+    # was kept, so they are formed only when the first pass is the answer.
     grid = _build_grid(measurements, element_bounds, len(chain.groups))
-    results, densities = _solve_on_grid(grid, measurements, root, chain,
-                                        element_bounds, **options)
-    refined = _refined_grid(grid, densities, measurements, element_bounds,
+    _results, boundary_densities = _solve_on_grid(
+        grid, measurements, root, chain, element_bounds, boundaries_only=True,
+        **options)
+    refined = _refined_grid(grid, boundary_densities, measurements, element_bounds,
                             len(chain.groups))
     if refined is not None:
         second, _densities = _solve_on_grid(refined, measurements, root, chain,
                                             element_bounds, **options)
         if second['edge_mass'] <= REFINED_EDGE_MASS:
-            second['grid']['first_pass_step'] = results['grid']['step']
+            second['grid']['first_pass_step'] = float(grid[1] - grid[0])
             return second
+    results, _densities = _solve_on_grid(grid, measurements, root, chain,
+                                         element_bounds, **options)
     return results
 
 
@@ -1646,10 +1697,19 @@ def _solve_on_grid(grid: np.ndarray, measurements: List[Dict], root: Dict,
                    chain: Chain, element_bounds: Dict, num_samples: int,
                    seed: int, uniform_span_prior: bool, estimate_durations: bool,
                    dispersal: Optional[Dict], interval_draws: int,
-                   resolution: float) -> Tuple[Dict, List[np.ndarray]]:
-    """solve() on one grid: (results, every posterior density it reported)."""
+                   resolution: float, boundaries_only: bool = False,
+                   ) -> Tuple[Optional[Dict], List[np.ndarray]]:
+    """
+    solve() on one grid: (results, every posterior density it reported).
+
+    With `boundaries_only`, (None, the Boundaries' densities) and nothing
+    else: what solve()'s first pass needs to place the second grid.
+    """
     dt = float(grid[1] - grid[0])
     M = len(grid)
+    # One M x M scratch array for every date factor below, rather than a fresh
+    # 32 MB allocation per date per use.
+    scratch = np.empty((M, M))
 
     likelihood, cumulative, outlier_parts = date_tables(
         grid, measurements, element_bounds)
@@ -1671,17 +1731,18 @@ def _solve_on_grid(grid: np.ndarray, measurements: List[Dict], root: Dict,
     for index, date_ids in enumerate(chain.groups):
         term = _boundary_pair_term(grid, len(date_ids))
         for date_id in date_ids:
-            term = term + _log_date_factor(
-                cumulative[date_id], likelihood[date_id], dt)
+            term += _log_date_factor(cumulative[date_id], likelihood[date_id], dt,
+                                     out=scratch)
         older_ok = allowed[chain.boundary_ids[index]]
         younger_ok = allowed[chain.boundary_ids[index + 1]]
-        term = np.where(younger_ok[:, None] & older_ok[None, :], term, -np.inf)
+        if not (older_ok.all() and younger_ok.all()):
+            term[~(younger_ok[:, None] & older_ok[None, :])] = -np.inf
         log_T.append(term)
 
     def transfer(i):
         """T_i, exponentiated on demand rather than kept alongside log_T."""
-        out = np.exp(_rescaled(log_T[i]))
-        return np.where(np.isfinite(out), out, 0.0)
+        weights = _rescaled(log_T[i])
+        return np.exp(weights, out=weights)            # exp(-inf) is 0
 
     all_dates = [d for group in chain.groups for d in group]
     inliers = {d: (outlier_parts[d][0] if d in outlier_parts else likelihood[d])
@@ -1707,9 +1768,7 @@ def _solve_on_grid(grid: np.ndarray, measurements: List[Dict], root: Dict,
             correction_offset = 0.0
         else:
             correction_offset = _finite_peak(log_correction)
-            correction = np.where(np.isfinite(log_correction),
-                                  np.exp(_rescaled(log_correction)), 0.0)
-            correction = np.where(np.isfinite(correction), correction, 0.0)
+            correction = np.exp(_rescaled(log_correction))     # exp(-inf) is 0
             pair_weight, boundary_density, draw_boundaries, log_mass = \
                 _messages_with_span_prior(chain, allowed, transfer, correction)
     else:
@@ -1725,28 +1784,44 @@ def _solve_on_grid(grid: np.ndarray, measurements: List[Dict], root: Dict,
     # windows.
     log_evidence = (log_mass + correction_offset
                     + sum(_finite_peak(term) for term in log_T))
+    span_prior_applied = log_correction is not None
+    # The messages hold what they need of these; nothing below reads them.
+    log_correction = correction = None
+
+    if boundaries_only:
+        boundary_densities = [boundary_density(i) for i in range(len(chain.boundary_ids))]
+        return None, [density for density in boundary_densities if density.sum() > 0]
 
     rng = np.random.default_rng(seed)
     results = {'measurements': {}, 'boundaries': {}}
     densities: List[np.ndarray] = []
 
     for index, date_ids in enumerate(chain.groups):
-        # Everything outside this group, once per group: on the span-prior
-        # path it is two M x M matrix products, and every date in the group
-        # shares it.
-        outside = pair_weight(index)
+        # Everything about this group's two boundaries, the weight outside the
+        # group and the transfer inside it, in the log and once per group: on
+        # the span-prior path the outside is two M x M matrix products, and
+        # every date in the group shares it.
+        with np.errstate(divide='ignore'):
+            log_pair = np.log(pair_weight(index))
+        log_pair += log_T[index]
         for date_id in date_ids:
             # This date's own factor divided back out, leaving it free: its
             # integral where the boundaries are apart, its likelihood where
-            # they share a cell (_log_date_factor).
+            # they share a cell (_log_date_factor). Where the date has no
+            # likelihood that factor is -inf, and so is log_T, which was summed
+            # from the same factor; -inf minus -inf is NaN, which fmax turns
+            # back into -inf.
+            W = _log_date_factor(cumulative[date_id], likelihood[date_id], dt,
+                                 out=scratch)
             with np.errstate(invalid='ignore'):
-                weights = np.where(np.isfinite(log_T[index]),
-                                   log_T[index] - _log_date_factor(
-                                       cumulative[date_id], likelihood[date_id], dt),
-                                   -np.inf)
-            G = np.exp(_rescaled(weights))
-            G = np.where(np.isfinite(G), G, 0.0)
-            W = G * outside
+                np.subtract(log_pair, W, out=W)
+            np.fmax(W, -np.inf, out=W)
+            peak = float(W.max())
+            if np.isfinite(peak):
+                W -= peak
+                np.exp(W, out=W)
+            else:
+                W.fill(0.0)
             # The weight with the date ON the younger boundary (row t: the
             # younger boundary at t, any older one) and ON the older (column t).
             # W is zero wherever the older boundary is younger, so a whole row
@@ -1755,13 +1830,6 @@ def _solve_on_grid(grid: np.ndarray, measurements: List[Dict], root: Dict,
             on_younger = W.sum(axis=1)
             on_older = W.sum(axis=0)
             on_both = np.diagonal(W).copy()
-            # Sum over {older boundary >= t} x {younger boundary <= t}, which
-            # a pair of cumulative sums leaves on the diagonal. Both in place:
-            # at M = 2000 each M x M temporary is 32 MB, and the sums are the
-            # same whether or not they overwrite their input.
-            np.cumsum(W, axis=0, out=W)
-            reversed_view = W[:, ::-1]
-            np.cumsum(reversed_view, axis=1, out=reversed_view)
             # A date sitting on one of its boundaries counts HALF, as it does in
             # the interval integral T was built from (_interval_integral) and in
             # the sampler (gibbs.Model.endpoint_weight). Counted whole, the
@@ -1773,7 +1841,8 @@ def _solve_on_grid(grid: np.ndarray, measurements: List[Dict], root: Dict,
             # With both boundaries at t the date can only be at t too, and the
             # whole of that weight is its: the half on each side would take it
             # twice, so it is put back once.
-            enclosed = np.diagonal(W) - 0.5 * (on_younger + on_older) + on_both
+            enclosed = (_straddling(on_younger, on_older)
+                        - 0.5 * (on_younger + on_older) + on_both)
             density = likelihood[date_id] * np.clip(enclosed, 0.0, None)
             densities.append(density)
             summary = _summarize(grid, density, rng, num_samples, resolution)
@@ -1821,10 +1890,37 @@ def _solve_on_grid(grid: np.ndarray, measurements: List[Dict], root: Dict,
 
     results['method'] = 'exact'
     results['log_evidence'] = float(log_evidence)
-    results['uniform_span_prior'] = log_correction is not None
+    results['uniform_span_prior'] = span_prior_applied
     results['grid'] = {'lower': float(grid[0]), 'upper': float(grid[-1]), 'step': dt}
     results['edge_mass'] = _edge_mass(densities, grid)
     return results, densities
+
+
+def _straddling(on_younger: np.ndarray, on_older: np.ndarray) -> np.ndarray:
+    """
+    For each cell t, the total weight of the boundary pairs that straddle it,
+    younger boundary at or below t and older at or above, from the weight
+    matrix's row sums (`on_younger`, by younger boundary) and column sums
+    (`on_older`, by older boundary) alone.
+
+    The matrix is zero below its diagonal -- an older boundary is never the
+    younger -- so a pair with its younger boundary at or below t straddles t
+    unless its older boundary is below t as well:
+
+        S(t) = sum_{y <= t} rows(y) - sum_{o < t} cols(o)
+             = sum_{o >= t} cols(o) - sum_{y > t} rows(y)
+
+    This used to be read off the diagonal of two M x M cumulative sums per
+    date: 15 ms each at M = 1,800, a fifth of the solve on a single phase of
+    thirty dates. Each form above subtracts two partial sums, which are small
+    on the young side for the first and on the old side for the second, so
+    each is used on its own side and neither cancels two large numbers.
+    """
+    rows_to = np.cumsum(on_younger)
+    from_young = rows_to - np.cumsum(on_older) + on_older
+    rows_after = np.cumsum(on_younger[::-1])[::-1] - on_younger
+    from_old = np.cumsum(on_older[::-1])[::-1] - rows_after
+    return np.where(rows_to <= 0.5 * rows_to[-1], from_young, from_old)
 
 
 def _outlier_probability(density: np.ndarray, mixture: np.ndarray,
