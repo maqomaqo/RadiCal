@@ -32,16 +32,26 @@ same answer every time, and a failure here is a real change in the pipeline.
 
 Cost
 ----
-One front is about four seconds, so the default 32 is the most that belongs in
-an ordinary suite run. `RADICAL_COVERAGE_FRONTS=200
+Measured 2026-10-08 on an M4 Pro across four workers: an exact front takes
+about three seconds and a sampled one about seven, so the defaults (32 and 12)
+take about a minute -- two and a quarter in the dev container, whose exact
+fronts run four times slower. `RADICAL_COVERAGE_FRONTS=200
 RADICAL_COVERAGE_SAMPLED_FRONTS=40 pytest tests/test_dispersal_coverage.py -s`
-is the figure the plan asks for, and takes about thirteen minutes across four
-cores.
+is the figure the plan asks for, and takes about four minutes.
 
-Measured 2026-09-15: the exact path covered **94.5% of 200 fronts** and the
-sampled path **92.5% of 40**, both against a nominal 95%. That is the number
-this file exists to produce, and it is recorded in the plan's feature entry
-beside the wiggle-match and age-depth ones.
+The sampled fronts run untempered (`temperatures=1`). The sampler's default of
+three temperatures triples a front's cost, 21 seconds against 7, and buys
+nothing here: over the 40 fronts of the recorded run it changed no front's
+verdict, moved no interval end by more than 0.04 km/yr, and left the lobe
+probe nothing to report at either setting. Crossing calibration lobes is what
+tempering is for, and test_gibbs.py checks that it does; this file asks
+whether the interval survives an MCMC chain at all.
+
+Measured 2026-09-15, and identical on 2026-10-08: the exact path covered
+**94.5% of 200 fronts** and the sampled path **92.5% of 40**, both against a
+nominal 95%. That is the number this file exists to produce, and it is
+recorded in the plan's feature entry beside the wiggle-match and age-depth
+ones.
 """
 import math
 import multiprocessing
@@ -58,7 +68,7 @@ from app.services.calibration import get_curve
 
 # Fronts simulated per coverage run. See the module docstring for the cost.
 FRONTS = int(os.environ.get('RADICAL_COVERAGE_FRONTS', '32'))
-# Fronts for the sampled path, which costs several times more per front and is
+# Fronts for the sampled path, which costs about twice as much per front and is
 # checked for gross miscalibration rather than to a tight band.
 SAMPLED_FRONTS = int(os.environ.get('RADICAL_COVERAGE_SAMPLED_FRONTS', '12'))
 # Processes the fronts are spread over.
@@ -153,8 +163,11 @@ def _covered_exact(seed):
 
 def _covered_sampled(seed):
     root, measurements = _simulate(seed)
+    # Untempered, which costs a third as much and changes nothing this file
+    # measures: see Cost in the module docstring.
     solved = gibbs.solve(measurements, root, sweeps=4000, num_samples=200,
-                         dispersal={'origin': ORIGIN}, interval_draws=4000)
+                         dispersal={'origin': ORIGIN}, interval_draws=4000,
+                         temperatures=1)
     fit = solved['intervals']['dispersal']['wave']
     if fit['refused'] is not None:  # pragma: no cover - would fail the test
         return None
@@ -221,8 +234,8 @@ class TestTheIntervalMeansWhatItSays:
 
     def test_the_sampled_path_is_not_grossly_miscalibrated(self):
         """
-        Fewer fronts and a looser band, because a Gibbs run costs several
-        times an exact one. This is not asking whether the sampler is as good
+        Fewer fronts and a looser band, because a Gibbs run costs about
+        twice an exact one. This is not asking whether the sampler is as good
         as the exact solver -- test_intervals.py already cross-checks the two
         -- but whether the speed interval survives the trip through an MCMC
         chain at all.
