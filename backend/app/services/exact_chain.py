@@ -1943,9 +1943,16 @@ def _date_marginals(groups: List[List[str]], log_T: List[np.ndarray], pair_weigh
             #
             # With both boundaries at t the date can only be at t too, and the
             # whole of that weight is its: the half on each side would take it
-            # twice, so it is put back once.
+            # twice, so it is put back once -- divided by the step. Everywhere
+            # else W is the pair's weight over the date's interval integral,
+            # so L * W is a density; on the diagonal the date's own factor was
+            # its likelihood, so L * W there is the tie's whole weight, a mass
+            # in one cell, and a density needs it over the cell's width.
+            # Counted as it was, the result depended on the unit of the grid:
+            # right at one year, and on a 32-year test grid 0.07 from the
+            # sampler's answer for a two-date phase where this gets 0.001.
             enclosed = (_straddling(on_younger, on_older)
-                        - 0.5 * (on_younger + on_older) + on_both)
+                        - 0.5 * (on_younger + on_older) + on_both / dt)
             density = likelihood[date_id] * np.clip(enclosed, 0.0, None)
             densities[date_id] = density
     return densities
