@@ -39,15 +39,12 @@ Three, which between them cover what the sampler is most often given:
   * Either of those with ORDERED BLOCKS of dates inside a pair of Boundaries:
     Phases or Sequences in a Sequence with no Boundary between them, so that
     every date of one is older than every date of the next -- the shape of the
-    Hillside reference model (tests/oxcal_fixture.py), which the exact solver
-    declines ("two groups are ordered
-    against each other with no Boundary between them"). The blocks are read off
+    Hillside reference model (tests/oxcal_fixture.py). The blocks are read off
     the sampler's own ordering (_blocks), and the group's integral over its
-    dates (_log_ordered) replaces the product of interval integrals: cut the
-    order at the oldest date of each block, and the sum over placements is a
-    chain over those cuts, a product of matrices like the one over Boundaries.
-    Dates in the same block are unordered, and one block alone is the plain
-    unordered group.
+    dates (_log_ordered) replaces the product of interval integrals: the exact
+    solver's sum over the cuts at each block's oldest date
+    (exact_chain._OrderedGroup). Dates in the same block are unordered, and
+    one block alone is the plain unordered group.
 
   * Any of those with dates OUTSIDE EVERY BOUNDARY at either end: Phases or
     Sequences of dates before the first Boundary of the model's Sequence, or
@@ -496,91 +493,19 @@ class _Direct:
         np.fill_diagonal(term, tie)
         return term
 
-    def _log_block_oldest(self, block: List[str], nodes: Dict[str, int]) -> np.ndarray:
-        """
-        T[b, a] for a block of dates all lying in [a, b] with the OLDEST of them
-        at b, in the log, indexed [older, younger]: the derivative with respect
-        to b of the product of the dates' interval integrals,
-
-            sum over dates j of  L_j(b) dt  prod over k != j of F_k(b, a),
-
-        with F the trapezoidal interval integral the dates inside a pair of
-        Boundaries use (half weight on each end cell). The product of all the
-        others is formed as a sum of logs with the dates whose integral is zero
-        counted, so a date at the very edge of its own likelihood does not turn
-        the whole thing to nan.
-
-        The trapezoid, not whole cells, is a choice about how a continuous
-        ordering is put on a grid. Two dates can share a cell, and counting
-        that whole gives a configuration with several dates in one cell more
-        weight than the continuum does, most where the span is a few cells;
-        half weights at the ends are what the sampler's own draws use for a
-        date held by a neighbouring date (Model.draw_date) and what OxCal's
-        continuous model converges to. The sampler's log_posterior does NOT
-        weigh a date-to-date tie that way, only a date on a Boundary; weighing
-        every tie as log_posterior does moved this calculation 0.2 from the
-        sampler's output on models of ordered phases, and the half weights
-        brought it back to 0.03-0.1.
-        """
-        rows = {d: self._likelihood(d, nodes) for d in block}
-
-        def log_f(d):
-            row = rows[d]
-            return _log_interval_integral(np.cumsum(row) * self.dt, row, self.dt).T
-
-        total = np.zeros((self.M, self.M))
-        zeros = np.zeros((self.M, self.M), dtype=int)
-        for d in block:
-            lf = log_f(d)
-            finite = np.isfinite(lf)
-            total += np.where(finite, lf, 0.0)
-            zeros += ~finite
-        out = np.full((self.M, self.M), -np.inf)
-        with np.errstate(divide='ignore', invalid='ignore'):
-            for d in block:
-                lf = log_f(d)
-                finite = np.isfinite(lf)
-                others = np.where(finite, np.where(zeros == 0, total - lf, -np.inf),
-                                  np.where(zeros == 1, total, -np.inf))
-                log_mass = np.log(rows[d] * self.dt)[:, None]
-                out = np.logaddexp(out, log_mass + others)
-        return np.where(self.cells >= 0, out, -np.inf)
-
     def _log_ordered(self, blocks: List[List[str]], nodes: Dict[str, int]) -> np.ndarray:
         """
         The dates' integral over a group whose blocks are ordered, [older
         boundary S, younger boundary E], in the log: the sum over placements of
-        every date with each block wholly older than the next.
-
-        Cut the order at the oldest date of each block after the first, c_i of
-        block i + 1. Block i's dates then lie in [c_i, c_(i-1)] with its oldest
-        at c_(i-1), which is T_i(c_i, c_(i-1)) (_log_block_oldest), the last
-        block's below by E itself, and the first block's oldest is under S. That
-        is a chain over the c's, and its sum is a product of matrices:
-
-            Z[S, E] = sum over c_0 < S of (T_1 T_2 ... T_n)[c_0, E]
-
-        Endpoints take half weight as an interval integral's do: a date at S
-        or at E counts half.
+        every date with each block wholly older than the next. The exact
+        solver's own (exact_chain._OrderedGroup), on this grid and at these
+        outlier scales, so the check and the solver weigh a tie the same way.
         """
-        log_scale = 0.0
-        matrices = []
-        for i, block in enumerate(blocks):
-            log_t = self._log_block_oldest(block, nodes)
-            if i == len(blocks) - 1:
-                # The last block's lower end is E itself, not a date.
-                log_t = log_t + np.where(self.cells == 0, np.log(0.5), 0.0)
-            matrix, peak = self._exp(log_t)
-            matrices.append(matrix)
-            log_scale += peak
-        product = matrices[0]
-        for matrix in matrices[1:]:
-            product, factor = self._scaled(product @ matrix)
-            log_scale += factor
-        below = np.vstack([np.zeros((1, self.M)), np.cumsum(product, axis=0)[:-1]])
-        Z = below + 0.5 * product
-        with np.errstate(divide='ignore'):
-            return np.where(Z > 0, np.log(np.where(Z > 0, Z, 1.0)), -np.inf) + log_scale
+        members = [d for block in blocks for d in block]
+        likelihood = {d: self._likelihood(d, nodes) for d in members}
+        cumulative = {d: np.cumsum(row) * self.dt for d, row in likelihood.items()}
+        group = exact_chain._OrderedGroup(blocks, self.model.grid, cumulative, likelihood)
+        return group.log_inner.T
 
     @staticmethod
     def _exp(log_matrix: np.ndarray) -> Tuple[np.ndarray, float]:

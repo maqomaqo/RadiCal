@@ -379,8 +379,9 @@ rather than arranged by hand.
 **Model settings** (on the New Analysis form):
 - **Solver**: Automatic (recommended: the exact solver where the model allows, sampling
   otherwise), Exact solver only (fast, but only for models built as a single line of Phases and
-  Boundaries, or as areas side by side between shared Boundaries, with or without a group of dates
-  before the first Boundary or after the last), or MH/Gibbs (works on all models). See [Choosing a solver](#choosing-a-solver).
+  Boundaries, or as areas side by side between shared Boundaries; Phases in a row with no Boundary
+  between them, and dates before the first Boundary or after the last, are fine), or MH/Gibbs
+  (works on all models). See [Choosing a solver](#choosing-a-solver).
 - **Minimum sweeps per chain** (sampled runs only): blank by default, which runs each chain until
   it converges. Set a number to make every chain run at least that long — the only way to ask for a
   longer run, since a run otherwise stops as soon as it converges.
@@ -422,15 +423,16 @@ run**, and the Results page always says which method was used.
   works on a site with areas side by side: a Phase holding several Sequences (trenches or areas,
   each built as a single line), with a Boundary before and after it that the areas share. That
   Phase can be one step in a longer Sequence. Either kind of model can also have dates before its
-  first Boundary or after its last, such as a Phase of dates from before the site was occupied, as
-  long as they form one group at each end. It shows no progress bar and cannot be cancelled, but
-  it rarely takes long.
+  first Boundary or after its last, such as a Phase of dates from before the site was occupied.
+  It also takes Phases in a row with no Boundary between them, as OxCal does, though a Boundary at
+  each transition is better practice. It shows no progress bar and cannot be cancelled, but it
+  rarely takes long.
 - **MH/Gibbs sampler.** The method OxCal uses. It builds up the answer by trying many thousands of
   possible dates for every item in the model and keeping the ones the model favours. It works on
-  any model, including the ones the exact solver cannot take: groups ordered with no Boundary
-  between them (also before the first Boundary or after the last), dates before the first
-  Boundary or after the last that carry an outlier model, and Sequences side by side with no
-  shared Boundary before and after them.
+  any model, including the ones the exact solver cannot take: dates inside one pair of Boundaries
+  ordered in some other way than one group after another (two Sequences side by side with no
+  Boundaries of their own, say), dates before the first Boundary or after the last that carry an
+  outlier model, and Sequences side by side with no shared Boundary before and after them.
   Its figures carry a little random variation, so two runs differ slightly, and a run can
   occasionally fall short. The app checks for this and warns you (see
   [Checking a sampled result](#checking-a-sampled-result)). Progress is shown, and a run can be
@@ -456,14 +458,14 @@ Where both methods can be used, they give the same date ranges to within about a
 - **Exact solver only** never samples. Choose it when you need figures that repeat exactly. On a
   model it cannot take, the run fails and says why, with one exception, described next.
 
-**Forcing the exact solver on a Sequence with a missing Boundary.** The commonest reason the exact
-solver cannot take a model is a Sequence that puts one group after another with no Boundary between
-them. **Exact solver only** will still solve it, by adding the Boundary that the order implies.
-That changes the model, and the date ranges move as a result: in tests against OxCal, sampling such
-models as written came closer to OxCal's answer than solving them with the added Boundary.
-Automatic therefore samples these models. If you do want the exact solver here, add the Boundary to
-the model yourself, so the change is visible and deliberate. Hovering over **Exact solver** on the
-Results page shows how many Boundaries were added for you.
+**Forcing the exact solver on a Sequence with no Boundaries.** A Sequence with no Boundaries of its
+own gives the exact solver nothing to work between. **Exact solver only** will still solve it, by
+adding the Boundaries that the order implies. That changes the model, and the date ranges move as a
+result: in tests against OxCal, a model solved with an added Boundary came out further from OxCal's
+answer than the same model taken as written. Automatic therefore samples these models. If you do
+want the exact solver here, add the Boundaries to the model yourself, so the change is visible and
+deliberate. Hovering over **Exact solver** on the Results page shows how many Boundaries were added
+for you.
 
 ### Checking a sampled result
 
@@ -1337,8 +1339,8 @@ meeting carries no tie of its own. The span correction counts every Boundary in 
 areas' included, over the outermost pair, as the sampler does. Joint draws take the outer
 Boundaries first, then each area's two ends given its stage, then its interior and its dates.
 
-**Dates outside every Boundary** (either shape above, with one group of dates older than its first
-Boundary B_1 or younger than its last, nothing ordering them against each other). Such a date has
+**Dates outside every Boundary** (either shape above, with dates older than its first Boundary B_1
+or younger than its last). Such a date has
 no span term, so its prior is flat, and given its end Boundary it is independent of everything
 else. The group enters as one weight on that Boundary, applied to it in the message passing:
 
@@ -1351,7 +1353,34 @@ p(t_j)  ∝ L_j(t_j) * sum over b_1 <= t_j of h p(b_1) / G_j(b_1)
 with h a half where t_j is on b_1, as for any date on its Boundary. These dates are not in the span
 correction's limits. Their draws follow their end Boundary's: each from its likelihood beyond it.
 A date out there with an outlier model is left to the sampler, since nothing on its far side would
-hold the outlier component in.
+hold the outlier component in. Groups in a row out there are ordered blocks, below, with the grid's
+edge for the far end and no span term.
+
+**Ordered groups** (Phases in a row with no Boundary between them, in a chain, an area or a stage of
+areas side by side). Inside one pair of Boundaries S > E the K dates fall into blocks B_1 … B_n,
+every date of one older than every date of the next, with the span term (S − E)^(−K) over all of
+them. That order does not factorise along the Boundaries, but it does along cuts v_i at the oldest
+date of each block after the first. Given the cuts the blocks are independent, so the group is a
+small chain of its own over (S, v_2, …, v_n, E), solved by the same message passing, its end factor
+everything outside the group:
+
+```
+block 1:    prod over B_1 of F_m(v_2, S)
+block i>1:  T_i(l, u) = sum over k in B_i of L_k(u) dt prod over m != k of F_m(l, u)
+G(S, E)  = (S - E)^(-K) * sum over the cuts of the product of the blocks' terms
+```
+
+with l the next cut or E. T_i is the derivative in u of the block's product of interval integrals:
+its dates in [l, u] with the oldest at u. Two neighbouring cuts in one cell count half, as two
+Boundaries do. This is the trapezoid rule for the continuum integral. The sampler's rule, a half for
+each tied ordering edge, would need each block's count of dates at a cell as extra state; the two
+part by a term of first order in the step. On the ordered test model the exact and sampled dates are
+0.56 and 0.58 years rms from OxCal's. A date's marginal comes from its link's pair weight: block 1's as in any group; a later
+block's from its terms with the date at u and with it below u under its own trapezoid, all formed
+together by a forward and a backward pass of the product rule. Joint draws take the cuts given S
+and E, then in each later block which date is oldest, then the rest. Dates inside one pair ordered
+in any other way, such as two Sequences side by side with no Boundaries of their own, are not blocks
+and are sampled.
 
 This costs O(M²) per group on an M-point grid while nothing couples a chain's two ends, as on a
 single Phase, and O(M³) per group once the span correction does: a chain of three or more
@@ -1427,8 +1456,7 @@ tempering tripled the run time (21 s against 7).
 **Checking a sampled result.** Both convergence measures compare the sampler against itself and
 cannot detect a lobe no chain has reached. The app therefore calculates the same posterior without
 sampling, using the exact solver's grid, interval integrals and message passing, with the sampler's
-shared outlier scale, over these shapes (the third the exact solver itself does not accept, and the
-fourth only as one group at each end with no outlier model):
+shared outlier scale, over these shapes:
 
 - A chain of Phases and Boundaries created using nested Sequences.
 - Parallel chains between one outer pair (e.g. a site's Start and End surrounding one Sequence per
@@ -1463,13 +1491,13 @@ On the test sequence above, with untempered chains that all sat in the late rang
 stayed in the early range 89–99% of the time; across about 2,000 tested ranges the model ruled out,
 they left all but one.
 
-**Forcing exact integration.** A Sequence that orders two groups with no Boundary between them is
-not chain-shaped. **Exact solver only** makes it so by supplying the Boundary the order implies.
-That splits one span term over K dates into two over K₁ + K₂ dates, and K is the exponent that
-holds a date to its group, so the modelled ranges genuinely move. Measured against OxCal on two
-test models (rms of the modelled dates, in years), sampling the model as written outperformed
-integrating the patched model both times: 1.49 against 2.51, and 4.53 against 10.63. Automatic
-therefore samples such models.
+**Forcing exact integration.** A Sequence with no Boundaries of its own encloses no dates, so it is
+not chain-shaped. **Exact solver only** makes it so by supplying the Boundaries the order implies.
+That splits one span term over K dates into several over K₁ + K₂ + … dates, and K is the exponent
+that holds a date to its group, so the modelled ranges genuinely move. On the ordered test model,
+which the exact solver now takes as written at 0.56 years rms from OxCal (and the sampler at 0.58),
+supplying the missing Boundary instead put it at 2.33. Automatic therefore samples models that need
+Boundaries supplied.
 
 ### A.7 Outlier models
 
