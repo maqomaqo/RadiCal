@@ -468,7 +468,7 @@ class TestTheAnalysisSolvesThemExactly:
         solver = created.json()['data']['solver']
         assert solver['method'] == 'exact'
         assert solver['reason'] is None
-        assert solver['implicit_boundaries'] == 0
+        assert 'implicit_boundaries' not in solver
 
     def test_an_order_that_is_not_blocks_is_sampled_and_says_why(self, client):
         tree, dates = _model([[[3100]]])
@@ -506,3 +506,18 @@ class TestConvergence:
         changes = np.abs(np.diff(starts))
         assert changes[1] < 0.7 * changes[0], starts
         assert changes[1] < 0.5, starts
+
+
+def test_outlier_models_work_on_blocks():
+    """A date in a block with an outlier model gets its outlier probability,
+    as anywhere in a chain -- the sampler path this replaced never applied
+    the outlier model to such a model at all."""
+    import oxcal_fixture as ox
+    samples = [dict(m, outlier_prior=0.05, outlier_model='general')
+               for m in ox.measurements()]
+    tree = ox.model_tree('ordered')
+    chain = ec.layout(tree, samples)
+    assert chain.ordered(0)
+    solved = ec.solve(samples, tree, chain, num_samples=300)
+    for m in samples:
+        assert 'outlier_probability' in solved['measurements'][m['id']]

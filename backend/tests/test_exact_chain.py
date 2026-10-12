@@ -160,6 +160,16 @@ class TestLayoutExplainsItself:
         assert 'loose' in reason
         assert 'd1' not in reason, 'only the unenclosed dates should be named'
 
+    def test_too_few_boundaries_says_what_to_add(self):
+        """The app never adds them itself, so the reason has to say where."""
+        dates = _dates(('d1', 3200, 30, 'p0'), ('d2', 3000, 30, 'p1'))
+        none = _sequence('s', [_phase('p0'), _phase('p1')])
+        one = _sequence('s', [_boundary('b0'), _phase('p0'), _phase('p1')])
+        _c, reason = ec.layout_with_reason(none, dates)
+        assert 'Add a Boundary at the start and end of the Sequence' in reason
+        _c, reason = ec.layout_with_reason(one, dates)
+        assert 'Add another Boundary' in reason
+
     def test_an_order_that_is_not_blocks_says_to_give_each_its_own_boundaries(self):
         _chain, reason = ec.layout_with_reason(*_side_by_side_lines())
         assert reason == ec.NOT_ONE_AFTER_ANOTHER
@@ -1706,83 +1716,6 @@ class TestCharcoalOutlierModel:
                     == pytest.approx(b['measurements'][d['id']]['outlier_probability']))
 
 
-class TestImplicitBoundaries:
-    """
-    A Sequence that orders two groups with no Boundary between them used to
-    fall through to MCMC -- where it was measurably wrong, and where the
-    outlier model did not work at all -- and supplying the transition it
-    implies made it exact. It is now integrated as written (TestOrderedGroups-
-    AgreeWithOxCal, test_exact_ordered.py), closer to OxCal still; the
-    insertion remains for models the solver cannot take as written.
-
-    This is a change to the model, not a rewriting of it: the uniform-scatter
-    prior becomes one term per group rather than one across both. The
-    justification is empirical and lives in the fixture -- see
-    test_matches_oxcals_own_answer_for_that_model below.
-    """
-
-    def test_inserts_only_where_a_boundary_is_missing(self):
-        from app.services.model_tree import with_implicit_boundaries
-
-        already = ox.model_tree('shared_boundary')
-        _tree, inserted = with_implicit_boundaries(already)
-        assert inserted == [], 'nothing to add when the transition is explicit'
-
-        ordered = ox.model_tree('ordered')
-        patched, inserted = with_implicit_boundaries(ordered)
-        assert len(inserted) == 1
-        assert ec.layout(patched, ox.measurements()) is not None
-
-    def test_leaves_a_single_group_alone(self):
-        from app.services.model_tree import with_implicit_boundaries
-
-        _tree, inserted = with_implicit_boundaries(ox.model_tree('unordered'))
-        assert inserted == []
-
-    def test_matches_oxcals_own_answer_for_that_model(self):
-        """
-        The whole justification. Solved this way, the fixture's `ordered`
-        model lands close to what OxCal reports FOR THAT MODEL -- much closer
-        than MCMC managed, which put the two groups 37 years apart against
-        OxCal's 11.7 and was 12.6 years rms out.
-        """
-        from app.services.model_tree import with_implicit_boundaries
-
-        samples = ox.measurements()
-        patched, _inserted = with_implicit_boundaries(ox.model_tree('ordered'))
-        solved = ec.solve(samples, patched, ec.layout(patched, samples), num_samples=300)
-
-        dists = ox.distributions('ordered')
-        errors = []
-        for m in samples:
-            cal, prob = dists[m['id']]['posterior']
-            errors.append(solved['measurements'][m['id']]['posterior_mean']
-                          - float((cal * prob / prob.sum()).sum()))
-        errors = np.array(errors)
-        assert np.sqrt((errors ** 2).mean()) < 9.0, errors.round(1)
-
-        def mean_ad(ids):
-            return np.mean([1950 - solved['measurements'][i]['posterior_mean'] for i in ids])
-        separation = mean_ad(ox.SOUTH) - mean_ad(ox.NORTH)
-        assert 0.0 < separation < 20.0, separation
-
-    def test_the_outlier_model_now_works_on_such_a_model(self):
-        """
-        The reason this matters beyond accuracy: the MCMC path this replaces
-        never applied the outlier model at all, so these analyses came back
-        with an empty Outlier column however it was configured.
-        """
-        from app.services.model_tree import with_implicit_boundaries
-
-        samples = [dict(m, outlier_prior=0.05, outlier_model='general')
-                   for m in ox.measurements()]
-        patched, inserted = with_implicit_boundaries(ox.model_tree('ordered'))
-        assert inserted
-        solved = ec.solve(samples, patched, ec.layout(patched, samples), num_samples=300)
-        for m in samples:
-            assert 'outlier_probability' in solved['measurements'][m['id']]
-
-
 def _spelled_out(element):
     """`element` with every Sequence directly inside a Sequence replaced by its
     children, at any depth -- the same model written flat."""
@@ -1934,7 +1867,7 @@ class TestSequenceOfSequences:
             dates, tree, {'mcmc_samples': 200})
         assert solver['method'] == 'exact'
         assert solver['reason'] is None
-        assert solver['implicit_boundaries'] == 0
+        assert 'implicit_boundaries' not in solver
 
     def test_independent_branches_are_still_not_chained(self):
         """Stitching needs the tree to order the paths. Two bracketed branches

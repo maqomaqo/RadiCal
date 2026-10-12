@@ -56,8 +56,7 @@ def _separate_areas_tree(tag):
     Phase(Sequence(Phase p1, Phase p2), Sequence(Phase p3, Phase p4)) with no
     Boundary anywhere: two areas with nothing they share around them, so
     separate models rather than areas of one site. One the exact solver
-    cannot integrate, before or after implicit transitions are supplied, and
-    so sampled.
+    cannot integrate, and so sampled.
     """
     def area(name, phases):
         return {'id': f'{tag}{name}', 'element_type': 'sequence', 'name': name,
@@ -105,21 +104,22 @@ class TestExactPath:
 
     def _needing_transitions(self, tag):
         """Three phases in a Sequence with no Boundary at all: solvable exactly
-        only by supplying the two transitions they imply. (Phases in a row
-        between Boundaries no longer need one: test_exact_ordered.py.)"""
+        only with Boundaries the model does not have. (Phases in a row between
+        Boundaries need none: test_exact_ordered.py.)"""
         return _unbounded_tree(tag), [
             _measurement(f'{tag}s1', f'{tag}p1', age_bp=3200),
             _measurement(f'{tag}s2', f'{tag}p2', age_bp=3100),
             _measurement(f'{tag}s3', f'{tag}p3', age_bp=3000),
         ]
 
-    def test_a_model_needing_a_transition_is_sampled_not_quietly_patched(self, client):
+    def test_a_model_needing_boundaries_is_sampled_and_says_what_to_add(self, client):
         """
-        `auto` does not supply transitions. Doing so makes the model exactly
-        solvable, but it splits one span term over K dates into several and is
-        measurably the worse answer: on the ordered fixture, 2.33 years rms
-        from OxCal with the transition supplied against 0.56 for the model as
-        written. So the user's model is taken as written and sampled.
+        The app never adds a Boundary to a model. Doing so would make this one
+        exactly solvable, but it answers a different model -- one span term
+        over K dates split into several -- and measurably a worse one: on the
+        ordered fixture, 2.33 years rms from OxCal with the transition supplied
+        against 0.56 for the model as written. So it is sampled as written, and
+        the reason says what to add.
         """
         tag = f'sr{next(_IDS)}'
         tree, measurements = self._needing_transitions(tag)
@@ -127,17 +127,15 @@ class TestExactPath:
         assert created.status_code == 200, created.text
         solver = created.json()['data']['solver']
         assert solver['method'] == 'gibbs'
-        # Nothing was supplied to the solver that ran...
-        assert solver['implicit_boundaries'] == 0
-        # ...but the record still says what an exact solve would have cost, which
-        # is a different statement from "this cannot be solved exactly".
-        assert solver['exact_needs_boundaries'] == 2
+        assert 'Add a Boundary at the start and end of the Sequence' in solver['reason']
+        assert 'implicit_boundaries' not in solver
+        assert 'exact_needs_boundaries' not in solver
 
-    def test_asking_for_exact_still_supplies_them_and_counts_them(self, client):
+    def test_asking_for_exact_is_refused_rather_than_adding_them(self, client):
         """
-        The override exists so an analyst can have the exact answer anyway. It
-        gets it, transitions and all, and the record says how many -- rather than
-        presenting the result as though their model were solvable as written.
+        Choosing the exact solver does not license changing the model: someone
+        who chose it cannot be assumed to know Boundaries would be added. The
+        run is refused, with what to add.
         """
         tag = f'sr{next(_IDS)}'
         tree, measurements = self._needing_transitions(tag)
@@ -148,10 +146,8 @@ class TestExactPath:
             'bayesian_config': {'mcmc_samples': 200, 'solver': 'exact'},
             'save': True,
         })
-        assert created.status_code == 200, created.text
-        solver = created.json()['data']['solver']
-        assert solver['method'] == 'exact'
-        assert solver['implicit_boundaries'] == 2
+        assert created.status_code == 400, created.text
+        assert 'Add a Boundary at the start and end' in created.json()['detail']
 
 
 class TestFallbackIsRecorded:
@@ -180,7 +176,6 @@ class TestFallbackIsRecorded:
         measurements, _tree, results, _boundaries, solver = self._sampled()
         assert solver['method'] == 'gibbs'
         assert solver['reason'], 'a fallback with no reason is barely better than a silent one'
-        assert solver['implicit_boundaries'] == 0
         # The record has to carry enough to judge the answer, not just name the
         # method -- a sampled result with no convergence figure is a result the
         # user cannot weigh.
@@ -193,17 +188,11 @@ class TestFallbackIsRecorded:
         for summary in results.values():
             assert summary['posterior_mean'] > 0
 
-    def test_the_reason_describes_the_model_as_it_stands_after_patching(self):
+    def test_the_reason_describes_the_model_as_written(self):
         """
-        Implicit transitions are supplied BEFORE giving up, so the reason must
-        describe what is wrong with the PATCHED model, not the original
-        complaint the patching has already dealt with.
-
-        Here that makes the message strictly more useful: before patching the
-        model has no boundaries at all, so all that can be said is "add some";
-        after, the interior transitions exist, the first and last phases are
-        the model's tails, and what remains is precisely the outlier model on
-        one of them.
+        Nothing is added to the model before the reason is given -- the app
+        used to supply transitions first and report what was wrong with the
+        PATCHED model -- so it names what the user's own model lacks.
         """
         from app.api import analysis as analysis_api
         from app.services import exact_chain
@@ -219,9 +208,9 @@ class TestFallbackIsRecorded:
             measurements, tree, {'mcmc_samples': 200, 'mcmc_temperatures': 1},
         )
         _chain, original = exact_chain.layout_with_reason(tree, measurements)
-        assert 'no Boundary encloses any date' in original
         assert solver['method'] == 'gibbs'
-        assert 'carry an outlier model' in solver['reason']
+        assert solver['reason'] == original
+        assert 'no pair of Boundaries encloses any date' in original
 
 
 class TestSolverOverride:
@@ -308,36 +297,6 @@ class TestSolverOverride:
         for sample_id, exact in exact_results.items():
             got = sampled_results[sample_id]['posterior_mean']
             assert got == pytest.approx(exact['posterior_mean'], abs=2.0), sample_id
-
-    def test_each_solver_is_given_the_tree_it_can_take(self):
-        """
-        On a model that is not a chain as authored the two solvers see DIFFERENT
-        trees -- the sampler the model as written, the exact solver a copy with the
-        implied transition supplied, because it cannot integrate anything else.
-
-        This reverses an earlier decision to hand both the patched tree so that the
-        override was a pure method-vs-method cross-check. That property is real but
-        costs accuracy on every such model, since the insertion weakens the (span)^
-        (-K) exponent, and the record keeps the difference visible instead: the
-        patch count is 2 for the exact solve and 0 for the sampled one.
-        """
-        tag = f'so{next(_IDS)}'
-        tree = _unbounded_tree(tag)
-        measurements = [
-            _measurement(f'{tag}s1', f'{tag}p1', age_bp=3200),
-            _measurement(f'{tag}s2', f'{tag}p2', age_bp=3100),
-            _measurement(f'{tag}s3', f'{tag}p3', age_bp=3000),
-        ]
-
-        from app.api import analysis as analysis_api
-        records = {}
-        for choice in ('exact', 'gibbs'):
-            _r, _b, records[choice], _i, _s = analysis_api._run_bayesian(
-                measurements, tree, {'mcmc_samples': 200, 'solver': choice,
-                                     'mcmc_temperatures': 1})
-        assert records['exact']['implicit_boundaries'] == 2
-        assert records['gibbs']['implicit_boundaries'] == 0
-        assert records['gibbs']['exact_needs_boundaries'] == 2
 
     def test_it_round_trips_through_a_saved_analysis(self, client):
         """The override has to survive being saved, or a rerun would silently

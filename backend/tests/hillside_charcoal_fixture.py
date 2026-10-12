@@ -28,11 +28,11 @@ outlier component, so nothing else moderates it.
 
 Two structural notes, both mattering when comparing:
 
-  * There is no Boundary between North and South, so the model is not a
-    chain and exact_chain declines it. The app supplies the transition the
-    ordering implies (model_tree.with_implicit_boundaries), which is a real
-    change to the model -- it splits one span term over 11 dates into two over 4
-    and 7.
+  * There is no Boundary between North and South: two groups in a row inside
+    one pair, which exact_chain integrates as written, as blocks
+    (_OrderedGroup). The app once supplied the transition instead, a real
+    change to the model -- one span term over 11 dates split into two over 4
+    and 7 -- and the figures below that say so were measured that way.
   * The app's span on this model no longer UNDERSHOOTS OxCal's 29.2 years, as it
     did on every model before the quadrature fix -- it overshoots, at 43-55
     depending on the solver. This is the one fixture where that happens, and the
@@ -128,12 +128,12 @@ deficit in the oldest lobe. Averaged over the seven South dates:
 That tail is the charcoal kernel's one-sided smear -- correct in direction and
 scale -- and what should resist it is the span prior: a residual date wandering
 young has to drag a boundary with it, and (span)^(-K) makes that expensive. The
-resistance is what differs, which is why the exact solver is 2.5x worse than the
-sampler here rather than equally wrong: it can only solve this model after
-with_implicit_boundaries splits one span term over ELEVEN dates into two over four
-and seven, and K is the exponent doing the resisting. Same cause, smaller, on
-tests/fixtures/oxcal's `ordered` run: 2.51 years rms patched against the sampler's
-1.49 on the model as authored.
+resistance is what differs, which is why the exact solver was 2.5x worse than the
+sampler here rather than equally wrong while it could only solve this model after
+a supplied transition split one span term over ELEVEN dates into two over four
+and seven, and K is the exponent doing the resisting. Taken as written it is 7.1
+years rms from OxCal, against 9.2 with the transition supplied
+(tests/test_charcoal_outlier.py).
 
 A SECOND, independent gap sits underneath, and it has nothing to do with outliers:
 any two ORDERED groups come out further apart than OxCal puts them. Separation of

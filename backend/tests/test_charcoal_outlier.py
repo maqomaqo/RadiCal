@@ -26,19 +26,16 @@ import pytest
 
 from app.services import exact_chain as ec
 from app.services import gibbs
-from app.services.model_tree import with_implicit_boundaries
 
 import hillside_charcoal_fixture as fx
 from oxcal_fixture import ad_to_calbp
 
 
 def _solved():
-    """The fixture's model as the app actually solves it: not a chain as
-    written, so the implied transition is supplied and it goes to the exact
-    solver."""
+    """The fixture's model as the app solves it: as written, its two groups
+    ordered with no Boundary between them as blocks (exact_chain._OrderedGroup)."""
     measurements = fx.measurements()
-    tree, inserted = with_implicit_boundaries(fx.model_tree())
-    assert len(inserted) == 1, 'one transition, between North and South'
+    tree = fx.model_tree()
     chain = ec.layout(tree, measurements)
     assert chain is not None
     return measurements, tree, ec.solve(measurements, tree, chain, num_samples=200)
@@ -120,9 +117,9 @@ class TestTheKernelMatchesOxCalsDefinition:
 class TestAgainstOxCalsOwnRun:
     def test_the_modelled_dates_land_within_ten_years(self):
         """
-        Measured at 9.9 years rms with the scale integrated, against 16.1 with a
-        single fixed scale. The residual is the nested-exponent difference
-        described in the fixture docstring, not the kernel.
+        Measured at 7.1 years rms with the scale integrated, on the model as
+        written; 9.2 with the missing transition supplied, as the app once
+        solved it, and 16.1 before that with a single fixed scale.
         """
         measurements, _tree, solved = _solved()
         rms, errors = _rms_against_oxcal(measurements, solved)
@@ -217,7 +214,7 @@ class TestTheSharedScale:
         having been told only the prior.
         """
         measurements = fx.measurements()
-        tree, _inserted = with_implicit_boundaries(fx.model_tree())
+        tree = fx.model_tree()
         sampled = gibbs.solve(measurements, tree, num_samples=200, temperatures=1)
 
         charcoal = sampled['outlier_scale']['charcoal']
@@ -338,7 +335,8 @@ class TestPhaseWidth:
         WIDE against OxCal's 29.2, where before the quadrature fix everything was
         too narrow: 54.9 years once, 40.4 on the first-pass grid (a 1.67-year
         step), and 38.6 since the second pass refines it (0.83 years; 37.7 at
-        0.38), so part of what was left was the grid.
+        0.38), so part of what was left was the grid. All of those with the
+        missing transition supplied; as written it is 36.3.
 
         Asserted as a band: this fails if someone closes the gap, which is the
         signal to revisit the fixture's note.
@@ -372,7 +370,7 @@ class TestPhaseWidth:
         priors are asserted rather than five to keep this to three solves.
         """
         base = fx.measurements()
-        tree, _inserted = with_implicit_boundaries(fx.model_tree())
+        tree = fx.model_tree()
         chain = ec.layout(tree, base)
         spans = []
         for prior in (0.0, 0.2, 1.0):

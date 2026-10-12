@@ -305,7 +305,13 @@ def layout_with_reason(root: Optional[Dict], measurements: List[Dict]
             # Phases in a row with no Boundary between them: one stage of
             # dates in blocks, unless areas are among them.
             if any(has_areas(c) for c in between):
-                return None, exact_chain.NO_BOUNDARY_BETWEEN
+                names = ' and '.join(f"'{c.get('name') or c.get('element_type')}'"
+                                     for c in between)
+                return None, (
+                    f'{names} sit one after another with no Boundary between them, '
+                    'and areas side by side are among them. Add a Boundary between '
+                    'them to make the model exactly solvable'
+                )
             dates = [d for c in between for d in subtree_dates(c)]
         elif between:
             element = between[0]

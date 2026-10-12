@@ -173,17 +173,13 @@ interface AnalysisResult {
     // labelled as one.
     requested?: 'auto' | 'exact' | 'gibbs'
     reason?: string | null
-    // Implied transitions supplied to the solver that ran; always 0 when
-    // sampled.
+    // Boundaries the app added to the model for the exact solver. Only on
+    // results from before it stopped doing so; it now refuses instead.
     implicit_boundaries?: number
     // The calendar step, in years, the modelled ranges were reported at --
     // OxCal's Resolution. Absent on a run from before it could be set, which
     // was reported at the default; see utils/hpd.reportingOf.
     resolution?: number
-    // How many WOULD be needed for the exact solver to apply, set only when
-    // that is why this was sampled. Distinct from `reason`, which says the
-    // model cannot be integrated exactly at all.
-    exact_needs_boundaries?: number
     // Sampled path only. `converged` is against OxCal's 0.95 target for the
     // overlap-integral convergence measure -- read off the rounds pooled over
     // every chain when several ran -- AND, with several chains, Gelman-Rubin
@@ -2102,7 +2098,11 @@ export default function Results() {
             'The posterior was integrated exactly on a calendar grid — no sampler, ' +
             'so nothing to converge and no calibration lobe to miss.' +
             (analysis.solver.implicit_boundaries
-              ? ` ${analysis.solver.implicit_boundaries} implied transition(s) were supplied to make the model solvable this way.`
+              ? ` This run added ${
+                  analysis.solver.implicit_boundaries === 1
+                    ? 'a Boundary'
+                    : `${analysis.solver.implicit_boundaries} Boundaries`
+                } the model did not have, which the app no longer does. Re-run it to solve the model as written.`
               : '')
           }
         >
@@ -2140,16 +2140,7 @@ export default function Results() {
           <Typography variant="subtitle2" gutterBottom>
             Sampled, but not fully converged
           </Typography>
-          {analysis.solver.exact_needs_boundaries ? (
-            <Typography variant="body2" sx={{ mb: 1 }}>
-              Integrating this model exactly would mean supplying{' '}
-              {analysis.solver.exact_needs_boundaries === 1
-                ? 'a transition'
-                : `${analysis.solver.exact_needs_boundaries} transitions`}{' '}
-              that its ordering only implies, which changes the model rather than
-              restating it, so it was sampled as written instead.
-            </Typography>
-          ) : analysis.solver.reason ? (
+          {analysis.solver.reason ? (
             <Typography variant="body2" sx={{ mb: 1 }}>
               This model cannot be solved exactly because {analysis.solver.reason}.
             </Typography>
@@ -2174,10 +2165,7 @@ export default function Results() {
             analysis.solver.rhat > analysis.solver.rhat_target
               ? `, and its chains had not come into agreement: R̂ ${analysis.solver.rhat.toFixed(2)} against the ${analysis.solver.rhat_target.toFixed(2)} wanted, which usually means a date whose calibration has two separated ranges and different chains settled in different ones.`
               : ', short of the 95% usually wanted.'}{' '}
-            The ranges below are probably a few years out rather than wrong
-            {analysis.solver.reason
-              ? ', but writing in the Boundary the model implies would let it be solved exactly without changing anything.'
-              : '.'}
+            The ranges below are probably a few years out rather than wrong.
             {crossCheck?.status === 'not_checked' && crossCheck.reason
               ? ` The exact solver’s check covers other model shapes: ${crossCheck.reason}.`
               : ''}
@@ -2195,13 +2183,7 @@ export default function Results() {
         <Tooltip
           describeChild
           title={
-            (analysis.solver.exact_needs_boundaries
-              ? `This model was sampled with the Metropolis-Hastings/Gibbs scheme. Integrating this model exactly would mean supplying ${
-                  analysis.solver.exact_needs_boundaries === 1
-                    ? 'a boundary'
-                    : analysis.solver.exact_needs_boundaries + ' boundaries'
-                } that its ordering only implies. That would be a change to the model, splitting one phase-span in two and measurably moving the answer. Choose the exact solver if you want the missing boundaries supplied anyway; note that it will then be answering a slightly different model. `
-              : analysis.solver.reason
+            (analysis.solver.reason
               ? `This model was sampled with the Metropolis-Hastings/Gibbs scheme. It cannot be integrated exactly — ${analysis.solver.reason}. `
               : 'The Metropolis-Hastings/Gibbs sampler was chosen for this analysis. This model could also have been integrated exactly; the two agree to well under a year on the models where both can be run. ') +
             `It converged to ${
