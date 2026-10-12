@@ -972,10 +972,11 @@ class TestOutlierModel:
         """
         This gap used to be attributed to "this app's outlier implementation" in
         general, since both solvers sat the same 0.0166 from OxCal and agreed
-        with each other to 0.0001. Sampling the SHARED scale instead of
-        marginalising it per date turns out to be the whole of it: the sampler
-        now lands within 0.0016 on all sixteen dates, ten times closer, while the
-        exact solver keeps its 0.0166.
+        with each other to 0.0001. Sharing the scale instead of marginalising it
+        per date turns out to be the whole of it: the sampler, drawing it, lands
+        within 0.0016 on all sixteen dates, ten times closer, and the exact
+        solver, now weighing it from the data (exact_chain._weigh_scales), at
+        0.0016 too, where it stayed at 0.0166 while it mixed over the prior.
         """
         sf, exact, sampled = solved
         table = sf.table()
@@ -986,7 +987,7 @@ class TestOutlierModel:
                        for m in sf.measurements())
 
         assert worst(sampled) < 0.005, worst(sampled)
-        assert worst(sampled) < worst(exact) / 3
+        assert worst(exact) < 0.005, worst(exact)
 
     def test_it_recovers_the_scale_oxcal_inferred(self, solved):
         """

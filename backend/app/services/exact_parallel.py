@@ -451,10 +451,10 @@ def solve(measurements: List[Dict], root: Dict, stages: Stages,
                    estimate_durations=estimate_durations, dispersal=dispersal,
                    interval_draws=interval_draws, resolution=resolution)
     return exact_chain._two_pass(
-        lambda grid, boundaries_only: _solve_on_grid(
+        lambda grid, boundaries_only, **extra: _solve_on_grid(
             grid, measurements, root, stages, element_bounds,
-            boundaries_only=boundaries_only, **options),
-        measurements, element_bounds, stages.num_groups)
+            boundaries_only=boundaries_only, **extra, **options),
+        measurements, element_bounds, stages.num_groups, seed)
 
 
 class _Area:
@@ -482,16 +482,19 @@ def _solve_on_grid(grid: np.ndarray, measurements: List[Dict], root: Dict,
                    seed: int, uniform_span_prior: bool, estimate_durations: bool,
                    dispersal: Optional[Dict], interval_draws: int,
                    resolution: float, boundaries_only: bool = False,
-                   ) -> Tuple[Optional[Dict], List[np.ndarray]]:
+                   scale_weights: Optional[Dict[str, np.ndarray]] = None,
+                   evidence_only: bool = False,
+                   ):
     """
     solve() on one grid: (results, every posterior density it reported), or
-    with `boundaries_only` (None, the outermost Boundaries' densities).
+    with `boundaries_only` (None, the outermost Boundaries' densities), or
+    with `evidence_only` the log evidence alone (exact_chain._weigh_scales).
     """
     dt = float(grid[1] - grid[0])
     M = len(grid)
     scratch = np.empty((M, M))
     likelihood, cumulative, outlier_parts = exact_chain.date_tables(
-        grid, measurements, element_bounds)
+        grid, measurements, element_bounds, scale_weights)
     allowed = exact_chain._allowed_windows(grid, element_bounds, stages.all_boundary_ids)
 
     areas = [[_Area(chain, grid, allowed, cumulative, likelihood, scratch)
@@ -555,6 +558,8 @@ def _solve_on_grid(grid: np.ndarray, measurements: List[Dict], root: Dict,
             outer, allowed, transfer, tails.end_weights)
     log_evidence = (log_mass + correction_offset + tails.log_scale
                     + sum(exact_chain._finite_peak(term) for term in log_T))
+    if evidence_only:
+        return log_evidence
     correction = None
 
     if boundaries_only:

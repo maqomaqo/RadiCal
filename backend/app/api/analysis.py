@@ -681,7 +681,7 @@ def _run_bayesian(
                    whichever solver actually ran),
          and for the sampled path: 'sweeps', 'convergence', 'converged',
          'outlier_scale' -- the shared offset scale each outlier model's dates
-         inferred, which only the sampler estimates (see services/gibbs.py) --
+         inferred (the exact path reports it too, when a date carries one) --
          and 'cross_check', the Boundaries against a direct calculation of the
          same model (services/cross_check.py), None if turned off}
     """
@@ -750,6 +750,10 @@ def _run_bayesian(
             # correlated them.
             'model_agreement': amodel,
             'overall_agreement': overall,
+            # Each outlier model's shared offset scale, weighed from the data
+            # (exact_chain._weigh_scales), as the sampled record has it.
+            **({'outlier_scale': solved['outlier_scale']}
+               if solved.get('outlier_scale') else {}),
         }, solved.get('intervals'), _phase_summary_block(
             model_tree, measurements, solved, estimate_kde)
 

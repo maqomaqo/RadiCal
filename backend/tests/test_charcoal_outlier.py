@@ -115,46 +115,31 @@ class TestTheKernelMatchesOxCalsDefinition:
 
 
 class TestAgainstOxCalsOwnRun:
-    def test_the_modelled_dates_land_within_ten_years(self):
+    def test_the_modelled_dates_land_within_five_years(self):
         """
-        Measured at 7.1 years rms with the scale integrated, on the model as
-        written; 9.2 with the missing transition supplied, as the app once
-        solved it, and 16.1 before that with a single fixed scale.
+        Measured at 3.45 years rms with the shared scale weighed from the data
+        (exact_chain._weigh_scales); 7.1 with each date's offset mixed over the
+        scale's prior, 9.2 before that with the missing transition supplied, as
+        the app once solved it, and 16.1 with a single fixed scale.
         """
         measurements, _tree, solved = _solved()
         rms, errors = _rms_against_oxcal(measurements, solved)
-        assert rms < 11.0, dict(zip([m['id'] for m in measurements], errors.round(2)))
+        assert rms < 4.5, dict(zip([m['id'] for m in measurements], errors.round(2)))
 
-    def test_integrating_the_scale_is_what_bought_that(self, monkeypatch):
+    def test_weighing_the_shared_scale_is_what_bought_that(self, monkeypatch):
         """
-        The fix, as a measurement rather than a comment: restore the single
-        fixed scale and the same model gets materially further from OxCal.
+        The fix, as a measurement rather than a comment: mix each date's offset
+        over the scale's prior again, as the solver did before it weighed the
+        shared scale, and the same model lands 7.1 years rms from OxCal
+        against 3.45.
         """
         measurements, tree, solved = _solved()
         good, _e = _rms_against_oxcal(measurements, solved)
-
-        real_kernel = ec._outlier_kernel
-
-        def single_scale(step, half_width, model=ec.DEFAULT_OUTLIER_MODEL):
-            if model != 'charcoal':
-                return real_kernel(step, half_width, model)
-            lags = np.arange(0.0, 8 * 200.0 + step, step)
-            density = np.exp(-lags / 200.0)
-            kernel = np.concatenate([density[::-1], np.zeros(len(lags) - 1)])
-            return kernel / kernel.sum()
-
-        monkeypatch.setattr(ec, '_outlier_kernel', single_scale)
+        monkeypatch.setattr(ec, '_weigh_scales', lambda *args, **kwargs: None)
         chain = ec.layout(tree, measurements)
         worse, _e2 = _rms_against_oxcal(
             measurements, ec.solve(measurements, tree, chain, num_samples=200))
-        # 11.45 against 10.63. The margin has shrunk from the 6.2 years first
-        # measured, because a different error the kernel shape had been partly
-        # compensating for was removed: the interval quadrature (see
-        # exact_chain._interval_integral). The claim still holds in direction, and
-        # that is all this can assert now -- on THIS fixture the remaining error is
-        # dominated by the declared-outlier degeneracy described in the fixture's
-        # PHASE WIDTH note, which swamps what the kernel shape is worth.
-        assert worse > good + 0.4, (worse, good)
+        assert worse > good + 2.0, (worse, good)
 
     def test_the_declared_outliers_are_reported_as_outliers(self):
         """
@@ -286,7 +271,8 @@ class TestPhaseWidth:
     Phase width against OxCal. This used to be the suite's largest open
     disagreement -- a modelled phase came out several times narrower than OxCal's
     -- and correcting the interval quadrature closed it on every fixture without
-    a declared outlier. What is left is this fixture, where it now OVERSHOOTS.
+    a declared outlier. This fixture then OVERSHOT, until the exact solver
+    weighed the shared outlier scale from the data.
 
     The tests below pin what that remainder is and, as much, what it is not. It
     was blamed on a degeneracy in the outlier model; that diagnosis predicted
@@ -328,18 +314,12 @@ class TestPhaseWidth:
         assert oxcal_span == pytest.approx(19.3, abs=1.0), oxcal_span
         assert span == pytest.approx(oxcal_span, rel=0.25), (span, oxcal_span)
 
-    def test_this_fixture_still_overshoots(self):
+    def test_the_span_now_matches_oxcals(self):
         """
-        The remaining disagreement, pinned so it cannot drift unnoticed. With
-        three dates declared residual outright, this model's span comes out too
-        WIDE against OxCal's 29.2, where before the quadrature fix everything was
-        too narrow: 54.9 years once, 40.4 on the first-pass grid (a 1.67-year
-        step), and 38.6 since the second pass refines it (0.83 years; 37.7 at
-        0.38), so part of what was left was the grid. All of those with the
-        missing transition supplied; as written it is 36.3.
-
-        Asserted as a band: this fails if someone closes the gap, which is the
-        signal to revisit the fixture's note.
+        With three dates declared residual outright, this model's span came out
+        too WIDE against OxCal's 29.2: 54.9 years once, 38.6 after the second
+        pass refined the grid, 36.3 on the model as written. Weighing the shared
+        outlier scale from the data (exact_chain._weigh_scales) put it at 29.4.
         """
         measurements, _tree, solved = _solved()
         boundaries = [b['posterior']['posterior_mean']
@@ -348,7 +328,7 @@ class TestPhaseWidth:
         oxcal_span = (fx.posterior_means()['Start Hillside']
                       - fx.posterior_means()['End Hillside'])
         assert oxcal_span == pytest.approx(29.2, abs=1.0), oxcal_span
-        assert 34.0 < span < 70.0, span
+        assert span == pytest.approx(oxcal_span, abs=3.0), span
 
     def test_absorbing_the_declared_outliers_narrows_the_span_monotonically(self):
         """

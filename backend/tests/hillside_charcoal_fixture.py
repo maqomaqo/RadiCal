@@ -34,12 +34,10 @@ Two structural notes, both mattering when comparing:
     change to the model -- one span term over 11 dates split into two over 4
     and 7 -- and the figures below that say so were measured that way.
   * The app's span on this model no longer UNDERSHOOTS OxCal's 29.2 years, as it
-    did on every model before the quadrature fix -- it overshoots, at 43-55
-    depending on the solver. This is the one fixture where that happens, and the
-    reason is the outright-outlier declaration rather than the phase model. That
-    is why the agreement asserted in tests/test_charcoal_outlier.py is a bound of
-    a few years rather than the sub-year agreement the other fixtures get. See
-    PHASE WIDTH below for how far it is understood.
+    did on every model before the quadrature fix. It then OVERSHOT, at 43-55
+    depending on the solver, until the exact solver weighed the shared outlier
+    scale from the data (exact_chain._weigh_scales): it is now 29.4. See PHASE
+    WIDTH below for the history.
 
 PHASE WIDTH: mostly RESOLVED, and it was a numerical bug
 -------------------------------------------------------
@@ -84,10 +82,16 @@ What the correction bought, rms of modelled dates against OxCal's:
     outlier/Dune            2.51 -> 0.18   (span 4.2 -> 20.7, OxCal 19.3)
     charcoal/Hillside       9.92 -> 10.63  (span 10.6 -> 54.9, OxCal 29.2)
 
-WHAT IS LEFT, on this fixture
------------------------------
-This is the only fixture that still disagrees, and it has flipped sign: the span
-OVERSHOOTS, at 43.3 sampled and 54.9 exact against OxCal's 29.2.
+WHAT WAS LEFT, on this fixture -- now resolved for the exact solver
+------------------------------------------------------------------
+Weighing the shared offset scale from the data instead of mixing each date's
+offset over its prior (exact_chain._weigh_scales) put the exact span at 29.4
+against OxCal's 29.2 and the dates at 3.5 years rms from OxCal's, where they
+had been 36.3 and 7.1 on the model as written. The notes below are the
+investigation that got there, kept for its measurements.
+
+This was the only fixture that still disagreed, and it had flipped sign: the span
+OVERSHOT, at 43.3 sampled and 54.9 exact against OxCal's 29.2.
 
 The "declared-outlier degeneracy" this note used to blame is NOT the cause, and
 the evidence for it did not survive the quadrature fix. That mechanism -- every

@@ -450,11 +450,11 @@ Where both methods can be used, they give the same date ranges to within about a
   - you want a second, independent opinion on an exact result. Run the analysis both ways and
     **Compare** shows how far they differ (see [Comparing Analyses](#comparing-analyses));
   - several dates carry outlier models because you suspect a shared cause (old wood, residual
-    material, a doubtful laboratory batch), and their *outlier probabilities* are what you want
-    to know. The sampler, like OxCal, lets those dates jointly decide how large a typical offset
-    is; the exact solver weighs each date on its own. The date ranges barely change either way, but
-    the outlier probabilities can differ by a percentage point or two. If one or two dates carry a
-    small outlier prior as a precaution, this does not matter.
+    material, a doubtful laboratory batch). Both methods, like OxCal, let those dates jointly
+    decide how large a typical offset is, and their outlier probabilities agree closely. The
+    sampler also keeps the link that shared offset makes between the dates themselves, which the
+    exact solver leaves out. On the one test model where its effect could be measured, it moved
+    the dates by a fraction of a year.
 - **Exact solver only** never samples. Choose it when you need figures that repeat exactly. On a
   model it cannot take, the run fails and says why, including which Boundaries to add.
 
@@ -1512,11 +1512,18 @@ an offset kernel, following Bronk Ramsey (2009b), building on Christen (1994):
   `u ~ U[0, 3]` (OxCal's `Outlier_Model("Charcoal", Exp(1,-10,0), U(0,3), "t")`). Mass sits on
   the side saying the dated material formed *before* its context.
 
-The scale is integrated over its prior on a 24-node log grid. On the exact path this is done
-per date independently (an approximation — OxCal shares one scale across all dates using the
-model). The sampler shares it properly. The cost is small where outlier priors are small: on a real
-OxCal comparison the exact path's outlier probabilities sat 0.017 from OxCal's where the sampler
-reached 0.002.
+The scale is shared by every date using the model, as in OxCal, and held on a 24-node log grid.
+The sampler draws it with everything else. The exact path weighs it from the data instead: the
+model's evidence at each node, from cheap passes on a 200-point grid over the posterior's window
+(every second node, interpolated in the log, and each model in turn where there are two), and then
+one ordinary solve with every flagged date's offset mixed over that posterior. The exact answer,
+one whole solve per node mixed by evidence, would take 24 solves per model; this keeps what the
+data say about the scale and drops only the link a common scale makes between the dates, for 3–17%
+more run time on the test models. Against OxCal its outlier probabilities sat 0.0016 away on one
+test model (0.0158 with the scale mixed over its prior on each date; 0.0012 for the exact mixture),
+and on another the modelled dates came to 3.5 years rms and the span to 29.4 years against OxCal's
+29.2 (7.1 and 36.3 before). The weighed scale is reported with the solver record, as the sampler's
+is.
 
 **Reported outlier probability** is the posterior probability of being an outlier:
 
