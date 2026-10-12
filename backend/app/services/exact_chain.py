@@ -291,11 +291,16 @@ def layout_with_reason(
         return None, coupled
 
     if not plan.span_groups:
-        return None, (
-            'no Boundary encloses any date. Add a Boundary at the start and '
-            'end of the sequence so each phase has a transition either side '
-            'of it'
-        )
+        count = len(plan.boundary_names)
+        if count == 0:
+            what = 'a Boundary at the start and end of the Sequence'
+        elif count == 1:
+            what = ('another Boundary, so that two of them enclose the dated '
+                    'Phases')
+        else:
+            what = 'Boundaries either side of the dated Phases'
+        return None, (f'no pair of Boundaries encloses any date. Add {what} to '
+                      'make the model exactly solvable')
 
     # Link the groups into paths: each group's younger boundary must be the
     # next group's older boundary, and no boundary may start or end two groups.

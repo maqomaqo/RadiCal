@@ -29,7 +29,7 @@ import pytest
 
 from app.services import exact_chain as ec
 from app.services import gibbs
-from app.services.model_tree import with_implicit_boundaries
+from boundary_edits import with_implicit_boundaries
 
 import oxcal_fixture as ox
 
@@ -721,9 +721,6 @@ class TestUniformSpanPriorGrouping:
         measurements = ox.measurements()
         tree = ox.model_tree(run)
         chain = ec.layout(tree, measurements)
-        if chain is None:
-            tree, _inserted = with_implicit_boundaries(tree)
-            chain = ec.layout(tree, measurements)
 
         model = gibbs.Model(measurements, tree)
         exponent = len(chain.boundary_ids) - 2

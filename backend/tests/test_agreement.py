@@ -620,15 +620,14 @@ class TestModelIndexAgainstOxCal:
         """
         Exact integration and the sampler must agree about it, or the number
         means something different depending on which solver a model happened to
-        qualify for. The exact solver needs the implied transition supplied,
-        which is a real change to the model -- hence a wider tolerance than the
-        two solvers' marginals themselves agree to.
+        qualify for. Both take the model as written, its two groups in a row
+        with no Boundary between them (exact_chain._OrderedGroup); the
+        tolerance is wider than their marginals agree to, since Amodel sums
+        over every date.
         """
         from app.services import exact_chain
-        from app.services.model_tree import with_implicit_boundaries
         measurements = ox.measurements()
-        tree, inserted = with_implicit_boundaries(ox.model_tree('ordered'))
-        assert inserted
+        tree = ox.model_tree('ordered')
         layout, _reason = exact_chain.layout_with_reason(tree, measurements)
         assert layout is not None
         exact = exact_chain.solve(measurements, tree, layout, num_samples=200)

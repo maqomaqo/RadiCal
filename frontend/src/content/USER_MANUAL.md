@@ -456,16 +456,13 @@ Where both methods can be used, they give the same date ranges to within about a
     the outlier probabilities can differ by a percentage point or two. If one or two dates carry a
     small outlier prior as a precaution, this does not matter.
 - **Exact solver only** never samples. Choose it when you need figures that repeat exactly. On a
-  model it cannot take, the run fails and says why, with one exception, described next.
+  model it cannot take, the run fails and says why, including which Boundaries to add.
 
-**Forcing the exact solver on a Sequence with no Boundaries.** A Sequence with no Boundaries of its
-own gives the exact solver nothing to work between. **Exact solver only** will still solve it, by
-adding the Boundaries that the order implies. That changes the model, and the date ranges move as a
-result: in tests against OxCal, a model solved with an added Boundary came out further from OxCal's
-answer than the same model taken as written. Automatic therefore samples these models. If you do
-want the exact solver here, add the Boundaries to the model yourself, so the change is visible and
-deliberate. Hovering over **Exact solver** on the Results page shows how many Boundaries were added
-for you.
+The app never changes your model to make it solvable. A Sequence with fewer than two Boundaries, for
+example, gives the exact solver nothing to work between: Automatic samples it, and **Exact solver
+only** fails and asks for a Boundary at the start and end of the Sequence. Results from older runs
+that had Boundaries added for them say so when you hover over **Exact solver**; re-run them to solve
+the model as written.
 
 ### Checking a sampled result
 
@@ -1491,13 +1488,12 @@ On the test sequence above, with untempered chains that all sat in the late rang
 stayed in the early range 89–99% of the time; across about 2,000 tested ranges the model ruled out,
 they left all but one.
 
-**Forcing exact integration.** A Sequence with no Boundaries of its own encloses no dates, so it is
-not chain-shaped. **Exact solver only** makes it so by supplying the Boundaries the order implies.
-That splits one span term over K dates into several over K₁ + K₂ + … dates, and K is the exponent
-that holds a date to its group, so the modelled ranges genuinely move. On the ordered test model,
-which the exact solver now takes as written at 0.56 years rms from OxCal (and the sampler at 0.58),
-supplying the missing Boundary instead put it at 2.33. Automatic therefore samples models that need
-Boundaries supplied.
+**No Boundaries are added.** The exact solver takes a model as written or refuses it. Supplying the
+Boundaries an order implies would make more models chain-shaped, but it splits one span term over K
+dates into several over K₁ + K₂ + … dates, and K is the exponent that holds a date to its group, so
+the modelled ranges genuinely move. On the ordered test model, which the exact solver takes as
+written at 0.56 years rms from OxCal (the sampler 0.58), supplying the missing Boundary put it at
+2.33. Earlier versions did this when the exact solver was chosen.
 
 ### A.7 Outlier models
 

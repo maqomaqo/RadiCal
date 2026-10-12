@@ -34,7 +34,6 @@ from app.services.model_tree import (
     tree_to_rows,
     validate_ordinates,
     validate_tree,
-    with_implicit_boundaries,
 )
 from app.models import (
     Analysis, RadiocarbonSample, AnalysisResult, StratigraphicRelationship,
@@ -551,7 +550,6 @@ def _run_wiggle_match(
         'requested': requested,
         'resolution': resolution,
         'reason': None,
-        'implicit_boundaries': 0,
         # The check that the match is REAL, not a diagnostic beside it: a
         # D_Sequence asserts the ring counts, and if they are wrong the model
         # cannot widen to absorb it the way a Phase can -- it simply fits
@@ -661,33 +659,26 @@ def _run_bayesian(
     OxCal's own MH/Gibbs scheme, which reproduces the exact solver to under a
     year wherever the exact solver can be asked.
 
-    A model that is not exactly solvable AS AUTHORED is sampled even when supplying the
-    transitions its ordering implies would make it exactly solvable, because
-    that insertion changes the model: it splits one span term over K dates
-    into two over K1 + K2, and K is the exponent in (span)^(-K) that resists a
-    date wandering from its group. Measured against OxCal (rms of the modelled
-    dates), the oxcal `ordered` fixture -- Phases in a row with no Boundary
-    between them, which the exact solver now takes as written -- is 0.56 from
-    OxCal as written and 2.33 on the patched tree. The cost, which the results
-    page states: choosing `exact` on a model that needs the patch cross-checks
-    a different model as well as a different method.
+    The exact solver takes the model as written or not at all. It never
+    supplies a Boundary the model lacks: that would answer a different model
+    -- one span term over K dates split into several, and K is the exponent in
+    (span)^(-K) that holds a date to its group -- and someone who chose the
+    exact solver cannot be assumed to know it had happened. Measured against
+    OxCal (rms of the modelled dates), the oxcal `ordered` fixture is 0.56 as
+    written and was 2.33 with its missing Boundary supplied, which this used to
+    do when the exact solver was asked for.
 
     bayesian_config.solver overrides the choice per analysis. `exact` on a
-    model that cannot be integrated raises rather than quietly sampling.
+    model that cannot be integrated raises rather than quietly sampling, with
+    the reason, which says what to add.
 
     The returned solver record makes the choice visible. Shape:
 
         {'method': 'exact' | 'gibbs',
          'requested': what the config asked for ('auto' unless overridden),
          'resolution': the calendar step in years the ranges were reported at,
-         'reason': why the model is not exactly solvable AS AUTHORED (None when
-                   it is, whichever solver actually ran),
-         'implicit_boundaries': how many transitions were supplied to the solver
-                   that ran -- always 0 on the sampled path, which never needs
-                   them,
-         'exact_needs_boundaries': how many WOULD have to be supplied for the
-                   exact solver to apply, set only when that is why the sampler
-                   ran,
+         'reason': why the model is not exactly solvable (None when it is,
+                   whichever solver actually ran),
          and for the sampled path: 'sweeps', 'convergence', 'converged',
          'outlier_scale' -- the shared offset scale each outlier model's dates
          inferred, which only the sampler estimates (see services/gibbs.py) --
@@ -717,31 +708,8 @@ def _run_bayesian(
         # not a sample of events whose spread means anything.
         return (*wiggle_result, None)
 
-    # Each solver gets the tree it can take: the sampler the model as
-    # AUTHORED, the exact solver a copy with the implied transitions supplied,
-    # since it cannot integrate anything else. The two are therefore not
-    # always the same tree -- see the docstring for why that is preferred to
-    # the accuracy it would cost, and the results page says when it happens.
+    # Both solvers are given the model as written; see the docstring.
     layout, reason = _exact_layout(model_tree, measurements)
-    authored_is_exact = layout is not None
-    exact_tree = model_tree
-    exact_needs_boundaries = 0
-    if layout is None:
-        # A Sequence with no Boundaries of its own is not a chain. Supplying
-        # the transitions it implies makes it solvable here -- at a price.
-        # See model_tree.with_implicit_boundaries.
-        candidate, inserted = with_implicit_boundaries(model_tree)
-        if inserted:
-            patched, patched_reason = _exact_layout(candidate, measurements)
-            if patched is not None:
-                layout, exact_tree = patched, candidate
-                exact_needs_boundaries = len(inserted)
-            else:
-                # Why it is still not a chain AFTER the transitions were
-                # supplied; the original reason has been dealt with, and
-                # repeating it would send the user to fix something already
-                # fixed.
-                reason = patched_reason
 
     if requested == 'exact' and layout is None:
         raise ValueError(
@@ -750,14 +718,10 @@ def _run_bayesian(
             'sampler, which has no such restriction.'
         )
 
-    # `auto` takes the exact answer only where it needs no help. Asking for it
-    # explicitly still gets it, transitions and all -- that is what the override
-    # is for.
-    if layout is not None and (requested == 'exact'
-                               or (requested != 'gibbs' and authored_is_exact)):
+    if layout is not None and requested != 'gibbs':
         parallel = isinstance(layout, exact_parallel.Stages)
         solved = (exact_parallel.solve if parallel else exact_chain.solve)(
-            measurements, exact_tree, layout,
+            measurements, model_tree, layout,
             num_samples=bayesian_config.get('mcmc_samples', 2000),
             uniform_span_prior=bayesian_config.get('uniform_span_prior', True),
             estimate_durations=estimate_durations,
@@ -778,7 +742,6 @@ def _run_bayesian(
             # page re-selects them at -- see _reporting_resolution.
             'resolution': resolution,
             'reason': None,
-            'implicit_boundaries': exact_needs_boundaries,
             # The two model-level agreement indices, alongside the per-date
             # ones attach() has just written. See services/agreement.py for
             # what separates them: Aoverall combines the per-date indices and
@@ -788,7 +751,7 @@ def _run_bayesian(
             'model_agreement': amodel,
             'overall_agreement': overall,
         }, solved.get('intervals'), _phase_summary_block(
-            exact_tree, measurements, solved, estimate_kde)
+            model_tree, measurements, solved, estimate_kde)
 
     # Only the sampler takes a progress callback: exact integration does not
     # iterate towards an answer, so it has no fraction to report and nothing
@@ -834,16 +797,10 @@ def _run_bayesian(
         # the run's joint states (services/agreement.py).
         'model_agreement': amodel,
         'overall_agreement': overall,
-        # Why the model is not a chain AS AUTHORED, and None when it is one
+        # Why the exact solver cannot take the model, and None when it can
         # and the sampler ran by choice -- so the results page does not warn
         # about a deliberate, valid decision.
         'reason': reason,
-        # Nothing was supplied -- the sampler took the model as written.
-        'implicit_boundaries': 0,
-        # ...but this is how many the exact solver would have needed: the
-        # model COULD have been integrated exactly and was not, because doing
-        # so would have changed it. A different statement from `reason`.
-        'exact_needs_boundaries': exact_needs_boundaries,
         # The seed the run took, so it can be repeated exactly or replicated
         # with another, and the floor it was held to (0 when none was set).
         'seed': seed,

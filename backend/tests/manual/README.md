@@ -110,14 +110,12 @@ diagnostics to misread. Because it is that fast, the modelled comparison is
 now an actual assertion in `tests/test_exact_chain.py` rather than something
 only this harness could check.
 
-`layout()` declines the `ordered` fixture — two groups ordered against each
-other while sharing one boundary pair is not a chain. That was the remaining
-wrong answer when this was written; since then `model_tree.with_implicit_boundaries`
-supplies the transition such a model implies, which makes it exact (6.4 yr rms
-from OxCal, against 12.6 for SMC), and OxCal gives essentially the same answer
-either way (posterior overlap 0.948 between its own two runs). Models that are
-still not chains — a branching site, say — now go to `services/gibbs.py` rather
-than SMC.
+`layout()` once declined the `ordered` fixture — two groups ordered against
+each other while sharing one boundary pair. That was the remaining wrong answer
+when this was written. It is now integrated as written, as ordered blocks
+(`exact_chain._OrderedGroup`), 0.56 yr rms from OxCal; the app never adds a
+Boundary to make a model solvable. Models the exact solver cannot take — a
+branching site, say — go to `services/gibbs.py` rather than SMC.
 
 ### OxCal's UniformSpanPrior
 
