@@ -6,8 +6,7 @@ integrated exactly; anything else is sampled by SMC, which has a known and
 measured failure on wiggly calibration curves (see services/exact_chain.py's
 module docstring). Both came back looking identical, so a result carrying that
 error was indistinguishable from an exact one -- and the shapes that trigger it
-are ordinary, not exotic: a sequence of phases with no Boundary anywhere, or two
-parallel excavation areas.
+are ordinary, not exotic: two excavation areas with no Boundary they share, say.
 
 The exact path is pure numpy, so most of this needs no sampler. The one test
 that covers the fallback's bookkeeping stubs the sampler out rather than running
@@ -38,10 +37,10 @@ def _chain_tree(tag):
 def _unbounded_tree(tag):
     """
     Sequence(Phase, Phase, Phase) with no Boundary anywhere -- an ordinary
-    naive model, and one that reaches SMC. Implicit transitions between the
-    three phases give two boundaries and so one bounded group (the middle
-    phase), but the first and last phases' dates are still outside every
-    boundary, which the chain cannot express.
+    naive model. Implicit transitions between the three phases give two
+    boundaries and so one bounded group (the middle phase), with the first and
+    last phases' dates outside every boundary, which the exact solver takes
+    as the model's two tails -- unless one carries an outlier model.
     """
     return {
         'id': f'{tag}root', 'element_type': 'sequence', 'name': 'Site', 'children': [
@@ -50,6 +49,25 @@ def _unbounded_tree(tag):
             {'id': f'{tag}p3', 'element_type': 'phase', 'name': 'Late', 'children': []},
         ],
     }
+
+
+def _separate_areas_tree(tag):
+    """
+    Phase(Sequence(Phase p1, Phase p2), Sequence(Phase p3, Phase p4)) with no
+    Boundary anywhere: two areas with nothing they share around them, so
+    separate models rather than areas of one site. One the exact solver
+    cannot integrate, before or after implicit transitions are supplied, and
+    so sampled.
+    """
+    def area(name, phases):
+        return {'id': f'{tag}{name}', 'element_type': 'sequence', 'name': name,
+                'children': [{'id': f'{tag}{p}', 'element_type': 'phase', 'name': p,
+                              'children': []} for p in phases]}
+    return {'id': f'{tag}root', 'element_type': 'phase', 'name': 'Site',
+            'children': [area('North', ['p1', 'p2']), area('South', ['p3', 'p4'])]}
+
+
+SEPARATE_AREAS = 'no Boundary before and after them'
 
 
 def _measurement(mid, element_id, age_bp=3000):
@@ -148,7 +166,7 @@ class TestFallbackIsRecorded:
         from app.api import analysis as analysis_api
 
         tag = f'sr{next(_IDS)}'
-        tree = _unbounded_tree(tag)
+        tree = _separate_areas_tree(tag)
         measurements = [
             _measurement(f'{tag}s1', f'{tag}p1', age_bp=3200),
             _measurement(f'{tag}s2', f'{tag}p2', age_bp=3100),
@@ -184,16 +202,27 @@ class TestFallbackIsRecorded:
 
         Here that makes the message strictly more useful: before patching the
         model has no boundaries at all, so all that can be said is "add some";
-        after, the interior transitions exist and what remains is precisely
-        which dates are still left outside them.
+        after, the interior transitions exist, the first and last phases are
+        the model's tails, and what remains is precisely the outlier model on
+        one of them.
         """
+        from app.api import analysis as analysis_api
         from app.services import exact_chain
 
-        measurements, tree, _results, _boundaries, solver = self._sampled()
+        tag = f'sr{next(_IDS)}'
+        tree = _unbounded_tree(tag)
+        measurements = [
+            {**_measurement(f'{tag}s1', f'{tag}p1', age_bp=3200), 'outlier_prior': 0.05},
+            _measurement(f'{tag}s2', f'{tag}p2', age_bp=3100),
+            _measurement(f'{tag}s3', f'{tag}p3', age_bp=3000),
+        ]
+        _results, _boundaries, solver, _intervals, _summaries = analysis_api._run_bayesian(
+            measurements, tree, {'mcmc_samples': 200, 'mcmc_temperatures': 1},
+        )
         _chain, original = exact_chain.layout_with_reason(tree, measurements)
         assert 'no Boundary encloses any date' in original
-        assert solver['reason'] != original
-        assert 'outside every Boundary' in solver['reason']
+        assert solver['method'] == 'gibbs'
+        assert 'carry an outlier model' in solver['reason']
 
 
 class TestSolverOverride:
@@ -258,11 +287,11 @@ class TestSolverOverride:
         ]
         with pytest.raises(ValueError) as raised:
             analysis_api._run_bayesian(
-                measurements, _unbounded_tree(tag),
+                measurements, _separate_areas_tree(tag),
                 {'mcmc_samples': 200, 'solver': 'exact'},
             )
         message = str(raised.value)
-        assert 'outside every Boundary' in message, message
+        assert SEPARATE_AREAS in message, message
         assert 'MH/Gibbs' in message, 'the message should name the way forward'
 
     def test_the_two_solvers_agree_on_the_same_model(self):
@@ -348,12 +377,12 @@ class TestSolverOverride:
                 _measurement(f'{tag}s2', f'{tag}p2', age_bp=3100),
                 _measurement(f'{tag}s3', f'{tag}p3', age_bp=3000),
             ],
-            'model_tree': _unbounded_tree(tag),
+            'model_tree': _separate_areas_tree(tag),
             'bayesian_config': {'solver': 'exact', 'mcmc_samples': 200},
             'save': True,
         })
         assert created.status_code == 400, created.text
-        assert 'outside every Boundary' in created.json()['detail']
+        assert SEPARATE_AREAS in created.json()['detail']
 
     def test_an_impossible_override_marks_a_saved_analysis_failed(self, client):
         """
@@ -370,7 +399,7 @@ class TestSolverOverride:
         created = client.post('/api/analysis/bayesian?wait=true', json={
             'name': f'Then broken {tag}',
             'measurements': measurements,
-            'model_tree': _unbounded_tree(tag),
+            'model_tree': _separate_areas_tree(tag),
             'bayesian_config': {'mcmc_samples': 200, 'mcmc_temperatures': 1},
             'save': True,
         })
@@ -403,7 +432,7 @@ class TestSolverOverride:
 
         after = client.get(f'/api/analysis/{analysis_id}').json()['data']
         assert after['status'] == 'failed'
-        assert 'outside every Boundary' in (after.get('error_message') or ''), after
+        assert SEPARATE_AREAS in (after.get('error_message') or ''), after
         # No stale record claiming a method it never managed to use.
         assert after['solver'] is None
 
@@ -554,7 +583,7 @@ class TestModelAgreementIsReported:
         a model happened to qualify for.
         """
         tag = f'sr{next(_IDS)}'
-        created = _run(client, tag, _unbounded_tree(tag), [
+        created = _run(client, tag, _separate_areas_tree(tag), [
             _measurement(f'{tag}s1', f'{tag}p1', age_bp=3200),
             _measurement(f'{tag}s2', f'{tag}p2', age_bp=3100),
             _measurement(f'{tag}s3', f'{tag}p3', age_bp=3000),
