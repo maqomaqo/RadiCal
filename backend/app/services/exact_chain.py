@@ -33,27 +33,29 @@ and exact up to the grid step.
 
 What it does NOT cover
 ----------------------
-The OUTLIER SCALE is approximated. OxCal's Outlier_Model carries one offset
-scale shared by every date using it and constrained by the data; this solver
-marginalises that scale independently per date over its prior, because a shared
-hyperparameter couples the dates and the message passing above needs each to
-enter through its own likelihood alone. The approximation is what makes the
-exact integration possible; services/gibbs.py samples the shared scale properly
-(bayesian_config.solver = "gibbs").
+The OUTLIER SCALE is approximated, though no longer ignored. OxCal's
+Outlier_Model carries one offset scale shared by every date using it and
+constrained by the data. A shared hyperparameter couples the dates, and the
+message passing above needs each to enter through its own likelihood alone; the
+exact answer, one whole solve per scale mixed by evidence, costs 24 solves per
+outlier model. Instead the scale is WEIGHED from the data with cheap evidence
+passes on a coarse grid (_weigh_scales), and each flagged date's offset is then
+mixed over that posterior. What is dropped is only the link a common scale makes
+between the dates; services/gibbs.py samples that too (bayesian_config.solver =
+"gibbs").
 
-What it costs: on tests/fixtures/oxcal_outlier the per-date marginalisation puts
-the reported outlier probabilities 0.0166 from OxCal's where the sampler gets to
-0.0016, and on tests/fixtures/oxcal_charcoal the modelled dates land 9.9 years
-rms from OxCal against the sampler's 6.3. So it matters where an outlier prior
-is large, and hardly at all at the usual few percent.
+What it costs, and what it buys: 3-17% more run time on the test models. On
+tests/fixtures/oxcal_outlier the outlier probabilities land 0.0016 from OxCal's
+(0.0158 with the scale mixed over its prior; 0.0012 for the exact mixture;
+the sampler 0.0016), and on tests/fixtures/oxcal_charcoal the modelled dates
+3.5 years rms from OxCal (7.1 over the prior; the sampler 4.7), its span 29.4
+years against OxCal's 29.2.
 
 PHASE WIDTH depends on the interval quadrature being right to second order --
-see _interval_integral, which carries the measurements. On models with a date
-declared an outright outlier (tests/fixtures/oxcal_charcoal) the span
-OVERSHOOTS, 54.9 years against OxCal's 29.2; that is the degenerate mode
-described in tests/hillside_charcoal_fixture's PHASE WIDTH note, not the phase
-model. services/gibbs.py carries the same rule as Model.endpoint_weight, and the
-two agree to about 0.6 years on the chain fixtures.
+see _interval_integral, which carries the measurements. services/gibbs.py
+carries the same rule as Model.endpoint_weight, and the two agree to about 0.6
+years on the chain fixtures. The one fixture that overshot, charcoal, did so
+because of the scale (tests/hillside_charcoal_fixture's PHASE WIDTH note).
 
 `layout()` returns None for anything that is not a single chain. The caller
 then tries services/exact_parallel.py, which integrates a chain whose stages
@@ -87,6 +89,7 @@ See _Tails. Several groups in a row out there are blocks, as inside a group.
 A date ordered against neither end, and a date out there with an outlier
 model, are not taken (tails_with_reason).
 """
+import functools
 from typing import Dict, List, Optional, Sequence, Set, Tuple
 
 import numpy as np
@@ -938,12 +941,34 @@ def convolve_on_grid(values: np.ndarray, kernel: np.ndarray) -> np.ndarray:
     return np.maximum(full[offset:offset + len(values)], 0.0)
 
 
+@functools.lru_cache(maxsize=4)
+def _scale_kernels(step: float, half_width: float, model: str) -> np.ndarray:
+    """Every scale node's kernel for `model`, one row each, on the shared lag
+    axis (_outlier_kernel_at_scale). Cached: the scale weighing (_weigh_scales)
+    asks for the same grid's kernels once per pass. Read-only."""
+    rows = np.array([_outlier_kernel_at_scale(step, half_width, model, log_scale)
+                     for log_scale in scale_nodes(model)])
+    rows.setflags(write=False)
+    return rows
+
+
+def _weighted_kernel(step: float, half_width: float, model: str,
+                     weights: np.ndarray) -> np.ndarray:
+    """The offset kernel with the scale mixed over `weights`, one per node of
+    scale_nodes(model): its posterior once weighed (_weigh_scales), where
+    _outlier_kernel mixes over the prior."""
+    kernel = np.asarray(weights, dtype=float) @ _scale_kernels(step, half_width, model)
+    return kernel / kernel.sum()
+
+
 def _with_outlier_component(
     grid: np.ndarray, inlier: np.ndarray, prior: float,
-    model: str = DEFAULT_OUTLIER_MODEL,
+    model: str = DEFAULT_OUTLIER_MODEL, scale_weights: Optional[np.ndarray] = None,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
     (mixture, outlier_component) for one date, both normalised on `grid`.
+    `scale_weights`, one per node of scale_nodes(model), mixes the offset
+    over the scale's posterior rather than its prior (_weigh_scales).
 
     Integrating out a Bernoulli outlier indicator is exact and costs the
     solver nothing, because the indicator touches only this date's own
@@ -956,8 +981,11 @@ def _with_outlier_component(
     the inference.
     """
     step = float(grid[1] - grid[0])
-    kernel = _outlier_kernel(step, max(OUTLIER_KERNEL_HALF_WIDTH_YEARS,
-                                       float(grid[-1] - grid[0])), model)
+    half_width = max(OUTLIER_KERNEL_HALF_WIDTH_YEARS, float(grid[-1] - grid[0]))
+    if scale_weights is None:
+        kernel = _outlier_kernel(step, half_width, model)
+    else:
+        kernel = _weighted_kernel(step, half_width, model, scale_weights)
     broad = convolve_on_grid(inlier, kernel)
     # NOT renormalised over the grid. The convolution of two normalised
     # densities is already proper on the real line, and most of its mass lies
@@ -978,6 +1006,7 @@ def _effective_date_bounds(measurement: Dict, element_bounds: Dict) -> Tuple:
 
 def date_tables(
     grid: np.ndarray, measurements: List[Dict], element_bounds: Dict,
+    scale_weights: Optional[Dict[str, np.ndarray]] = None,
 ) -> Tuple[Dict[str, np.ndarray], Dict[str, np.ndarray],
            Dict[str, Tuple[np.ndarray, np.ndarray, float]]]:
     """
@@ -996,6 +1025,11 @@ def date_tables(
     their answers to be comparable, and a second copy of the normalisation,
     truncation and outlier mixture would drift -- which would surface as the
     two disagreeing for a reason unrelated to either one's inference.
+
+    `scale_weights`, {outlier model: weight per node of scale_nodes(model)},
+    mixes each flagged date's offset over its model's scale weighed from the
+    data (_weigh_scales) instead of over the prior. The sampler draws the
+    scale itself and never passes it.
     """
     dt = float(grid[1] - grid[0])
     likelihood: Dict[str, np.ndarray] = {}
@@ -1019,7 +1053,9 @@ def date_tables(
                     f"sample '{m.get('sample_name', m['id'])}' has unknown outlier "
                     f"model '{model_name}'; expected one of {', '.join(OUTLIER_MODELS)}"
                 )
-            mixture, broad = _with_outlier_component(grid, lik, prior, model_name)
+            mixture, broad = _with_outlier_component(
+                grid, lik, prior, model_name,
+                None if scale_weights is None else scale_weights.get(model_name))
             outlier_parts[m['id']] = (lik, broad, float(prior))
             lik = mixture
         likelihood[m['id']] = lik
@@ -2083,33 +2119,139 @@ def solve(measurements: List[Dict], root: Dict, chain: Chain,
     # joint draws were 33-48% of a solve, discarded whenever the second pass
     # was kept, so they are formed only when the first pass is the answer.
     return _two_pass(
-        lambda grid, boundaries_only: _solve_on_grid(
+        lambda grid, boundaries_only, **extra: _solve_on_grid(
             grid, measurements, root, chain, element_bounds,
-            boundaries_only=boundaries_only, **options),
-        measurements, element_bounds, len(chain.groups))
+            boundaries_only=boundaries_only, **extra, **options),
+        measurements, element_bounds, len(chain.groups), seed)
 
 
 def _two_pass(solve_on_grid, measurements: List[Dict], element_bounds: Dict,
-              num_groups: int) -> Dict:
+              num_groups: int, seed: int = 42) -> Dict:
     """
     solve()'s two passes for any solver of this shape: `solve_on_grid(grid,
-    boundaries_only)` returns (results, densities) as _solve_on_grid does, and
-    with `boundaries_only` the densities of Boundaries that between them bound
-    every date -- all a first pass needs to place the second grid. Dates
-    outside every Boundary are not bound by them, but the second grid covers
-    every date's own likelihood support too (_refined_grid), so it holds them.
+    boundaries_only, scale_weights=None, evidence_only=False)` returns
+    (results, densities) as _solve_on_grid does, with `boundaries_only` the
+    densities of Boundaries that between them bound every date -- all a first
+    pass needs to place the second grid -- and with `evidence_only` the log
+    evidence alone. Dates outside every Boundary are not bound by them, but the
+    second grid covers every date's own likelihood support too
+    (_refined_grid), so it holds them.
+
+    Between the passes, where any date carries an outlier model, each model's
+    shared offset scale is weighed from the data over the second grid's window
+    (_weigh_scales), and the answer is solved with each flagged date's offset
+    mixed over that posterior rather than the prior.
     """
     grid = _build_grid(measurements, element_bounds, num_groups)
     _results, boundary_densities = solve_on_grid(grid, True)
     refined = _refined_grid(grid, boundary_densities, measurements, element_bounds,
                             num_groups)
+    models = sorted({m.get('outlier_model') or DEFAULT_OUTLIER_MODEL
+                     for m in measurements if (m.get('outlier_prior') or 0) > 0})
+    weights = None
+    if models:
+        window = refined if refined is not None else grid
+        weights = _weigh_scales(
+            lambda coarse, trial: solve_on_grid(coarse, False, scale_weights=trial,
+                                                evidence_only=True),
+            models, float(window[0]), float(window[-1]))
+    results = None
     if refined is not None:
-        second, _densities = solve_on_grid(refined, False)
+        second, _densities = solve_on_grid(refined, False, scale_weights=weights)
         if second['edge_mass'] <= REFINED_EDGE_MASS:
             second['grid']['first_pass_step'] = float(grid[1] - grid[0])
-            return second
-    results, _densities = solve_on_grid(grid, False)
+            results = second
+    if results is None:
+        results, _densities = solve_on_grid(grid, False, scale_weights=weights)
+    if weights is not None:
+        _report_scales(results, weights, seed)
     return results
+
+
+# The shared outlier scale is weighed on this many points across the second
+# grid's window. Against 800 across the first pass's much wider one, 400 there
+# came within 0.003-0.018 total variation of the weights; the second grid's
+# window is narrower, and 200 across it matched 300 to 0.04 years in the dates
+# and 0.0001 in the outlier probabilities on the test models.
+SCALE_WEIGHING_POINTS = 200
+# Every second scale node is solved for and the log evidence interpolated
+# between them: the scale's posterior is smooth in the log, and on the test
+# models 12 nodes matched 24 within 0.3 years and 0.0003 in outlier
+# probability, at half the cost. The last node is always solved too.
+SCALE_WEIGHING_STRIDE = 2
+# With several outlier models each is weighed in turn, the others held at
+# their weights so far, twice round. On the charcoal fixture's two the joint
+# weights are within 0.001 total variation of the product of each model's own.
+SCALE_WEIGHING_SWEEPS = 2
+
+
+def _weigh_scales(evidence, models: List[str], lower: float, upper: float
+                  ) -> Dict[str, np.ndarray]:
+    """
+    {outlier model: posterior weight per node of scale_nodes(model)}: the
+    shared offset scale weighed from the data.
+
+    OxCal's Outlier_Model carries ONE scale for all the dates using it, and
+    the data constrain it; mixing each date's offset over the scale's prior
+    on its own, as date_tables does by default, is a different model. The
+    exact answer mixes whole solves, one per scale, by their evidence -- 24
+    solves per model, 576 for two. Instead `evidence(grid, weights)`, the log
+    evidence on a coarse grid over [lower, upper] with each model's offset at
+    the given weights, is taken at each node, and the solve that follows mixes
+    each flagged date's offset over the posterior those give. That keeps what
+    the data say about the scale and drops only the link a common scale makes
+    between the dates. On the dune fixture the outlier probabilities came to
+    0.0014 from OxCal's (0.0158 over the prior; 0.0012 for the exact mixture),
+    and on the charcoal fixture the dates to 3.4 years rms (7.1; the sampler
+    4.7), for 3-17% more run time on the test models.
+    """
+    grid = np.linspace(lower, upper, SCALE_WEIGHING_POINTS)
+    count = OUTLIER_SCALE_NODES
+    solved_at = np.unique(np.r_[np.arange(0, count, SCALE_WEIGHING_STRIDE), count - 1])
+    weights = {model: np.full(count, 1.0 / count) for model in models}
+    for _sweep in range(1 if len(models) == 1 else SCALE_WEIGHING_SWEEPS):
+        for model in models:
+            log_evidence = []
+            for node in solved_at:
+                alone = np.zeros(count)
+                alone[node] = 1.0
+                log_evidence.append(evidence(grid, {**weights, model: alone}))
+            log_evidence = np.array(log_evidence)
+            finite = np.isfinite(log_evidence)
+            if not finite.any():
+                continue                      # nothing to weigh by: keep the prior
+            filled = np.where(finite, log_evidence, log_evidence[finite].min() - 50.0)
+            every = np.interp(np.arange(count), solved_at, filled)
+            posterior = np.exp(every - every.max())
+            weights[model] = posterior / posterior.sum()
+    return weights
+
+
+def _report_scales(results: Dict, weights: Dict[str, np.ndarray], seed: int) -> None:
+    """
+    Each outlier model's weighed scale in `results`, in the sampler's shape
+    (services/gibbs.py): `outlier_scale`, its posterior mean and 68% range in
+    log10 years, and `joint_scales`, one scale per joint draw drawn from it,
+    so services/agreement.py scores a flagged date under a scale as it does a
+    sampled run's. Seeded apart from everything else in the results.
+    """
+    rng = np.random.default_rng(seed + 2)
+    joint = results.get('joint_draws') or {}
+    count = len(next(iter(joint.values()))) if joint else 0
+    results['outlier_scale'] = {}
+    results['joint_scales'] = {}
+    for model, weight in weights.items():
+        nodes = scale_nodes(model)
+        mean = float((nodes * weight).sum())
+        cdf = np.cumsum(weight)
+        results['outlier_scale'][model] = {
+            'log10_mean': mean,
+            'log10_hpd_68': (float(np.interp(0.16, cdf, nodes)),
+                             float(np.interp(0.84, cdf, nodes))),
+            'years_mean': float(10.0 ** mean),
+        }
+        results['joint_scales'][model] = nodes[rng.choice(len(nodes), size=count,
+                                                          p=weight / weight.sum())]
 
 
 def _solve_on_grid(grid: np.ndarray, measurements: List[Dict], root: Dict,
@@ -2117,12 +2259,16 @@ def _solve_on_grid(grid: np.ndarray, measurements: List[Dict], root: Dict,
                    seed: int, uniform_span_prior: bool, estimate_durations: bool,
                    dispersal: Optional[Dict], interval_draws: int,
                    resolution: float, boundaries_only: bool = False,
-                   ) -> Tuple[Optional[Dict], List[np.ndarray]]:
+                   scale_weights: Optional[Dict[str, np.ndarray]] = None,
+                   evidence_only: bool = False,
+                   ):
     """
     solve() on one grid: (results, every posterior density it reported).
 
     With `boundaries_only`, (None, the Boundaries' densities) and nothing
-    else: what solve()'s first pass needs to place the second grid.
+    else: what solve()'s first pass needs to place the second grid. With
+    `evidence_only`, the log evidence alone, as soon as the messages give it:
+    what _weigh_scales asks for. `scale_weights` is date_tables'.
     """
     dt = float(grid[1] - grid[0])
     M = len(grid)
@@ -2131,7 +2277,7 @@ def _solve_on_grid(grid: np.ndarray, measurements: List[Dict], root: Dict,
     scratch = np.empty((M, M))
 
     likelihood, cumulative, outlier_parts = date_tables(
-        grid, measurements, element_bounds)
+        grid, measurements, element_bounds, scale_weights)
     allowed = _allowed_windows(grid, element_bounds, chain.boundary_ids)
     log_T, ordered = _chain_log_transfers(grid, chain, cumulative, likelihood,
                                           allowed, scratch)
@@ -2184,6 +2330,8 @@ def _solve_on_grid(grid: np.ndarray, measurements: List[Dict], root: Dict,
     # windows.
     log_evidence = (log_mass + correction_offset + tails.log_scale
                     + sum(_finite_peak(term) for term in log_T))
+    if evidence_only:
+        return log_evidence
     span_prior_applied = log_correction is not None
     # The messages hold what they need of these; nothing below reads them.
     log_correction = correction = None
