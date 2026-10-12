@@ -379,8 +379,8 @@ rather than arranged by hand.
 **Model settings** (on the New Analysis form):
 - **Solver**: Automatic (recommended: the exact solver where the model allows, sampling
   otherwise), Exact solver only (fast, but only for models built as a single line of Phases and
-  Boundaries, or as areas side by side between shared Boundaries), or MH/Gibbs (works on all
-  models). See [Choosing a solver](#choosing-a-solver).
+  Boundaries, or as areas side by side between shared Boundaries, with or without a group of dates
+  before the first Boundary or after the last), or MH/Gibbs (works on all models). See [Choosing a solver](#choosing-a-solver).
 - **Minimum sweeps per chain** (sampled runs only): blank by default, which runs each chain until
   it converges. Set a number to make every chain run at least that long — the only way to ask for a
   longer run, since a run otherwise stops as soon as it converges.
@@ -421,13 +421,16 @@ run**, and the Results page always says which method was used.
   Sequences counts, as long as each inner Sequence begins and ends with its own Boundary. It also
   works on a site with areas side by side: a Phase holding several Sequences (trenches or areas,
   each built as a single line), with a Boundary before and after it that the areas share. That
-  Phase can be one step in a longer Sequence. It shows no progress bar and cannot be cancelled,
-  but it rarely takes long.
+  Phase can be one step in a longer Sequence. Either kind of model can also have dates before its
+  first Boundary or after its last, such as a Phase of dates from before the site was occupied, as
+  long as they form one group at each end. It shows no progress bar and cannot be cancelled, but
+  it rarely takes long.
 - **MH/Gibbs sampler.** The method OxCal uses. It builds up the answer by trying many thousands of
   possible dates for every item in the model and keeping the ones the model favours. It works on
   any model, including the ones the exact solver cannot take: groups ordered with no Boundary
-  between them, dates outside every Boundary, and Sequences side by side with no shared Boundary
-  before and after them.
+  between them (also before the first Boundary or after the last), dates before the first
+  Boundary or after the last that carry an outlier model, and Sequences side by side with no
+  shared Boundary before and after them.
   Its figures carry a little random variation, so two runs differ slightly, and a run can
   occasionally fall short. The app checks for this and warns you (see
   [Checking a sampled result](#checking-a-sampled-result)). Progress is shown, and a run can be
@@ -1334,6 +1337,22 @@ meeting carries no tie of its own. The span correction counts every Boundary in 
 areas' included, over the outermost pair, as the sampler does. Joint draws take the outer
 Boundaries first, then each area's two ends given its stage, then its interior and its dates.
 
+**Dates outside every Boundary** (either shape above, with one group of dates older than its first
+Boundary B_1 or younger than its last, nothing ordering them against each other). Such a date has
+no span term, so its prior is flat, and given its end Boundary it is independent of everything
+else. The group enters as one weight on that Boundary, applied to it in the message passing:
+
+```
+G_j(b)  = the trapezoidal integral of L_j from b out to the grid's edge
+g(b_1)  = prod over the group of G_j(b_1)
+p(t_j)  ∝ L_j(t_j) * sum over b_1 <= t_j of h p(b_1) / G_j(b_1)
+```
+
+with h a half where t_j is on b_1, as for any date on its Boundary. These dates are not in the span
+correction's limits. Their draws follow their end Boundary's: each from its likelihood beyond it.
+A date out there with an outlier model is left to the sampler, since nothing on its far side would
+hold the outlier component in.
+
 This costs O(M²) per group on an M-point grid while nothing couples a chain's two ends, as on a
 single Phase, and O(M³) per group once the span correction does: a chain of three or more
 Boundaries, and every area side by side. Either way it is deterministic and exact up to the grid
@@ -1408,7 +1427,8 @@ tempering tripled the run time (21 s against 7).
 **Checking a sampled result.** Both convergence measures compare the sampler against itself and
 cannot detect a lobe no chain has reached. The app therefore calculates the same posterior without
 sampling, using the exact solver's grid, interval integrals and message passing, with the sampler's
-shared outlier scale, over these shapes (the last two the exact solver itself does not accept):
+shared outlier scale, over these shapes (the third the exact solver itself does not accept, and the
+fourth only as one group at each end with no outlier model):
 
 - A chain of Phases and Boundaries created using nested Sequences.
 - Parallel chains between one outer pair (e.g. a site's Start and End surrounding one Sequence per

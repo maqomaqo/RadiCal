@@ -621,9 +621,10 @@ def _exact_layout(tree: Dict, measurements: List[Dict]):
     exact_chain.Chain, or exact_parallel.Stages for a model with areas side by
     side -- else (None, why not). The reason is exact_parallel's for a model
     whose areas sit side by side, which says more about such a model than
-    exact_chain's "the model branches", and exact_chain's otherwise.
+    exact_chain's "the model branches", and exact_chain's otherwise. Both
+    take dates outside every Boundary at the model's ends (exact_chain._Tails).
     """
-    chain, reason = exact_chain.layout_with_reason(tree, measurements)
+    chain, reason = exact_chain.layout_with_reason(tree, measurements, allow_tails=True)
     if chain is not None:
         return chain, None
     stages, stages_reason = exact_parallel.layout_with_reason(tree, measurements)

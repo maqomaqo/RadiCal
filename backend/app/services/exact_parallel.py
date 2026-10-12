@@ -70,8 +70,10 @@ What it does NOT cover
 layout_with_reason returns None, with a reason, for a model whose areas are
 side by side but which is not this shape: areas with no Boundary before and
 after them that they share (separate models, in effect), an area that is not
-itself a single line, dates outside every Boundary, areas inside an area, or
-anything ordering one area against another. Those are sampled.
+itself a single line, areas inside an area, or anything ordering one area
+against another. Those are sampled. Dates outside every outer Boundary are
+taken under exact_chain's rules for them, as the same weight on the first or
+last outer Boundary (exact_chain._Tails).
 
 The outlier scale is marginalised per date, as on a chain; see exact_chain's
 module docstring.
@@ -165,20 +167,28 @@ class Stage:
 
 
 class Stages:
-    """A chain of outer Boundaries whose stages may hold areas, oldest first."""
+    """
+    A chain of outer Boundaries whose stages may hold areas, oldest first, and
+    the dates outside every Boundary at either end, as exact_chain.Chain has.
+    """
 
     def __init__(self, boundary_ids: List[str], stages: List[Stage],
-                 boundary_names: Dict[str, str]):
+                 boundary_names: Dict[str, str],
+                 older_tail: Optional[List[str]] = None,
+                 younger_tail: Optional[List[str]] = None):
         # len(boundary_ids) == len(stages) + 1
         self.boundary_ids = boundary_ids
         self.stages = stages
         self.boundary_names = boundary_names
+        self.older_tail = list(older_tail or [])
+        self.younger_tail = list(younger_tail or [])
 
     @property
     def outer_chain(self) -> Chain:
-        """The outer Boundaries as a Chain, each stage's own dates its group."""
+        """The outer Boundaries as a Chain, each stage's own dates its group,
+        with the model's tails."""
         return Chain(self.boundary_ids, [stage.dates for stage in self.stages],
-                     self.boundary_names)
+                     self.boundary_names, self.older_tail, self.younger_tail)
 
     @property
     def all_boundary_ids(self) -> List[str]:
@@ -259,10 +269,18 @@ def layout_with_reason(root: Optional[Dict], measurements: List[Dict]
             'no Boundary pair encloses its side-by-side areas. Add a Boundary '
             'before and after them'
         )
+    # Dates before the first outer Boundary or after the last are the model's
+    # tails, under exact_chain's rules for them.
     outside_dates = [d for c in children[:positions[0]] + children[positions[-1] + 1:]
                      for d in subtree_dates(c)]
+    older_tail: List[str] = []
+    younger_tail: List[str] = []
     if outside_dates:
-        return None, _outside_every_boundary(outside_dates, measurements)
+        (older_tail, younger_tail), reason = exact_chain.tails_with_reason(
+            plan, measurements, outside_dates, children[positions[0]]['id'],
+            children[positions[-1]]['id'])
+        if reason is not None:
+            return None, reason
 
     stages = []
     for older, younger in zip(positions, positions[1:]):
@@ -270,11 +288,7 @@ def layout_with_reason(root: Optional[Dict], measurements: List[Dict]
                    if subtree_dates(c) or has_areas(c)
                    or c.get('element_type') == 'sequence']
         if len(between) > 1:
-            return None, (
-                'two groups are ordered against each other with no Boundary '
-                'between them. Add a Boundary at that transition to make the '
-                'model exactly solvable'
-            )
+            return None, exact_chain.NO_BOUNDARY_BETWEEN
         dates: List[str] = []
         areas: List[Chain] = []
         if between:
@@ -296,7 +310,7 @@ def layout_with_reason(root: Optional[Dict], measurements: List[Dict]
                             dates, areas))
 
     layout = Stages([children[i]['id'] for i in positions], stages,
-                    dict(plan.boundary_names))
+                    dict(plan.boundary_names), older_tail, younger_tail)
     reason = _as_written(layout, plan, measurements)
     if reason is not None:
         return None, reason
@@ -336,19 +350,6 @@ def _areas_of(phase: Dict, measurements: List[Dict], dates_of: Dict[str, List[st
     return None
 
 
-def _outside_every_boundary(date_ids: List[str], measurements: List[Dict]) -> str:
-    """exact_chain's wording for dates no Boundary pair encloses."""
-    by_id = {m['id']: m for m in measurements}
-    names = ', '.join(sorted(by_id[d].get('sample_name') or d for d in date_ids[:4]))
-    if len(date_ids) > 4:
-        names += f' and {len(date_ids) - 4} more'
-    return (
-        f'{len(date_ids)} date(s) sit outside every Boundary ({names}). Add a '
-        'Boundary either side of the phases holding them so they fall inside '
-        'the chain'
-    )
-
-
 def _as_written(layout: Stages, plan, measurements: List[Dict]) -> Optional[str]:
     """
     None when `layout` is the model as written: the same groups of dates, each
@@ -366,30 +367,20 @@ def _as_written(layout: Stages, plan, measurements: List[Dict]) -> Optional[str]
                 if group:
                     laid.add((area.boundary_ids[index], area.boundary_ids[index + 1],
                               frozenset(group)))
-    placed = {d for _o, _y, group in laid for d in group}
+    placed = ({d for _o, _y, group in laid for d in group}
+              | set(layout.older_tail) | set(layout.younger_tail))
     stray = [m['id'] for m in measurements if m['id'] not in placed]
     if stray:
-        return _outside_every_boundary(stray, measurements)
+        return exact_chain.outside_every_boundary_reason(stray, measurements)
     if written != laid:
         return ('its groups of dates are not the ones its Boundaries enclose '
                 'as side-by-side areas')
 
-    written_order: Dict[str, Set[str]] = {}
     laid_order: Dict[str, Set[str]] = {}
 
     def edge(order, older, younger):
         order.setdefault(older, set()).add(younger)
         order.setdefault(younger, set())
-
-    for older_terms, younger_terms in plan.ordering:
-        for _ko, older in older_terms:
-            for _ky, younger in younger_terms:
-                edge(written_order, older, younger)
-    for group in plan.span_groups:
-        edge(written_order, group.older_boundary_id, group.younger_boundary_id)
-        for date_id in list(group.date_ids) + list(group.contained_ids):
-            edge(written_order, group.older_boundary_id, date_id)
-            edge(written_order, date_id, group.younger_boundary_id)
 
     def chain_edges(boundary_ids, groups):
         for index, group in enumerate(groups):
@@ -400,45 +391,22 @@ def _as_written(layout: Stages, plan, measurements: List[Dict]) -> Optional[str]
                 edge(laid_order, date_id, younger)
 
     chain_edges(layout.boundary_ids, [stage.dates for stage in layout.stages])
+    for date_id in layout.older_tail:
+        edge(laid_order, date_id, layout.boundary_ids[0])
+    for date_id in layout.younger_tail:
+        edge(laid_order, layout.boundary_ids[-1], date_id)
     for stage in layout.stages:
         for area in stage.areas:
             edge(laid_order, stage.older_id, area.boundary_ids[0])
             edge(laid_order, area.boundary_ids[-1], stage.younger_id)
             chain_edges(area.boundary_ids, area.groups)
 
-    if _closure(written_order) != _closure(laid_order):
+    if (exact_chain._closure(exact_chain.written_order(plan))
+            != exact_chain._closure(laid_order)):
         return ('some of its areas, or dates in them, are ordered against each '
                 'other, which side-by-side areas between shared Boundaries '
                 'cannot express')
     return None
-
-
-def _closure(order: Dict[str, Set[str]]) -> Dict[str, Set[str]]:
-    """
-    Everything each parameter is older than, transitively. Iterative, youngest
-    first, so a long model cannot reach Python's recursion limit; a cycle,
-    which no well-formed model has, leaves its members unclosed and so unequal
-    to anything the layout gives.
-    """
-    pending = {param: len(younger) for param, younger in order.items()}
-    older_of: Dict[str, List[str]] = {}
-    for param, younger in order.items():
-        for y in younger:
-            older_of.setdefault(y, []).append(param)
-    ready = [param for param, count in pending.items() if count == 0]
-    closed: Dict[str, Set[str]] = {}
-    while ready:
-        param = ready.pop()
-        found: Set[str] = set()
-        for younger in order.get(param, ()):
-            found.add(younger)
-            found |= closed[younger]
-        closed[param] = found
-        for older in older_of.get(param, ()):
-            pending[older] -= 1
-            if pending[older] == 0:
-                ready.append(older)
-    return closed
 
 
 # --------------------------------------------------------------------------
@@ -512,7 +480,12 @@ def _solve_on_grid(grid: np.ndarray, measurements: List[Dict], root: Dict,
               for chain in stage.areas] for stage in stages.stages]
 
     outer = stages.outer_chain
-    all_dates = [m['id'] for m in measurements]
+    # The model's tails weigh on its first and last outer Boundaries, as on a
+    # chain's (exact_chain._Tails), and are not enclosed by them, so they are
+    # not in the limits factor.
+    tails = exact_chain._Tails(outer, grid, cumulative, likelihood)
+    tail_dates = set(outer.older_tail) | set(outer.younger_tail)
+    all_dates = [m['id'] for m in measurements if m['id'] not in tail_dates]
     inliers = {d: (outlier_parts[d][0] if d in outlier_parts else likelihood[d])
                for d in all_dates}
     oldest_limits, youngest_limits = exact_chain.pair_limits(
@@ -558,11 +531,12 @@ def _solve_on_grid(grid: np.ndarray, measurements: List[Dict], root: Dict,
 
     if correction is not None:
         pair_weight, boundary_density, draw_outer, log_mass = \
-            exact_chain._messages_with_span_prior(outer, allowed, transfer, correction)
+            exact_chain._messages_with_span_prior(outer, allowed, transfer, correction,
+                                                  tails.end_weights)
     else:
         pair_weight, boundary_density, draw_outer, log_mass = exact_chain._messages(
-            outer, allowed, transfer)
-    log_evidence = (log_mass + correction_offset
+            outer, allowed, transfer, tails.end_weights)
+    log_evidence = (log_mass + correction_offset + tails.log_scale
                     + sum(exact_chain._finite_peak(term) for term in log_T))
     correction = None
 
@@ -608,12 +582,17 @@ def _solve_on_grid(grid: np.ndarray, measurements: List[Dict], root: Dict,
             for i, bid in enumerate(area.chain.boundary_ids):
                 boundary_densities[bid] = area_density(i)
     boundary_densities[outer.boundary_ids[-1]] = outer_densities[outer.boundary_ids[-1]]
+    date_densities.update(tails.marginals(outer_densities[outer.boundary_ids[0]],
+                                          outer_densities[outer.boundary_ids[-1]],
+                                          likelihood))
 
     def draw_joint(rng, count):
         outer_draws = draw_outer(rng, count)
         draws = {bid: outer_draws[:, i] for i, bid in enumerate(outer.boundary_ids)}
         date_draws = exact_chain._draw_dates(rng, outer, cumulative, outer_draws,
                                              likelihood, dt)
+        date_draws.update(tails.draw(rng, outer_draws[:, 0], outer_draws[:, -1],
+                                     cumulative, likelihood, dt))
         columns = np.arange(M)
         for index, stage in enumerate(stages.stages):
             S, E = outer_draws[:, index], outer_draws[:, index + 1]

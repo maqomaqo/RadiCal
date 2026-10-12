@@ -16,6 +16,7 @@ only this shape has:
     the marginals describe, and the API routes such a model to it.
 """
 import itertools
+import uuid
 
 import numpy as np
 import pytest
@@ -27,15 +28,19 @@ from app.services import gibbs
 from app.services.model_tree import inherited_bounds
 
 _IDS = itertools.count(1)
+# test_exact_tails.py imports these helpers as tests.test_exact_parallel while
+# pytest loads this file as test_exact_parallel: two copies, two counters. A
+# token per copy keeps their ids apart in the shared database.
+_COPY = uuid.uuid4().hex[:6]
 
 
 def _element(kind, name, children=()):
-    return {'id': f'xp{next(_IDS)}', 'element_type': kind, 'name': name,
+    return {'id': f'xp{_COPY}-{next(_IDS)}', 'element_type': kind, 'name': name,
             'tpq_age_bp': None, 'taq_age_bp': None, 'children': list(children)}
 
 
 def _date(element, age_bp, error=25, **extra):
-    tag = f'xpd{next(_IDS)}'
+    tag = f'xpd{_COPY}-{next(_IDS)}'
     date = {'id': tag, 'sample_name': tag, 'age_bp': float(age_bp),
             'error_1sigma': float(error), 'curve_id': 'intcal20',
             'element_id': element['id']}
@@ -138,13 +143,14 @@ class TestLayout:
         assert reason.startswith(f"in '{area['name']}', ")
         assert 'no Boundary between them' in reason
 
-    def test_dates_outside_every_boundary_are_declined(self):
+    def test_dates_before_the_first_boundary_are_a_tail(self):
+        """More in test_exact_tails.py."""
         tree, dates = _site(TWO_AREAS)
         before = _element('phase', 'Before')
         tree['children'].insert(0, before)
         dates.append(_date(before, 3300))
         stages, reason = ep.layout_with_reason(tree, dates)
-        assert stages is None and 'outside every Boundary' in reason
+        assert reason is None and stages.older_tail == [dates[-1]['id']]
 
     def test_areas_inside_an_area_are_declined(self):
         inner_a, dates_a = _area('Pit 1', [[3000]])
@@ -177,7 +183,7 @@ class TestLayout:
         assert reason is not None
 
 
-def _brute_force(tree, dates, grid):
+def _brute_force(tree, dates, grid, layout=None):
     """
     Every date's and Boundary's marginal by explicit summation over every
     configuration of the model's Boundaries, written from the model statement:
@@ -193,11 +199,20 @@ def _brute_force(tree, dates, grid):
     conditional is its likelihood over the pair's interval, half at each end,
     and in the cell its two Boundaries share when they share one.
 
+    Dates outside every Boundary add, for each, the integral of its
+    likelihood from its end Boundary out to the grid's edge, a half at each
+    end of that run -- nothing where the Boundary is on the edge -- and given
+    the Boundary sit anywhere in that run, its likelihood times those halves.
+    They are in no span term and not in the limits factor.
+
     The span correction and the interval integral are the solver's own
     definitions, as in test_exact_chain's _brute_force: what this checks is
     how the pieces are combined, not the pieces.
+
+    `layout` gives a chain's layout as Stages, for models with no areas.
     """
-    stages, reason = ep.layout_with_reason(tree, dates)
+    stages, reason = (layout, None) if layout is not None else ep.layout_with_reason(
+        tree, dates)
     assert stages is not None, reason
     bounds = inherited_bounds(tree)
     M = len(grid)
@@ -219,6 +234,18 @@ def _brute_force(tree, dates, grid):
     def tie(older, younger):
         return np.where(older > younger, 1.0, np.where(older == younger, 0.5, 0.0))
 
+    def run(date_id, F, older):
+        """Date date_id's weight at each cell given its end Boundary at F."""
+        h = np.zeros(M)
+        if (older and F == M - 1) or (not older and F == 0):
+            return h
+        span = slice(F, M) if older else slice(0, F + 1)
+        h[span] = 1.0
+        h[F] = h[M - 1 if older else 0] = 0.5
+        return likelihood[date_id] * h * dt
+
+    tails = [(d, True) for d in stages.older_tail] + [(d, False) for d in stages.younger_tail]
+    in_tails = {d for d, _older in tails}
     names = stages.all_boundary_ids
     grid_of = dict(zip(names, np.indices((M,) * len(names), dtype=np.int32)
                        .reshape(len(names), -1)))
@@ -226,7 +253,7 @@ def _brute_force(tree, dates, grid):
     log_c = ec._span_prior_correction(
         grid, len(names), True,
         *ec.pair_limits(bounds, outer[0], outer[-1], grid, likelihood,
-                        [d['id'] for d in dates]))
+                        [d['id'] for d in dates if d['id'] not in in_tails]))
     weight = np.exp(np.where(np.isfinite(log_c), log_c, -np.inf))[
         grid_of[outer[-1]], grid_of[outer[0]]]
     pairs = []
@@ -242,9 +269,16 @@ def _brute_force(tree, dates, grid):
             for k, date_ids in enumerate(area.groups):
                 weight = weight * group(date_ids, ends[k], ends[k + 1])
                 pairs.append((date_ids, ends[k], ends[k + 1]))
+    G = {d: np.array([run(d, F, older).sum() for F in range(M)]) for d, older in tails}
+    for d, older in tails:
+        weight = weight * G[d][grid_of[outer[0] if older else outer[-1]]]
     weight = weight / weight.sum()
 
     out = {b: np.bincount(grid_of[b], weights=weight, minlength=M) for b in names}
+    for d, older in tails:
+        end = out[outer[0] if older else outer[-1]]
+        out[d] = sum(end[F] * run(d, F, older) / G[d][F]
+                     for F in range(M) if G[d][F] > 0)
     for date_ids, older, younger in pairs:
         pair = np.zeros((M, M))
         np.add.at(pair, (older, younger), weight)
@@ -411,6 +445,7 @@ def _api_tree(tree):
 def _run(client, tree, dates, **config):
     measurements = [{**{k: d[k] for k in ('id', 'sample_name', 'age_bp', 'error_1sigma',
                                          'curve_id', 'element_id')},
+                     **{k: d[k] for k in ('outlier_prior',) if k in d},
                      'material_type': 'charcoal', 'sample_type': 'terrestrial'}
                     for d in dates]
     return client.post('/api/analysis/bayesian?wait=true', json={

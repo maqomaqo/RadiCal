@@ -67,8 +67,20 @@ between such groups makes it solvable here, and is better practice anyway.
 A Sequence of Sequences, each with its own Boundaries, IS a chain: it is the
 same model as its children written out in place, with an empty group between
 one inner Sequence's last Boundary and the next one's first. See _stitched.
+
+So is a chain with dates outside every Boundary at either end -- one group
+older than the first Boundary, one younger than the last, each with nothing
+ordering its dates against each other. Such a date has a flat prior and is
+held only by its end Boundary, so given that Boundary it is independent of
+everything else, and the whole group enters as one weight on it:
+
+    g(b_1) = ∏_(dates beyond b_1) G_j(b_1),   G_j = L_j integrated beyond b_1
+
+See _Tails. Several groups in a row out there, a date ordered against neither
+end, and a date out there with an outlier model are not taken
+(tails_with_reason).
 """
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Set, Tuple
 
 import numpy as np
 from scipy.signal import fftconvolve
@@ -160,23 +172,39 @@ BOUNDARY_TIE_WEIGHT = 0.5
 # differences of grid ages, not a gap. See log_limits_factor_of_span.
 LIMITS_ROUNDING_YEARS = 1e-6
 
+# The reason given for groups of dates ordered one after another with no
+# Boundary between them, wherever a layout finds them.
+NO_BOUNDARY_BETWEEN = (
+    'two groups are ordered against each other with no Boundary between '
+    'them. Add a Boundary at that transition to make the model exactly '
+    'solvable'
+)
+
 
 class Chain:
-    """A model that is a single line of bounded groups, oldest first."""
+    """
+    A model that is a single line of bounded groups, oldest first, and the
+    dates outside every Boundary at either end: `older_tail` older than the
+    first Boundary, `younger_tail` younger than the last (see _tail_weight).
+    """
 
     def __init__(self, boundary_ids: List[str], groups: List[List[str]],
-                 boundary_names: Dict[str, str]):
+                 boundary_names: Dict[str, str],
+                 older_tail: Optional[List[str]] = None,
+                 younger_tail: Optional[List[str]] = None):
         # len(boundary_ids) == len(groups) + 1
         self.boundary_ids = boundary_ids
         self.groups = groups
         self.boundary_names = boundary_names
+        self.older_tail = list(older_tail or [])
+        self.younger_tail = list(younger_tail or [])
 
     def __repr__(self):
         return f"Chain({len(self.groups)} groups, {len(self.boundary_ids)} boundaries)"
 
 
 def layout(root: Dict, measurements: List[Dict],
-           allow_inner_order: bool = False) -> Optional[Chain]:
+           allow_inner_order: bool = False, allow_tails: bool = False) -> Optional[Chain]:
     """
     The chain this model reduces to, or None if it does not reduce to one.
 
@@ -189,12 +217,19 @@ def layout(root: Dict, measurements: List[Dict],
     Boundaries. It returns the chain of Boundaries and groups without insisting
     that the chain implies every ordering the tree asks for; the caller must
     check the extra ordering is one it can integrate. This solver never asks.
+
+    `allow_tails` lets dates outside every Boundary at the model's two ends
+    in, as Chain.older_tail and younger_tail; see tails_with_reason. Off by
+    default, because a caller laying out PART of a model -- an area of a site
+    (services/exact_parallel.py), or the cross-check's branches -- has dates
+    outside that part's Boundaries that are not outside the model's.
     """
-    return layout_with_reason(root, measurements, allow_inner_order)[0]
+    return layout_with_reason(root, measurements, allow_inner_order, allow_tails)[0]
 
 
 def layout_with_reason(
-    root: Dict, measurements: List[Dict], allow_inner_order: bool = False
+    root: Dict, measurements: List[Dict], allow_inner_order: bool = False,
+    allow_tails: bool = False,
 ) -> Tuple[Optional[Chain], Optional[str]]:
     """
     layout(), plus a plain-English reason when the model is not a chain, so
@@ -272,18 +307,16 @@ def layout_with_reason(
             if date_id in placed:
                 return None, branched
             placed[date_id] = index
-    unenclosed = [m for m in measurements if m['id'] not in placed]
+    unenclosed = [m['id'] for m in measurements if m['id'] not in placed]
+    older_tail: List[str] = []
+    younger_tail: List[str] = []
     if unenclosed:
-        names = ', '.join(
-            sorted(m.get('sample_name') or m['id'] for m in unenclosed[:4])
-        )
-        if len(unenclosed) > 4:
-            names += f' and {len(unenclosed) - 4} more'
-        return None, (
-            f'{len(unenclosed)} date(s) sit outside every Boundary '
-            f'({names}). Add a Boundary either side of the phases holding '
-            'them so they fall inside the chain'
-        )
+        if not allow_tails:
+            return None, outside_every_boundary_reason(unenclosed, measurements)
+        (older_tail, younger_tail), reason = tails_with_reason(
+            plan, measurements, unenclosed, boundary_ids[0], boundary_ids[-1])
+        if reason is not None:
+            return None, reason
 
     # The chain must already imply every ordering constraint the tree asks
     # for. Rank boundary i at 2i and group i at 2i+1, oldest first; a
@@ -292,10 +325,17 @@ def layout_with_reason(
     # ordered against each other INSIDE one boundary pair -- is structure this
     # solver cannot express.
     rank_of_boundary = {bid: 2 * i for i, bid in enumerate(boundary_ids)}
+    # A tail sits beyond its end Boundary, one rank further out. Its dates
+    # share that rank; tails_with_reason has already turned away any two of
+    # them ordered against each other.
+    tail_rank = {**{d: -1 for d in older_tail},
+                 **{d: 2 * len(boundary_ids) - 1 for d in younger_tail}}
 
     def rank(kind: str, tid: str) -> Optional[int]:
         if kind == 'boundary':
             return rank_of_boundary.get(tid)
+        if tid in tail_rank:
+            return tail_rank[tid]
         index = placed.get(tid)
         return None if index is None else 2 * index + 1
 
@@ -307,14 +347,119 @@ def layout_with_reason(
         if max(older_ranks) >= min(younger_ranks):
             if allow_inner_order:
                 continue
-            return None, (
-                'two groups are ordered against each other with no Boundary '
-                'between them. Add a Boundary at that transition to make the '
-                'model exactly solvable'
-            )
+            return None, NO_BOUNDARY_BETWEEN
 
     return Chain(boundary_ids, [list(g.date_ids) for g in ordered_groups],
-                 dict(plan.boundary_names)), None
+                 dict(plan.boundary_names), older_tail, younger_tail), None
+
+
+def outside_every_boundary_reason(date_ids: List[str], measurements: List[Dict]) -> str:
+    """The reason given for dates no Boundary pair encloses, naming them."""
+    by_id = {m['id']: m for m in measurements}
+    names = ', '.join(sorted(by_id[d].get('sample_name') or d for d in date_ids[:4]))
+    if len(date_ids) > 4:
+        names += f' and {len(date_ids) - 4} more'
+    return (
+        f'{len(date_ids)} date(s) sit outside every Boundary ({names}). Add a '
+        'Boundary either side of the phases holding them so they fall inside '
+        'the chain'
+    )
+
+
+def tails_with_reason(plan, measurements: List[Dict], date_ids: List[str],
+                      first_id: str, last_id: str
+                      ) -> Tuple[Tuple[List[str], List[str]], Optional[str]]:
+    """
+    ((older tail, younger tail), None) for dates outside every Boundary that
+    this solver can take, else (([], []), why not).
+
+    A date outside every Boundary gets no span term -- its prior is flat, as
+    OxCal's is -- and is held only by its order against the model's first or
+    last Boundary. So it must be ordered older than the first or younger than
+    the last; one ordered against neither floats free of the model and is
+    left to the sampler. One carrying an outlier model is too: nothing holds
+    its outlier component, so its answer would depend on how far the
+    calculation window happens to reach. Dates at one end ordered against
+    each other are groups in a row with no Boundary between them, which waits
+    for that shape's own support.
+    """
+    by_id = {m['id']: m for m in measurements}
+    closed = _closure(written_order(plan))
+    older, younger, loose = [], [], []
+    for date_id in date_ids:
+        if first_id in closed.get(date_id, set()):
+            older.append(date_id)
+        elif date_id in closed.get(last_id, set()):
+            younger.append(date_id)
+        else:
+            loose.append(date_id)
+    if loose:
+        return ([], []), outside_every_boundary_reason(loose, measurements)
+    for tail in (older, younger):
+        members = set(tail)
+        if any(closed.get(d, set()) & members for d in tail):
+            return ([], []), NO_BOUNDARY_BETWEEN
+    flagged = [d for d in older + younger if (by_id[d].get('outlier_prior') or 0) > 0]
+    if flagged:
+        names = ', '.join(sorted(by_id[d].get('sample_name') or d for d in flagged[:4]))
+        return ([], []), (
+            f'{len(flagged)} date(s) outside every Boundary carry an outlier model '
+            f'({names}). With nothing on their far side to hold it, the outlier '
+            'component reaches the edge of the calculation, so they are sampled'
+        )
+    return (older, younger), None
+
+
+def written_order(plan) -> Dict[str, Set[str]]:
+    """
+    {parameter: the parameters the model as written orders directly younger
+    than it}: plan_model's ordering, and each group's containment of its dates
+    between its two Boundaries.
+    """
+    order: Dict[str, Set[str]] = {}
+
+    def edge(older: str, younger: str):
+        order.setdefault(older, set()).add(younger)
+        order.setdefault(younger, set())
+
+    for older_terms, younger_terms in plan.ordering:
+        for _ko, older in older_terms:
+            for _ky, younger in younger_terms:
+                edge(older, younger)
+    for group in plan.span_groups:
+        edge(group.older_boundary_id, group.younger_boundary_id)
+        for date_id in list(group.date_ids) + list(group.contained_ids):
+            edge(group.older_boundary_id, date_id)
+            edge(date_id, group.younger_boundary_id)
+    return order
+
+
+def _closure(order: Dict[str, Set[str]]) -> Dict[str, Set[str]]:
+    """
+    Everything each parameter is older than, transitively. Iterative, youngest
+    first, so a long model cannot reach Python's recursion limit; a cycle,
+    which no well-formed model has, leaves its members unclosed and so unequal
+    to anything a layout gives.
+    """
+    pending = {param: len(younger) for param, younger in order.items()}
+    older_of: Dict[str, List[str]] = {}
+    for param, younger in order.items():
+        for y in younger:
+            older_of.setdefault(y, []).append(param)
+    ready = [param for param, count in pending.items() if count == 0]
+    closed: Dict[str, Set[str]] = {}
+    while ready:
+        param = ready.pop()
+        found: Set[str] = set()
+        for younger in order.get(param, ()):
+            found.add(younger)
+            found |= closed[younger]
+        closed[param] = found
+        for older in older_of.get(param, ()):
+            pending[older] -= 1
+            if pending[older] == 0:
+                ready.append(older)
+    return closed
 
 
 def coupled_dates_reason(plan) -> Optional[str]:
@@ -1389,9 +1534,14 @@ def _draw_from_rows(rng, rows_for, keys: np.ndarray) -> np.ndarray:
     return picked
 
 
-def _messages(chain: Chain, allowed: Dict, transfer):
+def _messages(chain: Chain, allowed: Dict, transfer,
+              end_weights: Optional[Dict[str, np.ndarray]] = None):
     """
     Forward/backward over the boundaries, the O(M^2) case.
+
+    `end_weights`, {boundary id: weight over the grid}, multiplies the first
+    or last boundary's allowed window: the weight dates outside every
+    Boundary put on it (_tail_weight).
 
     Returns (pair_weight, boundary_density, draw_boundaries, log_mass):
     pair_weight(k) is everything outside group k as a matrix indexed [younger
@@ -1405,7 +1555,9 @@ def _messages(chain: Chain, allowed: Dict, transfer):
     total survives the rescaling.
     """
     log_scale = 0.0
-    alpha = [np.where(allowed[chain.boundary_ids[0]], 1.0, 0.0)]
+    weights = end_weights or {}
+    alpha = [np.where(allowed[chain.boundary_ids[0]], 1.0, 0.0)
+             * weights.get(chain.boundary_ids[0], 1.0)]
     for i in range(len(chain.groups)):
         message = transfer(i) @ alpha[i]
         peak = float(message.max())
@@ -1414,7 +1566,8 @@ def _messages(chain: Chain, allowed: Dict, transfer):
             log_scale += np.log(peak)
         alpha.append(message)
     beta = [None] * len(chain.boundary_ids)
-    beta[-1] = np.where(allowed[chain.boundary_ids[-1]], 1.0, 0.0)
+    beta[-1] = (np.where(allowed[chain.boundary_ids[-1]], 1.0, 0.0)
+                * weights.get(chain.boundary_ids[-1], 1.0))
     for i in range(len(chain.groups) - 1, -1, -1):
         message = beta[i + 1] @ transfer(i)
         peak = float(message.max())
@@ -1510,7 +1663,8 @@ class _ChainProducts:
 
 
 def _messages_with_span_prior(chain: Chain, allowed: Dict, transfer,
-                              correction: np.ndarray):
+                              correction: np.ndarray,
+                              end_weights: Optional[Dict[str, np.ndarray]] = None):
     """
     The same, once the span correction couples the first boundary to the last.
     That breaks the forward/backward recursion -- a message can no longer be a
@@ -1533,6 +1687,14 @@ def _messages_with_span_prior(chain: Chain, allowed: Dict, transfer,
     but its diagonal. Measured on the shared-boundary Hillside fixture the
     solve went from 5.1 s to about 2 s for identical output.
     """
+    if end_weights:
+        # Into the end factor, which couples the two ends anyway, and only
+        # there: the products already carry each end's 0/1 window, and a
+        # weight there as well would count it twice.
+        size = correction.shape[0]
+        first = np.broadcast_to(end_weights.get(chain.boundary_ids[0], 1.0), (size,))
+        last = np.broadcast_to(end_weights.get(chain.boundary_ids[-1], 1.0), (size,))
+        correction = correction * last[:, None] * first[None, :]   # [last, first]
     return _messages_with_end_factor(_ChainProducts(chain, allowed, transfer), correction)
 
 
@@ -1747,7 +1909,9 @@ def _two_pass(solve_on_grid, measurements: List[Dict], element_bounds: Dict,
     solve()'s two passes for any solver of this shape: `solve_on_grid(grid,
     boundaries_only)` returns (results, densities) as _solve_on_grid does, and
     with `boundaries_only` the densities of Boundaries that between them bound
-    every date -- all a first pass needs to place the second grid.
+    every date -- all a first pass needs to place the second grid. Dates
+    outside every Boundary are not bound by them, but the second grid covers
+    every date's own likelihood support too (_refined_grid), so it holds them.
     """
     grid = _build_grid(measurements, element_bounds, num_groups)
     _results, boundary_densities = solve_on_grid(grid, True)
@@ -1789,6 +1953,12 @@ def _solve_on_grid(grid: np.ndarray, measurements: List[Dict], root: Dict,
              for index, date_ids in enumerate(chain.groups)]
     transfer = _exponentiated(log_T)
 
+    # Dates outside every Boundary: one weight each on the first and last
+    # Boundary (_Tails). Not enclosed by the outer pair, so not part of the
+    # limits factor below either, as in the sampler.
+    tails = _Tails(chain, grid, cumulative, likelihood)
+    end_weights = tails.end_weights
+
     all_dates = [d for group in chain.groups for d in group]
     inliers = {d: (outlier_parts[d][0] if d in outlier_parts else likelihood[d])
                for d in all_dates}
@@ -1809,16 +1979,17 @@ def _solve_on_grid(grid: np.ndarray, measurements: List[Dict], root: Dict,
             log_T[0] = log_T[0] + np.where(np.isfinite(log_correction),
                                            log_correction, -np.inf)
             pair_weight, boundary_density, draw_boundaries, log_mass = _messages(
-                chain, allowed, transfer)
+                chain, allowed, transfer, end_weights)
             correction_offset = 0.0
         else:
             correction_offset = _finite_peak(log_correction)
             correction = np.exp(_rescaled(log_correction))     # exp(-inf) is 0
             pair_weight, boundary_density, draw_boundaries, log_mass = \
-                _messages_with_span_prior(chain, allowed, transfer, correction)
+                _messages_with_span_prior(chain, allowed, transfer, correction,
+                                          end_weights)
     else:
         pair_weight, boundary_density, draw_boundaries, log_mass = _messages(
-            chain, allowed, transfer)
+            chain, allowed, transfer, end_weights)
         correction_offset = 0.0
     # The model's evidence, p(data | model), in the log: the chain's total
     # weight with every factor the rescaling took out put back. Up to a constant
@@ -1827,7 +1998,7 @@ def _solve_on_grid(grid: np.ndarray, measurements: List[Dict], root: Dict,
     # over it -- so it compares solves of the SAME dates on the SAME grid, such
     # as one per value of a shared outlier scale, not models with different
     # windows.
-    log_evidence = (log_mass + correction_offset
+    log_evidence = (log_mass + correction_offset + tails.log_scale
                     + sum(_finite_peak(term) for term in log_T))
     span_prior_applied = log_correction is not None
     # The messages hold what they need of these; nothing below reads them.
@@ -1837,14 +2008,19 @@ def _solve_on_grid(grid: np.ndarray, measurements: List[Dict], root: Dict,
         boundary_densities = [boundary_density(i) for i in range(len(chain.boundary_ids))]
         return None, [density for density in boundary_densities if density.sum() > 0]
 
-    date_densities = _date_marginals(chain.groups, log_T, pair_weight, cumulative,
-                                     likelihood, dt, scratch)
     boundary_densities = {bid: boundary_density(i)
                           for i, bid in enumerate(chain.boundary_ids)}
+    date_densities = _date_marginals(chain.groups, log_T, pair_weight, cumulative,
+                                     likelihood, dt, scratch)
+    date_densities.update(tails.marginals(boundary_densities[chain.boundary_ids[0]],
+                                          boundary_densities[chain.boundary_ids[-1]],
+                                          likelihood))
 
     def draw_joint(rng, count):
         boundary_draws = draw_boundaries(rng, count)
         date_draws = _draw_dates(rng, chain, cumulative, boundary_draws, likelihood, dt)
+        date_draws.update(tails.draw(rng, boundary_draws[:, 0], boundary_draws[:, -1],
+                                     cumulative, likelihood, dt))
         return ({bid: boundary_draws[:, i] for i, bid in enumerate(chain.boundary_ids)},
                 date_draws)
 
@@ -2035,6 +2211,133 @@ def _results(grid: np.ndarray, root: Dict, measurements: List[Dict],
     results['grid'] = {'lower': float(grid[0]), 'upper': float(grid[-1]), 'step': dt}
     results['edge_mass'] = _edge_mass(densities, grid)
     return results, densities
+
+
+class _Tails:
+    """
+    A chain's dates outside every Boundary on one grid: each one's integral
+    beyond its end Boundary (_tail_integrals), and the weight the tail at each
+    end puts on that Boundary (_tail_weight), as `end_weights` for _messages
+    and _messages_with_span_prior, with `log_scale` the log of what scaling
+    the weights took out. Empty for a chain without tails, whose solve it
+    then leaves untouched.
+    """
+
+    def __init__(self, chain: Chain, grid: np.ndarray,
+                 cumulative: Dict[str, np.ndarray], likelihood: Dict[str, np.ndarray]):
+        self.chain = chain
+        self.older = _tail_integrals(grid, cumulative, likelihood, chain.older_tail, True)
+        self.younger = _tail_integrals(grid, cumulative, likelihood, chain.younger_tail,
+                                       False)
+        self.end_weights: Dict[str, np.ndarray] = {}
+        self.log_scale = 0.0
+        for bid, integrals in ((chain.boundary_ids[0], self.older),
+                               (chain.boundary_ids[-1], self.younger)):
+            if integrals:
+                self.end_weights[bid], peak = _tail_weight(integrals)
+                self.log_scale += peak
+
+    def marginals(self, first_density: np.ndarray, last_density: np.ndarray,
+                  likelihood: Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
+        """Every tail date's marginal, from its end Boundary's (_tail_marginals)."""
+        return {**_tail_marginals(first_density, self.older, likelihood, True),
+                **_tail_marginals(last_density, self.younger, likelihood, False)}
+
+    def draw(self, rng, first_draws: np.ndarray, last_draws: np.ndarray,
+             cumulative: Dict[str, np.ndarray], likelihood: Dict[str, np.ndarray],
+             step: float) -> Dict[str, np.ndarray]:
+        """Every tail date's draws, given its end Boundary's (_draw_tail)."""
+        out = {}
+        if self.chain.older_tail:
+            out.update(_draw_tail(rng, self.chain.older_tail, first_draws, True,
+                                  cumulative, likelihood, step))
+        if self.chain.younger_tail:
+            out.update(_draw_tail(rng, self.chain.younger_tail, last_draws, False,
+                                  cumulative, likelihood, step))
+        return out
+
+
+def _tail_integrals(grid: np.ndarray, cumulative: Dict[str, np.ndarray],
+                    likelihood: Dict[str, np.ndarray], date_ids: Sequence[str],
+                    older: bool) -> Dict[str, np.ndarray]:
+    """
+    {date id: G(F)} for dates outside every Boundary: each one's trapezoidal
+    integral from an end Boundary at F out to the grid's edge -- beyond F for
+    an older tail, below it for a younger. The entries of _interval_integral
+    with one end pinned at the edge, formed the same way and so equal to them;
+    services/cross_check.py's _tail_weight sums the same integral.
+    """
+    dt = float(grid[1] - grid[0])
+    out = {}
+    for date_id in date_ids:
+        padded = np.concatenate([[0.0], cumulative[date_id]])
+        half = 0.5 * dt * likelihood[date_id]
+        if older:      # [F, top]: (C[top] - h[top]) - (C[F-1] + h[F])
+            G = (padded[-1] - half[-1]) - (padded[:-1] + half)
+        else:          # [bottom, F]: (C[F] - h[F]) - (C[-1] + h[0])
+            G = (padded[1:] - half) - (padded[0] + half[0])
+        out[date_id] = np.maximum(G, 0.0)
+    return out
+
+
+def _tail_weight(integrals: Dict[str, np.ndarray]) -> Tuple[np.ndarray, float]:
+    """
+    The weight a tail of dates outside every Boundary puts on its end
+    Boundary: the product of their integrals beyond it, scaled to a peak of
+    one, with the log of that peak.
+
+    No span factor: a date outside every Boundary has a flat prior, as in
+    OxCal, so given the end Boundary the dates are independent of each other
+    and of the rest of the model, and this one vector is all of them the rest
+    of the model sees. A date ON the Boundary counts half, as everywhere.
+    """
+    with np.errstate(divide='ignore'):
+        log_g = sum(np.log(G) for G in integrals.values())
+    peak = _finite_peak(log_g)
+    return np.exp(log_g - peak), peak
+
+
+def _tail_marginals(end_density: np.ndarray, integrals: Dict[str, np.ndarray],
+                    likelihood: Dict[str, np.ndarray], older: bool
+                    ) -> Dict[str, np.ndarray]:
+    """
+    {date id: unnormalised marginal} for a tail, from its end Boundary's
+    marginal P(F), which already carries every tail date's integral.
+
+    Given F, date j sits at t with weight L_j(t) h(t) / G_j(F) over the tail's
+    side of F, h a half at F and at the grid's edge, as G_j integrates it.
+    So p_j(t) = L_j(t) * sum over F on the near side of t of h P(F) / G_j(F):
+    one cumulative sum.
+    """
+    out = {}
+    for date_id, G in integrals.items():
+        per_end = np.where(G > 0, end_density / np.where(G > 0, G, 1.0), 0.0)
+        if older:      # t >= F
+            reach = np.cumsum(per_end) - 0.5 * per_end
+            edge = -1
+        else:          # t <= F
+            reach = np.cumsum(per_end[::-1])[::-1] - 0.5 * per_end
+            edge = 0
+        density = likelihood[date_id] * np.clip(reach, 0.0, None)
+        density[edge] *= 0.5
+        out[date_id] = density
+    return out
+
+
+def _draw_tail(rng, date_ids: List[str], end_draws: np.ndarray, older: bool,
+               cumulative: Dict[str, np.ndarray], likelihood: Dict[str, np.ndarray],
+               step: float) -> Dict[str, np.ndarray]:
+    """
+    A grid index per tail date per draw, given its end Boundary's drawn cell:
+    its likelihood over the tail's side of that cell, half at each end, as
+    _draw_dates draws a date between two Boundaries -- here one of them is the
+    grid's edge.
+    """
+    M = len(next(iter(likelihood.values())))
+    edge = np.full(len(end_draws), M - 1 if older else 0, dtype=np.int64)
+    pair = np.column_stack([edge, end_draws] if older else [end_draws, edge])
+    pseudo = Chain(['_older', '_younger'], [list(date_ids)], {})
+    return _draw_dates(rng, pseudo, cumulative, pair, likelihood, step)
 
 
 def _straddling(on_younger: np.ndarray, on_older: np.ndarray) -> np.ndarray:
