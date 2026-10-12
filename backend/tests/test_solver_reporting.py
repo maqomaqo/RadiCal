@@ -103,27 +103,26 @@ class TestExactPath:
         fetched = client.get(f'/api/analysis/{analysis_id}').json()['data']
         assert fetched['solver']['method'] == 'exact'
 
-    def _ordered_without_a_boundary(self, tag):
-        """Two phases ordered with no Boundary between them: solvable exactly only
-        by supplying the transition they imply."""
-        tree = _chain_tree(tag)
-        tree['children'].insert(2, {'id': f'{tag}p2', 'element_type': 'phase',
-                                   'name': 'Later', 'children': []})
-        return tree, [
+    def _needing_transitions(self, tag):
+        """Three phases in a Sequence with no Boundary at all: solvable exactly
+        only by supplying the two transitions they imply. (Phases in a row
+        between Boundaries no longer need one: test_exact_ordered.py.)"""
+        return _unbounded_tree(tag), [
             _measurement(f'{tag}s1', f'{tag}p1', age_bp=3200),
-            _measurement(f'{tag}s2', f'{tag}p2', age_bp=3000),
+            _measurement(f'{tag}s2', f'{tag}p2', age_bp=3100),
+            _measurement(f'{tag}s3', f'{tag}p3', age_bp=3000),
         ]
 
     def test_a_model_needing_a_transition_is_sampled_not_quietly_patched(self, client):
         """
-        `auto` does not supply the transition. Doing so makes the model exactly
-        solvable, but it splits one span term over K dates into two over K1 + K2 and
-        is measurably the worse answer -- 2.51 years rms from OxCal against the
-        sampler's 1.49 on the plain fixture, 10.63 against 4.53 on the charcoal one.
-        So the user's model is taken as written and sampled.
+        `auto` does not supply transitions. Doing so makes the model exactly
+        solvable, but it splits one span term over K dates into several and is
+        measurably the worse answer: on the ordered fixture, 2.33 years rms
+        from OxCal with the transition supplied against 0.56 for the model as
+        written. So the user's model is taken as written and sampled.
         """
         tag = f'sr{next(_IDS)}'
-        tree, measurements = self._ordered_without_a_boundary(tag)
+        tree, measurements = self._needing_transitions(tag)
         created = _run(client, tag, tree, measurements)
         assert created.status_code == 200, created.text
         solver = created.json()['data']['solver']
@@ -132,7 +131,7 @@ class TestExactPath:
         assert solver['implicit_boundaries'] == 0
         # ...but the record still says what an exact solve would have cost, which
         # is a different statement from "this cannot be solved exactly".
-        assert solver['exact_needs_boundaries'] == 1
+        assert solver['exact_needs_boundaries'] == 2
 
     def test_asking_for_exact_still_supplies_them_and_counts_them(self, client):
         """
@@ -141,7 +140,7 @@ class TestExactPath:
         presenting the result as though their model were solvable as written.
         """
         tag = f'sr{next(_IDS)}'
-        tree, measurements = self._ordered_without_a_boundary(tag)
+        tree, measurements = self._needing_transitions(tag)
         created = client.post('/api/analysis/bayesian?wait=true', json={
             'name': f'Solver {tag}',
             'measurements': measurements,
@@ -152,7 +151,7 @@ class TestExactPath:
         assert created.status_code == 200, created.text
         solver = created.json()['data']['solver']
         assert solver['method'] == 'exact'
-        assert solver['implicit_boundaries'] == 1
+        assert solver['implicit_boundaries'] == 2
 
 
 class TestFallbackIsRecorded:
@@ -320,15 +319,14 @@ class TestSolverOverride:
         override was a pure method-vs-method cross-check. That property is real but
         costs accuracy on every such model, since the insertion weakens the (span)^
         (-K) exponent, and the record keeps the difference visible instead: the
-        patch count is 1 for the exact solve and 0 for the sampled one.
+        patch count is 2 for the exact solve and 0 for the sampled one.
         """
         tag = f'so{next(_IDS)}'
-        tree = _chain_tree(tag)
-        tree['children'].insert(2, {'id': f'{tag}p2', 'element_type': 'phase',
-                                    'name': 'Later', 'children': []})
+        tree = _unbounded_tree(tag)
         measurements = [
             _measurement(f'{tag}s1', f'{tag}p1', age_bp=3200),
-            _measurement(f'{tag}s2', f'{tag}p2', age_bp=3000),
+            _measurement(f'{tag}s2', f'{tag}p2', age_bp=3100),
+            _measurement(f'{tag}s3', f'{tag}p3', age_bp=3000),
         ]
 
         from app.api import analysis as analysis_api
@@ -337,9 +335,9 @@ class TestSolverOverride:
             _r, _b, records[choice], _i, _s = analysis_api._run_bayesian(
                 measurements, tree, {'mcmc_samples': 200, 'solver': choice,
                                      'mcmc_temperatures': 1})
-        assert records['exact']['implicit_boundaries'] == 1
+        assert records['exact']['implicit_boundaries'] == 2
         assert records['gibbs']['implicit_boundaries'] == 0
-        assert records['gibbs']['exact_needs_boundaries'] == 1
+        assert records['gibbs']['exact_needs_boundaries'] == 2
 
     def test_it_round_trips_through_a_saved_analysis(self, client):
         """The override has to survive being saved, or a rerun would silently

@@ -99,7 +99,8 @@ class TestLayout:
         assert reason is None and len(chain.older_tail) == 2
 
     @pytest.mark.parametrize('parallel', [False, True], ids=['chain', 'areas'])
-    def test_phases_in_a_row_out_there_are_declined(self, parallel):
+    def test_phases_in_a_row_out_there_are_blocks(self, parallel):
+        """More in test_exact_ordered.py."""
         tree, dates = _site(TWO_AREAS if parallel else [('plain', [3000])])
         tree, dates = _with_tails(tree, dates, before=[3100])
         earlier = _element('phase', 'Earlier')
@@ -107,7 +108,8 @@ class TestLayout:
         dates.append(_date(earlier, 3200))
         layout, reason = (ep.layout_with_reason(tree, dates) if parallel else
                           ec.layout_with_reason(tree, dates, allow_tails=True))
-        assert layout is None and reason == ec.NO_BOUNDARY_BETWEEN
+        assert reason is None
+        assert layout.older_tail_blocks == [_ids(dates, (3200,)), _ids(dates, (3100,))]
 
     @pytest.mark.parametrize('parallel', [False, True], ids=['chain', 'areas'])
     def test_an_outlier_model_out_there_is_declined(self, parallel):

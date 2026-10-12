@@ -58,11 +58,18 @@ two agree to about 0.6 years on the chain fixtures.
 `layout()` returns None for anything that is not a single chain. The caller
 then tries services/exact_parallel.py, which integrates a chain whose stages
 hold areas side by side with this module's own pieces, and falls back to the
-sampler only when that declines too. In particular a Sequence that orders two groups with
-NO boundary between them is not a chain: its dates share one enclosing boundary
-pair while an extra constraint orders them against each other, and that
-constraint does not factorise along the chain. Adding an explicit Boundary
-between such groups makes it solvable here, and is better practice anyway.
+sampler only when that declines too.
+
+A Sequence that orders two groups with NO Boundary between them is a chain
+too, of one group whose dates are ordered inside it as BLOCKS, one after
+another: the shape OxCal runs without comment. The order does not factorise
+along the Boundaries, but it does along cuts at each block's oldest date, so
+the group is a small chain of its own (_OrderedGroup). Solved as written it
+lands 0.56 years rms from OxCal on the Hillside `ordered` run, where
+supplying the missing Boundary instead -- a different model -- gave 2.33.
+Adding the Boundary is still better practice. Dates ordered inside one pair
+of Boundaries in any other way -- two Sequences side by side with no
+Boundaries of their own -- are not blocks, and are sampled.
 
 A Sequence of Sequences, each with its own Boundaries, IS a chain: it is the
 same model as its children written out in place, with an empty group between
@@ -76,9 +83,9 @@ everything else, and the whole group enters as one weight on it:
 
     g(b_1) = ∏_(dates beyond b_1) G_j(b_1),   G_j = L_j integrated beyond b_1
 
-See _Tails. Several groups in a row out there, a date ordered against neither
-end, and a date out there with an outlier model are not taken
-(tails_with_reason).
+See _Tails. Several groups in a row out there are blocks, as inside a group.
+A date ordered against neither end, and a date out there with an outlier
+model, are not taken (tails_with_reason).
 """
 from typing import Dict, List, Optional, Sequence, Set, Tuple
 
@@ -172,12 +179,24 @@ BOUNDARY_TIE_WEIGHT = 0.5
 # differences of grid ages, not a gap. See log_limits_factor_of_span.
 LIMITS_ROUNDING_YEARS = 1e-6
 
-# The reason given for groups of dates ordered one after another with no
-# Boundary between them, wherever a layout finds them.
+# The reason given for groups ordered one after another with no Boundary
+# between them where a layout cannot take them as blocks: beside areas side by
+# side, in one stage of services/exact_parallel.py.
 NO_BOUNDARY_BETWEEN = (
     'two groups are ordered against each other with no Boundary between '
     'them. Add a Boundary at that transition to make the model exactly '
     'solvable'
+)
+
+
+# The reason given for dates inside one pair of Boundaries, or outside every
+# Boundary at one end, ordered against each other other than as groups one
+# after another (blocks_with_reason).
+NOT_ONE_AFTER_ANOTHER = (
+    'some dates inside one pair of Boundaries are ordered against each other '
+    'other than as one group after another -- two Sequences side by side with '
+    'no Boundaries of their own, say. Give each its own Boundaries to make the '
+    'model exactly solvable'
 )
 
 
@@ -186,21 +205,43 @@ class Chain:
     A model that is a single line of bounded groups, oldest first, and the
     dates outside every Boundary at either end: `older_tail` older than the
     first Boundary, `younger_tail` younger than the last (see _tail_weight).
+
+    `blocks`, one list per group, holds the group's dates as BLOCKS, oldest
+    first, where they are ordered against each other inside the group --
+    Phases in a row with no Boundary between them (blocks_with_reason). A
+    group with no such order is one block, the default; so is an empty one,
+    as no blocks. `older_tail_blocks` and `younger_tail_blocks` do the same
+    for the tails.
     """
 
     def __init__(self, boundary_ids: List[str], groups: List[List[str]],
                  boundary_names: Dict[str, str],
                  older_tail: Optional[List[str]] = None,
-                 younger_tail: Optional[List[str]] = None):
+                 younger_tail: Optional[List[str]] = None,
+                 blocks: Optional[List[List[List[str]]]] = None,
+                 older_tail_blocks: Optional[List[List[str]]] = None,
+                 younger_tail_blocks: Optional[List[List[str]]] = None):
         # len(boundary_ids) == len(groups) + 1
         self.boundary_ids = boundary_ids
         self.groups = groups
         self.boundary_names = boundary_names
         self.older_tail = list(older_tail or [])
         self.younger_tail = list(younger_tail or [])
+        self.blocks = (blocks if blocks is not None
+                       else [[list(group)] if group else [] for group in groups])
+        self.older_tail_blocks = older_tail_blocks or _one_block(self.older_tail)
+        self.younger_tail_blocks = younger_tail_blocks or _one_block(self.younger_tail)
+
+    def ordered(self, index: int) -> bool:
+        """Whether group `index` has dates ordered inside it."""
+        return len(self.blocks[index]) > 1
 
     def __repr__(self):
         return f"Chain({len(self.groups)} groups, {len(self.boundary_ids)} boundaries)"
+
+
+def _one_block(date_ids: Sequence[str]) -> List[List[str]]:
+    return [list(date_ids)] if date_ids else []
 
 
 def layout(root: Dict, measurements: List[Dict],
@@ -308,26 +349,26 @@ def layout_with_reason(
                 return None, branched
             placed[date_id] = index
     unenclosed = [m['id'] for m in measurements if m['id'] not in placed]
-    older_tail: List[str] = []
-    younger_tail: List[str] = []
+    older_blocks: List[List[str]] = []
+    younger_blocks: List[List[str]] = []
     if unenclosed:
         if not allow_tails:
             return None, outside_every_boundary_reason(unenclosed, measurements)
-        (older_tail, younger_tail), reason = tails_with_reason(
+        (older_blocks, younger_blocks), reason = tails_with_reason(
             plan, measurements, unenclosed, boundary_ids[0], boundary_ids[-1])
         if reason is not None:
             return None, reason
+    older_tail = [d for block in older_blocks for d in block]
+    younger_tail = [d for block in younger_blocks for d in block]
 
     # The chain must already imply every ordering constraint the tree asks
-    # for. Rank boundary i at 2i and group i at 2i+1, oldest first; a
-    # constraint is implied when everything on its older side outranks
-    # everything on its younger side. Anything else -- above all two groups
-    # ordered against each other INSIDE one boundary pair -- is structure this
-    # solver cannot express.
+    # for, but for dates ordered against each other INSIDE one boundary pair,
+    # which are that group's blocks. Rank boundary i at 2i and group i at
+    # 2i+1, oldest first; a constraint is implied when everything on its
+    # older side outranks everything on its younger side.
     rank_of_boundary = {bid: 2 * i for i, bid in enumerate(boundary_ids)}
-    # A tail sits beyond its end Boundary, one rank further out. Its dates
-    # share that rank; tails_with_reason has already turned away any two of
-    # them ordered against each other.
+    # A tail sits beyond its end Boundary, one rank further out, and its
+    # dates share that rank, as a group's do.
     tail_rank = {**{d: -1 for d in older_tail},
                  **{d: 2 * len(boundary_ids) - 1 for d in younger_tail}}
 
@@ -339,18 +380,131 @@ def layout_with_reason(
         index = placed.get(tid)
         return None if index is None else 2 * index + 1
 
+    inner_order = bool(older_blocks and len(older_blocks) > 1
+                       or younger_blocks and len(younger_blocks) > 1)
     for older_terms, younger_terms in plan.ordering:
         older_ranks = [rank(k, t) for k, t in older_terms]
         younger_ranks = [rank(k, t) for k, t in younger_terms]
         if any(r is None for r in older_ranks + younger_ranks):
             return None, branched
         if max(older_ranks) >= min(younger_ranks):
-            if allow_inner_order:
-                continue
-            return None, NO_BOUNDARY_BETWEEN
+            inner_order = True
+    groups = [list(g.date_ids) for g in ordered_groups]
+    if allow_inner_order or not inner_order:
+        return Chain(boundary_ids, groups, dict(plan.boundary_names),
+                     older_tail, younger_tail), None
 
-    return Chain(boundary_ids, [list(g.date_ids) for g in ordered_groups],
-                 dict(plan.boundary_names), older_tail, younger_tail), None
+    # Order inside a group: its dates as blocks, and then the whole layout --
+    # the chain, each group's blocks, the tails -- held to the model as
+    # written, so integrating it cannot answer a different model.
+    closed = _closure(written_order(plan))
+    blocks = []
+    for group in groups:
+        group_blocks, reason = blocks_with_reason(group, closed)
+        if reason is not None:
+            return None, reason
+        blocks.append(group_blocks)
+    laid: Dict[str, Set[str]] = {}
+    _order_chain(laid, boundary_ids, blocks)
+    _order_tails(laid, boundary_ids[0], boundary_ids[-1], older_blocks, younger_blocks)
+    if _closure(laid) != closed:
+        return None, (
+            'its dates are ordered in a way one line of phases between '
+            'Boundaries cannot express'
+        )
+    return Chain(boundary_ids, groups, dict(plan.boundary_names), older_tail,
+                 younger_tail, blocks, older_blocks, younger_blocks), None
+
+
+def blocks_with_reason(date_ids: Sequence[str], closed: Dict[str, Set[str]]
+                       ) -> Tuple[Optional[List[List[str]]], Optional[str]]:
+    """
+    (blocks, None): `date_ids` as BLOCKS, oldest first, given `closed`,
+    everything each parameter is older than (_closure). Dates in one block
+    are not ordered against each other, and every date of a block is older
+    than every date of the next: Phases in a row with no Boundary between
+    them, or a Sequence of Phases with none, inside one pair of Boundaries.
+    One block when nothing orders them. (None, reason) for any other order --
+    two such Sequences side by side, say -- which does not reduce to blocks.
+
+    services/cross_check.py's _blocks reads the same structure off the
+    sampler's ordering.
+    """
+    members = list(date_ids)
+    if len(members) < 2:
+        return _one_block(members), None
+
+    def ordered(a, b):
+        return b in closed.get(a, ()) or a in closed.get(b, ())
+
+    parent = {d: d for d in members}
+
+    def find(d):
+        while parent[d] != d:
+            parent[d] = parent[parent[d]]
+            d = parent[d]
+        return d
+
+    for i, a in enumerate(members):
+        for b in members[i + 1:]:
+            if not ordered(a, b):
+                parent[find(a)] = find(b)
+    found: Dict[str, List[str]] = {}
+    for d in members:
+        found.setdefault(find(d), []).append(d)
+    blocks = list(found.values())
+    for block in blocks:
+        if any(ordered(a, b) for i, a in enumerate(block) for b in block[i + 1:]):
+            return None, NOT_ONE_AFTER_ANOTHER
+    # Oldest first: a block is older than every block its first date precedes.
+    older_than = {id(block): sum(1 for other in blocks
+                                 if other is not block and other[0] in closed.get(block[0], ()))
+                  for block in blocks}
+    blocks.sort(key=lambda block: -older_than[id(block)])
+    for i, older in enumerate(blocks):
+        for younger in blocks[i + 1:]:
+            if not all(y in closed.get(o, ()) for o in older for y in younger):
+                return None, NOT_ONE_AFTER_ANOTHER
+    return blocks, None
+
+
+def _edge(order: Dict[str, Set[str]], older: str, younger: str) -> None:
+    order.setdefault(older, set()).add(younger)
+    order.setdefault(younger, set())
+
+
+def _order_blocks(order: Dict[str, Set[str]], blocks: List[List[str]]) -> None:
+    """Each block's dates older than every date of the next."""
+    for older, younger in zip(blocks, blocks[1:]):
+        for o in older:
+            for y in younger:
+                _edge(order, o, y)
+
+
+def _order_chain(order: Dict[str, Set[str]], boundary_ids: List[str],
+                 blocks: List[List[List[str]]]) -> None:
+    """A chain's ordering: each group between its two Boundaries, in blocks."""
+    for index, group_blocks in enumerate(blocks):
+        older, younger = boundary_ids[index], boundary_ids[index + 1]
+        _edge(order, older, younger)
+        for block in group_blocks:
+            for date_id in block:
+                _edge(order, older, date_id)
+                _edge(order, date_id, younger)
+        _order_blocks(order, group_blocks)
+
+
+def _order_tails(order: Dict[str, Set[str]], first_id: str, last_id: str,
+                 older_blocks: List[List[str]], younger_blocks: List[List[str]]) -> None:
+    """Tails' ordering: beyond their end Boundary, in blocks."""
+    for block in older_blocks:
+        for date_id in block:
+            _edge(order, date_id, first_id)
+    for block in younger_blocks:
+        for date_id in block:
+            _edge(order, last_id, date_id)
+    _order_blocks(order, older_blocks)
+    _order_blocks(order, younger_blocks)
 
 
 def outside_every_boundary_reason(date_ids: List[str], measurements: List[Dict]) -> str:
@@ -368,10 +522,11 @@ def outside_every_boundary_reason(date_ids: List[str], measurements: List[Dict])
 
 def tails_with_reason(plan, measurements: List[Dict], date_ids: List[str],
                       first_id: str, last_id: str
-                      ) -> Tuple[Tuple[List[str], List[str]], Optional[str]]:
+                      ) -> Tuple[Tuple[List[List[str]], List[List[str]]], Optional[str]]:
     """
-    ((older tail, younger tail), None) for dates outside every Boundary that
-    this solver can take, else (([], []), why not).
+    ((older tail, younger tail), None), each tail as its blocks oldest first
+    (blocks_with_reason), for dates outside every Boundary that this solver
+    can take, else (([], []), why not).
 
     A date outside every Boundary gets no span term -- its prior is flat, as
     OxCal's is -- and is held only by its order against the model's first or
@@ -380,8 +535,7 @@ def tails_with_reason(plan, measurements: List[Dict], date_ids: List[str],
     left to the sampler. One carrying an outlier model is too: nothing holds
     its outlier component, so its answer would depend on how far the
     calculation window happens to reach. Dates at one end ordered against
-    each other are groups in a row with no Boundary between them, which waits
-    for that shape's own support.
+    each other must be groups one after another, as inside a group.
     """
     by_id = {m['id']: m for m in measurements}
     closed = _closure(written_order(plan))
@@ -395,10 +549,12 @@ def tails_with_reason(plan, measurements: List[Dict], date_ids: List[str],
             loose.append(date_id)
     if loose:
         return ([], []), outside_every_boundary_reason(loose, measurements)
+    tails = []
     for tail in (older, younger):
-        members = set(tail)
-        if any(closed.get(d, set()) & members for d in tail):
-            return ([], []), NO_BOUNDARY_BETWEEN
+        blocks, reason = blocks_with_reason(tail, closed)
+        if reason is not None:
+            return ([], []), reason
+        tails.append(blocks)
     flagged = [d for d in older + younger if (by_id[d].get('outlier_prior') or 0) > 0]
     if flagged:
         names = ', '.join(sorted(by_id[d].get('sample_name') or d for d in flagged[:4]))
@@ -407,7 +563,7 @@ def tails_with_reason(plan, measurements: List[Dict], date_ids: List[str],
             f'({names}). With nothing on their far side to hold it, the outlier '
             'component reaches the edge of the calculation, so they are sampled'
         )
-    return (older, younger), None
+    return (tails[0], tails[1]), None
 
 
 def written_order(plan) -> Dict[str, Set[str]]:
@@ -1809,19 +1965,8 @@ def _draw_dates(rng, chain: Chain, cumulative: Dict[str, np.ndarray],
             below = np.concatenate([[0.0], cum])
             uniform = rng.random(len(low))
             if likelihood is not None and step is not None:
-                density = likelihood[date_id]
-                low_end = 0.5 * step * density[low]
-                high_end = 0.5 * step * density[high]
-                # Interior cells low+1 .. high-1, whole.
-                interior = np.where(high > low + 1, cum[np.maximum(high - 1, 0)] - cum[low], 0.0)
-                total = low_end + interior + high_end
-                target = uniform * total
-                inside = np.searchsorted(cum, cum[low] + (target - low_end), side='right')
-                picked = np.where(target < low_end, low,
-                                  np.where(target < low_end + interior,
-                                           np.clip(inside, low + 1, np.maximum(high - 1, low + 1)),
-                                           high))
-                empty = total <= 0
+                picked, empty = _pick_in(cum, likelihood[date_id], low, high, step,
+                                         uniform, high_half=True)
             else:
                 floor, ceiling = below[low], cum[high]
                 picked = np.searchsorted(cum, floor + uniform * (ceiling - floor))
@@ -1834,6 +1979,42 @@ def _draw_dates(rng, chain: Chain, cumulative: Dict[str, np.ndarray],
                 picked = np.where(empty, spread, picked)
             draws[date_id] = np.clip(picked, low, high)
     return draws
+
+
+def _pick_in(cum: np.ndarray, density: np.ndarray, low: np.ndarray, high: np.ndarray,
+             step: float, uniform: np.ndarray, high_half: bool
+             ) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    (cell, empty) per draw: an inverse-CDF draw at `uniform` from `density`
+    over cells low..high, half weight at `low`, and at `high` too with
+    `high_half`; `empty` where the interval holds none.
+    """
+    low_end = 0.5 * step * density[low]
+    high_end = (0.5 if high_half else 1.0) * step * density[high]
+    if not high_half:
+        high_end = np.where(high > low, high_end, 0.0)
+    # Interior cells low+1 .. high-1, whole.
+    interior = np.where(high > low + 1, cum[np.maximum(high - 1, 0)] - cum[low], 0.0)
+    total = low_end + interior + high_end
+    target = uniform * total
+    inside = np.searchsorted(cum, cum[low] + (target - low_end), side='right')
+    picked = np.where(target < low_end, low,
+                      np.where(target < low_end + interior,
+                               np.clip(inside, low + 1, np.maximum(high - 1, low + 1)),
+                               high))
+    return picked, total <= 0
+
+
+def _draw_in(rng, cum: np.ndarray, density: np.ndarray, low: np.ndarray,
+             high: np.ndarray, step: float, high_half: bool) -> np.ndarray:
+    """_pick_in with its own uniforms, and a cell inside the interval where it
+    holds no likelihood, as _draw_dates does."""
+    uniform = rng.random(len(low))
+    picked, empty = _pick_in(cum, density, low, high, step, uniform, high_half)
+    if np.any(empty):
+        spread = (low + uniform * (high - low + 1)).astype(np.int64)
+        picked = np.where(empty, spread, picked)
+    return np.clip(picked, low, high)
 
 
 def solve(measurements: List[Dict], root: Dict, chain: Chain,
@@ -1947,10 +2128,8 @@ def _solve_on_grid(grid: np.ndarray, measurements: List[Dict], root: Dict,
     likelihood, cumulative, outlier_parts = date_tables(
         grid, measurements, element_bounds)
     allowed = _allowed_windows(grid, element_bounds, chain.boundary_ids)
-    log_T = [_group_log_transfer(grid, date_ids, cumulative, likelihood,
-                                 allowed[chain.boundary_ids[index]],
-                                 allowed[chain.boundary_ids[index + 1]], scratch)
-             for index, date_ids in enumerate(chain.groups)]
+    log_T, ordered = _chain_log_transfers(grid, chain, cumulative, likelihood,
+                                          allowed, scratch)
     transfer = _exponentiated(log_T)
 
     # Dates outside every Boundary: one weight each on the first and last
@@ -2010,15 +2189,16 @@ def _solve_on_grid(grid: np.ndarray, measurements: List[Dict], root: Dict,
 
     boundary_densities = {bid: boundary_density(i)
                           for i, bid in enumerate(chain.boundary_ids)}
-    date_densities = _date_marginals(chain.groups, log_T, pair_weight, cumulative,
-                                     likelihood, dt, scratch)
+    date_densities = _chain_date_marginals(chain, ordered, log_T, pair_weight,
+                                           cumulative, likelihood, dt, scratch)
     date_densities.update(tails.marginals(boundary_densities[chain.boundary_ids[0]],
                                           boundary_densities[chain.boundary_ids[-1]],
                                           likelihood))
 
     def draw_joint(rng, count):
         boundary_draws = draw_boundaries(rng, count)
-        date_draws = _draw_dates(rng, chain, cumulative, boundary_draws, likelihood, dt)
+        date_draws = _chain_draw_dates(rng, chain, ordered, cumulative, boundary_draws,
+                                       likelihood, dt)
         date_draws.update(tails.draw(rng, boundary_draws[:, 0], boundary_draws[:, -1],
                                      cumulative, likelihood, dt))
         return ({bid: boundary_draws[:, i] for i, bid in enumerate(chain.boundary_ids)},
@@ -2065,6 +2245,70 @@ def _group_log_transfer(grid: np.ndarray, date_ids: Sequence[str],
     if not (older_ok.all() and younger_ok.all()):
         term[~(younger_ok[:, None] & older_ok[None, :])] = -np.inf
     return term
+
+
+def _chain_log_transfers(grid: np.ndarray, chain: Chain,
+                         cumulative: Dict[str, np.ndarray],
+                         likelihood: Dict[str, np.ndarray], allowed: Dict,
+                         scratch: np.ndarray
+                         ) -> Tuple[List[np.ndarray], Dict[int, '_OrderedGroup']]:
+    """
+    Every group's log transfer, in order, and {group index: _OrderedGroup}
+    for the groups whose dates are ordered inside them (Chain.blocks).
+    """
+    log_T: List[np.ndarray] = []
+    ordered: Dict[int, _OrderedGroup] = {}
+    for index, date_ids in enumerate(chain.groups):
+        older_ok = allowed[chain.boundary_ids[index]]
+        younger_ok = allowed[chain.boundary_ids[index + 1]]
+        if chain.ordered(index):
+            ordered[index] = _OrderedGroup(chain.blocks[index], grid, cumulative, likelihood)
+            log_T.append(_ordered_log_transfer(ordered[index], grid, older_ok, younger_ok))
+        else:
+            log_T.append(_group_log_transfer(grid, date_ids, cumulative, likelihood,
+                                             older_ok, younger_ok, scratch))
+    return log_T, ordered
+
+
+def _chain_date_marginals(chain: Chain, ordered: Dict[int, '_OrderedGroup'],
+                          log_T: List[np.ndarray], pair_weight,
+                          cumulative: Dict[str, np.ndarray],
+                          likelihood: Dict[str, np.ndarray], dt: float,
+                          scratch: np.ndarray) -> Dict[str, np.ndarray]:
+    """
+    _date_marginals for a chain that may hold ordered groups, in the chain's
+    order. An ordered group's dates come from its own chain over its cuts,
+    given everything outside it: the pair weight, and whatever of its log
+    transfer is not the sum over its cuts -- the span factor, the tie, and the
+    span correction where one group carries it.
+    """
+    plain = [[] if index in ordered else group for index, group in enumerate(chain.groups)]
+    found = _date_marginals(plain, log_T, pair_weight, cumulative, likelihood, dt, scratch)
+    for index, group in ordered.items():
+        with np.errstate(divide='ignore', invalid='ignore'):
+            log_pair = np.log(pair_weight(index))
+            log_end = np.fmax(log_pair + (log_T[index] - group.log_inner), -np.inf)
+        # The ends in one cell are the tie, weighed on its own.
+        log_tie = np.diagonal(log_pair) + np.diagonal(log_T[index])
+        np.fill_diagonal(log_end, -np.inf)
+        group.solve(log_end, log_tie)
+        found.update(group.marginals())
+    return {date_id: found[date_id] for group in chain.groups for date_id in group}
+
+
+def _chain_draw_dates(rng, chain: Chain, ordered: Dict[int, '_OrderedGroup'],
+                      cumulative: Dict[str, np.ndarray], boundary_draws: np.ndarray,
+                      likelihood: Dict[str, np.ndarray], step: float
+                      ) -> Dict[str, np.ndarray]:
+    """_draw_dates for a chain that may hold ordered groups, whose dates come
+    from the group given its two Boundaries drawn (_OrderedGroup.draw)."""
+    plain = Chain(chain.boundary_ids,
+                  [[] if index in ordered else group
+                   for index, group in enumerate(chain.groups)], chain.boundary_names)
+    out = _draw_dates(rng, plain, cumulative, boundary_draws, likelihood, step)
+    for index, group in ordered.items():
+        out.update(group.draw(rng, boundary_draws[:, index], boundary_draws[:, index + 1]))
+    return out
 
 
 def _exponentiated(log_T: List[np.ndarray]):
@@ -2213,6 +2457,302 @@ def _results(grid: np.ndarray, root: Dict, measurements: List[Dict],
     return results, densities
 
 
+class _OrderedGroup:
+    """
+    Dates in BLOCKS, oldest first, between an older end and a younger end on
+    one grid: Phases in a row with no Boundary between them, inside one pair of
+    Boundaries or beyond an end one (Chain.blocks). The dates of a block are
+    unordered and every one is older than every date of the next block.
+
+    Their integral over every placement is cut at v_i, the oldest date of
+    block i for i >= 2. Given the cuts the blocks are independent, so the
+    group is a small chain over the nodes (older end, v_2, ..., v_n, younger
+    end), one transfer per block, indexed [younger, older] as everywhere here:
+
+        block 1:    prod_m F_m(v_2, S)
+        block i>1:  T_i(l, u) = sum_k L_k(u) dt prod_(m != k) F_m(l, u)
+
+    with F the trapezoidal interval integral, l the next cut or the younger
+    end, and T_i the derivative in u of block i's prod F: its dates in [l, u]
+    with the oldest AT u. Two neighbouring nodes in one cell count half, as
+    two Boundaries do (_boundary_pair_term) -- which leaves only a block of one
+    date there, since a block's F over no width is nothing.
+
+    This is the trapezoid rule for the continuum integral, cut by cut, and it
+    converges as the step does. Following the sampler's grid rule instead --
+    half per tied ordering edge, gibbs.Model.endpoint_weight -- would need
+    every block's count of dates at each cell as state, and the cheaper
+    imitations of it converge worse. One that weighed the date at a block's
+    oldest cell whole put the Hillside `ordered` model's Start 7.5 years
+    young at a 2-year step and 0.8 at an eighth of a year; this rule puts it
+    2.4 old and 0.1 (test_exact_ordered.py, TestConvergence). Both part from
+    the sampler's by a term of first order in the step, and
+    test_exact_ordered.py holds this one to the sampler's dates.
+
+    The chain's products are exact_chain's own (_ChainProducts), so the group's
+    weight over its ends, its cuts' marginals given everything outside it, and
+    their draws come from the code that does the same for Boundaries. The two
+    ends in one cell -- every date there -- is the group's tie, which the
+    caller weighs (_ordered_log_transfer) and hands back to marginals().
+    """
+
+    def __init__(self, blocks: List[List[str]], grid: np.ndarray,
+                 cumulative: Dict[str, np.ndarray], likelihood: Dict[str, np.ndarray]):
+        self.blocks = blocks
+        self.dt = float(grid[1] - grid[0])
+        self.M = M = len(grid)
+        self.cumulative, self.likelihood = cumulative, likelihood
+        index = np.arange(M)
+        self._upper = index[None, :] >= index[:, None]          # [l, u]: u >= l
+        self.log_links = [self._first_block(blocks[0])] + [
+            self._oldest_at(block) for block in blocks[1:]]
+        ids = ['_older'] + [f'_cut{i}' for i in range(2, len(blocks) + 1)] + ['_younger']
+        self.chain = Chain(ids, [[] for _ in blocks], {})
+        ones = np.ones(M, dtype=bool)
+        self.products = _ChainProducts(self.chain, {b: ones for b in ids},
+                                       _exponentiated(self.log_links))
+        self.link_scale = sum(_finite_peak(link) for link in self.log_links)
+        with np.errstate(divide='ignore'):
+            inner = np.log(self.products.end_to_end.T)          # [younger, older]
+        inner += self.products.log_scale + self.link_scale
+        self.log_inner = inner
+        self.messages = None
+
+    # -- the transfers --------------------------------------------------------
+
+    def _log_F(self, date_id: str) -> np.ndarray:
+        return _log_interval_integral(self.cumulative[date_id], self.likelihood[date_id],
+                                      self.dt)
+
+    def _first_block(self, block: List[str]) -> np.ndarray:
+        term = np.zeros((self.M, self.M))
+        for date_id in block:
+            term += self._log_F(date_id)
+        return term
+
+    def _log_top(self, date_id: str) -> np.ndarray:
+        """log of L(u) dt, by column u."""
+        with np.errstate(divide='ignore'):
+            return np.log(self.dt * self.likelihood[date_id])[None, :]
+
+    def _chunks(self, size: int):
+        """Row slices of [l, u] small enough that a block's per-date terms for
+        one of them fit in about 64 MB."""
+        step = max(1, int(64e6 / (16 * max(size, 1) * self.M)))
+        return [slice(start, min(start + step, self.M)) for start in range(0, self.M, step)]
+
+    def _leave_one_out(self, log_F: Dict[str, np.ndarray], members: List[str],
+                       rows: slice):
+        """
+        For rows `rows` of [l, u], each member j in turn as (j, log prod over
+        the others of F, log T over the others) -- T the derivative in u of
+        prod F, sum_k L_k(u) dt prod_(m != k) F_m. From one backward and one
+        forward pass of the product rule in the log, so no F is ever divided
+        out and a zero one stays a zero.
+        """
+        a = [log_F[d][rows] for d in members]
+        b = [self._log_top(d) for d in members]
+        K = len(members)
+        Q: List[np.ndarray] = [None] * K       # log prod F over the members after j
+        U: List[np.ndarray] = [None] * K       # log T over the members after j
+        q = np.zeros_like(a[0])
+        u = np.full_like(a[0], -np.inf)
+        for j in range(K - 1, -1, -1):
+            Q[j], U[j] = q, u
+            u = np.logaddexp(u + a[j], q + b[j])
+            q = q + a[j]
+        p = np.zeros_like(a[0])
+        r = np.full_like(a[0], -np.inf)
+        for j in range(K):
+            yield j, p + Q[j], np.logaddexp(r + Q[j], p + U[j])
+            r = np.logaddexp(r + a[j], p + b[j])
+            p = p + a[j]
+
+    def _oldest_at(self, block: List[str]) -> np.ndarray:
+        """log T over `block`, [l, u]: the derivative of its prod F in u, a
+        half where l = u (a block of one date only)."""
+        # The product rule forwards: r the derivative so far, p the product.
+        p = np.zeros((self.M, self.M))
+        out = np.full((self.M, self.M), -np.inf)
+        for date_id in block:
+            log_F = self._log_F(date_id)
+            out = np.logaddexp(out + log_F, p + self._log_top(date_id))
+            p += log_F
+        out[~self._upper] = -np.inf
+        diagonal = np.diagonal(out) + np.log(BOUNDARY_TIE_WEIGHT)
+        np.fill_diagonal(out, diagonal)
+        return out
+
+    # -- with the rest of the model -------------------------------------------
+
+    def solve(self, log_end: np.ndarray, log_tie: Optional[np.ndarray] = None) -> None:
+        """
+        Fold in `log_end`, [younger end, older end], the log weight of
+        everything outside the group -- zero where the ends share a cell -- and
+        `log_tie`, by cell, the whole weight of the ends and every date in
+        that one cell. marginals() and draw() read the result. Consumes the
+        products.
+        """
+        peak = _finite_peak(log_end)
+        self.messages = _messages_with_end_factor(self.products, np.exp(_rescaled(log_end)))
+        self.products = None
+        self.log_total = self.messages[3] + peak + self.link_scale
+        self.log_tie = log_tie
+
+    def marginals(self) -> Dict[str, np.ndarray]:
+        """{date id: unnormalised marginal}, given solve()'s weights: the
+        group's placements with its ends apart, each date's normalised to
+        their total, and the tie's mass in its cell."""
+        pair_weight = self.messages[0]
+        out: Dict[str, np.ndarray] = {}
+        for index, block in enumerate(self.blocks):
+            with np.errstate(divide='ignore'):
+                log_q = np.log(pair_weight(index))              # [younger, older]
+            log_F = {d: self._log_F(d) for d in block}
+            if index == 0:
+                log_q += self.log_links[0]
+                for date_id in block:
+                    with np.errstate(invalid='ignore'):
+                        W = np.fmax(log_q - log_F[date_id], -np.inf)
+                    np.fill_diagonal(W, -np.inf)
+                    W = np.exp(_rescaled(W))
+                    rows, cols = W.sum(axis=1), W.sum(axis=0)
+                    out[date_id] = self.likelihood[date_id] * np.clip(
+                        _straddling(rows, cols) - 0.5 * (rows + cols), 0.0, None)
+                continue
+            # Per date, as log sums: the date at the block's oldest cell u (a
+            # mass there, by u), and below u under its own trapezoid with
+            # another date at u (by row l and by column u, for _straddling).
+            K = len(block)
+            top = np.full((K, self.M), -np.inf)
+            rows_V = np.full((K, self.M), -np.inf)
+            cols_V = np.full((K, self.M), -np.inf)
+            for rows in self._chunks(K):
+                q = log_q[rows]
+                above = self._upper[rows]
+                span = np.arange(rows.start, rows.stop)
+                on_diagonal = np.zeros_like(above)
+                on_diagonal[span - rows.start, span] = True
+                for j, others, rest in self._leave_one_out(log_F, block, rows):
+                    at_top = q + self._log_top(block[j]) + others
+                    at_top[~above] = -np.inf
+                    if K == 1:
+                        at_top[on_diagonal] += np.log(BOUNDARY_TIE_WEIGHT)
+                    else:
+                        at_top[on_diagonal] = -np.inf
+                    V = q + rest
+                    V[~above | on_diagonal] = -np.inf
+                    top[j] = np.logaddexp(top[j], _log_sum(at_top, axis=0))
+                    cols_V[j] = np.logaddexp(cols_V[j], _log_sum(V, axis=0))
+                    rows_V[j, rows] = _log_sum(V, axis=1)
+            for j, date_id in enumerate(block):
+                peak = max(_finite_peak(top[j]), _finite_peak(rows_V[j]),
+                           _finite_peak(cols_V[j]))
+                rows_j, cols_j = np.exp(rows_V[j] - peak), np.exp(cols_V[j] - peak)
+                below = _straddling(rows_j, cols_j) - 0.5 * (rows_j + cols_j)
+                out[date_id] = (self.likelihood[date_id] * np.clip(below, 0.0, None)
+                                + np.exp(top[j] - peak) / self.dt)
+        # Each date's density sums, times the step, to the weight of every
+        # placement with the ends apart; the tie adds its own in one cell.
+        log_tie = self.log_tie
+        ref = max(self.log_total, _finite_peak(log_tie) if log_tie is not None else -np.inf)
+        apart = np.exp(self.log_total - ref) if np.isfinite(self.log_total) else 0.0
+        tie = (np.exp(log_tie - ref) / self.dt if log_tie is not None
+               else np.zeros(self.M))
+        for date_id, density in out.items():
+            mass = density.sum() * self.dt
+            out[date_id] = (density * (apart / mass) if mass > 0 else 0.0 * density) + tie
+        return out
+
+    def draw(self, rng, older: np.ndarray, younger: np.ndarray) -> Dict[str, np.ndarray]:
+        """A grid index per date per draw, given the group's two ends drawn:
+        every date in the ends' cell where they share one."""
+        count = len(older)
+        apart = older != younger
+        out = {d: older.copy() for block in self.blocks for d in block}
+        if not apart.any():
+            return out
+        cuts = self.messages[2](rng, int(apart.sum()), ends=(older[apart], younger[apart]))
+        drawn: Dict[str, np.ndarray] = {}
+        first = Chain(['_o', '_y'], [self.blocks[0]], {})
+        drawn.update(_draw_dates(rng, first, self.cumulative, cuts[:, :2],
+                                 self.likelihood, self.dt))
+        for index in range(1, len(self.blocks)):
+            drawn.update(self._draw_block(rng, self.blocks[index], cuts[:, index],
+                                          cuts[:, index + 1]))
+        for date_id, values in drawn.items():
+            out[date_id][apart] = values
+        return out
+
+    def _draw_block(self, rng, block: List[str], top: np.ndarray,
+                    low: np.ndarray) -> Dict[str, np.ndarray]:
+        """
+        A block's dates given its oldest cell `top` and its lower end `low`:
+        which date sits at the top, by its term in T, then the rest from
+        [low, top] under their trapezoids -- exactly the block's conditional,
+        with no M x M table. Where top = low the block is one date, there.
+        """
+        dt = self.dt
+        log_F, log_L = [], []
+        for date_id in block:
+            padded = np.concatenate([[0.0], self.cumulative[date_id]])
+            L = self.likelihood[date_id]
+            F = (padded[top + 1] - 0.5 * dt * L[top]) - (padded[low] + 0.5 * dt * L[low])
+            with np.errstate(divide='ignore'):
+                log_F.append(np.where(top > low, np.log(np.maximum(F, 0.0)), -np.inf))
+                log_L.append(np.log(dt * L[top]))
+        log_F, log_L = np.array(log_F), np.array(log_L)
+        finite = np.isfinite(log_F)
+        total = np.where(finite, log_F, 0.0).sum(axis=0)
+        zeros = (~finite).sum(axis=0)
+        with np.errstate(invalid='ignore'):
+            others = np.where(finite, np.where(zeros == 0, total - log_F, -np.inf),
+                              np.where(zeros == 1, total, -np.inf))
+        weights = log_L + others                                       # [k, draw]
+        weights = np.nan_to_num(np.exp(weights - np.max(weights, axis=0, initial=-np.inf)))
+        cdf = np.cumsum(weights, axis=0)
+        uniform = rng.random(len(top)) * cdf[-1]
+        chosen = np.minimum((cdf < uniform[None, :]).sum(axis=0), len(block) - 1)
+        out = {}
+        for k, date_id in enumerate(block):
+            within = _draw_in(rng, self.cumulative[date_id], self.likelihood[date_id],
+                              low, top, dt, high_half=True)
+            out[date_id] = np.where(chosen == k, top, within)
+        return out
+
+
+def _log_sum(log_weights: np.ndarray, axis: int) -> np.ndarray:
+    """log of the sum of exp(log_weights) along `axis`, -inf where all are."""
+    peak = np.max(log_weights, axis=axis, keepdims=True, initial=-np.inf)
+    safe = np.where(np.isfinite(peak), peak, 0.0)
+    with np.errstate(divide='ignore'):
+        out = np.log(np.exp(log_weights - safe).sum(axis=axis)) + np.squeeze(safe, axis)
+    return np.where(np.isfinite(np.squeeze(peak, axis)), out, -np.inf)
+
+
+def _ordered_log_transfer(group: _OrderedGroup, grid: np.ndarray,
+                          older_ok: np.ndarray, younger_ok: np.ndarray) -> np.ndarray:
+    """
+    An ordered group's T over its two Boundaries, in the log and indexed
+    [younger, older]: the span factor over all its K dates times the sum over
+    its cuts. Where the two Boundaries share
+    a cell every date is in it: the tie's half times the dates' likelihoods,
+    as for any group (_log_date_factor), and a half more for each pair of
+    dates in neighbouring blocks, a tied ordering edge each, as the sampler
+    weighs them.
+    """
+    sizes = [len(block) for block in group.blocks]
+    ties = sum(a * b for a, b in zip(sizes, sizes[1:]))
+    term = _boundary_pair_term(grid, sum(sizes)) + group.log_inner
+    with np.errstate(divide='ignore'):
+        tie = (np.log(BOUNDARY_TIE_WEIGHT) - ties * np.log(2.0)
+               + sum(np.log(group.likelihood[d]) for block in group.blocks for d in block))
+    np.fill_diagonal(term, tie)
+    if not (older_ok.all() and younger_ok.all()):
+        term[~(younger_ok[:, None] & older_ok[None, :])] = -np.inf
+    return term
+
+
 class _Tails:
     """
     A chain's dates outside every Boundary on one grid: each one's integral
@@ -2226,32 +2766,82 @@ class _Tails:
     def __init__(self, chain: Chain, grid: np.ndarray,
                  cumulative: Dict[str, np.ndarray], likelihood: Dict[str, np.ndarray]):
         self.chain = chain
-        self.older = _tail_integrals(grid, cumulative, likelihood, chain.older_tail, True)
-        self.younger = _tail_integrals(grid, cumulative, likelihood, chain.younger_tail,
-                                       False)
+        self.M = len(grid)
         self.end_weights: Dict[str, np.ndarray] = {}
         self.log_scale = 0.0
+        # A tail of several blocks, ordered one after another, is an ordered
+        # group with one end held at the grid's edge and no span factor, and
+        # its weight on the end Boundary is a row or column of the group's.
+        self.older_group = self.younger_group = None
+        self.older = self.younger = {}
+        if len(chain.older_tail_blocks) > 1:
+            self.older_group = _OrderedGroup(chain.older_tail_blocks, grid, cumulative,
+                                             likelihood)
+            self._weigh(chain.boundary_ids[0], self.older_group.log_inner[:, -1])
+        else:
+            self.older = _tail_integrals(grid, cumulative, likelihood, chain.older_tail,
+                                         True)
+        if len(chain.younger_tail_blocks) > 1:
+            self.younger_group = _OrderedGroup(chain.younger_tail_blocks, grid,
+                                               cumulative, likelihood)
+            self._weigh(chain.boundary_ids[-1], self.younger_group.log_inner[0, :])
+        else:
+            self.younger = _tail_integrals(grid, cumulative, likelihood,
+                                           chain.younger_tail, False)
         for bid, integrals in ((chain.boundary_ids[0], self.older),
                                (chain.boundary_ids[-1], self.younger)):
             if integrals:
                 self.end_weights[bid], peak = _tail_weight(integrals)
                 self.log_scale += peak
 
+    def _weigh(self, bid: str, log_g: np.ndarray) -> None:
+        peak = _finite_peak(log_g)
+        self.end_weights[bid] = np.exp(np.where(np.isfinite(log_g), log_g - peak, -np.inf))
+        self.log_scale += peak
+
+    def _solve_group(self, group: '_OrderedGroup', bid: str, density: np.ndarray,
+                     older_end: bool) -> Dict[str, np.ndarray]:
+        """An ordered tail's marginals: its end Boundary's own, with the
+        tail's weight on it divided out, as the weight of everything else."""
+        weight = self.end_weights[bid]
+        with np.errstate(divide='ignore', invalid='ignore'):
+            outside = np.where(weight > 0, np.log(density) - np.log(weight), -np.inf)
+        log_end = np.full((self.M, self.M), -np.inf)        # [younger, older]
+        if older_end:
+            log_end[:, -1] = outside
+        else:
+            log_end[0, :] = outside
+        group.solve(log_end)
+        return group.marginals()
+
     def marginals(self, first_density: np.ndarray, last_density: np.ndarray,
                   likelihood: Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
         """Every tail date's marginal, from its end Boundary's (_tail_marginals)."""
-        return {**_tail_marginals(first_density, self.older, likelihood, True),
-                **_tail_marginals(last_density, self.younger, likelihood, False)}
+        out = {**_tail_marginals(first_density, self.older, likelihood, True),
+               **_tail_marginals(last_density, self.younger, likelihood, False)}
+        if self.older_group is not None:
+            out.update(self._solve_group(self.older_group, self.chain.boundary_ids[0],
+                                         first_density, True))
+        if self.younger_group is not None:
+            out.update(self._solve_group(self.younger_group, self.chain.boundary_ids[-1],
+                                         last_density, False))
+        return out
 
     def draw(self, rng, first_draws: np.ndarray, last_draws: np.ndarray,
              cumulative: Dict[str, np.ndarray], likelihood: Dict[str, np.ndarray],
              step: float) -> Dict[str, np.ndarray]:
         """Every tail date's draws, given its end Boundary's (_draw_tail)."""
         out = {}
-        if self.chain.older_tail:
+        if self.older_group is not None:
+            out.update(self.older_group.draw(
+                rng, np.full(len(first_draws), self.M - 1, dtype=np.int64), first_draws))
+        elif self.chain.older_tail:
             out.update(_draw_tail(rng, self.chain.older_tail, first_draws, True,
                                   cumulative, likelihood, step))
-        if self.chain.younger_tail:
+        if self.younger_group is not None:
+            out.update(self.younger_group.draw(
+                rng, last_draws, np.zeros(len(last_draws), dtype=np.int64)))
+        elif self.chain.younger_tail:
             out.update(_draw_tail(rng, self.chain.younger_tail, last_draws, False,
                                   cumulative, likelihood, step))
         return out

@@ -76,15 +76,18 @@ class TestLayout:
         assert [sorted(g) for g in chain.groups] == [
             sorted(ox.FIRE_FEATURE_J), sorted(ox.SOUTH)]
 
-    def test_groups_ordered_without_a_boundary_between_them_is_not_a_chain(self):
+    def test_groups_ordered_without_a_boundary_between_them_are_blocks(self):
         """
         The Hillside original: two branches ordered against each other while
         sharing ONE enclosing boundary pair. Their dates are all in a single
-        span group, and the extra ordering does not factorise along the
-        chain, so the solver must decline it rather than quietly drop the
-        constraint.
+        span group, ordered one block after the other inside it, which the
+        solver integrates as such (_OrderedGroup) rather than dropping the
+        order or supplying a Boundary the model does not have.
         """
-        assert ec.layout(ox.model_tree('ordered'), ox.measurements()) is None
+        chain = ec.layout(ox.model_tree('ordered'), ox.measurements())
+        assert len(chain.groups) == 1 and chain.ordered(0)
+        assert [sorted(block) for block in chain.blocks[0]] == [sorted(ox.NORTH),
+                                                                sorted(ox.SOUTH)]
 
     def test_a_model_with_no_boundaries_is_not_a_chain(self):
         tree = _sequence('s', [_phase('p0'), _phase('p1')])
@@ -129,12 +132,13 @@ class TestLayoutExplainsItself:
                                      'name': 'Parallel', 'tpq_age_bp': None,
                                      'taq_age_bp': None, 'children': [left, right]}])
         loose = _sequence('s3', [_boundary('b0'), _phase('p0'), _boundary('b1'), _phase('p1')])
+        not_blocks = _side_by_side_lines()
 
         cases = [
             (no_boundaries, _dates(('d1', 3200, 30, 'p0'), ('d2', 3000, 30, 'p1'))),
             (parallel, _dates(('d1', 3200, 30, 'lp'), ('d2', 3000, 30, 'rp'))),
             (loose, _dates(('d1', 3200, 30, 'p0'), ('d2', 3000, 30, 'p1'))),
-            (ox.model_tree('ordered'), ox.measurements()),
+            not_blocks,
             (None, []),
         ]
         for tree, dates in cases:
@@ -156,9 +160,22 @@ class TestLayoutExplainsItself:
         assert 'loose' in reason
         assert 'd1' not in reason, 'only the unenclosed dates should be named'
 
-    def test_groups_ordered_with_no_boundary_says_to_add_one(self):
-        _chain, reason = ec.layout_with_reason(ox.model_tree('ordered'), ox.measurements())
-        assert 'Boundary' in reason
+    def test_an_order_that_is_not_blocks_says_to_give_each_its_own_boundaries(self):
+        _chain, reason = ec.layout_with_reason(*_side_by_side_lines())
+        assert reason == ec.NOT_ONE_AFTER_ANOTHER
+        assert 'Boundaries' in reason
+
+
+def _side_by_side_lines():
+    """Two Sequences of Phases with no Boundaries of their own, side by side
+    in one pair of Boundaries: an order inside the pair that is not blocks."""
+    lines = {'id': 'lines', 'element_type': 'phase', 'name': 'Lines',
+             'tpq_age_bp': None, 'taq_age_bp': None,
+             'children': [_sequence('na', [_phase('na1'), _phase('na2')]),
+                          _sequence('nb', [_phase('nb1'), _phase('nb2')])]}
+    tree = _sequence('s4', [_boundary('n0'), lines, _boundary('n1')])
+    return tree, _dates(('e1', 3100, 30, 'na1'), ('e2', 3000, 30, 'na2'),
+                        ('e3', 3090, 30, 'nb1'), ('e4', 2990, 30, 'nb2'))
 
 
 def _brute_force(curve, grid, dates):
@@ -549,11 +566,11 @@ class TestOrderedGroupsAgreeWithOxCal:
     14.2, 13.8 and 13.6 years at steps of 2.5, 1.0, 0.45 and 0.23 with the half,
     and both weightings meet near OxCal's 13.2 only below half a year.
 
-    `ordered` has no Boundary between its groups, and this solver supplies one
-    (with_implicit_boundaries), so it solves the SAME model as shared_boundary
-    and gives the same answer. OxCal does not: its two runs differ by 1.5 years.
-    So the excess on `ordered` is partly a different model, not a solver error;
-    services/cross_check.py can integrate the boundary-free model directly.
+    `ordered` has no Boundary between its groups. This solver used to supply
+    one (with_implicit_boundaries), which made it the SAME model as
+    shared_boundary, where OxCal's two runs differ by 1.5 years; it now takes
+    the groups as written, as blocks (_OrderedGroup), and lands +0.36 from
+    OxCal where the supplied Boundary gave +2.37.
 
     The history is worth keeping, because the residual was blamed on several things
     it was not. Four separate causes, each found by measurement:
@@ -580,11 +597,6 @@ class TestOrderedGroupsAgreeWithOxCal:
         measurements = ox.measurements()
         tree = ox.model_tree(run)
         chain = ec.layout(tree, measurements)
-        if chain is None:
-            from app.services.model_tree import with_implicit_boundaries
-            tree, inserted = with_implicit_boundaries(tree)
-            assert inserted
-            chain = ec.layout(tree, measurements)
         solved = ec.solve(measurements, tree, chain, num_samples=100, **kwargs)
         mean = lambda ids: np.mean(
             [solved['measurements'][i]['posterior_mean'] for i in ids])
@@ -603,14 +615,15 @@ class TestOrderedGroupsAgreeWithOxCal:
         assert self._separation('unordered') == pytest.approx(
             self._oxcals('unordered'), abs=0.5)
 
-    @pytest.mark.parametrize('run,bound', [('ordered', 3.0), ('shared_boundary', 1.5)])
+    @pytest.mark.parametrize('run,bound', [('ordered', 1.5), ('shared_boundary', 1.5)])
     def test_ordered_groups_agree_to_about_a_year(self, run, bound):
         """
-        Measured at +2.37 on `ordered` and +0.84 on `shared_boundary`; +1.19 and
-        -0.34 before the half weight and the second pass (see the class note),
+        Measured at +0.36 on `ordered`, taken as written, and +0.26 on
+        `shared_boundary`; earlier +2.37 on `ordered` with a Boundary supplied
+        and +0.84 on `shared_boundary`, +1.19 and -0.34 before the half weight
+        and the second pass (see the class note),
         +4.10 and +2.57 before the limits factor and +5.03/+3.50 before the
-        binomial count. `ordered` gets the wider bound because this solver gives
-        it a Boundary OxCal's model does not have.
+        binomial count.
         """
         excess = self._separation(run) - self._oxcals(run)
         assert abs(excess) < bound, (run, excess)
@@ -1695,10 +1708,12 @@ class TestCharcoalOutlierModel:
 
 class TestImplicitBoundaries:
     """
-    A Sequence that orders two groups with no Boundary between them is not a
-    chain, so it used to fall through to MCMC -- where it is measurably
-    wrong, and where the outlier model does not work at all. Supplying the
-    transition it implies makes it exact.
+    A Sequence that orders two groups with no Boundary between them used to
+    fall through to MCMC -- where it was measurably wrong, and where the
+    outlier model did not work at all -- and supplying the transition it
+    implies made it exact. It is now integrated as written (TestOrderedGroups-
+    AgreeWithOxCal, test_exact_ordered.py), closer to OxCal still; the
+    insertion remains for models the solver cannot take as written.
 
     This is a change to the model, not a rewriting of it: the uniform-scatter
     prior becomes one term per group rather than one across both. The

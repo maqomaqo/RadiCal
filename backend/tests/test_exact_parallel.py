@@ -134,14 +134,18 @@ class TestLayout:
     def test_an_area_that_is_not_one_line_is_named(self):
         tree, dates = _site(TWO_AREAS)
         area = tree['children'][1]['children'][0]
-        # Two Phases with no Boundary between them inside the area.
-        extra = _element('phase', 'Extra')
-        area['children'].insert(2, extra)
-        dates.append(_date(extra, 2995))
+        # Two Sequences of Phases side by side, with no Boundaries of their
+        # own, inside one of the area's groups: an order that is not blocks.
+        lines = []
+        for name, ages in (('Pit', (3005, 2995)), ('Ditch', (3004, 2994))):
+            first, second = _element('phase', f'{name} 1'), _element('phase', f'{name} 2')
+            lines.append(_element('sequence', name, [first, second]))
+            dates += [_date(first, ages[0]), _date(second, ages[1])]
+        area['children'][1]['children'] = lines
         stages, reason = ep.layout_with_reason(tree, dates)
         assert stages is None
         assert reason.startswith(f"in '{area['name']}', ")
-        assert 'no Boundary between them' in reason
+        assert reason.endswith(ec.NOT_ONE_AFTER_ANOTHER)
 
     def test_dates_before_the_first_boundary_are_a_tail(self):
         """More in test_exact_tails.py."""

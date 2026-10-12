@@ -776,11 +776,12 @@ def with_implicit_boundaries(root: Dict, new_id=None) -> Tuple[Dict, List[str]]:
     non-Boundary children of a Sequence, plus the ids of what was inserted.
 
     A Sequence that orders two groups with no Boundary between them puts all
-    their dates in ONE bounded group and bolts an ordering constraint on top,
-    which does not factorise along a chain, so exact_chain declines it.
-    Inserting the transition makes it a chain, and the evidence says OxCal
-    reads it the same way: on the fixture its `ordered` and `shared_boundary`
-    runs agree to 0.948 posterior overlap.
+    their dates in ONE bounded group with an ordering inside it. exact_chain
+    now integrates that as written (_OrderedGroup); this is for what it still
+    cannot take as written, such as a Sequence with no Boundary at all. On the
+    fixture OxCal's `ordered` and `shared_boundary` runs agree to 0.948
+    posterior overlap, so the inserted transition is a near neighbour of the
+    model, not the model.
 
     It is a real change to the model rather than a rewriting into an equal form
     -- the uniform-scatter prior becomes one term per group instead of one

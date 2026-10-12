@@ -155,15 +155,17 @@ def _scaled(matrix: np.ndarray) -> Tuple[np.ndarray, float]:
 class Stage:
     """
     One link of the outer chain: the outer Boundaries either side, the dates
-    lying directly between them, and any areas side by side there.
+    lying directly between them, as blocks where they are ordered against
+    each other (exact_chain.Chain.blocks), and any areas side by side there.
     """
 
     def __init__(self, older_id: str, younger_id: str, dates: List[str],
-                 areas: List[Chain]):
+                 areas: List[Chain], blocks: Optional[List[List[str]]] = None):
         self.older_id = older_id
         self.younger_id = younger_id
         self.dates = list(dates)
         self.areas = list(areas)
+        self.blocks = blocks if blocks is not None else exact_chain._one_block(self.dates)
 
 
 class Stages:
@@ -175,20 +177,27 @@ class Stages:
     def __init__(self, boundary_ids: List[str], stages: List[Stage],
                  boundary_names: Dict[str, str],
                  older_tail: Optional[List[str]] = None,
-                 younger_tail: Optional[List[str]] = None):
+                 younger_tail: Optional[List[str]] = None,
+                 older_tail_blocks: Optional[List[List[str]]] = None,
+                 younger_tail_blocks: Optional[List[List[str]]] = None):
         # len(boundary_ids) == len(stages) + 1
         self.boundary_ids = boundary_ids
         self.stages = stages
         self.boundary_names = boundary_names
         self.older_tail = list(older_tail or [])
         self.younger_tail = list(younger_tail or [])
+        self.older_tail_blocks = older_tail_blocks or exact_chain._one_block(self.older_tail)
+        self.younger_tail_blocks = (younger_tail_blocks
+                                    or exact_chain._one_block(self.younger_tail))
 
     @property
     def outer_chain(self) -> Chain:
         """The outer Boundaries as a Chain, each stage's own dates its group,
-        with the model's tails."""
+        in their blocks, with the model's tails."""
         return Chain(self.boundary_ids, [stage.dates for stage in self.stages],
-                     self.boundary_names, self.older_tail, self.younger_tail)
+                     self.boundary_names, self.older_tail, self.younger_tail,
+                     [stage.blocks for stage in self.stages],
+                     self.older_tail_blocks, self.younger_tail_blocks)
 
     @property
     def all_boundary_ids(self) -> List[str]:
@@ -273,25 +282,32 @@ def layout_with_reason(root: Optional[Dict], measurements: List[Dict]
     # tails, under exact_chain's rules for them.
     outside_dates = [d for c in children[:positions[0]] + children[positions[-1] + 1:]
                      for d in subtree_dates(c)]
-    older_tail: List[str] = []
-    younger_tail: List[str] = []
+    older_blocks: List[List[str]] = []
+    younger_blocks: List[List[str]] = []
     if outside_dates:
-        (older_tail, younger_tail), reason = exact_chain.tails_with_reason(
+        (older_blocks, younger_blocks), reason = exact_chain.tails_with_reason(
             plan, measurements, outside_dates, children[positions[0]]['id'],
             children[positions[-1]]['id'])
         if reason is not None:
             return None, reason
+    older_tail = [d for block in older_blocks for d in block]
+    younger_tail = [d for block in younger_blocks for d in block]
 
+    closed = exact_chain._closure(exact_chain.written_order(plan))
     stages = []
     for older, younger in zip(positions, positions[1:]):
         between = [c for c in children[older + 1:younger]
                    if subtree_dates(c) or has_areas(c)
                    or c.get('element_type') == 'sequence']
-        if len(between) > 1:
-            return None, exact_chain.NO_BOUNDARY_BETWEEN
         dates: List[str] = []
         areas: List[Chain] = []
-        if between:
+        if len(between) > 1:
+            # Phases in a row with no Boundary between them: one stage of
+            # dates in blocks, unless areas are among them.
+            if any(has_areas(c) for c in between):
+                return None, exact_chain.NO_BOUNDARY_BETWEEN
+            dates = [d for c in between for d in subtree_dates(c)]
+        elif between:
             element = between[0]
             if element.get('element_type') != 'phase':
                 return None, (
@@ -306,11 +322,17 @@ def layout_with_reason(root: Optional[Dict], measurements: List[Dict]
                     return None, reason
             else:
                 dates = subtree_dates(element)
+        blocks, reason = exact_chain.blocks_with_reason(dates, closed)
+        if reason is not None:
+            return None, reason
+        if areas and len(blocks) > 1:
+            return None, exact_chain.NO_BOUNDARY_BETWEEN
         stages.append(Stage(children[older]['id'], children[younger]['id'],
-                            dates, areas))
+                            dates, areas, blocks))
 
     layout = Stages([children[i]['id'] for i in positions], stages,
-                    dict(plan.boundary_names), older_tail, younger_tail)
+                    dict(plan.boundary_names), older_tail, younger_tail,
+                    older_blocks, younger_blocks)
     reason = _as_written(layout, plan, measurements)
     if reason is not None:
         return None, reason
@@ -382,24 +404,15 @@ def _as_written(layout: Stages, plan, measurements: List[Dict]) -> Optional[str]
         order.setdefault(older, set()).add(younger)
         order.setdefault(younger, set())
 
-    def chain_edges(boundary_ids, groups):
-        for index, group in enumerate(groups):
-            older, younger = boundary_ids[index], boundary_ids[index + 1]
-            edge(laid_order, older, younger)
-            for date_id in group:
-                edge(laid_order, older, date_id)
-                edge(laid_order, date_id, younger)
-
-    chain_edges(layout.boundary_ids, [stage.dates for stage in layout.stages])
-    for date_id in layout.older_tail:
-        edge(laid_order, date_id, layout.boundary_ids[0])
-    for date_id in layout.younger_tail:
-        edge(laid_order, layout.boundary_ids[-1], date_id)
+    exact_chain._order_chain(laid_order, layout.boundary_ids,
+                             [stage.blocks for stage in layout.stages])
+    exact_chain._order_tails(laid_order, layout.boundary_ids[0], layout.boundary_ids[-1],
+                             layout.older_tail_blocks, layout.younger_tail_blocks)
     for stage in layout.stages:
         for area in stage.areas:
             edge(laid_order, stage.older_id, area.boundary_ids[0])
             edge(laid_order, area.boundary_ids[-1], stage.younger_id)
-            chain_edges(area.boundary_ids, area.groups)
+            exact_chain._order_chain(laid_order, area.boundary_ids, area.blocks)
 
     if (exact_chain._closure(exact_chain.written_order(plan))
             != exact_chain._closure(laid_order)):
@@ -445,10 +458,9 @@ class _Area:
     def __init__(self, chain: Chain, grid: np.ndarray, allowed: Dict,
                  cumulative: Dict, likelihood: Dict, scratch: np.ndarray):
         self.chain = chain
-        self.log_T = [exact_chain._group_log_transfer(
-            grid, dates, cumulative, likelihood,
-            allowed[chain.boundary_ids[index]], allowed[chain.boundary_ids[index + 1]],
-            scratch) for index, dates in enumerate(chain.groups)]
+        # Ordered groups inside the area too (exact_chain._OrderedGroup).
+        self.log_T, self.ordered = exact_chain._chain_log_transfers(
+            grid, chain, cumulative, likelihood, allowed, scratch)
         self.products = exact_chain._ChainProducts(
             chain, allowed, exact_chain._exponentiated(self.log_T))
         self.J = self.products.end_to_end                      # [first, last]
@@ -498,15 +510,14 @@ def _solve_on_grid(grid: np.ndarray, measurements: List[Dict], root: Dict,
     # Each stage's own term, [younger, older]: its dates' factors, as for any
     # group, and for a stage holding areas no tie between its two Boundaries,
     # which are not neighbours there (module docstring).
+    # A stage of Phases in a row is an ordered group, as on a chain
+    # (exact_chain._OrderedGroup); layout_with_reason keeps areas out of one.
     diagonal = np.arange(M)
-    own = []
+    own, ordered = exact_chain._chain_log_transfers(grid, outer, cumulative, likelihood,
+                                                    allowed, scratch)
     for index, stage in enumerate(stages.stages):
-        term = exact_chain._group_log_transfer(
-            grid, stage.dates, cumulative, likelihood,
-            allowed[stage.older_id], allowed[stage.younger_id], scratch)
         if stage.areas:
-            term[diagonal, diagonal] -= np.log(BOUNDARY_TIE_WEIGHT)
-        own.append(term)
+            own[index][diagonal, diagonal] -= np.log(BOUNDARY_TIE_WEIGHT)
     span_prior_applied = log_correction is not None
     correction = None
     correction_offset = 0.0
@@ -547,8 +558,8 @@ def _solve_on_grid(grid: np.ndarray, measurements: List[Dict], root: Dict,
     # Every outer stage's own dates, read off the outer chain as on any chain:
     # a stage's log_T already holds its areas' Z, so dividing a date's own
     # factor out of it works unchanged.
-    stage_dates = exact_chain._date_marginals(
-        outer.groups, log_T, pair_weight, cumulative, likelihood, dt, scratch)
+    stage_dates = exact_chain._chain_date_marginals(
+        outer, ordered, log_T, pair_weight, cumulative, likelihood, dt, scratch)
     outer_densities = {bid: boundary_density(i) for i, bid in enumerate(outer.boundary_ids)}
 
     # Each area given everything outside it.
@@ -576,9 +587,9 @@ def _solve_on_grid(grid: np.ndarray, measurements: List[Dict], root: Dict,
             date_densities[date_id] = stage_dates[date_id]
         for area, (area_pair, area_density, _draw, _mass) in zip(
                 areas[index], area_messages[index]):
-            date_densities.update(exact_chain._date_marginals(
-                area.chain.groups, area.log_T, area_pair, cumulative, likelihood,
-                dt, scratch))
+            date_densities.update(exact_chain._chain_date_marginals(
+                area.chain, area.ordered, area.log_T, area_pair, cumulative,
+                likelihood, dt, scratch))
             for i, bid in enumerate(area.chain.boundary_ids):
                 boundary_densities[bid] = area_density(i)
     boundary_densities[outer.boundary_ids[-1]] = outer_densities[outer.boundary_ids[-1]]
@@ -589,8 +600,8 @@ def _solve_on_grid(grid: np.ndarray, measurements: List[Dict], root: Dict,
     def draw_joint(rng, count):
         outer_draws = draw_outer(rng, count)
         draws = {bid: outer_draws[:, i] for i, bid in enumerate(outer.boundary_ids)}
-        date_draws = exact_chain._draw_dates(rng, outer, cumulative, outer_draws,
-                                             likelihood, dt)
+        date_draws = exact_chain._chain_draw_dates(rng, outer, ordered, cumulative,
+                                                   outer_draws, likelihood, dt)
         date_draws.update(tails.draw(rng, outer_draws[:, 0], outer_draws[:, -1],
                                      cumulative, likelihood, dt))
         columns = np.arange(M)
@@ -602,10 +613,10 @@ def _solve_on_grid(grid: np.ndarray, measurements: List[Dict], root: Dict,
                 inner = draw_area(rng, count, ends=(first, last))
                 for i, bid in enumerate(area.chain.boundary_ids):
                     draws[bid] = inner[:, i]
-                date_draws.update(exact_chain._draw_dates(
-                    rng, area.chain, cumulative, inner, likelihood, dt))
-        ordered = {bid: draws[bid] for bid in boundary_densities}
-        return ordered, date_draws
+                date_draws.update(exact_chain._chain_draw_dates(
+                    rng, area.chain, area.ordered, cumulative, inner, likelihood, dt))
+        in_order = {bid: draws[bid] for bid in boundary_densities}
+        return in_order, date_draws
 
     return exact_chain._results(
         grid, root, measurements, date_densities, boundary_densities,

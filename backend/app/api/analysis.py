@@ -666,10 +666,11 @@ def _run_bayesian(
     that insertion changes the model: it splits one span term over K dates
     into two over K1 + K2, and K is the exponent in (span)^(-K) that resists a
     date wandering from its group. Measured against OxCal (rms of the modelled
-    dates), the oxcal `ordered` fixture gives 1.49 sampled as written against
-    2.51 exact on the patched tree, and the charcoal fixture 4.53 against
-    10.63. The cost, which the results page states: choosing `exact` on such a
-    model cross-checks a different model as well as a different method.
+    dates), the oxcal `ordered` fixture -- Phases in a row with no Boundary
+    between them, which the exact solver now takes as written -- is 0.56 from
+    OxCal as written and 2.33 on the patched tree. The cost, which the results
+    page states: choosing `exact` on a model that needs the patch cross-checks
+    a different model as well as a different method.
 
     bayesian_config.solver overrides the choice per analysis. `exact` on a
     model that cannot be integrated raises rather than quietly sampling.
@@ -726,9 +727,9 @@ def _run_bayesian(
     exact_tree = model_tree
     exact_needs_boundaries = 0
     if layout is None:
-        # A Sequence that orders two groups with no Boundary between them is
-        # not a chain. Supplying the transition it implies makes it solvable
-        # here -- at a price. See model_tree.with_implicit_boundaries.
+        # A Sequence with no Boundaries of its own is not a chain. Supplying
+        # the transitions it implies makes it solvable here -- at a price.
+        # See model_tree.with_implicit_boundaries.
         candidate, inserted = with_implicit_boundaries(model_tree)
         if inserted:
             patched, patched_reason = _exact_layout(candidate, measurements)

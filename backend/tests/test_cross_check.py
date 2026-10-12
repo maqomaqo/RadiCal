@@ -191,13 +191,14 @@ class TestOrderedGroups:
     """
     Dates ordered against each other inside one pair of Boundaries -- the shape
     of the Hillside reference model (a project run through OxCal and kept as a
-    fixture), and one the exact solver declines ("two groups are ordered against
-    each other with no Boundary between them").
+    fixture). The exact solver takes it as blocks too, and the check's integral
+    over them is the solver's own (test_exact_ordered.py holds the two to each
+    other); the check reads the blocks off the sampler's ordering.
     """
 
-    def test_the_exact_solver_declines_it_and_the_check_reads_it_as_a_chain(self):
+    def test_the_check_reads_it_as_a_chain_as_the_exact_solver_does(self):
         dates, tree = _ordered_phases()
-        assert ec.layout(tree, dates) is None
+        assert ec.layout(tree, dates).ordered(0)
         outer, branches, _tails = cross_check.shape(tree, dates)
         assert outer is None and len(branches) == 1
         assert len(branches[0].boundary_ids) == 2
@@ -253,7 +254,6 @@ class TestOrderedGroups:
     def test_it_agrees_with_the_sampler_on_the_oxcal_hillside_model(self):
         import oxcal_fixture as ox
         dates, tree = ox.measurements(), ox.model_tree('ordered')
-        assert ec.layout(tree, dates) is None
         sampled = gibbs.solve(dates, tree, sweeps=20000, max_sweeps=20000,
                               num_samples=200, chains=4, temperatures=1)
         record = cross_check.check(dates, tree, sampled)
