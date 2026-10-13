@@ -454,7 +454,8 @@ def solve(measurements: List[Dict], root: Dict, stages: Stages,
         lambda grid, boundaries_only, **extra: _solve_on_grid(
             grid, measurements, root, stages, element_bounds,
             boundaries_only=boundaries_only, **extra, **options),
-        measurements, element_bounds, stages.num_groups, seed)
+        measurements, element_bounds, stages.num_groups, seed,
+        outer=stages.outer_chain)
 
 
 class _Area:
@@ -483,32 +484,39 @@ def _solve_on_grid(grid: np.ndarray, measurements: List[Dict], root: Dict,
                    dispersal: Optional[Dict], interval_draws: int,
                    resolution: float, boundaries_only: bool = False,
                    scale_weights: Optional[Dict[str, np.ndarray]] = None,
-                   evidence_only: bool = False,
+                   evidence_only: bool = False, prior_only: bool = False,
+                   masses: Optional[Dict[str, float]] = None,
                    ):
     """
     solve() on one grid: (results, every posterior density it reported), or
     with `boundaries_only` (None, the outermost Boundaries' densities), or
     with `evidence_only` the log evidence alone (exact_chain._weigh_scales).
+    `prior_only` and `masses` are exact_chain._solve_on_grid's.
     """
     dt = float(grid[1] - grid[0])
     M = len(grid)
     scratch = np.empty((M, M))
     likelihood, cumulative, outlier_parts = exact_chain.date_tables(
-        grid, measurements, element_bounds, scale_weights)
+        grid, measurements, element_bounds, scale_weights,
+        log_masses=None if prior_only else masses)
     allowed = exact_chain._allowed_windows(grid, element_bounds, stages.all_boundary_ids)
 
-    areas = [[_Area(chain, grid, allowed, cumulative, likelihood, scratch)
-              for chain in stage.areas] for stage in stages.stages]
-
     outer = stages.outer_chain
-    # The model's tails weigh on its first and last outer Boundaries, as on a
-    # chain's (exact_chain._Tails), and are not enclosed by them, so they are
-    # not in the limits factor.
-    tails = exact_chain._Tails(outer, grid, cumulative, likelihood)
     tail_dates = set(outer.older_tail) | set(outer.younger_tail)
     all_dates = [m['id'] for m in measurements if m['id'] not in tail_dates]
     inliers = {d: (outlier_parts[d][0] if d in outlier_parts else likelihood[d])
                for d in all_dates}
+    if prior_only:
+        likelihood, cumulative = exact_chain.flat_date_tables(
+            grid, measurements, element_bounds, masses)
+
+    areas = [[_Area(chain, grid, allowed, cumulative, likelihood, scratch)
+              for chain in stage.areas] for stage in stages.stages]
+
+    # The model's tails weigh on its first and last outer Boundaries, as on a
+    # chain's (exact_chain._Tails), and are not enclosed by them, so they are
+    # not in the limits factor.
+    tails = exact_chain._Tails(outer, grid, cumulative, likelihood)
     oldest_limits, youngest_limits = exact_chain.pair_limits(
         element_bounds, outer.boundary_ids[0], outer.boundary_ids[-1],
         grid, inliers, all_dates)

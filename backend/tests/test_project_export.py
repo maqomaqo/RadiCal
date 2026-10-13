@@ -42,7 +42,10 @@ def _project(client):
     })
     assert group.status_code == 200, group.text
 
-    tree = {'id': f'{tag}_root', 'element_type': 'sequence', 'name': 'Site', 'children': [
+    # The limits sit on the Sequence, as the editor puts them; its Boundaries
+    # inherit them, which is what bounds the model's prior.
+    tree = {'id': f'{tag}_root', 'element_type': 'sequence', 'name': 'Site',
+            'tpq_age_bp': 800, 'taq_age_bp': 450, 'children': [
         {'id': f'{tag}_b0', 'element_type': 'boundary', 'name': 'Start', 'children': []},
         {'id': f'{tag}_p', 'element_type': 'phase', 'name': 'Layer 11', 'children': []},
         {'id': f'{tag}_b1', 'element_type': 'boundary', 'name': 'End', 'children': []},
@@ -131,6 +134,10 @@ class TestProjectExport:
         assert all(r['Median BP'] and not r['Median (yr)'] for r in boundaries)
         assert all(r['Median (yr)'] and not r['Median BP'] for r in durations)
         assert model_rows[0]['Seed'] in ('', '42')
+        # A model with bounded outer Boundaries carries its evidence; a group
+        # calibration has none.
+        assert float(model_rows[0]['log10 evidence']) < 0
+        assert all(r['log10 evidence'] == '' for r in rows if r['Analysis ID'] == group_id)
         # An analysis with nothing modelled is still listed.
         assert [r['Quantity'] for r in rows if r['Analysis ID'] == group_id] == ['']
 

@@ -1015,6 +1015,109 @@ class TestEvidence:
         assert np.isfinite(solved['log_evidence'])
 
 
+class TestModelEvidence:
+    """
+    The evidence that compares between runs (solve's `evidence`): the data's
+    weight over the prior's, with the prior bounded by the outer Boundaries.
+    """
+
+    @staticmethod
+    def _bounded(dates, young, old, middle=()):
+        first, last = _boundary('b0'), _boundary('b1')
+        first['tpq_age_bp'], last['taq_age_bp'] = old, young
+        tree = _sequence('s', [first, _phase('p'), last])
+        return tree, ec.layout(tree, dates)
+
+    @staticmethod
+    def _by_integration(dates, young, old, step=0.25):
+        """One Phase between two Boundaries uniform over [young, old], each date
+        uniform between them, written from the model statement."""
+        grid = np.arange(young, old + step / 2, step)
+        cums = []
+        for m in dates:
+            lik = ec.event_likelihood(grid, m)
+            cums.append(np.concatenate([[0], np.cumsum((lik[1:] + lik[:-1]) / 2 * step)]))
+        total = 0.0
+        for j in range(1, len(grid)):
+            span = grid[j] - grid[:j]
+            term = np.ones(j)
+            for cum in cums:
+                term = term * (cum[j] - cum[:j]) / span
+            total += term.sum() * step * step
+        return np.log(2.0 / (old - young) ** 2 * total)
+
+    @pytest.mark.parametrize('young, old', [(3000, 3500), (3050, 3400), (3100, 3300)])
+    def test_it_is_the_integral_over_the_bounded_prior(self, young, old):
+        dates = _dates(('mv1', 3000, 30, 'p'), ('mv2', 3040, 30, 'p'), ('mv3', 3080, 30, 'p'))
+        tree, chain = self._bounded(dates, young, old)
+        solved = ec.solve(dates, tree, chain, num_samples=50, uniform_span_prior=False)
+        evidence = solved['evidence']
+        assert evidence['available']
+        assert evidence['log'] == pytest.approx(self._by_integration(dates, young, old),
+                                                abs=0.01)
+        assert evidence['log10'] == pytest.approx(evidence['log'] / np.log(10.0))
+        assert (evidence['lower'], evidence['upper']) == (young, old)
+
+    @pytest.mark.parametrize('old, young, tolerance', [
+        (3800, 2900, 0.01),     # limits well clear of the dates
+        (3450, 3250, 0.05),     # limits cutting into the posterior
+    ], ids=['wide', 'tight'])
+    def test_it_does_not_depend_on_the_grid(self, old, young, tolerance):
+        """The same model's evidence at a 1.25-yr step against a grid four
+        times finer. Where the limits cut into the posterior the error is first
+        order in the step, from the cells at the limits; elsewhere second."""
+        import unittest.mock as mock
+        dates = _dates(('mg1', 3300, 30, 'p0'), ('mg2', 3270, 30, 'p0'),
+                       ('mg3', 3050, 30, 'p1'), ('mg4', 3020, 30, 'p1'))
+        tree = _sequence('s', [_boundary('b0'), _phase('p0'), _boundary('b1'),
+                               _phase('p1'), _boundary('b2')])
+        tree['tpq_age_bp'], tree['taq_age_bp'] = old, young
+        found = {}
+        for points in ((old - young) / 1.25, 4 * (old - young) / 1.25):
+            with mock.patch.object(ec, 'EVIDENCE_MAX_GRID_POINTS', points), \
+                    mock.patch.object(ec, 'MAX_GRID_POINTS', max(points, 2000)):
+                evidence = ec.solve(dates, tree, ec.layout(tree, dates),
+                                    num_samples=20)['evidence']
+            found[evidence['step']] = evidence['log']
+        assert sorted(found) == [0.3125, 1.25]
+        assert abs(found[1.25] - found[0.3125]) < tolerance, found
+
+    def test_limits_on_the_sequence_bound_its_boundaries(self):
+        """The editor puts limiters on Sequences and Phases, not Boundaries."""
+        dates = _dates(('mq1', 3000, 30, 'p'), ('mq2', 3040, 30, 'p'))
+        tree = _sequence('s', [_boundary('b0'), _phase('p'), _boundary('b1')])
+        tree['tpq_age_bp'], tree['taq_age_bp'] = 3400, 2900
+        evidence = ec.solve(dates, tree, ec.layout(tree, dates), num_samples=50)['evidence']
+        by_boundaries = ec.solve(dates, *self._bounded(dates, 2900, 3400),
+                                 num_samples=50)['evidence']
+        assert evidence['available']
+        assert evidence['log'] == pytest.approx(by_boundaries['log'], abs=1e-9)
+
+    def test_it_is_not_given_for_an_unbounded_model(self):
+        dates = _dates(('mu1', 3000, 30, 'p'))
+        tree = _sequence('s', [_boundary('b0', 'Start'), _phase('p'), _boundary('b1', 'End')])
+        evidence = ec.solve(dates, tree, ec.layout(tree, dates), num_samples=50)['evidence']
+        assert not evidence['available']
+        assert 'Start' in evidence['reason'] and 'TPQ' in evidence['reason']
+
+    def test_it_covers_a_model_with_an_outlier_date(self):
+        dates = _dates(('ml1', 3000, 30, 'p'), ('ml2', 3040, 30, 'p'))
+        flagged = [dict(d, outlier_prior=0.05) if d['id'] == 'ml1' else d for d in dates]
+        tree, chain = self._bounded(flagged, 2900, 3300)
+        evidence = ec.solve(flagged, tree, chain, num_samples=50)['evidence']
+        plain = ec.solve(dates, *self._bounded(dates, 2900, 3300), num_samples=50)['evidence']
+        assert evidence['available']
+        # A small allowance for a date being wrong costs a little on data that agree.
+        assert 0 < plain['log'] - evidence['log'] < 1.0
+
+    def test_its_key_names_the_readings_and_nothing_else(self):
+        a = _dates(('mk1', 3000, 30, 'p'), ('mk2', 3040, 25, 'p'))
+        b = _dates(('other-2', 3040, 25, 'p'), ('other-1', 3000, 30, 'p'))
+        c = _dates(('mk1', 3000, 30, 'p'), ('mk2', 3040, 30, 'p'))
+        assert ec._readings_key(a) == ec._readings_key(b)
+        assert ec._readings_key(a) != ec._readings_key(c)
+
+
 class TestTheCorrectionIsExact:
     """
     The UniformSpanPrior factor against a closed form, with no fixture and no

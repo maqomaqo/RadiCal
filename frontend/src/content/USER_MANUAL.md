@@ -1081,6 +1081,39 @@ threshold on both axes. This is the half of a comparison the Dates tab cannot sh
 gained 140 years of precision can sit well below the diagonal here, because the precision was bought
 by overruling the date rather than learning something about it.
 
+### Comparing models by evidence
+
+When two runs differ in what the model asserts (a phase that began in one century against another,
+a short occupation against a long one), the question is which of them the dates favour. An
+exactly solved run reports its **evidence**: how probable the radiocarbon readings are under that
+model, with every way the model allows its Boundaries and dates to fall averaged over. The
+Results page shows it as *Evidence log₁₀*, and the **Models** tab of a comparison shows each run's
+evidence and the **Bayes factor** of each run against the first one ticked. A log₁₀ factor of 1
+means the dates are ten times more probable under that run's model than under the reference's.
+The words beside it follow Jeffreys' scale: below 0.5 hardly worth mentioning, then substantial,
+strong, very strong, and decisive from 2.
+
+A model has an evidence only when its prior is bounded. Give the Sequence that holds the model's
+outermost Boundaries a **TPQ** and a **TAQ** in the model editor (**Add TPQ/TAQ** on its row).
+Boundaries take the limits of the element they sit in, so the oldest cannot be older than the TPQ
+and the youngest cannot be younger than the TAQ. Those limits are the model's statement of what was possible before the dates were seen, and the
+evidence depends on them: a model that allows a wider range of years spreads its probability
+thinner and scores lower on dates that did not need the room. Models being compared need not
+share limits. Different limits are different hypotheses, which is the usual reason to compare.
+
+Bayes factors are withheld, with the reason, when:
+
+- the runs were not fitted to the same radiocarbon readings (a date left out, or an age edited),
+  since the probability of different data cannot be compared;
+- a run was sampled rather than solved exactly, or was run before the evidence was recorded;
+- a run has no bounded prior (the Sequence holding its outer Boundaries has no TPQ or no TAQ), or
+  has a date outside every Boundary, which nothing bounds.
+
+Two cautions. A Bayes factor answers how well each model predicted the dates, and a model that
+is clearly the better of two can still be a poor one: check the agreement indices beside it. And
+it is sensitive to the limits and to the outlier settings, so state them when reporting one.
+A model with outlier dates is taken with each date's offset scale mixed over its prior
+independently, not with the single shared scale that its displayed ranges are weighed under.
 
 ## Best Practices
 
@@ -1881,6 +1914,45 @@ maximum inbuilt ages, the probability of the first Boundary falling before a tes
 0.1, with and without allowances, and with the most influential date moved to another layer or left
 out.
 
+### A.20 Model evidence
+
+The model's evidence is the probability of the data under it, averaged over the prior:
+
+```
+p(data | M) = ∫ L(θ) π(θ) dθ
+```
+
+with θ the Boundaries and dates, L the product of the dates' likelihoods and π the model's prior,
+which is the uniform prior over ordered Boundaries with each date uniform between its own
+(Appendix A.5 and A.6), the span correction included. The exact solver's message passing integrates this
+sum, but on a grid chosen to cover the posterior and with each date's likelihood normalised over
+it, so the number it carries along depends on the grid. A figure that compares between runs needs
+the prior's normalisation, which is the same sum with no data:
+
+```
+p(data | M) = [ Σ L π ] / [ Σ π ]
+```
+
+Both are formed by the same passes on one grid, the second with every date flat over the years its
+limiters allow, and each date's normalising constant restored to both. The grid is the region the
+outer limits leave, 800 points at most, so it does not move with the posterior. On the test models
+it is within 0.01 in the natural logarithm of a direct integration of the model's definition. At a
+1.25-year step it is within 0.005 of a grid four times finer where the limits sit clear of the
+dates, and within 0.05 where they cut into the posterior, since the cells at a limit count whole
+and that error grows in proportion to the step. A region over 2,000 years wide takes a step over
+2.5 years, and the figure is then flagged as approximate.
+
+The limits factor of the span correction (Appendix A.6) is taken from the dates, as it is in the
+posterior; it is the same in both sums, so the prior is normalised as the model uses it. The
+factor between two runs, `B₁₂ = p(data | M₁) / p(data | M₂)`, is reported as log₁₀ B₁₂, with
+Jeffreys' (1961) verbal scale as Kass and Raftery (1995) set it out.
+
+A model with a date outside every Boundary has an improper prior over that date and no evidence.
+A model with outlier dates (A.7) mixes each date's offset over its scale's prior independently.
+The shared scale that the posterior is weighed under (A.6) would need one solve per value of the
+scale to mix into the evidence; the independent mixture is the model the evidence is then of,
+and the two differ most when many dates share an outlier model.
+
 ## Bibliography
 
 - Ammerman, A. J., and Cavalli-Sforza, L. L. (1971). Measuring the rate of spread of early farming
@@ -1928,6 +2000,9 @@ out.
   *Radiocarbon* 62(4), 779–820.
 - Hogg, A. G., Heaton, T. J., Hua, Q., Palmer, J. G., Turney, C. S. M., Southon, J., et al. (2020).
   SHCal20 Southern Hemisphere calibration, 0–55,000 years cal BP. *Radiocarbon* 62(4), 759–778.
+- Jeffreys, H. (1961). *Theory of Probability*, 3rd ed. Oxford: Clarendon Press.
+- Kass, R. E., and Raftery, A. E. (1995). Bayes factors. *Journal of the American Statistical
+  Association* 90(430), 773–795.
 - Metropolis, N., Rosenbluth, A. W., Rosenbluth, M. N., Teller, A. H., and Teller, E. (1953).
   Equation of state calculations by fast computing machines. *Journal of Chemical Physics* 21(6),
   1087–1092.

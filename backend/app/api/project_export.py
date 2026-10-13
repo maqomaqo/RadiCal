@@ -64,6 +64,7 @@ _SAMPLE_COLUMNS = [
 SUMMARY_HEADER = [
     'Analysis', 'Analysis ID', 'Type', 'Status', 'Solver', 'Converged',
     'Convergence', 'R-hat', 'Sweeps', 'Seed', 'Cross-check', 'A_model', 'A_overall',
+    'log10 evidence',
     'Quantity', 'Name', 'Median BP', '95.4% HPD BP', 'Median (yr)', '95.4% Range (yr)',
 ]
 
@@ -134,6 +135,7 @@ def _solver_cells(analysis: Analysis) -> List:
         cross.get('status') or '',
         _number(solver.get('model_agreement'), 1),
         _number(solver.get('overall_agreement'), 1),
+        _number((solver.get('evidence') or {}).get('log10'), 3),
     ]
 
 
