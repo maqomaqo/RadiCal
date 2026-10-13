@@ -102,19 +102,23 @@ to start without one.
 ## API Overview
 
 Full interactive documentation (generated from the actual FastAPI routes) is at
-`http://localhost:8000/docs` on a running installation.
+`http://localhost:8000/api/docs` on a running installation, and the OpenAPI schema at
+`/api/openapi.json`. The old `/docs` and `/openapi.json` redirect there.
 
 **Every endpoint below needs a bearer token** except `/api/auth/register`, `/api/auth/login` and
 `/api/health`. Get one from `POST /api/auth/login` and send it as `Authorization: Bearer <token>`;
-it lasts twelve hours. Someone else's project or analysis answers **404**, not 403 — an id must
+it lasts twelve hours. For a script, make a **personal access token** (`rct_...`) on the Account
+page instead: it lasts 7 days to a year, may be read-only (GET requests only), and can be revoked. Someone else's project or analysis answers **404**, not 403 — an id must
 not be a way to discover that a row exists.
 
 The main groups:
 
 - **Authentication** (`/api/auth/register`, `/api/auth/login`, `/api/auth/me`,
-  `/api/auth/password`) — register and login both return a token and the account it belongs to.
-  Changing a password requires the current one, so a token left on a shared machine cannot be used
-  to lock its owner out.
+  `/api/auth/password`, `/api/auth/tokens`) — register and login both return a token and the account
+  it belongs to. Changing a password requires the current one, so a token left on a shared machine
+  cannot be used to lock its owner out. `/api/auth/tokens` lists, makes (`POST`, the secret returned
+  once) and revokes (`DELETE /api/auth/tokens/{id}`) personal access tokens; it and the password
+  route refuse an access token, so a leaked one cannot make its own successor.
 
 - **Calibration curves** (`/api/curves`, `/api/curves/{id}`, `/api/curves/type/{type}`) — what
   curves are available and what is true about each. Served from the registry, so this list and the

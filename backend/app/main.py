@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
 import os
@@ -11,11 +11,34 @@ from app.database import init_db
 
 load_dotenv()
 
+# The schema and the docs live under /api with everything else, so they pass
+# through any proxy that forwards /api -- the development server's, or a
+# deployment's -- and a client can read the schema from the same base URL it
+# calls. The old root paths redirect, below.
 app = FastAPI(
     title="RadiCal API",
     description="Bayesian analysis of radiocarbon dates",
-    version="0.1.0"
+    version="0.1.0",
+    openapi_url="/api/openapi.json",
+    docs_url="/api/docs",
+    redoc_url="/api/redoc",
+    swagger_ui_oauth2_redirect_url="/api/docs/oauth2-redirect",
 )
+
+
+@app.get("/docs", include_in_schema=False)
+def _old_docs():
+    return RedirectResponse("/api/docs", status_code=308)
+
+
+@app.get("/redoc", include_in_schema=False)
+def _old_redoc():
+    return RedirectResponse("/api/redoc", status_code=308)
+
+
+@app.get("/openapi.json", include_in_schema=False)
+def _old_schema():
+    return RedirectResponse("/api/openapi.json", status_code=308)
 
 # CORS Configuration
 origins = os.getenv("CORS_ORIGINS", "http://localhost:5173").split(",")
@@ -102,7 +125,7 @@ async def health_check():
 
 # The built frontend, when this is the published image (the root Dockerfile
 # puts `vite build`'s output at /app/static). Registered last so every /api
-# route, and FastAPI's own /docs and /openapi.json, are matched first; the
+# route, and FastAPI's own /api/docs and /api/openapi.json, are matched first; the
 # catch-all then hands any path the frontend owns to index.html, which is
 # what BrowserRouter needs for a deep link or a reload on /projects/42. In
 # the development stack there is no static/ directory, the frontend is Vite's
@@ -151,7 +174,7 @@ else:
     async def root():
         return {
             "message": "RadiCal API",
-            "docs": "/docs",
+            "docs": "/api/docs",
             "health": "/api/health"
         }
 

@@ -44,6 +44,39 @@ class User(Base):
     last_login_at = Column(DateTime, nullable=True)
 
 
+class PersonalAccessToken(Base):
+    """
+    A long-lived credential for scripts: `Authorization: Bearer rct_...`.
+
+    The sign-in token (services/auth.create_token) lasts twelve hours and is
+    signed rather than stored, which is right for a browser and wrong for a
+    script that re-runs a project overnight. These last up to a year, so they
+    need what a signed token cannot have: a row, so one can be revoked.
+
+    Only a SHA-256 of the secret is kept. The secret is shown once, when it
+    is made, and cannot be recovered -- a database copy, a backup or a log of
+    this table is then no use to anyone. SHA-256 rather than bcrypt because
+    the secret is 256 random bits, not a password: nothing is gained by making
+    each request a quarter of a second slower.
+    """
+    __tablename__ = "personal_access_tokens"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"),
+                     nullable=False, index=True)
+    # What the owner called it ("overnight re-run"), to tell tokens apart.
+    name = Column(String, nullable=False)
+    token_hash = Column(String, nullable=False, unique=True, index=True)
+    # The first characters of the secret, shown in the list so a token found
+    # in a script can be matched to its row without the row holding it.
+    prefix = Column(String, nullable=False)
+    # 'read' (GET only) or 'full'.
+    scope = Column(String, nullable=False)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    expires_at = Column(DateTime, nullable=False)
+    last_used_at = Column(DateTime, nullable=True)
+
+
 class Project(Base):
     """
     Groups analyses together (by site, dig season, or research question).

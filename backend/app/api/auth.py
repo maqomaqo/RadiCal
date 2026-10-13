@@ -21,16 +21,22 @@ get subtly wrong in each individual route:
 - **A list endpoint filters, it does not check.** Filtering by owner in the
   query means a new row type cannot leak by someone forgetting to add a check
   to a loop.
+
+A script signs in with a personal access token instead (`rct_...`, made on the
+Account page): the same bearer header, a stored and revocable credential, and
+optionally read-only. A token cannot make or revoke tokens, or change the
+password -- `browser_user` -- so a leaked one cannot entrench itself.
 """
-from datetime import datetime
-from typing import Optional
+from datetime import datetime, timedelta
+from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.security import HTTPBearer
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import Analysis, Project, StoredCalibrationCurve, User
+from app.models import Analysis, PersonalAccessToken, Project, StoredCalibrationCurve, User
 from app.services import auth
 
 router = APIRouter()
@@ -183,7 +189,47 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
     }
 
 
-def current_user(request: Request, db: Session = Depends(get_db)) -> User:
+# Declares the bearer scheme in the OpenAPI schema, so /api/docs offers an
+# Authorize button. current_user reads the header itself; this only documents it.
+_bearer_scheme = HTTPBearer(
+    auto_error=False,
+    description='A sign-in token from POST /api/auth/login, or a personal access '
+                'token (rct_...) made on the Account page.')
+
+# What a read-only access token may do.
+_READ_METHODS = {'GET', 'HEAD', 'OPTIONS'}
+# last_used_at is a guide, not an audit log: written at most this often per
+# token, rather than a write on every request a script makes.
+_LAST_USED_RESOLUTION = timedelta(minutes=1)
+_BAD_ACCESS_TOKEN = 'That access token is not valid: it is wrong, has expired, or was revoked.'
+
+
+def _access_token_user(request: Request, token: str, db: Session) -> User:
+    """current_user for a personal access token."""
+    row = db.query(PersonalAccessToken).filter(
+        PersonalAccessToken.token_hash == auth.access_token_hash(token)).first()
+    now = datetime.utcnow()
+    if row is None or row.expires_at <= now:
+        raise HTTPException(status_code=401, detail=_BAD_ACCESS_TOKEN,
+                            headers={'WWW-Authenticate': 'Bearer'})
+    user = db.query(User).filter(User.id == row.user_id).first()
+    if user is None:
+        raise HTTPException(status_code=401, detail=_BAD_ACCESS_TOKEN,
+                            headers={'WWW-Authenticate': 'Bearer'})
+    # A read-only token is refused anything but a read, whatever the route --
+    # including the few POSTs that only compute, which keeps the rule one a
+    # new route cannot get wrong.
+    if row.scope != 'full' and request.method.upper() not in _READ_METHODS:
+        raise HTTPException(status_code=403, detail='This access token is read-only.')
+    if row.last_used_at is None or now - row.last_used_at >= _LAST_USED_RESOLUTION:
+        row.last_used_at = now
+        db.commit()
+    request.state.access_token_id = row.id
+    return user
+
+
+def current_user(request: Request, db: Session = Depends(get_db),
+                 _credentials=Depends(_bearer_scheme)) -> User:
     """
     The signed-in user, or 401.
 
@@ -205,6 +251,10 @@ def current_user(request: Request, db: Session = Depends(get_db)) -> User:
             headers={'WWW-Authenticate': 'Bearer'},
         )
 
+    if auth.is_access_token(token.strip()):
+        return _access_token_user(request, token.strip(), db)
+    request.state.access_token_id = None
+
     try:
         claims = auth.read_token(token.strip())
     except auth.AuthError:
@@ -222,6 +272,20 @@ def current_user(request: Request, db: Session = Depends(get_db)) -> User:
             detail='Your session has expired. Sign in again.',
             headers={'WWW-Authenticate': 'Bearer'},
         )
+    return user
+
+
+def browser_user(request: Request, user: User = Depends(current_user)) -> User:
+    """
+    current_user, refusing a personal access token: for the routes that manage
+    tokens and the password. Otherwise a leaked token could mint itself a
+    successor before it was revoked, or lock its owner out.
+    """
+    if getattr(request.state, 'access_token_id', None) is not None:
+        raise HTTPException(
+            status_code=403,
+            detail='Access tokens and the password are managed from a signed-in browser, '
+                   'not with an access token.')
     return user
 
 
@@ -248,7 +312,7 @@ def me(user: User = Depends(current_user)):
 @router.post("/auth/password")
 def change_password(
     payload: dict,
-    user: User = Depends(current_user),
+    user: User = Depends(browser_user),
     db: Session = Depends(get_db),
 ):
     """
@@ -275,4 +339,84 @@ def change_password(
     # No new token: the existing one still identifies the same account, and
     # issuing one here would imply the old one had been invalidated, which
     # without a session table it has not been. See services/auth.py.
+    return {'success': True}
+
+
+# --------------------------------------------------------------------------
+# Personal access tokens
+# --------------------------------------------------------------------------
+
+# Enough for every script a person runs; a cap so a loop cannot fill the table.
+MAX_ACCESS_TOKENS = 50
+
+
+class AccessTokenRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    days: int = auth.ACCESS_TOKEN_DEFAULT_LIFETIME
+    scope: Literal['read', 'full'] = 'read'
+
+
+def _access_token_json(row: PersonalAccessToken) -> dict:
+    """A token as the list shows it: never the secret, which is not stored."""
+    return {
+        'id': row.id,
+        'name': row.name,
+        'prefix': row.prefix,
+        'scope': row.scope,
+        'created_at': row.created_at.isoformat() if row.created_at else None,
+        'expires_at': row.expires_at.isoformat(),
+        'last_used_at': row.last_used_at.isoformat() if row.last_used_at else None,
+        'expired': row.expires_at <= datetime.utcnow(),
+    }
+
+
+@router.get("/auth/tokens")
+def list_access_tokens(user: User = Depends(browser_user), db: Session = Depends(get_db)):
+    """Your personal access tokens, newest first."""
+    rows = (db.query(PersonalAccessToken)
+            .filter(PersonalAccessToken.user_id == user.id)
+            .order_by(PersonalAccessToken.created_at.desc()).all())
+    return {'success': True, 'data': [_access_token_json(row) for row in rows],
+            'lifetimes': list(auth.ACCESS_TOKEN_LIFETIMES)}
+
+
+@router.post("/auth/tokens", status_code=201)
+def create_access_token(payload: AccessTokenRequest, user: User = Depends(browser_user),
+                        db: Session = Depends(get_db)):
+    """
+    Make a personal access token. The secret is in this response and nowhere
+    else: it is not stored, so it cannot be shown again.
+    """
+    if payload.days not in auth.ACCESS_TOKEN_LIFETIMES:
+        raise HTTPException(
+            status_code=422,
+            detail='A token lasts ' + ', '.join(map(str, auth.ACCESS_TOKEN_LIFETIMES[:-1]))
+                   + f' or {auth.ACCESS_TOKEN_LIFETIMES[-1]} days.')
+    count = db.query(PersonalAccessToken).filter(
+        PersonalAccessToken.user_id == user.id).count()
+    if count >= MAX_ACCESS_TOKENS:
+        raise HTTPException(
+            status_code=409,
+            detail=f'You have {MAX_ACCESS_TOKENS} access tokens. Revoke one you no longer use first.')
+    secret = auth.new_access_token()
+    now = datetime.utcnow()
+    row = PersonalAccessToken(
+        user_id=user.id, name=payload.name.strip(), scope=payload.scope,
+        token_hash=auth.access_token_hash(secret), prefix=auth.access_token_prefix(secret),
+        created_at=now, expires_at=now + timedelta(days=payload.days))
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return {'success': True, 'data': {**_access_token_json(row), 'token': secret}}
+
+
+@router.delete("/auth/tokens/{token_id}")
+def revoke_access_token(token_id: str, user: User = Depends(browser_user),
+                        db: Session = Depends(get_db)):
+    """Revoke a token. It stops working at once; the row goes with it."""
+    row = db.query(PersonalAccessToken).filter(PersonalAccessToken.id == token_id).first()
+    if row is None or row.user_id != user.id:
+        raise HTTPException(status_code=404, detail='That token was not found.')
+    db.delete(row)
+    db.commit()
     return {'success': True}

@@ -21,9 +21,10 @@
 17. [Exporting Data](#exporting-data)
 18. [Projects and Date Collections](#projects-and-date-collections)
 19. [Comparing Analyses](#comparing-analyses)
-20. [Best Practices](#best-practices)
-21. [Appendix A: Mathematical Methods](#appendix-a-mathematical-methods)
-22. [Bibliography](#bibliography)
+20. [Scripts and Access Tokens](#scripts-and-access-tokens)
+21. [Best Practices](#best-practices)
+22. [Appendix A: Mathematical Methods](#appendix-a-mathematical-methods)
+23. [Bibliography](#bibliography)
 
 ## Getting Started
 
@@ -1114,6 +1115,51 @@ is clearly the better of two can still be a poor one: check the agreement indice
 it is sensitive to the limits and to the outlier settings, so state them when reporting one.
 A model with outlier dates is taken with each date's offset scale mixed over its prior
 independently, not with the single shared scale that its displayed ranges are weighed under.
+
+## Scripts and Access Tokens
+
+Everything the app does goes through its API, so a script can do it too: re-run a project
+overnight, export it, or run a batch of analyses. A script signs in with a **personal access
+token** rather than your password.
+
+**Making one.** Open the account menu (your name, top right) and choose **Account and access
+tokens**, then **New token**. Give it a name that says what it is for, choose its access, and
+choose how long it lasts: 7, 30 or 90 days, or a year. Every token expires.
+
+- **Read only** can fetch anything you can see (results, exports, job progress) and change nothing.
+- **Read and write** can do anything you can, such as run, re-run, edit and delete. Use it only
+  for scripts that need it.
+
+The token is shown **once**, when it is made. Copy it then. RadiCal keeps only a fingerprint of
+it, so it cannot show it again; if you lose it, revoke it and make another. The list shows each
+token's first characters, its expiry and when it was last used.
+
+**Using one.** Send it in the `Authorization` header of every request:
+
+```bash
+curl -H "Authorization: Bearer rct_..." https://your-radical/api/projects
+```
+
+```python
+import time, requests
+
+api = "https://your-radical/api"
+headers = {"Authorization": "Bearer rct_..."}
+job = requests.post(f"{api}/projects/PROJECT_ID/rerun", headers=headers).json()["data"]["job_id"]
+while requests.get(f"{api}/jobs/{job}", headers=headers).json()["data"]["state"] in ("queued", "running"):
+    time.sleep(10)
+with open("project.zip", "wb") as out:
+    out.write(requests.get(f"{api}/projects/PROJECT_ID/export", headers=headers).content)
+```
+
+Jobs run on the server, so a script can stop polling and come back later; closing it does not stop
+the work. The full list of endpoints is at **/api/docs** on your installation, with the schema at
+**/api/openapi.json**. Press **Authorize** there and paste a token to try requests from the page.
+
+**Keeping them safe.** Treat a token like a password: keep it out of shared files and version
+control, and revoke it from the same page as soon as it is no longer needed. Revoking takes effect
+at once. A token cannot make or revoke tokens, or change your password; those need you signed in
+in the browser.
 
 ## Best Practices
 

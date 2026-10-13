@@ -3,6 +3,7 @@ import { AppBar, Toolbar, Typography, Box, Button, Container, Divider, IconButto
 import MenuIcon from '@mui/icons-material/Menu'
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline'
 import LogoutIcon from '@mui/icons-material/Logout'
+import ManageAccountsIcon from '@mui/icons-material/ManageAccounts'
 import PersonOutlineIcon from '@mui/icons-material/PersonOutline'
 import { Link as RouterLink, useLocation } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
@@ -272,7 +273,16 @@ export default function Navigation() {
               )}
             </Box>
             <Divider />
-            <MenuItem onClick={() => { setAccountAnchor(null); signOut() }} sx={{ mt: 0.5, gap: 1.5 }}>
+            <MenuItem
+              component={RouterLink}
+              to="/account"
+              onClick={() => setAccountAnchor(null)}
+              sx={{ mt: 0.5, gap: 1.5 }}
+            >
+              <ManageAccountsIcon fontSize="small" />
+              Account and access tokens
+            </MenuItem>
+            <MenuItem onClick={() => { setAccountAnchor(null); signOut() }} sx={{ gap: 1.5 }}>
               <LogoutIcon fontSize="small" />
               Sign out
             </MenuItem>
