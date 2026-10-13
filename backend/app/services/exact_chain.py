@@ -90,6 +90,8 @@ A date ordered against neither end, and a date out there with an outlier
 model, are not taken (tails_with_reason).
 """
 import functools
+import hashlib
+import json
 from typing import Dict, List, Optional, Sequence, Set, Tuple
 
 import numpy as np
@@ -1007,6 +1009,7 @@ def _effective_date_bounds(measurement: Dict, element_bounds: Dict) -> Tuple:
 def date_tables(
     grid: np.ndarray, measurements: List[Dict], element_bounds: Dict,
     scale_weights: Optional[Dict[str, np.ndarray]] = None,
+    log_masses: Optional[Dict[str, float]] = None,
 ) -> Tuple[Dict[str, np.ndarray], Dict[str, np.ndarray],
            Dict[str, Tuple[np.ndarray, np.ndarray, float]]]:
     """
@@ -1030,6 +1033,9 @@ def date_tables(
     mixes each flagged date's offset over its model's scale weighed from the
     data (_weigh_scales) instead of over the prior. The sampler draws the
     scale itself and never passes it.
+
+    `log_masses`, if given, receives each date's log integral before the
+    normalisation, which the model's evidence needs put back (_model_evidence).
     """
     dt = float(grid[1] - grid[0])
     likelihood: Dict[str, np.ndarray] = {}
@@ -1044,6 +1050,8 @@ def date_tables(
                 f"sample '{m.get('sample_name', m['id'])}' has no probability inside "
                 'its allowed calendar range'
             )
+        if log_masses is not None:
+            log_masses[m['id']] = float(np.log(total))
         lik = lik / total
         prior = m.get('outlier_prior') or 0.0
         if prior > 0:
@@ -1062,6 +1070,38 @@ def date_tables(
         cumulative[m['id']] = np.cumsum(lik) * dt
 
     return likelihood, cumulative, outlier_parts
+
+
+def flat_date_tables(grid: np.ndarray, measurements: List[Dict], element_bounds: Dict,
+                     log_masses: Optional[Dict[str, float]] = None
+                     ) -> Tuple[Dict[str, np.ndarray], Dict[str, np.ndarray]]:
+    """
+    date_tables' ({id: likelihood}, {id: cumulative}) for a model with no data:
+    every date equally likely anywhere its TPQ/TAQ limiters allow, normalised as
+    date_tables does. What the model asserts before it sees a date, which the
+    evidence is measured against (_model_evidence). `log_masses` receives each
+    date's log allowed length.
+    """
+    dt = float(grid[1] - grid[0])
+    likelihood: Dict[str, np.ndarray] = {}
+    cumulative: Dict[str, np.ndarray] = {}
+    for m in measurements:
+        taq, tpq = _effective_date_bounds(m, element_bounds)
+        allowed = np.ones(len(grid))
+        if taq is not None:
+            allowed = np.where(grid >= taq, allowed, 0.0)
+        if tpq is not None:
+            allowed = np.where(grid <= tpq, allowed, 0.0)
+        total = allowed.sum() * dt
+        if total <= 0:
+            raise ValueError(
+                f"sample '{m.get('sample_name', m['id'])}' has no allowed calendar range"
+            )
+        if log_masses is not None:
+            log_masses[m['id']] = float(np.log(total))
+        likelihood[m['id']] = allowed / total
+        cumulative[m['id']] = np.cumsum(allowed / total) * dt
+    return likelihood, cumulative
 
 
 def _dates_extent(measurements: List[Dict], element_bounds: Dict
@@ -2122,11 +2162,102 @@ def solve(measurements: List[Dict], root: Dict, chain: Chain,
         lambda grid, boundaries_only, **extra: _solve_on_grid(
             grid, measurements, root, chain, element_bounds,
             boundaries_only=boundaries_only, **extra, **options),
-        measurements, element_bounds, len(chain.groups), seed)
+        measurements, element_bounds, len(chain.groups), seed, outer=chain)
+
+
+# The evidence's grid is the prior's own region, whatever its width, so it can be
+# far coarser than the posterior's. On the test models a 1.25-yr step came within
+# 0.005 in the natural log of a grid four times finer where the limits sit clear
+# of the dates, and within 0.05 where they cut into the posterior: there the
+# cells at the limits, counted whole, make the error proportional to the step
+# (0.12 at 2.5 yr). 800 points cost a sixth of 2,000. Past 2.5 yr, a region over
+# 2,000 years wide, the figure is flagged as approximate rather than withheld.
+EVIDENCE_MAX_GRID_POINTS = 800
+EVIDENCE_COARSE_STEP_YEARS = 2.5
+
+
+def _evidence_unavailable(outer: Chain, element_bounds: Dict) -> Optional[str]:
+    """Why the model has no evidence, or None when it has one."""
+    if (outer.older_tail or outer.younger_tail
+            or outer.older_tail_blocks or outer.younger_tail_blocks):
+        return ('a date sits outside every Boundary, so nothing bounds where it '
+                'may fall')
+    first, last = outer.boundary_ids[0], outer.boundary_ids[-1]
+    # A Boundary has no limiters of its own in the editor; it takes those of the
+    # Sequence or Phase it sits in (inherited_bounds).
+    if element_bounds.get(first, (None, None))[1] is None:
+        return (f"the oldest Boundary, '{outer.boundary_names[first]}', has no TPQ "
+                'from the Sequence that holds it, so the model has no bounded prior')
+    if element_bounds.get(last, (None, None))[0] is None:
+        return (f"the youngest Boundary, '{outer.boundary_names[last]}', has no TAQ "
+                'from the Sequence that holds it, so the model has no bounded prior')
+    return None
+
+
+def _readings_key(measurements: List[Dict]) -> str:
+    """A short key for the radiocarbon readings alone: models compared by
+    evidence must explain the same data."""
+    readings = sorted((round(float(m['age_bp']), 3), round(float(m['error_1sigma']), 3))
+                      for m in measurements)
+    return hashlib.sha1(json.dumps(readings).encode()).hexdigest()[:16]
+
+
+def _model_evidence(solve_on_grid, measurements: List[Dict], element_bounds: Dict,
+                    outer: Chain, num_groups: int) -> Dict:
+    """
+    The model's marginal likelihood, p(data | model), in a form that compares
+    between models: {'available': False, 'reason'}, or {'available': True,
+    'log', 'log10', 'lower', 'upper', 'step', 'approximate', 'readings'}.
+
+    The solver's own log_evidence is up to a constant that depends on the grid
+    (its dates are normalised over it and its prior is not), so it compares
+    nothing between runs. This one is the data's weight over the prior's weight,
+    both from the same message passing on the same grid:
+
+        p(data | model) = sum of (likelihoods x prior) / sum of (prior)
+
+    the second with every date flat (flat_date_tables), and each date's
+    normalisation put back on both sides. For that to be a probability the prior
+    has to be proper, which is what bounds on the outer Boundaries are for, and
+    the grid is exactly the region those bounds leave -- so it does not depend
+    on where the posterior happens to lie. A model with outlier dates is taken
+    with each date's offset scale mixed over its prior, independently.
+    """
+    reason = _evidence_unavailable(outer, element_bounds)
+    if reason is not None:
+        return {'available': False, 'reason': reason}
+    lower = float(element_bounds[outer.boundary_ids[-1]][0])
+    upper = float(element_bounds[outer.boundary_ids[0]][1])
+    if upper <= lower:
+        return {'available': False,
+                'reason': 'the outer Boundaries\' limits leave no calendar range'}
+    step = _reporting_aligned_step(max(
+        MIN_GRID_STEP_YEARS / 4,
+        (upper - lower) / min(EVIDENCE_MAX_GRID_POINTS, _point_budget(num_groups))))
+    count = int(np.ceil((upper - lower) / step - 1e-9)) + 1
+    grid = lower + step * np.arange(count)
+    data_masses: Dict[str, float] = {}
+    prior_masses: Dict[str, float] = {}
+    try:
+        with_data = solve_on_grid(grid, False, evidence_only=True, masses=data_masses)
+        without = solve_on_grid(grid, False, evidence_only=True, prior_only=True,
+                                masses=prior_masses)
+    except ValueError as error:
+        return {'available': False, 'reason': str(error)}
+    if not (np.isfinite(with_data) and np.isfinite(without)):
+        return {'available': False,
+                'reason': 'the data have no probability inside the limits'}
+    log_evidence = (with_data + sum(data_masses.values())
+                    - without - sum(prior_masses.values()))
+    return {'available': True, 'log': float(log_evidence),
+            'log10': float(log_evidence / np.log(10.0)),
+            'lower': lower, 'upper': upper, 'step': float(step),
+            'approximate': bool(step > EVIDENCE_COARSE_STEP_YEARS),
+            'readings': _readings_key(measurements)}
 
 
 def _two_pass(solve_on_grid, measurements: List[Dict], element_bounds: Dict,
-              num_groups: int, seed: int = 42) -> Dict:
+              num_groups: int, seed: int = 42, outer: Optional[Chain] = None) -> Dict:
     """
     solve()'s two passes for any solver of this shape: `solve_on_grid(grid,
     boundaries_only, scale_weights=None, evidence_only=False)` returns
@@ -2165,6 +2296,9 @@ def _two_pass(solve_on_grid, measurements: List[Dict], element_bounds: Dict,
         results, _densities = solve_on_grid(grid, False, scale_weights=weights)
     if weights is not None:
         _report_scales(results, weights, seed)
+    if outer is not None:
+        results['evidence'] = _model_evidence(solve_on_grid, measurements,
+                                              element_bounds, outer, num_groups)
     return results
 
 
@@ -2260,7 +2394,8 @@ def _solve_on_grid(grid: np.ndarray, measurements: List[Dict], root: Dict,
                    dispersal: Optional[Dict], interval_draws: int,
                    resolution: float, boundaries_only: bool = False,
                    scale_weights: Optional[Dict[str, np.ndarray]] = None,
-                   evidence_only: bool = False,
+                   evidence_only: bool = False, prior_only: bool = False,
+                   masses: Optional[Dict[str, float]] = None,
                    ):
     """
     solve() on one grid: (results, every posterior density it reported).
@@ -2269,6 +2404,10 @@ def _solve_on_grid(grid: np.ndarray, measurements: List[Dict], root: Dict,
     else: what solve()'s first pass needs to place the second grid. With
     `evidence_only`, the log evidence alone, as soon as the messages give it:
     what _weigh_scales asks for. `scale_weights` is date_tables'.
+
+    `prior_only` solves the same model with no data (flat_date_tables), the
+    limits factor still taken from the real dates, and `masses` receives the
+    dates' log integrals either way: what _model_evidence needs of both.
     """
     dt = float(grid[1] - grid[0])
     M = len(grid)
@@ -2277,7 +2416,14 @@ def _solve_on_grid(grid: np.ndarray, measurements: List[Dict], root: Dict,
     scratch = np.empty((M, M))
 
     likelihood, cumulative, outlier_parts = date_tables(
-        grid, measurements, element_bounds, scale_weights)
+        grid, measurements, element_bounds, scale_weights,
+        log_masses=None if prior_only else masses)
+    all_dates = [d for group in chain.groups for d in group]
+    inliers = {d: (outlier_parts[d][0] if d in outlier_parts else likelihood[d])
+               for d in all_dates}
+    if prior_only:
+        likelihood, cumulative = flat_date_tables(grid, measurements, element_bounds,
+                                                  masses)
     allowed = _allowed_windows(grid, element_bounds, chain.boundary_ids)
     log_T, ordered = _chain_log_transfers(grid, chain, cumulative, likelihood,
                                           allowed, scratch)
@@ -2289,9 +2435,6 @@ def _solve_on_grid(grid: np.ndarray, measurements: List[Dict], root: Dict,
     tails = _Tails(chain, grid, cumulative, likelihood)
     end_weights = tails.end_weights
 
-    all_dates = [d for group in chain.groups for d in group]
-    inliers = {d: (outlier_parts[d][0] if d in outlier_parts else likelihood[d])
-               for d in all_dates}
     oldest_limits, youngest_limits = pair_limits(
         element_bounds, chain.boundary_ids[0], chain.boundary_ids[-1],
         grid, inliers, all_dates)

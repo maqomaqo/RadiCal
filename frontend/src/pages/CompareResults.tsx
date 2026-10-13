@@ -21,6 +21,7 @@ import DownloadIcon from '@mui/icons-material/Download'
 import AgreementScatter from '@/components/AgreementScatter'
 import ComparePosteriorPlot from '@/components/ComparePosteriorPlot'
 import DerivedQuantitiesPanel from '@/components/DerivedQuantitiesPanel'
+import EvidencePanel from '@/components/EvidencePanel'
 import ModelDiffPanel from '@/components/ModelDiffPanel'
 import ShiftPlot from '@/components/ShiftPlot'
 import BackLink from '@/components/BackLink'
@@ -47,6 +48,7 @@ import {
 import { CONFIDENCE_LEVELS, SIGMA_2, reportingOf } from '@/utils/hpd'
 import { formatApiError } from '@/utils/apiError'
 import { analysisTypeLabel } from '@/utils/analysisTypes'
+import type { SolverEvidence } from '@/utils/evidence'
 import type { IntervalsBlock, MatrixMeasurement, ModelElement } from '@/types'
 
 /**
@@ -94,6 +96,8 @@ interface RunPayload {
     convergence?: number
     converged?: boolean
     resolution?: number
+    // Exact runs only: p(data | model), or why this model has none.
+    evidence?: SolverEvidence | null
   } | null
   model_tree?: ModelElement | null
   intervals?: IntervalsBlock | null
@@ -700,6 +704,23 @@ export default function CompareResults() {
               dateFormat={dateFormat}
               confidence={confidence}
               confidenceLabel={confidenceLabel}
+            />
+          </Paper>
+
+          <Paper sx={{ p: 2.5, mb: 3 }}>
+            <Typography variant="h6" gutterBottom>
+              Model evidence
+            </Typography>
+            <Typography variant="body2" color="textSecondary" sx={{ mb: 2, maxWidth: '72ch' }}>
+              How well each model explains the same radiocarbon readings, set against the first.
+            </Typography>
+            <EvidencePanel
+              runs={runs.map((run) => ({
+                name: run.name,
+                isBayesian: run.analysis_type === 'bayesian',
+                method: run.solver?.method,
+                evidence: run.solver?.evidence,
+              }))}
             />
           </Paper>
 

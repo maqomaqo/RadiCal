@@ -86,6 +86,8 @@ import { analysisTypeLabel } from '@/utils/analysisTypes'
 import { flattenStructure } from '@/utils/stratigraphy'
 import type { StructureRow } from '@/utils/stratigraphy'
 import type { SameEventTest } from '@/utils/sameEvent'
+import { formatLog10 } from '@/utils/evidence'
+import type { SolverEvidence } from '@/utils/evidence'
 import {
   formatProbability,
   loadThreshold,
@@ -228,6 +230,8 @@ interface AnalysisResult {
     // on an analysis run before they were reported.
     model_agreement?: number | null
     overall_agreement?: number | null
+    // Exact runs only: p(data | model), or why this model has none.
+    evidence?: SolverEvidence | null
     // Legacy: set only on analyses run before the current sampler.
     draws?: number
     // Wiggle-match path only. The combination index is not a diagnostic
@@ -2427,6 +2431,18 @@ export default function Results() {
                       </Box>
                     </>
                   )}
+                </Typography>
+              )}
+              {analysis.solver?.method === 'exact' && analysis.solver.evidence?.available && (
+                <Typography
+                  variant="body2"
+                  component="p"
+                  sx={{ fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}
+                >
+                  Evidence log₁₀{' '}
+                  <Box component="strong" sx={{ color: 'text.primary' }}>
+                    {formatLog10(analysis.solver.evidence.log10 ?? 0)}
+                  </Box>
                 </Typography>
               )}
               {analysis.status !== 'completed' && (

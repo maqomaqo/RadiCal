@@ -269,3 +269,41 @@ class TestTheAnalysisSolvesThemExactly:
         solver = created.json()['data']['solver']
         assert solver['method'] == 'gibbs'
         assert 'outlier model' in solver['reason']
+
+
+def _bounded_outer(tree, young, old):
+    """Limits on the first and last Boundary directly under `tree`."""
+    boundaries = [c for c in tree['children'] if c['element_type'] == 'boundary']
+    boundaries[0]['tpq_age_bp'], boundaries[-1]['taq_age_bp'] = old, young
+    return tree
+
+
+class TestEvidenceOfTheseShapes:
+    """exact_chain._model_evidence on a chain with tails, and on areas."""
+
+    def test_a_tail_leaves_the_prior_unbounded(self):
+        tree, dates, chain = _chain([[3000, 2990]], before=[3100], after=[2900])
+        _bounded_outer(tree, 2700, 3400)
+        evidence = ec.solve(dates, tree, chain, num_samples=10)['evidence']
+        assert not evidence['available']
+        assert 'outside every Boundary' in evidence['reason']
+
+    def test_areas_side_by_side_have_one(self):
+        tree, dates = _site(TWO_AREAS)
+        _bounded_outer(tree, 2700, 3400)
+        layout, _reason = ep.layout_with_reason(tree, dates)
+        evidence = ep.solve(dates, tree, layout, num_samples=10)['evidence']
+        assert evidence['available']
+        assert (evidence['lower'], evidence['upper']) == (2700, 3400)
+
+    def test_one_area_has_the_evidence_of_its_chain(self):
+        tree, dates = _site([('areas', [[[3010, 2990], [2950]]], [])])
+        _bounded_outer(tree, 2700, 3400)
+        area = tree['children'][1]['children'][0]
+        chain_tree = _element('sequence', 'Line', [tree['children'][0]]
+                              + area['children'] + [tree['children'][2]])
+        layout, _reason = ep.layout_with_reason(tree, dates)
+        chain = ec.layout(chain_tree, dates)
+        parallel = ep.solve(dates, tree, layout, num_samples=10)['evidence']
+        line = ec.solve(dates, chain_tree, chain, num_samples=10)['evidence']
+        assert parallel['log'] == pytest.approx(line['log'], abs=0.02)

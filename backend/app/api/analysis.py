@@ -754,6 +754,9 @@ def _run_bayesian(
             # (exact_chain._weigh_scales), as the sampled record has it.
             **({'outlier_scale': solved['outlier_scale']}
                if solved.get('outlier_scale') else {}),
+            # p(data | model) in a form that compares between runs of the same
+            # readings, or why this model has none (exact_chain._model_evidence).
+            **({'evidence': solved['evidence']} if solved.get('evidence') else {}),
         }, solved.get('intervals'), _phase_summary_block(
             model_tree, measurements, solved, estimate_kde)
 
