@@ -28,10 +28,17 @@ Choices worth stating, since each is a place where the obvious thing is worse:
   valid until it expires. That is the right trade for this app -- the
   alternative buys revocation, which matters when tokens are long-lived, and
   these are not.
+
+- **Personal access tokens are the long-lived exception, so they are stored.**
+  A script that re-runs a project overnight cannot sign in every twelve hours.
+  Its token (`rct_...`, up to a year) has a row (models.PersonalAccessToken)
+  so it can be revoked, and only a hash of it is kept.
 """
 from __future__ import annotations
 
+import hashlib
 import os
+import secrets
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -175,3 +182,36 @@ def normalise_email(email: str) -> str:
     cannot become two accounts that each believe they are the only one.
     """
     return (email or '').strip().lower()
+
+
+# Personal access tokens. The prefix marks one at a glance -- in a script, a
+# log, or a secret scanner's rules -- and tells current_user which kind of
+# bearer token it has been given without trying to decode it as a JWT.
+ACCESS_TOKEN_PREFIX = 'rct_'
+# The lifetimes offered, in days. Every token expires; a year is the longest,
+# enough for a project's re-runs, short enough that a forgotten one lapses.
+ACCESS_TOKEN_LIFETIMES = (7, 30, 90, 365)
+ACCESS_TOKEN_DEFAULT_LIFETIME = 90
+# 'read' may only GET; 'full' may do whatever its owner can.
+ACCESS_TOKEN_SCOPES = ('read', 'full')
+# Characters of the secret kept to identify a token in the list.
+_SHOWN_PREFIX = 12
+
+
+def new_access_token() -> str:
+    """A fresh secret: the prefix and 256 random bits."""
+    return ACCESS_TOKEN_PREFIX + secrets.token_urlsafe(32)
+
+
+def is_access_token(token: str) -> bool:
+    return token.startswith(ACCESS_TOKEN_PREFIX)
+
+
+def access_token_hash(token: str) -> str:
+    """What is stored and looked up. A fast hash is enough for a random secret."""
+    return hashlib.sha256(token.encode('utf-8')).hexdigest()
+
+
+def access_token_prefix(token: str) -> str:
+    """The part shown in the list, which identifies a token but cannot be used as one."""
+    return token[:_SHOWN_PREFIX]

@@ -27,6 +27,7 @@ const ProjectDetail = lazy(() => import('@/pages/ProjectDetail'))
 const CompareResults = lazy(() => import('@/pages/CompareResults'))
 const Help = lazy(() => import('@/pages/Help'))
 const Glossary = lazy(() => import('@/pages/Glossary'))
+const Account = lazy(() => import('@/pages/Account'))
 const NotFound = lazy(() => import('@/pages/NotFound'))
 
 // `background.muted` is ours, not MUI's -- declared so `sx={{ backgroundColor:
@@ -290,6 +291,7 @@ function RoutedPages() {
           <Route path="/curves/:curveId/browse" element={<CurveBrowser />} />
           <Route path="/projects/:projectId" element={<ProjectDetail />} />
           <Route path="/projects/:projectId/compare" element={<CompareResults />} />
+          <Route path="/account" element={<Account />} />
           {/* Without this an unknown path rendered an empty canvas under the
               bar, indistinguishable from a page still loading. */}
           <Route path="*" element={<NotFound />} />

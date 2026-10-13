@@ -280,7 +280,8 @@ class TestEveryRouteIsProtected:
         '/api/auth/login',      # ditto
         '/api/health',          # a load balancer has no credentials
         '/',                    # the API's own index
-        '/docs', '/redoc', '/openapi.json', '/docs/oauth2-redirect',
+        '/api/docs', '/api/redoc', '/api/openapi.json', '/api/docs/oauth2-redirect',
+        '/docs', '/redoc', '/openapi.json',     # redirects to the three above
     }
 
     def test_no_route_is_unintentionally_open(self):
@@ -493,3 +494,137 @@ class TestAdoptingTheWorkThatCameBefore:
         with SessionLocal() as db:
             assert db.query(Project).filter(Project.owner_id.is_(None)).count() == 0
             assert db.query(Analysis).filter(Analysis.owner_id.is_(None)).count() == 0
+
+
+# --------------------------------------------------------------------------
+# Personal access tokens
+# --------------------------------------------------------------------------
+
+class TestAccessTokens:
+    """
+    Long-lived tokens for scripts. What matters: the secret is shown once and
+    never stored, a read-only token cannot write, expiry and revocation take
+    effect at once, and a token cannot manage tokens or the password.
+    """
+
+    @pytest.fixture(scope='class')
+    def owner(self):
+        from fastapi.testclient import TestClient
+        from app.main import app
+        with TestClient(app) as bare:
+            token = _register(bare, 'scripts@radical.example.com').json()['data']['token']
+        return TestClient(app, headers={'Authorization': f'Bearer {token}'})
+
+    @staticmethod
+    def _with(token):
+        from fastapi.testclient import TestClient
+        from app.main import app
+        return TestClient(app, headers={'Authorization': f'Bearer {token}'})
+
+    @staticmethod
+    def _make(owner, **body):
+        response = owner.post('/api/auth/tokens', json={'name': 'script', **body})
+        assert response.status_code == 201, response.text
+        return response.json()['data']
+
+    def test_the_secret_is_shown_once_and_stored_only_as_a_hash(self, owner):
+        from app.database import SessionLocal
+        from app.models import PersonalAccessToken
+        made = self._make(owner, name='once')
+        assert made['token'].startswith('rct_') and len(made['token']) > 40
+        listed = owner.get('/api/auth/tokens').json()['data']
+        row = next(t for t in listed if t['id'] == made['id'])
+        assert 'token' not in row and made['token'].startswith(row['prefix'])
+        with SessionLocal() as db:
+            stored = db.query(PersonalAccessToken).filter_by(id=made['id']).one()
+            assert made['token'] not in (stored.token_hash, stored.prefix)
+            assert stored.token_hash == auth.access_token_hash(made['token'])
+
+    def test_a_token_signs_its_owner_in_and_records_its_use(self, owner):
+        made = self._make(owner, scope='full')
+        me = self._with(made['token']).get('/api/auth/me')
+        assert me.status_code == 200
+        assert me.json()['data']['email'] == 'scripts@radical.example.com'
+        listed = owner.get('/api/auth/tokens').json()['data']
+        assert next(t for t in listed if t['id'] == made['id'])['last_used_at']
+
+    def test_a_read_only_token_reads_and_cannot_write(self, owner):
+        reader = self._with(self._make(owner, scope='read')['token'])
+        assert reader.get('/api/projects').status_code == 200
+        refused = reader.post('/api/projects', json={'name': 'Not allowed'})
+        assert refused.status_code == 403
+        assert 'read-only' in refused.json()['detail']
+
+    def test_a_full_token_can_write(self, owner):
+        writer = self._with(self._make(owner, scope='full')['token'])
+        assert writer.post('/api/projects', json={'name': 'From a script'}).status_code == 200
+
+    def test_the_default_is_read_only_for_ninety_days(self, owner):
+        made = self._make(owner)
+        assert made['scope'] == 'read'
+        created = datetime.fromisoformat(made['created_at'])
+        expires = datetime.fromisoformat(made['expires_at'])
+        assert expires - created == timedelta(days=90)
+
+    def test_only_the_offered_lifetimes_are_accepted(self, owner):
+        for days in (0, 1000, 400):
+            response = owner.post('/api/auth/tokens', json={'name': 'x', 'days': days})
+            assert response.status_code == 422, days
+        assert owner.post('/api/auth/tokens', json={'name': 'x', 'scope': 'admin'}).status_code == 422
+
+    def test_an_expired_token_is_refused(self, owner):
+        from app.database import SessionLocal
+        from app.models import PersonalAccessToken
+        made = self._make(owner, scope='full')
+        with SessionLocal() as db:
+            row = db.query(PersonalAccessToken).filter_by(id=made['id']).one()
+            row.expires_at = datetime.utcnow() - timedelta(seconds=1)
+            db.commit()
+        assert self._with(made['token']).get('/api/auth/me').status_code == 401
+        listed = owner.get('/api/auth/tokens').json()['data']
+        assert next(t for t in listed if t['id'] == made['id'])['expired'] is True
+
+    def test_a_revoked_token_stops_working_at_once(self, owner):
+        made = self._make(owner, scope='full')
+        script = self._with(made['token'])
+        assert script.get('/api/auth/me').status_code == 200
+        assert owner.delete(f"/api/auth/tokens/{made['id']}").status_code == 200
+        assert script.get('/api/auth/me').status_code == 401
+
+    def test_a_wrong_token_is_refused_like_any_other(self, anonymous_client):
+        assert self._with('rct_' + 'x' * 43).get('/api/auth/me').status_code == 401
+
+    def test_a_token_cannot_manage_tokens_or_the_password(self, owner):
+        script = self._with(self._make(owner, scope='full')['token'])
+        assert script.get('/api/auth/tokens').status_code == 403
+        assert script.post('/api/auth/tokens', json={'name': 'successor'}).status_code == 403
+        assert script.post('/api/auth/password', json={
+            'current_password': 'whatever', 'new_password': 'something new'}).status_code == 403
+
+    def test_someone_else_cannot_see_or_revoke_yours(self, owner):
+        from fastapi.testclient import TestClient
+        from app.main import app
+        made = self._make(owner)
+        with TestClient(app) as bare:
+            token = _register(bare, 'token-stranger@radical.example.com').json()['data']['token']
+        stranger = TestClient(app, headers={'Authorization': f'Bearer {token}'})
+        assert all(t['id'] != made['id'] for t in stranger.get('/api/auth/tokens').json()['data'])
+        assert stranger.delete(f"/api/auth/tokens/{made['id']}").status_code == 404
+        assert owner.get('/api/auth/tokens').status_code == 200
+
+
+class TestTheSchemaIsUnderApi:
+    """The schema and docs sit under /api so a proxy forwarding /api passes them."""
+
+    def test_the_schema_is_served_and_declares_the_bearer_scheme(self, anonymous_client):
+        schema = anonymous_client.get('/api/openapi.json')
+        assert schema.status_code == 200
+        schemes = schema.json()['components']['securitySchemes']
+        assert any(s.get('scheme') == 'bearer' for s in schemes.values())
+
+    def test_the_old_paths_redirect(self, anonymous_client):
+        for old, new in (('/docs', '/api/docs'), ('/openapi.json', '/api/openapi.json'),
+                         ('/redoc', '/api/redoc')):
+            response = anonymous_client.get(old, follow_redirects=False)
+            assert response.status_code == 308 and response.headers['location'] == new
+        assert anonymous_client.get('/api/docs').status_code == 200
