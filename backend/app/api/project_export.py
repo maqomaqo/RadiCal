@@ -63,11 +63,11 @@ _CURVE_FIELDS = (
     'content_sha256',
 )
 
-# The collection as the CSV importer reads it (date_import.TEMPLATE_COLUMNS),
-# so the file goes straight back in; `phase` is the collection's
-# default_context_name. The importer's template has no sample type or
-# location, so those follow it, where a spreadsheet keeps them and the
-# importer passes them by.
+# The collection as the CSV importer reads it (date_import.COLUMN_ALIASES),
+# so the file goes straight back in with every field it was stored with;
+# `phase` is the collection's default_context_name. The template's columns
+# come first, then the rest. reservoir_age is left out: it is superseded by
+# delta_r and never applied.
 _SAMPLE_COLUMNS = [
     ('sample_name', 'sample_name'), ('age_bp', 'age_bp'),
     ('error_1sigma', 'error_1sigma'), ('material_type', 'material_type'),
@@ -78,7 +78,7 @@ _SAMPLE_COLUMNS = [
     ('sample_type', 'sample_type'), ('location', 'location'),
     ('depth_cm', 'depth_cm'), ('ring_offset', 'ring_offset'),
     ('ring_offset_error', 'ring_offset_error'), ('inbuilt_years', 'inbuilt_years'),
-    ('inbuilt_shape', 'inbuilt_shape'),
+    ('inbuilt_shape', 'inbuilt_shape'), ('delta_r_source', 'delta_r_source'),
 ]
 
 # The collection as a package carries it: every field a date is stored with,
@@ -251,9 +251,19 @@ def samples_csv(samples: List[ProjectSample], precision: str = 'full') -> str:
     writer = csv.writer(output)
     writer.writerow([column for column, _ in _SAMPLE_COLUMNS])
     for record in collection_records(samples, precision):
-        writer.writerow(['' if record.get(field) is None else record[field]
-                         for _, field in _SAMPLE_COLUMNS])
+        writer.writerow([_cell(record.get(field)) for _, field in _SAMPLE_COLUMNS])
     return output.getvalue()
+
+
+def _cell(value) -> str:
+    if value is None:
+        return ''
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, separators=(',', ':'), sort_keys=True)
+    # 614, not 614.0: a spreadsheet shows what was entered.
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    return value
 
 
 def _solver_cells(analysis: Analysis) -> List:

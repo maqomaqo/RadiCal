@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Alert,
   AlertTitle,
@@ -13,7 +13,6 @@ import {
   DialogTitle,
   Divider,
   FormControlLabel,
-  Link,
   Paper,
   Stack,
   Table,
@@ -32,6 +31,8 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import UploadFileIcon from '@mui/icons-material/UploadFile'
 import DownloadIcon from '@mui/icons-material/Download'
 import { formatApiError, describeFetchError } from '@/utils/apiError'
+import { saveDownload } from '@/utils/saveDownload'
+import { describeMatch, splitByCollection, type DateValues } from '@/utils/collectionMatches'
 import { useNotify } from '@/contexts/NotificationContext'
 import type { ModelElement } from '@/types'
 
@@ -59,6 +60,9 @@ export interface ImportedDate {
   // A date's inbuilt-age allowance, when the file has one (utils/inbuiltAge).
   inbuilt_years?: number | null
   inbuilt_shape?: 'uniform' | 'exponential' | null
+  // How a looked-up ΔR was derived, carried back in from the collection's
+  // own CSV export.
+  delta_r_source?: Record<string, unknown> | null
   // WGS84 decimal degrees, and only that: a file writing them in degrees and
   // minutes is refused by name rather than converted, so a date that arrives
   // here placed is placed in the one form the app reads.
@@ -133,6 +137,12 @@ interface Props {
    * put them in.
    */
   collectionProjectName?: string | null
+  /**
+   * The collection being imported into, for target 'collection': dates it
+   * already holds by name are left out unless the reader asks for them, and
+   * the preview says which, and where their values differ.
+   */
+  collection?: DateValues[]
   onConfirm: (preview: ImportPreview, options: ImportOptions) => void | Promise<void>
   confirming?: boolean
 }
@@ -140,6 +150,11 @@ interface Props {
 export interface ImportOptions {
   /** Whether the dates should also be added to the project's collection. */
   storeInCollection: boolean
+  /**
+   * For target 'collection': the dates to add, which leaves out those the
+   * collection already holds unless the reader chose to add them again.
+   */
+  dates?: ImportedDate[]
 }
 
 function formatOutlier(date: ImportedDate): string | null {
@@ -165,6 +180,7 @@ export default function ImportDatesDialog({
   target,
   collectionProjectName = null,
   existingCount = 0,
+  collection,
   onConfirm,
   confirming = false,
 }: Props) {
@@ -177,6 +193,9 @@ export default function ImportDatesDialog({
   // Off by default: adding to the collection is a second, lasting write that
   // outlives this draft, so it is asked for rather than assumed.
   const [storeInCollection, setStoreInCollection] = useState(false)
+  // Off by default: a name already in the collection is far more often the
+  // same date imported twice than a second date that shares its lab code.
+  const [includeExisting, setIncludeExisting] = useState(false)
 
   useEffect(() => {
     if (!open) return
@@ -198,6 +217,7 @@ export default function ImportDatesDialog({
       setDragging(false)
       setUploading(false)
       setStoreInCollection(false)
+      setIncludeExisting(false)
     }
   }, [open])
 
@@ -225,6 +245,16 @@ export default function ImportDatesDialog({
     const file = files?.[0]
     if (file) upload(file)
   }
+
+  const split = useMemo(
+    () =>
+      target === 'collection' && collection && preview?.ok
+        ? splitByCollection(preview.dates, collection)
+        : null,
+    [target, collection, preview]
+  )
+  const toAdd = split ? (includeExisting ? preview!.dates : split.fresh) : preview?.dates ?? []
+  const differing = split?.matched.filter((m) => m.differs.length > 0).length ?? 0
 
   const structureKept = target === 'analysis' && !!preview?.model_tree
   const structureDropped = target === 'collection' && !!preview?.model_tree
@@ -310,8 +340,13 @@ export default function ImportDatesDialog({
                 <Button
                   size="small"
                   startIcon={<DownloadIcon />}
-                  component={Link}
-                  href="/api/import/csv-template"
+                  // Fetched rather than linked: the API reads the sign-in from
+                  // a header, which a plain link does not send.
+                  onClick={() =>
+                    saveDownload('/api/import/csv-template', 'radical-dates-template.csv').catch((err) =>
+                      notify('Could not download the template: ' + describeFetchError(err))
+                    )
+                  }
                   sx={{ mb: 2 }}
                 >
                   Download template
@@ -461,6 +496,42 @@ export default function ImportDatesDialog({
               </Alert>
             )}
 
+            {split && split.matched.length > 0 && (
+              <Alert severity={differing > 0 ? 'warning' : 'info'} sx={{ mb: 2 }}>
+                <AlertTitle>
+                  {split.fresh.length} new, {split.matched.length} already in the collection
+                </AlertTitle>
+                <Typography variant="body2" sx={{ mb: 1 }}>
+                  {differing > 0
+                    ? `Matched by name. ${differing} of them ${differing === 1 ? 'differs' : 'differ'} from the stored date. Edit ${differing === 1 ? 'it' : 'those'} in the collection to change ${differing === 1 ? 'it' : 'them'}.`
+                    : 'Matched by name, with the same age, error and curve.'}
+                </Typography>
+                <Box component="ul" sx={{ m: 0, pl: 2.5, maxHeight: 160, overflowY: 'auto' }}>
+                  {split.matched.map((match, index) => (
+                    <li key={index}>
+                      <Typography variant="body2">{describeMatch(match)}</Typography>
+                    </li>
+                  ))}
+                </Box>
+                <FormControlLabel
+                  sx={{ mt: 1 }}
+                  control={
+                    <Checkbox
+                      size="small"
+                      checked={includeExisting}
+                      onChange={(e) => setIncludeExisting(e.target.checked)}
+                    />
+                  }
+                  label={
+                    <Typography variant="body2">
+                      Add {split.matched.length === 1 ? 'it' : `these ${split.matched.length}`} again as
+                      {split.matched.length === 1 ? ' a separate date' : ' separate dates'}
+                    </Typography>
+                  }
+                />
+              </Alert>
+            )}
+
             {preview.notes.length > 0 && (
               <Alert severity="info" sx={{ mb: 2 }}>
                 <AlertTitle>How the file was read</AlertTitle>
@@ -547,13 +618,21 @@ export default function ImportDatesDialog({
         <Button onClick={onClose}>Cancel</Button>
         <Button
           variant="contained"
-          disabled={!preview?.ok || !preview.dates.length || confirming}
-          onClick={() => preview && onConfirm(preview, { storeInCollection: offerCollection && storeInCollection })}
+          disabled={!preview?.ok || !toAdd.length || confirming}
+          onClick={() =>
+            preview &&
+            onConfirm(preview, {
+              storeInCollection: offerCollection && storeInCollection,
+              dates: toAdd,
+            })
+          }
         >
           {confirming
             ? 'Importing…'
             : target === 'collection'
-              ? `Add ${preview?.date_count ?? 0} date${preview?.date_count === 1 ? '' : 's'} to the collection`
+              ? toAdd.length === 0 && preview?.ok
+                ? 'Nothing new to add'
+                : `Add ${toAdd.length} date${toAdd.length === 1 ? '' : 's'} to the collection`
               : existingCount > 0
                 ? `Replace ${existingCount} date${existingCount === 1 ? '' : 's'} with ${
                     preview?.date_count ?? 0

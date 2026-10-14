@@ -18,6 +18,7 @@ how a date goes missing without anyone noticing.
 """
 import csv
 import io
+import json
 import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
@@ -193,6 +194,10 @@ COLUMN_ALIASES: Dict[str, tuple] = {
         'inbuilt_max_years', 'inbuilt_mean',
     ),
     'inbuilt_shape': ('inbuilt_shape', 'inbuilt_kernel', 'inbuilt_model'),
+    # How a ΔR was looked up, as the collection's own CSV export writes it: one
+    # JSON object. Read back so a collection survives a round trip with its
+    # provenance; nothing recalculates from it.
+    'delta_r_source': ('delta_r_source',),
     # WGS84 decimal degrees, and only that. Degrees-and-minutes in any
     # spelling is refused by _coordinate rather than parsed -- see there.
     'latitude': ('latitude', 'lat', 'y', 'dec_lat', 'decimal_latitude', 'lat_dd'),
@@ -654,6 +659,7 @@ def _row_to_date(values: Dict[str, Any], line: int, errors: List[str],
             values.get('ring_offset_error'), 'ring offset error', line, errors),
         'inbuilt_years': _number(values.get('inbuilt_years'), 'inbuilt age', line, errors),
         'inbuilt_shape': _inbuilt_shape(values.get('inbuilt_shape'), line, errors),
+        'delta_r_source': _delta_r_source(values.get('delta_r_source'), line, errors),
         'location': _clean(values.get('location')) or None,
         'notes': _clean(values.get('notes')) or None,
         'outlier_model': _outlier_model(values.get('outlier_model'), line, errors) or 'general',
@@ -693,6 +699,21 @@ def _finish(result: ImportResult) -> None:
         return
 
     _tree_from_phases(result)
+
+
+def _delta_r_source(value: str, line: int, errors: List[str]) -> Optional[Dict[str, Any]]:
+    text = _clean(value)
+    if not text:
+        return None
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        parsed = None
+    if not isinstance(parsed, dict):
+        errors.append(f'Row {line}: delta_r_source is not the record the app exports '
+                      '(a JSON object). Clear the cell to import the date without it.')
+        return None
+    return parsed
 
 
 def _validate_dates(result: ImportResult) -> None:

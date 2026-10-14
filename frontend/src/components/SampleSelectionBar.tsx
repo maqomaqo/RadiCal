@@ -44,6 +44,7 @@ import RocketLaunchIcon from '@mui/icons-material/RocketLaunch'
 import TimelineIcon from '@mui/icons-material/Timeline'
 import WavesIcon from '@mui/icons-material/Waves'
 import PlaceIcon from '@mui/icons-material/Place'
+import DownloadIcon from '@mui/icons-material/Download'
 
 import { curveOptions, type CurveSpec } from '@/api/curves'
 import { isMarineMeasurement } from '@/components/MeasurementFields'
@@ -98,6 +99,8 @@ interface Props {
    * keep the selection on screen the way a popover does.
    */
   onPlaceOnMap: () => void
+  /** Saves the selection as a CSV the importer reads back in. */
+  onExport: () => void
   onDelete: () => void
 }
 
@@ -111,6 +114,7 @@ export default function SampleSelectionBar({
   onAssignCurve,
   onAssignDeltaR,
   onPlaceOnMap,
+  onExport,
   onDelete,
 }: Props) {
   const [curveAnchor, setCurveAnchor] = useState<HTMLElement | null>(null)
@@ -321,6 +325,15 @@ export default function SampleSelectionBar({
         disabled={busy}
       >
         Place on map
+      </Button>
+      <Button
+        size="small"
+        variant="outlined"
+        startIcon={<DownloadIcon />}
+        onClick={onExport}
+        disabled={busy}
+      >
+        Export CSV
       </Button>
 
       <Box sx={{ flexGrow: 1 }} />

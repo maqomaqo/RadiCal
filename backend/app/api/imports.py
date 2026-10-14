@@ -117,6 +117,11 @@ def csv_columns(user: User = Depends(current_user)):
                      "minutes (54°30'N) are refused, not converted."),
         'longitude': ('Decimal degrees, WGS84, minus for west. Both halves of '
                       'a coordinate are needed, or neither.'),
+        'inbuilt_years': ('Most years older than its event the material may be '
+                          '(the mean, for an exponential allowance).'),
+        'inbuilt_shape': 'uniform or exponential. How the inbuilt age is spread.',
+        'delta_r_source': ('How a looked-up ΔR was derived, as the app exports it. '
+                           'Leave blank for a ΔR you entered.'),
         'location': 'Site or find location.',
         'notes': 'Free text.',
     }

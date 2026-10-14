@@ -9,9 +9,10 @@ Deploying COPIES the values into the analysis's own RadiocarbonSample rows
 rather than referencing the collection, so an analysis stays a self-contained
 snapshot of what it was run on. See ProjectSample's docstring.
 """
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
-from typing import Optional
+from typing import List, Optional
 
 from app.database import get_db
 from app.models import Project, ProjectSample, Analysis, RadiocarbonSample, SampleGroup, User
@@ -100,6 +101,38 @@ def list_project_samples(project_id: str, db: Session = Depends(get_db),
     return {"success": True, "data": {"items": [_serialize(s) for s in samples]}}
 
 
+@router.get("/projects/{project_id}/samples/export")
+def export_project_samples(
+    project_id: str,
+    sample: Optional[List[str]] = Query(default=None),
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+):
+    """
+    The collection as a CSV the date importer reads straight back in, every
+    stored field included (project_export.samples_csv). `sample` (repeatable)
+    narrows it to those dates. Positions leave at the project's coordinate
+    precision, as every export's do.
+    """
+    from app.api import project_export
+
+    project = _require_project(project_id, db, user)
+    query = db.query(ProjectSample).filter(ProjectSample.project_id == project_id)
+    if sample:
+        query = query.filter(ProjectSample.id.in_(sample))
+    samples = query.order_by(ProjectSample.created_at, ProjectSample.id).all()
+    if sample and len(samples) != len(set(sample)):
+        raise HTTPException(status_code=404,
+                            detail="Some of the chosen dates are not in this collection.")
+    content = project_export.samples_csv(samples, project.coordinate_precision or 'full')
+    name = project_export._slug(project.name or 'project')
+    return Response(
+        content=content,
+        media_type='text/csv',
+        headers={'Content-Disposition': f'attachment; filename=dates-{name}.csv'},
+    )
+
+
 @router.post("/projects/{project_id}/samples")
 def create_project_samples(
     project_id: str,
@@ -133,6 +166,10 @@ def create_project_samples(
             reservoir_age=item.reservoir_age,
             delta_r=item.delta_r,
             delta_r_error=item.delta_r_error,
+            # Provenance belongs to the number it derived: kept only beside a
+            # delta_r, as the bulk edit keeps it. An exported collection
+            # carries it, so a round trip does not lose it.
+            delta_r_source=item.delta_r_source if item.delta_r is not None else None,
             latitude=item.latitude,
             longitude=item.longitude,
             depth_cm=item.depth_cm,
