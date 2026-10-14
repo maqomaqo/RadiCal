@@ -149,6 +149,38 @@ class TestRoundTrip:
             'End of A', 'Start of B', 'B', 'End']
 
 
+class TestOxcalRules:
+    """What OxCal itself requires of a file, beyond what the importer checks."""
+
+    def _layered(self):
+        tree = _el('root', 'sequence', 'S', [
+            _el('b0', 'boundary', 'Start'), _el('p1', 'phase', 'A'),
+            _el('b1', 'boundary', 'Mid'), _el('p2', 'phase', 'B'),
+            _el('b2', 'boundary', 'End')])
+        dates = [_date('A1', 702, 'p1'),
+                 _date('A2', 970, 'p1', curve_id='marine20', delta_r=-7, delta_r_error=45),
+                 _date('B1', 614, 'p2'), _date('B2', 640, 'p2', curve_id='marine20')]
+        return write_oxcal('S', 'bayesian', dates, tree, {'resolution': 5})[0]
+
+    def test_options_are_global_above_plot(self):
+        text = self._layered()
+        assert text.index('Options()') < text.index('Plot()')
+        assert 'Resolution=5;' in text[:text.index('Plot()')]
+
+    def test_each_curve_is_defined_once_then_called_by_name(self):
+        text = self._layered()
+        assert text.count('Curve("SHCal20","shcal20.14c");') == 1
+        assert text.count('Curve("Marine20","marine20.14c");') == 1
+        # Both definitions sit at the head of Plot, before any model element.
+        head = text[text.index('Plot()'):text.index('Sequence(')]
+        assert 'Curve("SHCal20","shcal20.14c");' in head
+        assert 'Curve("Marine20","marine20.14c");' in head
+        body = text[text.index('Sequence('):]
+        assert 'Curve("SHCal20");' in body and 'Curve("Marine20");' in body
+        assert '.14c' not in body
+        _read(text)
+
+
 class TestWhatIsNotWritten:
     def test_limits_and_inbuilt_age_are_listed_not_approximated(self):
         tree = _el('root', 'sequence', 'S', [

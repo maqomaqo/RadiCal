@@ -21,10 +21,13 @@ Mapping:
   interpolated_depth   Date("name") { z=...; };
   date                 R_Date("name", age, error) { Outlier(...); z=...; };
 
-Curves and reservoir offsets are stated before each date whose curve or
-offset differs from the last one stated, and again after leaving any block,
-so the file means the same whether a reader scopes them to blocks (as the
-importer does) or reads them straight down the file.
+Options() comes first, above Plot(), since OxCal reads it as a global
+setting. Each curve is loaded once at the head of Plot() -- a file, or a
+Mix_Curves of curves loaded before it -- because OxCal refuses a curve name
+defined twice. After that a curve is selected by name alone, before each date
+whose curve or offset differs from the last one stated, and again after
+leaving any block, so the file means the same whether a reader scopes the
+selection to blocks (as the importer does) or reads it straight down the file.
 """
 import math
 from datetime import datetime, timezone
@@ -96,48 +99,54 @@ class _Writer:
     # -- curves -----------------------------------------------------------
 
     def prepare_curves(self, curve_ids: Iterable[str]) -> None:
-        """Name every curve used, and declare each mixture once, up front."""
+        """
+        Load every curve used, once: the files first, then each mixture after
+        the curves it is made of. OxCal refuses a name defined twice.
+        """
+        order: List[str] = []
         for curve_id in sorted(set(curve_ids)):
-            self._name_curve(curve_id)
+            self._collect(curve_id, order, 0)
+        for curve_id in order:
+            if curve_id not in self.mixed:
+                self.line(self._load_statement(curve_id))
+        for curve_id in order:
+            if curve_id in self.mixed:
+                a, b, percent, error = self.mixed[curve_id]
+                self.line(f'Mix_Curves({_quote(self.curve_names[curve_id])},'
+                          f'{_quote(self.curve_names[a])},{_quote(self.curve_names[b])},'
+                          f'{_number(percent)},{_number(error)});')
 
-    def _name_curve(self, curve_id: str, depth: int = 0) -> str:
-        if curve_id in self.curve_names:
-            return self.curve_names[curve_id]
+    def _collect(self, curve_id: str, order: List[str], depth: int) -> None:
+        """Name a curve, and its parents before it, in the order to load them."""
+        if curve_id in self.curve_names or depth > 8:
+            return
         spec = curve_registry.get_spec(curve_id)
-        name = spec.name or curve_id
-        self.curve_names[curve_id] = name
-        if spec.kind == 'mixed' and depth < 8:
+        self.curve_names[curve_id] = spec.name or curve_id
+        if spec.kind == 'mixed':
             from app.database import SessionLocal
             from app.models import StoredCalibrationCurve
             with SessionLocal() as db:
                 row = db.query(StoredCalibrationCurve).filter(
                     StoredCalibrationCurve.id == curve_id).one()
                 recipe = dict(row.recipe or {})
-            a = self._name_curve(recipe['a'], depth + 1)
-            b = self._name_curve(recipe['b'], depth + 1)
-            self._load_curve(recipe['a'])
-            self._load_curve(recipe['b'])
-            self.line(f'Mix_Curves({_quote(name)},{_quote(a)},{_quote(b)},'
-                      f'{_number(recipe.get("percent_a", 50))},'
-                      f'{_number(recipe.get("percent_a_error", 0))});')
-            self.mixed[curve_id] = (a, b, recipe.get('percent_a', 50),
+            self._collect(recipe['a'], order, depth + 1)
+            self._collect(recipe['b'], order, depth + 1)
+            self.mixed[curve_id] = (recipe['a'], recipe['b'], recipe.get('percent_a', 50),
                                     recipe.get('percent_a_error', 0))
-        return name
+        order.append(curve_id)
 
-    def _load_curve(self, curve_id: str) -> None:
-        if curve_id in self.mixed:
-            return
-        self.line(self._curve_statement(curve_id))
-
-    def _curve_statement(self, curve_id: str) -> str:
+    def _load_statement(self, curve_id: str) -> str:
         name = self.curve_names[curve_id]
-        if curve_id in self.mixed:
-            return f'Curve({_quote(name)});'
         spec = curve_registry.get_spec(curve_id)
         if spec.kind == 'builtin':
-            return f'Curve({_quote(name)},{_quote(_BUILTIN_FILES.get(curve_id, curve_id + ".14c"))});'
-        filename = spec.source_filename or f'{curve_id}.14c'
+            filename = _BUILTIN_FILES.get(curve_id, curve_id + '.14c')
+        else:
+            filename = spec.source_filename or f'{curve_id}.14c'
         return f'Curve({_quote(name)},{_quote(filename)});'
+
+    def _curve_statement(self, curve_id: str) -> str:
+        """Select a curve already loaded, by its name alone."""
+        return f'Curve({_quote(self.curve_names[curve_id])});'
 
     def select(self, m: Dict[str, Any]) -> None:
         """State the date's curve and offset, if they are not already in force."""
@@ -303,7 +312,6 @@ def write_oxcal(name: str, analysis_type: str, measurements: List[Dict[str, Any]
     """
     config = config or {}
     writer = _Writer(measurements)
-    writer.open('Plot()')
     resolution = config.get('resolution')
     if resolution and analysis_type == 'bayesian':
         writer.line('Options()')
@@ -312,6 +320,7 @@ def write_oxcal(name: str, analysis_type: str, measurements: List[Dict[str, Any]
         if config.get('uniform_span_prior') is False:
             writer.line('  UniformSpanPrior=FALSE;')
         writer.line('};')
+    writer.open('Plot()')
     models = sorted({(m.get('outlier_model') or 'general').lower()
                      for m in measurements if m.get('outlier_prior')})
     for model in models:
