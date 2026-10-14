@@ -902,13 +902,10 @@ export default function ProjectDetail() {
         )}
 
         {tab === 'dates' && !isUnassigned ? (
+          // How a collection works -- enter once, deploy copies -- is in the
+          // manual (Projects and Date Collections); the empty state says it in
+          // a sentence for someone who has not started one.
           <Box sx={{ p: 3 }}>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 2, maxWidth: '78ch' }}>
-              This project's radiocarbon dates. Enter them once here, then deploy any selection into a
-              new analysis — the same dates can feed several analyses, each modelling them under
-              different criteria. Deployed dates are copies, so editing one here never alters an
-              analysis already created from it.
-            </Typography>
             <ProjectSampleTable
               projectId={project.id}
               projectName={project.name}
