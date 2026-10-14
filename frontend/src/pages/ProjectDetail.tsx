@@ -153,6 +153,8 @@ export default function ProjectDetail() {
   const [deletingProject, setDeletingProject] = useState(false)
   const [deleteAnalysisTarget, setDeleteAnalysisTarget] = useState<AnalysisSummary | null>(null)
   const [deletingAnalysis, setDeletingAnalysis] = useState(false)
+  const [deleteSelectedOpen, setDeleteSelectedOpen] = useState(false)
+  const [deletingSelected, setDeletingSelected] = useState(false)
 
   // 'analyses' | 'dates': the date collection has its own tab (see
   // ProjectSampleTable). The Unassigned pseudo-project is not a real project
@@ -169,10 +171,11 @@ export default function ProjectDetail() {
   const [jobId, setJobId] = useState<string | null>(null)
   const [cancelling, setCancelling] = useState(false)
 
-  // Analyses picked for a comparison, IN THE ORDER THEY WERE TICKED: the first
-  // is the reference every shift on the compare page is measured against, so
-  // the order is a choice the user makes rather than whatever the table sorts
-  // to. An array, not a Set, to say that out loud.
+  // The ticked analyses, IN THE ORDER THEY WERE TICKED: the first is the
+  // reference every shift on the compare page is measured against, so the
+  // order is a choice the user makes rather than whatever the table sorts to.
+  // An array, not a Set, to say that out loud. The same selection is what
+  // "Delete" acts on, where the order does not matter.
   const [selectedForCompare, setSelectedForCompare] = useState<string[]>([])
 
   // The project's own edit/delete, and each row's five actions, live behind a
@@ -401,7 +404,9 @@ export default function ProjectDetail() {
       const response = await fetch(`/api/analysis/${deleteAnalysisTarget.id}`, { method: 'DELETE' })
       const data = await response.json()
       if (data.success) {
+        const deletedId = deleteAnalysisTarget.id
         setDeleteAnalysisTarget(null)
+        setSelectedForCompare((current) => current.filter((id) => id !== deletedId))
         fetchProject(project.id)
       } else {
         notify('Could not delete analysis: ' + formatApiError(data))
@@ -410,6 +415,34 @@ export default function ProjectDetail() {
       notify('Could not delete analysis: ' + describeFetchError(err))
     } finally {
       setDeletingAnalysis(false)
+    }
+  }
+
+  // One request for the whole selection, all-or-nothing on the server, so a
+  // failure leaves the table exactly as it was rather than half-emptied.
+  const handleDeleteSelected = async () => {
+    if (!project || selectedForCompare.length === 0) return
+    setDeletingSelected(true)
+    try {
+      const response = await fetch('/api/analysis', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ analysis_ids: selectedForCompare }),
+      })
+      const data = await response.json()
+      if (data.success) {
+        const n = data.data.deleted_count
+        setDeleteSelectedOpen(false)
+        setSelectedForCompare([])
+        notify(`${n} ${n === 1 ? 'analysis' : 'analyses'} deleted`, 'success')
+        fetchProject(project.id)
+      } else {
+        notify('Could not delete the selected analyses: ' + formatApiError(data))
+      }
+    } catch (err) {
+      notify('Could not delete the selected analyses: ' + describeFetchError(err))
+    } finally {
+      setDeletingSelected(false)
     }
   }
 
@@ -539,8 +572,25 @@ export default function ProjectDetail() {
 
   const analysesCount = project.analyses.length
   const menuAnalysis = rowMenu?.analysis ?? null
+  const selectedCount = selectedForCompare.length
+  const allSelected = analysesCount > 0 && selectedCount === analysesCount
   const showCompare = tab === 'analyses' && analysesCount > 1
-  const compareControl = (
+  // Delete appears only while something is ticked: a permanently greyed-out
+  // red button would be the loudest thing in the bar and do nothing.
+  const showDeleteSelected = tab === 'analyses' && selectedCount > 0
+  const showSelectionControls = showCompare || showDeleteSelected
+  const deleteSelectedControl = showDeleteSelected && (
+    <Button
+      variant="outlined"
+      color="error"
+      size="small"
+      startIcon={<DeleteIcon />}
+      onClick={() => setDeleteSelectedOpen(true)}
+    >
+      Delete ({selectedCount})
+    </Button>
+  )
+  const compareControl = showCompare && (
     <Tooltip
       title={
         compareBlockedBecause() ??
@@ -557,10 +607,16 @@ export default function ProjectDetail() {
             navigate(`/projects/${projectId}/compare?runs=${selectedForCompare.join(',')}`)
           }
         >
-          Compare{selectedForCompare.length > 0 ? ` (${selectedForCompare.length})` : ''}
+          Compare{selectedCount > 0 ? ` (${selectedCount})` : ''}
         </Button>
       </span>
     </Tooltip>
+  )
+  const selectionControls = (
+    <>
+      {deleteSelectedControl}
+      {compareControl}
+    </>
   )
 
   return (
@@ -794,16 +850,16 @@ export default function ProjectDetail() {
             </Tabs>
           )}
           <Box sx={{ flex: 1 }} />
-          {showCompare && (
-            <Box sx={{ display: { xs: 'none', sm: 'flex' } }}>{compareControl}</Box>
+          {showSelectionControls && (
+            <Box sx={{ display: { xs: 'none', sm: 'flex' }, gap: 1 }}>{selectionControls}</Box>
           )}
         </Box>
         {/* Below sm the bar cannot hold the tabs and this at once -- the second
             tab's label was being clipped by it -- so it moves above the table
             it acts on. Same control, declared once. */}
-        {showCompare && (
-          <Box sx={{ display: { xs: 'flex', sm: 'none' }, justifyContent: 'flex-end', px: 2, pt: 2 }}>
-            {compareControl}
+        {showSelectionControls && (
+          <Box sx={{ display: { xs: 'flex', sm: 'none' }, justifyContent: 'flex-end', gap: 1, px: 2, pt: 2 }}>
+            {selectionControls}
           </Box>
         )}
 
@@ -847,7 +903,17 @@ export default function ProjectDetail() {
             <Table stickyHeader sx={{ minWidth: 720 }}>
               <TableHead>
                 <TableRow>
-                  <TableCell padding="checkbox" sx={{ backgroundColor: 'background.muted' }} />
+                  <TableCell padding="checkbox" sx={{ backgroundColor: 'background.muted' }}>
+                    <Checkbox
+                      size="small"
+                      checked={allSelected}
+                      indeterminate={selectedCount > 0 && !allSelected}
+                      onChange={() =>
+                        setSelectedForCompare(allSelected ? [] : project.analyses.map((a) => a.id))
+                      }
+                      inputProps={{ 'aria-label': 'Select all analyses' }}
+                    />
+                  </TableCell>
                   <TableCell sx={{ backgroundColor: 'background.muted' }}>Name</TableCell>
                   {/* Every column but the name shrinks to its own content, so
                       the surplus goes to the one column that carries meaning
@@ -881,7 +947,7 @@ export default function ProjectDetail() {
                         checked={selectedForCompare.includes(a.id)}
                         onClick={(e) => e.stopPropagation()}
                         onChange={() => toggleCompare(a.id)}
-                        inputProps={{ 'aria-label': `Select ${a.name} for comparison` }}
+                        inputProps={{ 'aria-label': `Select ${a.name}` }}
                       />
                     </TableCell>
                     {/* The row navigates on click, which no keyboard user can
@@ -1113,6 +1179,32 @@ export default function ProjectDetail() {
         loading={deletingAnalysis}
         onConfirm={handleDeleteAnalysis}
         onCancel={() => setDeleteAnalysisTarget(null)}
+      />
+
+      <ConfirmDialog
+        open={deleteSelectedOpen}
+        title={`Delete ${selectedCount} ${selectedCount === 1 ? 'analysis' : 'analyses'}?`}
+        message={
+          <>
+            Permanently delete{' '}
+            {selectedCount === 1 ? 'this analysis' : `these ${selectedCount} analyses`}? This
+            removes their samples and results and cannot be undone.
+            <Box component="ul" sx={{ m: 0, mt: 1, pl: 2.5 }}>
+              {project.analyses
+                .filter((a) => selectedForCompare.includes(a.id))
+                .slice(0, 10)
+                .map((a) => (
+                  <li key={a.id}>{a.name}</li>
+                ))}
+              {selectedCount > 10 && <li>and {selectedCount - 10} more</li>}
+            </Box>
+          </>
+        }
+        confirmLabel="Delete"
+        danger
+        loading={deletingSelected}
+        onConfirm={handleDeleteSelected}
+        onCancel={() => setDeleteSelectedOpen(false)}
       />
 
       <ConfirmDialog

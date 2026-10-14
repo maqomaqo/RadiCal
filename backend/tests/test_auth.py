@@ -438,6 +438,15 @@ class TestOneUserCannotReachAnother:
         # let a stranger interfere rather than merely look.
         assert stranger.delete(f'/api/jobs/{job_id}').status_code == 404
 
+    def test_a_bulk_delete_cannot_reach_someone_else_s_analysis(self, two_users, owned_work):
+        owner, stranger = two_users
+        _, analysis_id = owned_work
+
+        response = stranger.request('DELETE', '/api/analysis',
+                                    json={'analysis_ids': [analysis_id]})
+        assert response.status_code == 404
+        assert owner.get(f'/api/analysis/{analysis_id}').status_code == 200
+
 
 class TestCurvesAreTheException:
     """

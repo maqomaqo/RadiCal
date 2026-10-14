@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.database import get_db
 from app.schemas.sample import (
     CalibrateRequest, BayesianRequest, GroupCalibrationRequest, SameEventRequest,
+    AnalysisBulkDelete,
 )
 from app.services.calibration import (
     REPORTING_CONFIDENCE_LEVELS,
@@ -1808,19 +1809,65 @@ def delete_analysis(analysis_id: str, db: Session = Depends(get_db),
     dependency order: results and relationships, then samples, then groups,
     then the analysis.
     """
-    analysis = owned_or_404(
+    owned_or_404(
         db.query(Analysis).filter(Analysis.id == analysis_id).first(),
         user, 'That analysis')
 
-    db.query(AnalysisResult).filter(AnalysisResult.analysis_id == analysis_id).delete(synchronize_session=False)
-    db.query(StratigraphicRelationship).filter(StratigraphicRelationship.analysis_id == analysis_id).delete(synchronize_session=False)
-    db.query(ModelElement).filter(ModelElement.analysis_id == analysis_id).delete(synchronize_session=False)
-    db.query(RadiocarbonSample).filter(RadiocarbonSample.analysis_id == analysis_id).delete(synchronize_session=False)
-    db.query(SampleGroup).filter(SampleGroup.analysis_id == analysis_id).delete(synchronize_session=False)
-    db.delete(analysis)
+    _delete_analyses(db, [analysis_id])
     db.commit()
 
     return {"success": True, "data": {"deleted_analysis_id": analysis_id}}
+
+
+@router.delete("/analysis")
+def bulk_delete_analyses(request: AnalysisBulkDelete, db: Session = Depends(get_db),
+                         user: User = Depends(current_user)):
+    """
+    Permanently delete several analyses at once -- the project page's
+    "delete selected".
+
+    All-or-nothing on the ids, as for the collection's bulk delete: an id that
+    is not one of the caller's analyses fails the whole request, so a caller
+    never has to work out which of its ids went. Someone else's analysis
+    answers the same 404 as one that does not exist (auth.owned_or_404).
+
+    The ids travel in the body, not the query string, for the same length
+    reason as DELETE /projects/{id}/samples.
+    """
+    ids = request.analysis_ids
+    found = {
+        row.id for row in
+        db.query(Analysis.id).filter(Analysis.id.in_(ids), Analysis.owner_id == user.id).all()
+    }
+    missing = [aid for aid in ids if aid not in found]
+    if missing:
+        raise HTTPException(
+            status_code=404,
+            detail=f"These analyses were not found: {', '.join(missing)}",
+        )
+
+    _delete_analyses(db, ids)
+    db.commit()
+
+    return {"success": True, "data": {"deleted_count": len(ids), "deleted_analysis_ids": sorted(ids)}}
+
+
+def _delete_analyses(db: Session, ids: List[str]) -> None:
+    """
+    Everything tied to these analyses, then the analyses. Ownership is the
+    caller's to have checked.
+
+    SampleGroup, StratigraphicRelationship and ModelElement have no cascade at
+    either the ORM or the DB level, so everything is deleted explicitly in
+    dependency order: results and relationships, then samples, then groups,
+    then the analyses. Those last go through the ORM, not a query delete, so
+    their own cascades (earlier runs) still apply.
+    """
+    for model in (AnalysisResult, StratigraphicRelationship, ModelElement,
+                  RadiocarbonSample, SampleGroup):
+        db.query(model).filter(model.analysis_id.in_(ids)).delete(synchronize_session=False)
+    for analysis in db.query(Analysis).filter(Analysis.id.in_(ids)).all():
+        db.delete(analysis)
 
 
 @router.patch("/analysis/{analysis_id}")

@@ -1052,7 +1052,8 @@ differently.
 From a project page you can re-run all analyses at once, or re-run, duplicate, or edit a single
 analysis (editing replaces saved inputs and re-runs in place). Ticking two or more finished
 analyses and pressing **Compare** opens them side by side; see
-[Comparing Analyses](#comparing-analyses).
+[Comparing Analyses](#comparing-analyses). Ticking any analyses and pressing **Delete** removes them
+all at once, after a confirmation; this cannot be undone.
 
 Deploying always creates a **Bayesian** analysis and opens its editor, but you can switch the type.
 Choosing Single Calibration for more than one date stores it as a group calibration.

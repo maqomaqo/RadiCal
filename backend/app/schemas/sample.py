@@ -430,6 +430,18 @@ class ProjectSampleBulkDelete(BaseModel):
         return v
 
 
+class AnalysisBulkDelete(BaseModel):
+    """DELETE body for removing several analyses at once (api/analysis.py)."""
+    analysis_ids: List[str] = Field(..., min_length=1, max_length=500)
+
+    @field_validator("analysis_ids")
+    @classmethod
+    def _no_duplicate_ids(cls, v: List[str]) -> List[str]:
+        if len(set(v)) != len(v):
+            raise ValueError("analysis_ids contains a duplicate id")
+        return v
+
+
 class DeployRequest(BaseModel):
     """
     POST body for deploying a project's dates into a new analysis (see
