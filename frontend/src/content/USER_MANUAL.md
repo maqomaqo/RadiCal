@@ -1019,13 +1019,18 @@ Results page **Export** offers three formats:
 
 Elsewhere:
 
-- **Export all (zip)** (a project's ⋮ menu): the whole project in one file. `analyses/` holds every
-  analysis exactly as its own **Export → JSON** gives it, and `inputs/` what each was run from: settings,
-  dates and model structure. `samples.csv` is the project's date collection in the columns the CSV
-  import reads, so it goes straight back in. `summary.csv` has one row per modelled Boundary and
+- **Export** (a project page): the whole project in one .zip, which **Import project** reads back
+  in (see [Sharing and replicating a project](#sharing-and-replicating-a-project)). Tick analyses
+  and press **Export (n)** to save only those, with the collection dates they use. Inside:
+  `analyses/` holds every analysis exactly as its own **Export → JSON** gives it, and `inputs/` what
+  each was run from: settings, dates and model structure. `runs/` holds the run each result came
+  from, and `curves/` every curve used that RadiCal does not ship. `samples.csv` is the project's
+  date collection in the columns the CSV import reads, so it goes straight back in; `samples.json`
+  holds the same dates with every field. `summary.csv` has one row per modelled Boundary and
   duration of every analysis, with the solver, convergence, R̂, seed and cross-check beside it.
   Calendar ages there are cal BP and lengths of time are years, in separate columns. An analysis with
-  nothing modelled still gets a row. PDFs are not included.
+  nothing modelled still gets a row. Positions follow the project's coordinate precision everywhere
+  in the file. PDFs are not included.
 - **Curve data** (curve browser page): **Export this window** saves the visible stretch as CSV;
   **Export profile** saves the whole expected-resolution profile. A curve itself can be downloaded
   from the Curves page, byte-for-byte as imported.
@@ -1057,6 +1062,40 @@ all at once, after a confirmation; this cannot be undone.
 
 Deploying always creates a **Bayesian** analysis and opens its editor, but you can switch the type.
 Choosing Single Calibration for more than one date stores it as a group calibration.
+
+### Sharing and replicating a project
+
+A project can be passed to another researcher, who loads it into their own copy of RadiCal and
+runs it again.
+
+**To share**, open the project and press **Export**. To share only some analyses, tick them and
+press **Export (n)**. Send the .zip that is saved. It holds every analysis's dates, settings and
+model, your results, the date collection, and any curve you imported or mixed yourself.
+
+**To load one**, go to **Projects** and press **Import project**, then choose the .zip. Before
+anything is stored, RadiCal lists the analyses, the dates and any curves that will be added to
+your curves, along with anything to check first. Name the project and press **Import**. It arrives
+as a new project of your own. Importing the same file again makes a second copy.
+
+With **Run every analysis after importing** ticked (the default), every analysis then runs on your
+installation. When the runs finish, the project page says whether each result matches the author's
+to within 10 years, or lists the Boundaries and durations that differ. Each analysis keeps the
+author's result as its earlier run, so **Compare with an earlier run** on its Results page sets the
+two side by side.
+
+Results can differ for three reasons:
+
+- the author's copy of a shipped curve such as IntCal20 is not the same file as yours (the import
+  warns about this);
+- the project rounds its coordinates on the way out, which moves spatial dispersal results (the
+  import warns about this too);
+- the two installations run different versions of RadiCal. **Compare with an earlier run** shows
+  the version each run used.
+
+A curve you imported is matched by its numbers, not its name: if you already have the same
+curve, yours is used; otherwise it is added. A file that has been altered since it was saved is
+refused whole, as is one with any date that would be refused if typed in. A package from a newer
+version of RadiCal than yours cannot be read until you update.
 
 ## Comparing Analyses
 

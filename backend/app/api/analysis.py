@@ -357,9 +357,31 @@ def _get_or_migrate_tree(analysis: Analysis, db: Session) -> Tuple[Optional[Dict
     if existing is not None:
         return existing, False
 
+    migrated = migrated_tree(analysis, db)
+    if migrated is None:
+        return None, False
+    root, linearized, element_ids = migrated
+    for s in analysis.measurements:
+        s.element_id = element_ids.get(s.id)
+
+    _persist_tree(analysis.id, root, db)
+    db.commit()
+    return root, linearized
+
+
+def migrated_tree(analysis: Analysis,
+                  db: Session) -> Optional[Tuple[Dict, bool, Dict[str, str]]]:
+    """
+    The tree _get_or_migrate_tree would store for an analysis that has none,
+    built without writing anything: (root, linearized, the phase each date
+    lands in by sample id). None for an analysis with no dates.
+
+    Split out so a read-only caller -- the project package -- can carry an
+    old analysis's structure without migrating it as a side effect.
+    """
     samples = list(analysis.measurements)
     if not samples:
-        return None, False
+        return None
 
     groups = db.query(SampleGroup).filter(SampleGroup.analysis_id == analysis.id).all()
     relationships = db.query(StratigraphicRelationship).filter(
@@ -377,6 +399,7 @@ def _get_or_migrate_tree(analysis: Analysis, db: Session) -> Tuple[Optional[Dict
     )
 
     # Dates that were in no context need a phase of their own.
+    element_ids = {s.id: s.group_id for s in samples if s.group_id}
     loose = [s for s in samples if not s.group_id]
     if loose:
         loose_id = str(uuid.uuid4())
@@ -385,14 +408,8 @@ def _get_or_migrate_tree(analysis: Analysis, db: Session) -> Tuple[Optional[Dict
             'tpq_age_bp': None, 'taq_age_bp': None, 'children': [],
         })
         for s in loose:
-            s.element_id = loose_id
-    for s in samples:
-        if s.group_id:
-            s.element_id = s.group_id
-
-    _persist_tree(analysis.id, root, db)
-    db.commit()
-    return root, linearized
+            element_ids[s.id] = loose_id
+    return root, linearized, element_ids
 
 
 def _sample_row(

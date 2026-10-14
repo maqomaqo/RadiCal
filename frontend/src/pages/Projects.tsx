@@ -17,15 +17,17 @@ import {
   IconButton,
   Tooltip,
 } from '@mui/material'
-import { Link as RouterLink, useSearchParams } from 'react-router-dom'
+import { Link as RouterLink, useNavigate, useSearchParams } from 'react-router-dom'
 import AddIcon from '@mui/icons-material/Add'
 import InboxIcon from '@mui/icons-material/Inbox'
 import DeleteIcon from '@mui/icons-material/Delete'
 import SearchIcon from '@mui/icons-material/Search'
 import ChevronRightIcon from '@mui/icons-material/ChevronRight'
+import UploadFileIcon from '@mui/icons-material/UploadFile'
 import { formatApiError, describeFetchError } from '@/utils/apiError'
 import { useNotify } from '@/contexts/NotificationContext'
 import ConfirmDialog from '@/components/ConfirmDialog'
+import ImportProjectDialog from '@/components/ImportProjectDialog'
 import StatusStrip, { statusSummary } from '@/components/StatusStrip'
 import type { StatusCounts } from '@/components/StatusStrip'
 import { parseServerTime, relativeTime } from '@/utils/serverTime'
@@ -213,6 +215,8 @@ function ProjectCard({
 
 export default function Projects() {
   const notify = useNotify()
+  const navigate = useNavigate()
+  const [importOpen, setImportOpen] = useState(false)
   const [projects, setProjects] = useState<ProjectSummary[]>([])
   const [unassignedCount, setUnassignedCount] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -361,9 +365,14 @@ export default function Projects() {
               Dates collected in a project can be reused across every analysis in it.
             </Typography>
           </Box>
-          <Button variant="contained" startIcon={<AddIcon />} onClick={() => setDialogOpen(true)}>
-            New Project
-          </Button>
+          <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap' }}>
+            <Button variant="outlined" startIcon={<UploadFileIcon />} onClick={() => setImportOpen(true)}>
+              Import project
+            </Button>
+            <Button variant="contained" startIcon={<AddIcon />} onClick={() => setDialogOpen(true)}>
+              New Project
+            </Button>
+          </Box>
         </Box>
 
         {showControls && (
@@ -461,9 +470,14 @@ export default function Projects() {
                 A project groups analyses by site, region, or research question, and holds a
                 collection of dates you can deploy into any of them.
               </Typography>
-              <Button variant="contained" startIcon={<AddIcon />} onClick={() => setDialogOpen(true)}>
-                New Project
-              </Button>
+              <Box sx={{ display: 'flex', gap: 1.5, justifyContent: 'center', flexWrap: 'wrap' }}>
+                <Button variant="outlined" startIcon={<UploadFileIcon />} onClick={() => setImportOpen(true)}>
+                  Import project
+                </Button>
+                <Button variant="contained" startIcon={<AddIcon />} onClick={() => setDialogOpen(true)}>
+                  New Project
+                </Button>
+              </Box>
             </Paper>
           ) : visible.length === 0 ? (
             <Paper sx={{ p: 4, textAlign: 'center' }}>
@@ -510,6 +524,17 @@ export default function Projects() {
           </Button>
         </DialogActions>
       </Dialog>
+
+      <ImportProjectDialog
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        onImported={({ projectId, jobId }) => {
+          setImportOpen(false)
+          // The project page follows the run, and words its report against
+          // the author's results rather than a previous run of its own.
+          navigate(`/projects/${projectId}`, { state: { jobId, imported: true } })
+        }}
+      />
 
       <ConfirmDialog
         open={!!deleteTarget}

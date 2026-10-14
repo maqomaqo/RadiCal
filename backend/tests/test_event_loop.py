@@ -33,6 +33,8 @@ AWAITS_AN_UPLOAD = {
     'preview_curve',
     'create_curve',
     'import_dates',
+    'preview_project_import',
+    'import_project',
 }
 
 # Handlers that touch nothing: no database session, no file, no computation.

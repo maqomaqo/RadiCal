@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
-import { useParams, useNavigate, Link as RouterLink } from 'react-router-dom'
+import { useParams, useNavigate, useLocation, Link as RouterLink } from 'react-router-dom'
 import {
   Container,
   Box,
@@ -122,19 +122,27 @@ export default function ProjectDetail() {
   const navigate = useNavigate()
   const notify = useNotify()
   const isUnassigned = projectId === 'unassigned'
+  const location = useLocation()
+  // Set by Import project: the run it queued, and that this project's
+  // previous runs are the author's (see ImportProjectDialog).
+  const arrival = location.state as { jobId?: string | null; imported?: boolean } | null
 
-  // The whole project as one zip: every analysis's Export JSON, what each was
-  // run from, the collection, and a summary table (api/project_export.py).
-  // Built in one request -- stored results only, no solver or plots -- so a
-  // large project is seconds, said once while it builds.
-  const handleExportAll = async () => {
-    if (!projectId || isUnassigned) return
-    notify('Building the project export…', 'info')
+  // The project as one package: every analysis's Export JSON, what each was
+  // run from, the run its results came from, the curves they need, the
+  // collection and a summary table (api/project_export.py). Import project
+  // reads it back in. `ids` narrows it to those analyses and the dates they
+  // use. Stored results only, no solver or plots, so a large project is
+  // seconds, said once while it builds.
+  const handleExport = async (ids?: string[]) => {
+    if (!projectId) return
+    notify('Building the export…', 'info')
     try {
       const name = (project?.name || 'project').replace(/[^A-Za-z0-9._-]+/g, '-')
-      await saveDownload(`/api/projects/${projectId}/export`, `project-${name}.zip`)
+      const query = ids ? '?' + ids.map((id) => `analysis=${encodeURIComponent(id)}`).join('&') : ''
+      const suffix = ids ? `-${ids.length}-${ids.length === 1 ? 'analysis' : 'analyses'}` : ''
+      await saveDownload(`/api/projects/${projectId}/export${query}`, `project-${name}${suffix}.zip`)
     } catch (err) {
-      notify('Could not export the project: ' + describeFetchError(err))
+      notify('Could not export: ' + describeFetchError(err))
     }
   }
 
@@ -168,7 +176,8 @@ export default function ProjectDetail() {
   const [rerunAllOpen, setRerunAllOpen] = useState(false)
   const [rerunningAll, setRerunningAll] = useState(false)
   const [rerunSummary, setRerunSummary] = useState<RerunSummary | null>(null)
-  const [jobId, setJobId] = useState<string | null>(null)
+  const [jobId, setJobId] = useState<string | null>(arrival?.jobId ?? null)
+  const [imported, setImported] = useState(!!arrival?.imported)
   const [cancelling, setCancelling] = useState(false)
 
   // The ticked analyses, IN THE ORDER THEY WERE TICKED: the first is the
@@ -191,6 +200,13 @@ export default function ProjectDetail() {
     setSelectedForCompare([])
   }, [projectId])
 
+  // Read once, then dropped from history, so a reload does not follow the
+  // import's run a second time.
+  useEffect(() => {
+    if (arrival) navigate(location.pathname, { replace: true, state: null })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   // Only a job this page started. Unlike the results page there is no useful
   // fallback by target -- a project's most recent job may be from last week,
   // and a bar for something long finished is worse than none. Arriving mid-run
@@ -212,7 +228,7 @@ export default function ProjectDetail() {
           details: failed.map((f) => `${f.name}: ${f.error}`),
         })
       } else if (projectId) {
-        reportRunDiff(projectId)
+        reportRunDiff(projectId).finally(() => setImported(false))
       }
     },
   })
@@ -228,20 +244,26 @@ export default function ProjectDetail() {
       if (!response.ok || !body.success) return
       const diff = body.data as RunDiff
       if (diff.compared === 0) return
+      // After an import the previous run is the author's, so the report is
+      // about agreeing with them rather than about what changed.
+      const against = imported ? "the author's results" : 'their previous run'
+      const finished = imported ? 'Run finished.' : 'Re-run finished.'
       if (diff.changed.length === 0) {
         setRerunSummary({
           severity: 'success',
           headline:
             diff.compared === 1
-              ? `Re-run finished. The analysis matches its previous run to within ${diff.shift_years} years.`
-              : `Re-run finished. All ${diff.compared} analyses match their previous run to within ${diff.shift_years} years.`,
+              ? `${finished} The analysis matches ${imported ? against : 'its previous run'} to within ${diff.shift_years} years.`
+              : `${finished} All ${diff.compared} analyses match ${against} to within ${diff.shift_years} years.`,
         })
         return
       }
       const lines = diff.changed.map(describeRunChange)
       setRerunSummary({
         severity: 'info',
-        headline: `Re-run finished. ${diff.changed.length} of ${diff.compared} analyses changed since their previous run:`,
+        headline: imported
+          ? `Run finished. ${diff.changed.length} of ${diff.compared} analyses differ from the author's results:`
+          : `Re-run finished. ${diff.changed.length} of ${diff.compared} analyses changed since their previous run:`,
         details: lines.length > 20 ? [...lines.slice(0, 20), `and ${lines.length - 20} more`] : lines,
       })
     } catch {
@@ -612,9 +634,20 @@ export default function ProjectDetail() {
       </span>
     </Tooltip>
   )
+  const exportSelectedControl = showDeleteSelected && (
+    <Button
+      variant="outlined"
+      size="small"
+      startIcon={<DownloadIcon />}
+      onClick={() => handleExport(selectedForCompare)}
+    >
+      Export ({selectedCount})
+    </Button>
+  )
   const selectionControls = (
     <>
       {deleteSelectedControl}
+      {exportSelectedControl}
       {compareControl}
     </>
   )
@@ -750,6 +783,11 @@ export default function ProjectDetail() {
               Re-run all
             </Button>
           )}
+          {!isUnassigned && (
+            <Button variant="outlined" startIcon={<DownloadIcon />} onClick={() => handleExport()}>
+              Export
+            </Button>
+          )}
         </Box>
 
       </Paper>
@@ -771,17 +809,6 @@ export default function ProjectDetail() {
             <EditIcon fontSize="small" />
           </ListItemIcon>
           <ListItemText>Edit project</ListItemText>
-        </MenuItem>
-        <MenuItem
-          onClick={() => {
-            setProjectMenuAnchor(null)
-            handleExportAll()
-          }}
-        >
-          <ListItemIcon>
-            <DownloadIcon fontSize="small" />
-          </ListItemIcon>
-          <ListItemText>Export all (zip)</ListItemText>
         </MenuItem>
         <Divider />
         <MenuItem
@@ -858,7 +885,18 @@ export default function ProjectDetail() {
             tab's label was being clipped by it -- so it moves above the table
             it acts on. Same control, declared once. */}
         {showSelectionControls && (
-          <Box sx={{ display: { xs: 'flex', sm: 'none' }, justifyContent: 'flex-end', gap: 1, px: 2, pt: 2 }}>
+          <Box
+            sx={{
+              display: { xs: 'flex', sm: 'none' },
+              flexWrap: 'wrap',
+              justifyContent: 'flex-end',
+              gap: 1,
+              px: 2,
+              pt: 2,
+              // Three controls fit a phone only on one line each.
+              '& .MuiButton-root': { whiteSpace: 'nowrap' },
+            }}
+          >
             {selectionControls}
           </Box>
         )}
