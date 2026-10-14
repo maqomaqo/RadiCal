@@ -34,11 +34,16 @@ import PlaylistAddIcon from '@mui/icons-material/PlaylistAdd'
 import UploadFileIcon from '@mui/icons-material/UploadFile'
 import MoreVertIcon from '@mui/icons-material/MoreVert'
 import ViewColumnIcon from '@mui/icons-material/ViewColumn'
+import DownloadIcon from '@mui/icons-material/Download'
+import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown'
+import EditNoteIcon from '@mui/icons-material/EditNote'
 import ConfirmDialog from '@/components/ConfirmDialog'
-import ImportDatesDialog, { type ImportPreview } from '@/components/ImportDatesDialog'
+import ImportDatesDialog, { type ImportOptions, type ImportPreview } from '@/components/ImportDatesDialog'
 import SampleSelectionBar, { type DeltaRValue } from '@/components/SampleSelectionBar'
 import PlaceOnMapDialog from '@/components/PlaceOnMapDialog'
 import { formatApiError, describeFetchError } from '@/utils/apiError'
+import { saveDownload } from '@/utils/saveDownload'
+import { splitByCollection, describeMatch } from '@/utils/collectionMatches'
 import { useNotify } from '@/contexts/NotificationContext'
 import { curveLabel, curveOptions } from '@/api/curves'
 import { useCurves } from '@/hooks/useCurves'
@@ -262,6 +267,10 @@ function limitsLabel(sample: ProjectSample): string {
 
 interface Props {
   projectId: string
+  /** For the exported file's name. */
+  projectName?: string
+  /** Told the collection's size whenever it is read, so the page's counts follow it. */
+  onCountChange?: (count: number) => void
   /**
    * Whether this project has turned basemap tiles on. Passed down rather than
    * fetched here: the flag belongs to the project, and the page that owns the
@@ -270,7 +279,12 @@ interface Props {
   mapTilesEnabled?: boolean
 }
 
-export default function ProjectSampleTable({ projectId, mapTilesEnabled = false }: Props) {
+export default function ProjectSampleTable({
+  projectId,
+  projectName,
+  onCountChange,
+  mapTilesEnabled = false,
+}: Props) {
   const navigate = useNavigate()
   const notify = useNotify()
   const { curves, loading: curvesLoading, error: curvesError } = useCurves()
@@ -296,6 +310,9 @@ export default function ProjectSampleTable({ projectId, mapTilesEnabled = false 
 
   const [importOpen, setImportOpen] = useState(false)
   const [importing, setImporting] = useState(false)
+  // Every way of adding dates is one menu: entering one, pasting a list,
+  // importing a file, and the template a file is written from.
+  const [addAnchor, setAddAnchor] = useState<HTMLElement | null>(null)
 
   const [deleteTarget, setDeleteTarget] = useState<ProjectSample | null>(null)
   const [deleting, setDeleting] = useState(false)
@@ -317,6 +334,7 @@ export default function ProjectSampleTable({ projectId, mapTilesEnabled = false 
       const data = await response.json()
       if (data.success) {
         setSamples(data.data.items)
+        onCountChange?.(data.data.items.length)
         // Drop any selection pointing at rows that no longer exist.
         setSelected((prev) => new Set([...prev].filter((id) => data.data.items.some((s: ProjectSample) => s.id === id))))
       } else {
@@ -403,18 +421,35 @@ export default function ProjectSampleTable({ projectId, mapTilesEnabled = false 
       setPasteError({ headline: 'No dates found. Use one per line: name, age, error' })
       return
     }
+    // As the file import does: a name the collection holds is skipped, and
+    // said so, with any value that differs from the stored date.
+    const { fresh, matched } = splitByCollection(rows, samples)
+    if (fresh.length === 0) {
+      setPasteError({
+        headline: 'All of these are already in the collection:',
+        details: matched.map(describeMatch),
+      })
+      return
+    }
     setPasteError(null)
     setSaving(true)
     try {
       const response = await fetch(`/api/projects/${projectId}/samples`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ samples: rows }),
+        body: JSON.stringify({ samples: fresh }),
       })
       const data = await response.json()
       if (data.success) {
         setPasteOpen(false)
         setPasteText('')
+        if (matched.length > 0) {
+          notify(
+            `Added ${fresh.length}. Skipped ${matched.length} already in the collection: ` +
+              matched.map(describeMatch).join(', '),
+            'info'
+          )
+        }
         fetchSamples()
       } else {
         notify('Could not add dates: ' + formatApiError(data))
@@ -434,20 +469,23 @@ export default function ProjectSampleTable({ projectId, mapTilesEnabled = false 
    * each date was filed under becomes its default context, which deploying
    * then groups by.
    */
-  const handleImport = async (preview: ImportPreview) => {
+  const handleImport = async (preview: ImportPreview, options: ImportOptions) => {
     setImporting(true)
     try {
       const response = await fetch(`/api/projects/${projectId}/samples`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          samples: preview.dates.map((d) => ({
+          samples: (options.dates ?? preview.dates).map((d) => ({
             sample_name: d.sample_name,
             age_bp: d.age_bp,
             error_1sigma: d.error_1sigma,
             material_type: d.material_type || 'unknown',
             curve_id: d.curve_id,
             sample_type: d.sample_type,
+            delta_r: d.delta_r,
+            delta_r_error: d.delta_r_error,
+            delta_r_source: d.delta_r_source,
             default_context_name: d.phase_name,
             tpq_age_bp: d.tpq_age_bp,
             taq_age_bp: d.taq_age_bp,
@@ -477,6 +515,23 @@ export default function ProjectSampleTable({ projectId, mapTilesEnabled = false 
       setImporting(false)
     }
   }
+
+  // The collection, or the ticked dates, as a CSV the importer reads straight
+  // back in with every field (api/project_samples.export_project_samples).
+  const handleExport = async (ids?: string[]) => {
+    const query = ids ? '?' + ids.map((id) => `sample=${encodeURIComponent(id)}`).join('&') : ''
+    const stem = (projectName || 'project').replace(/[^A-Za-z0-9._-]+/g, '-')
+    try {
+      await saveDownload(`/api/projects/${projectId}/samples/export${query}`, `dates-${stem}.csv`)
+    } catch (err) {
+      notify('Could not export the dates: ' + describeFetchError(err))
+    }
+  }
+
+  const downloadTemplate = () =>
+    saveDownload('/api/import/csv-template', 'radical-dates-template.csv').catch((err) =>
+      notify('Could not download the template: ' + describeFetchError(err))
+    )
 
   const handleDelete = async () => {
     if (!deleteTarget) return
@@ -980,26 +1035,20 @@ export default function ProjectSampleTable({ projectId, mapTilesEnabled = false 
   return (
     <Box>
       <Box sx={{ display: 'flex', gap: 1, mb: 2, flexWrap: 'wrap' }}>
-        <Button variant="outlined" startIcon={<AddIcon />} onClick={openAdd}>
-          Add Date
-        </Button>
         <Button
           variant="outlined"
-          startIcon={<PlaylistAddIcon />}
-          onClick={() => {
-            setPasteError(null)
-            setPasteOpen(true)
-          }}
+          startIcon={<AddIcon />}
+          endIcon={<ArrowDropDownIcon />}
+          aria-haspopup="true"
+          onClick={(e) => setAddAnchor(e.currentTarget)}
         >
-          Paste Dates
+          Add dates
         </Button>
-        <Button
-          variant="outlined"
-          startIcon={<UploadFileIcon />}
-          onClick={() => setImportOpen(true)}
-        >
-          Import File
-        </Button>
+        {samples.length > 0 && (
+          <Button variant="outlined" startIcon={<DownloadIcon />} onClick={() => handleExport()}>
+            Export CSV
+          </Button>
+        )}
 
         {/* Every field the collection stores can be put on screen, whether or
             not this project has filled it in -- notes, depth, location and
@@ -1016,6 +1065,55 @@ export default function ProjectSampleTable({ projectId, mapTilesEnabled = false 
           Columns
         </Button>
       </Box>
+
+      <Menu anchorEl={addAnchor} open={!!addAnchor} onClose={() => setAddAnchor(null)}>
+        <MenuItem
+          onClick={() => {
+            setAddAnchor(null)
+            openAdd()
+          }}
+        >
+          <ListItemIcon>
+            <EditNoteIcon fontSize="small" />
+          </ListItemIcon>
+          <ListItemText>Enter one date</ListItemText>
+        </MenuItem>
+        <MenuItem
+          onClick={() => {
+            setAddAnchor(null)
+            setPasteError(null)
+            setPasteOpen(true)
+          }}
+        >
+          <ListItemIcon>
+            <PlaylistAddIcon fontSize="small" />
+          </ListItemIcon>
+          <ListItemText>Paste a list</ListItemText>
+        </MenuItem>
+        <MenuItem
+          onClick={() => {
+            setAddAnchor(null)
+            setImportOpen(true)
+          }}
+        >
+          <ListItemIcon>
+            <UploadFileIcon fontSize="small" />
+          </ListItemIcon>
+          <ListItemText secondary="CSV or OxCal">Import a file</ListItemText>
+        </MenuItem>
+        <Divider />
+        <MenuItem
+          onClick={() => {
+            setAddAnchor(null)
+            downloadTemplate()
+          }}
+        >
+          <ListItemIcon>
+            <DownloadIcon fontSize="small" />
+          </ListItemIcon>
+          <ListItemText>Download CSV template</ListItemText>
+        </MenuItem>
+      </Menu>
 
       <Menu
         anchorEl={columnsAnchor}
@@ -1078,6 +1176,7 @@ export default function ProjectSampleTable({ projectId, mapTilesEnabled = false 
           onAssignCurve={handleAssignCurve}
           onAssignDeltaR={handleAssignDeltaR}
           onPlaceOnMap={() => setPlaceOpen(true)}
+          onExport={() => handleExport([...selected])}
           onDelete={() => setBulkDeleteOpen(true)}
         />
       )}
@@ -1119,8 +1218,14 @@ export default function ProjectSampleTable({ projectId, mapTilesEnabled = false 
           {/* The one contained button on the panel, and only while the
               collection is empty: with dates in it the page's primary action
               is the masthead's, not this. */}
-          <Button variant="contained" startIcon={<AddIcon />} onClick={openAdd}>
-            Add Date
+          <Button
+            variant="contained"
+            startIcon={<AddIcon />}
+            endIcon={<ArrowDropDownIcon />}
+            aria-haspopup="true"
+            onClick={(e) => setAddAnchor(e.currentTarget)}
+          >
+            Add dates
           </Button>
         </Box>
       ) : (
@@ -1545,6 +1650,7 @@ export default function ProjectSampleTable({ projectId, mapTilesEnabled = false 
         open={importOpen}
         onClose={() => setImportOpen(false)}
         target="collection"
+        collection={samples}
         confirming={importing}
         onConfirm={handleImport}
       />

@@ -73,7 +73,7 @@ analysis.
 
 ## Importing Dates from a File
 
-**Import from a File** (on New Analysis, and **Import File** on a project's Dates tab) reads a
+**Import from a File** (on New Analysis, and **Add dates → Import a file** on a project's Dates tab) reads a
 spreadsheet of dates or an OxCal model. The file is parsed first and shown for review; confirming
 places them where hand-typed dates go.
 
@@ -88,10 +88,13 @@ Column **order is free** and common spellings are understood: `Lab Code`, `Age B
 `± 1σ`, `sd`, `Material`, `Curve`, `Context` all resolve correctly. Comma, tab and
 semicolon separators all work.
 
-Use **Download template** for a file with the full column list and three worked example rows.
-The optional columns are `material_type`, `curve_id`, `sample_type`, `delta_r`,
-`delta_r_error`, `phase`, `tpq_age_bp`, `taq_age_bp`, `outlier_model`, `outlier_prior`, `depth_cm`,
-`location` and `notes`.
+Use **Download template** (in the import dialog, or **Add dates → Download CSV template** on a
+project's Dates tab) for a file with the full column list and three worked example rows. The
+optional columns are `material_type`, `curve_id`, `sample_type`, `delta_r`, `delta_r_error`,
+`phase`, `tpq_age_bp`, `taq_age_bp`, `outlier_model`, `outlier_prior`, `depth_cm`, `ring_offset`,
+`ring_offset_error`, `inbuilt_years`, `inbuilt_shape`, `latitude`, `longitude`, `location`,
+`notes` and `delta_r_source`. The last is written by the collection's own **Export CSV**, to keep a
+looked-up ΔR's record of how it was derived; leave it blank otherwise.
 
 The `phase` column prepares dates for use in a model. Dates sharing a phase name are
 grouped, and a starting structure is built: one Start/End pair with the phases
@@ -1031,6 +1034,8 @@ Elsewhere:
   Calendar ages there are cal BP and lengths of time are years, in separate columns. An analysis with
   nothing modelled still gets a row. Positions follow the project's coordinate precision everywhere
   in the file. PDFs are not included.
+- **Export CSV** (a project's Dates tab): the date collection, or the ticked dates, in the columns
+  the CSV import reads. See [Projects and Date Collections](#projects-and-date-collections).
 - **Curve data** (curve browser page): **Export this window** saves the visible stretch as CSV;
   **Export profile** saves the whole expected-resolution profile. A curve itself can be downloaded
   from the Curves page, byte-for-byte as imported.
@@ -1044,11 +1049,21 @@ Elsewhere:
 ## Projects and Date Collections
 
 A **Project** groups analyses and can hold its own date collection, independent of any particular
-analysis. Dates can be entered one at a time, pasted in bulk
-(`name, age, error[, material[, context[, curve]]]` per line), or imported from a file (see
-[Importing Dates from a File](#importing-dates-from-a-file)). A collection holds dates rather than
-models, so importing an OxCal file here keeps each date's phase as its default context but not the
-structure; import from a new analysis to keep that.
+analysis. On the project's **Dates** tab, **Add dates** offers every way in: enter one date, paste a
+list (`name, age, error[, material[, context[, curve]]]` per line), import a file (see
+[Importing Dates from a File](#importing-dates-from-a-file)), or download the CSV template. A
+collection holds dates rather than models, so importing an OxCal file here keeps each date's phase
+as its default context but not the structure; import from a new analysis to keep that.
+
+A date whose name is already in the collection is skipped when you paste or import, so bringing in
+the same file twice does not double it. Names are matched ignoring case and surrounding spaces. The
+import preview lists the dates it will skip and marks any whose age, error or curve differs from
+the stored one; to change a stored date, edit it in the collection. To add them anyway, as
+separate dates, tick **Add these again** in the preview.
+
+**Export CSV** saves the collection, or the ticked dates from the selection bar, as a CSV that
+imports straight back in with every field it was stored with. Positions follow the project's
+coordinate precision.
 
 Deploying dates copies the values into a new analysis, so editing the collection afterwards never
 changes an analysis already created, and the same dates can be deployed more than once to model

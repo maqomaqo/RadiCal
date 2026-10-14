@@ -909,7 +909,16 @@ export default function ProjectDetail() {
               different criteria. Deployed dates are copies, so editing one here never alters an
               analysis already created from it.
             </Typography>
-            <ProjectSampleTable projectId={project.id} mapTilesEnabled={project.map_tiles_enabled} />
+            <ProjectSampleTable
+              projectId={project.id}
+              projectName={project.name}
+              onCountChange={(count) =>
+                setProject((current) =>
+                  current && current.samples_count !== count ? { ...current, samples_count: count } : current
+                )
+              }
+              mapTilesEnabled={project.map_tiles_enabled}
+            />
           </Box>
         ) : analysesCount === 0 ? (
           <Box sx={{ px: 3, py: 7, textAlign: 'center' }}>
