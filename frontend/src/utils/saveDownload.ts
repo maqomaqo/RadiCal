@@ -6,8 +6,11 @@ import { formatApiError } from '@/utils/apiError'
  * happily as a one-cell file and a PDF reader or unzipper fails on only when
  * opened -- so unchecked, a failed export is noticed by whoever opens it
  * looking for their results.
+ *
+ * Resolves to the response's headers, for an export that reports something
+ * about the file beside it.
  */
-export async function saveDownload(url: string, filename: string): Promise<void> {
+export async function saveDownload(url: string, filename: string): Promise<Headers> {
   const response = await fetch(url)
   if (!response.ok) {
     throw new Error(formatApiError(await response.json().catch(() => null)))
@@ -21,4 +24,5 @@ export async function saveDownload(url: string, filename: string): Promise<void>
   a.click()
   window.URL.revokeObjectURL(href)
   document.body.removeChild(a)
+  return response.headers
 }

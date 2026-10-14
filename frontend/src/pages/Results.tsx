@@ -1321,6 +1321,28 @@ export default function Results() {
     }
   }
 
+  // For a reader who runs OxCal. Inputs only, so it is the same file before
+  // and after a run; what OxCal's language cannot carry is listed in its
+  // header, and said here so nobody has to open the file to find out.
+  const handleExportOxcal = async () => {
+    if (!analysisId) return
+    try {
+      const headers = await saveDownload(
+        `/api/results/${analysisId}/export/oxcal`,
+        `${(analysis?.name || 'analysis').replace(/[^A-Za-z0-9._-]+/g, '-')}.oxcal`
+      )
+      const left = Number(headers.get('X-RadiCal-Not-Written') || 0)
+      if (left > 0) {
+        notify(
+          `${left} setting${left === 1 ? '' : 's'} could not be written in OxCal's language. The file's header lists ${left === 1 ? 'it' : 'them'}.`,
+          'info'
+        )
+      }
+    } catch (err) {
+      notify('Failed to export the OxCal file: ' + (err as Error).message)
+    }
+  }
+
   // The PDF is rendered server-side at a plot per modelled parameter, so a
   // large model takes seconds -- long enough that a button just sitting there
   // reads as broken. The CSV, returned in milliseconds, needs no such state.
@@ -2831,6 +2853,7 @@ export default function Results() {
               { label: 'CSV', secondary: 'Spreadsheet', onSelect: handleExportCSV },
               { label: 'JSON', secondary: 'Machine-readable', onSelect: handleExportJSON },
               { label: 'PDF', secondary: 'Printable report', onSelect: handleExportPDF },
+              { label: 'OxCal', secondary: 'Model file to run in OxCal', onSelect: handleExportOxcal },
             ].map((format) => (
               <MenuItem
                 key={format.label}

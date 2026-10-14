@@ -1026,7 +1026,7 @@ marked uncertain.
 
 ## Exporting Data
 
-Results page **Export** offers three formats:
+Results page **Export** offers four formats:
 
 - **CSV**: the full results table in the selected date format. Where a run
   produced durations and differences, they follow as a second block (blank line, own header — since
@@ -1044,6 +1044,17 @@ Results page **Export** offers three formats:
   KDE, a Group Calibration's same-event test, and a plot per modelled
   parameter with HPD ranges marked. Uses the currently selected date format. A large model takes a
   few seconds.
+
+- **OxCal**: the analysis as an OxCal model file (`.oxcal`), for someone who runs OxCal. It holds
+  the dates, their curves, ΔR and outlier settings, the Sequences, Phases and Boundaries, wiggle
+  matches (`D_Sequence`, or `V_Sequence` where the gaps have uncertainties), age-depth models
+  (`P_Sequence`, with each level's `z=`) and the Resolution. A curve you imported must be loaded
+  into OxCal under the file name given; a mixed curve is written as `Mix_Curves`. Some settings
+  have no equivalent in that file and are left out rather than approximated: TPQ and TAQ limits,
+  inbuilt-age allowances, and any date not placed in the model. A Hiatus is written as a comment,
+  because in OxCal the gap is simply the two Boundaries either side. The file's header lists what
+  was left out, and the page says how many. Importing the file back into RadiCal gives the same
+  dates and structure.
 
 Elsewhere:
 

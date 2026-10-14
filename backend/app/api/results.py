@@ -13,6 +13,7 @@ from app.services import statistics
 from typing import Dict, List, Optional
 from decimal import Decimal, ROUND_HALF_EVEN
 import io
+import re
 import csv
 import json
 
@@ -995,6 +996,58 @@ def get_p_before(analysis_id: str, cal_bp: float, db: Session = Depends(get_db),
     """
     _owned_analysis(analysis_id, db, user)
     return {"success": True, "data": _p_before(analysis_id, db, _threshold(cal_bp))}
+
+
+_OXCAL_FIELDS = (
+    'sample_name', 'age_bp', 'error_1sigma', 'curve_id', 'delta_r', 'delta_r_error',
+    'outlier_prior', 'outlier_model', 'depth_cm', 'ring_offset', 'ring_offset_error',
+    'tpq_age_bp', 'taq_age_bp', 'inbuilt_years', 'inbuilt_shape', 'element_id',
+)
+
+
+@router.get("/results/{analysis_id}/export/oxcal")
+def export_oxcal(analysis_id: str, db: Session = Depends(get_db),
+                 user: User = Depends(current_user)):
+    """
+    The analysis as an OxCal model file (services/oxcal_export.py): its
+    dates, curves, reservoir offsets, outlier settings and structure, for a
+    reader who runs OxCal. What OxCal's language there cannot carry is listed
+    in the file's header, and counted in the X-RadiCal-Not-Written header so
+    the page can say so.
+
+    Inputs only, so it is the same file before and after a run. An analysis
+    stored before model trees is written from the structure reading it would
+    build, without storing that.
+    """
+    from app.api.analysis import migrated_tree
+    from app.api.run_history import app_commit
+    from app.services import oxcal_export
+
+    analysis = _owned_analysis(analysis_id, db, user)
+    measurements = [{f: getattr(s, f, None) for f in _OXCAL_FIELDS}
+                    for s in analysis.measurements]
+    tree = rows_to_tree(
+        db.query(ModelElement).filter(ModelElement.analysis_id == analysis_id).all())
+    if tree is None and analysis.analysis_type == 'bayesian':
+        migrated = migrated_tree(analysis, db)
+        if migrated is not None:
+            tree, _linearized, element_ids = migrated
+            ids = [s.id for s in analysis.measurements]
+            for m, sample_id in zip(measurements, ids):
+                m['element_id'] = element_ids.get(sample_id)
+    text, omitted = oxcal_export.write_oxcal(
+        analysis.name, analysis.analysis_type, measurements, tree,
+        analysis.bayesian_config, app_commit())
+    stem = re.sub(r'[^A-Za-z0-9._-]+', '-', analysis.name or 'analysis').strip('-.') or 'analysis'
+    return StreamingResponse(
+        iter([text]),
+        media_type='text/plain',
+        headers={
+            'Content-Disposition': f'attachment; filename="{stem}.oxcal"',
+            'X-RadiCal-Not-Written': str(len(omitted)),
+            'Access-Control-Expose-Headers': 'X-RadiCal-Not-Written',
+        },
+    )
 
 
 @router.get("/results/{analysis_id}/pdf")
