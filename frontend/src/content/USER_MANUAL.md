@@ -14,18 +14,19 @@
 10. [Viewing Results](#viewing-results)
 11. [Durations and Differences](#durations-and-differences)
 12. [Testing Influence](#testing-influence)
-13. [Kernel Density Estimates](#kernel-density-estimates)
-14. [Same-Event Test](#same-event-test)
-15. [Wiggle Matching](#wiggle-matching)
-16. [Age-Depth Modelling](#age-depth-modelling)
-17. [Geographic Analysis](#geographic-analysis)
-18. [Exporting Data](#exporting-data)
-19. [Projects and Date Collections](#projects-and-date-collections)
-20. [Comparing Analyses](#comparing-analyses)
-21. [Scripts and Access Tokens](#scripts-and-access-tokens)
-22. [Best Practices](#best-practices)
-23. [Appendix A: Mathematical Methods](#appendix-a-mathematical-methods)
-24. [Bibliography](#bibliography)
+13. [Simulating from a Known Truth](#simulating-from-a-known-truth)
+14. [Kernel Density Estimates](#kernel-density-estimates)
+15. [Same-Event Test](#same-event-test)
+16. [Wiggle Matching](#wiggle-matching)
+17. [Age-Depth Modelling](#age-depth-modelling)
+18. [Geographic Analysis](#geographic-analysis)
+19. [Exporting Data](#exporting-data)
+20. [Projects and Date Collections](#projects-and-date-collections)
+21. [Comparing Analyses](#comparing-analyses)
+22. [Scripts and Access Tokens](#scripts-and-access-tokens)
+23. [Best Practices](#best-practices)
+24. [Appendix A: Mathematical Methods](#appendix-a-mathematical-methods)
+25. [Bibliography](#bibliography)
 
 ## Getting Started
 
@@ -675,6 +676,47 @@ refresh it.
 **Reading with care.** A date with large influence is not necessarily wrong: a model with few
 dates per phase is expected to depend on each of them. What the table shows is where the answer
 is fragile, which is where the context of each date matters most.
+
+## Simulating from a Known Truth
+
+What does a model do with dates whose true ages you know? **Simulation** answers it: it keeps an
+analysis's model and its dates' errors, curves, ΔR and inbuilt-age allowances, but replaces every
+radiocarbon age with one drawn from a truth you set. Running the copies shows what the model
+reports when the answer is known, for example whether a site with no gaps still produces
+apparent gaps between its layers.
+
+On a Bayesian result or a Group Calibration, press **Simulate…**. The dialog shows the **truth**:
+a window of calendar years for each Phase. Each starts from the model's own result (the medians of
+the Boundaries either side of it), and you can type any years over them in the page's date format.
+A Phase with no dates (a sterile layer) and a Hiatus have windows too. **Close every gap** sets
+those to zero length and moves everything younger up to meet the Phase before, giving the truth of
+a site occupied without a break. A Group Calibration has a single window for all its dates.
+
+Each simulated date is made the way a real one comes about:
+
+- its **event** falls at random inside its Phase's window;
+- its **material** is older than the event by its inbuilt age, drawn from the date's own
+  allowance (see [Inbuilt Age](#inbuilt-age)), if it has one;
+- its **radiocarbon age** is the calibration curve's value at that age, plus the date's ΔR, plus
+  laboratory scatter at the date's own error, rounded to a whole year.
+
+**Replicates.** **r0** is the expected case: every event at the centre of its window, no scatter,
+and the inbuilt age at its average (half the maximum, or the mean for an exponential allowance).
+**r1** onwards are noisy draws. Their number is set in the dialog, up to 20. The **seed** decides
+every draw, so the same seed and settings give exactly the same dates again. Two simulations with
+the same seed and different truths share their draws, so they differ in the truth alone. Untick
+**Laboratory scatter** or **Inbuilt age** to leave either out.
+
+**Simulate and run** saves each replicate as an ordinary analysis in the project, named after the
+simulation and its replicate (*… r0*, *… r1*), and runs them all in the background. The Simulation
+section then lists each set with a chip per replicate that opens its result, a **Compare** button
+for the first four, and the **truth key**: a CSV with one row per simulated date per replicate,
+giving its window, event, inbuilt age, the age of its material, the curve's value there, the
+scatter drawn (`z`, in units of the error), and the radiocarbon age it was given. All ages in the
+truth key are in cal BP.
+
+The simulated dates scatter about the curve's mean value, at the laboratory error only, as is
+usual for this kind of test. ΔR is taken as exactly the value the date carries.
 
 ## Kernel Density Estimates
 

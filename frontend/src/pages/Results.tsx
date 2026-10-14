@@ -63,6 +63,7 @@ import CurvePosteriorPlot from '@/components/CurvePosteriorPlot'
 import HarrisMatrixDiagram from '@/components/HarrisMatrixDiagram'
 import DurationsPanel from '@/components/DurationsPanel'
 import InfluencePanel from '@/components/InfluencePanel'
+import SimulationPanel from '@/components/SimulationPanel'
 import KdePanel from '@/components/KdePanel'
 import SameEventPanel from '@/components/SameEventPanel'
 import { modelCanReportIntervals } from '@/utils/intervalsAvailable'
@@ -3707,6 +3708,19 @@ export default function Results() {
         analysis.status === 'completed' &&
         analysis.solver?.method !== 'wiggle_match' && (
           <InfluencePanel analysisId={analysis.id} dateFormat={dateFormat} />
+        )}
+
+      {/* What the model does with dates from a truth set here. Starts from a
+          Bayesian model or a group calibration; a wiggle match's dates are
+          placed by their ring offsets, not drawn Phase by Phase. */}
+      {(isBayesian || analysis.analysis_type === 'group_calibration') &&
+        analysis.status === 'completed' &&
+        analysis.solver?.method !== 'wiggle_match' && (
+          <SimulationPanel
+            analysisId={analysis.id}
+            analysisName={analysis.name}
+            dateFormat={dateFormat}
+          />
         )}
 
       {/* Said once, quietly, and only where it could have applied: a run that

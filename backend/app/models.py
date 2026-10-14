@@ -77,6 +77,35 @@ class PersonalAccessToken(Base):
     last_used_at = Column(DateTime, nullable=True)
 
 
+class Simulation(Base):
+    """
+    A set of simulated replicates of one analysis (api/simulation.py): the
+    truth they were drawn from, the plan, the seed, and the truth key -- every
+    simulated date's event, inbuilt age and what it was made to read -- so a
+    result can be scored against what really happened. The replicates are
+    ordinary analyses carrying simulation_id.
+    """
+    __tablename__ = "simulations"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    owner_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"),
+                      nullable=False, index=True)
+    project_id = Column(String, ForeignKey("projects.id", ondelete="SET NULL"), nullable=True)
+    source_analysis_id = Column(String, ForeignKey("analyses.id", ondelete="SET NULL"),
+                                nullable=True, index=True)
+    name = Column(String, nullable=False)
+    seed = Column(Integer, nullable=False)
+    replicates = Column(Integer, nullable=False)
+    scatter = Column(Boolean, nullable=False, default=True)
+    inbuilt = Column(Boolean, nullable=False, default=True)
+    # [{element_id, name, kind, old_bp, young_bp}], cal BP.
+    windows = Column(JSON, nullable=False)
+    # Every replicate's dates: services/simulation.simulate's rows, each with
+    # its replicate number. Deferred: only the truth-key download reads it.
+    truth_key = deferred(Column(JSON, nullable=False))
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+
 class Project(Base):
     """
     Groups analyses together (by site, dig season, or research question).
@@ -463,6 +492,13 @@ class Analysis(Base):
     # its Boundaries and durations. Deferred: it runs to hundreds of kilobytes
     # and only the influence section reads it.
     influence = deferred(Column(JSON, nullable=True))
+
+    # A replicate of a simulation (services/simulation.py): which one, and
+    # which replicate, 0 being the noise-free expected case. Null for an
+    # analysis of real dates.
+    simulation_id = Column(String, ForeignKey('simulations.id', ondelete='SET NULL'),
+                           nullable=True, index=True)
+    replicate = Column(Integer, nullable=True)
 
     # Relations
     project = relationship('Project', back_populates='analyses')

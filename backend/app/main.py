@@ -6,7 +6,8 @@ from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
 import os
 from app.api import (auth, curves, analysis, results, projects, project_samples,
-                     imports, jobs, reservoir, dispersal, run_history, influence)
+                     imports, jobs, reservoir, dispersal, run_history, influence,
+                     simulation)
 from app.database import init_db
 
 load_dotenv()
@@ -96,6 +97,7 @@ app.include_router(reservoir.router, prefix="/api", tags=["marine reservoir"])
 app.include_router(dispersal.router, prefix="/api", tags=["dispersal"])
 app.include_router(run_history.router, prefix="/api", tags=["run history"])
 app.include_router(influence.router, prefix="/api", tags=["influence"])
+app.include_router(simulation.router, prefix="/api", tags=["simulation"])
 
 # A deployment signing tokens with the published development secret is a
 # deployment where anyone holding this source can mint a token for any
