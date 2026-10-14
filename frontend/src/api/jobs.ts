@@ -11,7 +11,7 @@ export type JobState = 'queued' | 'running' | 'completed' | 'failed' | 'cancelle
 
 export interface Job {
   job_id: string
-  kind: 'analysis_run' | 'project_rerun'
+  kind: 'analysis_run' | 'project_rerun' | 'influence'
   target_id: string | null
   state: JobState
   /**
