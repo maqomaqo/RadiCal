@@ -116,11 +116,12 @@ class TestParsingWhatMustBeRefused:
         assert 'duplicated calendar age' in self._errors(text=text)
 
     def test_post_bomb_negative_cal_bp(self):
-        """Post-bomb curves need an F14C likelihood this app does not have.
-        Refusing says so; accepting would calibrate them as ordinary ages."""
+        """The likelihood is already formed in F14C, as a post-bomb curve
+        needs, but nothing else in the app handles dates after 1950 AD.
+        Refusing says so rather than half-supporting them."""
         text = curve_text([(-5, -100, 10), (0, 0, 20), (10, 9, 20)])
         message = self._errors(text=text)
-        assert 'F14C' in message and 'negative' in message
+        assert 'Post-bomb' in message and 'negative' in message
 
     def test_f14c_in_the_radiocarbon_column(self):
         text = curve_text([(0, 1.0, 0.003), (10, 0.99, 0.003), (20, 0.98, 0.003)])

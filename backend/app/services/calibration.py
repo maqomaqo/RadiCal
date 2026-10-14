@@ -31,6 +31,15 @@ SIGMA_3 = erf(3 / sqrt(2))      # 0.9973002039...  reported as 99.7%
 REPORTING_CONFIDENCE_LEVELS = (SIGMA_1, SIGMA_2, SIGMA_3)
 CONFIDENCE_LABELS = {SIGMA_1: '68.3%', SIGMA_2: '95.4%', SIGMA_3: '99.7%'}
 
+# Libby's mean life of 14C, in years: a conventional radiocarbon age r is
+# defined as -8033 ln F14C, so F14C = exp(-r / 8033).
+LIBBY_MEAN_LIFE = 8033.0
+
+
+def f14c(age_bp):
+    """Fraction modern for a conventional radiocarbon age."""
+    return np.exp(-np.asarray(age_bp, dtype=float) / LIBBY_MEAN_LIFE)
+
 
 @dataclass
 class CalibrationPoint:
@@ -195,8 +204,8 @@ class CalibrationCurve:
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
         Calibrate a radiocarbon age to a calendar age by the probability
-        method: at each curve point, combine the curve and sample errors in
-        quadrature, evaluate the Gaussian likelihood, weight by the
+        method: at each curve point, evaluate the likelihood (in F14C, with
+        curve and sample errors in quadrature; see likelihood), weight by the
         calendar-year interval the point represents, and normalise.
 
         The likelihood includes the 1/sigma normalisation term, not just the
@@ -223,17 +232,8 @@ class CalibrationCurve:
         if len(self.cal_ages) == 0:
             raise ValueError("Calibration curve data is empty")
 
-        offset = delta_r or 0.0
-        offset_error = delta_r_error or 0.0
-
-        # Combined uncertainty: sqrt(sigma_curve^2 + sigma_measurement^2 + sigma_deltaR^2)
-        combined_error = np.sqrt(self.c14_errors**2 + c14_error**2 + offset_error**2)
-
-        # P(c14_obs | cal_age), normalised up to the shared 1/sqrt(2*pi).
-        # The 1/sigma factor matters because combined_error varies from point
-        # to point along the curve.
-        log_likelihood = -0.5 * ((self.c14_ages - (c14_age - offset)) / combined_error)**2
-        likelihood = np.exp(log_likelihood) / combined_error
+        likelihood = self.likelihood(
+            self.cal_ages, c14_age, c14_error, delta_r, delta_r_error)
 
         # Weighted by local grid spacing before normalising, so the curve
         # file's calendar-year density does not distort the posterior shape.
@@ -250,6 +250,55 @@ class CalibrationCurve:
         
         return self.cal_ages, posterior_prob
     
+    def likelihood(
+        self,
+        cal_ages,
+        c14_age: float,
+        c14_error: float,
+        delta_r: Optional[float] = None,
+        delta_r_error: Optional[float] = None,
+    ) -> np.ndarray:
+        """
+        p(measurement | calendar age) at each of `cal_ages`, formed in F14C.
+
+        A laboratory counts 14C, so it is the fraction modern that carries
+        Gaussian error; a conventional age is -8033 ln F14C, and its symmetric
+        error is a linearisation that stretches the old tail and squeezes the
+        young one. Comparing measurement and curve in F14C removes that, as
+        OxCal does by default. Through the Holocene the difference is a
+        fraction of a year; it grows for dates near the curve's old end, where
+        the BP error is far from symmetric, and for near-modern dates.
+
+        The curve's age and the reservoir offset are combined in radiocarbon
+        years first -- Delta-R is defined as an offset in years -- and the
+        expected age and its error are then carried to F14C:
+
+            F_c = f14c(curve(t) + delta_r),  s_c = F_c sqrt(sc^2 + sdr^2) / 8033
+            F_m = f14c(c14_age),             s_m = F_m c14_error / 8033
+            L(t) = N(F_m; F_c, s_c^2 + s_m^2) * F_m / 8033
+
+        The 1/sigma term is kept because the combined error varies along the
+        curve (Bronk Ramsey 2001 eqs. 1-2). The trailing F_m / 8033 is the
+        Jacobian back to the measured age: a constant, so no posterior moves,
+        but it keeps L a density over the reported BP age, which is the scale
+        model evidence (p(data | model)) is quoted on.
+
+        Zero beyond the curve's ends, where interpolate() clamps rather than
+        extrapolating and the curve says nothing.
+        """
+        cal_ages = np.asarray(cal_ages, dtype=float)
+        curve_c14, curve_error = self.interpolate(cal_ages)
+        expected = f14c(curve_c14 + (delta_r or 0.0))
+        expected_error = expected * np.sqrt(
+            curve_error ** 2 + (delta_r_error or 0.0) ** 2) / LIBBY_MEAN_LIFE
+        measured = float(f14c(c14_age))
+        measured_error = measured * c14_error / LIBBY_MEAN_LIFE
+        sigma = np.sqrt(expected_error ** 2 + measured_error ** 2)
+        lik = (np.exp(-0.5 * ((measured - expected) / sigma) ** 2) / sigma
+               * measured / LIBBY_MEAN_LIFE)
+        inside = (cal_ages >= self.cal_ages[0]) & (cal_ages <= self.cal_ages[-1])
+        return np.where(inside, lik, 0.0)
+
     def interpolate(self, cal_age) -> Tuple[np.ndarray, np.ndarray]:
         """
         Linearly interpolate the curve's radiocarbon age and its 1-sigma

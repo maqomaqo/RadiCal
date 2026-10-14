@@ -348,9 +348,7 @@ def parse_curve(
         if cal < 0:
             result.errors.append(
                 f"Row {line_number}: calendar age {cal:g} is negative (after "
-                f"1950 AD). Post-bomb curves need an F14C likelihood rather "
-                "than a conventional-age one, which this app does not yet "
-                "have, so it cannot calibrate against one."
+                f"1950 AD). Post-bomb curves are not supported."
             )
             continue
 

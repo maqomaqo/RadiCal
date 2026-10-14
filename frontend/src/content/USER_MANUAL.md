@@ -189,7 +189,7 @@ Check that the curve draws correctly to confirm the rows and columns were read i
 
 Files are refused rather than repaired, each refusal naming the row and reason: a non-positive
 error, a duplicated calendar age, a radiocarbon column that looks like F¹⁴C rather than an age, or
-a negative cal BP (post-bomb curves need a different likelihood, which this app does not implement).
+a negative cal BP (post-bomb curves, after 1950 AD, are not supported).
 Rows written oldest-first are simply sorted, as the IntCal files themselves are written that way.
 
 Give a curve **aliases** if files refer to it by other names. An alias of `IntCal13` lets an
@@ -1360,18 +1360,24 @@ A single calibration can return ranges that are not multiples of five: SHCal20 i
 ### A.2 Calibrating one date
 
 The probability method of Stuiver and Reimer (1993), in the form OxCal uses (Bronk Ramsey 2001,
-eqs. 1–2). For a measurement `a ± sigma_a` against a curve giving radiocarbon age `mu(t)` with
-1-sigma curve error `sigma_c(t)`:
+eqs. 1–2), compared in fraction modern (F14C). For a measurement `a ± sigma_a` against a curve
+giving radiocarbon age `mu(t)` with 1-sigma curve error `sigma_c(t)`, and `F(r) = exp(-r/8033)`:
 
 ```
-sigma_combined(t)^2 = sigma_c(t)^2 + sigma_a^2 + sigma_dR^2
+F_m = F(a)              s_m = F_m sigma_a / 8033
+F_c = F(mu(t) + dR)     s_c = F_c sqrt(sigma_c(t)^2 + sigma_dR^2) / 8033
+s(t)^2 = s_m^2 + s_c^2
 
-p(t) proportional to  exp( -(mu(t) - (a - dR))^2 / (2 sigma_combined(t)^2) )
-                      / sigma_combined(t)
-                      * w(t)
+p(t) proportional to  exp( -(F_m - F_c)^2 / (2 s(t)^2) ) / s(t) * w(t)
 ```
 
-Three details matter:
+Four details matter:
+
+- **The comparison is in F14C.** A laboratory counts 14C atoms, so it is the fraction modern that
+  carries Gaussian error; a radiocarbon age is a logarithm of it, and a symmetric error in years is
+  an approximation that grows poor for old samples. Through the Holocene the two forms agree to a
+  fraction of a year. At 30,000 BP the calibrated mean moves about 7 years older, at 42,000 BP about
+  40, and near the curve's end by hundreds. OxCal works the same way by default.
 
 - **The `1/sigma` factor is kept**, not just the exponential. Curve error varies with calendar age,
   and omitting the normalising term biases the posterior toward stretches where the curve is poorly
@@ -1379,9 +1385,9 @@ Three details matter:
 - **`w(t)` is the calendar-year width each curve grid point stands for** (half the distance to each
   neighbour). IntCal20 is tabulated at 1, 5, 10 and 20-year steps in different ranges, so
   unweighted summing would concentrate posterior mass wherever the file happens to be dense.
-- **`dR` is the local marine reservoir offset**, applied as a shift because the marine curve
-  models only the global average. Its uncertainty `sigma_dR` enters the quadrature sum, so a
-  poorly known offset widens the calibrated range.
+- **`dR` is the local marine reservoir offset**, applied as a shift in radiocarbon years because
+  the marine curve models only the global average. Its uncertainty `sigma_dR` joins the curve error
+  before conversion, so a poorly known offset widens the calibrated range.
 
 Curve values at non-grid calendar ages are linearly interpolated in both `mu` and `sigma_c`.
 Beyond the curve's ends the likelihood is zero: the curve has nothing to say, so neither does the
@@ -1727,9 +1733,8 @@ which solver is used:
 - **Likelihood cut-off.** OxCal treats a date's likelihood as zero beyond a fixed 5.26 standard
   deviations of the measurement; RadiCal cuts at a millionth of each date's own peak. The effect on a
   span is about 0.1 years.
-- **Calibration.** OxCal forms the likelihood in fraction modern (F14C) and interpolates the curve
-  with cubic splines; RadiCal works in radiocarbon years and interpolates linearly. The difference
-  is negligible through the Holocene and grows for very old and near-modern dates.
+- **Curve interpolation.** OxCal interpolates between curve points with cubic splines; RadiCal
+  interpolates linearly. The difference is small, and confined to wiggly stretches of the curve.
 - **Random variation.** OxCal seeds each run from the clock, so repeat runs differ slightly; a
   difference of a few tenths of a year from OxCal is within that variation.
 

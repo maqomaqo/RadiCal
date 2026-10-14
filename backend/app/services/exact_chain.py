@@ -796,16 +796,8 @@ def _calibration_likelihood(points: np.ndarray, measurement: Dict) -> np.ndarray
     """The measurement's own likelihood at each calendar age: the age of the
     MATERIAL, with its reservoir offset applied."""
     curve = get_curve(measurement.get('curve_id') or 'intcal20')
-    delta_r = measurement.get('delta_r') or 0.0
-    delta_r_error = measurement.get('delta_r_error') or 0.0
-
-    c14, curve_error = curve.interpolate(points)
-    sigma2 = curve_error ** 2 + measurement['error_1sigma'] ** 2 + delta_r_error ** 2
-    lik = np.exp(-0.5 * (c14 - (measurement['age_bp'] - delta_r)) ** 2 / sigma2) / np.sqrt(sigma2)
-    # interpolate() CLAMPS beyond the curve's ends rather than extrapolating,
-    # which would give a grid point past the curve the finite likelihood of
-    # its last point. The curve says nothing there, so neither does the date.
-    return np.where((points >= curve.cal_ages[0]) & (points <= curve.cal_ages[-1]), lik, 0.0)
+    return curve.likelihood(points, measurement['age_bp'], measurement['error_1sigma'],
+                            measurement.get('delta_r'), measurement.get('delta_r_error'))
 
 
 def event_likelihood(grid: np.ndarray, measurement: Dict) -> np.ndarray:
@@ -3173,9 +3165,17 @@ def _tail_integrals(grid: np.ndarray, cumulative: Dict[str, np.ndarray],
         half = 0.5 * dt * likelihood[date_id]
         if older:      # [F, top]: (C[top] - h[top]) - (C[F-1] + h[F])
             G = (padded[-1] - half[-1]) - (padded[:-1] + half)
+            edge = -1
         else:          # [bottom, F]: (C[F] - h[F]) - (C[-1] + h[0])
             G = (padded[1:] - half) - (padded[0] + half[0])
-        out[date_id] = np.maximum(G, 0.0)
+            edge = 0
+        G = np.maximum(G, 0.0)
+        # With F on the grid's edge the interval has no width. The difference
+        # above leaves rounding there instead of zero, and _tail_marginals
+        # divides by G, so a residue of 1e-16 would hand that cell a weight
+        # it does not have.
+        G[edge] = 0.0
+        out[date_id] = G
     return out
 
 
