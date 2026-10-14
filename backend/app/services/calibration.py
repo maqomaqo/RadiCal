@@ -1,5 +1,8 @@
+import contextvars
+from contextlib import contextmanager
+
 import numpy as np
-from scipy.interpolate import interp1d
+from scipy.interpolate import CubicSpline, interp1d
 from dataclasses import dataclass
 from math import erf, sqrt
 from typing import Tuple, Optional, List, Dict
@@ -39,6 +42,44 @@ LIBBY_MEAN_LIFE = 8033.0
 def f14c(age_bp):
     """Fraction modern for a conventional radiocarbon age."""
     return np.exp(-np.asarray(age_bp, dtype=float) / LIBBY_MEAN_LIFE)
+
+
+# How far from the curve, in standard deviations of the F14C difference,
+# observed OxCal 4.4 behaviour treats a measurement's likelihood as zero:
+# exp(-z^2/2) < 1e-6.
+OXCAL_LIKELIHOOD_CUTOFF_Z = float(np.sqrt(-2.0 * np.log(1e-6)))      # 5.2565
+
+# Whether the calculation running in this context is matching OxCal 4.4
+# ("Match OxCal 4.4" on an analysis; see matching_oxcal). A context variable
+# rather than an argument because the likelihood is reached from the solvers,
+# the agreement indices and the wiggle match alike, and every one of them has
+# to see the same setting for the run to describe one model.
+_MATCHING_OXCAL = contextvars.ContextVar('matching_oxcal', default=False)
+
+
+@contextmanager
+def matching_oxcal(enabled: bool = True):
+    """
+    Within the block, likelihoods are formed as observed OxCal 4.4 behaviour
+    forms them: the curve interpolated cubically between its points, and the
+    likelihood cut to zero beyond OXCAL_LIKELIHOOD_CUTOFF_Z. Off by default,
+    where interpolation is linear and nothing is cut.
+    """
+    token = _MATCHING_OXCAL.set(bool(enabled))
+    try:
+        yield
+    finally:
+        _MATCHING_OXCAL.reset(token)
+
+
+def is_matching_oxcal() -> bool:
+    return _MATCHING_OXCAL.get()
+
+
+def set_matching_oxcal(enabled: bool) -> None:
+    """For a worker process that holds one run at a time (gibbs._chain_server),
+    where there is no enclosing block to scope it to."""
+    _MATCHING_OXCAL.set(bool(enabled))
 
 
 @dataclass
@@ -174,6 +215,19 @@ class CalibrationCurve:
         self.c14_errors = np.array(c14_errors, dtype=float)
         self.curve_name = "Unknown"
         self._grid_weights_cache: Optional[np.ndarray] = None
+        self._cubic: Optional[Tuple[CubicSpline, CubicSpline]] = None
+
+    def __getstate__(self):
+        # Curves are pickled to the sampler's worker processes. The cubic
+        # splines are a cache, rebuilt on first use, and some SciPy versions
+        # cannot pickle them.
+        state = dict(self.__dict__)
+        state['_cubic'] = None
+        return state
+
+    def __setstate__(self, state):
+        state.setdefault('_cubic', None)
+        self.__dict__.update(state)
 
     def _grid_weights(self) -> np.ndarray:
         """
@@ -284,20 +338,42 @@ class CalibrationCurve:
         model evidence (p(data | model)) is quoted on.
 
         Zero beyond the curve's ends, where interpolate() clamps rather than
-        extrapolating and the curve says nothing.
+        extrapolating and the curve says nothing. Under matching_oxcal the
+        curve is interpolated cubically and the likelihood cut beyond
+        OXCAL_LIKELIHOOD_CUTOFF_Z as well.
         """
         cal_ages = np.asarray(cal_ages, dtype=float)
-        curve_c14, curve_error = self.interpolate(cal_ages)
+        matching = is_matching_oxcal()
+        curve_c14, curve_error = (self.interpolate_cubic(cal_ages) if matching
+                                  else self.interpolate(cal_ages))
         expected = f14c(curve_c14 + (delta_r or 0.0))
         expected_error = expected * np.sqrt(
             curve_error ** 2 + (delta_r_error or 0.0) ** 2) / LIBBY_MEAN_LIFE
         measured = float(f14c(c14_age))
         measured_error = measured * c14_error / LIBBY_MEAN_LIFE
         sigma = np.sqrt(expected_error ** 2 + measured_error ** 2)
-        lik = (np.exp(-0.5 * ((measured - expected) / sigma) ** 2) / sigma
-               * measured / LIBBY_MEAN_LIFE)
+        z = (measured - expected) / sigma
+        lik = np.exp(-0.5 * z ** 2) / sigma * measured / LIBBY_MEAN_LIFE
         inside = (cal_ages >= self.cal_ages[0]) & (cal_ages <= self.cal_ages[-1])
+        if matching:
+            inside &= np.abs(z) <= OXCAL_LIKELIHOOD_CUTOFF_Z
         return np.where(inside, lik, 0.0)
+
+    def interpolate_cubic(self, cal_age) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        As interpolate, with a cubic spline through the curve's points in
+        place of straight lines, for matching OxCal. Identical at the points
+        themselves; between them it follows the curve's wiggles rather than
+        cutting across them. Clamped beyond the ends, as interpolate is.
+        """
+        if self._cubic is None:
+            self._cubic = (CubicSpline(self.cal_ages, self.c14_ages),
+                           CubicSpline(self.cal_ages, self.c14_errors))
+        at = np.clip(np.asarray(cal_age, dtype=float), self.cal_ages[0], self.cal_ages[-1])
+        c14_spline, error_spline = self._cubic
+        # A spline through positive errors can overshoot below zero between
+        # two small ones.
+        return c14_spline(at), np.maximum(error_spline(at), 1e-9)
 
     def interpolate(self, cal_age) -> Tuple[np.ndarray, np.ndarray]:
         """

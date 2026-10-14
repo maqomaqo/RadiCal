@@ -48,6 +48,10 @@ export interface McmcConfig {
   // BayesianConfigInput.uniform_span_prior on the backend for what it does.
   // On by default there and here.
   uniform_span_prior: boolean
+  // Reproduce OxCal 4.4 rather than solve the model as stated: the sampler,
+  // with OxCal's mid-run narrowing of limits. Off by default -- see
+  // BayesianConfigInput.match_oxcal on the backend.
+  match_oxcal: boolean
   // The calendar step, in years, modelled ranges and durations are reported
   // at: OxCal's Options Resolution. 5 by default, as there -- see
   // BayesianConfigInput.resolution on the backend.
@@ -86,6 +90,7 @@ export const DEFAULT_MCMC: McmcConfig = {
   seed: null,
   apply_inbuilt: true,
   uniform_span_prior: true,
+  match_oxcal: false,
   resolution: 5,
   estimate_durations: false,
   estimate_kde: false,

@@ -460,6 +460,15 @@ class TestWiggleMatchSentence:
         assert 'pass mark' not in sentence
 
 
+class TestMatchOxcalSentence:
+    def test_says_the_run_matched_oxcal(self):
+        sentence = pdf_report._solver_sentence({'method': 'gibbs', 'match_oxcal': True})
+        assert 'Run to match OxCal 4.4.' in sentence
+
+    def test_silent_otherwise(self):
+        assert 'OxCal 4.4' not in pdf_report._solver_sentence({'method': 'gibbs'})
+
+
 class TestCalendarTicks:
     """
     Mirrored from frontend/src/utils/dateFormat.ts. The property worth

@@ -93,6 +93,8 @@ interface RunPayload {
     sweeps?: number
     // The seed a sampled run took; absent before it was recorded.
     seed?: number
+    // True when the run matched OxCal 4.4 rather than solving the model as stated.
+    match_oxcal?: boolean
     convergence?: number
     converged?: boolean
     resolution?: number
@@ -134,7 +136,8 @@ function solverLabel(run: RunPayload): string {
   const sweeps = run.solver.sweeps ? `, ${run.solver.sweeps.toLocaleString()} sweeps` : ''
   // Named so two replicates of one model read as what they are.
   const seed = typeof run.solver.seed === 'number' ? `, seed ${run.solver.seed}` : ''
-  return `MH/Gibbs${sweeps}${seed}`
+  const matching = run.solver.match_oxcal ? ', matching OxCal 4.4' : ''
+  return `MH/Gibbs${matching}${sweeps}${seed}`
 }
 
 export default function CompareResults() {

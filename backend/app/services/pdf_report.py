@@ -830,6 +830,8 @@ def _solver_sentence(solver: Optional[Dict]) -> Optional[str]:
         return None
     method = _SOLVER_NAMES.get(solver.get('method'), solver.get('method') or 'unknown method')
     sentence = f"Solved by {method}."
+    if solver.get('match_oxcal'):
+        sentence += ' Run to match OxCal 4.4.'
     reason = solver.get('reason')
     if solver.get('method') == 'gibbs' and reason:
         sentence += f" The model could not be integrated exactly: {reason}"

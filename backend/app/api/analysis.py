@@ -14,6 +14,7 @@ from app.services.calibration import (
     CalibrationCurve,
     get_curve,
 )
+from app.services import calibration
 from app.services import cross_check
 from app.services import exact_chain
 from app.services import exact_parallel
@@ -620,6 +621,14 @@ def _cross_check(measurements: List[Dict], model_tree: Dict, sampled: Dict,
     """
     if bayesian_config.get('cross_check') is False:
         return None
+    if bayesian_config.get('match_oxcal'):
+        # The direct calculation solves the model as stated; a run matching
+        # OxCal narrows its limits partway through, so the two are meant to
+        # differ and comparing them would flag every phase.
+        return {'status': 'not_checked',
+                'reason': 'the run matches OxCal 4.4, which the direct calculation does not',
+                'shape': None, 'threshold': cross_check.DISAGREEMENT, 'checked': 0,
+                'worst': None, 'differing': [], 'seconds': None}
     try:
         return cross_check.check(
             measurements, model_tree, sampled,
@@ -650,6 +659,26 @@ def _exact_layout(tree: Dict, measurements: List[Dict]):
 
 
 def _run_bayesian(
+    measurements: List[Dict],
+    model_tree: Dict,
+    bayesian_config: Dict,
+    on_progress: Optional[Callable[[Dict], bool]] = None,
+) -> Tuple[Dict, Dict, Dict, Optional[Dict], Optional[Dict]]:
+    """
+    _solve_bayesian, with every likelihood it forms set to match OxCal 4.4
+    when the analysis asks for it (bayesian_config.match_oxcal;
+    calibration.matching_oxcal), and the solver record saying so.
+    """
+    match_oxcal = bool(bayesian_config.get('match_oxcal'))
+    with calibration.matching_oxcal(match_oxcal):
+        results, boundaries, solver, interval_block, summary_block = _solve_bayesian(
+            measurements, model_tree, bayesian_config, on_progress)
+    if match_oxcal:
+        solver['match_oxcal'] = True
+    return results, boundaries, solver, interval_block, summary_block
+
+
+def _solve_bayesian(
     measurements: List[Dict],
     model_tree: Dict,
     bayesian_config: Dict,
@@ -704,6 +733,7 @@ def _run_bayesian(
          same model (services/cross_check.py), None if turned off}
     """
     requested = bayesian_config.get('solver') or 'auto'
+    match_oxcal = bool(bayesian_config.get('match_oxcal'))
     resolution = _reporting_resolution(bayesian_config)
     estimate_durations = bool(bayesian_config.get('estimate_durations'))
     estimate_kde = bool(bayesian_config.get('estimate_kde'))
@@ -729,6 +759,14 @@ def _run_bayesian(
     # Both solvers are given the model as written; see the docstring.
     layout, reason = _exact_layout(model_tree, measurements)
 
+    # Matching OxCal 4.4 runs OxCal's method: the exact solver has no
+    # equivalent of the sampler's mid-run narrowing of limits.
+    if match_oxcal and requested == 'exact':
+        raise ValueError(
+            'Match OxCal 4.4 uses the MH/Gibbs sampler, so it cannot be combined '
+            'with the exact solver. Choose Automatic or the MH/Gibbs sampler.'
+        )
+
     if requested == 'exact' and layout is None:
         raise ValueError(
             'this model cannot be integrated exactly, so the exact solver was '
@@ -736,7 +774,7 @@ def _run_bayesian(
             'sampler, which has no such restriction.'
         )
 
-    if layout is not None and requested != 'gibbs':
+    if layout is not None and requested != 'gibbs' and not match_oxcal:
         parallel = isinstance(layout, exact_parallel.Stages)
         solved = (exact_parallel.solve if parallel else exact_chain.solve)(
             measurements, model_tree, layout,
@@ -801,6 +839,7 @@ def _run_bayesian(
         temperatures=int(bayesian_config.get('mcmc_temperatures')
                          or gibbs.DEFAULT_TEMPERATURES),
         resolution=resolution,
+        match_oxcal=match_oxcal,
     )
     overall = agreement_service.attach(
         sampled['measurements'], measurements,

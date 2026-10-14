@@ -436,6 +436,10 @@ rather than arranged by hand.
   sequence's overall span prior independent of how finely it is subdivided. It matters most on a
   sequence with three or more Boundaries, but it also narrows a single Phase between two
   Boundaries (see [A.5](#a5-the-bayesian-model)).
+- **Match OxCal 4.4**: off by default. Reproduces OxCal's own figures, for checking a published
+  analysis against its source. It uses the MH/Gibbs sampler and copies three things OxCal does
+  that RadiCal otherwise does not (see [A.6](#a6-solvers)); the main visible effect is a phase's
+  span coming out a little narrower. Results and the PDF say when a run was made this way.
 - **Apply inbuilt-age allowances**: on by default. Off runs the model as if no date had an
   [inbuilt-age allowance](#inbuilt-age).
 - **Durations and differences**: off by default; see
@@ -484,9 +488,10 @@ Where both methods can be used, they give the same date ranges to within about a
 
 - **Automatic** uses the exact solver whenever the model is built as a single line or as areas side
   by side between shared Boundaries, and the sampler otherwise.
-- **MH/Gibbs sampler (as OxCal)** always samples. Choose it when:
+- **MH/Gibbs sampler** always samples, by the same method as OxCal. Choose it when:
   - you are reproducing a published OxCal analysis and want the same method as well as the same
-    model;
+    model (to reproduce OxCal's figures as closely as possible, turn on **Match OxCal 4.4** under
+    Advanced settings as well);
   - you want a second, independent opinion on an exact result. Run the analysis both ways and
     **Compare** shows how far they differ (see [Comparing Analyses](#comparing-analyses));
   - several dates carry outlier models because you suspect a shared cause (old wood, residual
@@ -1726,7 +1731,7 @@ written at 0.56 years rms from OxCal (the sampler 0.58), supplying the missing B
 2.33. Earlier versions did this when the exact solver was chosen.
 
 **Known differences from OxCal 4.4.** Each is small next to a date's range, and none depends on
-which solver is used:
+which solver is used. **Match OxCal 4.4** removes the first three:
 
 - **Span prior limits.** OxCal narrows the limits factor's limits partway through a run (A.5);
   RadiCal keeps them fixed. A single phase's span can come out up to about a tenth wider.
@@ -1737,6 +1742,17 @@ which solver is used:
   interpolates linearly. The difference is small, and confined to wiggly stretches of the curve.
 - **Random variation.** OxCal seeds each run from the clock, so repeat runs differ slightly; a
   difference of a few tenths of a year from OxCal is within that variation.
+
+**Match OxCal 4.4.** The run uses the sampler, untempered and with no probe of unvisited ranges,
+since OxCal has neither, and always completes its first eight rounds. After the fourth, if the
+convergence measure over everything sampled so far is above 0.5, each parameter's allowed range is
+narrowed once to the range it has been sampled over (its histogram trimmed at a millionth of its
+peak), and the limits factor of A.5 is recomputed from the Boundaries' narrowed ranges. The rounds
+before and after are pooled, as OxCal pools its groups. Likelihoods use cubic interpolation of the
+curve and are cut beyond 5.26 standard deviations. On one Phase of eight dates (IntCal20, 1480 to
+1410 BP, ±25) the span came to 26.3–27.6 years over several seeds, against OxCal's 26.3 and 28.4
+without matching; on four of those dates 50.4–51.8, against 48.9 and 54.4. The check against a
+direct calculation is not run, since the two are meant to differ.
 
 ### A.7 Outlier models
 
