@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Query
 from fastapi.responses import JSONResponse, Response
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -10,7 +10,7 @@ from app.api.auth import current_user, owned_or_404
 from app.api import project_export
 from app.services import jobs
 from app.services import failures
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 router = APIRouter()
 
@@ -386,39 +386,65 @@ def export_project(
     project_id: str,
     date_format: Optional[str] = None,
     p_before_bp: Optional[float] = None,
+    analysis: Optional[List[str]] = Query(default=None),
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ):
     """
-    The whole project as one zip (api/project_export.build_zip): every
-    analysis's Export JSON, what each was run from, the date collection and a
-    summary table across them. `date_format` and `p_before_bp` read as they do
-    on a single analysis's exports.
+    The project as one zip (api/project_export.build_zip): every analysis's
+    Export JSON, what each was run from, the run its results came from, the
+    curves they need, the date collection and a summary table across them.
+    `date_format` and `p_before_bp` read as they do on a single analysis's
+    exports.
+
+    `analysis` (repeatable) narrows it to those analyses, and the collection
+    to the dates they use, matched by name -- a deployed date is a copy, with
+    no link back to its collection row. `unassigned` as the project exports
+    from the analyses filed under no project, which need `analysis`.
     """
-    project = owned_or_404(
-        db.query(Project).filter(Project.id == project_id).first(),
-        user, 'That project')
-    analyses = (
-        db.query(Analysis)
-        .filter(Analysis.project_id == project_id)
-        .filter(Analysis.owner_id == user.id)
-        .order_by(Analysis.created_at, Analysis.id)
-        .all()
-    )
-    samples = (
-        db.query(ProjectSample)
-        .filter(ProjectSample.project_id == project_id)
-        .order_by(ProjectSample.created_at, ProjectSample.id)
-        .all()
-    )
+    unassigned = project_id == 'unassigned'
+    project = None
+    if not unassigned:
+        project = owned_or_404(
+            db.query(Project).filter(Project.id == project_id).first(),
+            user, 'That project')
+    elif not analysis:
+        raise HTTPException(status_code=422,
+                            detail='Choose the unassigned analyses to export.')
+    query = db.query(Analysis).filter(Analysis.owner_id == user.id)
+    query = (query.filter(Analysis.project_id.is_(None)) if unassigned
+             else query.filter(Analysis.project_id == project_id))
+    if analysis:
+        query = query.filter(Analysis.id.in_(analysis))
+    analyses = query.order_by(Analysis.created_at, Analysis.id).all()
+    if analysis:
+        missing = set(analysis) - {a.id for a in analyses}
+        if missing:
+            raise HTTPException(
+                status_code=404,
+                detail=f"{len(missing)} of the chosen analyses are not in this project.")
+
+    samples = []
+    if project is not None:
+        samples = (
+            db.query(ProjectSample)
+            .filter(ProjectSample.project_id == project_id)
+            .order_by(ProjectSample.created_at, ProjectSample.id)
+            .all()
+        )
+        if analysis:
+            used = {m.sample_name.strip().lower() for a in analyses for m in a.measurements}
+            samples = [s for s in samples if s.sample_name.strip().lower() in used]
     content = project_export.build_zip(
         project, analyses, samples, db, user,
-        date_format=date_format, p_before_bp=p_before_bp)
-    name = project_export._slug(project.name or 'project')
+        date_format=date_format, p_before_bp=p_before_bp, selection=bool(analysis))
+    name = project_export._slug(project.name if project else 'unassigned')
+    stem = (f'project-{name}' if not analysis else
+            f"project-{name}-{len(analyses)}-{'analysis' if len(analyses) == 1 else 'analyses'}")
     return Response(
         content=content,
         media_type='application/zip',
-        headers={'Content-Disposition': f'attachment; filename=project-{name}.zip'},
+        headers={'Content-Disposition': f'attachment; filename={stem}.zip'},
     )
 
 

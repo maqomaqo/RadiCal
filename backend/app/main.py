@@ -6,7 +6,8 @@ from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
 import os
 from app.api import (auth, curves, analysis, results, projects, project_samples,
-                     imports, jobs, reservoir, dispersal, run_history, influence)
+                     imports, jobs, reservoir, dispersal, run_history, influence,
+                     project_import)
 from app.database import init_db
 
 load_dotenv()
@@ -91,6 +92,7 @@ app.include_router(results.router, prefix="/api", tags=["results"])
 app.include_router(projects.router, prefix="/api", tags=["projects"])
 app.include_router(project_samples.router, prefix="/api", tags=["project dates"])
 app.include_router(imports.router, prefix="/api", tags=["import"])
+app.include_router(project_import.router, prefix="/api", tags=["import"])
 app.include_router(jobs.router, prefix="/api", tags=["jobs"])
 app.include_router(reservoir.router, prefix="/api", tags=["marine reservoir"])
 app.include_router(dispersal.router, prefix="/api", tags=["dispersal"])
