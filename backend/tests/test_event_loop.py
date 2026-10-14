@@ -35,6 +35,8 @@ AWAITS_AN_UPLOAD = {
     'import_dates',
     'preview_project_import',
     'import_project',
+    'preview_template_import',
+    'import_templates',
 }
 
 # Handlers that touch nothing: no database session, no file, no computation.

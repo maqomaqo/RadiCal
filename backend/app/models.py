@@ -283,6 +283,34 @@ class StoredCalibrationCurve(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class ModelTemplate(Base):
+    """
+    A model structure saved for reuse: the tree of Sequences, Phases,
+    Boundaries and their limits, with no dates in it, and the model settings
+    it was run under (api/model_templates.py).
+
+    Private to the account that saved it, as a stored curve is. Applying one
+    copies it into a draft, so editing or deleting a template never changes an
+    analysis built from it.
+    """
+    __tablename__ = "model_templates"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    owner_id = Column(String, ForeignKey('users.id', ondelete='CASCADE'),
+                      nullable=False, index=True)
+    name = Column(String, nullable=False)
+    description = Column(String, nullable=True)
+    # The structure, as GET /analysis/{id} returns a model tree, with no
+    # posteriors and nothing that names a date.
+    model_tree = Column(JSON, nullable=False)
+    # BayesianConfigInput's fields, less the dispersal origin, which is a
+    # place rather than a modelling choice.
+    bayesian_config = Column(JSON, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow,
+                        onupdate=datetime.utcnow)
+
+
 class MarineReservoirSnapshot(Base):
     """
     One fetch of the CHRONO/calib.org marine reservoir database, frozen.

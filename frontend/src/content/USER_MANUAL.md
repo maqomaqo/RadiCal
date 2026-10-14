@@ -373,6 +373,31 @@ The editor is reached via **Specify Model Structure** / **Edit Model Structure**
 tab for building the tree and a **Matrix diagram** tab showing it drawn. The Results page renders
 the same diagram for a completed analysis, and Posterior distribution plots follow its order.
 
+### Model templates
+
+A template is a model's structure saved for reuse: its Sequences, Phases, Boundaries, Hiatuses and
+their TPQ/TAQ limits, without the dates. It also keeps the model settings (solver, resolution, and
+whether durations, KDEs and dispersal are estimated), but not a dispersal origin, which belongs to
+a site. Templates belong to your account and can be used in any project.
+
+**To save one**, open the model in the editor and choose **Templates › Save this model as a
+template**, then give it a name.
+
+**To use one**, choose **Templates › Apply a template** and press **Apply** beside it. This replaces
+the model, and **Undo** brings the old one back. Each date goes into the template's phase with the
+same name as the phase it sits in now (case is ignored). The confirmation says how many dates found
+a phase and lists any that did not; those are left unassigned for you to place. Dates deployed from
+a project's collection arrive in phases named after their contexts, so naming a template's phases
+after the contexts you use places them automatically. The template's settings replace the
+analysis's settings; the confirmation says so, or says when yours are kept.
+
+**Sharing templates.** In the same list, tick templates and press **Export**, or **Export all**,
+to save them as one .json file. **Import file** reads such a file, lists what it holds, and adds
+them to your templates. A template you already have is skipped. One whose name you already use for
+a different template is added under a new name. A file with any template that would not be a valid
+model is refused whole. Renaming and deleting are in each template's ⋮ menu. Deleting a template
+leaves analyses already built from it unchanged.
+
 ### Reading the Model diagram
 
 The diagram pictures the model tree. **Oldest is at the bottom**, as in a stratigraphic profile.
