@@ -62,6 +62,7 @@ import StackedPosteriorPlot, { type SeriesMeasurement } from '@/components/Stack
 import CurvePosteriorPlot from '@/components/CurvePosteriorPlot'
 import HarrisMatrixDiagram from '@/components/HarrisMatrixDiagram'
 import DurationsPanel from '@/components/DurationsPanel'
+import InfluencePanel from '@/components/InfluencePanel'
 import KdePanel from '@/components/KdePanel'
 import SameEventPanel from '@/components/SameEventPanel'
 import { modelCanReportIntervals } from '@/utils/intervalsAvailable'
@@ -3699,6 +3700,14 @@ export default function Results() {
           }))}
         />
       )}
+
+      {/* Which dates the answer rests on: after everything it re-computes. A
+          wiggle match is one fitted curve, not dates that could each move. */}
+      {isBayesian &&
+        analysis.status === 'completed' &&
+        analysis.solver?.method !== 'wiggle_match' && (
+          <InfluencePanel analysisId={analysis.id} dateFormat={dateFormat} />
+        )}
 
       {/* Said once, quietly, and only where it could have applied: a run that
           was not asked for durations has none, and the difference between

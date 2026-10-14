@@ -13,18 +13,19 @@
 9. [Running an Analysis](#running-an-analysis)
 10. [Viewing Results](#viewing-results)
 11. [Durations and Differences](#durations-and-differences)
-12. [Kernel Density Estimates](#kernel-density-estimates)
-13. [Same-Event Test](#same-event-test)
-14. [Wiggle Matching](#wiggle-matching)
-15. [Age-Depth Modelling](#age-depth-modelling)
-16. [Geographic Analysis](#geographic-analysis)
-17. [Exporting Data](#exporting-data)
-18. [Projects and Date Collections](#projects-and-date-collections)
-19. [Comparing Analyses](#comparing-analyses)
-20. [Scripts and Access Tokens](#scripts-and-access-tokens)
-21. [Best Practices](#best-practices)
-22. [Appendix A: Mathematical Methods](#appendix-a-mathematical-methods)
-23. [Bibliography](#bibliography)
+12. [Testing Influence](#testing-influence)
+13. [Kernel Density Estimates](#kernel-density-estimates)
+14. [Same-Event Test](#same-event-test)
+15. [Wiggle Matching](#wiggle-matching)
+16. [Age-Depth Modelling](#age-depth-modelling)
+17. [Geographic Analysis](#geographic-analysis)
+18. [Exporting Data](#exporting-data)
+19. [Projects and Date Collections](#projects-and-date-collections)
+20. [Comparing Analyses](#comparing-analyses)
+21. [Scripts and Access Tokens](#scripts-and-access-tokens)
+22. [Best Practices](#best-practices)
+23. [Appendix A: Mathematical Methods](#appendix-a-mathematical-methods)
+24. [Bibliography](#bibliography)
 
 ## Getting Started
 
@@ -633,6 +634,53 @@ solver's output, so they carry a sampling error; the panel reports the draw coun
 were independent (exact solver or Group Calibration) or from an MCMC chain. Reported ranges use a
 step that widens for very long durations, rather than claiming five-year precision the draws cannot
 support.
+
+## Testing Influence
+
+A conclusion can rest on a single date. **Influence** on a Bayesian result finds out which: it
+solves the model again with each date changed, one at a time, and ranks the changes by how far they
+move the answer.
+
+Choose the changes to try, then **Test influence**:
+
+- **Leave each date out.**
+- **Move each date to the neighbouring Phase**, the one before and the one after it in its
+  Sequence, across the Boundary between them. A date that could belong to either layer is the
+  usual reason to try this.
+- **Treat each date as an outlier**: its outlier probability set to 1, under its own outlier model
+  or the General one. The date then barely counts, without being removed.
+
+The run happens in the background, one solve per change (about a second each for a model the
+exact solver takes, longer for a sampled one), and the page shows how far it has got. You can
+leave the page and come back.
+
+**Reading it.** Pick the **quantity** (any Boundary, or any duration) and the **figure** to judge
+it by: its median, the width of its 95% range, or the probability that a Boundary falls before a
+year you type. The first row is the model as it stands, the reference. Every change follows,
+largest first, with its figure and how far it moved from the reference, which always says which
+way in words:
+
+| Figure | The change reads | Bar to the left | Bar to the right |
+|---|---|---|---|
+| Median of a Boundary | *40 yr older* or *40 yr younger* | older | younger |
+| Median of a duration | *12 yr longer* or *12 yr shorter* | shorter | longer |
+| Width of the 95% range | *12 yr wider* or *12 yr narrower* | narrower | wider |
+| Probability before a year | *0.239 more likely* or *0.123 less likely* | less likely | more likely |
+
+*Older* means further back in time, whatever date format the page uses. A Boundary's bars put
+older to the left, as every calendar axis in RadiCal does; for the other figures, more is to the
+right. The words at the top of the bar column name the two ends. You can switch quantity and figure
+freely; nothing is solved again. A change the model cannot be solved with is listed last, with the
+reason.
+
+**Open as analysis** makes any row a saved analysis in the same project, so it can be inspected,
+compared or edited like any other. The report itself stays on the analysis. If you change the
+analysis's dates, model or settings afterwards, the report says it is out of date; test again to
+refresh it.
+
+**Reading with care.** A date with large influence is not necessarily wrong: a model with few
+dates per phase is expected to depend on each of them. What the table shows is where the answer
+is fragile, which is where the context of each date matters most.
 
 ## Kernel Density Estimates
 

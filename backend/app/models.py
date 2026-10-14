@@ -458,6 +458,12 @@ class Analysis(Base):
     # whole.
     summaries = Column(JSON, nullable=True)
 
+    # The last influence run's report (api/influence.py): each variant of the
+    # model -- a date left out, moved or treated as an outlier -- reduced to
+    # its Boundaries and durations. Deferred: it runs to hundreds of kilobytes
+    # and only the influence section reads it.
+    influence = deferred(Column(JSON, nullable=True))
+
     # Relations
     project = relationship('Project', back_populates='analyses')
     # Ordered by the user's arrangement (RadiocarbonSample.sort_order), with

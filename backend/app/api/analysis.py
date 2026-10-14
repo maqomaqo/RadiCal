@@ -1853,6 +1853,44 @@ def update_analysis(analysis_id: str, updates: Dict, db: Session = Depends(get_d
     }
 
 
+def _measurement_dicts(samples) -> List[Dict]:
+    """A saved analysis's dates as the solver takes them. Shared by a re-run
+    and an influence run, so the two solve from the same inputs."""
+    return [
+        {
+            'id': s.id,
+            'age_bp': s.age_bp,
+            'error_1sigma': s.error_1sigma,
+            'sample_name': s.sample_name,
+            'curve_id': s.curve_id,
+            'delta_r': s.delta_r,
+            'delta_r_error': s.delta_r_error,
+            'element_id': s.element_id or s.group_id,
+            # Where the date is. Carried for services/dispersal.py, which
+            # derives a site's position from the dates inside it -- so a
+            # run that dropped these would report "no coordinates" on a
+            # collection that has them.
+            'latitude': s.latitude,
+            'longitude': s.longitude,
+            'tpq_age_bp': s.tpq_age_bp,
+            'taq_age_bp': s.taq_age_bp,
+            'outlier_prior': s.outlier_prior,
+            'outlier_model': s.outlier_model,
+            # The ordinates an ordinate-bearing sequence is built on. Not
+            # optional extras: a wiggle match IS its ring offsets and a
+            # deposition sequence IS its depths, so a rerun that dropped
+            # them would solve a different model from the one that was
+            # saved.
+            'depth_cm': s.depth_cm,
+            'ring_offset': s.ring_offset,
+            'ring_offset_error': s.ring_offset_error,
+            'inbuilt_years': s.inbuilt_years,
+            'inbuilt_shape': s.inbuilt_shape,
+        }
+        for s in samples
+    ]
+
+
 def _rerun_analysis(analysis: Analysis, db: Session,
                     on_progress: Optional[Callable[[Dict], bool]] = None) -> None:
     """
@@ -1915,39 +1953,7 @@ def _rerun_analysis(analysis: Analysis, db: Session,
         if root is None:
             raise ValueError("Analysis has no model structure to run")
 
-        measurement_dicts = [
-            {
-                'id': s.id,
-                'age_bp': s.age_bp,
-                'error_1sigma': s.error_1sigma,
-                'sample_name': s.sample_name,
-                'curve_id': s.curve_id,
-                'delta_r': s.delta_r,
-                'delta_r_error': s.delta_r_error,
-                'element_id': s.element_id or s.group_id,
-                # Where the date is. Carried for services/dispersal.py, which
-                # derives a site's position from the dates inside it -- so a
-                # run that dropped these would report "no coordinates" on a
-                # collection that has them.
-                'latitude': s.latitude,
-                'longitude': s.longitude,
-                'tpq_age_bp': s.tpq_age_bp,
-                'taq_age_bp': s.taq_age_bp,
-                'outlier_prior': s.outlier_prior,
-                'outlier_model': s.outlier_model,
-                # The ordinates an ordinate-bearing sequence is built on. Not
-                # optional extras: a wiggle match IS its ring offsets and a
-                # deposition sequence IS its depths, so a rerun that dropped
-                # them would solve a different model from the one that was
-                # saved.
-                'depth_cm': s.depth_cm,
-                'ring_offset': s.ring_offset,
-                'ring_offset_error': s.ring_offset_error,
-                'inbuilt_years': s.inbuilt_years,
-                'inbuilt_shape': s.inbuilt_shape,
-            }
-            for s in samples
-        ]
+        measurement_dicts = _measurement_dicts(samples)
 
         results, boundary_results, solver, interval_block, summary_block = _run_bayesian(
             measurement_dicts, root, analysis.bayesian_config or {},
@@ -2220,6 +2226,31 @@ def duplicate_analysis(analysis_id: str, new_seed: bool = False,
         name = f"{source.name} (inbuilt age {'on' if apply_inbuilt else 'off'})"
         config = {**(config or {}), 'apply_inbuilt': apply_inbuilt}
 
+    copy, _samples_map, _element_map = _copy_inputs(source, name, config, user, db)
+    db.commit()
+    db.refresh(copy)
+
+    return {
+        "success": True,
+        "data": {
+            "id": copy.id,
+            "name": copy.name,
+            "analysis_type": copy.analysis_type,
+            "status": copy.status,
+            "project_id": copy.project_id,
+            "source_analysis_id": source.id,
+        },
+    }
+
+
+def _copy_inputs(source: Analysis, name: str, config: Optional[Dict], user: User,
+                 db: Session) -> Tuple[Analysis, Dict[str, str], Dict[str, str]]:
+    """
+    duplicate_analysis's copy, uncommitted: the new Analysis, and the maps from
+    the source's sample ids and model-element ids to the copy's, for a caller
+    that goes on to change the copy (an influence variant opened as an
+    analysis).
+    """
     copy = Analysis(
         name=name,
         analysis_type=source.analysis_type,
@@ -2290,8 +2321,8 @@ def duplicate_analysis(analysis_id: str, new_seed: bool = False,
     source_tree = rows_to_tree(
         db.query(ModelElement).filter(ModelElement.analysis_id == source.id).all()
     )
+    element_map: Dict[str, str] = dict(groups_map)
     if source_tree:
-        element_map = dict(groups_map)
         for element in _iter_tree(source_tree):
             if element['id'] not in element_map:
                 element_map[element['id']] = str(uuid.uuid4())
@@ -2308,21 +2339,7 @@ def duplicate_analysis(analysis_id: str, new_seed: bool = False,
                     RadiocarbonSample.id == new_id
                 ).update({'element_id': element_map.get(source_element)},
                          synchronize_session=False)
-
-    db.commit()
-    db.refresh(copy)
-
-    return {
-        "success": True,
-        "data": {
-            "id": copy.id,
-            "name": copy.name,
-            "analysis_type": copy.analysis_type,
-            "status": copy.status,
-            "project_id": copy.project_id,
-            "source_analysis_id": source.id,
-        },
-    }
+    return copy, samples_map, element_map
 
 
 @router.put("/analysis/{analysis_id}/inputs")
