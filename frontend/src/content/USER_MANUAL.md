@@ -654,24 +654,8 @@ The run happens in the background, one solve per change (about a second each for
 exact solver takes, longer for a sampled one), and the page shows how far it has got. You can
 leave the page and come back.
 
-**Reading it.** Pick the **quantity** (any Boundary, or any duration) and the **figure** to judge
-it by: its median, the width of its 95% range, or the probability that a Boundary falls before a
-year you type. The first row is the model as it stands, the reference. Every change follows,
-largest first, with its figure and how far it moved from the reference, which always says which
-way in words:
-
-| Figure | The change reads | Bar to the left | Bar to the right |
-|---|---|---|---|
-| Median of a Boundary | *40 yr older* or *40 yr younger* | older | younger |
-| Median of a duration | *12 yr longer* or *12 yr shorter* | shorter | longer |
-| Width of the 95% range | *12 yr wider* or *12 yr narrower* | narrower | wider |
-| Probability before a year | *0.239 more likely* or *0.123 less likely* | less likely | more likely |
-
-*Older* means further back in time, whatever date format the page uses. A Boundary's bars put
-older to the left, as every calendar axis in RadiCal does; for the other figures, more is to the
-right. The words at the top of the bar column name the two ends. You can switch quantity and figure
-freely; nothing is solved again. A change the model cannot be solved with is listed last, with the
-reason.
+**Reading it.** Pick the **quantity** (any Boundary, or any duration) and the **figure**: its median, the width of its 95% range, or the probability that a Boundary falls before a year you type. The first row is the model as currently calculated. The effect of every change is shown below this,
+largest first, with its figure and how far it moved from the reference. You can switch quantity and figure freely; nothing is solved again.
 
 **Open as analysis** makes any row a saved analysis in the same project, so it can be inspected,
 compared or edited like any other. The report itself stays on the analysis. If you change the
