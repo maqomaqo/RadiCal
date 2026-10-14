@@ -68,6 +68,10 @@ function shared<T>(dates: DraftMeasurement[], pick: (m: DraftMeasurement) => T):
  * refuses dates that do not share them. Anything else they share (material, place, context, limits) is
  * kept; anything they do not is left blank rather than taken from one of them.
  * The notes say what was pooled, so the date can be traced back.
+ *
+ * An R_Combine in an imported .oxcal file becomes the same date, with the same
+ * refusals (backend services/oxcal_script._translate_combine): keep the two in
+ * step.
  */
 export function pooledMeasurement(
   dates: DraftMeasurement[],

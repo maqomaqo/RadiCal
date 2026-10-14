@@ -27,7 +27,7 @@ import re
 import uuid
 from typing import Any, Dict, List, Optional, Tuple
 
-from app.services import curve_registry
+from app.services import curve_registry, statistics
 from app.services.date_import import ImportResult, _name_from_filename
 
 
@@ -282,6 +282,10 @@ DEPOSITION_SEQUENCE = 'p_sequence'
 # R_Simulate states a calendar year instead of a measurement, and the
 # measurement is read off the curve (see _simulate_measurement).
 DATE_COMMANDS = {'r_date', 'r_simulate'}
+# Measurements pooled before calibration: read as the one date they make,
+# exactly as the model editor's "Replace with pooled date" makes it
+# (_translate_combine).
+COMBINE_COMMAND = 'r_combine'
 
 # Queries and plots: they read a posterior rather than shape one, so leaving
 # them out changes nothing.
@@ -338,12 +342,6 @@ UNSUPPORTED = {
         'undated level.'
     ),
     'age': 'a relative-age parameter, which this app does not model.',
-    'r_combine': (
-        'several measurements pooled into one before calibration. Import the '
-        'measurements as separate dates in one Phase, then use Test as one '
-        'event in the model editor, which tests them and replaces them with '
-        'their pooled date.'
-    ),
     'combine': 'a combination of likelihoods, which this app does not model.',
     'u_date': 'a uranium-series date, which this app does not calibrate.',
     'tl_date': 'a luminescence date, which this app does not calibrate.',
@@ -521,6 +519,19 @@ class _Translator:
                     date['phase_name'] = context
                     dates.append(date)
                 continue
+            if command == COMBINE_COMMAND:
+                # Without a model the pool still stands where it can be made;
+                # where it cannot, its dates are read one by one, which is
+                # what an import without the model offers.
+                errors_before = len(self.result.errors)
+                date, _reason = self._translate_combine(node, scope.copy())
+                if date is not None:
+                    date['phase_name'] = context
+                    dates.append(date)
+                    continue
+                del self.result.errors[errors_before:]
+                dates.extend(self._collect_dates(node.block or [], scope.copy(), context))
+                continue
             # A date written as an argument -- After(R_Date(...)) -- is still
             # a measurement once the constraint around it is gone.
             for argument in node.args:
@@ -689,6 +700,14 @@ class _Translator:
                 date = self._translate_date(node, scope)
                 if date is not None:
                     items.append(('date', date))
+                continue
+            if command == COMBINE_COMMAND:
+                date, reason = self._translate_combine(node, scope)
+                if date is not None:
+                    items.append(('date', date))
+                elif reason is not None:
+                    self.blocking_commands.append(node.command)
+                    self.error(node, reason)
                 continue
             if command == 'gap':
                 # Emitted rather than acted on here: only a D_Sequence or a
@@ -1035,6 +1054,100 @@ class _Translator:
             )
 
         return date
+
+    def _translate_combine(self, node: Node, scope: _Scope
+                           ) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+        """
+        An R_Combine as the one date it makes, or (None, why not).
+
+        The date is the one the model editor's "Replace with pooled date" makes
+        (frontend utils/sameEvent.pooledMeasurement): the error-weighted mean
+        and its error, on the dates' shared curve and reservoir offset, with
+        the same refusals -- dates on different curves or offsets, and dates
+        that fail Ward and Wilson's test. OxCal pools those last ones anyway and
+        only reports T; a pool of dates from more than one event is a date of
+        nothing, so here it is refused, naming T against its critical value.
+
+        An Outlier() written in the R_Combine's own block applies to the pooled
+        date. One on a date inside it is refused: the pool is made before
+        calibration, so one of its measurements cannot be an outlier on its
+        own, and dropping the setting would change the model without saying so.
+        """
+        name = node.name or f'R_Combine line {node.line}'
+        if node.numbers:
+            return None, (
+                f'R_Combine("{name}") has a number after its name, which adds to '
+                'the pooled error in OxCal. This importer does not apply it; '
+                'remove it, or pool the dates in the model editor.')
+        inner = scope.copy()
+        dates: List[Dict[str, Any]] = []
+        pooled_outlier: Optional[Node] = None
+        for child in node.block or []:
+            command = child.command.lower()
+            if command in DATE_COMMANDS:
+                date = self._translate_date(child, inner)
+                if date is None:
+                    return None, None            # the date's own error is recorded
+                if date['outlier_prior']:
+                    return None, (
+                        f'R_Combine("{name}") has an outlier setting on '
+                        f'{date["sample_name"]}. Its measurements are pooled before '
+                        'calibration, so one of them cannot be an outlier on its own; '
+                        'put the Outlier() on the R_Combine instead.')
+                dates.append(date)
+            elif command == 'curve':
+                self._select_curve(child, inner)
+            elif command == 'delta_r':
+                self._apply_delta_r(child, inner)
+            elif command == 'outlier':
+                pooled_outlier = child
+            elif command == '=' and child.args and str(child.args[0]).lower() in DISPLAY_ATTRIBUTES:
+                self.seen_display_attributes.append(str(child.args[0]).lower())
+            elif command in IGNORABLE:
+                self.seen_ignorable.append(child.command)
+            else:
+                return None, (
+                    f'{child.command}() inside R_Combine("{name}") is not something '
+                    'this importer recognises.')
+        if len(dates) < 2:
+            return None, (
+                f'R_Combine("{name}") pools {len(dates)} date; it needs two or more.')
+
+        test = statistics.same_event(dates)
+        if test['refused']:
+            return None, (
+                f'R_Combine("{name}") cannot pool its dates: {test["refused"]} '
+                'The model editor refuses the same pool.')
+        figures = (f'T = {test["t"]:.1f} · {round(test["level"] * 100)}% critical '
+                   f'{test["critical"]:.2f} · df {test["df"]}')
+        if not test['consistent']:
+            return None, (
+                f'R_Combine("{name}") pools dates that fail the same-event test '
+                f'({figures}), so they are not one event. OxCal pools them anyway; '
+                'this app does not. Put them in a Phase as separate dates, or leave '
+                'out the one that does not belong.')
+
+        first = dates[0]
+        sources = '; '.join(f'{d["sample_name"]} {d["age_bp"]:g} ± {d["error_1sigma"]:g} BP'
+                            for d in dates)
+        pooled: Dict[str, Any] = {
+            **first,
+            'id': f'd-{uuid.uuid4().hex[:12]}',
+            'sample_name': name,
+            'age_bp': round(test['mean_bp'], 1),
+            'error_1sigma': round(test['error_bp'], 1),
+            'depth_cm': None,
+            'notes': (f'R_Combine of {len(dates)} dates (Ward and Wilson 1978; '
+                      f'{figures}): {sources}.'),
+            'outlier_prior': 0.0,
+            'outlier_model': 'general',
+        }
+        if pooled_outlier is not None:
+            self._apply_outlier(pooled_outlier, pooled)
+        self.result.notes.append(
+            f'R_Combine("{name}") was imported as one pooled date, '
+            f'{pooled["age_bp"]:g} ± {pooled["error_1sigma"]:g} BP ({figures}).')
+        return pooled, None
 
     def _simulate_measurement(self, node: Node, date: Dict[str, Any],
                               year: float) -> bool:

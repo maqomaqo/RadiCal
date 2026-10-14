@@ -370,6 +370,7 @@ class TestConstructsThatMustBeRefused:
         ('Sigma_Boundary', 'Sequence(){ Sigma_Boundary("s"); Phase("A"){ R_Date("a",3000,25); }; Boundary(); };'),
         ('Zero_Boundary', 'Sequence(){ Zero_Boundary("z"); Phase("A"){ R_Date("a",3000,25); }; Boundary(); };'),
         ('C_Date', 'Phase("A"){ R_Date("a",3000,25); C_Date("h",1500,10); };'),
+        # One date is no pool; see TestRCombine for what is imported.
         ('R_Combine', 'Phase("A"){ R_Combine("c"){ R_Date("a",3000,25); }; };'),
         ('U_Sequence', 'U_Sequence("u",1){ Boundary(); Phase("A"){ R_Date("a",3000,25); }; Boundary(); };'),
         ('After', 'Phase("A"){ After(R_Date("a",3000,25)); };'),
@@ -1732,3 +1733,101 @@ class TestDepositionSequences:
             got = solved['measurements'][date['id']]['posterior_median']
             assert abs(got - expected) < 60.0, (
                 f"{date['sample_name']} came back at {got:.0f}, not {expected:.0f}")
+
+
+class TestRCombine:
+    """
+    R_Combine imports as the one date it makes -- the date the model editor's
+    "Replace with pooled date" makes -- with the editor's refusals.
+    """
+
+    def test_it_imports_as_the_pooled_date(self):
+        result = parse_oxcal(oxcal_model(
+            'Phase("A"){ R_Combine("pooled"){ R_Date("a",3000,25); R_Date("b",3020,25); }; '
+            'R_Date("c",3100,30); };'), 't.oxcal')
+
+        assert result.ok, result.errors
+        assert [d['sample_name'] for d in result.dates] == ['pooled', 'c']
+        pooled = result.dates[0]
+        # The error-weighted mean of two equal errors, and its error.
+        assert (pooled['age_bp'], pooled['error_1sigma']) == (3010.0, 17.7)
+        assert pooled['notes'].startswith('R_Combine of 2 dates (Ward and Wilson 1978; T = 0.3')
+        assert 'a 3000 ± 25 BP; b 3020 ± 25 BP' in pooled['notes']
+        assert any('R_Combine("pooled") was imported as one pooled date' in n for n in result.notes)
+
+    def test_it_matches_the_same_event_test(self):
+        from app.services import statistics
+        result = parse_oxcal(oxcal_model(
+            'Phase("A"){ R_Combine("p"){ R_Date("a",3000,20); R_Date("b",3040,30); '
+            'R_Date("c",3010,25); }; };'), 't.oxcal')
+        test = statistics.same_event([
+            {'age_bp': a, 'error_1sigma': e, 'curve_id': 'intcal20'}
+            for a, e in ((3000, 20), (3040, 30), (3010, 25))])
+        pooled = result.dates[0]
+        assert pooled['age_bp'] == round(test['mean_bp'], 1)
+        assert pooled['error_1sigma'] == round(test['error_bp'], 1)
+
+    def test_the_curve_and_offset_in_force_apply_to_the_pool(self):
+        result = parse_oxcal(oxcal_model(
+            'Phase("A"){ R_Combine("shells"){ Curve("Marine20","marine20.14c"); '
+            'Delta_R("local",-162,28); R_Date("a",3000,25); R_Date("b",3010,25); }; };'
+        ), 't.oxcal')
+
+        assert result.ok, result.errors
+        pooled = result.dates[0]
+        assert (pooled['curve_id'], pooled['delta_r'], pooled['delta_r_error']) == (
+            'marine20', -162.0, 28.0)
+
+    def test_dates_that_fail_the_test_are_refused_naming_t(self):
+        result = parse_oxcal(oxcal_model(
+            'Phase("A"){ R_Combine("mixed"){ R_Date("a",3000,25); R_Date("b",3400,25); }; };'
+        ), 't.oxcal')
+
+        assert not result.ok
+        assert result.blocking_commands == ['R_Combine']
+        assert any('R_Combine("mixed") pools dates that fail the same-event test' in e
+                   and 'T = ' in e and '5% critical 3.84' in e for e in result.errors)
+        # Offered without the model, its dates are read one by one.
+        assert [d['sample_name'] for d in result.dates_only.dates] == ['a', 'b']
+
+    def test_dates_on_different_offsets_are_refused(self):
+        result = parse_oxcal(oxcal_model(
+            'Curve("Marine20","marine20.14c"); Phase("A"){ R_Combine("p"){ '
+            'R_Date("a",3000,25){ Delta_R("x",-100,20); }; '
+            'R_Date("b",3010,25){ Delta_R("y",-150,20); }; }; };'), 't.oxcal')
+
+        assert not result.ok
+        assert any('cannot pool its dates' in e and 'ΔR' in e for e in result.errors)
+
+    def test_an_outlier_on_the_pool_applies_to_it(self):
+        result = parse_oxcal(oxcal_model(
+            'Phase("A"){ R_Combine("p"){ Outlier(0.1); R_Date("a",3000,25); '
+            'R_Date("b",3010,25); }; };'), 't.oxcal')
+
+        assert result.ok, result.errors
+        assert (result.dates[0]['outlier_prior'], result.dates[0]['outlier_model']) == (
+            0.1, 'general')
+
+    def test_an_outlier_on_one_pooled_date_is_refused(self):
+        result = parse_oxcal(oxcal_model(
+            'Phase("A"){ R_Combine("p"){ R_Date("a",3000,25){ Outlier(0.1); }; '
+            'R_Date("b",3010,25); }; };'), 't.oxcal')
+
+        assert not result.ok
+        assert any('outlier setting on a' in e for e in result.errors)
+
+    def test_an_added_error_is_refused(self):
+        result = parse_oxcal(oxcal_model(
+            'Phase("A"){ R_Combine("p", 10){ R_Date("a",3000,25); R_Date("b",3010,25); }; };'
+        ), 't.oxcal')
+
+        assert not result.ok
+        assert any('number after its name' in e for e in result.errors)
+
+    def test_in_a_sequence_the_pool_holds_a_position(self):
+        result = parse_oxcal(oxcal_model(
+            'Sequence(){ Boundary("S"); R_Combine("p"){ R_Date("a",3000,25); '
+            'R_Date("b",3010,25); }; R_Date("c",2900,25); Boundary("E"); };'), 't.oxcal')
+
+        assert result.ok, result.errors
+        assert [d['sample_name'] for d in result.dates] == ['p', 'c']

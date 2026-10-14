@@ -130,11 +130,20 @@ plus any ΔR in force, with the error given. OxCal adds random scatter to a simu
 so its results vary; this app omits the scatter, giving the same result every time. The date's
 notes record that it was simulated and for which year.
 
+`R_Combine("name") { R_Date(...); R_Date(...); }` comes across as **one pooled date** called
+`name`, the same date [Replace with pooled date](#same-event-test) makes in the model editor: the
+error-weighted mean of the measurements and its error, on their curve and ΔR, with notes listing
+the dates pooled and the test's `T`. A `Curve()` or `Delta_R()` inside it applies to the pool, and
+an `Outlier()` written directly inside it applies to the pooled date. It is refused, as the editor
+refuses it, when the dates are on different curves or ΔR values, or **fail the same-event test**:
+OxCal pools such dates anyway and only reports `T`, but dates that are not one event do not make
+one date. The message gives `T` and the critical value. An `Outlier()` on one of the pooled dates,
+or a number after the name (an added error), is refused too.
+
 OxCal's language is larger than what this app models. Anything that would change the posterior and
 cannot be honoured **fails the import** with a message naming the unsupported feature:
 `Tau_Boundary`, `Sigma_Boundary` and `Zero_Boundary` (non-uniform transitions), `C_Date`,
-`R_Combine` (import the dates separately and pool them with
-[Test as one event](#same-event-test)), `U_Sequence` (a different deposition prior from the `P_Sequence` this app implements),
+an `R_Combine` that cannot be pooled (above), `U_Sequence` (a different deposition prior from the `P_Sequence` this app implements),
 an unavailable curve, or a custom `Outlier_Model`. A `D_Sequence` or `V_Sequence` nested inside a
 larger model also fails — this app solves a wiggle match on its own, and reading its members as
 ordinary dates in a phase would report a match that was never made. Unrecognised commands fail the
@@ -143,7 +152,8 @@ import too. Commands that only query a posterior (`Sum`, `KDE_Plot`, `Span`, `Di
 
 When a model is refused but its dates can still be read, the import offers to bring in the dates
 without the model. Each date keeps its curve, ΔR and outlier setting, and its Phase name becomes
-its context; the dates are then calibrated independently. A problem with a date itself (e.g. an
+its context; the dates are then calibrated independently. An `R_Combine` that could not be pooled
+comes across as its separate dates. A problem with a date itself (e.g. an
 unavailable curve) still stops the import.
 
 Two differences in reading are made explicit: a date sitting directly inside a `Sequence` is placed
@@ -708,7 +718,8 @@ as OxCal reports it under `R_Combine`.
   rest. This is where the answer matters: it decides whether dates enter the Phase as separate
   events or are pooled into a single date first. Where the ticked dates pass, **Replace with
   pooled date** puts their pooled age in the Phase in their place, as OxCal's `R_Combine` would,
-  with notes listing the dates pooled. The originals leave the analysis and Undo cannot restore
+  with notes listing the dates pooled. An `R_Combine` in an imported `.oxcal` file becomes the
+  same pooled date. The originals leave the analysis and Undo cannot restore
   them; dates deployed from a project's collection remain in the collection.
 - A **Group Calibration** tests all its dates together, in its own panel below the plots.
   **Export → CSV** adds the test as a block below the results, and **Export → PDF** as a table.
