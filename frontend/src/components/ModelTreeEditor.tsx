@@ -81,6 +81,15 @@ import {
 } from '@/utils/modelTreeDefaults'
 import { shortSeriesWarning } from '@/utils/ringOffsets'
 import RingNumberDialog from '@/components/RingNumberDialog'
+import { SaveTemplateDialog, TemplateLibraryDialog } from '@/components/ModelTemplateDialogs'
+import {
+  applyTemplate,
+  describeSettings,
+  templateSettings,
+  type AppliedTemplate,
+  type ModelTemplate,
+} from '@/utils/modelTemplates'
+import type { McmcConfig } from '@/stores/analysisStore'
 
 export { newElementId }
 
@@ -895,6 +904,16 @@ interface Props {
    * open -- the spatial-order proposal's.
    */
   tiles?: boolean | null
+  /**
+   * The model settings to save with a template, where the host has them.
+   * Absent, a template is saved with its structure alone.
+   */
+  templateSettings?: Partial<McmcConfig> | null
+  /**
+   * Applies a template's settings to what will be run. Absent, applying a
+   * template changes the structure only, and the confirmation says so.
+   */
+  onApplyTemplateSettings?: (settings: Partial<McmcConfig>) => void
 }
 
 /**
@@ -2024,6 +2043,8 @@ export default function ModelTreeEditor({
   onRemoveDates,
   onPoolDates,
   tiles = false,
+  templateSettings: currentSettings,
+  onApplyTemplateSettings,
 }: Props) {
   const [addMenu, setAddMenu] = useState<{ anchor: HTMLElement; targetId: string } | null>(null)
   // The one phase picker, and which date it is open for. See PhaseButton.
@@ -2048,6 +2069,17 @@ export default function ModelTreeEditor({
   // Grouping REPLACES the model, as the presets do, so it is confirmed the
   // same way.
   const [buildMenu, setBuildMenu] = useState<HTMLElement | null>(null)
+  // Saved model templates: the menu, its two dialogs, and a template awaiting
+  // confirmation. Applying one REPLACES the model, as the presets do, so it is
+  // confirmed the same way -- with where the dates will land said first.
+  const [templateMenu, setTemplateMenu] = useState<HTMLElement | null>(null)
+  const [saveTemplateOpen, setSaveTemplateOpen] = useState(false)
+  const [libraryOpen, setLibraryOpen] = useState(false)
+  const [pendingTemplate, setPendingTemplate] = useState<{
+    template: ModelTemplate
+    applied: AppliedTemplate
+    settings: Partial<McmcConfig> | null
+  } | null>(null)
   const [pendingGrouping, setPendingGrouping] = useState<SiteGroupingKey | null>(null)
   // Containers whose children are hidden. Ids rather than nodes, so a tree
   // edit cannot leave this pointing at something that no longer exists.
@@ -2343,6 +2375,25 @@ export default function ModelTreeEditor({
       }),
       assignments
     )
+  }
+
+  const chooseTemplate = (template: ModelTemplate) => {
+    setLibraryOpen(false)
+    setPendingTemplate({
+      template,
+      applied: applyTemplate(template.model_tree, tree, measurements, assignments),
+      settings: onApplyTemplateSettings ? templateSettings(template.bayesian_config) : null,
+    })
+  }
+
+  const confirmTemplate = () => {
+    if (!pendingTemplate) return
+    remember()
+    onChange(pendingTemplate.applied.tree, pendingTemplate.applied.assignments)
+    if (pendingTemplate.settings && onApplyTemplateSettings) {
+      onApplyTemplateSettings(pendingTemplate.settings)
+    }
+    setPendingTemplate(null)
   }
 
   const applyPreset = (type: 'wiggle_sequence' | 'deposition_sequence') => {
@@ -2881,6 +2932,49 @@ export default function ModelTreeEditor({
             </Button>
           </span>
         </Tooltip>
+        <Button
+          size="small"
+          endIcon={<ArrowDropDownIcon />}
+          onClick={(e) => setTemplateMenu(e.currentTarget)}
+          aria-haspopup="menu"
+          aria-expanded={templateMenu ? true : undefined}
+          sx={{ minHeight: 44, flexShrink: 0 }}
+        >
+          Templates
+        </Button>
+        <Menu
+          open={!!templateMenu}
+          anchorEl={templateMenu}
+          onClose={() => setTemplateMenu(null)}
+          MenuListProps={{ 'aria-label': 'Model templates' }}
+        >
+          <MenuItem
+            onClick={() => {
+              setTemplateMenu(null)
+              setLibraryOpen(true)
+            }}
+          >
+            <Box>
+              <Typography variant="body2">Apply a template</Typography>
+              <Typography variant="caption" color="text.secondary">
+                Also where templates are renamed, imported and exported
+              </Typography>
+            </Box>
+          </MenuItem>
+          <MenuItem
+            onClick={() => {
+              setTemplateMenu(null)
+              setSaveTemplateOpen(true)
+            }}
+          >
+            <Box>
+              <Typography variant="body2">Save this model as a template</Typography>
+              <Typography variant="caption" color="text.secondary">
+                Its structure{currentSettings ? ' and settings' : ''}, without the dates
+              </Typography>
+            </Box>
+          </MenuItem>
+        </Menu>
         <Menu
           open={!!buildMenu}
           anchorEl={buildMenu}
@@ -2980,6 +3074,48 @@ export default function ModelTreeEditor({
           />
         </Suspense>
       )}
+
+      <TemplateLibraryDialog
+        open={libraryOpen}
+        onClose={() => setLibraryOpen(false)}
+        onApply={chooseTemplate}
+      />
+      <SaveTemplateDialog
+        open={saveTemplateOpen}
+        onClose={() => setSaveTemplateOpen(false)}
+        tree={tree}
+        settings={currentSettings ? { ...currentSettings, dispersal_origin: null } : null}
+      />
+      <ConfirmDialog
+        open={pendingTemplate !== null}
+        title={pendingTemplate ? `Replace the model with “${pendingTemplate.template.name}”?` : ''}
+        message={
+          pendingTemplate ? (
+            <>
+              {measurements.length > 0 &&
+                `${pendingTemplate.applied.placed} of ${measurements.length} date${
+                  measurements.length === 1 ? '' : 's'
+                } go into the phase of the same name. `}
+              {pendingTemplate.applied.unplaced.length > 0 &&
+                `${pendingTemplate.applied.unplaced.length} will be unassigned, for you to place: ` +
+                  pendingTemplate.applied.unplaced.slice(0, 8).join(', ') +
+                  (pendingTemplate.applied.unplaced.length > 8 ? ', …' : '') +
+                  '. '}
+              {pendingTemplate.settings && Object.keys(pendingTemplate.settings).length > 0
+                ? `The settings change to the template's: ${describeSettings(pendingTemplate.settings)}. `
+                : onApplyTemplateSettings
+                  ? 'The template has no settings, so yours are kept. '
+                  : 'Your settings are kept. '}
+              Undo restores what is there now.
+            </>
+          ) : (
+            ''
+          )
+        }
+        confirmLabel="Replace"
+        onCancel={() => setPendingTemplate(null)}
+        onConfirm={confirmTemplate}
+      />
 
       <ConfirmDialog
         open={pendingPreset !== null}

@@ -58,6 +58,8 @@ export default function Stratigraphy() {
     setModelTree: setDraftTree,
     editingAnalysisId,
     projectId: draftProjectId,
+    mcmc,
+    setMcmc,
   } = useAnalysisDraftStore()
 
   // Reached either as /new-analysis/model-structure (building a new analysis)
@@ -81,6 +83,12 @@ export default function Stratigraphy() {
   // nor place it.
   const draftHoldsDates =
     !editRouteId || (editingAnalysisId === editRouteId && measurements.length > 0)
+  // A template's settings go where the model's settings are kept for the
+  // next run: the draft. So only while the draft is this analysis's -- a
+  // direct link to a saved analysis's structure has no settings to hand.
+  const settingsProps = draftHoldsDates
+    ? { templateSettings: mcmc, onApplyTemplateSettings: setMcmc }
+    : {}
 
   // The default tab, being the authoring surface in both flows. A saved
   // analysis loads it from and writes it back to the API; a new one holds it
@@ -443,6 +451,7 @@ export default function Stratigraphy() {
                 onRemoveDates={canRemoveDates ? removeDates : undefined}
                 onPoolDates={canPoolDates ? poolDates : undefined}
                 tiles={mapTiles}
+                {...settingsProps}
               />
             ) : (
               <Alert severity="info">No dates yet — add them on the New Analysis page first.</Alert>
@@ -467,6 +476,7 @@ export default function Stratigraphy() {
                 onRemoveDates={canRemoveDates ? removeDates : undefined}
                 onPoolDates={canPoolDates ? poolDates : undefined}
                 tiles={mapTiles}
+                {...settingsProps}
                 onChange={(nextTree, nextAssignments) => {
                   setModelTree(nextTree)
                   setAssignments(nextAssignments)
