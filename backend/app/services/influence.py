@@ -106,7 +106,10 @@ def plan(measurements: Sequence[Dict], tree: Dict, kinds: Sequence[str]) -> List
                     'date_id': m['id'], 'date_name': name,
                     'to_phase_id': phase['id'], 'to_phase_name': phase_name,
                     'direction': direction,
-                    'label': f'{name} moved to {phase_name} ({direction})'})
+                    # "the older Phase", not "(older)": beside a change
+                    # that reads older or younger, a bare word would read
+                    # as the direction the answer moved.
+                    'label': f'{name} moved to {phase_name}, the {direction} Phase'})
         if 'outlier' in kinds and (m.get('outlier_prior') or 0) < 1:
             variants.append({'id': f"outlier:{m['id']}", 'kind': 'outlier',
                              'date_id': m['id'], 'date_name': name,

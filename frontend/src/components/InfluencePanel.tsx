@@ -28,6 +28,8 @@ import { DateFormat, formatCalendarAge } from '@/utils/dateFormat'
 import { formatProbability, parseCalendarAge } from '@/utils/threshold'
 import { relativeTime } from '@/utils/serverTime'
 import {
+  changeSense,
+  describeChange,
   figure,
   quantitiesOf,
   rank,
@@ -123,18 +125,12 @@ export default function InfluencePanel({
     if (effectiveStatistic === 'median' && isBoundary) return formatCalendarAge(value, dateFormat)
     return `${Math.round(value)} yr`
   }
-  const formatChange = (change: number | null) => {
-    if (change == null) return '—'
-    if (effectiveStatistic === 'p_before') {
-      return `${change >= 0 ? '+' : '−'}${Math.abs(change).toFixed(3)}`
-    }
-    const years = Math.round(change)
-    if (years === 0) return '0 yr'
-    if (effectiveStatistic === 'median' && isBoundary) {
-      return `${Math.abs(years)} yr ${years > 0 ? 'older' : 'younger'}`
-    }
-    return `${years > 0 ? '+' : '−'}${Math.abs(years)} yr`
-  }
+  const group = isBoundary ? 'boundary' : 'duration'
+  const sense = changeSense(effectiveStatistic, group)
+  // Which word sits at each end of the bars: older is drawn left, as on the
+  // app's calendar axes; for every other figure, more is right.
+  const leftWord = sense.positiveRight ? sense.less : sense.more
+  const rightWord = sense.positiveRight ? sense.more : sense.less
 
   const start = async () => {
     try {
@@ -294,7 +290,20 @@ export default function InfluencePanel({
                   <TableCell>Variant</TableCell>
                   <TableCell align="right">Value</TableCell>
                   <TableCell align="right">Change</TableCell>
-                  <TableCell sx={{ width: 180 }} />
+                  <TableCell sx={{ width: 180 }}>
+                    <Box
+                      sx={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        width: 160,
+                        fontWeight: 400,
+                        color: 'text.secondary',
+                      }}
+                    >
+                      <span>← {leftWord}</span>
+                      <span>{rightWord} →</span>
+                    </Box>
+                  </TableCell>
                   <TableCell />
                 </TableRow>
               </TableHead>
@@ -304,7 +313,9 @@ export default function InfluencePanel({
                   <TableCell align="right" sx={{ ...NUMERIC_SX, fontWeight: 600 }}>
                     {formatValue(baseline)}
                   </TableCell>
-                  <TableCell />
+                  <TableCell align="right" sx={{ color: 'text.secondary' }}>
+                    reference
+                  </TableCell>
                   <TableCell />
                   <TableCell />
                 </TableRow>
@@ -321,7 +332,7 @@ export default function InfluencePanel({
                       )}
                     </TableCell>
                     <TableCell align="right" sx={NUMERIC_SX}>
-                      {formatChange(change)}
+                      {describeChange(change, effectiveStatistic, group)}
                     </TableCell>
                     <TableCell>
                       {/* The tornado: one bar per variant from a centre line,
@@ -337,19 +348,23 @@ export default function InfluencePanel({
                             borderColor: 'divider',
                           }}
                         />
-                        {change != null && largest > 0 && (
-                          <Box
-                            sx={{
-                              position: 'absolute',
-                              top: 2,
-                              bottom: 2,
-                              bgcolor: change >= 0 ? 'primary.main' : 'secondary.main',
-                              opacity: 0.75,
-                              left: change >= 0 ? '50%' : `${50 - (50 * Math.abs(change)) / largest}%`,
-                              width: `${(50 * Math.abs(change)) / largest}%`,
-                            }}
-                          />
-                        )}
+                        {change != null && largest > 0 && (() => {
+                          const right = change >= 0 === sense.positiveRight
+                          const share = (50 * Math.abs(change)) / largest
+                          return (
+                            <Box
+                              sx={{
+                                position: 'absolute',
+                                top: 2,
+                                bottom: 2,
+                                bgcolor: right ? 'primary.main' : 'secondary.main',
+                                opacity: 0.75,
+                                left: right ? '50%' : `${50 - share}%`,
+                                width: `${share}%`,
+                              }}
+                            />
+                          )
+                        })()}
                       </Box>
                     </TableCell>
                     <TableCell align="right">

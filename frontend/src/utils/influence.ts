@@ -148,3 +148,39 @@ export function rank(
   measured.sort((a, b) => Math.abs(b.change!) - Math.abs(a.change!))
   return [...measured, ...unmeasured]
 }
+
+export interface ChangeSense {
+  /** What a positive change means, and a negative one, in words. */
+  more: string
+  less: string
+  /** Whether a positive change is drawn to the right of the centre line. */
+  positiveRight: boolean
+}
+
+/**
+ * Which way a change points, in words, for the figure being read.
+ *
+ * A Boundary's median is in cal BP, so a positive change is OLDER -- and
+ * older is drawn to the left, as on every calendar axis in the app. The
+ * other figures are lengths or probabilities, where more is to the right.
+ */
+export function changeSense(statistic: Statistic, group: 'boundary' | 'duration'): ChangeSense {
+  if (statistic === 'p_before') return { more: 'more likely', less: 'less likely', positiveRight: true }
+  if (statistic === 'width') return { more: 'wider', less: 'narrower', positiveRight: true }
+  if (group === 'duration') return { more: 'longer', less: 'shorter', positiveRight: true }
+  return { more: 'older', less: 'younger', positiveRight: false }
+}
+
+/** A change as words: "80 yr younger", "12 yr wider", "0.239 more likely". */
+export function describeChange(
+  change: number | null,
+  statistic: Statistic,
+  group: 'boundary' | 'duration'
+): string {
+  if (change == null) return '—'
+  const sense = changeSense(statistic, group)
+  const size = statistic === 'p_before' ? Math.abs(change).toFixed(3) : Math.round(Math.abs(change))
+  if (Number(size) === 0) return 'no change'
+  const unit = statistic === 'p_before' ? '' : ' yr'
+  return `${size}${unit} ${change > 0 ? sense.more : sense.less}`
+}

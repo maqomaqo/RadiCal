@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { figure, probabilityAbove, quantitiesOf, rank } from './influence'
+import { changeSense, describeChange, figure, probabilityAbove, quantitiesOf, rank } from './influence'
 import type { InfluenceReport, InfluenceVariant, RunSummary } from './influence'
 
 const run = (startMedian: number, width = 100, duration = 50): RunSummary => ({
@@ -85,5 +85,30 @@ describe('probabilityAbove', () => {
   it('needs a threshold for P before', () => {
     expect(figure(report.baseline, 'boundary:b0', 'p_before', null)).toBeNull()
     expect(figure(report.baseline, 'boundary:b0', 'p_before', 3325)).toBeCloseTo(0.125)
+  })
+})
+
+describe('changeSense and describeChange', () => {
+  it('reads a Boundary median as older or younger, with older drawn left', () => {
+    expect(changeSense('median', 'boundary')).toEqual({
+      more: 'older',
+      less: 'younger',
+      positiveRight: false,
+    })
+    // cal BP: a larger median is an older date.
+    expect(describeChange(44, 'median', 'boundary')).toBe('44 yr older')
+    expect(describeChange(-80, 'median', 'boundary')).toBe('80 yr younger')
+  })
+
+  it('reads widths, durations and probabilities as more or less, drawn right', () => {
+    expect(describeChange(12, 'width', 'boundary')).toBe('12 yr wider')
+    expect(describeChange(-12, 'median', 'duration')).toBe('12 yr shorter')
+    expect(describeChange(0.2391, 'p_before', 'boundary')).toBe('0.239 more likely')
+    expect(changeSense('p_before', 'boundary').positiveRight).toBe(true)
+  })
+
+  it('says when nothing moved', () => {
+    expect(describeChange(0.3, 'median', 'boundary')).toBe('no change')
+    expect(describeChange(null, 'median', 'boundary')).toBe('—')
   })
 })

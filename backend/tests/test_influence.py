@@ -53,6 +53,9 @@ class TestPlanning:
         moves = [v for v in influence.plan(dates, tree, ['move']) if v['date_id'] == 'bm2']
         assert {(v['direction'], v['to_phase_name']) for v in moves} == {
             ('older', 'Lower'), ('younger', 'Upper')}
+        # Says which Phase, not which way the answer moved.
+        assert {v['label'] for v in moves} == {
+            'LB-3 moved to Lower, the older Phase', 'LB-3 moved to Upper, the younger Phase'}
 
     def test_the_oldest_phase_has_no_older_neighbour(self):
         tree, dates = _tree('c'), _dates('c')
