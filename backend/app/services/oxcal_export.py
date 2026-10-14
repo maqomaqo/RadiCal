@@ -22,7 +22,9 @@ Mapping:
   date                 R_Date("name", age, error) { Outlier(...); z=...; };
 
 Options() comes first, above Plot(), since OxCal reads it as a global
-setting. Each curve is loaded once at the head of Plot() -- a file, or a
+setting. Each reservoir offset is declared once by name at the head of Plot()
+-- "None" too, where some dates carry no offset -- and cited by name,
+Delta_R("=LocalMarine", ), wherever a date needs it. Each curve is loaded once at the head of Plot() -- a file, or a
 Mix_Curves of curves loaded before it -- because OxCal refuses a curve name
 defined twice. After that a curve is selected by name alone, before each date
 whose curve or offset differs from the last one stated, and again after
@@ -77,7 +79,9 @@ class _Writer:
         # The curve and offset last stated, or None once it is unknown (after
         # leaving a block). See the module docstring.
         self.state: Optional[Tuple[str, Optional[float], Optional[float]]] = None
-        self.any_offset = False
+        # Each distinct reservoir offset, declared once by name at the head
+        # of Plot() and cited by that name before the dates it applies to.
+        self.offset_names: Dict[Tuple[float, float], str] = {}
         self.curve_names: Dict[str, str] = {}
         self.mixed: Dict[str, Tuple[str, str, float, float]] = {}
 
@@ -155,13 +159,36 @@ class _Writer:
         if self.state == want:
             return
         self.line(self._curve_statement(want[0]))
-        if want[1] is not None:
-            self.line(f'Delta_R("Local",{_number(want[1])},{_number(want[2] or 0)});')
-            self.any_offset = True
-        elif self.any_offset:
-            # An offset stated earlier for this curve would otherwise carry on.
-            self.line('Delta_R("None",0,0);')
+        if self.offset_names:
+            # Cited every time a curve is selected, "None" included, so no
+            # offset stated for an earlier date carries on to this one.
+            name = (self.offset_names[(float(want[1]), float(want[2] or 0))]
+                    if want[1] is not None else 'None')
+            self.line(f'Delta_R("={name}", );')
         self.state = want
+
+    def declare_offsets(self) -> None:
+        """
+        Name every reservoir offset the dates carry, once, at the head of
+        Plot(): "LocalMarine" for one, numbered for several, and "None" when
+        some dates carry none. Dates then cite them by name, so no name is
+        ever stated twice.
+        """
+        offsets: List[Tuple[float, float]] = []
+        bare = False
+        for m in self.measurements:
+            if m.get('delta_r') is None:
+                bare = True
+                continue
+            key = (float(m['delta_r']), float(m.get('delta_r_error') or 0))
+            if key not in offsets:
+                offsets.append(key)
+        for index, key in enumerate(offsets, start=1):
+            name = 'LocalMarine' if len(offsets) == 1 else f'LocalMarine{index}'
+            self.offset_names[key] = name
+            self.line(f'Delta_R({_quote(name)},{_number(key[0])},{_number(key[1])});')
+        if offsets and bare:
+            self.line('Delta_R("None",0,0);')
 
     # -- dates ------------------------------------------------------------
 
@@ -326,6 +353,7 @@ def write_oxcal(name: str, analysis_type: str, measurements: List[Dict[str, Any]
     for model in models:
         writer.line(_OUTLIER_MODELS.get(model, ''))
     writer.prepare_curves(m.get('curve_id') or 'intcal20' for m in measurements)
+    writer.declare_offsets()
 
     if analysis_type == 'bayesian' and tree is not None:
         placed = {id(m) for ms in writer.by_element.values() for m in ms}

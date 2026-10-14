@@ -181,6 +181,34 @@ class TestOxcalRules:
         _read(text)
 
 
+    def test_offsets_are_declared_once_then_cited_by_name(self):
+        text = self._layered()
+        head = text[text.index('Plot()'):text.index('Sequence(')]
+        assert text.count('Delta_R("LocalMarine",-7,45);') == 1
+        assert text.count('Delta_R("None",0,0);') == 1
+        assert 'Delta_R("LocalMarine",-7,45);' in head and 'Delta_R("None",0,0);' in head
+        body = text[text.index('Sequence('):]
+        assert 'Delta_R("=LocalMarine", );' in body and 'Delta_R("=None", );' in body
+        back = {d['sample_name']: d for d in _read(text).dates}
+        assert (back['A2']['delta_r'], back['A2']['delta_r_error']) == (-7, 45)
+        assert not back['B2']['delta_r']
+        assert not back['A1']['delta_r']
+
+    def test_several_offsets_get_a_name_each(self):
+        dates = [_date('M1', 900, curve_id='marine20', delta_r=-7, delta_r_error=45),
+                 _date('M2', 950, curve_id='marine20', delta_r=30, delta_r_error=20)]
+        text, _ = write_oxcal('G', 'group_calibration', dates, None, {})
+        assert 'Delta_R("LocalMarine1",-7,45);' in text
+        assert 'Delta_R("LocalMarine2",30,20);' in text
+        assert 'Delta_R("None"' not in text
+        back = {d['sample_name']: d['delta_r'] for d in _read(text).dates}
+        assert back == {'M1': -7, 'M2': 30}
+
+    def test_no_offsets_means_no_delta_r_at_all(self):
+        text, _ = write_oxcal('G', 'group_calibration', [_date('T', 600)], None, {})
+        assert 'Delta_R' not in text
+
+
 class TestWhatIsNotWritten:
     def test_limits_and_inbuilt_age_are_listed_not_approximated(self):
         tree = _el('root', 'sequence', 'S', [
