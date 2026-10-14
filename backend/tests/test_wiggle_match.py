@@ -446,6 +446,7 @@ class TestAgreement:
     def test_a_clean_series_agrees_with_itself(self):
         result = solve(simulated_series(2500.0, np.linspace(0, 250, 8)))
         assert result['combination_agreement'] > 60.0
+        assert result['combination_threshold'] == pytest.approx(25.0)
         assert all(index > 60.0 for index in result['agreement'].values())
 
     def test_a_member_at_the_wrong_ring_shows_up_in_the_index(self):
@@ -495,6 +496,7 @@ class TestThroughTheApi:
         data = client.get(f'/api/analysis/{analysis_id}').json()['data']
         assert data['solver']['method'] == 'wiggle_match'
         assert data['solver']['combination_agreement'] is not None
+        assert data['solver']['combination_threshold'] == pytest.approx(25.0)
         assert data['solver']['series_span'] == pytest.approx(250.0)
 
         element = data['model_tree']

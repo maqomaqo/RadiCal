@@ -138,7 +138,9 @@ REFINED_EDGE_MASS = 1e-4
 BOUNDARY_WINDOW_FACTOR = 6.0
 MIN_BOUNDARY_PAD_YEARS = 800.0
 # Likelihood below this fraction of a date's peak is treated as absent when
-# working out where the grid needs to reach.
+# working out where the grid needs to reach. OxCal instead cuts at a fixed
+# |z| > 5.26 (exp(-z^2/2) < 1e-6) in F14C, relative to the measurement rather
+# than each date's own peak; the two differ by about 0.1 years on a span.
 SUPPORT_THRESHOLD = 1e-6
 # OxCal's "General" outlier model: a Student-t offset on the calendar age,
 # scaled by 10^u with u uniform over four decades (Bronk Ramsey 2009).
@@ -1630,25 +1632,35 @@ def _span_prior_correction(grid: np.ndarray, num_boundaries: int, enabled: bool,
         outlier/Dune            0.18 -> 0.16     20.7 -> 18.5
         charcoal/Hillside      10.12 -> 8.37     51.4 -> 40.3
 
-    WHAT IS STILL OPEN. On one phase of eight overlapping dates the span is 29.2
-    against OxCal's 26.3, and 54.8 against 48.9 on four -- a constant proportion
-    rather than a constant offset, localised to the two BOUNDARIES, whose
-    marginals carry about 45% more mass far from the dates while the dates
-    themselves agree to 0.1-0.2 years in sd.
+    THE REMAINING SPAN DIFFERENCE, AND WHY IT IS KEPT. On one phase of eight
+    overlapping dates the span is 28.5 against OxCal's 26.3, and 54.4 against
+    48.9 on four, with the dates themselves agreeing to 0.1-0.2 years in sd.
+    The difference sits in the two Boundaries and appears only with the span
+    prior on.
 
-    Ruled out by measurement: the limits (feeding OxCal's own llim/ulim in moves
-    the answer 0.11 years), the grid (refining sixfold moves the span 0.38), the
-    interior-boundary factor (exact against a closed form), the likelihoods
-    (within 0.5% of OxCal's in width), and any extra exponent. The difference
-    also CHANGES SIGN with the number of dates -- ours/OxCal 54.76/48.90 at four,
-    29.12/26.26 at eight, 22.39/23.86 at sixteen -- which rules out both a
-    constant prior difference and the depleted-far-tail hypothesis, since a
-    depleted tail predicts wider still at sixteen. OxCal is not under-converged
-    either, reporting C of 97.6-99.8.
+    It comes from how OxCal runs, not from the model it states. Observed OxCal
+    4.4 behaviour: after the fourth of its ten groups of passes, provided
+    convergence is already above 0.5, OxCal pulls every parameter's hard limits
+    in to the range it has sampled so far, once. The limits factor above reads
+    those limits live, so from then on its offset term drops from roughly
+    span + 123 years to roughly span + 45, and the factor narrows the span. The
+    limits it STARTS with -- the dates' supports widened outward, then tightened
+    along the ordering -- sit hundreds of years from the dates and never bind,
+    which is why feeding OxCal's printed limits in here moved the answer only
+    0.11 years. Emulating the shrink (solve, set each Boundary's limits to its
+    sampled range, solve again, pool 40/60 as OxCal's groups pool) takes the gap
+    from 2.3 to about 0.6 years at eight dates and from 5.5 to 1-2 at four. It
+    also accounts for the other facts recorded against this difference: it
+    needs the span prior, it grows as dates get fewer, and OxCal's span moves
+    with its resolution (28.2 at five years, 26.3 at one), since coarser bins
+    round the shrunk range outward.
 
-    Left open deliberately: every remaining lead is a guess about OxCal's
-    internals. In practice the dates agree to a year or two on every fixture and
-    a phase's span differs by up to about a tenth.
+    This solver does NOT do that, deliberately. It makes OxCal's prior depend
+    on the run's own early samples, and so on run length, resolution and the
+    random stream; what this computes is the posterior of the model as OxCal
+    documents it. Still unexplained: the last 0.6-2 years (correlated sampling
+    and OxCal's binning are candidates), and the reported reversal at sixteen
+    dates (22.4 here against 23.9), which has not been re-run with the shrink.
 
     At n = 2 the exponent is zero, so a single Phase between two Boundaries --
     the app's default shape -- is untouched by the interior-boundary term, and
@@ -1662,8 +1674,9 @@ def _span_prior_correction(grid: np.ndarray, num_boundaries: int, enabled: bool,
     About 1.5 years of extra separation remains, and is not this factor's doing:
     it survives refining the grid fourfold, appears whenever two groups are
     ORDERED whether the middle Boundary is written or implied, and is absent
-    when nothing orders them. See tests/hillside_charcoal_fixture's WHAT IS LEFT
-    note.
+    when nothing orders them. OxCal's mid-run shrink acting on the shared middle
+    Boundary is a plausible cause, not yet tested. See
+    tests/test_charcoal_outlier.py's WHAT IS LEFT note.
     """
     if not enabled:
         return None

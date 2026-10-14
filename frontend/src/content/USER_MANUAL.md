@@ -854,9 +854,9 @@ ranges, the series has not settled on one place on the curve: a longer series re
 more samples inside the same span usually will not.
 
 The **combination agreement** is the check that the match worked. The gaps are asserted, so a
-misidentified sample simply degrades the overall fit. RadiCal quotes the index without a pass mark:
-OxCal's combination threshold scales with n, and this app does not print a threshold it has not
-verified against a real OxCal run.
+misidentified sample simply degrades the overall fit. It is shown with its pass mark, which is
+lower for a longer series (50% for two samples, 25% for eight), as in OxCal. An index below its pass
+mark is shown in amber: check the ring counts and look for a member with poor agreement.
 
 **Outlier models** are incompatible with wiggle matching: the gaps are asserted, so there is no room
 for a date to sit apart. The agreement index is what identifies a misfit member.
@@ -1512,6 +1512,15 @@ g = min( (ulim_m - llim_a) - (t_m - t_a),
 This is not negligible: on eight overlapping dates in one phase it is worth about 18% of the
 reported span, and it narrows.
 
+The limits `llim` and `ulim` are taken from the dates' likelihoods and the model's ordering, and
+stay fixed. OxCal behaves differently during a run: after four of its ten groups of passes, it
+pulls each parameter's limits in to the range it has sampled so far, and the limits factor then
+reads those narrower limits. That strengthens the factor and narrows a phase's span further, by an
+amount that depends on run length, resolution and the random seed rather than on the model. RadiCal
+does not do this, so a single phase's span can be up to about a tenth wider than OxCal's (28.5
+against 26.3 years on eight dates, 54.4 against 48.9 on four), while the dates themselves agree to
+a fraction of a year. With the span prior off the two agree to 0.2 years.
+
 ### A.6 Solvers
 
 The app chooses between two solvers by model shape. Both target the same posterior. After a sampled
@@ -1608,8 +1617,10 @@ too narrow.
 al. 1953; Hastings 1970; Geman and Geman 1984; Buck et al. 1992; Bronk Ramsey 1995). Each full conditional is
 one-dimensional and exactly samplable: a date's conditional is its likelihood over the interval its
 neighbours and boundaries allow; a Boundary's is the product of the span factors of the groups it
-bounds. The app draws by inverse CDF on a precomputed cumulative table rather than by
-propose-and-reject. Conditionally independent dates are updated in blocks, and whole-group
+bounds. OxCal updates each parameter with one proposal drawn uniformly over its allowed interval,
+accepted with probability `p'/p`, so a parameter with a sharp conditional often stays put. The app
+instead draws each conditional exactly, by inverse CDF on a precomputed cumulative table: a true
+Gibbs step, which always moves and mixes better per sweep. Conditionally independent dates are updated in blocks, and whole-group
 translation moves are proposed on the exact MH ratio so a tightly constrained group can cross
 between calibration lobes. Half the wide proposals jump by one of the distances between the group's
 own calibration peaks (both directions, blurred by a few years), rather than from a fixed 120-year
@@ -1708,6 +1719,20 @@ the modelled ranges genuinely move. On the ordered test model, which the exact s
 written at 0.56 years rms from OxCal (the sampler 0.58), supplying the missing Boundary put it at
 2.33. Earlier versions did this when the exact solver was chosen.
 
+**Known differences from OxCal 4.4.** Each is small next to a date's range, and none depends on
+which solver is used:
+
+- **Span prior limits.** OxCal narrows the limits factor's limits partway through a run (A.5);
+  RadiCal keeps them fixed. A single phase's span can come out up to about a tenth wider.
+- **Likelihood cut-off.** OxCal treats a date's likelihood as zero beyond a fixed 5.26 standard
+  deviations of the measurement; RadiCal cuts at a millionth of each date's own peak. The effect on a
+  span is about 0.1 years.
+- **Calibration.** OxCal forms the likelihood in fraction modern (F14C) and interpolates the curve
+  with cubic splines; RadiCal works in radiocarbon years and interpolates linearly. The difference
+  is negligible through the Holocene and grows for very old and near-modern dates.
+- **Random variation.** OxCal seeds each run from the clock, so repeat runs differ slightly; a
+  difference of a few tenths of a year from OxCal is within that variation.
+
 ### A.7 Outlier models
 
 A Bernoulli outlier indicator is integrated out per date:
@@ -1770,6 +1795,14 @@ Aoverall = 100 * (product of A_i/100)^(1/sqrt(n))
 
 `Amodel` falls below `Aoverall` when the model's structure is doing work, because it sees the
 correlation the ordering imposes. It is a Monte Carlo average over joint draws, good to about ±0.5.
+
+A **combination** of n dates (a wiggle match, A.13) is quoted against OxCal's pass mark
+
+```
+A_n = 100 / sqrt(2n)
+```
+
+which falls as dates are added: 50% for two, 25% for eight. With no dates it is 60%.
 
 **Resolution.** The indices are ratios of integrals. The likelihood is evaluated exactly at every
 posterior point, and `integral(L^2)` is taken at one-year steps. OxCal's indices depend on its
@@ -1912,8 +1945,8 @@ pass (not the solver grid of A.6, which pads generously for Boundaries that a wi
 
 **Agreement.** Each member's index is A.8's formula, and the combination is the same
 `100·(∏A_i/100)^(1/√n)`. This matters more here than elsewhere: the gaps are rigid, so a
-misidentified member only degrades the overall fit. No threshold is printed — OxCal's combination
-threshold scales with n, and RadiCal has not verified it against a real run.
+misidentified member only degrades the overall fit. It is quoted against the pass mark
+`A_n = 100/√(2n)` of A.8, as OxCal quotes it.
 
 **Outlier models** are refused in a wiggle match. Every member is the same calendar age plus a
 fixed number — there is no room for a date to sit apart. The agreement index identifies misfits.

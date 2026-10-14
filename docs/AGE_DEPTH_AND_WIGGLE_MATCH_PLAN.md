@@ -302,12 +302,8 @@ Per member: `agreement.py`'s existing formula, comparing each member's modelled 
 code, new caller. Combined: `overall_agreement` already implements
 `100 · (∏ Aᵢ/100)^(1/√n)`.
 
-**Open, and to be pinned against a real OxCal run rather than recalled** (§12.1): the critical
-*threshold* OxCal quotes a combination against scales with n, and `agreement.py`'s own docstring
-records what happened last time a formula here was written from memory — `Amodel` is
-deliberately not implemented because a guess at the headline number archaeologists screen on
-would be worse than reporting nothing. The same standard applies: quote the index, and quote a
-threshold only once a fixture says what it is.
+**Threshold** (§12.1, resolved): the combination is quoted against OxCal's
+`A_n = 100/√(2n)`, confirmed from observed OxCal 4.4 behaviour (`agreement.combination_threshold`).
 
 ### 4.6 Data model
 
@@ -597,11 +593,8 @@ Then:
 
 ## 12. Open decisions
 
-1. **The combination agreement threshold.** The index itself is `overall_agreement`, already
-   implemented and already validated. What OxCal quotes a *combination* against scales with n,
-   and this document deliberately does not name a number: pin it against a real `D_Sequence` run
-   before putting a pass/fail threshold in front of an archaeologist. `Amodel` is precedent —
-   `agreement.py` reports nothing rather than a guess.
+1. **The combination agreement threshold.** Resolved: OxCal's `A_n = 100/√(2n)`, confirmed
+   from observed OxCal 4.4 behaviour and printed beside the index.
 2. **`gap_units`.** Rings are the overwhelming case, but varve counts and sampled sequences are
    the same maths in different units. Carrying a `gap_units` field costs almost nothing and
    makes the axis label honest; the alternative is calling everything "rings" and being wrong

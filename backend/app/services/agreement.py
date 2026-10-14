@@ -135,6 +135,8 @@ SUPPORT_THRESHOLD = 1e-6
 OUTLIER_MARGIN_YEARS = 500.0
 # Conventional threshold for a date worth re-examining (Bronk Ramsey 1995).
 POOR_AGREEMENT_BELOW = 60.0
+# What OxCal quotes a combination of no dates against; see combination_threshold.
+EMPTY_COMBINATION_THRESHOLD = 60.0
 # Floor applied before taking logs in the overall index. A date pushed clean
 # off its likelihood scores a true zero, and dropping those would remove
 # precisely the worst dates and let a broken model report a healthy overall.
@@ -390,6 +392,20 @@ def overall_agreement(indices: Iterable[Optional[float]],
     floored = np.maximum(np.asarray(usable, dtype=float), MINIMUM_FOR_OVERALL)
     logs = np.log(floored / 100.0)
     return float(100.0 * np.exp(logs.sum() / np.sqrt(len(usable) + extra_terms)))
+
+
+def combination_threshold(n: int) -> float:
+    """
+    The pass mark a combination index over `n` dates is quoted against:
+    A_n = 100 / sqrt(2n), the threshold in OxCal's documentation and the one
+    observed OxCal 4.4 behaviour prints beside Acomb ("Acomb=...(An=...)").
+    It falls as n grows, since the index's 1/sqrt(n) exponent lets a long
+    series score lower than a short one for the same quality of fit. With no
+    dates OxCal falls back to 60, the per-date threshold.
+    """
+    if n <= 0:
+        return EMPTY_COMBINATION_THRESHOLD
+    return float(100.0 / np.sqrt(2.0 * n))
 
 
 def _scales_for(measurement: Dict, scales: Optional[Dict[str, Sequence[float]]]):

@@ -238,10 +238,10 @@ interface AnalysisResult {
     // Wiggle-match path only. The combination index is not a diagnostic
     // beside the answer -- a D_Sequence asserts the gaps and cannot widen to
     // absorb a member that does not fit, so this IS the check that the match
-    // is real. Reported without a pass/fail threshold, since what OxCal
-    // quotes a combination against scales with the number of members and this
-    // app does not print a number it has not pinned against a real run.
+    // is real. Quoted against OxCal's A_n, which scales with the number of
+    // members; absent on analyses run before it was reported.
     combination_agreement?: number | null
+    combination_threshold?: number | null
     series_span?: number
     gap_units?: string
     reference_sample_id?: string | null
@@ -2747,6 +2747,7 @@ export default function Results() {
             gapUnits={analysis.solver?.gap_units || 'rings'}
             seriesSpan={analysis.solver?.series_span ?? 0}
             combinationAgreement={analysis.solver?.combination_agreement}
+            combinationThreshold={analysis.solver?.combination_threshold}
             referenceSampleId={analysis.solver?.reference_sample_id}
             measurements={Object.fromEntries(
               (analysis.solver?.members || []).map((member) => {

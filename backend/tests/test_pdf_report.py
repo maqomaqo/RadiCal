@@ -444,6 +444,22 @@ class TestHpdText:
         assert pdf_report._hpd_text(None, None, None, 'calBP') == ''
 
 
+class TestWiggleMatchSentence:
+    _SOLVER = {'method': 'wiggle_match', 'series_span': 250.0,
+               'gap_units': 'rings', 'combination_agreement': 104.2}
+
+    def test_quotes_the_combination_against_its_pass_mark(self):
+        sentence = pdf_report._solver_sentence(
+            {**self._SOLVER, 'combination_threshold': 25.0})
+        assert 'combination index of 104%' in sentence
+        assert 'A<sub>n</sub> 25%' in sentence
+
+    def test_an_older_run_without_a_threshold_quotes_the_index_alone(self):
+        sentence = pdf_report._solver_sentence(self._SOLVER)
+        assert 'combination index of 104%.' in sentence
+        assert 'pass mark' not in sentence
+
+
 class TestCalendarTicks:
     """
     Mirrored from frontend/src/utils/dateFormat.ts. The property worth
