@@ -394,19 +394,28 @@ class TestEveryKernelTargetsOneDistribution:
         assert tied - apart == pytest.approx(
             float(log_lik[5] - log_lik[6]) - np.log(2.0))
 
-    def test_every_tie_a_date_has_is_its_own_half(self):
+    def test_a_tie_of_three_is_the_chance_of_their_order(self):
         """
-        One half per tied ordering EDGE. A date tied to both dates of the
-        next Phase at one cell has two, not one: given only one half the
-        conditionals of its neighbours would disagree about the weight of the
-        configuration, and no joint distribution has them all.
+        A date tied to both dates of the next Phase at one cell weighs 1/3 --
+        the chance that it is the oldest of three placed at random in the
+        cell -- not the 1/4 a half per tie gave, which over-penalised every
+        tie of more than two and pushed ordered groups apart by a term of
+        first order in the grid step. Its neighbours, each tied only to it,
+        see the same configuration at the same weight, which is what makes
+        the rule one joint distribution.
         """
         model = self._ordered()
         state = model.initial_state()
-        date_id = model.date_ids[0]
+        first, second, third, fourth = model.date_ids
+        older, younger = model.group_dates[0][:2]
+        state.index[older], state.index[younger] = 12, 0
         for cell, other in zip((8, 9, 8, 8), model.date_ids):
             state.index[other] = cell
-        assert model.endpoint_weight(date_id, state) == 0.25
+        assert model.endpoint_weight(first, state) == pytest.approx(1 / 3)
+        # Moving `third` away leaves `first` and `fourth`, a pair: 1/2. So
+        # `third` at 8 multiplies the joint by (1/3) / (1/2).
+        assert model.endpoint_weight(third, state) == pytest.approx(2 / 3)
+        assert model._cluster_weight([first, second, third, fourth]) == pytest.approx(1 / 6)
 
     def test_a_date_at_the_edge_of_its_own_window_is_not_halved(self):
         """
@@ -470,9 +479,18 @@ class TestEveryKernelTargetsOneDistribution:
                 axes = np.arange(n + 1)
                 a1, a2, b1, b2 = np.meshgrid(axes, axes, axes, axes, indexing='ij')
                 ordered = np.minimum(a1, a2) >= np.maximum(b1, b2)
-                ties = (a1 == b1).astype(int) + (a1 == b2) + (a2 == b1) + (a2 == b2)
+                # Dates of the two Phases can only share the cell where the
+                # older Phase's youngest meets the younger's oldest. With n_a
+                # and n_b of them there, the chance that random positions in
+                # the cell keep the order: n_a! n_b! / (n_a + n_b)!.
+                meet = np.minimum(a1, a2)
+                n_a = (a1 == meet).astype(int) + (a2 == meet)
+                n_b = (b1 == meet).astype(int) + (b2 == meet)
+                factorial = np.array([1.0, 1.0, 2.0, 6.0, 24.0])
+                tie = np.where(n_b > 0,
+                               factorial[n_a] * factorial[n_b] / factorial[n_a + n_b], 1.0)
                 w = (weight[0][a1] * weight[1][a2] * weight[2][b1] * weight[3][b2]
-                     * np.where(ordered, 0.5 ** ties, 0.0) * prefactor)
+                     * np.where(ordered, tie, 0.0) * prefactor)
                 marginals['older'][o] += w.sum()
                 marginals['younger'][y] += w.sum()
                 total += w.sum()
@@ -585,6 +603,33 @@ class TestEveryKernelTargetsOneDistribution:
         for k in range(4):
             assert self._tv(got[2][k], target[2][k]) < 0.03, k
         assert all(a > 0 for a in chain.swaps_accepted)
+
+class TestOrderedGroupsDoNotDependOnTheGrid:
+    """
+    Two ordered groups with no Boundary between them (`ordered`), where dates
+    of the two groups can share a cell. Weighting each tie a half made the
+    groups' separation depend on the grid step -- 13.7 years at 2.0, about
+    13.0 at the default 1.25, 12.3 at 0.5 -- converging on the answer only as
+    the step went to zero. Weighted as the chance of the tied dates' order
+    (Model._cluster_weight) it is 11.6-12.2 at every step. The exact solver's
+    limit is about 11.8 (11.86 at a step of 0.125, first order in the step);
+    OxCal gives 11.66.
+    """
+
+    def _separation(self, step):
+        measurements, tree = ox.measurements(), ox.model_tree('ordered')
+        lo, hi = gibbs.Model(measurements, tree).grid[[0, -1]]
+        solved = gibbs.solve(measurements, tree, grid=np.arange(lo, hi + step / 2, step),
+                             chains=2, seed=1, num_samples=100)
+        mean = lambda ids: np.mean(                                    # noqa: E731
+            [solved['measurements'][i]['posterior_mean'] for i in ids])
+        return mean(ox.NORTH) - mean(ox.SOUTH)
+
+    def test_a_coarse_grid_gives_the_answer_a_fine_one_does(self):
+        coarse, fine = self._separation(2.0), self._separation(0.5)
+        assert coarse == pytest.approx(fine, abs=0.7), (coarse, fine)
+        assert coarse == pytest.approx(11.8, abs=0.7), coarse
+
 
 class TestBranchingModels:
     """
