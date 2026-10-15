@@ -1524,13 +1524,16 @@ This is not negligible: on eight overlapping dates in one phase it is worth abou
 reported span, and it narrows.
 
 The limits `llim` and `ulim` are taken from the dates' likelihoods and the model's ordering, and
-stay fixed. OxCal behaves differently during a run: after four of its ten groups of passes, it
-pulls each parameter's limits in to the range it has sampled so far, and the limits factor then
-reads those narrower limits. That strengthens the factor and narrows a phase's span further, by an
-amount that depends on run length, resolution and the random seed rather than on the model. RadiCal
-does not do this, so a single phase's span can be up to about a tenth wider than OxCal's (28.5
-against 26.3 years on eight dates, 54.4 against 48.9 on four), while the dates themselves agree to
-a fraction of a year. With the span prior off the two agree to 0.2 years.
+stay fixed. OxCal behaves differently during a run: once, from its fourth group of passes on and
+as soon as its convergence measure is above 0.5, it pulls each parameter's limits in to the range
+it has sampled so far, and the limits factor then reads those narrower limits. That strengthens the
+factor and narrows a phase's span further, by an amount that depends on run length, resolution and
+the random seed rather than on the model. RadiCal does not do this, so a single phase's span can be
+up to about a tenth wider than OxCal's: on eight dates 28.5 years against OxCal's 26.2 (the mean of
+five runs, which ranged from 25.6 to 26.9), and on four 54.4 against 48.9 (one run). The dates
+themselves agree to a fraction of a year. With the span prior off the two agree to 0.2 years. On
+sixteen dates the difference is no larger than OxCal's own variation between runs: 21.9 against a
+mean of 22.5 over five runs that ranged from 20.9 to 24.2.
 
 ### A.6 Solvers
 
@@ -1738,19 +1741,26 @@ which solver is used. **Match OxCal 4.4** removes the first three:
   span is about 0.1 years.
 - **Curve interpolation.** OxCal interpolates between curve points with cubic splines; RadiCal
   interpolates linearly. The difference is small, and confined to wiggly stretches of the curve.
-- **Random variation.** OxCal seeds each run from the clock, so repeat runs differ slightly; a
-  difference of a few tenths of a year from OxCal is within that variation.
+- **Random variation.** OxCal seeds each run from the clock, so repeat runs differ. A phase's span
+  can move by a year or more from one OxCal run to the next (20.9 to 24.2 years over five runs of
+  one test model, and half a year either way on another), so compare against several OxCal runs
+  rather than one.
 
 **Match OxCal 4.4.** The run uses the sampler, untempered and with no probe of unvisited ranges,
 since OxCal has neither, and always completes its first eight rounds. From the fourth round on,
 the first time the convergence measure over everything sampled so far is above 0.5, each
 parameter's allowed range is narrowed once to the range it has been sampled over (its histogram
-trimmed at a millionth of its peak), and the limits factor of A.5 is recomputed from the Boundaries' narrowed ranges. The rounds
-before and after are pooled, as OxCal pools its groups. Likelihoods use cubic interpolation of the
-curve and are cut beyond 5.26 standard deviations. On one Phase of eight dates (IntCal20, 1480 to
-1410 BP, ±25) the span came to 26.3–27.6 years over several seeds, against OxCal's 26.3 and 28.4
-without matching; on four of those dates 50.4–51.8, against 48.9 and 54.4. The check against a
-direct calculation is not run, since the two are meant to differ.
+trimmed at a millionth of its peak), and the limits factor of A.5 is recomputed from the
+Boundaries' narrowed ranges. The rounds before and after are pooled, as OxCal pools its groups.
+Likelihoods use cubic interpolation of the curve and are cut beyond 5.26 standard deviations.
+
+On one Phase of eight dates (IntCal20, 1480 to 1410 BP, ±25), five OxCal runs gave spans of 25.6 to
+26.9 years (mean 26.2), against 28.5 without matching. Matched, one chain gave 24.7 to 26.2 and
+four chains 26.3 to 27.6, so OxCal falls between them: several chains pool a wider sampled range
+before narrowing it, and so narrow less than OxCal's single chain does. The Start Boundary lands
+where OxCal puts it, AD 608.6 against 608.8, where the unmatched model gives 607.0. On four of
+those dates matching gave 50.4 to 51.8, against one OxCal run of 48.9 and 54.4 without matching.
+The check against a direct calculation is not run, since the two are meant to differ.
 
 ### A.7 Outlier models
 
