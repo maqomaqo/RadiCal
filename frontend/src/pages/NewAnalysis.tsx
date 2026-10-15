@@ -1369,11 +1369,14 @@ export default function NewAnalysis() {
                     onChange={(e) => setMcmc({ solver: e.target.value as SolverChoice })}
                   >
                     <MenuItem value="auto">Automatic</MenuItem>
-                    <MenuItem value="exact">Exact solver only</MenuItem>
-                    <MenuItem value="gibbs">MH/Gibbs sampler (as OxCal)</MenuItem>
+                    {/* Match OxCal 4.4 is the sampler's; see that switch. */}
+                    <MenuItem value="exact" disabled={mcmc.match_oxcal}>Exact solver only</MenuItem>
+                    <MenuItem value="gibbs">MH/Gibbs sampler</MenuItem>
                   </Select>
                   <FormHelperText>
-                    {mcmc.solver === 'auto' &&
+                    {mcmc.solver === 'auto' && mcmc.match_oxcal &&
+                      'Uses the MH/Gibbs sampler, since Match OxCal 4.4 is on.'}
+                    {mcmc.solver === 'auto' && !mcmc.match_oxcal &&
                       'Uses an Exact Solver for models where this is possible, and uses the MH/Gibbs method otherwise.'}
                     {mcmc.solver === 'exact' &&
                       'Integrates the posterior exactly for chain-shaped models i.e. a Sequence of Phases separated by Boundaries. Faster, but will fail for branching models.'}
@@ -1568,6 +1571,29 @@ export default function NewAnalysis() {
                     <FormHelperText sx={{ mt: 0, ml: 0 }}>
                       OxCal&rsquo;s UniformSpanPrior correction (Nicholls and Jones 2001), on
                       by default. Only affects a sequence with three or more boundaries.
+                    </FormHelperText>
+                    <FormControlLabel
+                      sx={{ mt: 1, display: 'flex' }}
+                      control={
+                        <Switch
+                          checked={mcmc.match_oxcal}
+                          onChange={(e) =>
+                            setMcmc({
+                              match_oxcal: e.target.checked,
+                              // The exact solver has no OxCal-matching mode.
+                              ...(e.target.checked && mcmc.solver === 'exact'
+                                ? { solver: 'auto' as SolverChoice }
+                                : {}),
+                            })
+                          }
+                        />
+                      }
+                      label={<span>Match OxCal 4.4</span>}
+                    />
+                    <FormHelperText sx={{ mt: 0, ml: 0 }}>
+                      Reproduces OxCal&rsquo;s own results, for checking a published analysis.
+                      Uses the MH/Gibbs sampler. A phase&rsquo;s span usually comes out a little
+                      narrower than the model alone gives.
                     </FormHelperText>
                     <FormControlLabel
                       sx={{ mt: 1, display: 'flex' }}

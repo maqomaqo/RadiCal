@@ -200,6 +200,17 @@ from app.services.exact_chain import (
 from app.services.model_tree import inherited_bounds, plan_model
 from app.services.stratigraphy import effective_bounds
 
+# Matching OxCal 4.4 ("Match OxCal 4.4"): observed OxCal behaviour is to pull
+# every parameter's hard limits in to the range it has sampled so far, once,
+# after the fourth of its ten groups of passes, provided its convergence
+# measure is already above 0.5; the limits factor of the span prior then reads
+# those narrower limits. Here that is after the same fraction of the first
+# sampling rounds. A histogram is trimmed at SHRINK_TRIM of its peak first.
+# See Model.shrink_limits and exact_chain._span_prior_correction for what it
+# does to a phase's span.
+SHRINK_AFTER_FRACTION = 0.4
+SHRINK_MIN_CONVERGENCE = 0.5
+SHRINK_TRIM = 1e-6
 # Sweeps discarded before anything is accumulated, as a fraction of the total.
 # A sweep starts from a repaired-but-arbitrary state, so the early ones say more
 # about where the chain began than about the posterior.
@@ -907,6 +918,38 @@ class Model:
                 row = row + limits
             rows.append(row)
         return rows
+
+    def shrink_limits(self, ranges: Dict[str, Tuple[int, int]]) -> None:
+        """
+        Narrow each parameter's own window to `ranges` (index pairs, from
+        sampled_ranges), and recompute the span prior's limits factor from
+        the Boundaries' narrowed windows -- what observed OxCal 4.4 behaviour
+        does once, partway through a run, when matching OxCal is asked for.
+
+        The factor is otherwise built from limits that sit well clear of the
+        dates (pair_limits); from sampled ranges its offset term is much
+        smaller, so it narrows the span more. A chain's own state lies inside
+        what it sampled, so nothing it holds becomes impossible.
+        """
+        for param, (lo, hi) in ranges.items():
+            own_lo, own_hi = self.window[param]
+            self.window[param] = (max(own_lo, lo), min(own_hi, hi))
+        self.window_lo = np.array([self.window[p][0] for p in self.params])
+        self.window_hi = np.array([self.window[p][1] for p in self.params])
+
+        spans = np.arange(self.M, dtype=float) * self.dt
+        tables = {}
+        for oldest_id, youngest_id, _exponent in self.span_priors:
+            # (oldest age, youngest age) each Boundary may now take, cal BP.
+            oldest = self.window[oldest_id]
+            youngest = self.window[youngest_id]
+            factor = log_limits_factor_of_span(
+                spans, (self.grid[oldest[1]], self.grid[oldest[0]]),
+                (self.grid[youngest[1]], self.grid[youngest[0]]))
+            if factor is not None:
+                tables[(oldest_id, youngest_id)] = factor
+        self.limits_tables = tables
+        self.span_prior_rows = self._span_prior_rows()
 
     def _neighbouring_boundaries(self) -> set:
         """
@@ -1977,6 +2020,7 @@ class _Chain:
         self.per_round_draws = max(1, collect_draws // ROUNDS) if collect_draws else 0
         self.round_draws: List[np.ndarray] = []
         self.round_length = max(1, (sweeps - self.burn_in) // ROUNDS)
+        self.limits_shrunk = False
 
     def sweep(self) -> None:
         """
@@ -2071,6 +2115,15 @@ class _Chain:
         for _ in range(count):
             self.sweep()
 
+    def shrink(self, ranges: Dict[str, Tuple[int, int]]) -> None:
+        """Model.shrink_limits, for a run matching OxCal. Tempered copies are
+        not supported alongside it: OxCal has none, and a hot copy's state can
+        sit outside what the recorded chain sampled."""
+        if self.hot_states:
+            raise ValueError('limits cannot be shrunk on a tempered chain')
+        self.model.shrink_limits(ranges)
+        self.limits_shrunk = True
+
     def round(self) -> Dict[str, np.ndarray]:
         """
         One sampling round: round_length sweeps accumulated into a fresh
@@ -2163,7 +2216,42 @@ class _Chain:
             'acceptance': [a / p if p else 0.0 for a, p in zip(self.accepted, self.proposed)],
             'scales': self.scales,
             'convergence': convergence,
+            'limits_shrunk': self.limits_shrunk,
         }
+
+
+def sampled_ranges(totals: Dict[str, np.ndarray], trim: float = SHRINK_TRIM
+                   ) -> Dict[str, Tuple[int, int]]:
+    """Each parameter's sampled range as (first, last) grid index, the
+    histogram trimmed at `trim` of its peak; parameters never sampled are
+    left out."""
+    ranges = {}
+    for param, counts in totals.items():
+        if counts.max() <= 0:
+            continue
+        kept = np.nonzero(counts >= trim * counts.max())[0]
+        ranges[param] = (int(kept[0]), int(kept[-1]))
+    return ranges
+
+
+def shrink_round() -> int:
+    """How many sampling rounds a run matching OxCal completes before its
+    one chance to shrink the limits (SHRINK_AFTER_FRACTION of ROUNDS)."""
+    return max(1, int(np.ceil(SHRINK_AFTER_FRACTION * ROUNDS)))
+
+
+def _shrink_due(rounds: List[Dict[str, np.ndarray]], params: List[str]
+                ) -> Optional[Dict[str, Tuple[int, int]]]:
+    """
+    The ranges to shrink to, if a run matching OxCal has just completed its
+    shrink_round()-th round and converged past SHRINK_MIN_CONVERGENCE over
+    everything sampled so far; otherwise None. The caller asks once, at that
+    round, as OxCal tests once: a run not converged by then is never shrunk.
+    """
+    measure = _convergence(rounds, params)
+    if not measure or min(measure.values()) <= SHRINK_MIN_CONVERGENCE:
+        return None
+    return sampled_ranges({p: sum(r[p] for r in rounds) for p in params})
 
 
 def _folded(rounds: List[Dict[str, np.ndarray]], params: List[str]
@@ -2206,7 +2294,8 @@ def run(model: Model, sweeps: int = DEFAULT_SWEEPS, seed: int = 42,
         on_progress: Optional[Callable[[Dict], bool]] = None,
         start_quantile: Optional[float] = None,
         start_lobe: Optional[Tuple] = None,
-        temperatures: int = DEFAULT_TEMPERATURES) -> Dict:
+        temperatures: int = DEFAULT_TEMPERATURES,
+        match_oxcal: bool = False) -> Dict:
     """
     Sweep the sampler and accumulate each parameter's marginal as a histogram
     over the calendar grid, extending the run until it has converged.
@@ -2260,6 +2349,9 @@ def run(model: Model, sweeps: int = DEFAULT_SWEEPS, seed: int = 42,
     stays flat however long the run extends. Unlike exact_chain's, these draws
     are an MCMC chain: consecutive ones are correlated.
 
+    `match_oxcal` shrinks every parameter's limits once, partway through, as
+    observed OxCal 4.4 behaviour does (_shrink_due, Model.shrink_limits).
+
     Returns {'histograms', 'sweeps', 'sweeps_kept', 'convergence', 'acceptance',
     ...} -- convergence being OxCal's own diagnostic, per parameter.
     """
@@ -2281,9 +2373,15 @@ def run(model: Model, sweeps: int = DEFAULT_SWEEPS, seed: int = 42,
 
     while True:
         chain.round()
+        if match_oxcal and len(chain.rounds) == shrink_round():
+            ranges = _shrink_due(chain.rounds, model.params)
+            if ranges is not None:
+                chain.shrink(ranges)
         convergence, worst, kept = chain.convergence()
         report('sampling', worst)
-        if kept < 2:
+        if kept < 2 or (match_oxcal and len(chain.rounds) < ROUNDS):
+            # OxCal always completes its first ten groups, the shrink among
+            # them, before it may stop.
             continue
         if chain.swept >= chain.max_sweeps:
             break
@@ -2397,6 +2495,7 @@ def _chain_server(conn) -> None:
         try:
             if command == 'build':
                 calibration.preload_curves(payload['curves'])
+                calibration.set_matching_oxcal(payload.get('match_oxcal', False))
                 model = Model(payload['measurements'], payload['root'],
                               grid=payload['grid'],
                               uniform_span_prior=payload['uniform_span_prior'])
@@ -2412,6 +2511,9 @@ def _chain_server(conn) -> None:
                 reply = chain.swept
             elif command == 'round':
                 reply = {'histogram': chain.round(), 'swept': chain.swept}
+            elif command == 'shrink':
+                chain.shrink(payload)
+                reply = None
             elif command == 'finish':
                 measure, _worst, _kept = chain.convergence()
                 reply = chain.result(measure)
@@ -2571,7 +2673,8 @@ def solve_chains(measurements: List[Dict], root: Dict, chains: int,
                  collect_draws: int = 0,
                  on_progress: Optional[Callable[[Dict], bool]] = None,
                  start_strategy: str = DEFAULT_START_STRATEGY,
-                 temperatures: int = DEFAULT_TEMPERATURES) -> Dict:
+                 temperatures: int = DEFAULT_TEMPERATURES,
+                 match_oxcal: bool = False) -> Dict:
     """
     run() over `chains` chains in parallel worker processes, under ONE
     stopping rule read off their pooled rounds, returned as one result of
@@ -2634,7 +2737,7 @@ def solve_chains(measurements: List[Dict], root: Dict, chains: int,
             'uniform_span_prior': uniform_span_prior, 'sweeps': sweeps,
             'seed': seed + c, 'max_sweeps': max_sweeps,
             'collect_draws': collect_draws, 'curves': curves,
-            'temperatures': temperatures,
+            'temperatures': temperatures, 'match_oxcal': match_oxcal,
             **start,
         } for c, start in enumerate(chain_starts(chains, seed, start_strategy))])
         params: List[str] = built[0]['params']
@@ -2650,20 +2753,29 @@ def solve_chains(measurements: List[Dict], root: Dict, chains: int,
         # chain's own, so the pooled halves and the between-chain figures
         # can be read every round without shipping histories back and forth.
         per_chain: List[List[Dict[str, np.ndarray]]] = [[] for _ in range(chains)]
+        completed = 0
         while True:
             replies = everyone('round', [None] * chains)
+            completed += 1
             swept = [r['swept'] for r in replies]
             for rounds, reply in zip(per_chain, replies):
                 rounds.append(reply['histogram'])
                 if len(rounds) > 2 * ROUNDS:
                     rounds[:] = _folded(rounds, params)
+            if match_oxcal and completed == shrink_round():
+                # One run as OxCal sees it: the chains' rounds pooled, and
+                # every chain shrunk to the same ranges.
+                ranges = _shrink_due([{p: sum(r[p] for r in same) for p in params}
+                                      for same in zip(*per_chain)], params)
+                if ranges is not None:
+                    everyone('shrink', [ranges] * chains)
             kept = [_after_burn_in(rounds) for rounds in per_chain]
             pooled = [{p: sum(r[p] for r in same) for p in params}
                       for same in zip(*kept)]
             convergence = _convergence(pooled, params)
             worst = min(convergence.values()) if convergence else 0.0
             report('sampling', swept, worst)
-            if len(pooled) < 2:
+            if len(pooled) < 2 or (match_oxcal and completed < ROUNDS):
                 continue
             if min(swept) >= max_sweeps:
                 break
@@ -2743,6 +2855,7 @@ def _pool_chains(results: List[Dict]) -> Dict:
                        zip(*(r['acceptance'] for r in results))],
         'scales': results[0]['scales'],
         'convergence': within,
+        'limits_shrunk': any(r.get('limits_shrunk') for r in results),
         'chains': len(results),
         'between_chain_convergence': between,
         'rhat': rhat,
@@ -2979,7 +3092,8 @@ def solve(measurements: List[Dict], root: Dict, sweeps: int = DEFAULT_SWEEPS,
           on_progress: Optional[Callable[[Dict], bool]] = None,
           chains: int = 1,
           resolution: float = REPORTING_STEP_YEARS,
-          temperatures: int = DEFAULT_TEMPERATURES) -> Dict:
+          temperatures: int = DEFAULT_TEMPERATURES,
+          match_oxcal: bool = False) -> Dict:
     """
     Posterior summaries for every date and boundary, in the same shape
     exact_chain.solve returns -- so a caller does not need to know which
@@ -3016,7 +3130,15 @@ def solve(measurements: List[Dict], root: Dict, sweeps: int = DEFAULT_SWEEPS,
 
     `resolution` is the calendar step the HPD ranges and durations are
     reported at, as in exact_chain.solve. It does not touch the run.
+
+    `match_oxcal` runs the sampler as observed OxCal 4.4 behaviour does: the
+    limits shrunk once partway through (run, Model.shrink_limits), no
+    tempered copies and no lobe probe, neither of which OxCal has. The
+    likelihood side of matching OxCal is calibration.matching_oxcal, which
+    the caller sets around the whole solve.
     """
+    if match_oxcal:
+        temperatures = 1
     model = Model(measurements, root, grid=grid,
                   uniform_span_prior=uniform_span_prior)
     # Joint states are always kept, because Amodel is always reported and is a
@@ -3037,14 +3159,16 @@ def solve(measurements: List[Dict], root: Dict, sweeps: int = DEFAULT_SWEEPS,
             uniform_span_prior=uniform_span_prior, grid=model.grid,
             target_convergence=target_convergence, max_sweeps=max_sweeps,
             min_sweeps=min_sweeps, collect_draws=interval_draws,
-            on_progress=on_progress, temperatures=temperatures)
+            on_progress=on_progress, temperatures=temperatures,
+            match_oxcal=match_oxcal)
     else:
         if max_sweeps is None and min_sweeps:
             max_sweeps = max(sweeps, MAX_SWEEPS, min_sweeps)
         chain = run(model, sweeps=sweeps, seed=seed, min_sweeps=min_sweeps,
                     target_convergence=target_convergence, max_sweeps=max_sweeps,
                     collect_draws=interval_draws,
-                    on_progress=on_progress, temperatures=temperatures)
+                    on_progress=on_progress, temperatures=temperatures,
+                    match_oxcal=match_oxcal)
     rng = np.random.default_rng(seed)
 
     results: Dict = {'measurements': {}, 'boundaries': {}}
@@ -3082,8 +3206,10 @@ def solve(measurements: List[Dict], root: Dict, sweeps: int = DEFAULT_SWEEPS,
 
     results['method'] = 'gibbs'
     # Lobes the run left empty, probed: see probe_unvisited_lobes.
-    results['lobe_probe'] = probe_unvisited_lobes(model, chain['histograms'], seed,
-                                                  temperatures)
+    results['lobe_probe'] = (None if match_oxcal else
+                             probe_unvisited_lobes(model, chain['histograms'], seed,
+                                                   temperatures))
+    results['limits_shrunk'] = bool(chain.get('limits_shrunk'))
     results['deposition'] = _deposition_report(model, chain)
     results['uniform_span_prior'] = bool(model.span_priors)
     results['sweeps'] = chain['sweeps']

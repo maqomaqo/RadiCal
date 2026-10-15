@@ -175,6 +175,10 @@ interface AnalysisResult {
     // method deliberately, so the result is not a fallback and must not be
     // labelled as one.
     requested?: 'auto' | 'exact' | 'gibbs'
+    // Present and true when the run matched OxCal 4.4 (the sampler with
+    // OxCal's mid-run narrowing of limits) rather than solving the model as
+    // stated; see BayesianConfigInput.match_oxcal.
+    match_oxcal?: boolean
     reason?: string | null
     // Boundaries the app added to the model for the exact solver. Only on
     // results from before it stopped doing so; it now refuses instead.
@@ -2167,7 +2171,11 @@ export default function Results() {
           <Typography variant="subtitle2" gutterBottom>
             Sampled, but not fully converged
           </Typography>
-          {analysis.solver.reason ? (
+          {analysis.solver.match_oxcal ? (
+            <Typography variant="body2" sx={{ mb: 1 }}>
+              This run was set to match OxCal 4.4, which uses the sampler.
+            </Typography>
+          ) : analysis.solver.reason ? (
             <Typography variant="body2" sx={{ mb: 1 }}>
               This model cannot be solved exactly because {analysis.solver.reason}.
             </Typography>
@@ -2193,7 +2201,7 @@ export default function Results() {
               ? `, and its chains had not come into agreement: R̂ ${analysis.solver.rhat.toFixed(2)} against the ${analysis.solver.rhat_target.toFixed(2)} wanted, which usually means a date whose calibration has two separated ranges and different chains settled in different ones.`
               : ', short of the 95% usually wanted.'}{' '}
             The ranges below are probably a few years out rather than wrong.
-            {crossCheck?.status === 'not_checked' && crossCheck.reason
+            {crossCheck?.status === 'not_checked' && crossCheck.reason && !analysis.solver.match_oxcal
               ? ` The exact solver’s check covers other model shapes: ${crossCheck.reason}.`
               : ''}
           </Typography>
@@ -2210,7 +2218,9 @@ export default function Results() {
         <Tooltip
           describeChild
           title={
-            (analysis.solver.reason
+            (analysis.solver.match_oxcal
+              ? 'Run to match OxCal 4.4: sampled as OxCal samples, with each parameter’s limits narrowed to the range sampled so far partway through the run. '
+              : analysis.solver.reason
               ? `This model was sampled with the Metropolis-Hastings/Gibbs scheme. It cannot be integrated exactly — ${analysis.solver.reason}. `
               : 'The Metropolis-Hastings/Gibbs sampler was chosen for this analysis. This model could also have been integrated exactly; the two agree to well under a year on the models where both can be run. ') +
             `It converged to ${
@@ -2218,7 +2228,9 @@ export default function Results() {
                 ? (analysis.solver.convergence * 100).toFixed(1) + '%'
                 : 'the 95% target'
             } over ${sampling}.` +
-            (crossCheck?.status === 'agrees'
+            (analysis.solver.match_oxcal
+              ? ''
+              : crossCheck?.status === 'agrees'
               ? ' The exact solver, run on the same model as a check, agrees.'
               : crossCheck?.status === 'not_checked' && crossCheck.reason
               ? ` The exact solver’s check covers other model shapes: ${crossCheck.reason}.`
@@ -2229,7 +2241,11 @@ export default function Results() {
             variant="outlined"
             color="success"
             label={`${
-              analysis.solver.requested === 'gibbs' ? 'MH/Gibbs (chosen)' : 'MH/Gibbs (auto)'
+              analysis.solver.match_oxcal
+                ? 'MH/Gibbs, matching OxCal 4.4'
+                : analysis.solver.requested === 'gibbs'
+                ? 'MH/Gibbs (chosen)'
+                : 'MH/Gibbs (auto)'
             } — ${
               analysis.solver.convergence !== undefined
                 ? (analysis.solver.convergence * 100).toFixed(0) + '% converged'

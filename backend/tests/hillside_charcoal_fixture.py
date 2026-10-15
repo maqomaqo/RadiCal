@@ -165,8 +165,8 @@ option OFF is what identified it, by bringing the two into line --
 
 -- against OxCal's defaults of 11.66 and 13.19: the app was reproducing OxCal with
 one of OxCal's own refinements switched off, on every model where the phase prior
-does real work. With the factor in, the separations are 12.4 and 14.0 against those
-defaults, and this fixture's own gap falls from +3.85 to +1.31. See
+does real work. With the factor in, the separations are 12.0 and 13.5 (exact
+solver) against those defaults, and this fixture's own gap falls from +3.85 to +1.31. See
 exact_chain._span_prior_correction for the term and for why the sign of it is
 subtle, and pair_limits for where the limits come from.
 

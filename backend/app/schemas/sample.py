@@ -608,6 +608,14 @@ class BayesianConfigInput(BaseModel):
     # boundaries. See exact_chain._span_prior_correction and
     # gibbs.Model._span_priors.
     uniform_span_prior: bool = True
+    # Reproduce OxCal 4.4 rather than solve the model as stated: the MH/Gibbs
+    # sampler with its limits narrowed to the sampled range once, partway
+    # through, as observed OxCal behaviour does, the curve interpolated
+    # cubically and each likelihood cut beyond 5.26 standard deviations.
+    # Off by default, since the narrowing makes the answer depend on the run
+    # itself; for reproducing a published OxCal analysis. See
+    # gibbs.Model.shrink_limits and calibration.matching_oxcal.
+    match_oxcal: bool = False
     # The calendar step, in years, modelled HPD ranges and durations are
     # reported at: OxCal's Options Resolution, five years by default there and
     # here. Finer suits a recent model whose ranges span a few decades, coarser
