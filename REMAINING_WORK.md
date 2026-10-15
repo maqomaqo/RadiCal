@@ -32,8 +32,6 @@ approximation, not OxCal's shared scale. Get a real OxCal fixture first.
 
 ### 4. Wiggle-match decisions left open
 From [`docs/AGE_DEPTH_AND_WIGGLE_MATCH_PLAN.md`](docs/AGE_DEPTH_AND_WIGGLE_MATCH_PLAN.md):
-- **§12.1:** no pass/fail threshold is printed against the combination
-  agreement. Pin it against a real OxCal run rather than a recalled figure.
 - **§12.3:** a sapwood allowance is not modelled.
 
 ---

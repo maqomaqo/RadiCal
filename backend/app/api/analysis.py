@@ -571,10 +571,10 @@ def _run_wiggle_match(
         # The check that the match is REAL, not a diagnostic beside it: a
         # D_Sequence asserts the ring counts, and if they are wrong the model
         # cannot widen to absorb it the way a Phase can -- it simply fits
-        # everything worse. Reported without a pass/fail threshold, since what
-        # OxCal quotes a combination against scales with n and this app does
-        # not print a number it has not pinned against a real run.
+        # everything worse. Quoted against OxCal's A_n, which scales with
+        # the number of members (agreement.combination_threshold).
         'combination_agreement': solved['combination_agreement'],
+        'combination_threshold': solved['combination_threshold'],
         'series_span': solved['series_span'],
         'gap_units': solved['gap_units'],
         'members': solved['members'],

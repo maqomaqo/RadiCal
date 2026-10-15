@@ -19,10 +19,8 @@
 // misidentified by forty rings the model cannot widen to absorb it the way a
 // Phase can -- it simply fits everything worse -- so the agreement index here
 // is not a diagnostic beside the answer, it IS the check that the match
-// happened. It is reported without a pass/fail threshold, because what OxCal
-// quotes a combination against scales with the number of members and this app
-// does not print a number it has not pinned against a real run (the same
-// standard services/agreement.py holds Amodel to).
+// happened. It is quoted against OxCal's pass mark A_n = 100/sqrt(2n), which
+// falls as members are added (services/agreement.combination_threshold).
 import {
   Box,
   Link,
@@ -63,6 +61,8 @@ interface Props {
   gapUnits: string
   seriesSpan: number
   combinationAgreement?: number | null
+  /** The pass mark the combination is quoted against; absent on older runs. */
+  combinationThreshold?: number | null
   /** Which member gap zero refers to; null when no sample sits exactly there. */
   referenceSampleId?: string | null
   /** Each member's laboratory measurement, by date id, for the figure. */
@@ -100,6 +100,7 @@ export default function WiggleMatchPanel({
   gapUnits,
   seriesSpan,
   combinationAgreement,
+  combinationThreshold,
   referenceSampleId,
   measurements,
   memberDistributions,
@@ -146,6 +147,10 @@ export default function WiggleMatchPanel({
   const poor = ordered.filter(
     (m) => m.agreement_index != null && m.agreement_index < POOR_AGREEMENT
   )
+  const combinationFails =
+    combinationAgreement != null &&
+    combinationThreshold != null &&
+    combinationAgreement < combinationThreshold
 
   return (
     <Paper variant="outlined" sx={{ p: { xs: 2, md: 3 } }}>
@@ -276,9 +281,17 @@ export default function WiggleMatchPanel({
         <Box>
           <Typography variant="body2">
             Combination agreement:{' '}
-            <Box component="span" sx={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
+            <Box
+              component="span"
+              sx={{
+                fontWeight: 600,
+                fontVariantNumeric: 'tabular-nums',
+                color: combinationFails ? 'warning.main' : undefined,
+              }}
+            >
               {agreementText(combinationAgreement)}
             </Box>
+            {combinationThreshold != null && ` (pass mark ${combinationThreshold.toFixed(0)}%)`}
           </Typography>
           <Link component={RouterLink} to="/help#wiggle-matching" variant="body2">
             How to read a wiggle match

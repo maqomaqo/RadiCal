@@ -856,16 +856,18 @@ def _solver_sentence(solver: Optional[Dict]) -> Optional[str]:
     if solver.get('method') == 'wiggle_match':
         # The check that the match is REAL rather than a diagnostic beside it:
         # the gaps are asserted, so a member at the wrong ring cannot be
-        # absorbed. Quoted without a pass mark, since what OxCal holds a
-        # combination against scales with the number of members and this app
-        # does not print a threshold it has not pinned against a real run.
+        # absorbed. Quoted against OxCal's A_n where the run recorded it;
+        # analyses solved before it was reported carry the index alone.
         combination = solver.get('combination_agreement')
         if combination is not None:
+            threshold = solver.get('combination_threshold')
+            against = ('' if threshold is None
+                       else f" (pass mark A<sub>n</sub> {threshold:.0f}%)")
             sentence += (
                 f" The series spans {solver.get('series_span', 0):g}"
                 f" {solver.get('gap_units') or 'rings'} and its dates agree with"
                 f" their own calibrations at a combination index of"
-                f" {combination:.0f}%."
+                f" {combination:.0f}%{against}."
             )
     for deposition in solver.get('deposition') or []:
         if deposition.get('k_mean') is None:

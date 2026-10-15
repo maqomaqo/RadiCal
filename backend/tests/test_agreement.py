@@ -247,6 +247,19 @@ class TestBehaviour:
         assert agreement.overall_agreement([None, None]) is None
 
 
+class TestCombinationThreshold:
+    """OxCal's A_n = 100/sqrt(2n), the pass mark printed beside Acomb."""
+
+    @pytest.mark.parametrize('n, expected', [
+        (1, 70.71), (2, 50.0), (4, 35.36), (8, 25.0), (50, 10.0),
+    ])
+    def test_follows_one_over_root_two_n(self, n, expected):
+        assert agreement.combination_threshold(n) == pytest.approx(expected, abs=0.01)
+
+    def test_an_empty_combination_falls_back_to_the_per_date_threshold(self):
+        assert agreement.combination_threshold(0) == 60.0
+
+
 class TestWhatItCanAndCannotSee:
     """
     The index measures conflict between the data and the model's STRUCTURE.

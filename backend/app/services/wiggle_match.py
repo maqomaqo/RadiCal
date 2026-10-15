@@ -323,6 +323,7 @@ def solve(measurements: List[Dict], group: WiggleGroup,
          'measurements': {date_id: that member's posterior, same shape},
          'agreement':   {date_id: A_i},
          'combination_agreement': the overall index over all members,
+         'combination_threshold': the pass mark it is quoted against,
          'members':     [{'id', 'name', 'ring_offset', 'ring_offset_error',
                           'agreement_index'}] youngest first,
          'method':      'wiggle_match',
@@ -427,11 +428,9 @@ def solve(measurements: List[Dict], group: WiggleGroup,
         'reference': reference,
         'measurements': results,
         'agreement': {r['id']: r['agreement_index'] for r in member_records},
-        # The index itself only. What OxCal quotes a COMBINATION against
-        # scales with n, and this app does not print a threshold it has not
-        # pinned against a real run -- the same standard agreement.py holds
-        # Amodel to.
         'combination_agreement': agreement_service.overall_agreement(indices),
+        # OxCal's A_n, with n counting every member.
+        'combination_threshold': agreement_service.combination_threshold(len(members)),
         'members': member_records,
         'gap_units': group.gap_units,
         'reference_sample_id': group.reference_sample_id,

@@ -125,12 +125,15 @@ tractable here at all.
 
 Where this deliberately differs from OxCal
 ------------------------------------------
-OxCal draws each conditional by REJECTION, which is exact but unbounded in cost:
-a conditional peaked relative to its interval -- a sharp calibration lobe inside
-a wide phase, the normal case -- rejects many times per draw. This uses
-inverse-CDF sampling on the cumulative table: the same target distribution, one
-searchsorted per draw, and it vectorises, which is what makes the blocked update
-below worth doing.
+Observed OxCal 4.4 behaviour is a single Metropolis-Hastings step per parameter
+per pass: one proposal drawn uniformly over the parameter's allowed window,
+accepted with probability p'/p. A conditional peaked relative to its window -- a
+sharp calibration lobe inside a wide phase, the normal case -- rejects most such
+proposals, so the parameter often does not move. This instead draws each
+conditional exactly, by inverse-CDF sampling on the cumulative table: a true
+Gibbs step, which always moves to an independent draw from the conditional and
+so mixes better per sweep. It is one searchsorted per draw and it vectorises,
+which is what makes the blocked update below worth doing.
 
 Blocked updates
 ---------------
@@ -2226,8 +2229,10 @@ def run(model: Model, sweeps: int = DEFAULT_SWEEPS, seed: int = 42,
     be wasteful on small models or quietly wrong on awkward ones.
 
     Stopping when the convergence measure is met is data-dependent and so not
-    perfectly unbiased in principle, but it is what OxCal does and the effect is
-    far below the Monte Carlo error it controls. `max_sweeps` bounds the work
+    perfectly unbiased in principle, but it is what OxCal does -- ten groups,
+    the length doubled while the minimum convergence is under 0.95, capped at
+    128 times the requested passes -- and the effect is far below the Monte
+    Carlo error it controls. `max_sweeps` bounds the work
     regardless, and the achieved convergence is always reported.
 
     `min_sweeps` is the analyst's own floor: the run may not stop on
