@@ -111,6 +111,27 @@ class TestShrink:
         with pytest.raises(ValueError):
             chain.shrink({})
 
+    def test_a_run_not_converged_at_round_four_is_shrunk_later(self, monkeypatch):
+        """
+        OxCal checks at the end of every group from the fourth on and
+        narrows at the first one whose convergence is above 0.5, once. So a
+        run that is not converged at round four is asked again each round
+        until it is, and never after.
+        """
+        tree, measurements = _phase(EIGHT)
+        model = gibbs.Model(measurements, tree)
+        real, asked = gibbs._shrink_due, []
+
+        def not_yet_twice(rounds, params):
+            asked.append(len(rounds))
+            return None if len(asked) <= 2 else real(rounds, params)
+
+        monkeypatch.setattr(gibbs, '_shrink_due', not_yet_twice)
+        result = gibbs.run(model, sweeps=4000, seed=1, temperatures=1, match_oxcal=True)
+        first = gibbs.shrink_round()
+        assert result['limits_shrunk']
+        assert asked == [first, first + 1, first + 2]
+
     def test_narrows_a_phase_toward_oxcal(self):
         """
         One chain, the default seed. Solved as stated the span is about 28.4;

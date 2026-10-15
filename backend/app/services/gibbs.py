@@ -202,11 +202,12 @@ from app.services.model_tree import inherited_bounds, plan_model
 from app.services.stratigraphy import effective_bounds
 
 # Matching OxCal 4.4 ("Match OxCal 4.4"): observed OxCal behaviour is to pull
-# every parameter's hard limits in to the range it has sampled so far, once,
-# after the fourth of its ten groups of passes, provided its convergence
-# measure is already above 0.5; the limits factor of the span prior then reads
-# those narrower limits. Here that is after the same fraction of the first
-# sampling rounds. A histogram is trimmed at SHRINK_TRIM of its peak first.
+# every parameter's hard limits in to the range it has sampled so far, once:
+# at the end of the first group of passes, from the fourth on, whose pooled
+# convergence measure is above 0.5 (the count carries on when a run extends
+# itself). The limits factor of the span prior then reads those narrower
+# limits. Here the first check comes after the same fraction of the first
+# sampling rounds, and every later round is checked until it fires. A histogram is trimmed at SHRINK_TRIM of its peak first.
 # See Model.shrink_limits and exact_chain._span_prior_correction for what it
 # does to a phase's span.
 SHRINK_AFTER_FRACTION = 0.4
@@ -2365,18 +2366,20 @@ def sampled_ranges(totals: Dict[str, np.ndarray], trim: float = SHRINK_TRIM
 
 
 def shrink_round() -> int:
-    """How many sampling rounds a run matching OxCal completes before its
-    one chance to shrink the limits (SHRINK_AFTER_FRACTION of ROUNDS)."""
+    """How many sampling rounds a run matching OxCal completes before it
+    first checks whether to shrink the limits (SHRINK_AFTER_FRACTION of
+    ROUNDS)."""
     return max(1, int(np.ceil(SHRINK_AFTER_FRACTION * ROUNDS)))
 
 
 def _shrink_due(rounds: List[Dict[str, np.ndarray]], params: List[str]
                 ) -> Optional[Dict[str, Tuple[int, int]]]:
     """
-    The ranges to shrink to, if a run matching OxCal has just completed its
-    shrink_round()-th round and converged past SHRINK_MIN_CONVERGENCE over
-    everything sampled so far; otherwise None. The caller asks once, at that
-    round, as OxCal tests once: a run not converged by then is never shrunk.
+    The ranges to shrink to, if a run matching OxCal has converged past
+    SHRINK_MIN_CONVERGENCE over everything sampled so far; otherwise None.
+    The caller asks after every round from shrink_round() on until this
+    returns ranges, then never again, as OxCal does: a run not converged by
+    the fourth group is shrunk at the first later one that is.
     """
     measure = _convergence(rounds, params)
     if not measure or min(measure.values()) <= SHRINK_MIN_CONVERGENCE:
@@ -2501,9 +2504,11 @@ def run(model: Model, sweeps: int = DEFAULT_SWEEPS, seed: int = 42,
         if chain.swept % burn_chunk == 0:
             report('burn_in', 0.0)
 
+    completed = 0
     while True:
         chain.round()
-        if match_oxcal and len(chain.rounds) == shrink_round():
+        completed += 1
+        if match_oxcal and not chain.limits_shrunk and completed >= shrink_round():
             ranges = _shrink_due(chain.rounds, model.params)
             if ranges is not None:
                 chain.shrink(ranges)
@@ -2884,6 +2889,7 @@ def solve_chains(measurements: List[Dict], root: Dict, chains: int,
         # can be read every round without shipping histories back and forth.
         per_chain: List[List[Dict[str, np.ndarray]]] = [[] for _ in range(chains)]
         completed = 0
+        shrunk = False
         while True:
             replies = everyone('round', [None] * chains)
             completed += 1
@@ -2892,13 +2898,14 @@ def solve_chains(measurements: List[Dict], root: Dict, chains: int,
                 rounds.append(reply['histogram'])
                 if len(rounds) > 2 * ROUNDS:
                     rounds[:] = _folded(rounds, params)
-            if match_oxcal and completed == shrink_round():
+            if match_oxcal and not shrunk and completed >= shrink_round():
                 # One run as OxCal sees it: the chains' rounds pooled, and
                 # every chain shrunk to the same ranges.
                 ranges = _shrink_due([{p: sum(r[p] for r in same) for p in params}
                                       for same in zip(*per_chain)], params)
                 if ranges is not None:
                     everyone('shrink', [ranges] * chains)
+                    shrunk = True
             kept = [_after_burn_in(rounds) for rounds in per_chain]
             pooled = [{p: sum(r[p] for r in same) for p in params}
                       for same in zip(*kept)]

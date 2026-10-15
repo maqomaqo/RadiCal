@@ -1726,12 +1726,7 @@ On the test sequence above, with untempered chains that all sat in the late rang
 stayed in the early range 89–99% of the time; across about 2,000 tested ranges the model ruled out,
 they left all but one.
 
-**No Boundaries are added.** The exact solver takes a model as written or refuses it. Supplying the
-Boundaries an order implies would make more models chain-shaped, but it splits one span term over K
-dates into several over K₁ + K₂ + … dates, and K is the exponent that holds a date to its group, so
-the modelled ranges genuinely move. On the ordered test model, which the exact solver takes as
-written at 0.57 years rms from OxCal, supplying the missing Boundary put it at
-2.33. Earlier versions did this when the exact solver was chosen.
+**No Boundaries are added.** The exact solver takes a model as written or refuses it.
 
 **Known differences from OxCal 4.4.** Each is small next to a date's range, and none depends on
 which solver is used. **Match OxCal 4.4** removes the first three:
@@ -1747,10 +1742,10 @@ which solver is used. **Match OxCal 4.4** removes the first three:
   difference of a few tenths of a year from OxCal is within that variation.
 
 **Match OxCal 4.4.** The run uses the sampler, untempered and with no probe of unvisited ranges,
-since OxCal has neither, and always completes its first eight rounds. After the fourth, if the
-convergence measure over everything sampled so far is above 0.5, each parameter's allowed range is
-narrowed once to the range it has been sampled over (its histogram trimmed at a millionth of its
-peak), and the limits factor of A.5 is recomputed from the Boundaries' narrowed ranges. The rounds
+since OxCal has neither, and always completes its first eight rounds. From the fourth round on,
+the first time the convergence measure over everything sampled so far is above 0.5, each
+parameter's allowed range is narrowed once to the range it has been sampled over (its histogram
+trimmed at a millionth of its peak), and the limits factor of A.5 is recomputed from the Boundaries' narrowed ranges. The rounds
 before and after are pooled, as OxCal pools its groups. Likelihoods use cubic interpolation of the
 curve and are cut beyond 5.26 standard deviations. On one Phase of eight dates (IntCal20, 1480 to
 1410 BP, ±25) the span came to 26.3–27.6 years over several seeds, against OxCal's 26.3 and 28.4
@@ -2262,7 +2257,9 @@ and the two differ most when many dates share an outlier model.
 - Ward, G. K., and Wilson, S. R. (1978). Procedures for comparing and combining radiocarbon age
   determinations: a critique. *Archaeometry* 20(1), 19–31.
 
-**Software.** Demján, P. `res14c` — reference implementation of the Svetlik et al. resolution
-method, https://github.com/demjanp/res14c_online. OxCal (C. Bronk Ramsey), against whose 4.4 output
+**Software.** 
+- Demján, P. `res14c` — reference implementation of the Svetlik et al. resolution
+method, https://github.com/demjanp/res14c_online. 
+- OxCal (C. Bronk Ramsey), against whose 4.4 output
 this app's agreement indices, outlier probabilities and modelled ages are validated:
 https://c14.arch.ox.ac.uk/oxcal.html
