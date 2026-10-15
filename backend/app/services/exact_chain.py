@@ -1651,24 +1651,29 @@ def _span_prior_correction(grid: np.ndarray, num_boundaries: int, enabled: bool,
     on the run's own early samples, and so on run length, resolution and the
     random stream; what this computes is the posterior of the model as OxCal
     documents it. Still unexplained: the last 0.6-2 years (correlated sampling
-    and OxCal's binning are candidates), and the reported reversal at sixteen
-    dates (22.4 here against 23.9), which has not been re-run with the shrink.
+    and OxCal's binning are candidates). The reversal once reported at sixteen
+    dates -- OxCal's 23.9 against 21.8 here, at OxCal's resolution of one year
+    -- is not a difference in the model: single converged chains on that model
+    scatter from 21.5 to 24.3 years by seed alone, with or without the shrink,
+    and OxCal's figure is one such run.
 
     At n = 2 the exponent is zero, so a single Phase between two Boundaries --
     the app's default shape -- is untouched by the interior-boundary term, and
     the O(M^2) chain is kept unless the limits factor applies.
 
     It is not optional: on the fixture's two-group model the group separation is
-    14.7 years against OxCal's 13.2 with it and 26.7 without, and the dates 0.76
+    13.5 years against OxCal's 13.2 with it and 26.7 without, and the dates 0.76
     years rms against 6.67. It couples the two ends of the chain, so the solve
     stops factorising and goes from O(M^2) to O(M^3) per group -- worth paying.
 
-    About 1.5 years of extra separation remains, and is not this factor's doing:
-    it survives refining the grid fourfold, appears whenever two groups are
-    ORDERED whether the middle Boundary is written or implied, and is absent
-    when nothing orders them. OxCal's mid-run shrink acting on the shared middle
-    Boundary is a plausible cause, not yet tested. See
-    tests/test_charcoal_outlier.py's WHAT IS LEFT note.
+    The ordered-group separations now sit within 0.4 years of OxCal's: 12.0
+    against 11.7 with the groups ordered by structure alone, 13.5 against 13.2
+    with a Boundary between them, -0.02 against -0.05 with nothing ordering
+    them. The 1.5 years between OxCal's first two is OxCal's own and is
+    reproduced here (1.4). Matching OxCal's mid-run shrink pulls the shared-
+    Boundary case to 12.5-12.7, past OxCal rather than onto it, so OxCal sits
+    between the two as it does on a single phase. See
+    tests/test_exact_chain.py's TestOrderedGroupsAgreeWithOxCal.
     """
     if not enabled:
         return None

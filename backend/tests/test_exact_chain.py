@@ -567,11 +567,16 @@ class TestOrderedGroupsAgreeWithOxCal:
 
         run               OxCal   exact   gibbs        was (exact/gibbs)
         unordered          -0.1     0.0    -0.1
-        ordered            11.7    14.0    12.4        15.8 / 14.4
-        shared_boundary    13.2    14.0    14.0        15.8 / 15.9
+        ordered            11.7    12.0    12.9-13.1   15.8 / 14.4
+        shared_boundary    13.2    13.5    13.5-14.0   15.8 / 15.9
 
-    The exact column moved from 12.9 to 14.0 when two things were corrected at
-    once. A date sitting on one of its Boundaries now counts half, as it does in
+    Measured with the F14C likelihood; the sampler over three seeds. Its
+    excess on `ordered` is its own grid error in weighting ties between the
+    ordered groups, which shrinks with the step (13.7 at 2 years, 12.3 at
+    0.5).
+
+    The exact column once moved from 12.9 to 14.0 when two things were
+    corrected at once. A date sitting on one of its Boundaries now counts half, as it does in
     the interval integral the Boundaries come from, where it used to count whole
     and the modelled dates were not the marginals of the joint posterior. And a
     second pass refines the grid. The 12.9 was partly the first error flattering
