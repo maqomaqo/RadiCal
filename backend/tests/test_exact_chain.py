@@ -567,13 +567,14 @@ class TestOrderedGroupsAgreeWithOxCal:
 
         run               OxCal   exact   gibbs        was (exact/gibbs)
         unordered          -0.1     0.0    -0.1
-        ordered            11.7    12.0    12.9-13.1   15.8 / 14.4
+        ordered            11.7    12.0    11.5-11.6   15.8 / 14.4
         shared_boundary    13.2    13.5    13.5-14.0   15.8 / 15.9
 
-    Measured with the F14C likelihood; the sampler over three seeds. Its
-    excess on `ordered` is its own grid error in weighting ties between the
-    ordered groups, which shrinks with the step (13.7 at 2 years, 12.3 at
-    0.5).
+    Measured with the F14C likelihood; the sampler over three seeds. On
+    `ordered` the exact solver's trapezoid is first order in the step and it
+    stops at 0.45 years: 12.36, 12.07, 11.93, 11.86 at steps of 1, 0.5, 0.25
+    and 0.125, heading for about 11.8, which the sampler gives at any step
+    (gibbs.Model._cluster_weight).
 
     The exact column once moved from 12.9 to 14.0 when two things were
     corrected at once. A date sitting on one of its Boundaries now counts half, as it does in

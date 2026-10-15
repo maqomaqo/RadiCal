@@ -1667,9 +1667,10 @@ def _span_prior_correction(grid: np.ndarray, num_boundaries: int, enabled: bool,
     stops factorising and goes from O(M^2) to O(M^3) per group -- worth paying.
 
     The ordered-group separations now sit within 0.4 years of OxCal's: 12.0
-    against 11.7 with the groups ordered by structure alone, 13.5 against 13.2
-    with a Boundary between them, -0.02 against -0.05 with nothing ordering
-    them. The 1.5 years between OxCal's first two is OxCal's own and is
+    against 11.7 with the groups ordered by structure alone (about 11.8 as the
+    step goes to zero; _OrderedGroup's trapezoid is first order in it), 13.5
+    against 13.2 with a Boundary between them, -0.02 against -0.05 with nothing
+    ordering them. The 1.5 years between OxCal's first two is OxCal's own and is
     reproduced here (1.4). Matching OxCal's mid-run shrink pulls the shared-
     Boundary case to 12.5-12.7, past OxCal rather than onto it, so OxCal sits
     between the two as it does on a single phase. See

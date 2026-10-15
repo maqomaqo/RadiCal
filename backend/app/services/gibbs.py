@@ -174,6 +174,7 @@ how the UniformSpanPrior correction is grouped so it reduces to exact_chain's on
 a chain.
 """
 import itertools
+import math
 import multiprocessing
 import os
 import threading
@@ -894,10 +895,128 @@ class Model:
         for younger, older in tie_pairs:
             self.tied_with[younger].append(older)
             self.tied_with[older].append(younger)
-        self.tie_younger = np.array([self.param_row[y] for y, _o in tie_pairs],
+
+        # Ties between two DATES (ordered groups with no Boundary between them,
+        # or dates in a Sequence) are weighted per cluster rather than per edge;
+        # see _cluster_weight. Every other tie -- a date on a Boundary, two
+        # neighbouring Boundaries -- keeps its half per edge, which is the
+        # exact solver's trapezoid.
+        date_set = set(self.date_ids) - set(self.deposition_of)
+        self.date_tie_pairs = {(y, o) for y, o in tie_pairs
+                               if y in date_set and o in date_set}
+        edge_ties = tie_pairs - self.date_tie_pairs
+        self.date_tied_with: Dict[str, List[str]] = {p: [] for p in self.params}
+        self.edge_tied_with: Dict[str, List[str]] = {p: [] for p in self.params}
+        for younger, older in self.date_tie_pairs:
+            self.date_tied_with[younger].append(older)
+            self.date_tied_with[older].append(younger)
+        for younger, older in edge_ties:
+            self.edge_tied_with[younger].append(older)
+            self.edge_tied_with[older].append(younger)
+        self.tie_younger = np.array([self.param_row[y] for y, _o in edge_ties],
                                     dtype=np.intp)
-        self.tie_older = np.array([self.param_row[o] for _y, o in tie_pairs],
+        self.tie_older = np.array([self.param_row[o] for _y, o in edge_ties],
                                   dtype=np.intp)
+        self.date_tie_younger = np.array(
+            [self.param_row[y] for y, _o in self.date_tie_pairs], dtype=np.intp)
+        self.date_tie_older = np.array(
+            [self.param_row[o] for _y, o in self.date_tie_pairs], dtype=np.intp)
+        reachable = self._younger_reachable() if self.date_tie_pairs else {}
+        self._younger_dates = {d: reachable.get(d, set()) & date_set
+                               for d in date_set}
+        self._cluster_weights: Dict[Tuple[str, ...], float] = {}
+
+    def _cluster_weight(self, members) -> float:
+        """
+        The weight of a set of dates sitting in ONE cell, joined by ordering
+        ties: the chance that positions drawn uniformly within the cell put
+        them in an order the model allows -- the number of orders it allows
+        (its linear extensions) over k!.
+
+        This is the trapezoid's own idea taken to more than two. Two ordered
+        dates in a cell get 1/2, as before. But a date older than two dates of
+        the next group, all three in one cell, gets 1/3 -- the older one being
+        the oldest of three -- where a half per tie gave 1/4. Halves per tie
+        over-penalise every tie of more than two, which on ordered groups with
+        no Boundary between them pushed the groups apart by a term of first
+        order in the grid step: about a year of extra separation at the
+        default step, falling to the exact solver's answer only as the step
+        went to zero. Ordered groups are complete between consecutive groups,
+        so a cluster with n_1, n_2, ... dates of each group weighs
+        n_1! n_2! ... / k!.
+
+        Still ONE joint weight -- a product over cells of this over each
+        cluster -- so every full conditional is a ratio of it and the Gibbs
+        draws and the Metropolis moves target the same distribution.
+        """
+        key = tuple(sorted(members))
+        cached = self._cluster_weights.get(key)
+        if cached is not None:
+            return cached
+        k = len(key)
+        if k < 2:
+            weight = 1.0
+        else:
+            position = {d: i for i, d in enumerate(key)}
+            # Bit j of older[i]: key[j] must be older than key[i].
+            older = [0] * k
+            for d in key:
+                for younger in self._younger_dates[d]:
+                    if younger in position:
+                        older[position[younger]] |= 1 << position[d]
+            ways = [0] * (1 << k)
+            ways[0] = 1
+            for placed in range(1 << k):
+                if not ways[placed]:
+                    continue
+                for i in range(k):
+                    if not placed >> i & 1 and older[i] & ~placed == 0:
+                        ways[placed | 1 << i] += ways[placed]
+            weight = ways[-1] / math.factorial(k)
+        self._cluster_weights[key] = weight
+        return weight
+
+    def _cluster(self, start: Sequence[str], cell: int, index: Dict[str, int],
+                 leave_out: Optional[str] = None) -> set:
+        """The dates in `cell` joined to `start` through date ties."""
+        found, stack = set(), list(start)
+        while stack:
+            d = stack.pop()
+            if d in found or d == leave_out or index[d] != cell:
+                continue
+            found.add(d)
+            stack.extend(self.date_tied_with[d])
+        return found
+
+    def _date_tie_factor(self, date_id: str, cell: int, index: Dict[str, int]) -> float:
+        """
+        What placing `date_id` in `cell` multiplies the joint's cluster
+        weights by: its cluster there with it, over the clusters its tied
+        neighbours there form without it (they may fall apart into several).
+        """
+        neighbours = [o for o in self.date_tied_with[date_id] if index[o] == cell]
+        if not neighbours:
+            return 1.0
+        without, joined = 1.0, set()
+        for neighbour in neighbours:
+            if neighbour in joined:
+                continue
+            part = self._cluster([neighbour], cell, index, leave_out=date_id)
+            joined |= part
+            without *= self._cluster_weight(part)
+        return self._cluster_weight(joined | {date_id}) / without
+
+    def _log_cluster_weights(self, index: Dict[str, int]) -> float:
+        """log of the product of _cluster_weight over every cluster of
+        tied dates in the state."""
+        total, seen = 0.0, set()
+        for younger, older in self.date_tie_pairs:
+            if index[younger] != index[older] or younger in seen:
+                continue
+            members = self._cluster([younger], index[younger], index)
+            seen |= members
+            total += math.log(self._cluster_weight(members))
+        return total
 
     def _span_prior_rows(self) -> List[np.ndarray]:
         """
@@ -1180,13 +1299,17 @@ class Model:
         EDGE, so the joint is a plain product and every full conditional is
         its own factor of it; a rule that gave a date two ties at one cell a
         single half would have conditionals no joint distribution agrees with.
+
+        Ties between two DATES are the exception, weighted per cluster in
+        one cell (_cluster_weight) -- also one joint, but one that counts a
+        tie of three or more correctly.
         """
         weight = 1.0
         index = state.index[date_id]
-        for other in self.tied_with[date_id]:
+        for other in self.edge_tied_with[date_id]:
             if state.index[other] == index:
                 weight *= 0.5
-        return weight
+        return weight * self._date_tie_factor(date_id, index, state.index)
 
     def draw_date(self, date_id: str, state: _State, u: float) -> int:
         """
@@ -1216,12 +1339,15 @@ class Model:
         # a younger neighbour cannot be above lo, an older one below hi.
         low_weight = high_weight = 1.0
         index = state.index
-        for other in self.tied_with[date_id]:
+        for other in self.edge_tied_with[date_id]:
             at = index[other]
             if at == lo:
                 low_weight *= 0.5
             elif at == hi:
                 high_weight *= 0.5
+        if self.date_tied_with[date_id]:
+            low_weight *= self._date_tie_factor(date_id, lo, index)
+            high_weight *= self._date_tie_factor(date_id, hi, index)
 
         # Interior cells lo+1 .. hi-1 at full weight, the two ends as weighted.
         interior = float(cdf[hi - 1] - cdf[lo]) if hi - 1 >= lo + 1 else 0.0
@@ -1361,9 +1487,13 @@ class Model:
         # see beta), and everything else -- the prior -- untouched.
         total = self.beta * self.log_likelihood_sum(state)
         # log of endpoint_weight, summed: -log 2 per tied ordering edge, a date
-        # on a boundary or on another date, or two neighbouring boundaries.
+        # on a boundary or two neighbouring boundaries, and the clusters of
+        # tied dates (_cluster_weight).
         halves = int((index[self.tie_younger] == index[self.tie_older]).sum())
         total -= halves * np.log(2.0)
+        if len(self.date_tie_younger) and (
+                index[self.date_tie_younger] == index[self.date_tie_older]).any():
+            total += self._log_cluster_weights(state.index)
 
         # The deposition prior, in full and NORMALISED -- the shift moves
         # below accept on this ratio, and a term missing here would let them

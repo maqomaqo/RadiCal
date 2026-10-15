@@ -1602,10 +1602,13 @@ G(S, E)  = (S - E)^(-K) * sum over the cuts of the product of the blocks' terms
 
 with l the next cut or E. T_i is the derivative in u of the block's product of interval integrals:
 its dates in [l, u] with the oldest at u. Two neighbouring cuts in one cell count half, as two
-Boundaries do. This is the trapezoid rule for the continuum integral. The sampler's rule, a half for
-each tied ordering edge, would need each block's count of dates at a cell as extra state; the two
-part by a term of first order in the step. On the ordered test model the exact and sampled dates are
-0.56 and 0.58 years rms from OxCal's. A date's marginal comes from its link's pair weight: block 1's as in any group; a later
+Boundaries do. This is the trapezoid rule for the continuum integral, and its error is first order
+in the step. The sampler weighs dates of neighbouring blocks that share a cell by the chance that
+positions drawn at random within the cell keep their order, `n_1! n_2! / (n_1 + n_2)!` for `n_1` and
+`n_2` of each block, which leaves no first-order term (a half per tied pair, as it once used, did,
+and moved the groups apart by about a year at its default step). On the ordered test model the
+groups' separation converges to about 11.8 years against OxCal's 11.66: the sampler gives that at
+any step, the exact solver 12.0 at its finest step of 0.45 years. A date's marginal comes from its link's pair weight: block 1's as in any group; a later
 block's from its terms with the date at u and with it below u under its own trapezoid, all formed
 together by a forward and a backward pass of the product rule. Joint draws take the cuts given S
 and E, then in each later block which date is oldest, then the rest. Dates inside one pair ordered
@@ -1727,7 +1730,7 @@ they left all but one.
 Boundaries an order implies would make more models chain-shaped, but it splits one span term over K
 dates into several over K₁ + K₂ + … dates, and K is the exponent that holds a date to its group, so
 the modelled ranges genuinely move. On the ordered test model, which the exact solver takes as
-written at 0.56 years rms from OxCal (the sampler 0.58), supplying the missing Boundary put it at
+written at 0.57 years rms from OxCal, supplying the missing Boundary put it at
 2.33. Earlier versions did this when the exact solver was chosen.
 
 **Known differences from OxCal 4.4.** Each is small next to a date's range, and none depends on
