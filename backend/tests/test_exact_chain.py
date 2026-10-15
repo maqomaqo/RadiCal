@@ -221,9 +221,12 @@ def _brute_force(curve, grid, dates):
     K = len(dates)
     L = []
     for d in dates:
+        # In F14C, as calibration forms it; written out here so the reference
+        # does not lean on the code it checks.
         c14, err = curve.interpolate(grid)
-        sigma2 = err ** 2 + d['error_1sigma'] ** 2
-        lik = np.exp(-0.5 * (c14 - d['age_bp']) ** 2 / sigma2) / np.sqrt(sigma2)
+        expected, measured = np.exp(-c14 / 8033.0), np.exp(-d['age_bp'] / 8033.0)
+        sigma2 = (expected * err / 8033.0) ** 2 + (measured * d['error_1sigma'] / 8033.0) ** 2
+        lik = np.exp(-0.5 * (expected - measured) ** 2 / sigma2) / np.sqrt(sigma2)
         L.append(lik / (lik.sum() * dt))
     L = np.array(L)
     cum = np.cumsum(L, axis=1) * dt

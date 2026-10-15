@@ -1,7 +1,9 @@
 """Unit tests for calibration algorithm"""
 import pytest
 import numpy as np
-from app.services.calibration import CalibrationCurve, hpd_ranges_from_distribution
+from app.services.calibration import (
+    LIBBY_MEAN_LIFE, CalibrationCurve, f14c, get_curve, hpd_ranges_from_distribution,
+)
 
 
 class TestCalibrationCurve:
@@ -231,6 +233,72 @@ class TestReservoirCorrection:
         assert self._peak(curve, 2500, 50, 190, 0) == pytest.approx(
             self._peak(curve, 2500, 50, 190, 100), abs=40
         )
+
+
+class TestF14CLikelihood:
+    """
+    The likelihood compares measurement and curve in fraction modern, where
+    counting error is Gaussian, rather than in radiocarbon years.
+    """
+
+    @staticmethod
+    def _bp_likelihood(curve, cal, age, error):
+        c14, curve_error = curve.interpolate(cal)
+        sigma2 = curve_error ** 2 + error ** 2
+        return np.exp(-0.5 * (c14 - age) ** 2 / sigma2) / np.sqrt(sigma2)
+
+    @staticmethod
+    def _mean(curve, probs):
+        return float((curve.cal_ages * probs).sum())
+
+    def test_is_a_density_over_the_measured_age(self):
+        """
+        Integrated over the reported BP age at a fixed calendar age it gives
+        sqrt(2 pi), the same scale as the BP form (both leave out the shared
+        1/sqrt(2 pi)), so model evidence keeps its units.
+        """
+        curve = get_curve('intcal20')
+        ages = np.arange(1500.0, 4500.0, 0.5)
+        total = sum(float(curve.likelihood(np.array([3000.0]), a, 30.0)[0]) for a in ages) * 0.5
+        assert total == pytest.approx(np.sqrt(2 * np.pi), rel=1e-3)
+
+    @pytest.mark.parametrize('age, error', [(250, 25), (1450, 25), (3000, 30), (10000, 40)])
+    def test_holocene_dates_barely_move(self, age, error):
+        curve = get_curve('intcal20')
+        old = self._bp_likelihood(curve, curve.cal_ages, age, error) * curve._grid_weights()
+        _, new = curve.calibrate(age, error)
+        assert self._mean(curve, new) == pytest.approx(self._mean(curve, old / old.sum()), abs=1.0)
+
+    def test_old_dates_move_older(self):
+        """
+        Near the curve's old end a symmetric BP error understates how far the
+        material could be OLDER (F14C is tiny and its relative error large),
+        so working in F14C moves the posterior older -- by tens of years at
+        42,000 BP.
+        """
+        curve = get_curve('intcal20')
+        old = self._bp_likelihood(curve, curve.cal_ages, 42000, 500) * curve._grid_weights()
+        _, new = curve.calibrate(42000, 500)
+        shift = self._mean(curve, new) - self._mean(curve, old / old.sum())
+        assert 20.0 < shift < 100.0
+
+    def test_reservoir_offset_is_applied_in_years(self):
+        """Delta-R shifts the curve in radiocarbon years before conversion."""
+        curve = get_curve('intcal20')
+        cal = np.arange(2500.0, 3500.0)
+        shifted = curve.likelihood(cal, 3100.0, 30.0, delta_r=100.0)
+        plain = curve.likelihood(cal, 3000.0, 30.0)
+        # Equal up to the Jacobian F_m/8033, which differs by f14c(100).
+        assert np.allclose(shifted / shifted.max(), plain / plain.max(), atol=2e-3)
+
+    def test_f14c_matches_the_definition_of_a_conventional_age(self):
+        assert float(f14c(0.0)) == 1.0
+        assert float(f14c(LIBBY_MEAN_LIFE)) == pytest.approx(np.exp(-1.0))
+
+    def test_zero_beyond_the_curve(self):
+        curve = get_curve('intcal20')
+        lik = curve.likelihood(np.array([-10.0, 60000.0]), 3000.0, 30.0)
+        assert np.all(lik == 0.0)
 
 
 class TestDisplayDistributionIsADensity:

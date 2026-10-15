@@ -153,15 +153,8 @@ def unmodelled_likelihood(measurement: Dict, grid: np.ndarray) -> np.ndarray:
     no model at all. Unnormalised; any array of calendar ages will do.
     """
     curve = get_curve(measurement.get('curve_id') or 'intcal20')
-    delta_r = measurement.get('delta_r') or 0.0
-    delta_r_error = measurement.get('delta_r_error') or 0.0
-    grid = np.asarray(grid, dtype=float)
-    c14, curve_error = curve.interpolate(grid)
-    sigma2 = curve_error ** 2 + measurement['error_1sigma'] ** 2 + delta_r_error ** 2
-    lik = np.exp(-0.5 * (c14 - (measurement['age_bp'] - delta_r)) ** 2 / sigma2) / np.sqrt(sigma2)
-    # Nothing beyond the curve's ends; interpolate() clamps rather than
-    # extrapolates there (see exact_chain._date_likelihood).
-    return np.where((grid >= curve.cal_ages[0]) & (grid <= curve.cal_ages[-1]), lik, 0.0)
+    return curve.likelihood(grid, measurement['age_bp'], measurement['error_1sigma'],
+                            measurement.get('delta_r'), measurement.get('delta_r_error'))
 
 
 def _outlier_prior(measurement: Dict) -> float:

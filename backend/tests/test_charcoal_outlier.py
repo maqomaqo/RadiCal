@@ -238,19 +238,20 @@ class TestTheSharedScale:
         assert model.outlier_models == []
         assert model.likelihood_at == {}
 
-    def test_the_sampler_is_closer_to_oxcal_than_the_exact_solver(self):
+    def test_both_solvers_land_near_oxcal(self):
         """
-        The consequence, and the reason the override in bayesian_config exists:
-        on a model with a declared-residual date, choosing OxCal's own method
-        gets nearer OxCal's answer. Measured 6.3 years rms against the exact
-        solver's 9.9.
+        On a model with a declared-residual date. The sampler was once the
+        nearer of the two (6.3 years rms against 9.9); since the exact solver
+        shares the outlier scale too, both sit at about 3.4, the exact solver
+        at 3.43 and the sampler between 3.0 and 3.7 depending on its seed, so
+        which is nearer is now Monte Carlo noise and not asserted.
         """
         measurements, tree, exact = _solved()
         sampled = gibbs.solve(measurements, tree, num_samples=200, temperatures=1)
         exact_rms, _e = _rms_against_oxcal(measurements, exact)
         sampled_rms, _s = _rms_against_oxcal(measurements, sampled)
-        assert sampled_rms < exact_rms, (sampled_rms, exact_rms)
-        assert sampled_rms < 8.0, sampled_rms
+        assert exact_rms < 4.5, exact_rms
+        assert sampled_rms < 4.5, sampled_rms
 
     def test_the_declared_outliers_are_still_certain(self):
         """P(outlier) is now read from the run rather than from the reported

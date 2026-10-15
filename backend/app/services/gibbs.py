@@ -165,8 +165,9 @@ the exact solver deliberately part company. On tests/fixtures/oxcal_outlier
 sampling the shared scale lands within 0.0016 of OxCal's outlier probabilities
 where marginalising it per date sits at 0.0166. On tests/fixtures/oxcal_charcoal
 it recovers the scale OxCal inferred -- log10 1.82 against 1.79 -- from only the
-U(0,3) prior, and the modelled dates land 6.3 years rms from OxCal against the
-exact solver's 9.9.
+U(0,3) prior, and the modelled dates land about 3.4 years rms from OxCal, level
+with the exact solver now that it shares the scale too (they were 6.3 and 9.9
+before it did).
 
 See tests/test_gibbs.py and tests/test_charcoal_outlier.py, and _span_priors for
 how the UniformSpanPrior correction is grouped so it reduces to exact_chain's on
