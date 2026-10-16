@@ -223,7 +223,8 @@ class TestChangingAPassword:
 
         refused = anonymous_client.post('/api/auth/password', headers=headers, json={
             'current_password': 'a guess', 'new_password': 'the second password'})
-        assert refused.status_code == 401
+        # Not 401, which the browser reads as an expired session and signs out.
+        assert refused.status_code == 403
 
         accepted = anonymous_client.post('/api/auth/password', headers=headers, json={
             'current_password': 'the first password',
@@ -233,6 +234,137 @@ class TestChangingAPassword:
         assert anonymous_client.post('/api/auth/login', json={
             'email': 'changer@radical.example.com',
             'password': 'the second password'}).status_code == 200
+
+
+class TestResettingAForgottenPassword:
+    """
+    A reset link works once, for an hour, for one account, and is never a
+    session; asking for one says nothing about who has an account.
+    """
+
+    @staticmethod
+    def _user(client, email, password='the old password'):
+        from app.database import SessionLocal
+        from app.models import User
+        _register(client, email, password)
+        with SessionLocal() as db:
+            user = db.query(User).filter(User.email == email).one()
+            return user.id, user.password_hash
+
+    @staticmethod
+    def _login(client, email, password):
+        return client.post('/api/auth/login', json={'email': email, 'password': password})
+
+    def test_a_link_sets_the_password_and_signs_in(self, anonymous_client):
+        user_id, old_hash = self._user(anonymous_client, 'forgot@radical.example.com')
+        token = auth.create_reset_token(user_id, old_hash)
+        response = anonymous_client.post('/api/auth/reset-password', json={
+            'token': token, 'new_password': 'the new password'})
+        assert response.status_code == 200, response.text
+        session = response.json()['data']['token']
+        assert anonymous_client.get('/api/auth/me', headers={
+            'Authorization': f'Bearer {session}'}).status_code == 200
+        assert self._login(anonymous_client, 'forgot@radical.example.com',
+                           'the old password').status_code == 401
+        assert self._login(anonymous_client, 'forgot@radical.example.com',
+                           'the new password').status_code == 200
+
+    def test_a_link_works_once(self, anonymous_client):
+        user_id, old_hash = self._user(anonymous_client, 'once@radical.example.com')
+        token = auth.create_reset_token(user_id, old_hash)
+        body = {'token': token, 'new_password': 'the new password'}
+        assert anonymous_client.post('/api/auth/reset-password', json=body).status_code == 200
+        again = anonymous_client.post('/api/auth/reset-password',
+                                      json={**body, 'new_password': 'an attacker s password'})
+        assert again.status_code == 400
+        assert 'expired or has already been used' in again.json()['detail']
+
+    def test_an_expired_link_is_refused(self, anonymous_client):
+        user_id, old_hash = self._user(anonymous_client, 'late@radical.example.com')
+        token = auth.create_reset_token(
+            user_id, old_hash, now=datetime.now(timezone.utc) - timedelta(hours=2))
+        assert anonymous_client.post('/api/auth/reset-password', json={
+            'token': token, 'new_password': 'the new password'}).status_code == 400
+
+    def test_a_link_is_not_a_session_and_a_session_is_not_a_link(self, anonymous_client):
+        user_id, old_hash = self._user(anonymous_client, 'purpose@radical.example.com')
+        reset = auth.create_reset_token(user_id, old_hash)
+        with pytest.raises(auth.AuthError):
+            auth.read_token(reset)
+        assert anonymous_client.get('/api/auth/me', headers={
+            'Authorization': f'Bearer {reset}'}).status_code == 401
+        assert anonymous_client.post('/api/auth/reset-password', json={
+            'token': auth.create_token(user_id),
+            'new_password': 'the new password'}).status_code == 400
+
+    def test_a_short_new_password_is_refused(self, anonymous_client):
+        user_id, old_hash = self._user(anonymous_client, 'shortreset@radical.example.com')
+        assert anonymous_client.post('/api/auth/reset-password', json={
+            'token': auth.create_reset_token(user_id, old_hash),
+            'new_password': 'seven77'}).status_code == 422
+
+    def test_without_email_there_is_no_email_option(self, anonymous_client, monkeypatch):
+        monkeypatch.delenv('RADICAL_SMTP_HOST', raising=False)
+        assert anonymous_client.get('/api/auth/options').json()['data'] == {
+            'password_reset_email': False}
+        assert anonymous_client.post('/api/auth/forgot-password', json={
+            'email': 'anyone@radical.example.com'}).status_code == 503
+
+    @pytest.fixture
+    def outbox(self, monkeypatch):
+        from app.services import mail
+        monkeypatch.setenv('RADICAL_PUBLIC_URL', 'https://radical.example.com/')
+        monkeypatch.setenv('RADICAL_SMTP_HOST', 'smtp.radical.example.com')
+        monkeypatch.setenv('RADICAL_SMTP_FROM', 'radical@radical.example.com')
+        sent = []
+        monkeypatch.setattr(mail, 'send', lambda config, to, subject, body: sent.append((to, body)))
+        return sent
+
+    def test_an_email_carries_a_working_link(self, anonymous_client, outbox):
+        self._user(anonymous_client, 'emailed@radical.example.com')
+        assert anonymous_client.get('/api/auth/options').json()['data']['password_reset_email']
+        response = anonymous_client.post('/api/auth/forgot-password', json={
+            'email': 'Emailed@Radical.Example.com'})
+        assert response.status_code == 200
+        [(to, body)] = outbox
+        assert to == 'emailed@radical.example.com'
+        prefix = 'https://radical.example.com/reset-password#token='
+        link = next(line for line in body.splitlines() if line.startswith(prefix))
+        assert anonymous_client.post('/api/auth/reset-password', json={
+            'token': link[len(prefix):], 'new_password': 'the new password'}).status_code == 200
+
+    def test_asking_says_nothing_about_who_has_an_account(self, anonymous_client, outbox):
+        self._user(anonymous_client, 'known@radical.example.com')
+        known = anonymous_client.post('/api/auth/forgot-password', json={
+            'email': 'known@radical.example.com'})
+        unknown = anonymous_client.post('/api/auth/forgot-password', json={
+            'email': 'unknown@radical.example.com'})
+        assert known.status_code == unknown.status_code == 200
+        assert known.json() == unknown.json()
+        assert [to for to, _ in outbox] == ['known@radical.example.com']
+
+    def test_asking_again_at_once_sends_nothing_more(self, anonymous_client, outbox):
+        self._user(anonymous_client, 'impatient@radical.example.com')
+        for _ in range(3):
+            assert anonymous_client.post('/api/auth/forgot-password', json={
+                'email': 'impatient@radical.example.com'}).status_code == 200
+        assert len(outbox) == 1
+
+
+class TestTheServerResetCommand:
+    def test_it_sets_the_password(self, anonymous_client):
+        from app.reset_password import reset
+        _register(anonymous_client, 'cli@radical.example.com', 'the old password')
+        reset('CLI@radical.example.com', 'the new password')
+        assert anonymous_client.post('/api/auth/login', json={
+            'email': 'cli@radical.example.com', 'password': 'the new password'}).status_code == 200
+
+    def test_it_refuses_an_unknown_account_or_a_short_password(self):
+        from app.reset_password import reset
+        with pytest.raises(LookupError):
+            reset('nobody-here@radical.example.com', 'a long enough password')
+        with pytest.raises(ValueError):
+            reset('cli@radical.example.com', 'short')
 
 
 # --------------------------------------------------------------------------
@@ -278,6 +410,9 @@ class TestEveryRouteIsProtected:
     OPEN = {
         '/api/auth/register',   # there is no account yet, by definition
         '/api/auth/login',      # ditto
+        '/api/auth/options',            # what the sign-in page may offer
+        '/api/auth/forgot-password',    # the password is what is missing
+        '/api/auth/reset-password',     # ditto; the reset token is the credential
         '/api/health',          # a load balancer has no credentials
         '/',                    # the API's own index
         '/api/docs', '/api/redoc', '/api/openapi.json', '/api/docs/oauth2-redirect',

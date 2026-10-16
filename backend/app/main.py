@@ -82,9 +82,9 @@ except Exception as e:
 # API Routes.
 #
 # auth first, because everything below it depends on the current_user it
-# defines: registering and signing in are the only endpoints that do not
-# require an account, and /api/health below is the only other thing reachable
-# without one.
+# defines: registering, signing in and resetting a forgotten password are the
+# only endpoints that do not require an account, and /api/health below is the
+# only other thing reachable without one.
 app.include_router(auth.router, prefix="/api", tags=["authentication"])
 app.include_router(curves.router, prefix="/api", tags=["calibration curves"])
 app.include_router(analysis.router, prefix="/api", tags=["analysis"])

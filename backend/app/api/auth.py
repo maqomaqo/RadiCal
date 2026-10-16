@@ -27,19 +27,23 @@ Account page): the same bearer header, a stored and revocable credential, and
 optionally read-only. A token cannot make or revoke tokens, or change the
 password -- `browser_user` -- so a leaked one cannot entrench itself.
 """
+import logging
+import threading
+import time
 from datetime import datetime, timedelta
 from typing import Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.security import HTTPBearer
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import Analysis, PersonalAccessToken, Project, StoredCalibrationCurve, User
-from app.services import auth
+from app.services import auth, mail
 
 router = APIRouter()
+log = logging.getLogger(__name__)
 
 
 class RegisterRequest(BaseModel):
@@ -325,8 +329,11 @@ def change_password(
     current = str(payload.get('current_password') or '')
     new = str(payload.get('new_password') or '')
 
+    # 403, not 401: the session is fine, the answer is wrong. The browser
+    # client treats any 401 as an expired session and signs out, which would
+    # end the session of someone who only mistyped.
     if not auth.verify_password(current, user.password_hash):
-        raise HTTPException(status_code=401, detail='That current password is not right.')
+        raise HTTPException(status_code=403, detail='That current password is not right.')
     if len(new) < 8:
         raise HTTPException(status_code=422, detail='A password needs at least 8 characters.')
 
@@ -340,6 +347,116 @@ def change_password(
     # issuing one here would imply the old one had been invalidated, which
     # without a session table it has not been. See services/auth.py.
     return {'success': True}
+
+
+# --------------------------------------------------------------------------
+# A forgotten password
+# --------------------------------------------------------------------------
+#
+# By email when the installation can send it (services/mail.py), and otherwise
+# by whoever runs the server, with `python -m app.reset_password`. Both end in
+# the same place: the person sets a new password themselves.
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str = Field(min_length=8, max_length=72)
+
+
+# One email per address per this long. Without it, the form is a way to fill
+# somebody's inbox. In memory rather than a column: the app runs as one
+# process, and a restart forgetting a few minutes of it costs nothing.
+_RESET_EMAIL_INTERVAL = 300.0
+_last_reset_email: dict[str, float] = {}
+_last_reset_email_lock = threading.Lock()
+
+
+def _reset_email_allowed(email: str) -> bool:
+    now = time.monotonic()
+    with _last_reset_email_lock:
+        for address, sent in list(_last_reset_email.items()):
+            if now - sent >= _RESET_EMAIL_INTERVAL:
+                del _last_reset_email[address]
+        if email in _last_reset_email:
+            return False
+        _last_reset_email[email] = now
+        return True
+
+
+def _send_reset_email(config: mail.MailSettings, to: str, token: str) -> None:
+    # After the response, so a reply does not take longer when the account
+    # exists. A failure can only be logged: the person was already told
+    # "if there is an account, an email is on its way".
+    try:
+        mail.send_reset_link(config, to, token)
+    except Exception:
+        log.exception('Could not send a password-reset email')
+
+
+@router.get("/auth/options")
+def auth_options():
+    """What the sign-in page can offer. Open: it is read before anyone signs in."""
+    return {'success': True, 'data': {'password_reset_email': mail.is_configured()}}
+
+
+@router.post("/auth/forgot-password")
+def forgot_password(payload: ForgotPasswordRequest, background: BackgroundTasks,
+                    db: Session = Depends(get_db)):
+    """
+    Email a one-hour reset link to the address, if it has an account.
+
+    The same answer whether or not it does, for the reason login gives one
+    message for both: otherwise this is a way to find out who has an account.
+    """
+    config = mail.settings()
+    if config is None:
+        raise HTTPException(
+            status_code=503,
+            detail='This installation cannot send email. Ask whoever runs it to reset '
+                   'your password.')
+    email = auth.normalise_email(payload.email)
+    user = db.query(User).filter(User.email == email).first()
+    if user is not None and _reset_email_allowed(email):
+        token = auth.create_reset_token(user.id, user.password_hash)
+        background.add_task(_send_reset_email, config, user.email, token)
+    return {'success': True}
+
+
+@router.post("/auth/reset-password")
+def reset_password(payload: ResetPasswordRequest, db: Session = Depends(get_db)):
+    """
+    Set a new password with a reset link's token, and sign in.
+
+    Signing in is what the person was trying to do when they found they could
+    not, so the response is the same as login's.
+    """
+    def password_hash_of(user_id: str) -> Optional[str]:
+        row = db.query(User).filter(User.id == user_id).first()
+        return row.password_hash if row else None
+
+    try:
+        user_id = auth.read_reset_token(payload.token, password_hash_of)
+    except auth.AuthError:
+        raise HTTPException(
+            status_code=400,
+            detail='This reset link has expired or has already been used. Ask for a new one.')
+
+    user = db.query(User).filter(User.id == user_id).one()
+    try:
+        user.password_hash = auth.hash_password(payload.new_password)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    user.last_login_at = datetime.utcnow()
+    db.commit()
+    db.refresh(user)
+
+    return {
+        'success': True,
+        'data': {'token': auth.create_token(user.id), 'user': _user_json(user)},
+    }
 
 
 # --------------------------------------------------------------------------

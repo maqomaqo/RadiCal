@@ -85,6 +85,34 @@ account sees only its own projects and analyses. To make it reachable from this 
 change the `ports:` line in `docker-compose.yml` from `"8000:8000"` to `"127.0.0.1:8000:8000"`
 and run `docker compose up -d`.
 
+## Forgotten passwords
+
+To set a new password for an account, run this in the RadiCal folder with its email address, and
+type the new password twice when asked:
+
+```bash
+docker compose exec radical python -m app.reset_password someone@example.org
+```
+
+### Password-reset emails
+
+If RadiCal can send email, **Forgot your password?** on the sign-in page emails people a link to
+choose a new password themselves. The link works once, for an hour. To turn this on, add your mail
+server's details to `.env` and run `docker compose up -d`:
+
+```
+RADICAL_PUBLIC_URL=https://radical.example.org
+RADICAL_SMTP_HOST=smtp.example.org
+RADICAL_SMTP_PORT=587
+RADICAL_SMTP_USER=radical@example.org
+RADICAL_SMTP_PASSWORD=...
+RADICAL_SMTP_FROM=radical@example.org
+```
+
+`RADICAL_PUBLIC_URL` is the address people open RadiCal at; the link in the email points there.
+For a server on port 465, add `RADICAL_SMTP_SECURITY=ssl`. If an email does not arrive,
+`docker compose logs radical` shows why.
+
 ## Using a different port
 
 If something else already uses port 8000, change the *first* number in that same `ports:` line —

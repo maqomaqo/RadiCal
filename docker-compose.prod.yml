@@ -48,6 +48,15 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-radiocarbon}:${POSTGRES_PASSWORD:-password}@postgres:5432/${POSTGRES_DB:-radiocarbon_db}
       RADICAL_ENV: ${RADICAL_ENV:-production}
       RADICAL_SECRET_KEY: ${RADICAL_SECRET_KEY:?set RADICAL_SECRET_KEY in .env or the environment}
+      # Optional: password-reset emails (docs/INSTALLATION.md). Unset, the
+      # sign-in page sends people to whoever runs the server instead.
+      RADICAL_PUBLIC_URL: ${RADICAL_PUBLIC_URL:-}
+      RADICAL_SMTP_HOST: ${RADICAL_SMTP_HOST:-}
+      RADICAL_SMTP_PORT: ${RADICAL_SMTP_PORT:-}
+      RADICAL_SMTP_SECURITY: ${RADICAL_SMTP_SECURITY:-}
+      RADICAL_SMTP_USER: ${RADICAL_SMTP_USER:-}
+      RADICAL_SMTP_PASSWORD: ${RADICAL_SMTP_PASSWORD:-}
+      RADICAL_SMTP_FROM: ${RADICAL_SMTP_FROM:-}
     volumes:
       - uploads:/app/uploads
     depends_on:

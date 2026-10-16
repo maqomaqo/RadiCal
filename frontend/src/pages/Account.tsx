@@ -33,7 +33,7 @@ import { describeFetchError, formatApiError } from '@/utils/apiError'
 import { absoluteTime, parseServerTime, relativeTime } from '@/utils/serverTime'
 
 /**
- * The signed-in account, and its personal access tokens: long-lived
+ * The signed-in account: its password, and its personal access tokens: long-lived
  * credentials for scripts (api/auth.py). The secret is shown once, in the
  * dialog that follows making one, because the server keeps only its hash.
  */
@@ -72,6 +72,12 @@ export default function Account() {
   const [saving, setSaving] = useState(false)
   const [made, setMade] = useState<string | null>(null)
   const [revoking, setRevoking] = useState<AccessToken | null>(null)
+  const [currentPassword, setCurrentPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [passwordError, setPasswordError] = useState<string | null>(null)
+  const [passwordChanged, setPasswordChanged] = useState(false)
+  const [changingPassword, setChangingPassword] = useState(false)
 
   const load = async () => {
     try {
@@ -129,6 +135,36 @@ export default function Account() {
     }
   }
 
+  const changePassword = async (event: React.FormEvent) => {
+    event.preventDefault()
+    setPasswordError(null)
+    setPasswordChanged(false)
+    if (newPassword !== confirmPassword) {
+      setPasswordError('The two new passwords do not match.')
+      return
+    }
+    setChangingPassword(true)
+    try {
+      const response = await fetch('/api/auth/password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+      })
+      if (!response.ok) {
+        setPasswordError(formatApiError(await response.json().catch(() => null)))
+        return
+      }
+      setCurrentPassword('')
+      setNewPassword('')
+      setConfirmPassword('')
+      setPasswordChanged(true)
+    } catch (error) {
+      setPasswordError('Could not change the password: ' + describeFetchError(error))
+    } finally {
+      setChangingPassword(false)
+    }
+  }
+
   const copy = async (text: string) => {
     try {
       await navigator.clipboard.writeText(text)
@@ -148,6 +184,63 @@ export default function Account() {
           Signed in as {user?.email}
           {user?.display_name ? ` (${user.display_name})` : ''}.
         </Typography>
+      </Paper>
+
+      <Paper sx={{ p: 3, mb: 3 }}>
+        <Typography variant="h6" gutterBottom>
+          Password
+        </Typography>
+        <Box
+          component="form"
+          onSubmit={changePassword}
+          sx={{ display: 'flex', flexDirection: 'column', gap: 2, maxWidth: 420 }}
+        >
+          {passwordError && <Alert severity="error">{passwordError}</Alert>}
+          {passwordChanged && <Alert severity="success">Your password has been changed.</Alert>}
+          {/* The account's address, hidden, so a password manager knows which
+              login the new password belongs to. */}
+          <input
+            type="email"
+            name="username"
+            autoComplete="username"
+            value={user?.email ?? ''}
+            readOnly
+            hidden
+          />
+          <TextField
+            label="Current password"
+            type="password"
+            value={currentPassword}
+            onChange={(e) => setCurrentPassword(e.target.value)}
+            autoComplete="current-password"
+            required
+            size="small"
+          />
+          <TextField
+            label="New password"
+            type="password"
+            value={newPassword}
+            onChange={(e) => setNewPassword(e.target.value)}
+            autoComplete="new-password"
+            required
+            size="small"
+            helperText="At least 8 characters. Length beats punctuation."
+          />
+          <TextField
+            label="New password again"
+            type="password"
+            value={confirmPassword}
+            onChange={(e) => setConfirmPassword(e.target.value)}
+            autoComplete="new-password"
+            required
+            size="small"
+          />
+          <Box>
+            <Button type="submit" variant="contained" disabled={changingPassword}>
+              {changingPassword ? 'Working…' : 'Change password'}
+            </Button>
+          </Box>
+        </Box>
       </Paper>
 
       <Paper sx={{ p: 3 }}>
