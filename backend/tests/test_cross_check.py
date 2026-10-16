@@ -145,6 +145,7 @@ class TestTheSameModel:
             assert mean == pytest.approx(
                 exact['boundaries'][boundary_id]['posterior']['posterior_mean'], abs=1.0)
 
+    @pytest.mark.slow
     @pytest.mark.parametrize('outliers', [False, True])
     def test_it_is_the_sampler_on_parallel_branches(self, outliers):
         """

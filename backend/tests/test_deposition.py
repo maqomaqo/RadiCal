@@ -333,6 +333,7 @@ class TestTheSpanPriorIsNotAppliedTwice:
             assert model.below[measurement['id']]
             assert model.above[measurement['id']]
 
+    @pytest.mark.slow
     def test_enclosing_boundaries_barely_move_the_levels(self):
         """
         The boundaries add containment and nothing else, and containment is

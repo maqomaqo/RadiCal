@@ -953,6 +953,7 @@ class TestReplaceInputs:
         body.update(overrides)
         return body
 
+    @pytest.mark.slow
     def test_replacing_inputs_clears_stale_results(self, client):
         created = client.post(
             "/api/analysis/bayesian?wait=true",

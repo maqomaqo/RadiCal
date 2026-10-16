@@ -377,6 +377,7 @@ class TestAgreesWithTheReferences:
             np.testing.assert_allclose(mine[bid] / mine[bid].sum(), density / density.sum(),
                                        atol=1e-12, err_msg=bid)
 
+    @pytest.mark.slow
     def test_the_dates_are_the_samplers(self):
         tree, dates = _site([('plain', [3150])] + TWO_AREAS, error=25)
         layout, _reason = ep.layout_with_reason(tree, dates)
@@ -479,6 +480,7 @@ class TestTheAnalysisRoutesItHere:
         assert created.status_code == 200, created.text
         assert created.json()['data']['solver']['shape'] == 'chain'
 
+    @pytest.mark.slow
     def test_the_sampler_can_still_be_chosen(self, client):
         tree, dates = _site(TWO_AREAS)
         created = _run(client, tree, dates, solver='gibbs')
@@ -488,6 +490,7 @@ class TestTheAnalysisRoutesItHere:
         assert solver['reason'] is None
         assert solver['cross_check']['status'] in ('agrees', 'differs')
 
+    @pytest.mark.slow
     def test_an_area_that_is_not_one_line_is_sampled_and_says_why(self, client):
         tree, dates = _site(TWO_AREAS)
         area = tree['children'][1]['children'][0]

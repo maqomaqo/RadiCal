@@ -83,6 +83,7 @@ class TestAgainstOxCal:
 
 
 class TestAgainstTheExactMixture:
+    @pytest.mark.slow
     def test_one_wild_date(self):
         """
         The exact answer mixes one whole solve per scale node by its evidence.
@@ -134,6 +135,7 @@ class TestTheWeighing:
             assert a['outlier_probability'] == pytest.approx(b['outlier_probability'],
                                                              abs=0.002)
 
+    @pytest.mark.slow
     def test_two_models_weighed_in_turn_match_their_joint_weighing(self, monkeypatch):
         """The charcoal fixture's General and Charcoal scales, weighed one at a
         time, against all 24 x 24 pairs on the same grid -- every node solved,

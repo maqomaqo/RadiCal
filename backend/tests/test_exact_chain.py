@@ -1946,6 +1946,7 @@ class TestSequenceOfSequences:
                     == pytest.approx(flat['boundaries'][bid]['posterior']['posterior_mean'],
                                      abs=1e-9))
 
+    @pytest.mark.slow
     def test_it_matches_the_sampler(self):
         """
         The independent check: gibbs.solve on the NESTED tree, which it plans

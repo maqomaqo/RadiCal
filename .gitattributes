@@ -1,0 +1,6 @@
+# Bytes that are hashed must be the same bytes on every checkout. Git for
+# Windows converts line endings by default, which would change the SHA-256
+# of the curve files and of every corpus file, both of which the desktop corpus
+# tests check.
+calibration_data/** -text
+desktop/corpus/** -text

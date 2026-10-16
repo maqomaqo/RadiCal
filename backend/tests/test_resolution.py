@@ -240,6 +240,7 @@ class TestEndpoint:
     def test_unknown_curve_is_404(self, client):
         assert client.get('/api/curves/intcal13/resolution').status_code == 404
 
+    @pytest.mark.slow
     def test_csv_export_carries_the_reference_columns(self, client):
         response = client.get('/api/curves/marine20/resolution.csv?stride=200')
         assert response.status_code == 200

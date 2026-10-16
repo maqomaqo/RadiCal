@@ -1,0 +1,252 @@
+{
+ "schema": 2,
+ "family": "units/same_event",
+ "cases": [
+  {
+   "name": "same_event/consistent",
+   "inputs": {
+    "measurements": [
+     {
+      "age_bp": 3000,
+      "error_1sigma": 25,
+      "curve_id": "intcal20",
+      "delta_r": null,
+      "delta_r_error": null
+     },
+     {
+      "age_bp": 3020,
+      "error_1sigma": 30,
+      "curve_id": "intcal20",
+      "delta_r": null,
+      "delta_r_error": null
+     },
+     {
+      "age_bp": 2990,
+      "error_1sigma": 20,
+      "curve_id": "intcal20",
+      "delta_r": null,
+      "delta_r_error": null
+     }
+    ]
+   },
+   "outputs": {
+    "n": 3,
+    "df": 2,
+    "level": 0.05,
+    "mean_bp": 2999.4669509594887,
+    "error_bp": 13.852712896188304,
+    "t": 0.6929637526652452,
+    "critical": 5.99146454710798,
+    "consistent": true,
+    "pooled_hpd_ranges": [
+     {
+      "confidence": 0.6826894921370859,
+      "ranges": [
+       {
+        "min": 3165.0,
+        "max": 3212.0,
+        "probability_percent": 68.45359615602442
+       }
+      ]
+     },
+     {
+      "confidence": 0.9544997361036416,
+      "ranges": [
+       {
+        "min": 3306.0,
+        "max": 3318.0,
+        "probability_percent": 2.432128154529061
+       },
+       {
+        "min": 3238.0,
+        "max": 3239.0,
+        "probability_percent": 0.23282218762504897
+       },
+       {
+        "min": 3143.0,
+        "max": 3236.0,
+        "probability_percent": 86.49432781896937
+       },
+       {
+        "min": 3111.0,
+        "max": 3124.0,
+        "probability_percent": 3.125869423228997
+       },
+       {
+        "min": 3080.0,
+        "max": 3092.0,
+        "probability_percent": 3.246857604764166
+       }
+      ]
+     },
+     {
+      "confidence": 0.9973002039367398,
+      "ranges": [
+       {
+        "min": 3297.0,
+        "max": 3329.0,
+        "probability_percent": 3.594587227751709
+       },
+       {
+        "min": 3104.0,
+        "max": 3251.0,
+        "probability_percent": 92.45638406757874
+       },
+       {
+        "min": 3075.0,
+        "max": 3096.0,
+        "probability_percent": 3.6792818002050627
+       }
+      ]
+     }
+    ],
+    "refused": null
+   }
+  },
+  {
+   "name": "same_event/inconsistent",
+   "inputs": {
+    "measurements": [
+     {
+      "age_bp": 3000,
+      "error_1sigma": 25,
+      "curve_id": "intcal20",
+      "delta_r": null,
+      "delta_r_error": null
+     },
+     {
+      "age_bp": 3400,
+      "error_1sigma": 30,
+      "curve_id": "intcal20",
+      "delta_r": null,
+      "delta_r_error": null
+     }
+    ]
+   },
+   "outputs": {
+    "n": 2,
+    "df": 1,
+    "level": 0.05,
+    "mean_bp": 3163.934426229508,
+    "error_bp": 19.205531989934396,
+    "t": 104.91803278688525,
+    "critical": 3.8414588206941205,
+    "consistent": false,
+    "pooled_hpd_ranges": null,
+    "refused": null
+   }
+  },
+  {
+   "name": "same_event/one",
+   "inputs": {
+    "measurements": [
+     {
+      "age_bp": 3000,
+      "error_1sigma": 25,
+      "curve_id": "intcal20",
+      "delta_r": null,
+      "delta_r_error": null
+     }
+    ]
+   },
+   "outputs": null
+  },
+  {
+   "name": "same_event/two-curves",
+   "inputs": {
+    "measurements": [
+     {
+      "age_bp": 3000,
+      "error_1sigma": 25,
+      "curve_id": "intcal20",
+      "delta_r": null,
+      "delta_r_error": null
+     },
+     {
+      "age_bp": 3000,
+      "error_1sigma": 25,
+      "curve_id": "shcal20",
+      "delta_r": null,
+      "delta_r_error": null
+     }
+    ]
+   },
+   "outputs": {
+    "n": 2,
+    "df": 1,
+    "level": 0.05,
+    "mean_bp": null,
+    "error_bp": null,
+    "t": null,
+    "critical": null,
+    "consistent": null,
+    "pooled_hpd_ranges": null,
+    "refused": "Dates are on more than one curve."
+   }
+  },
+  {
+   "name": "same_event/marine-same-offset",
+   "inputs": {
+    "measurements": [
+     {
+      "age_bp": 4000,
+      "error_1sigma": 30,
+      "curve_id": "marine20",
+      "delta_r": 50,
+      "delta_r_error": 20
+     },
+     {
+      "age_bp": 4050,
+      "error_1sigma": 35,
+      "curve_id": "marine20",
+      "delta_r": 50,
+      "delta_r_error": 20
+     }
+    ]
+   },
+   "outputs": {
+    "n": 2,
+    "df": 1,
+    "level": 0.05,
+    "mean_bp": 4021.176470588235,
+    "error_bp": 22.7776980709589,
+    "t": 1.1764705882352942,
+    "critical": 3.8414588206941205,
+    "consistent": true,
+    "pooled_hpd_ranges": [
+     {
+      "confidence": 0.6826894921370859,
+      "ranges": [
+       {
+        "min": 3710.0,
+        "max": 3870.0,
+        "probability_percent": 68.96946928750216
+       }
+      ]
+     },
+     {
+      "confidence": 0.9544997361036416,
+      "ranges": [
+       {
+        "min": 3630.0,
+        "max": 3960.0,
+        "probability_percent": 95.59287004555883
+       }
+      ]
+     },
+     {
+      "confidence": 0.9973002039367398,
+      "ranges": [
+       {
+        "min": 3550.0,
+        "max": 4060.0,
+        "probability_percent": 99.73593587199238
+       }
+      ]
+     }
+    ],
+    "refused": null
+   }
+  }
+ ]
+}

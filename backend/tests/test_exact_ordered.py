@@ -417,6 +417,7 @@ class TestAgreesWithTheReferences:
             np.testing.assert_allclose(mine[bid] / mine[bid].sum(), density / density.sum(),
                                        atol=1e-12, err_msg=bid)
 
+    @pytest.mark.slow
     @pytest.mark.parametrize('parallel', [False, True], ids=['chain', 'areas'])
     def test_the_dates_are_the_samplers(self, parallel):
         if parallel:

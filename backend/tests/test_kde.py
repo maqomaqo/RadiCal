@@ -305,6 +305,7 @@ class TestAModel:
         assert created.status_code == 200, created.text
         return created.json()['data']['id']
 
+    @pytest.mark.slow
     @pytest.mark.parametrize('solver', ['exact', 'gibbs'])
     def test_it_reports_one_kde_per_phase(self, client, solver):
         prefix = f'km-{solver}'

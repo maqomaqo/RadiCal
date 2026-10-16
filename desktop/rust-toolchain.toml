@@ -1,0 +1,5 @@
+# Pinned so a float result cannot change under the corpus because the
+# compiler did. Bump deliberately, and rerun the parity tests when you do.
+[toolchain]
+channel = "1.99.1"
+components = ["clippy", "rustfmt"]

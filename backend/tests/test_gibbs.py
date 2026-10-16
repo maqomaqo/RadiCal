@@ -582,6 +582,7 @@ class TestEveryKernelTargetsOneDistribution:
                 assert self._tv(got[2][k], target[2][k]) < 0.03, (name, 'date', k)
 
 
+    @pytest.mark.slow
     def test_the_recorded_chain_of_a_tempered_ladder_reaches_the_same_distribution(self):
         """
         Parallel tempering (gibbs._Chain) adds hot copies and swaps; only the
@@ -625,6 +626,7 @@ class TestOrderedGroupsDoNotDependOnTheGrid:
             [solved['measurements'][i]['posterior_mean'] for i in ids])
         return mean(ox.NORTH) - mean(ox.SOUTH)
 
+    @pytest.mark.slow
     def test_a_coarse_grid_gives_the_answer_a_fine_one_does(self):
         coarse, fine = self._separation(2.0), self._separation(0.5)
         assert coarse == pytest.approx(fine, abs=0.7), (coarse, fine)
@@ -658,6 +660,7 @@ class TestBranchingModels:
         _a, _b, combined, dates_a, dates_b = self._two_branches()
         assert ec.layout(combined, dates_a + dates_b) is None
 
+    @pytest.mark.slow
     @pytest.mark.parametrize('uniform_span_prior', [True, False])
     def test_it_reproduces_each_branch_solved_separately(self, uniform_span_prior):
         """
@@ -917,6 +920,7 @@ class TestTheChainCanActuallyMove:
         for block in model.blocks:
             assert len(block) == 1, 'these two dates constrain each other'
 
+    @pytest.mark.slow
     def test_the_wide_proposal_is_what_makes_it_usable(self, monkeypatch):
         """
         Why WIDE_MOVE_FRACTION exists, as a measurement rather than a comment.
@@ -958,6 +962,7 @@ class TestTheChainCanActuallyMove:
         assert without > 2 * with_wide, (without, with_wide)
 
 
+@pytest.mark.slow
 class TestOutlierModel:
     """
     The outlier model, against the same OxCal 4.4 run the exact solver is held
@@ -1239,6 +1244,7 @@ class TestRunLength:
         return ([_date(phase['id'], 3000), _date(phase['id'], 3020),
                  _date(phase['id'], 3040)], tree)
 
+    @pytest.mark.slow
     def test_it_reports_the_length_it_actually_ran(self):
         measurements, tree = self._easy_model()
         sampled = gibbs.solve(measurements, tree, sweeps=2000, num_samples=50,
@@ -1259,6 +1265,7 @@ class TestRunLength:
         assert sampled['converged'] is False
         assert sampled['convergence'] < 1.01
 
+    @pytest.mark.slow
     def test_min_sweeps_holds_a_converged_run_to_its_floor(self):
         """
         A floor above the length the run would have stopped at is the only
@@ -1281,6 +1288,7 @@ class TestRunLength:
                            chains=2, min_sweeps=floor, temperatures=1)
         assert min(held['sweeps_per_chain']) >= floor
 
+    @pytest.mark.slow
     def test_the_seed_reproduces_a_run_and_a_new_one_replicates_it(self):
         measurements, tree = self._easy_model()
         a = gibbs.solve(measurements, tree, sweeps=2000, num_samples=50, seed=11,
@@ -1710,6 +1718,7 @@ class TestBoundaryTiesCountHalf:
         assert boundary_ties == {(area_start, site_start), (area_end, area_start),
                                  (site_end, area_end)}
 
+    @pytest.mark.slow
     def test_it_agrees_with_the_exact_solver_across_empty_phases(self):
         """
         Exact Start 617.0. With coincident Boundaries counted whole the same
@@ -1860,6 +1869,7 @@ class TestLobeProbe:
         names = {row['name'] for row in record['not_reached']}
         assert {'Le-10002', 'Le-10003'} <= names, record
 
+    @pytest.mark.slow
     def test_lobes_the_model_rules_out_are_left(self):
         """A run at the exact answer leaves only lobes the model rules out
         empty, and the probe reports none of them."""
@@ -1885,6 +1895,7 @@ class TestParallelTempering:
     copies cross easily and swap what they find into the recorded chain.
     """
 
+    @pytest.mark.slow
     def test_tempered_chains_cross_between_the_starts_two_ranges(self):
         measurements, tree = TestLobeProbe()._dune_layers()
         model = gibbs.Model(measurements, tree)

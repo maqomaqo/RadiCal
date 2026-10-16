@@ -298,6 +298,7 @@ class TestSolverOverride:
             got = sampled_results[sample_id]['posterior_mean']
             assert got == pytest.approx(exact['posterior_mean'], abs=2.0), sample_id
 
+    @pytest.mark.slow
     def test_it_round_trips_through_a_saved_analysis(self, client):
         """The override has to survive being saved, or a rerun would silently
         revert to the automatic choice."""

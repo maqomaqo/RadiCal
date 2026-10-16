@@ -87,17 +87,12 @@ onto the job queue if models grow.
 
 ## Testing
 
-### 10. CI runs no tests
-`.github/workflows/publish-image.yml` builds and publishes the image and
-nothing else. Neither `pytest` nor `vitest` runs on a push or a PR. The backend
-suite takes about 16 minutes in the dev container.
-
-### 11. No automated end-to-end tests
+### 10. No automated end-to-end tests
 Flows are verified by hand against the running stack. The obvious first
 scenarios, for example Playwright against `docker-compose.yml`: sign in → new
 analysis → run → results; deploy from a collection; compare two analyses.
 
-### 12. Frontend unit gaps
+### 11. Frontend unit gaps
 - `utils/stratigraphy.ts` (`flattenStructure`, `expandRelationships`,
   `findCycle`) is pure and untested.
 - `hooks/useJob.ts` and `api/jobs.ts` are covered only end to end, through the

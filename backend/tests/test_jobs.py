@@ -234,6 +234,7 @@ class TestFailure:
 
 
 class TestCancellation:
+    @pytest.mark.slow
     def test_cancelling_stops_the_run_and_keeps_the_old_results(self, client):
         """
         A cancel is a stop, not an undo. The analysis keeps whatever it had,
@@ -297,6 +298,7 @@ class TestCancellation:
 
 
 class TestOrdering:
+    @pytest.mark.slow
     def test_two_submissions_run_one_after_the_other(self, client):
         """
         One worker, on purpose: the sampler's loop is pure Python and holds

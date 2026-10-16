@@ -593,12 +593,14 @@ class TestModelIndexAgainstOxCal:
             for m in ox.measurements()
         ]
 
+    @pytest.mark.slow
     def test_reproduces_oxcals_amodel(self):
         """Against OxCal at one year, 100.6: measured 100.9."""
         got = _amodel(self._solved('ordered'), ox.measurements())
         _table, amodel, _aoverall = rf.table(rf.HILLSIDE)
         assert got == pytest.approx(amodel, abs=1.5), got
 
+    @pytest.mark.slow
     @pytest.mark.parametrize('run', RUNS)
     def test_oxcals_default_resolution_reads_lower(self, run):
         """
@@ -791,6 +793,7 @@ class TestOutlierModels:
         assert agreement.overall_agreement(
             indices, agreement.outlier_scale_terms(measurements)) == pytest.approx(aoverall, abs=1.5)
 
+    @pytest.mark.slow
     def test_a_run_scores_the_flagged_date_as_oxcal_does(self):
         """
         End to end on Dune Section, RadiCal's own run: LB10002 is scored off

@@ -194,6 +194,7 @@ class TestAgreesWithTheReferences:
             np.testing.assert_allclose(mine[bid] / mine[bid].sum(), density / density.sum(),
                                        atol=1e-12, err_msg=bid)
 
+    @pytest.mark.slow
     def test_the_dates_are_the_samplers(self):
         tree, dates = _with_tails(*_site([('plain', [3150])] + TWO_AREAS), before=[3250],
                                   after=[2850])
