@@ -8,6 +8,7 @@ desktop/
   Cargo.toml            the workspace; crates are added as the phase that needs them starts
   rust-toolchain.toml   the pinned compiler
   crates/
+    radical-core/       the calibration maths, ported from backend/app/services (Phase 1)
     radical-corpus/     reads the golden corpus and checks it is intact
   corpus/
     generate.py         writes the corpus from the Python implementation
@@ -28,6 +29,9 @@ cargo clippy --all-targets -- -D warnings
 ```
 
 CI runs the same on macOS, Windows and Linux (`.github/workflows/desktop.yml`).
+
+`cargo test -p radical-core --test units -- --nocapture` also prints, for each corpus family, the
+largest relative difference from the Python answer and where it was.
 
 ## The golden corpus
 

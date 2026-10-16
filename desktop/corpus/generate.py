@@ -413,7 +413,9 @@ def units_date_format():
     ranges = [{'min': 3100.0, 'max': 3270.0, 'probability_percent': 81.9},
               {'min': 1900.0, 'max': 2000.0, 'probability_percent': 13.5}]
     cases = []
-    for fmt in ('cal_bp', 'bc_ad', 'bce_ce', None, 'nonsense'):
+    # The three valid ids, then spellings that are not ids and must fall back
+    # to cal BP.
+    for fmt in ('calBP', 'bcad', 'bce_ce', 'cal_bp', 'bc_ad', None, 'nonsense'):
         def run(fmt=fmt):
             norm = date_format.normalise(fmt)
             return {

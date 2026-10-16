@@ -1,0 +1,17 @@
+[package]
+name = "radical-core"
+description = "The calibration maths of RadiCal, ported from backend/app/services: no I/O, no async."
+publish = false
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+
+[dev-dependencies]
+radical-corpus = { path = "../radical-corpus" }
+serde_json.workspace = true
+
+[lints]
+workspace = true

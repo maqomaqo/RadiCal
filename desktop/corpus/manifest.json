@@ -19,7 +19,7 @@
   "data/units/calibrate.json": "979813d23f9db0e24a9a0d6ea18d93dceddb247b4d3ec55a8e39dc9feecd9f39",
   "data/units/cell_edges.json": "530b19fc70de602bbd3935ea5c12eeb93a31d08b957c640c8f3fda14bd9dd6da",
   "data/units/curve_mix.json": "934a165a5d8d6541e91f90cb88ed4088a188c4cf846ab6e4160598bcc24f0d84",
-  "data/units/date_format.json": "0947d69c9b8c1a96fe3e5fe93b6a4352db2f258626fdc89a65326c8aa0016187",
+  "data/units/date_format.json": "68f068ce6c2f44f1164412cb93f9ce80a7563148adb4fe4e02ec416dbba78811",
   "data/units/f14c.json": "ad4bcdd6116239d48519765ae4edff56309fe4b06e7ff61ede16649a0e4537f6",
   "data/units/interpolation.json": "7464635e1e5458bc1780d197ca435939ec453de0979f5a3742112eb6ad041951",
   "data/units/likelihood.json": "b1e6c973adcee8d31718918b33469073c606008fb3c1cc251ee048a29c67b172",
@@ -29,8 +29,8 @@
   "data/units/same_event.json": "c83b0a249bbb909bb6a2920be1c4de168307be6677e6f634364f5f5d6e397c6f"
  },
  "generated_from": {
-  "commit": "ce2b9d83474b81b594015e974026668edfba4d0c",
-  "dirty": true,
+  "commit": "34637b12d4bc152aecc34b8e12a8436d518aa76b",
+  "dirty": false,
   "numpy": "2.5.3",
   "python": "3.13.9",
   "scipy": "1.18.1"
