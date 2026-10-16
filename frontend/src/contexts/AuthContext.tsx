@@ -9,6 +9,7 @@ import {
   installAuthenticatedFetch,
   signIn as apiSignIn,
   register as apiRegister,
+  resetPassword as apiResetPassword,
   storedUser,
   whenSessionExpires,
 } from '@/api/client'
@@ -36,6 +37,7 @@ interface AuthContextValue {
   user: AuthUser | null
   signIn: (email: string, password: string) => Promise<void>
   register: (email: string, password: string, displayName?: string) => Promise<number>
+  resetPassword: (token: string, newPassword: string) => Promise<void>
   signOut: () => void
 }
 
@@ -90,14 +92,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     []
   )
 
+  const resetPassword = useCallback(async (token: string, newPassword: string) => {
+    const { user: signedIn } = await apiResetPassword(token, newPassword)
+    // Off the reset link's address before the app appears: it names no page,
+    // and leaving it would show the reset form again on the next render.
+    window.history.replaceState(null, '', '/')
+    setUser(signedIn)
+  }, [])
+
   const signOut = useCallback(() => {
     clearSession()
     setUser(null)
   }, [])
 
   const value = useMemo(
-    () => ({ user, signIn, register, signOut }),
-    [user, signIn, register, signOut]
+    () => ({ user, signIn, register, resetPassword, signOut }),
+    [user, signIn, register, resetPassword, signOut]
   )
 
   if (checking) {

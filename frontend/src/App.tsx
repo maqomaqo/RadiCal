@@ -9,7 +9,7 @@ import { AuthProvider, useAuth } from '@/contexts/AuthContext'
 import Navigation from '@/components/Navigation'
 import ErrorBoundary from '@/components/ErrorBoundary'
 import Dashboard from '@/pages/Dashboard'
-import SignIn from '@/pages/SignIn'
+import SignIn, { isResetLink } from '@/pages/SignIn'
 
 // Every page but the two a visit can open on is its own chunk, fetched the
 // first time it is navigated to. Most of them draw with Plotly, which is
@@ -316,7 +316,9 @@ function RoutedPages() {
  */
 function AppShell() {
   const { user } = useAuth()
-  if (!user) return <SignIn />
+  // A reset link wins even over a session: it may be for another account, and
+  // its owner opened it to set a password, not to see the app.
+  if (!user || isResetLink()) return <SignIn />
   return (
     <Router>
       <Navigation />

@@ -37,6 +37,14 @@ services:
       # which is the one thing a signing key must never be.
       RADICAL_ENV: ${RADICAL_ENV:-development}
       RADICAL_SECRET_KEY: ${RADICAL_SECRET_KEY:-}
+      # Optional password-reset emails; see .env.example.
+      RADICAL_PUBLIC_URL: ${RADICAL_PUBLIC_URL:-}
+      RADICAL_SMTP_HOST: ${RADICAL_SMTP_HOST:-}
+      RADICAL_SMTP_PORT: ${RADICAL_SMTP_PORT:-}
+      RADICAL_SMTP_SECURITY: ${RADICAL_SMTP_SECURITY:-}
+      RADICAL_SMTP_USER: ${RADICAL_SMTP_USER:-}
+      RADICAL_SMTP_PASSWORD: ${RADICAL_SMTP_PASSWORD:-}
+      RADICAL_SMTP_FROM: ${RADICAL_SMTP_FROM:-}
       INTCAL_CURVE_PATH: ${INTCAL_CURVE_PATH:-/app/data/intcal20.14c}
       MARINE_CURVE_PATH: ${MARINE_CURVE_PATH:-/app/data/marine20.14c}
       SHCAL_CURVE_PATH: ${SHCAL_CURVE_PATH:-/app/data/shcal20.14c}

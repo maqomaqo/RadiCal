@@ -33,6 +33,11 @@ Choices worth stating, since each is a place where the obvious thing is worse:
   A script that re-runs a project overnight cannot sign in every twelve hours.
   Its token (`rct_...`, up to a year) has a row (models.PersonalAccessToken)
   so it can be revoked, and only a hash of it is kept.
+
+- **A password-reset link is a token too, and needs no table either.** It is
+  signed like a session token but marked for its one purpose, lasts an hour,
+  and carries a fingerprint of the password hash it was issued against -- so
+  it works once, and not at all after the password has changed.
 """
 from __future__ import annotations
 
@@ -163,6 +168,11 @@ def read_token(token: str) -> TokenClaims:
     except jwt.PyJWTError as exc:
         raise AuthError(str(exc)) from exc
 
+    # A password-reset link is signed with the same key and names the same
+    # user, so without this it would also be a twelve-hour session.
+    if 'purpose' in payload:
+        raise AuthError('not a session token')
+
     user_id = payload.get('sub')
     if not isinstance(user_id, str) or not user_id:
         raise AuthError('token has no subject')
@@ -171,6 +181,63 @@ def read_token(token: str) -> TokenClaims:
         user_id=user_id,
         expires_at=datetime.fromtimestamp(payload['exp'], tz=timezone.utc),
     )
+
+
+# How long a password-reset link works. Long enough to find the email, short
+# enough that one left in an inbox is not a standing way into the account.
+RESET_TTL = timedelta(hours=1)
+
+_RESET_PURPOSE = 'password-reset'
+
+
+def _password_fingerprint(password_hash: str) -> str:
+    """
+    What a reset token remembers of the password it was issued against.
+
+    A reset link stops working the moment the password changes -- by being
+    used, or by its owner remembering the password after all -- without a table
+    of issued links: the token carries this, and it no longer matches. A hash
+    of the bcrypt hash, so the token (readable by anyone who holds it) shows
+    nothing of the hash itself.
+    """
+    return hashlib.sha256(password_hash.encode('utf-8')).hexdigest()[:32]
+
+
+def create_reset_token(user_id: str, password_hash: str,
+                       now: Optional[datetime] = None) -> str:
+    """A signed, one-use, short-lived token for setting a new password."""
+    issued = now or datetime.now(timezone.utc)
+    return jwt.encode(
+        {'sub': user_id, 'purpose': _RESET_PURPOSE,
+         'pwd': _password_fingerprint(password_hash),
+         'iat': int(issued.timestamp()), 'exp': int((issued + RESET_TTL).timestamp())},
+        secret_key(),
+        algorithm=_ALGORITHM,
+    )
+
+
+def read_reset_token(token: str, password_hash_of) -> str:
+    """
+    The user id a reset token is for, or AuthError.
+
+    `password_hash_of(user_id)` returns that user's current hash, or None if
+    there is no such user; the token is good only while the hash is the one
+    it was issued against.
+    """
+    try:
+        payload = jwt.decode(token, secret_key(), algorithms=[_ALGORITHM])
+    except jwt.PyJWTError as exc:
+        raise AuthError(str(exc)) from exc
+    if payload.get('purpose') != _RESET_PURPOSE:
+        raise AuthError('not a reset token')
+    user_id = payload.get('sub')
+    if not isinstance(user_id, str) or not user_id:
+        raise AuthError('token has no subject')
+    current = password_hash_of(user_id)
+    if not current or not secrets.compare_digest(
+            str(payload.get('pwd') or ''), _password_fingerprint(current)):
+        raise AuthError('used, superseded, or for no account')
+    return user_id
 
 
 def normalise_email(email: str) -> str:

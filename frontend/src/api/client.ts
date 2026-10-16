@@ -126,7 +126,13 @@ function isOurApi(input: RequestInfo | URL): boolean {
 // is the answer to a question -- "is this password right?" -- not an expired
 // session, and treating it as one would sign the user out as they try to sign
 // in.
-const OPEN_PATHS = ['/api/auth/login', '/api/auth/register']
+const OPEN_PATHS = [
+  '/api/auth/login',
+  '/api/auth/register',
+  '/api/auth/options',
+  '/api/auth/forgot-password',
+  '/api/auth/reset-password',
+]
 
 function isOpenPath(input: RequestInfo | URL): boolean {
   try {
@@ -194,7 +200,31 @@ export async function register(email: string, password: string, displayName?: st
   })
 }
 
-async function submitCredentials(path: string, body: Record<string, unknown>) {
+/** POST /api/auth/reset-password: a new password from a reset link, which also signs in. */
+export async function resetPassword(token: string, newPassword: string) {
+  return submitCredentials('/api/auth/reset-password', { token, new_password: newPassword })
+}
+
+/**
+ * Whether this installation can email a reset link. False on any failure: the
+ * sign-in page then offers the other way, asking whoever runs the server.
+ */
+export async function canEmailResetLinks(): Promise<boolean> {
+  try {
+    const response = await fetch('/api/auth/options')
+    if (!response.ok) return false
+    return Boolean((await response.json()).data?.password_reset_email)
+  } catch {
+    return false
+  }
+}
+
+/** POST /api/auth/forgot-password. Succeeds whether or not the address has an account. */
+export async function requestPasswordReset(email: string): Promise<void> {
+  await postOpen('/api/auth/forgot-password', { email })
+}
+
+async function postOpen(path: string, body: Record<string, unknown>) {
   const response = await fetch(path, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -215,7 +245,11 @@ async function submitCredentials(path: string, body: Record<string, unknown>) {
           : 'That did not work. Please try again.'
     throw new Error(message)
   }
+  return payload
+}
 
+async function submitCredentials(path: string, body: Record<string, unknown>) {
+  const payload = await postOpen(path, body)
   const data = payload.data as {
     token: string
     user: AuthUser

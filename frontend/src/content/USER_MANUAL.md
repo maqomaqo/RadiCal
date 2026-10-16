@@ -33,6 +33,12 @@
    your deployment's address.
 2. Click **New Analysis** (top navigation bar, or from the Dashboard).
 
+**Forgotten password.** Click **Forgot your password?** on the sign-in page. If your installation
+can send email, enter your address and RadiCal emails you a link to choose a new password; the link
+works once, within an hour. Otherwise, ask whoever runs RadiCal to set a new one for you. To change
+a password you know, open the account menu (your name, top right) and choose **Account and access
+tokens**.
+
 ## Creating an Analysis
 
 New Analysis is a single form: settings on the left, measurements on the right, the measurement
