@@ -93,6 +93,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "radical-core"
+version = "0.1.0"
+dependencies = [
+ "radical-corpus",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "radical-corpus"
 version = "0.1.0"
 dependencies = [

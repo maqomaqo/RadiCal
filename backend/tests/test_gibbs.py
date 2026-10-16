@@ -1374,6 +1374,17 @@ class TestParallelChains:
     chain -- which are the parts a process boundary can silently break.
     """
 
+    @pytest.fixture(autouse=True)
+    def _four_workers(self, monkeypatch):
+        """
+        Room for four chains whatever the machine. solve_chains caps the
+        chain count at the cores available, so on a two-core CI runner these
+        tests would run two chains and report on two, while asking for three
+        or four. More worker processes than cores is slower, not different.
+        """
+        cap = gibbs.worker_cap()
+        monkeypatch.setattr(gibbs, 'worker_cap', lambda: max(4, cap))
+
     def _model(self):
         phase = _element('phase', 'Only')
         tree = _element('sequence', 'Site', [

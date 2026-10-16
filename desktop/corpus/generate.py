@@ -16,7 +16,9 @@ Two kinds of case, kept apart because they are compared differently:
            Phase 1 targets: f14c, cell edges, curve interpolation (linear and
            cubic), likelihoods, calibrated posteriors, HPD ranges, point
            estimates, curve mixing, expected resolution, same-event tests,
-           reservoir combination, date formatting.
+           reservoir combination, date formatting, NumPy's seeded generator,
+           the KDE summary, the curve browser's windows and comparisons, and
+           the measured half of the curve registry.
 
   api/     a whole request through the HTTP API, as the frontend sends it, and
            the JSON that came back. Every .oxcal fixture in backend/tests is
@@ -413,7 +415,9 @@ def units_date_format():
     ranges = [{'min': 3100.0, 'max': 3270.0, 'probability_percent': 81.9},
               {'min': 1900.0, 'max': 2000.0, 'probability_percent': 13.5}]
     cases = []
-    for fmt in ('cal_bp', 'bc_ad', 'bce_ce', None, 'nonsense'):
+    # The three valid ids, then spellings that are not ids and must fall back
+    # to cal BP.
+    for fmt in ('calBP', 'bcad', 'bce_ce', 'cal_bp', 'bc_ad', None, 'nonsense'):
         def run(fmt=fmt):
             norm = date_format.normalise(fmt)
             return {
@@ -425,6 +429,198 @@ def units_date_format():
         cases.append(capture(f'date_format/{fmt}', {'format': fmt, 'ages': ages, 'ranges': ranges}, run))
     return cases
 
+
+# ---------------------------------------------------------------------------
+# units/ -- the rest of Phase 1: the random generator, KDE, curve view and the
+# measurable half of the curve registry
+# ---------------------------------------------------------------------------
+
+def _rng_state(rng) -> Dict[str, str]:
+    """PCG64's 128-bit state and increment, as decimal strings (JSON numbers
+    stop being exact at 2^53)."""
+    state = rng.bit_generator.state['state']
+    return {'state': str(state['state']), 'inc': str(state['inc'])}
+
+
+def units_rng():
+    """
+    numpy.random.default_rng: SeedSequence seeding PCG64, and the draws the
+    services take from it. Seeded draws are part of what a run reproduces, so
+    the port reproduces the generator, not merely its distribution.
+    """
+    cases = []
+    for seed in [0, 1, 42, 2**31 - 1, 2**32 + 5, 2**64 + 7, [42, 3], [0, 0], [7, 2**33]]:
+        def run(seed=seed):
+            rng = np.random.default_rng(seed)
+            state = _rng_state(rng)
+            return {'state': state, 'random': rng.random(8)}
+        # As decimal strings: a JSON reader need not hold integers past 2^53.
+        written = [str(v) for v in seed] if isinstance(seed, list) else str(seed)
+        cases.append(capture(f'random/{seed}', {'seed': written}, run))
+
+    def uniforms():
+        rng = np.random.default_rng(42)
+        scalars = [float(rng.uniform(a, b)) for a, b in
+                   [(0.0, 1.0), (-0.5, 0.5), (100.0, 250.0), (3.0, 3.0)]]
+        return {'scalars': scalars, 'array': rng.uniform(-0.5, 0.5, 6), 'random_after': rng.random(2)}
+    cases.append(capture('uniform', {'seed': 42, 'scalars': [[0.0, 1.0], [-0.5, 0.5], [100.0, 250.0],
+                                                             [3.0, 3.0]],
+                                     'array': [-0.5, 0.5, 6]}, uniforms))
+
+    p = [0.1, 0.0, 0.25, 0.4, 0.25]
+    def choices():
+        rng = np.random.default_rng(9)
+        return {'choices': [int(rng.choice(len(p), p=p)) for _ in range(12)]}
+    cases.append(capture('choice', {'seed': 9, 'p': p, 'count': 12}, choices))
+    return cases
+
+
+# Fixed sets of event ages for the deterministic KDE functions: written out
+# rather than drawn, so the inputs do not depend on the generator under test.
+KDE_SETS = {
+    'five': [3010.0, 2987.5, 3044.25, 2950.0, 3001.0],
+    'bimodal': [2480.0, 2510.5, 2495.0, 2530.0, 2470.25, 2502.0,
+                3490.0, 3520.0, 3505.5, 3475.0, 3512.0, 3499.0],
+    'two': [1200.0, 1260.0],
+    'isolated': [500.0 + 3.0 * i for i in range(20)] + [9000.0],
+    'ties': [800.0, 800.0, 800.0, 810.0, 790.0, 800.0],
+}
+
+
+def units_kde():
+    from app.services import kde
+    from app.services.calibration import get_curve
+    from app.services.intervals import draws_from_distribution
+    cases = []
+    for name, values in KDE_SETS.items():
+        t = np.array(values)
+        h_s = kde.silverman_bandwidth(t)
+        cases.append(capture(f'silverman/{name}', {'t': values}, lambda h_s=h_s: {'h_s': h_s}))
+        gs = [0.03, 0.1, 0.25, 0.5, 0.9, 1.0]
+        cases.append(capture(f'log_likelihood/{name}', {'t': values, 'h_s': h_s, 'g': gs},
+                             lambda t=t, h_s=h_s: {'log_likelihood': [kde.log_likelihood(t, h_s, g) for g in gs]}))
+        def grid(t=t, h_s=h_s):
+            nodes, bounds, weight = kde._g_grid(t, h_s)
+            return {'nodes': nodes, 'bounds': bounds, 'weight': weight}
+        cases.append(capture(f'g_grid/{name}', {'t': values, 'h_s': h_s}, grid))
+        def draw(t=t, h_s=h_s):
+            rng = np.random.default_rng(5)
+            return {'g': [kde.draw_g(t, h_s, rng) for _ in range(4)]}
+        cases.append(capture(f'draw_g/{name}', {'t': values, 'h_s': h_s, 'seed': 5, 'count': 4}, draw))
+
+    t = np.array(KDE_SETS['bimodal'])
+    for label, h, bounds in [('plain', 40.0, None), ('narrow', 6.5, None),
+                             ('reflected', 40.0, [2460.0, 3530.0]), ('reflected-tight', 15.0, [2475.0, 3510.0])]:
+        ages = np.arange(2300.0, 3700.0, 5.0)
+        def density(h=h, bounds=bounds, ages=ages):
+            return {'density': kde.kde_density(t, h, ages, None if bounds is None else tuple(bounds))}
+        cases.append(capture(f'kde_density/{label}', {'t': KDE_SETS['bimodal'], 'h': h, 'bounds': bounds,
+                                                      'ages': [2300.0, 3700.0, 5.0]}, density))
+
+    draws = np.array([KDE_SETS['five'], [v + 20.0 for v in KDE_SETS['five']]]).T
+    for bandwidths in ([12.0, 30.5], [0.4, 0.9], [300.0, 2.0]):
+        cases.append(capture(f'output_grid/{bandwidths}', {'draws': draws, 'bandwidths': bandwidths},
+                             lambda b=bandwidths: {'ages': kde._output_grid(draws, np.array(b))}))
+
+    for values in ([1.0, 2.0, 3.0, 4.0], [5.5], [9.0, 1.0, 4.0, 7.5, 2.25, 3.0, 8.0]):
+        cases.append(capture(f'summary/{values}', {'values': values},
+                             lambda v=values: kde._summary(np.array(v))))
+
+    curve = get_curve('intcal20')
+    ages, masses = curve.calibrate(3000, 30)
+    cases.append(capture('draws_from_distribution', {'curve': 'intcal20', 'age_bp': 3000, 'error_1sigma': 30,
+                                                     'seed': 3, 'count': 20},
+                         lambda: {'draws': draws_from_distribution(ages, masses, np.random.default_rng(3), 20)}))
+
+    for label, dates in [('clustered', [(2950, 25), (3000, 30), (3020, 25), (2990, 40), (3060, 30)]),
+                         ('spread', [(2450, 30), (2600, 25), (3100, 35), (3150, 30)]),
+                         ('one', [(3000, 30)])]:
+        def run(dates=dates):
+            calibrated = [get_curve('intcal20').calibrate(a, e) for a, e in dates]
+            return kde.summarise(calibrated, draws=60, seed=42)
+        cases.append(capture(f'summarise/{label}', {'curve': 'intcal20', 'dates': dates, 'draws': 60, 'seed': 42}, run))
+
+    # Joint states written out, as a solver would hand them over.
+    states = np.random.default_rng(11).normal(3000.0, 40.0, (4, 90)).round(3)
+    older = (states.max(axis=0) + 15.0).round(3)
+    younger = (states.min(axis=0) - 12.0).round(3)
+    for label, bounds in [('plain', None), ('reflected', [older, younger])]:
+        cases.append(capture(f'summarise_draws/{label}',
+                             {'sampled': states, 'bounds': bounds, 'draws': 50, 'seed': 42},
+                             lambda b=bounds: kde.summarise_draws(states, None if b is None else tuple(b),
+                                                                  draws=50, seed=42)))
+    return cases
+
+
+def _small_curve(cal, c14, err):
+    from app.services.calibration import CalibrationCurve
+    return CalibrationCurve(cal, c14, err)
+
+
+def units_curve_view():
+    from app.services import curve_view
+    from app.services.calibration import get_curve
+    cases = []
+    windows = [('intcal20', None, None, 800), ('intcal20', 2300, 2800, 800), ('intcal20', 2300, 2800, 100),
+               ('intcal20', 2450.2, 2450.6, 800), ('intcal20', 2800, 2300, 50), ('intcal20', 60000, 70000, 800),
+               ('intcal20', 12000, 30000, 1), ('shcal20', 0, 600, 9999), ('marine20', 5000, 5400, 20),
+               ('marine20', 5003, 5007, 800)]
+    for curve_id, lo, hi, cap in windows:
+        def run(curve_id=curve_id, lo=lo, hi=hi, cap=cap):
+            w = curve_view.window(get_curve(curve_id), lo, hi, cap)
+            return {'window': w, 'csv': curve_view.to_csv(w, get_curve(curve_id).curve_name)}
+        cases.append(capture(f'window/{curve_id}/{lo}-{hi}/{cap}',
+                             {'curve': curve_id, 'cal_from': lo, 'cal_to': hi, 'max_points': cap}, run))
+    for a, b, lo, hi, cap in [('intcal20', 'shcal20', 2000, 3000, 200), ('intcal20', 'marine20', None, None, 800),
+                              ('shcal20', 'intcal20', 100.2, 100.4, 800), ('intcal20', 'marine20', 4000, 3000, 10)]:
+        cases.append(capture(f'compare/{a}-{b}/{lo}-{hi}/{cap}',
+                             {'curve_a': a, 'curve_b': b, 'cal_from': lo, 'cal_to': hi, 'max_points': cap},
+                             lambda a=a, b=b, lo=lo, hi=hi, cap=cap:
+                                 curve_view.compare(get_curve(a), get_curve(b), lo, hi, cap)))
+    left = ([0.0, 10.0, 20.0], [100.0, 110.0, 125.0], [5.0, 5.0, 6.0])
+    right = ([30.0, 40.0, 50.0], [140.0, 150.0, 170.0], [5.0, 6.0, 7.0])
+    gappy = ([0.0, 100.0], [50.0, 160.0], [4.0, 4.5])
+    for label, a, b in [('no-overlap', left, right), ('sparse-grid', gappy, gappy)]:
+        cases.append(capture(f'compare/{label}', {'a': a, 'b': b, 'cal_from': 40.2, 'cal_to': 40.7, 'max_points': 800},
+                             lambda a=a, b=b: curve_view.compare(_small_curve(*a), _small_curve(*b), 40.2, 40.7, 800)))
+    return cases
+
+
+def units_curve_registry():
+    from app.services import curve_registry as reg
+    from app.services.calibration import get_curve
+    from app.services.curve_mix import mix
+    names = ['IntCal20.14c', 'intcal-20', 'IntCal 20', ' =SHCal20 ', 'Marine20.CSV', 'my curve.txt',
+             '', '   ', 'IntCal13', 'mix.14c.bak', 'Marine', 'SH-Cal', 'intcal20.14C', '=']
+    cases = [
+        capture('normalise', {'names': names}, lambda: {'normalised': [reg._normalise(n) for n in names]}),
+        capture('resolve_alias/builtin', {'names': names},
+                lambda: {'ids': [reg._builtin_index().get(reg._normalise(n)) if reg._normalise(n) else None
+                                 for n in names]}),
+    ]
+    grids = {
+        'empty': [], 'one': [5.0], 'two': [0.0, 1.0], 'uniform': [0.0, 5.0, 10.0, 15.0],
+        'halves': [0.0, 0.5, 1.0, 1.5, 3.5, 5.5],
+        'two-runs-thousands': [0.0, 5000.0, 10000.0, 10020.0, 10040.0, 10060.0],
+        'nearly-equal': [0.0, 1.0, 2.0000000001, 3.0, 4.5],
+        'irregular': [0.0, 1.0, 3.0, 6.0, 10.0, 15.0, 21.0, 28.0],
+    }
+    for name, grid in grids.items():
+        cases.append(capture(f'step_summary/{name}', {'cal_ages': grid},
+                             lambda g=grid: {'summary': reg._step_summary(np.array(g, dtype=float))}))
+    for curve_id in CURVE_FILES:
+        cases.append(capture(f'spec/{curve_id}', {'curve': curve_id},
+                             lambda c=curve_id: reg.get_spec(c).as_dict()))
+    mixed = mix(get_curve('intcal20'), get_curve('marine20'), 30.0, 10.0)
+    cases.append(capture('content_hash/mixed', {'curve_a': 'intcal20', 'curve_b': 'marine20',
+                                                'percent_a': 30.0, 'percent_a_error': 10.0},
+                         lambda: {'sha256': reg.content_hash(mixed)}))
+    odd = ([0.1234567, 1e-7, 123456789.0, 2.5, -0.0, 1e21],
+           [0.5, 99999.95, 1234567.0, 0.000123456, 100000.0, 7.0],
+           [1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
+    cases.append(capture('content_hash/odd-numbers', {'cal_ages': odd[0], 'c14_ages': odd[1], 'c14_errors': odd[2]},
+                         lambda: {'sha256': reg.content_hash(_small_curve(*odd))}))
+    return cases
 
 # ---------------------------------------------------------------------------
 # api/ -- Phases 2, 3 and 5
@@ -601,6 +797,8 @@ def main() -> None:
         ('units/calibrate', units_calibrate), ('units/curve_mix', units_curve_mix),
         ('units/resolution', units_resolution), ('units/same_event', units_same_event),
         ('units/reservoir', units_reservoir), ('units/date_format', units_date_format),
+        ('units/rng', units_rng), ('units/kde', units_kde),
+        ('units/curve_view', units_curve_view), ('units/curve_registry', units_curve_registry),
     ]:
         write(family, build())
 

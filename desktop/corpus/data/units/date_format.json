@@ -3,6 +3,81 @@
  "family": "units/date_format",
  "cases": [
   {
+   "name": "date_format/calBP",
+   "inputs": {
+    "format": "calBP",
+    "ages": [-60.0,-0.4,0.0,0.5,1949.0,1950.0,1950.6,3000.0,12345.0],
+    "ranges": [
+     {
+      "min": 3100.0,
+      "max": 3270.0,
+      "probability_percent": 81.9
+     },
+     {
+      "min": 1900.0,
+      "max": 2000.0,
+      "probability_percent": 13.5
+     }
+    ]
+   },
+   "outputs": {
+    "normalised": "calBP",
+    "ages": ["-60 cal BP","0 cal BP","0 cal BP","0 cal BP","1949 cal BP","1950 cal BP","1951 cal BP","3000 cal BP","12345 cal BP"],
+    "range": "3270-3100 cal BP",
+    "ranges": "3270-3100 cal BP (81.9%); 2000-1900 cal BP (13.5%)"
+   }
+  },
+  {
+   "name": "date_format/bcad",
+   "inputs": {
+    "format": "bcad",
+    "ages": [-60.0,-0.4,0.0,0.5,1949.0,1950.0,1950.6,3000.0,12345.0],
+    "ranges": [
+     {
+      "min": 3100.0,
+      "max": 3270.0,
+      "probability_percent": 81.9
+     },
+     {
+      "min": 1900.0,
+      "max": 2000.0,
+      "probability_percent": 13.5
+     }
+    ]
+   },
+   "outputs": {
+    "normalised": "bcad",
+    "ages": ["AD 2010","AD 1950","AD 1950","AD 1950","AD 1","1 BC","2 BC","1051 BC","10396 BC"],
+    "range": "1321 BC - 1151 BC",
+    "ranges": "1321 BC - 1151 BC (81.9%); 51 BC - AD 50 (13.5%)"
+   }
+  },
+  {
+   "name": "date_format/bce_ce",
+   "inputs": {
+    "format": "bce_ce",
+    "ages": [-60.0,-0.4,0.0,0.5,1949.0,1950.0,1950.6,3000.0,12345.0],
+    "ranges": [
+     {
+      "min": 3100.0,
+      "max": 3270.0,
+      "probability_percent": 81.9
+     },
+     {
+      "min": 1900.0,
+      "max": 2000.0,
+      "probability_percent": 13.5
+     }
+    ]
+   },
+   "outputs": {
+    "normalised": "bce_ce",
+    "ages": ["2010 CE","1950 CE","1950 CE","1950 CE","1 CE","1 BCE","2 BCE","1051 BCE","10396 BCE"],
+    "range": "1321 BCE - 1151 BCE",
+    "ranges": "1321 BCE - 1151 BCE (81.9%); 51 BCE - 50 CE (13.5%)"
+   }
+  },
+  {
    "name": "date_format/cal_bp",
    "inputs": {
     "format": "cal_bp",
@@ -50,31 +125,6 @@
     "ages": ["-60 cal BP","0 cal BP","0 cal BP","0 cal BP","1949 cal BP","1950 cal BP","1951 cal BP","3000 cal BP","12345 cal BP"],
     "range": "3270-3100 cal BP",
     "ranges": "3270-3100 cal BP (81.9%); 2000-1900 cal BP (13.5%)"
-   }
-  },
-  {
-   "name": "date_format/bce_ce",
-   "inputs": {
-    "format": "bce_ce",
-    "ages": [-60.0,-0.4,0.0,0.5,1949.0,1950.0,1950.6,3000.0,12345.0],
-    "ranges": [
-     {
-      "min": 3100.0,
-      "max": 3270.0,
-      "probability_percent": 81.9
-     },
-     {
-      "min": 1900.0,
-      "max": 2000.0,
-      "probability_percent": 13.5
-     }
-    ]
-   },
-   "outputs": {
-    "normalised": "bce_ce",
-    "ages": ["2010 CE","1950 CE","1950 CE","1950 CE","1 CE","1 BCE","2 BCE","1051 BCE","10396 BCE"],
-    "range": "1321 BCE - 1151 BCE",
-    "ranges": "1321 BCE - 1151 BCE (81.9%); 51 BCE - 50 CE (13.5%)"
    }
   },
   {

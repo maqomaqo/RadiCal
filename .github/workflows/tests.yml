@@ -23,7 +23,9 @@ concurrency:
 jobs:
   backend-fast:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # About 34 minutes on a two-core runner, where the sampler's chains share
+    # two cores (6 minutes on a 12-core Mac); the limit leaves room for that.
+    timeout-minutes: 60
     defaults:
       run:
         working-directory: backend

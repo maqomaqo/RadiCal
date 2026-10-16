@@ -958,6 +958,15 @@ MAX_ORIGIN_CANDIDATES = 2500
 # claim a coverage property nothing here has established.
 ORIGIN_SUPPORT_CUTOFF = 0.125
 
+# Candidates whose scores differ by less than this, relative to the best, are
+# one peak. A plane wave fits equally well from anywhere along its axis behind
+# the sites, so a row of cells ties exactly in exact arithmetic, and which of
+# them comes out a few ulps ahead is the platform's log, not the data: the
+# reported peak and whether it is on the rim then changed between macOS and
+# Linux. Rounding moves a score by around 1e-15 of itself; this is far above
+# that and far below any difference the data could make.
+PEAK_TIE_TOLERANCE = 1e-9
+
 
 def _ols_per_draw(distances: np.ndarray,
                   ages: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -1131,7 +1140,14 @@ def profile_origin(sites: Sequence[SiteSpec], draws: Dict[str, np.ndarray],
     } for lat, lon, score in scores]
     inside = [point for point in region
               if point['support'] >= ORIGIN_SUPPORT_CUTOFF]
-    peak = max(region, key=lambda point: point['support'])
+    # Every candidate tied with the best (see PEAK_TIE_TOLERANCE). The first in
+    # grid order is reported, as max() would on an exact tie, and the peak is
+    # on the rim if any of them is: the surface is then flat out to where the
+    # search stopped.
+    tie = PEAK_TIE_TOLERANCE * max(1.0, abs(best))
+    tied = [point for point, (_lat, _lon, score) in zip(region, scores)
+            if best - score <= tie]
+    peak = tied[0]
 
     return block(
         step_deg=step,
@@ -1148,7 +1164,7 @@ def profile_origin(sites: Sequence[SiteSpec], draws: Dict[str, np.ndarray],
         # rising where the search stopped: the origin may lie further out,
         # or -- the usual case -- the dates fit a plane wave from anywhere
         # far enough back and do not locate one.
-        peak_at_reach=(peak['lat'], peak['lon']) in rim,
+        peak_at_reach=any((point['lat'], point['lon']) in rim for point in tied),
         region=inside,
         # How much of the searched grid survives the cutoff. Near 1 the data
         # do not locate an origin at all, which is a finding and is exactly
