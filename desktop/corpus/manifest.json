@@ -1,0 +1,40 @@
+{
+ "curves": {
+  "intcal20": {
+   "file": "calibration_data/intcal20.14c",
+   "sha256": "974a66649f2ac8a53e6c99e256b019ac6982f999b12dcf7193162d4c1c09168e"
+  },
+  "marine20": {
+   "file": "calibration_data/marine20.14c",
+   "sha256": "3ce3741050016b6febeced357c334df39cf75356c28d4ae8e1c935be5ee3f168"
+  },
+  "shcal20": {
+   "file": "calibration_data/shcal20.14c",
+   "sha256": "e214d987bc4dbddfbc91c0aca4573a71db22a17c93d8bc55fa609bb58ae39b0d"
+  }
+ },
+ "files": {
+  "data/api/calibrate.json": "d8c3ffec90c632e4083f33ef9cc5f0fc027e75b9f2733387c5d515e12156a428",
+  "data/api/models.json": "71342f62c7e74c1844c5be74b46b72c1c677ca2cfb04c46441b4a9d1fafee7fa",
+  "data/units/calibrate.json": "979813d23f9db0e24a9a0d6ea18d93dceddb247b4d3ec55a8e39dc9feecd9f39",
+  "data/units/cell_edges.json": "530b19fc70de602bbd3935ea5c12eeb93a31d08b957c640c8f3fda14bd9dd6da",
+  "data/units/curve_mix.json": "934a165a5d8d6541e91f90cb88ed4088a188c4cf846ab6e4160598bcc24f0d84",
+  "data/units/date_format.json": "0947d69c9b8c1a96fe3e5fe93b6a4352db2f258626fdc89a65326c8aa0016187",
+  "data/units/f14c.json": "ad4bcdd6116239d48519765ae4edff56309fe4b06e7ff61ede16649a0e4537f6",
+  "data/units/interpolation.json": "7464635e1e5458bc1780d197ca435939ec453de0979f5a3742112eb6ad041951",
+  "data/units/likelihood.json": "b1e6c973adcee8d31718918b33469073c606008fb3c1cc251ee048a29c67b172",
+  "data/units/linspace.json": "7020d3d5aa6baef430a0ba570d1118667a1e1d776eff95c39781abf818e70445",
+  "data/units/reservoir.json": "ed2baaf6e1f807eea3d52a17114d0de8e981d04919aa8d80f63a088e65f94d5b",
+  "data/units/resolution.json": "75a57ae562ea9a28ba19829a7b9ec5d5aa4359090029d9ec70628972f7e6c6ee",
+  "data/units/same_event.json": "c83b0a249bbb909bb6a2920be1c4de168307be6677e6f634364f5f5d6e397c6f"
+ },
+ "generated_from": {
+  "commit": "ce2b9d83474b81b594015e974026668edfba4d0c",
+  "dirty": true,
+  "numpy": "2.5.3",
+  "python": "3.13.9",
+  "scipy": "1.18.1"
+ },
+ "schema": 2,
+ "seed": 42
+}

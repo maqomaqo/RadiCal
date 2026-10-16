@@ -346,6 +346,7 @@ class TestEditRoundTrip:
         assert replaced.status_code == 200, replaced.text
         assert stored() == extras
 
+    @pytest.mark.slow
     def test_a_date_in_no_context_still_gets_a_phase(self, client):
         """
         Saved with neither groups nor a tree, every date is "loose".

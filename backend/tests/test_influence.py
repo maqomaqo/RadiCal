@@ -126,6 +126,7 @@ def _saved_model(client, tag):
     return response.json()['data']['id']
 
 
+@pytest.mark.slow
 class TestTheReport:
     @pytest.fixture(scope='class')
     def tested(self, suite_user):

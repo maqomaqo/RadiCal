@@ -190,6 +190,7 @@ class TestTheSharedScale:
     lobes, which test_gibbs.py tests, and it triples the cost of these runs.
     """
 
+    @pytest.mark.slow
     def test_it_recovers_the_scale_oxcal_inferred(self):
         """
         The strongest check available anywhere in this suite. OxCal's export gives
@@ -238,6 +239,7 @@ class TestTheSharedScale:
         assert model.outlier_models == []
         assert model.likelihood_at == {}
 
+    @pytest.mark.slow
     def test_both_solvers_land_near_oxcal(self):
         """
         On a model with a declared-residual date. The sampler was once the
@@ -253,6 +255,7 @@ class TestTheSharedScale:
         assert exact_rms < 4.5, exact_rms
         assert sampled_rms < 4.5, sampled_rms
 
+    @pytest.mark.slow
     def test_the_declared_outliers_are_still_certain(self):
         """P(outlier) is now read from the run rather than from the reported
         density, since it depends on the sampled scale. At prior 1.00 it must
@@ -331,6 +334,7 @@ class TestPhaseWidth:
         assert oxcal_span == pytest.approx(29.2, abs=1.0), oxcal_span
         assert span == pytest.approx(oxcal_span, abs=3.0), span
 
+    @pytest.mark.slow
     def test_absorbing_the_declared_outliers_narrows_the_span_monotonically(self):
         """
         Why the overshoot is NOT the degeneracy this fixture's note used to blame.

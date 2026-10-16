@@ -1,0 +1,39 @@
+# The Rust workspace for RadiCal Desktop (docs/RUST_DESKTOP_PLAN.md), on the
+# three platforms it will ship for. The toolchain comes from
+# desktop/rust-toolchain.toml, which rustup on the runner installs.
+name: Desktop
+
+on:
+  push:
+    paths: ['desktop/**', 'calibration_data/**', '.github/workflows/desktop.yml']
+  pull_request:
+    paths: ['desktop/**', 'calibration_data/**', '.github/workflows/desktop.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cargo:
+    name: cargo (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v7
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop
+      - run: cargo fmt --all --check
+      - run: cargo clippy --all-targets --locked -- -D warnings
+      - run: cargo test --all-targets --locked

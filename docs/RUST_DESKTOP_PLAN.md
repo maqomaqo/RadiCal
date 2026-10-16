@@ -124,12 +124,12 @@ familiar with the Python code; the solver phases dominate.
 ### Phase 0 — Groundwork (≈1 week)
 
 - Create `desktop/` workspace, CI on macOS/Windows/Linux running `cargo test` and `cargo clippy`.
-- **Close `REMAINING_WORK.md` §10 first**: get `pytest` running in CI. The port leans on that
+- **Get `pytest` running in CI first** (it ran nowhere before this phase). The port leans on that
   suite, so it has to be green and fast enough to run per PR. Split the 16-minute suite into a
   fast tier (unit + fixtures) and a slow tier (long OxCal agreement runs, nightly).
 - Freeze a **golden corpus**: run every fixture in `backend/tests` (the stratigraphic
   section and outlier fixtures, the OxCal resolution fixtures, the wiggle matches) through the
-  current Python and save inputs + outputs as JSON in `desktop/fixtures/`. These outputs, plus the existing
+  current Python and save inputs + outputs as JSON in `desktop/corpus/`. These outputs, plus the existing
   OxCal 4.4 fixtures, are the targets.
 
 ### Phase 1 — Calibration core (≈2 weeks)
@@ -292,7 +292,7 @@ model templates, PDF reports — everything in the README's feature list.
 |---|---|
 | Subtle solver divergence from the OxCal-matched Python | §4.1 swap-in tests per function; no optimisation before parity |
 | `oxcal_script` parser drift | Port its test corpus first; fail-by-name behaviour is part of the contract |
-| Webview differences (Safari WebKit on macOS, WebView2 on Windows, WebKitGTK on Linux) — Plotly and React Flow are the exposure | Smoke-test the Results, Stratigraphy and Curve Browser pages on all three in CI with `tauri-driver`; this also starts `REMAINING_WORK.md` §11 |
+| Webview differences (Safari WebKit on macOS, WebView2 on Windows, WebKitGTK on Linux) — Plotly and React Flow are the exposure | Smoke-test the Results, Stratigraphy and Curve Browser pages on all three in CI with `tauri-driver`; this also starts `REMAINING_WORK.md` §10 |
 | PDF looks different | Accept "different but equivalent"; review side by side before release |
 | Two codebases during the port | The Docker app stays the release until Phase 7; `radical-py` lets it benefit from each ported module along the way |
 | Signing certificates take weeks | Start in Phase 0 |

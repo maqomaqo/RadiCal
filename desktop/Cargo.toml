@@ -1,0 +1,36 @@
+# RadiCal Desktop. See docs/RUST_DESKTOP_PLAN.md for what goes where; crates
+# are added here as the phase that needs them starts, not ahead of it.
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/maqomaqo/RadiCal"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }
+sha2 = "0.10"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+# The ported numerics compare floats on purpose and cast between index and
+# float types constantly; these two would be noise on every line of it.
+float_cmp = "allow"
+cast_precision_loss = "allow"
+
+[profile.release]
+# The solvers are the product; give the optimiser everything.
+lto = "fat"
+codegen-units = 1
+
+[profile.dev.package."*"]
+# Dependencies optimised even in debug builds, so `cargo test` on numeric code
+# is not dominated by unoptimised serde_json parsing of the corpus.
+opt-level = 3

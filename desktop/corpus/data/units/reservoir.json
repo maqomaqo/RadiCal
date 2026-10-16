@@ -1,0 +1,93 @@
+{
+ "schema": 2,
+ "family": "units/reservoir",
+ "cases": [
+  {
+   "name": "haversine_km",
+   "inputs": {
+    "pairs": [
+     [0,0,0,0],
+     [-45.87,170.5,-36.85,174.76],
+     [51.5,-0.12,40.71,-74.0],
+     [89.9,10,-89.9,-170],
+     [0,179.9,0,-179.9]
+    ]
+   },
+   "outputs": {
+    "km": [0.0,1063.711215441753,5570.80196053134,20015.114442035923,22.23901604670676]
+   }
+  },
+  {
+   "name": "combine/weighted",
+   "inputs": {
+    "points": [
+     [1,10.0,20.0],
+     [2,-30.0,40.0],
+     [3,55.0,25.0]
+    ]
+   },
+   "outputs": {
+    "delta_r": 19.94708994708995,
+    "delta_r_error": 34.60657232966737,
+    "n": 3,
+    "map_nos": [1,2,3],
+    "internal": 14.547859349066158,
+    "scatter": 34.60657232966737,
+    "excluded_no_error": []
+   }
+  },
+  {
+   "name": "combine/single",
+   "inputs": {
+    "points": [
+     [1,120.0,50.0]
+    ]
+   },
+   "outputs": {
+    "delta_r": 120.0,
+    "delta_r_error": 50.0,
+    "n": 1,
+    "map_nos": [1],
+    "internal": 50.0,
+    "scatter": 0.0,
+    "excluded_no_error": []
+   }
+  },
+  {
+   "name": "combine/missing-error",
+   "inputs": {
+    "points": [
+     [1,10.0,20.0],
+     [2,40.0,null]
+    ]
+   },
+   "outputs": {
+    "delta_r": 10.0,
+    "delta_r_error": 20.0,
+    "n": 1,
+    "map_nos": [1],
+    "internal": 20.0,
+    "scatter": 0.0,
+    "excluded_no_error": [2]
+   }
+  },
+  {
+   "name": "combine/scatter-wins",
+   "inputs": {
+    "points": [
+     [1,-200.0,10.0],
+     [2,200.0,10.0]
+    ]
+   },
+   "outputs": {
+    "delta_r": 0.0,
+    "delta_r_error": 282.842712474619,
+    "n": 2,
+    "map_nos": [1,2],
+    "internal": 7.0710678118654755,
+    "scatter": 282.842712474619,
+    "excluded_no_error": []
+   }
+  }
+ ]
+}
