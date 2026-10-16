@@ -8,6 +8,8 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+# The curve content hash (curve_registry), as hashlib.sha256 computes it.
+sha2.workspace = true
 
 [dev-dependencies]
 radical-corpus = { path = "../radical-corpus" }

@@ -19,11 +19,16 @@
 
 pub mod calibration;
 pub mod curve_mix;
+pub mod curve_registry;
+pub mod curve_view;
 pub mod curves;
 pub mod date_format;
+pub mod kde;
 pub mod numeric;
+pub mod pyfmt;
 pub mod reservoir;
 pub mod resolution;
+pub mod rng;
 pub mod special;
 pub mod spline;
 pub mod statistics;
@@ -58,6 +63,8 @@ pub enum Error {
     ZeroStride,
     EmptyWindow,
     NothingMapsIntoWindow,
+    EmptyCalibration,
+    CurvesDoNotOverlap,
 }
 
 impl fmt::Display for Error {
@@ -94,6 +101,11 @@ impl fmt::Display for Error {
             Self::NothingMapsIntoWindow => {
                 "No radiocarbon age maps into this window; it may lie outside the \
                  range the curve covers."
+            }
+            Self::EmptyCalibration => "a calibration came out empty; nothing to draw from",
+            Self::CurvesDoNotOverlap => {
+                "These two curves do not overlap in calendar time, so there is \
+                 nothing to compare."
             }
         };
         f.write_str(message)

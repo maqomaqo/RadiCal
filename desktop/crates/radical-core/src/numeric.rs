@@ -351,6 +351,103 @@ fn heapsort_indices(v: &[f64], t: &mut [usize]) {
     }
 }
 
+/// `numpy.mean` of a 1-D array: the pairwise [`sum`] divided by the count.
+pub fn mean(a: &[f64]) -> f64 {
+    sum(a) / a.len() as f64
+}
+
+/// `numpy.std(a, ddof=ddof)`: the mean as [`mean`], the squared deviations
+/// summed pairwise, divided by `n - ddof`, square-rooted.
+pub fn std(a: &[f64], ddof: usize) -> f64 {
+    let centre = mean(a);
+    let squares: Vec<f64> = a
+        .iter()
+        .map(|&x| {
+            let d = x - centre;
+            d * d
+        })
+        .collect();
+    (sum(&squares) / (a.len() - ddof) as f64).sqrt()
+}
+
+/// `numpy.median`: the middle value, or the mean of the two middle values as
+/// `(a + b) / 2`.
+pub fn median(a: &[f64]) -> f64 {
+    let mut sorted = a.to_vec();
+    sorted.sort_by(f64::total_cmp);
+    let n = sorted.len();
+    if n % 2 == 1 {
+        sorted[n / 2]
+    } else {
+        (sorted[n / 2 - 1] + sorted[n / 2]) / 2.0
+    }
+}
+
+/// `numpy.percentile(a, q)` with the default (linear) method: the virtual
+/// index `(n - 1) * q / 100`, and NumPy's `_lerp` between its neighbours --
+/// `a + d * t` below the midpoint, `b - d * (1 - t)` from it on, so that the
+/// result is exact at both ends.
+pub fn percentile(a: &[f64], q: f64) -> f64 {
+    let mut sorted = a.to_vec();
+    sorted.sort_by(f64::total_cmp);
+    let n = sorted.len();
+    let virtual_index = (n - 1) as f64 * (q / 100.0);
+    if virtual_index >= (n - 1) as f64 {
+        return sorted[n - 1];
+    }
+    if virtual_index < 0.0 {
+        return sorted[0];
+    }
+    let previous = virtual_index.floor();
+    let gamma = virtual_index - previous;
+    let (lo, hi) = (sorted[previous as usize], sorted[previous as usize + 1]);
+    let difference = hi - lo;
+    if gamma >= 0.5 {
+        hi - difference * (1.0 - gamma)
+    } else {
+        lo + difference * gamma
+    }
+}
+
+/// `numpy.interp(x, xp, fp, left=left, right=right)`: [`interp_one`] inside
+/// `xp`, and the given values beyond either end.
+pub fn interp_bounded(x: &[f64], xp: &[f64], fp: &[f64], left: f64, right: f64) -> Vec<f64> {
+    let (first, last) = (xp[0], xp[xp.len() - 1]);
+    x.iter()
+        .map(|&v| {
+            if v < first {
+                left
+            } else if v > last {
+                right
+            } else {
+                interp_one(v, xp, fp)
+            }
+        })
+        .collect()
+}
+
+/// `numpy.convolve(a, v, mode='same')` for an odd-length `v` no longer than
+/// `a`: the full convolution's central `a.len()` values. Each is summed in
+/// index order; NumPy hands the same products to BLAS's `ddot`, whose order
+/// is the library's own, so the two agree to rounding rather than to the bit.
+pub fn convolve_same(a: &[f64], v: &[f64]) -> Vec<f64> {
+    debug_assert!(v.len() % 2 == 1 && v.len() <= a.len());
+    let half = v.len() / 2;
+    (0..a.len())
+        .map(|k| {
+            // out[k] = sum_i a[i] * v[k + half - i], over the i that index both.
+            let m = k + half;
+            let i_lo = m.saturating_sub(v.len() - 1);
+            let i_hi = m.min(a.len() - 1);
+            let mut total = 0.0;
+            for i in i_lo..=i_hi {
+                total += a[i] * v[m - i];
+            }
+            total
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

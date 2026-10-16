@@ -255,18 +255,21 @@ port is done.
 
 ### 4.3 Randomness
 
-`np.random.default_rng` is PCG64, but NumPy's normal/uniform/integer draws use its own
-algorithms, so **Rust runs will not be bit-identical to Python runs with the same seed**.
-Consequences and decisions:
+`np.random.default_rng` is PCG64 seeded through NumPy's `SeedSequence`. Phase 1 ports both
+(`radical_core::rng`), with `random`, `uniform` and `choice`, and the corpus holds them to
+NumPy's state and draws bit for bit. So wherever a service draws only those, **a Rust run
+reproduces a Python run with the same seed**: the KDE summary does, to the rounding of its
+kernel sums. Consequences and decisions:
 
-- Sampler parity is judged statistically (the existing tolerances), not bit-for-bit.
+- NumPy's `normal`, `exponential` and `integers` draws use their own algorithms (ziggurat tables,
+  Lemire's bounded integers). Port each when a solver that uses it is ported, against corpus
+  cases of its own, rather than substituting another algorithm.
+- Until then, sampler parity is judged statistically (the existing tolerances), not bit for bit.
 - The exact solvers are deterministic apart from the seeded posterior draws in `exact_chain`
-  (`seed`, `seed + 1`, `seed + 2`); those are compared by distribution.
-- Within the desktop app, a seed must reproduce a run exactly. Pin the RNG and distribution
-  crates and record the engine version on each `AnalysisRun`, so run history says which
-  generator produced it.
-- If bit-exact reproduction of old Python runs is ever required, port NumPy's PCG64 +
-  ziggurat — possible, but not planned.
+  (`seed`, `seed + 1`, `seed + 2`); compare those bit for bit where their draws are ported, and
+  by distribution where not.
+- Within the desktop app, a seed must reproduce a run exactly. Record the engine version on
+  each `AnalysisRun`, so run history says which implementation produced it.
 
 ---
 
