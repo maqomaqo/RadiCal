@@ -24,6 +24,7 @@ pub mod curve_view;
 pub mod curves;
 pub mod date_format;
 pub mod exact_chain;
+pub mod intervals;
 pub mod kde;
 pub mod measurement;
 pub mod model_tree;
@@ -44,6 +45,7 @@ pub use calibration::{
     SIGMA_3, cell_edges, f14c, hpd_ranges, hpd_ranges_from_distribution, point_estimate,
 };
 pub use curves::get_curve;
+pub use measurement::Measurement;
 
 /// A refusal. Each message is the one the Python code raises, word for word,
 /// since the API passes them on to the user.

@@ -82,6 +82,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use crate::Error;
 use crate::measurement::Measurement;
+use crate::numeric::{py_max, py_min};
 use crate::pyfmt;
 use crate::stratigraphy::{self, Group, Relationship};
 
@@ -1108,16 +1109,6 @@ pub fn inherited_bounds(root: &Element) -> HashMap<String, Limits> {
     let mut out = HashMap::new();
     walk(root, None, None, &mut out);
     out
-}
-
-/// Python's `max(a, b)`: the first unless the second is larger.
-pub(crate) fn py_max(a: f64, b: f64) -> f64 {
-    if b > a { b } else { a }
-}
-
-/// Python's `min(a, b)`: the first unless the second is smaller.
-pub(crate) fn py_min(a: f64, b: f64) -> f64 {
-    if b < a { b } else { a }
 }
 
 /// Turn a validated model tree into ordering constraints, bounded groups and

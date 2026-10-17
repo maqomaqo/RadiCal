@@ -13,6 +13,7 @@ mod curve_view;
 mod date_format;
 mod f14c;
 mod interpolation;
+mod intervals;
 mod kde;
 mod likelihood;
 mod linspace;
@@ -51,7 +52,7 @@ pub const REL: f64 = 1e-12;
 pub const REL_LIKELIHOOD: f64 = 5e-12;
 
 /// The families compared here; every units/ family must be one.
-const COVERED: [&str; 17] = [
+const COVERED: [&str; 18] = [
     "calibrate",
     "cell_edges",
     "curve_mix",
@@ -60,6 +61,7 @@ const COVERED: [&str; 17] = [
     "date_format",
     "f14c",
     "interpolation",
+    "intervals",
     "kde",
     "likelihood",
     "linspace",

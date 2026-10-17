@@ -15,7 +15,7 @@
 use std::collections::{BTreeSet, HashMap, VecDeque};
 
 use crate::measurement::Measurement;
-use crate::model_tree::{py_max, py_min};
+use crate::numeric::{py_max, py_min};
 
 /// (older, younger).
 pub type Edge = (String, String);

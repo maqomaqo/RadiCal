@@ -939,6 +939,112 @@ def units_stratigraphy():
     return cases
 
 
+# Joint draws the interval cases are evaluated on. Fewer than a solve's
+# 20,000, to keep the corpus small; the arithmetic is the same at any count.
+INTERVAL_DRAWS = 1000
+
+
+def _joint_draws(tree, dates, count=INTERVAL_DRAWS):
+    """
+    ({parameter id: draws}, grid step) for a model: the exact solver's own
+    joint draws where it can take the model, else draws made up for it --
+    ordered along each deposition sequence, so an age-depth model reads as one.
+    """
+    from app.api.analysis import _exact_layout
+    from app.services import exact_chain, exact_parallel
+    layout, _reason = _exact_layout(tree, dates)
+    if layout is not None:
+        solve = (exact_parallel.solve if isinstance(layout, exact_parallel.Stages)
+                 else exact_chain.solve)
+        solved = solve(dates, tree, layout, num_samples=10, interval_draws=count)
+        draws = {**solved['joint_boundaries'], **solved['joint_draws']}
+        return {k: [float(v) for v in values] for k, values in draws.items()}, solved['grid']['step']
+    from app.services import model_tree as mt
+    rng = np.random.default_rng(17)
+    draws = {}
+    for m in dates:
+        draws[m['id']] = list(np.round(rng.normal(3000.0 - 10.0 * len(draws), 30.0, count), 2))
+    for group in mt.plan_model(tree, dates).deposition_groups:
+        ids = group.parameter_ids
+        stacked = np.sort(np.round(rng.normal(3000.0, 120.0, (len(ids), count)), 2), axis=0)[::-1]
+        for pid, row in zip(ids, stacked):
+            draws[pid] = [float(v) for v in row]
+    return draws, 0.0
+
+
+def _block_dict(block):
+    return plain(block)
+
+
+def units_intervals():
+    from app.services import intervals as iv
+    from app.services import kde
+    cases = []
+    models = _hand_models()
+    for name, (tree, dates) in models.items():
+        draws, grid_step = _joint_draws(tree, dates)
+        steps = [None, 1.0] if name == 'chain' else [None]
+        for step in steps:
+            def run(tree=tree, dates=dates, draws=draws, step=step, grid_step=grid_step):
+                arrays = {k: np.asarray(v) for k, v in draws.items()}
+                differences, note = iv.plan_phase_differences(tree, dates)
+                return {
+                    'durations_plan': [{**spec, 'boundaries': list(spec['boundaries']),
+                                        'dates': list(spec['dates'])}
+                                       for spec in iv.plan_durations(tree, dates)],
+                    'differences_plan': differences, 'note': note,
+                    'activity_plan': iv.plan_phase_activity(tree, dates),
+                    'age_depth_plan': iv.plan_age_depth(tree, dates),
+                    'report': iv.report(tree, dates, arrays, independent=True, step=step),
+                    'phases': kde.report_phases(tree, dates, arrays, grid_step=grid_step),
+                }
+            cases.append(capture(f'report/{name}/step={step}',
+                                 {'tree': tree, 'dates': dates, 'draws': draws, 'step': step,
+                                  'grid_step': grid_step}, run))
+    # Without durations the age-depth section alone.
+    tree, dates = models['deposition']
+    draws, _step = _joint_draws(tree, dates)
+    cases.append(capture('report/deposition/no-durations',
+                         {'tree': tree, 'dates': dates, 'draws': draws, 'step': None},
+                         lambda: iv.report(tree, dates, {k: np.asarray(v) for k, v in draws.items()},
+                                           independent=False, durations=False)))
+
+    rng = np.random.default_rng(23)
+    arrays = {
+        'normal': np.round(rng.normal(40.0, 12.0, 500), 3),
+        'against-zero': np.abs(np.round(rng.normal(0.0, 20.0, 400), 1)),
+        'heavy-tail': np.round(np.concatenate([rng.normal(100.0, 5.0, 300), [900.0, -700.0]]), 2),
+        'wide': np.round(rng.normal(0.0, 3000.0, 800), 1),
+        'one': np.array([12.5]),
+        'two': np.array([3.0, 3.0]),
+        'constant': np.full(50, 7.0),
+        'with-nan': np.array([1.0, np.nan, 5.0, np.inf, 9.0, 2.0, 4.0]),
+        'all-nan': np.array([np.nan, np.nan]),
+        'grid-ties': np.repeat(np.arange(0.0, 60.0, 2.5), 7),
+    }
+    for label, values in arrays.items():
+        for base in (None, 1.0, 0.25, 20.0):
+            cases.append(capture(f'summarise/{label}/base={base}',
+                                 {'values': values, 'base': base},
+                                 lambda v=values, b=base: {'summary': iv.summarise(v, b),
+                                                           'step': iv._step_for(v[np.isfinite(v)], b)
+                                                           if np.isfinite(v).any() else None}))
+    overlaps = [0.0, 0.0455, 0.04550026389635842, 0.2, 0.3173, 0.31731050786291415, 0.5,
+                0.6826894921370859, 0.9, 0.9544997361036416, 0.99, 1.0]
+    cases.append(capture('severity', {'overlaps': overlaps},
+                         lambda: {'words': [iv.severity(o) for o in overlaps]}))
+    named = [{'id': f'd{i}', 'name': f'D-{i}'} for i in range(5)]
+    draws = {d['id']: np.round(rng.normal(3000.0 + 15.0 * i, 25.0, 300), 1) for i, d in enumerate(named)}
+    cases.append(capture('report_dates', {'dates': named, 'draws': draws},
+                         lambda: iv.report_dates(named, draws)))
+    many = [{'id': f'd{i}', 'name': f'D-{i}'} for i in range(26)]
+    cases.append(capture('plan_date_differences/many', {'dates': many},
+                         lambda: dict(zip(('specs', 'note'), iv.plan_date_differences(many)))))
+    band = np.round(rng.normal(2500.0, 40.0, 999), 2)
+    cases.append(capture('calendar_band', {'values': band}, lambda: iv.calendar_band(band)))
+    return cases
+
+
 # ---------------------------------------------------------------------------
 # api/ -- Phases 2, 3 and 5
 # ---------------------------------------------------------------------------
@@ -1117,6 +1223,7 @@ def main() -> None:
         ('units/rng', units_rng), ('units/kde', units_kde),
         ('units/curve_view', units_curve_view), ('units/curve_registry', units_curve_registry),
         ('units/model_tree', units_model_tree), ('units/stratigraphy', units_stratigraphy),
+        ('units/intervals', units_intervals),
     ]:
         write(family, build())
 

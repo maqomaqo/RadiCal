@@ -24,6 +24,7 @@
   "data/units/date_format.json": "68f068ce6c2f44f1164412cb93f9ce80a7563148adb4fe4e02ec416dbba78811",
   "data/units/f14c.json": "ad4bcdd6116239d48519765ae4edff56309fe4b06e7ff61ede16649a0e4537f6",
   "data/units/interpolation.json": "7464635e1e5458bc1780d197ca435939ec453de0979f5a3742112eb6ad041951",
+  "data/units/intervals.json": "ff193e1d378532433925f27798ee980d06c0d6da268b948e099fdc9fd9940387",
   "data/units/kde.json": "084e681a6872eaf74af2bab67d13380e07d22cd5a129edec7c4d8d58b46cf051",
   "data/units/likelihood.json": "b1e6c973adcee8d31718918b33469073c606008fb3c1cc251ee048a29c67b172",
   "data/units/linspace.json": "7020d3d5aa6baef430a0ba570d1118667a1e1d776eff95c39781abf818e70445",
@@ -35,7 +36,7 @@
   "data/units/stratigraphy.json": "822181207e1517c50ff2c935bd3d08db4c7093db3765adb075f7ea788d9ca41e"
  },
  "generated_from": {
-  "commit": "0da4590ddfd3329358c355f4bba1d2704583180c",
+  "commit": "67e4a013c01cb0698e1d9e9b186bdfcfcaf4cfe0",
   "dirty": false,
   "numpy": "2.5.3",
   "python": "3.13.9",

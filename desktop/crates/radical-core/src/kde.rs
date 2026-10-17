@@ -42,14 +42,13 @@
 //! at an eighth of its width, so the cost of a draw grows with the span of the
 //! dates, not with n squared.
 //!
-//! Not here yet: `report_phases`, one KDE per Phase inside a model. It needs
-//! the model tree's duration plan (`services/intervals.py`), which is ported
-//! with the solvers in Phase 2; [`summarise_draws`] is what it calls.
+//! [`report_phases`] does the same for each Phase inside a model, from a
+//! solver's joint draws.
 
 use crate::Error;
 use crate::numeric::{
     argmax, argsort_quicksort, convolve_same, cumsum, diff, interp, interp_bounded, linspace, mean,
-    median, percentile, std, sum,
+    median, percentile, py_max, py_min, std, sum,
 };
 use crate::rng::Generator;
 
@@ -342,16 +341,6 @@ pub fn output_grid(states: &[Vec<f64>], bandwidths: &[f64]) -> Vec<f64> {
     crate::numeric::arange(start, hi + step, step)
 }
 
-/// Python's `max(a, b)`: `a` unless `b` is strictly greater.
-fn py_max(a: f64, b: f64) -> f64 {
-    if b > a { b } else { a }
-}
-
-/// Python's `min(a, b)`: `a` unless `b` is strictly less.
-fn py_min(a: f64, b: f64) -> f64 {
-    if b < a { b } else { a }
-}
-
 /// Eq. 1 on `ages`: the KDE of the points t at bandwidth h, binned at no more
 /// than an eighth of h and read off by interpolation.
 ///
@@ -583,4 +572,95 @@ pub fn summarise_draws(
         silverman: spread(&silverman),
         factor: spread(&factor),
     })
+}
+
+/// One Phase's KDE_Plot, named for the phase.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PhaseSummary {
+    pub element_id: Option<String>,
+    pub name: String,
+    pub summary: Summary,
+}
+
+/// One KDE_Plot per Phase holding two or more dates, from a solver's joint
+/// draws -- OxCal's KDE_Plot used in place of Phase(). The phases are the
+/// ones `intervals` reports a dated-events duration for, so the two sections
+/// name the same groups, and each KDE is reflected at the Boundary pair that
+/// innermost brackets its phase, when there is one.
+///
+/// `draws` maps date and Boundary ids to their values in the same joint
+/// states. A phase whose dates did not all come back with draws -- none
+/// should -- is left out rather than summarised from part of it.
+///
+/// `grid_step` is the solver's calendar grid. Its draws are grid points, so
+/// three dates in a short phase often share one in some state, and a state
+/// with no spread has no Silverman bandwidth. A grid point stands for its
+/// whole cell, so each draw is spread uniformly across it -- the continuous
+/// posterior the grid discretises. Jittering a date and its Boundary
+/// independently can put the date part of a cell outside it, so each state's
+/// Boundaries are widened to take in its dates. Squeezing the dates in
+/// instead would stack a phase that fits in one cell onto one age.
+pub fn report_phases(
+    root: Option<&crate::model_tree::Element>,
+    measurements: &[crate::Measurement],
+    draws: &crate::intervals::Draws,
+    grid_step: f64,
+    seed: u64,
+) -> Vec<PhaseSummary> {
+    use crate::intervals::{DurationKind, plan_durations};
+    let mut rng = Generator::new(seed);
+    let mut continuous = |values: &[f64]| -> Vec<f64> {
+        if grid_step > 0.0 {
+            values
+                .iter()
+                .map(|v| v + rng.uniform(-0.5, 0.5) * grid_step)
+                .collect()
+        } else {
+            values.to_vec()
+        }
+    };
+    let mut records = Vec::new();
+    for spec in plan_durations(root, measurements) {
+        if spec.kind != DurationKind::Sample {
+            continue;
+        }
+        if !spec.dates.iter().all(|d| draws.contains_key(d)) {
+            continue;
+        }
+        let sampled: Vec<Vec<f64>> = spec.dates.iter().map(|d| continuous(&draws[d])).collect();
+        let bounds = match &spec.boundaries {
+            Some((o, y)) if draws.contains_key(o) && draws.contains_key(y) => {
+                let older = continuous(&draws[o]);
+                let younger = continuous(&draws[y]);
+                let states = older.len();
+                let mut upper = Vec::with_capacity(states);
+                let mut lower = Vec::with_capacity(states);
+                for k in 0..states {
+                    let (top, bottom) = sampled
+                        .iter()
+                        .fold((f64::NEG_INFINITY, f64::INFINITY), |(t, b), row| {
+                            (t.max(row[k]), b.min(row[k]))
+                        });
+                    upper.push(older[k].max(younger[k]).max(top));
+                    lower.push(older[k].min(younger[k]).min(bottom));
+                }
+                Some((upper, lower))
+            }
+            _ => None,
+        };
+        let summary = summarise_draws(
+            &sampled,
+            bounds.as_ref().map(|(u, l)| (u.as_slice(), l.as_slice())),
+            DEFAULT_DRAWS,
+            42,
+        );
+        if let Some(summary) = summary {
+            records.push(PhaseSummary {
+                element_id: spec.element_id.clone(),
+                name: spec.name.clone(),
+                summary,
+            });
+        }
+    }
+    records
 }
