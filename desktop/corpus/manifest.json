@@ -27,13 +27,15 @@
   "data/units/kde.json": "084e681a6872eaf74af2bab67d13380e07d22cd5a129edec7c4d8d58b46cf051",
   "data/units/likelihood.json": "b1e6c973adcee8d31718918b33469073c606008fb3c1cc251ee048a29c67b172",
   "data/units/linspace.json": "7020d3d5aa6baef430a0ba570d1118667a1e1d776eff95c39781abf818e70445",
+  "data/units/model_tree.json": "722edb250e57f7b4212ce85e53deb564afe3fc8eb0617cccf1eadf7d01da0762",
   "data/units/reservoir.json": "ed2baaf6e1f807eea3d52a17114d0de8e981d04919aa8d80f63a088e65f94d5b",
   "data/units/resolution.json": "75a57ae562ea9a28ba19829a7b9ec5d5aa4359090029d9ec70628972f7e6c6ee",
   "data/units/rng.json": "d94a87ccd801ba6b45bc13cdd56f503ceb37ca781ebb7e23af271724ec872bbd",
-  "data/units/same_event.json": "c83b0a249bbb909bb6a2920be1c4de168307be6677e6f634364f5f5d6e397c6f"
+  "data/units/same_event.json": "c83b0a249bbb909bb6a2920be1c4de168307be6677e6f634364f5f5d6e397c6f",
+  "data/units/stratigraphy.json": "822181207e1517c50ff2c935bd3d08db4c7093db3765adb075f7ea788d9ca41e"
  },
  "generated_from": {
-  "commit": "b2fc90339f0c08aa183d281d58213c7e7cf01aa1",
+  "commit": "0da4590ddfd3329358c355f4bba1d2704583180c",
   "dirty": false,
   "numpy": "2.5.3",
   "python": "3.13.9",

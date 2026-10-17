@@ -23,7 +23,10 @@ pub mod curve_registry;
 pub mod curve_view;
 pub mod curves;
 pub mod date_format;
+pub mod exact_chain;
 pub mod kde;
+pub mod measurement;
+pub mod model_tree;
 pub mod numeric;
 pub mod pyfmt;
 pub mod reservoir;
@@ -32,6 +35,7 @@ pub mod rng;
 pub mod special;
 pub mod spline;
 pub mod statistics;
+pub mod stratigraphy;
 
 use std::fmt;
 
@@ -65,6 +69,9 @@ pub enum Error {
     NothingMapsIntoWindow,
     EmptyCalibration,
     CurvesDoNotOverlap,
+    /// A model, or a date in one, refused with Python's `ValueError` message,
+    /// which names the element or sample at fault.
+    Model(String),
 }
 
 impl fmt::Display for Error {
@@ -103,6 +110,7 @@ impl fmt::Display for Error {
                  range the curve covers."
             }
             Self::EmptyCalibration => "a calibration came out empty; nothing to draw from",
+            Self::Model(message) => message,
             Self::CurvesDoNotOverlap => {
                 "These two curves do not overlap in calendar time, so there is \
                  nothing to compare."

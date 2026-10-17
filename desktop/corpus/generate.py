@@ -623,6 +623,323 @@ def units_curve_registry():
     return cases
 
 # ---------------------------------------------------------------------------
+# units/ -- Phase 2: the model tree and the exact solvers
+# ---------------------------------------------------------------------------
+
+def _b(eid, name=None, **kw):
+    return {'id': eid, 'element_type': 'boundary', 'name': name, 'children': [], **kw}
+
+
+def _p(eid, name=None, children=(), **kw):
+    return {'id': eid, 'element_type': 'phase', 'name': name, 'children': list(children), **kw}
+
+
+def _s(eid, name, children, **kw):
+    return {'id': eid, 'element_type': 'sequence', 'name': name, 'children': list(children), **kw}
+
+
+def _h(eid, name='Hiatus'):
+    return {'id': eid, 'element_type': 'hiatus', 'name': name, 'children': []}
+
+
+def _d(eid, element, age, err=25, **kw):
+    return {'id': eid, 'sample_name': eid.upper(), 'age_bp': float(age), 'error_1sigma': float(err),
+            'curve_id': 'intcal20', 'element_id': element, **kw}
+
+
+def _hand_models():
+    """
+    Small models written out by hand, each crossing one thing the planner, the
+    layouts or the solvers treat specially. Ages are IntCal20 ones a few
+    decades apart, so the same models serve the solver cases.
+    """
+    m = {}
+    m['chain'] = (_s('r', 'Site', [_b('b0', 'Start'), _p('p1', 'Lower'), _b('b1', 'Transition'),
+                                   _p('p2', 'Upper'), _b('b2', 'End')]),
+                  [_d('a1', 'p1', 3050), _d('a2', 'p1', 3010, 30), _d('a3', 'p1', 2990),
+                   _d('a4', 'p2', 2900), _d('a5', 'p2', 2880, 35)])
+    m['one-phase'] = (_s('r', 'Site', [_b('b0'), _p('p1', 'Only'), _b('b1')]),
+                      [_d('a1', 'p1', 2450, 30), _d('a2', 'p1', 2480), _d('a3', 'p1', 2400, 35),
+                       _d('a4', 'p1', 2520, 40)])
+    m['hiatus'] = (_s('r', 'Site', [_b('b0'), _p('p1', 'Lower'), _b('b1'), _h('h1'), _b('b2'),
+                                    _p('p2', 'Upper'), _b('b3')]),
+                   [_d('a1', 'p1', 3400), _d('a2', 'p1', 3350), _d('a3', 'p2', 3000),
+                    _d('a4', 'p2', 2950, 30)])
+    m['named-hiatus'] = (_s('r', 'Site', [_b('b0'), _p('p1', 'Lower'), _b('b1'), _h('h1', 'Abandonment'),
+                                          _b('b2'), _p('p2', 'Upper'), _b('b3')]),
+                         [_d('a1', 'p1', 3400), _d('a2', 'p2', 3000)])
+    m['nested'] = (_s('r', 'Site', [_b('b0', 'Start'), _p('p1', 'Early'), _b('b1'),
+                                    _s('s2', 'Inner', [_b('b2'), _p('p2', 'Mid A'), _b('b3'),
+                                                       _p('p3', 'Mid B'), _b('b4')]),
+                                    _b('b5', 'End')]),
+                   [_d('a1', 'p1', 3200), _d('a2', 'p1', 3150), _d('a3', 'p2', 3050),
+                    _d('a4', 'p2', 3020), _d('a5', 'p3', 2950), _d('a6', 'p3', 2900, 30)])
+    m['seq-of-seqs'] = (_s('r', 'Site', [_s('s1', 'First', [_b('b0'), _p('p1'), _b('b1')]),
+                                         _s('s2', 'Second', [_b('b2'), _p('p2'), _b('b3')])]),
+                        [_d('a1', 'p1', 3300), _d('a2', 'p1', 3260), _d('a3', 'p2', 3000),
+                         _d('a4', 'p2', 2980)])
+    m['areas'] = (_s('r', 'Site', [_b('b0', 'Start'), _p('p1', 'Early'), _b('b1', 'Transition'),
+                                   _p('pa', 'Areas', [
+                                       _s('sa', 'Area A', [_b('ba0'), _p('pa1', 'A lower'), _b('ba1'),
+                                                           _p('pa2', 'A upper'), _b('ba2')]),
+                                       _s('sb', 'Area B', [_b('bb0'), _p('pb1', 'B only'), _b('bb1')])]),
+                                   _b('b2', 'End')]),
+                  [_d('a1', 'p1', 3300), _d('a2', 'p1', 3250), _d('a3', 'pa1', 3100),
+                   _d('a4', 'pa1', 3080), _d('a5', 'pa2', 2980), _d('a6', 'pb1', 3050),
+                   _d('a7', 'pb1', 2990, 30)])
+    m['ordered-blocks'] = (_s('r', 'Site', [_b('b0'), _p('p1', 'Lower'), _p('p2', 'Upper'), _b('b1')]),
+                           [_d('a1', 'p1', 3060), _d('a2', 'p1', 3030), _d('a3', 'p2', 2990),
+                            _d('a4', 'p2', 2970, 30), _d('a5', 'p2', 2950)])
+    m['tails'] = (_s('r', 'Site', [_p('p0', 'Before'), _b('b0'), _p('p1', 'Middle'), _b('b1'),
+                                   _p('p2', 'After')]),
+                  [_d('a0', 'p0', 3300), _d('a1', 'p1', 3100), _d('a2', 'p1', 3060),
+                   _d('a3', 'p2', 2900), _d('a4', 'p2', 2870)])
+    m['undated-phase'] = (_s('r', 'Site', [_b('b0'), _p('p1'), _b('b1'), _p('p2', 'Empty'), _b('b2'),
+                                           _p('p3'), _b('b3')]),
+                          [_d('a1', 'p1', 3300), _d('a2', 'p1', 3280), _d('a3', 'p3', 3000),
+                           _d('a4', 'p3', 2970)])
+    m['limits'] = (_s('r', 'Site', [_b('b0'), _p('p1', tpq_age_bp=3500.0), _b('b1'),
+                                    _p('p2', taq_age_bp=2700.0), _b('b2')],
+                      tpq_age_bp=4000.0, taq_age_bp=2500.0),
+                   [_d('a1', 'p1', 3200, tpq_age_bp=3450.0), _d('a2', 'p1', 3150),
+                    _d('a3', 'p2', 2950, taq_age_bp=2800.0), _d('a4', 'p2', 2900)])
+    m['unbounded'] = (_p('r', 'Loose'), [_d('a1', 'r', 3000), _d('a2', 'r', 3040)])
+    m['outliers'] = (_s('r', 'Site', [_b('b0'), _p('p1'), _b('b1')]),
+                     [_d('a1', 'p1', 3000), _d('a2', 'p1', 3030), _d('a3', 'p1', 3400, outlier_prior=0.05),
+                      _d('a4', 'p1', 2990, outlier_prior=0.1, outlier_model='charcoal'),
+                      _d('a5', 'p1', 3010, inbuilt_years=40.0, inbuilt_shape='exponential'),
+                      _d('a6', 'p1', 2980, inbuilt_years=25.0)])
+    m['marine'] = (_s('r', 'Midden', [_b('b0'), _p('p1'), _b('b1')]),
+                   [_d('a1', 'p1', 3400, 30, curve_id='marine20', delta_r=-50.0, delta_r_error=30.0),
+                    _d('a2', 'p1', 3000, 25), _d('a3', 'p1', 3450, 35, curve_id='marine20',
+                                                 delta_r=-50.0, delta_r_error=30.0)])
+    m['wiggle'] = ({'id': 'r', 'element_type': 'phase', 'name': 'Timber', 'children': [
+                        {'id': 'w', 'element_type': 'wiggle_sequence', 'name': None, 'children': [],
+                         'params': {'gap_units': 'rings', 'reference_sample_id': 'a1'}}]},
+                   [_d('a1', 'w', 2480, 20, ring_offset=0.0), _d('a2', 'w', 2520, 20, ring_offset=30.0),
+                    _d('a3', 'w', 2455, 20, ring_offset=10.0, ring_offset_error=3.0),
+                    _d('a4', 'w', 2560, 25, ring_offset=55.0)])
+    m['deposition'] = (_s('r', 'Core', [_b('b0'), {'id': 'dep', 'element_type': 'deposition_sequence',
+                                                   'name': 'Core 1', 'params': {'k': 1.0, 'k_variable': False},
+                                                   'children': [
+                                                       {'id': 'lev', 'element_type': 'interpolated_depth',
+                                                        'name': 'Tephra', 'children': [],
+                                                        'params': {'depth_cm': 47.0}},
+                                                       {'id': 'lev2', 'element_type': 'interpolated_depth',
+                                                        'name': None, 'children': [],
+                                                        'params': {'depth_cm': 12.5}}]},
+                                         _b('b1')]),
+                       [_d('a1', 'dep', 3200, depth_cm=80.0), _d('a2', 'dep', 2900, depth_cm=20.0),
+                        _d('a3', 'dep', 3050, depth_cm=55.0)])
+    return m
+
+
+def _invalid_models():
+    """Trees and dates each validator must refuse, with the reason."""
+    ok = _s('r', 'Site', [_b('b0'), _p('p1'), _b('b1')])
+    return {
+        'empty': (None, []),
+        'boundary-root': (_b('r'), []),
+        'no-id': (_s('r', 'S', [_p('')]), []),
+        'duplicate-id': (_s('r', 'S', [_p('dup'), _p('dup')]), []),
+        'unknown-type': (_s('r', 'S', [{'id': 'x', 'element_type': 'trench', 'children': []}]), []),
+        'boundary-with-children': (_s('r', 'S', [_b('b0', children=[_p('p')])]), []),
+        'wiggle-with-children': (_s('r', 'S', [{'id': 'w', 'element_type': 'wiggle_sequence',
+                                                'children': [_p('p')]}]), []),
+        'empty-wiggle': (_s('r', 'S', [{'id': 'w', 'element_type': 'wiggle_sequence', 'name': 'Rings',
+                                        'children': []}]), []),
+        'deposition-with-phase': (_s('r', 'S', [{'id': 'd', 'element_type': 'deposition_sequence',
+                                                 'children': [_p('p')]}]), []),
+        'empty-deposition': (_s('r', 'S', [{'id': 'd', 'element_type': 'deposition_sequence',
+                                            'children': []}]), []),
+        'one-level': (_s('r', 'S', [{'id': 'd', 'element_type': 'deposition_sequence', 'name': 'Core',
+                                     'children': []}]), [_d('a1', 'd', 3000, depth_cm=10.0)]),
+        'dated-level': (_s('r', 'S', [{'id': 'd', 'element_type': 'deposition_sequence', 'children': [
+                            {'id': 'l', 'element_type': 'interpolated_depth', 'name': 'Lev', 'children': [],
+                             'params': {'depth_cm': 3.0}}]}]),
+                        [_d('a1', 'd', 3000, depth_cm=1.0), _d('a2', 'l', 3000)]),
+        'level-without-depth': (_s('r', 'S', [{'id': 'd', 'element_type': 'deposition_sequence', 'children': [
+                                    {'id': 'l', 'element_type': 'interpolated_depth', 'children': []}]}]),
+                                [_d('a1', 'd', 3000, depth_cm=1.0)]),
+        'boundary-in-phase': (_s('r', 'S', [_p('p', children=[_b('bx')])]), []),
+        'loose-hiatus': (_s('r', 'S', [_b('b0'), _h('h'), _p('p1')]), []),
+        'limits-crossed': (_s('r', 'S', [_p('p', tpq_age_bp=1000.0, taq_age_bp=1500.5)]), []),
+        'unassigned-date': (ok, [_d('a1', None, 3000)]),
+        'unknown-element': (ok, [_d('a1', 'nope', 3000)]),
+        'date-on-boundary': (ok, [_d('a1', 'b0', 3000)]),
+        'nameless-unknown-element': (ok, [{'id': 'a1', 'age_bp': 3000.0, 'error_1sigma': 25.0,
+                                           'element_id': 'zz'}]),
+    }
+
+
+def _invalid_ordinates():
+    def wig(params=None):
+        return _p('r', 'P', [{'id': 'w', 'element_type': 'wiggle_sequence', 'name': 'Rings',
+                              'children': [], 'params': params}])
+
+    def dep(params=None, children=()):
+        return _s('r', 'S', [{'id': 'd', 'element_type': 'deposition_sequence', 'name': 'Core',
+                              'children': list(children), 'params': params}])
+    return {
+        'no-gap': (wig(), [_d('z1', 'w', 3000), _d('a2', 'w', 3000, ring_offset=1.0), _d('b3', 'w', 3000)]),
+        'same-gap': (wig(), [_d('a1', 'w', 3000, ring_offset=5.0), _d('a2', 'w', 3000, ring_offset=5.0)]),
+        'negative-error': (wig(), [_d('a1', 'w', 3000, ring_offset=0.0, ring_offset_error=-1.0)]),
+        'stray-reference': (wig({'reference_sample_id': 'zz'}), [_d('a1', 'w', 3000, ring_offset=0.0)]),
+        'inbuilt': (wig(), [_d('a1', 'w', 3000, ring_offset=0.0, inbuilt_years=20.0)]),
+        'outlier': (wig(), [_d('a1', 'w', 3000, ring_offset=0.0, outlier_prior=0.05),
+                            _d('a0', 'w', 3000, ring_offset=2.0, outlier_prior=0.05)]),
+        'no-depth': (dep(), [_d('a1', 'd', 3000)]),
+        'same-depth': (dep(children=[{'id': 'l', 'element_type': 'interpolated_depth', 'children': [],
+                                      'params': {'depth_cm': 10.0}}]), [_d('a1', 'd', 3000, depth_cm=10.0)]),
+        'bad-k': (dep({'k': -1.5}), [_d('a1', 'd', 3000, depth_cm=1.0), _d('a2', 'd', 2900, depth_cm=0.5)]),
+        'empty-k-range': (dep({'log_k_min': 1.0, 'log_k_max': 1.0}),
+                          [_d('a1', 'd', 3000, depth_cm=1.0), _d('a2', 'd', 2900, depth_cm=0.5)]),
+        'fine': (dep({'k': 2.0}), [_d('a1', 'd', 3000, depth_cm=1.0), _d('a2', 'd', 2900, depth_cm=0.5)]),
+    }
+
+
+def _oxcal_models():
+    """Every .oxcal fixture as the importer reads it, ids made stable: (name,
+    tree, dates, resolution)."""
+    from app.services.date_import import parse_upload
+    out = []
+    for path in _oxcal_fixtures():
+        with open(path, 'rb') as fh:
+            content = fh.read()
+        result = parse_upload(os.path.basename(path), content, 'corpus').as_dict()
+        if not result.get('ok'):
+            continue
+        stable = Stable()
+        tree = stable(result['model_tree'])
+        dates = stable([{k: v for k, v in d.items() if k != 'phase_name'} for d in result['dates']])
+        out.append((os.path.relpath(path, FIXTURES), tree, dates, result.get('resolution')))
+    return out
+
+
+def _all_models():
+    models = [(f'hand/{k}', tree, dates) for k, (tree, dates) in _hand_models().items()]
+    models += [(f'oxcal/{name}', tree, dates) for name, tree, dates, _res in _oxcal_models()]
+    return models
+
+
+def _plan_dict(plan) -> Dict[str, Any]:
+    return {
+        'ordering': [[[list(t) for t in older], [list(t) for t in younger]]
+                     for older, younger in plan.ordering],
+        'span_groups': [{'older': g.older_boundary_id, 'younger': g.younger_boundary_id,
+                         'dates': g.date_ids, 'contained': g.contained_ids}
+                        for g in plan.span_groups],
+        'marginalized': sorted(plan.marginalized_boundaries),
+        'sampled': plan.sampled_boundaries,
+        'boundary_names': [[k, v] for k, v in plan.boundary_names.items()],
+        'wiggle_groups': [{'element_id': g.element_id, 'name': g.name,
+                           'members': [list(m) for m in g.members], 'gap_units': g.gap_units,
+                           'reference_sample_id': g.reference_sample_id}
+                          for g in plan.wiggle_groups],
+        'deposition_groups': [{'element_id': g.element_id, 'name': g.name,
+                               'levels': [list(level) for level in g.levels], 'k': g.k,
+                               'k_variable': g.k_variable, 'log_k_min': g.log_k_min,
+                               'log_k_max': g.log_k_max, 'depth_units': g.depth_units,
+                               'level_names': g.level_names}
+                              for g in plan.deposition_groups],
+    }
+
+
+def units_model_tree():
+    from app.services import model_tree as mt
+    cases = []
+    for name, tree, dates in _all_models():
+        def run(tree=tree, dates=dates):
+            mt.validate_tree(tree, dates)
+            mt.validate_ordinates(tree, dates)
+            elements = list(mt.iter_elements(tree))
+            bounds = mt.inherited_bounds(tree)
+            wiggle = mt.standalone_wiggle_match(tree, dates)
+            ids = [d['id'] for d in dates]
+            return {
+                'plan': _plan_dict(mt.plan_model(tree, dates)),
+                'elements': [e['id'] for e in elements],
+                'labels': [mt.element_label(e) for e in elements],
+                'params': [mt.element_params(e) for e in elements],
+                'inherited_bounds': [list(bounds[e['id']]) for e in elements],
+                'standalone_wiggle_match': None if wiggle is None else wiggle['id'],
+                'flattened': [{**{k: v for k, v in row.items() if k not in ('sample', 'posterior')},
+                               'sample': None if row['sample'] is None else ids.index(row['sample']['id'])}
+                              for row in mt.flatten_structure(tree, dates)],
+            }
+        cases.append(capture(f'model/{name}', {'tree': tree, 'dates': dates}, run))
+    for name, (tree, dates) in _invalid_models().items():
+        cases.append(capture(f'validate_tree/{name}', {'tree': tree, 'dates': dates},
+                             lambda t=tree, d=dates: mt.validate_tree(t, d)))
+    for name, (tree, dates) in _invalid_ordinates().items():
+        cases.append(capture(f'validate_ordinates/{name}', {'tree': tree, 'dates': dates},
+                             lambda t=tree, d=dates: mt.validate_ordinates(t, d)))
+    # A flattened reading with dates in no element, and one found by group_id.
+    tree, dates = _hand_models()['chain']
+    loose = dates + [{**_d('x1', None, 3000), 'group_id': 'p2'}, _d('x2', 'gone', 2000)]
+    ids = [d['id'] for d in loose]
+    cases.append(capture('flatten/orphans', {'tree': tree, 'dates': loose}, lambda: {
+        'flattened': [{**{k: v for k, v in row.items() if k not in ('sample', 'posterior')},
+                       'sample': None if row['sample'] is None else ids.index(row['sample']['id'])}
+                      for row in mt.flatten_structure(tree, loose)]}))
+    return cases
+
+
+def units_stratigraphy():
+    from app.services import model_tree as mt
+    from app.services import stratigraphy as st
+    cases = []
+    groups = [{'id': 'g1', 'name': 'Upper', 'tpq_age_bp': 3000.0, 'taq_age_bp': None},
+              {'id': 'g2', 'name': 'Lower', 'tpq_age_bp': None, 'taq_age_bp': 2000.0},
+              {'id': 'g3', 'name': None, 'tpq_age_bp': None, 'taq_age_bp': None},
+              {'id': 'g4', 'name': 'Empty', 'tpq_age_bp': None, 'taq_age_bp': None}]
+    dates = [{'id': 'a', 'group_id': 'g1'}, {'id': 'b', 'group_id': 'g2'}, {'id': 'c', 'group_id': 'g2'},
+             {'id': 'd', 'group_id': 'g3'}, {'id': 'e', 'group_id': 'g9'}, {'id': 'f', 'group_id': None}]
+    relationship_sets = {
+        'none': [],
+        'chain': [{'from_sample_id': 'g1', 'to_sample_id': 'g2', 'relationship': 'above',
+                   'from_type': 'group', 'to_type': 'group'},
+                  {'from_sample_id': 'g2', 'to_sample_id': 'd', 'relationship': 'above',
+                   'from_type': 'group', 'to_type': 'sample'}],
+        'below-and-equal': [{'from_sample_id': 'a', 'to_sample_id': 'b', 'relationship': 'below'},
+                            {'from_sample_id': 'c', 'to_sample_id': 'b', 'relationship': 'equal'},
+                            {'from_sample_id': 'g2', 'to_sample_id': 'g2', 'relationship': 'above',
+                             'from_type': 'group', 'to_type': 'group'},
+                            {'from_sample_id': 'g4', 'to_sample_id': 'a', 'relationship': 'above',
+                             'from_type': 'group', 'to_type': None}],
+        'cycle': [{'from_sample_id': 'a', 'to_sample_id': 'b', 'relationship': 'above'},
+                  {'from_sample_id': 'b', 'to_sample_id': 'c', 'relationship': 'above'},
+                  {'from_sample_id': 'c', 'to_sample_id': 'a', 'relationship': 'above'},
+                  {'from_sample_id': 'd', 'to_sample_id': 'a', 'relationship': 'above'}],
+        'partial': [{'from_sample_id': 'g3', 'to_sample_id': 'g1', 'relationship': 'above',
+                     'from_type': 'group', 'to_type': 'group'}],
+    }
+    cases.append(capture('group_members', {'dates': dates, 'groups': groups},
+                         lambda: {'members': [[k, v] for k, v in st.group_members(dates, groups).items()]}))
+    for name, rels in relationship_sets.items():
+        def run(rels=rels):
+            older, equal = st.expand_relationships(dates, groups, rels)
+            counter = iter(range(1000))
+            root, linearized, boundaries = mt.migrate_from_relationships(
+                dates, groups, rels, lambda: f'gen{next(counter)}')
+            return {'older_younger': sorted(list(e) for e in older),
+                    'equal': sorted(list(e) for e in equal),
+                    'cycle': st.find_cycle(older),
+                    'migrated': {'root': root, 'linearized': linearized,
+                                 'group_boundaries': [[k, list(v)] for k, v in boundaries.items()]}}
+        cases.append(capture(f'relationships/{name}', {'dates': dates, 'groups': groups,
+                                                       'relationships': rels}, run))
+    pairs = [[None, None, None], [3000.0, None, None], [None, 2500.0, [None, None]],
+             [3000.0, 2000.0, [3100.0, 2100.0]], [3000.0, 2000.0, [2900.0, 1900.0]],
+             [None, None, [2900.0, 1900.0]], [3000.0, None, [None, 2500.0]]]
+    cases.append(capture('effective_bounds', {'cases': pairs}, lambda: {'bounds': [
+        list(st.effective_bounds({'tpq_age_bp': tpq, 'taq_age_bp': taq},
+                                 None if g is None else {'tpq_age_bp': g[0], 'taq_age_bp': g[1]}))
+        for tpq, taq, g in pairs]}))
+    return cases
+
+
+# ---------------------------------------------------------------------------
 # api/ -- Phases 2, 3 and 5
 # ---------------------------------------------------------------------------
 
@@ -799,6 +1116,7 @@ def main() -> None:
         ('units/reservoir', units_reservoir), ('units/date_format', units_date_format),
         ('units/rng', units_rng), ('units/kde', units_kde),
         ('units/curve_view', units_curve_view), ('units/curve_registry', units_curve_registry),
+        ('units/model_tree', units_model_tree), ('units/stratigraphy', units_stratigraphy),
     ]:
         write(family, build())
 

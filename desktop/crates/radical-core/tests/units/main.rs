@@ -16,10 +16,13 @@ mod interpolation;
 mod kde;
 mod likelihood;
 mod linspace;
+mod model;
+mod model_tree;
 mod reservoir;
 mod resolution;
 mod rng;
 mod same_event;
+mod stratigraphy;
 
 use std::collections::BTreeSet;
 
@@ -48,7 +51,7 @@ pub const REL: f64 = 1e-12;
 pub const REL_LIKELIHOOD: f64 = 5e-12;
 
 /// The families compared here; every units/ family must be one.
-const COVERED: [&str; 15] = [
+const COVERED: [&str; 17] = [
     "calibrate",
     "cell_edges",
     "curve_mix",
@@ -60,10 +63,12 @@ const COVERED: [&str; 15] = [
     "kde",
     "likelihood",
     "linspace",
+    "model_tree",
     "reservoir",
     "resolution",
     "rng",
     "same_event",
+    "stratigraphy",
 ];
 
 #[test]

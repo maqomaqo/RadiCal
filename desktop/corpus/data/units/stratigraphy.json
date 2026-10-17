@@ -1,0 +1,1044 @@
+{
+ "schema": 2,
+ "family": "units/stratigraphy",
+ "cases": [
+  {
+   "name": "group_members",
+   "inputs": {
+    "dates": [
+     {
+      "id": "a",
+      "group_id": "g1"
+     },
+     {
+      "id": "b",
+      "group_id": "g2"
+     },
+     {
+      "id": "c",
+      "group_id": "g2"
+     },
+     {
+      "id": "d",
+      "group_id": "g3"
+     },
+     {
+      "id": "e",
+      "group_id": "g9"
+     },
+     {
+      "id": "f",
+      "group_id": null
+     }
+    ],
+    "groups": [
+     {
+      "id": "g1",
+      "name": "Upper",
+      "tpq_age_bp": 3000.0,
+      "taq_age_bp": null
+     },
+     {
+      "id": "g2",
+      "name": "Lower",
+      "tpq_age_bp": null,
+      "taq_age_bp": 2000.0
+     },
+     {
+      "id": "g3",
+      "name": null,
+      "tpq_age_bp": null,
+      "taq_age_bp": null
+     },
+     {
+      "id": "g4",
+      "name": "Empty",
+      "tpq_age_bp": null,
+      "taq_age_bp": null
+     }
+    ]
+   },
+   "outputs": {
+    "members": [
+     [
+      "g1",
+      ["a"]
+     ],
+     [
+      "g2",
+      ["b","c"]
+     ],
+     [
+      "g3",
+      ["d"]
+     ],
+     [
+      "g4",
+      []
+     ],
+     [
+      "g9",
+      ["e"]
+     ]
+    ]
+   }
+  },
+  {
+   "name": "relationships/none",
+   "inputs": {
+    "dates": [
+     {
+      "id": "a",
+      "group_id": "g1"
+     },
+     {
+      "id": "b",
+      "group_id": "g2"
+     },
+     {
+      "id": "c",
+      "group_id": "g2"
+     },
+     {
+      "id": "d",
+      "group_id": "g3"
+     },
+     {
+      "id": "e",
+      "group_id": "g9"
+     },
+     {
+      "id": "f",
+      "group_id": null
+     }
+    ],
+    "groups": [
+     {
+      "id": "g1",
+      "name": "Upper",
+      "tpq_age_bp": 3000.0,
+      "taq_age_bp": null
+     },
+     {
+      "id": "g2",
+      "name": "Lower",
+      "tpq_age_bp": null,
+      "taq_age_bp": 2000.0
+     },
+     {
+      "id": "g3",
+      "name": null,
+      "tpq_age_bp": null,
+      "taq_age_bp": null
+     },
+     {
+      "id": "g4",
+      "name": "Empty",
+      "tpq_age_bp": null,
+      "taq_age_bp": null
+     }
+    ],
+    "relationships": []
+   },
+   "outputs": {
+    "older_younger": [],
+    "equal": [],
+    "cycle": null,
+    "migrated": {
+     "root": {
+      "id": "gen5",
+      "element_type": "sequence",
+      "name": "Site sequence",
+      "tpq_age_bp": null,
+      "taq_age_bp": null,
+      "children": [
+       {
+        "id": "gen0",
+        "element_type": "boundary",
+        "name": "Start of sequence",
+        "tpq_age_bp": null,
+        "taq_age_bp": null,
+        "children": []
+       },
+       {
+        "id": "g1",
+        "element_type": "phase",
+        "name": "Upper",
+        "tpq_age_bp": 3000.0,
+        "taq_age_bp": null,
+        "children": []
+       },
+       {
+        "id": "gen1",
+        "element_type": "boundary",
+        "name": "End of Upper",
+        "tpq_age_bp": null,
+        "taq_age_bp": null,
+        "children": []
+       },
+       {
+        "id": "g2",
+        "element_type": "phase",
+        "name": "Lower",
+        "tpq_age_bp": null,
+        "taq_age_bp": 2000.0,
+        "children": []
+       },
+       {
+        "id": "gen2",
+        "element_type": "boundary",
+        "name": "End of Lower",
+        "tpq_age_bp": null,
+        "taq_age_bp": null,
+        "children": []
+       },
+       {
+        "id": "g3",
+        "element_type": "phase",
+        "name": "Context",
+        "tpq_age_bp": null,
+        "taq_age_bp": null,
+        "children": []
+       },
+       {
+        "id": "gen3",
+        "element_type": "boundary",
+        "name": "End of context",
+        "tpq_age_bp": null,
+        "taq_age_bp": null,
+        "children": []
+       },
+       {
+        "id": "g4",
+        "element_type": "phase",
+        "name": "Empty",
+        "tpq_age_bp": null,
+        "taq_age_bp": null,
+        "children": []
+       },
+       {
+        "id": "gen4",
+        "element_type": "boundary",
+        "name": "End of sequence",
+        "tpq_age_bp": null,
+        "taq_age_bp": null,
+        "children": []
+       }
+      ]
+     },
+     "linearized": true,
+     "group_boundaries": [
+      [
+       "g1",
+       ["gen0","gen1"]
+      ],
+      [
+       "g2",
+       ["gen1","gen2"]
+      ],
+      [
+       "g3",
+       ["gen2","gen3"]
+      ],
+      [
+       "g4",
+       ["gen3","gen4"]
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "relationships/chain",
+   "inputs": {
+    "dates": [
+     {
+      "id": "a",
+      "group_id": "g1"
+     },
+     {
+      "id": "b",
+      "group_id": "g2"
+     },
+     {
+      "id": "c",
+      "group_id": "g2"
+     },
+     {
+      "id": "d",
+      "group_id": "g3"
+     },
+     {
+      "id": "e",
+      "group_id": "g9"
+     },
+     {
+      "id": "f",
+      "group_id": null
+     }
+    ],
+    "groups": [
+     {
+      "id": "g1",
+      "name": "Upper",
+      "tpq_age_bp": 3000.0,
+      "taq_age_bp": null
+     },
+     {
+      "id": "g2",
+      "name": "Lower",
+      "tpq_age_bp": null,
+      "taq_age_bp": 2000.0
+     },
+     {
+      "id": "g3",
+      "name": null,
+      "tpq_age_bp": null,
+      "taq_age_bp": null
+     },
+     {
+      "id": "g4",
+      "name": "Empty",
+      "tpq_age_bp": null,
+      "taq_age_bp": null
+     }
+    ],
+    "relationships": [
+     {
+      "from_sample_id": "g1",
+      "to_sample_id": "g2",
+      "relationship": "above",
+      "from_type": "group",
+      "to_type": "group"
+     },
+     {
+      "from_sample_id": "g2",
+      "to_sample_id": "d",
+      "relationship": "above",
+      "from_type": "group",
+      "to_type": "sample"
+     }
+    ]
+   },
+   "outputs": {
+    "older_younger": [
+     ["b","a"],
+     ["c","a"],
+     ["d","b"],
+     ["d","c"]
+    ],
+    "equal": [],
+    "cycle": null,
+    "migrated": {
+     "root": {
+      "id": "gen5",
+      "element_type": "sequence",
+      "name": "Site sequence",
+      "tpq_age_bp": null,
+      "taq_age_bp": null,
+      "children": [
+       {
+        "id": "gen0",
+        "element_type": "boundary",
+        "name": "Start of sequence",
+        "tpq_age_bp": null,
+        "taq_age_bp": null,
+        "children": []
+       },
+       {
+        "id": "g3",
+        "element_type": "phase",
+        "name": "Context",
+        "tpq_age_bp": null,
+        "taq_age_bp": null,
+        "children": []
+       },
+       {
+        "id": "gen1",
+        "element_type": "boundary",
+        "name": "End of context",
+        "tpq_age_bp": null,
+        "taq_age_bp": null,
+        "children": []
+       },
+       {
+        "id": "g2",
+        "element_type": "phase",
+        "name": "Lower",
+        "tpq_age_bp": null,
+        "taq_age_bp": 2000.0,
+        "children": []
+       },
+       {
+        "id": "gen2",
+        "element_type": "boundary",
+        "name": "End of Lower",
+        "tpq_age_bp": null,
+        "taq_age_bp": null,
+        "children": []
+       },
+       {
+        "id": "g1",
+        "element_type": "phase",
+        "name": "Upper",
+        "tpq_age_bp": 3000.0,
+        "taq_age_bp": null,
+        "children": []
+       },
+       {
+        "id": "gen3",
+        "element_type": "boundary",
+        "name": "End of Upper",
+        "tpq_age_bp": null,
+        "taq_age_bp": null,
+        "children": []
+       },
+       {
+        "id": "g4",
+        "element_type": "phase",
+        "name": "Empty",
+        "tpq_age_bp": null,
+        "taq_age_bp": null,
+        "children": []
+       },
+       {
+        "id": "gen4",
+        "element_type": "boundary",
+        "name": "End of sequence",
+        "tpq_age_bp": null,
+        "taq_age_bp": null,
+        "children": []
+       }
+      ]
+     },
+     "linearized": true,
+     "group_boundaries": [
+      [
+       "g3",
+       ["gen0","gen1"]
+      ],
+      [
+       "g2",
+       ["gen1","gen2"]
+      ],
+      [
+       "g1",
+       ["gen2","gen3"]
+      ],
+      [
+       "g4",
+       ["gen3","gen4"]
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "relationships/below-and-equal",
+   "inputs": {
+    "dates": [
+     {
+      "id": "a",
+      "group_id": "g1"
+     },
+     {
+      "id": "b",
+      "group_id": "g2"
+     },
+     {
+      "id": "c",
+      "group_id": "g2"
+     },
+     {
+      "id": "d",
+      "group_id": "g3"
+     },
+     {
+      "id": "e",
+      "group_id": "g9"
+     },
+     {
+      "id": "f",
+      "group_id": null
+     }
+    ],
+    "groups": [
+     {
+      "id": "g1",
+      "name": "Upper",
+      "tpq_age_bp": 3000.0,
+      "taq_age_bp": null
+     },
+     {
+      "id": "g2",
+      "name": "Lower",
+      "tpq_age_bp": null,
+      "taq_age_bp": 2000.0
+     },
+     {
+      "id": "g3",
+      "name": null,
+      "tpq_age_bp": null,
+      "taq_age_bp": null
+     },
+     {
+      "id": "g4",
+      "name": "Empty",
+      "tpq_age_bp": null,
+      "taq_age_bp": null
+     }
+    ],
+    "relationships": [
+     {
+      "from_sample_id": "a",
+      "to_sample_id": "b",
+      "relationship": "below"
+     },
+     {
+      "from_sample_id": "c",
+      "to_sample_id": "b",
+      "relationship": "equal"
+     },
+     {
+      "from_sample_id": "g2",
+      "to_sample_id": "g2",
+      "relationship": "above",
+      "from_type": "group",
+      "to_type": "group"
+     },
+     {
+      "from_sample_id": "g4",
+      "to_sample_id": "a",
+      "relationship": "above",
+      "from_type": "group",
+      "to_type": null
+     }
+    ]
+   },
+   "outputs": {
+    "older_younger": [
+     ["a","b"],
+     ["b","c"],
+     ["c","b"]
+    ],
+    "equal": [
+     ["b","c"]
+    ],
+    "cycle": ["b","c"],
+    "migrated": {
+     "root": {
+      "id": "gen5",
+      "element_type": "sequence",
+      "name": "Site sequence",
+      "tpq_age_bp": null,
+      "taq_age_bp": null,
+      "children": [
+       {
+        "id": "gen0",
+        "element_type": "boundary",
+        "name": "Start of sequence",
+        "tpq_age_bp": null,
+        "taq_age_bp": null,
+        "children": []
+       },
+       {
+        "id": "g1",
+        "element_type": "phase",
+        "name": "Upper",
+        "tpq_age_bp": 3000.0,
+        "taq_age_bp": null,
+        "children": []
+       },
+       {
+        "id": "gen1",
+        "element_type": "boundary",
+        "name": "End of Upper",
+        "tpq_age_bp": null,
+        "taq_age_bp": null,
+        "children": []
+       },
+       {
+        "id": "g2",
+        "element_type": "phase",
+        "name": "Lower",
+        "tpq_age_bp": null,
+        "taq_age_bp": 2000.0,
+        "children": []
+       },
+       {
+        "id": "gen2",
+        "element_type": "boundary",
+        "name": "End of Lower",
+        "tpq_age_bp": null,
+        "taq_age_bp": null,
+        "children": []
+       },
+       {
+        "id": "g3",
+        "element_type": "phase",
+        "name": "Context",
+        "tpq_age_bp": null,
+        "taq_age_bp": null,
+        "children": []
+       },
+       {
+        "id": "gen3",
+        "element_type": "boundary",
+        "name": "End of context",
+        "tpq_age_bp": null,
+        "taq_age_bp": null,
+        "children": []
+       },
+       {
+        "id": "g4",
+        "element_type": "phase",
+        "name": "Empty",
+        "tpq_age_bp": null,
+        "taq_age_bp": null,
+        "children": []
+       },
+       {
+        "id": "gen4",
+        "element_type": "boundary",
+        "name": "End of sequence",
+        "tpq_age_bp": null,
+        "taq_age_bp": null,
+        "children": []
+       }
+      ]
+     },
+     "linearized": true,
+     "group_boundaries": [
+      [
+       "g1",
+       ["gen0","gen1"]
+      ],
+      [
+       "g2",
+       ["gen1","gen2"]
+      ],
+      [
+       "g3",
+       ["gen2","gen3"]
+      ],
+      [
+       "g4",
+       ["gen3","gen4"]
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "relationships/cycle",
+   "inputs": {
+    "dates": [
+     {
+      "id": "a",
+      "group_id": "g1"
+     },
+     {
+      "id": "b",
+      "group_id": "g2"
+     },
+     {
+      "id": "c",
+      "group_id": "g2"
+     },
+     {
+      "id": "d",
+      "group_id": "g3"
+     },
+     {
+      "id": "e",
+      "group_id": "g9"
+     },
+     {
+      "id": "f",
+      "group_id": null
+     }
+    ],
+    "groups": [
+     {
+      "id": "g1",
+      "name": "Upper",
+      "tpq_age_bp": 3000.0,
+      "taq_age_bp": null
+     },
+     {
+      "id": "g2",
+      "name": "Lower",
+      "tpq_age_bp": null,
+      "taq_age_bp": 2000.0
+     },
+     {
+      "id": "g3",
+      "name": null,
+      "tpq_age_bp": null,
+      "taq_age_bp": null
+     },
+     {
+      "id": "g4",
+      "name": "Empty",
+      "tpq_age_bp": null,
+      "taq_age_bp": null
+     }
+    ],
+    "relationships": [
+     {
+      "from_sample_id": "a",
+      "to_sample_id": "b",
+      "relationship": "above"
+     },
+     {
+      "from_sample_id": "b",
+      "to_sample_id": "c",
+      "relationship": "above"
+     },
+     {
+      "from_sample_id": "c",
+      "to_sample_id": "a",
+      "relationship": "above"
+     },
+     {
+      "from_sample_id": "d",
+      "to_sample_id": "a",
+      "relationship": "above"
+     }
+    ]
+   },
+   "outputs": {
+    "older_younger": [
+     ["a","c"],
+     ["a","d"],
+     ["b","a"],
+     ["c","b"]
+    ],
+    "equal": [],
+    "cycle": ["a","b","c","d"],
+    "migrated": {
+     "root": {
+      "id": "gen5",
+      "element_type": "sequence",
+      "name": "Site sequence",
+      "tpq_age_bp": null,
+      "taq_age_bp": null,
+      "children": [
+       {
+        "id": "gen0",
+        "element_type": "boundary",
+        "name": "Start of sequence",
+        "tpq_age_bp": null,
+        "taq_age_bp": null,
+        "children": []
+       },
+       {
+        "id": "g4",
+        "element_type": "phase",
+        "name": "Empty",
+        "tpq_age_bp": null,
+        "taq_age_bp": null,
+        "children": []
+       },
+       {
+        "id": "gen1",
+        "element_type": "boundary",
+        "name": "End of Empty",
+        "tpq_age_bp": null,
+        "taq_age_bp": null,
+        "children": []
+       },
+       {
+        "id": "g1",
+        "element_type": "phase",
+        "name": "Upper",
+        "tpq_age_bp": 3000.0,
+        "taq_age_bp": null,
+        "children": []
+       },
+       {
+        "id": "gen2",
+        "element_type": "boundary",
+        "name": "End of Upper",
+        "tpq_age_bp": null,
+        "taq_age_bp": null,
+        "children": []
+       },
+       {
+        "id": "g2",
+        "element_type": "phase",
+        "name": "Lower",
+        "tpq_age_bp": null,
+        "taq_age_bp": 2000.0,
+        "children": []
+       },
+       {
+        "id": "gen3",
+        "element_type": "boundary",
+        "name": "End of Lower",
+        "tpq_age_bp": null,
+        "taq_age_bp": null,
+        "children": []
+       },
+       {
+        "id": "g3",
+        "element_type": "phase",
+        "name": "Context",
+        "tpq_age_bp": null,
+        "taq_age_bp": null,
+        "children": []
+       },
+       {
+        "id": "gen4",
+        "element_type": "boundary",
+        "name": "End of sequence",
+        "tpq_age_bp": null,
+        "taq_age_bp": null,
+        "children": []
+       }
+      ]
+     },
+     "linearized": true,
+     "group_boundaries": [
+      [
+       "g4",
+       ["gen0","gen1"]
+      ],
+      [
+       "g1",
+       ["gen1","gen2"]
+      ],
+      [
+       "g2",
+       ["gen2","gen3"]
+      ],
+      [
+       "g3",
+       ["gen3","gen4"]
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "relationships/partial",
+   "inputs": {
+    "dates": [
+     {
+      "id": "a",
+      "group_id": "g1"
+     },
+     {
+      "id": "b",
+      "group_id": "g2"
+     },
+     {
+      "id": "c",
+      "group_id": "g2"
+     },
+     {
+      "id": "d",
+      "group_id": "g3"
+     },
+     {
+      "id": "e",
+      "group_id": "g9"
+     },
+     {
+      "id": "f",
+      "group_id": null
+     }
+    ],
+    "groups": [
+     {
+      "id": "g1",
+      "name": "Upper",
+      "tpq_age_bp": 3000.0,
+      "taq_age_bp": null
+     },
+     {
+      "id": "g2",
+      "name": "Lower",
+      "tpq_age_bp": null,
+      "taq_age_bp": 2000.0
+     },
+     {
+      "id": "g3",
+      "name": null,
+      "tpq_age_bp": null,
+      "taq_age_bp": null
+     },
+     {
+      "id": "g4",
+      "name": "Empty",
+      "tpq_age_bp": null,
+      "taq_age_bp": null
+     }
+    ],
+    "relationships": [
+     {
+      "from_sample_id": "g3",
+      "to_sample_id": "g1",
+      "relationship": "above",
+      "from_type": "group",
+      "to_type": "group"
+     }
+    ]
+   },
+   "outputs": {
+    "older_younger": [
+     ["a","d"]
+    ],
+    "equal": [],
+    "cycle": null,
+    "migrated": {
+     "root": {
+      "id": "gen5",
+      "element_type": "sequence",
+      "name": "Site sequence",
+      "tpq_age_bp": null,
+      "taq_age_bp": null,
+      "children": [
+       {
+        "id": "gen0",
+        "element_type": "boundary",
+        "name": "Start of sequence",
+        "tpq_age_bp": null,
+        "taq_age_bp": null,
+        "children": []
+       },
+       {
+        "id": "g1",
+        "element_type": "phase",
+        "name": "Upper",
+        "tpq_age_bp": 3000.0,
+        "taq_age_bp": null,
+        "children": []
+       },
+       {
+        "id": "gen1",
+        "element_type": "boundary",
+        "name": "End of Upper",
+        "tpq_age_bp": null,
+        "taq_age_bp": null,
+        "children": []
+       },
+       {
+        "id": "g2",
+        "element_type": "phase",
+        "name": "Lower",
+        "tpq_age_bp": null,
+        "taq_age_bp": 2000.0,
+        "children": []
+       },
+       {
+        "id": "gen2",
+        "element_type": "boundary",
+        "name": "End of Lower",
+        "tpq_age_bp": null,
+        "taq_age_bp": null,
+        "children": []
+       },
+       {
+        "id": "g3",
+        "element_type": "phase",
+        "name": "Context",
+        "tpq_age_bp": null,
+        "taq_age_bp": null,
+        "children": []
+       },
+       {
+        "id": "gen3",
+        "element_type": "boundary",
+        "name": "End of context",
+        "tpq_age_bp": null,
+        "taq_age_bp": null,
+        "children": []
+       },
+       {
+        "id": "g4",
+        "element_type": "phase",
+        "name": "Empty",
+        "tpq_age_bp": null,
+        "taq_age_bp": null,
+        "children": []
+       },
+       {
+        "id": "gen4",
+        "element_type": "boundary",
+        "name": "End of sequence",
+        "tpq_age_bp": null,
+        "taq_age_bp": null,
+        "children": []
+       }
+      ]
+     },
+     "linearized": true,
+     "group_boundaries": [
+      [
+       "g1",
+       ["gen0","gen1"]
+      ],
+      [
+       "g2",
+       ["gen1","gen2"]
+      ],
+      [
+       "g3",
+       ["gen2","gen3"]
+      ],
+      [
+       "g4",
+       ["gen3","gen4"]
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "effective_bounds",
+   "inputs": {
+    "cases": [
+     [null,null,null],
+     [3000.0,null,null],
+     [
+      null,
+      2500.0,
+      [null,null]
+     ],
+     [
+      3000.0,
+      2000.0,
+      [3100.0,2100.0]
+     ],
+     [
+      3000.0,
+      2000.0,
+      [2900.0,1900.0]
+     ],
+     [
+      null,
+      null,
+      [2900.0,1900.0]
+     ],
+     [
+      3000.0,
+      null,
+      [null,2500.0]
+     ]
+    ]
+   },
+   "outputs": {
+    "bounds": [
+     [null,null],
+     [null,3000.0],
+     [2500.0,null],
+     [2100.0,3000.0],
+     [2000.0,2900.0],
+     [1900.0,2900.0],
+     [2500.0,3000.0]
+    ]
+   }
+  }
+ ]
+}
