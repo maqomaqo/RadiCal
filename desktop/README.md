@@ -8,12 +8,13 @@ desktop/
   Cargo.toml            the workspace; crates are added as the phase that needs them starts
   rust-toolchain.toml   the pinned compiler
   crates/
-    radical-core/       the calibration maths, ported from backend/app/services (Phase 1)
+    radical-core/       the calibration maths and the exact solvers, ported from
+                        backend/app/services (Phases 1 and 2)
     radical-corpus/     reads the golden corpus and checks it is intact
   corpus/
     generate.py         writes the corpus from the Python implementation
     manifest.json       every corpus file's SHA-256, and the curves it was made against
-    data/units/         one service function per case: the Phase 1 targets
+    data/units/         one service function per case: the Phase 1 and 2 targets
     data/api/           whole API requests and responses: solver and server targets
 ```
 
@@ -29,6 +30,9 @@ cargo clippy --all-targets -- -D warnings
 ```
 
 CI runs the same on macOS, Windows and Linux (`.github/workflows/desktop.yml`).
+
+`cargo test -p radical-core --test models` runs every model the API solved without sampling
+(`data/api/models.json`) through the same pipeline and compares each number it stored.
 
 `cargo test -p radical-core --test units -- --nocapture` also prints, for each corpus family, the
 largest relative difference from the Python answer and where it was.

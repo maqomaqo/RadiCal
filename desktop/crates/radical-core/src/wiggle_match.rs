@@ -125,7 +125,7 @@ fn curve_limits(members: &[Member], cal: &Calibrator) -> Result<(f64, f64), Erro
 /// Marginalising G_i ~ N(g_i, sigma_i) turns member i's shifted likelihood
 /// into that likelihood convolved with this, so a D_Sequence is exactly the
 /// sigma = 0 case of the same code path rather than a separate one.
-fn gap_kernel(step: f64, sigma: f64) -> Vec<f64> {
+pub fn gap_kernel(step: f64, sigma: f64) -> Vec<f64> {
     let reach = py_max(step, GAP_KERNEL_SIGMAS * sigma);
     let kernel: Vec<f64> = arange(-reach, reach + step, step)
         .into_iter()

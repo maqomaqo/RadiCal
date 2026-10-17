@@ -16,12 +16,15 @@
  "files": {
   "data/api/calibrate.json": "d8c3ffec90c632e4083f33ef9cc5f0fc027e75b9f2733387c5d515e12156a428",
   "data/api/models.json": "71342f62c7e74c1844c5be74b46b72c1c677ca2cfb04c46441b4a9d1fafee7fa",
+  "data/units/agreement.json": "d9c41d99cc6408701da6963deb1a2e6d4bdcc1a777a77b83220b6b2b4b61393f",
   "data/units/calibrate.json": "979813d23f9db0e24a9a0d6ea18d93dceddb247b4d3ec55a8e39dc9feecd9f39",
   "data/units/cell_edges.json": "530b19fc70de602bbd3935ea5c12eeb93a31d08b957c640c8f3fda14bd9dd6da",
   "data/units/curve_mix.json": "934a165a5d8d6541e91f90cb88ed4088a188c4cf846ab6e4160598bcc24f0d84",
   "data/units/curve_registry.json": "27a869d8eef67c15b1cde3e653af0a665d2ca43f7975105c391e9ecb54923320",
   "data/units/curve_view.json": "2e9443d22cf476b7904533536b6ab6b12482732f3ed0e307b9dfd672cc6f37d4",
   "data/units/date_format.json": "68f068ce6c2f44f1164412cb93f9ce80a7563148adb4fe4e02ec416dbba78811",
+  "data/units/exact_chain.json": "b3a87e2bd32357ae32a199940f3ceefeaee22f5b6350c26abba559be9de281f1",
+  "data/units/exact_parallel.json": "0d8eaf327b12af5e56f5d27e53ad60b58ad4c428094d960c694cde2a937fa0c6",
   "data/units/f14c.json": "ad4bcdd6116239d48519765ae4edff56309fe4b06e7ff61ede16649a0e4537f6",
   "data/units/interpolation.json": "7464635e1e5458bc1780d197ca435939ec453de0979f5a3742112eb6ad041951",
   "data/units/intervals.json": "ff193e1d378532433925f27798ee980d06c0d6da268b948e099fdc9fd9940387",
@@ -33,10 +36,11 @@
   "data/units/resolution.json": "75a57ae562ea9a28ba19829a7b9ec5d5aa4359090029d9ec70628972f7e6c6ee",
   "data/units/rng.json": "d94a87ccd801ba6b45bc13cdd56f503ceb37ca781ebb7e23af271724ec872bbd",
   "data/units/same_event.json": "c83b0a249bbb909bb6a2920be1c4de168307be6677e6f634364f5f5d6e397c6f",
-  "data/units/stratigraphy.json": "822181207e1517c50ff2c935bd3d08db4c7093db3765adb075f7ea788d9ca41e"
+  "data/units/stratigraphy.json": "822181207e1517c50ff2c935bd3d08db4c7093db3765adb075f7ea788d9ca41e",
+  "data/units/wiggle_match.json": "34b824cf61cc4298393b3bbae9eda592bf217ec879096b5a277194ee07ec1519"
  },
  "generated_from": {
-  "commit": "67e4a013c01cb0698e1d9e9b186bdfcfcaf4cfe0",
+  "commit": "dd7a0edd253048e3340188b1020d40408508e28e",
   "dirty": false,
   "numpy": "2.5.3",
   "python": "3.13.9",
