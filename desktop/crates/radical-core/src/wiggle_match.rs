@@ -399,8 +399,7 @@ pub struct WiggleSolution {
 /// Each member's posterior is the reference's shifted by its own gap -- one
 /// distribution translated rather than n results, which every caller that
 /// renders them has to say -- except where the gap was measured rather than
-/// counted, which gives that member a width of its own (see
-/// [`member_density`]).
+/// counted, which gives that member a width of its own.
 ///
 /// `resolution` is the calendar step the HPD ranges are reported at, as in the
 /// chain solver.
@@ -529,15 +528,4 @@ pub fn solve(
             - offsets.iter().copied().reduce(py_min).expect("members"),
         grid: (grid[0], grid[grid.len() - 1], grid[1] - grid[0]),
     })
-}
-
-/// [`solve`] with the defaults Python's signature gives.
-pub fn solve_default(
-    measurements: &[Measurement],
-    group: &WiggleGroup,
-    root: Option<&Element>,
-    resolution: f64,
-    cal: &Calibrator,
-) -> Result<WiggleSolution, Error> {
-    solve(measurements, group, root, 4000, 42, resolution, cal)
 }

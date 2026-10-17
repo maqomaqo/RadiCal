@@ -15,7 +15,7 @@ use crate::matrix::Matrix;
 use crate::numeric::{py_max, python_sum, sum};
 use crate::rng::Generator;
 
-/// F[y, o] = integral of one date's likelihood over [grid[y], grid[o]],
+/// `F[y, o]` = integral of one date's likelihood over `[grid[y], grid[o]]`,
 /// TRAPEZOIDALLY -- half weight on each endpoint cell.
 ///
 /// The half-weights are the difference between right and wrong here, because

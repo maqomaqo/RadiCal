@@ -1,6 +1,6 @@
 [package]
 name = "radical-core"
-description = "The calibration maths of RadiCal, ported from backend/app/services: no I/O, no async."
+description = "The calibration maths and exact solvers of RadiCal, ported from backend/app/services: no I/O, no async."
 publish = false
 version.workspace = true
 edition.workspace = true

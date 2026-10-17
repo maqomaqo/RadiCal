@@ -1,7 +1,8 @@
-//! The calibration maths of RadiCal: pure functions over curves and
-//! measurements, with no I/O, no database and no async. A port of
-//! `backend/app/services`, held to the Python implementation by the golden
-//! corpus in `desktop/corpus` (see `tests/units`).
+//! The calibration maths of RadiCal and its exact solvers: pure functions
+//! over curves, measurements and model trees, with no I/O, no database and no
+//! async. A port of `backend/app/services`, held to the Python implementation
+//! by the golden corpus in `desktop/corpus` (see `tests/units`, and
+//! `tests/models` for whole API runs).
 //!
 //! The Python docstrings' reasoning is carried across as doc comments. Where
 //! the port departs from the Python shape, it says so:
@@ -9,7 +10,12 @@
 //! - "Match OxCal 4.4" is a [`Mode`] passed down explicitly rather than a
 //!   context variable.
 //! - Functions return structs where Python returns dicts, and [`Error`] where
-//!   Python raises `ValueError`, with the same message.
+//!   Python raises `ValueError`, with the same message ([`Error::Model`] where
+//!   the message names a sample or an element).
+//! - The exact solvers' matrix products and SciPy's FFT convolutions are
+//!   summed in an order of this crate's own ([`matrix`],
+//!   [`exact_chain::convolve_on_grid`]), so the solvers agree with Python to
+//!   rounding rather than to the bit.
 //! - Only the builtin curves are known here ([`curves`]); stored and mixed
 //!   curves belong to the store, which hands them in.
 //!

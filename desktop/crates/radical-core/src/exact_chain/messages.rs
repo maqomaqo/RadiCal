@@ -9,7 +9,7 @@ use crate::matrix::Matrix;
 use crate::numeric::{cumsum, searchsorted_left, searchsorted_right, sum};
 use crate::rng::Generator;
 
-/// The finite maximum [`rescaled`] takes out, 0 when there is none.
+/// The finite maximum [`exp_rescaled`] takes out, 0 when there is none.
 pub fn finite_peak(log_weights: &[f64]) -> f64 {
     let mut best = f64::NEG_INFINITY;
     let mut any = false;
@@ -335,11 +335,11 @@ pub fn scaled_by_peak(mut matrix: Matrix) -> (Matrix, f64) {
 pub struct ChainProducts {
     pub first_ok: Vec<f64>,
     pub last_ok: Vec<f64>,
-    /// A[k], indexed [first boundary, boundary k]: from the first boundary to
-    /// boundary k. A[0] is the identity on the allowed first boundaries, so
+    /// `A[k]`, indexed [first boundary, boundary k]: from the first boundary to
+    /// boundary k. `A[0]` is the identity on the allowed first boundaries, so
     /// that a chain of one group reduces to the plain case.
     pub a: Vec<Matrix>,
-    /// D[k], indexed [boundary k, last boundary]: from boundary k to the last.
+    /// `D[k]`, indexed [boundary k, last boundary]: from boundary k to the last.
     pub d: Vec<Matrix>,
     pub log_scale: f64,
 }
@@ -376,7 +376,7 @@ impl ChainProducts {
         }
     }
 
-    /// A[n], indexed [first boundary, last boundary]: the chain's weight with
+    /// `A[n]`, indexed [first boundary, last boundary]: the chain's weight with
     /// both ends held, scaled down by exp(log_scale).
     pub fn end_to_end(&self) -> &Matrix {
         &self.a[self.a.len() - 1]
@@ -445,7 +445,7 @@ pub struct EndFactorMessages {
     c: Matrix,
     a_last: Matrix,
     d: Vec<Matrix>,
-    /// L[k] = A[k]^T C, indexed [b_k, b_last]: everything before boundary k
+    /// `L[k] = A[k]^T C`, indexed [b_k, b_last]: everything before boundary k
     /// with the end-to-end factor folded in.
     l: Vec<Matrix>,
     pub log_mass: f64,
@@ -493,7 +493,7 @@ impl EndFactorMessages {
         self.d[k + 1].matmul(&self.l[k].transpose())
     }
 
-    /// diag(L[i] @ D[i].T) without forming the product.
+    /// `diag(L[i] @ D[i].T)` without forming the product.
     pub fn boundary_density(&self, i: usize) -> Vec<f64> {
         (0..self.l[i].rows())
             .map(|r| {
@@ -512,7 +512,7 @@ impl EndFactorMessages {
     /// C couples b_first to b_last, so there is no backward pass over single
     /// boundaries. CONDITIONAL on both ends, though, C is a constant and the
     /// rest is an ordinary chain again: the two ends are drawn together from
-    /// their joint C * A[n], and the interior filled in forwards, each boundary
+    /// their joint `C * A[n]`, and the interior filled in forwards, each boundary
     /// from T_i(b_i, b_(i+1)) D_(i+1)(b_(i+1), b_last) given the one before it
     /// and the far end.
     ///
@@ -520,7 +520,7 @@ impl EndFactorMessages {
     /// step: [`crate::exact_parallel`] draws an area's ends from the rest of
     /// the model and has only its interior filled in here.
     ///
-    /// The last step needs no special case: D[n] is diagonal on the allowed
+    /// The last step needs no special case: `D[n]` is diagonal on the allowed
     /// last boundary, so the final draw can only land on the b_last already
     /// drawn, which is the consistency check falling out of the maths rather
     /// than being imposed on it.

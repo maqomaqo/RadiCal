@@ -44,7 +44,7 @@
 //! message passing above needs each to enter through its own likelihood alone;
 //! the exact answer, one whole solve per scale mixed by evidence, costs 24
 //! solves per outlier model. Instead the scale is WEIGHED from the data with
-//! cheap evidence passes on a coarse grid ([`solve`]'s scale weighing), and
+//! cheap evidence passes on a coarse grid ([`solve::weigh_scales`]), and
 //! each flagged date's offset is then mixed over that posterior. What is
 //! dropped is only the link a common scale makes between the dates; the
 //! sampler samples that too.
@@ -57,7 +57,7 @@
 //! years against OxCal's 29.2.
 //!
 //! PHASE WIDTH depends on the interval quadrature being right to second order
-//! -- see [`tables::interval_integral`], which carries the measurements. The
+//! -- see [`ordered::interval_integral`], which carries the measurements. The
 //! sampler carries the same rule, and the two agree to about 0.6 years on the
 //! chain fixtures.
 //!
