@@ -335,19 +335,45 @@ pub fn convolve_on_grid(values: &[f64], kernel: &[f64]) -> Vec<f64> {
     let stop = (centre + reach + 1).min(kernel.len());
     let trimmed = &kernel[start..stop];
     let offset = centre.min(reach);
-    (0..n)
-        .map(|k| {
-            // full[offset + k] = sum_i values[i] * trimmed[offset + k - i]
-            let j = offset + k;
-            let i_lo = j.saturating_sub(trimmed.len() - 1);
-            let i_hi = j.min(n - 1);
-            let mut total = 0.0;
-            for i in i_lo..=i_hi {
-                total += values[i] * trimmed[j - i];
-            }
-            total.max(0.0)
-        })
-        .collect()
+    // out[k] = full[offset + k] = sum over i of values[i] * trimmed[offset + k - i],
+    // accumulated in increasing i -- the order the plain sum takes -- but
+    // value by value, so the inner loop runs along the output and vectorises.
+    // Threads take disjoint stretches of the output.
+    let threads = std::thread::available_parallelism()
+        .map_or(1, usize::from)
+        .min((n * trimmed.len()).div_ceil(1 << 22))
+        .max(1);
+    let per = n.div_ceil(threads);
+    let mut out = vec![0.0; n];
+    std::thread::scope(|scope| {
+        for (chunk, part) in out.chunks_mut(per).enumerate() {
+            let first = chunk * per;
+            scope.spawn(move || {
+                for (i, &v) in values.iter().enumerate() {
+                    if v == 0.0 {
+                        continue;
+                    }
+                    // Outputs k with 0 <= offset + k - i < trimmed.len().
+                    let k_lo = (i + 1).saturating_sub(offset + 1).max(first);
+                    let k_hi = (i + trimmed.len())
+                        .saturating_sub(offset)
+                        .min(first + part.len());
+                    if k_lo >= k_hi {
+                        continue;
+                    }
+                    let lag0 = offset + k_lo - i;
+                    let taps = &trimmed[lag0..lag0 + (k_hi - k_lo)];
+                    for (o, &t) in part[k_lo - first..k_hi - first].iter_mut().zip(taps) {
+                        *o += v * t;
+                    }
+                }
+            });
+        }
+    });
+    for o in &mut out {
+        *o = o.max(0.0);
+    }
+    out
 }
 
 /// (mixture, outlier component) for one date, both normalised on `grid`.

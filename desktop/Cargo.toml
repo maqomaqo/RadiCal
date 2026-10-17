@@ -31,6 +31,11 @@ cast_precision_loss = "allow"
 lto = "fat"
 codegen-units = 1
 
+[profile.dev.package.radical-core]
+# The exact solvers multiply 2,000 x 2,000 matrices: unoptimised, one corpus
+# case takes minutes rather than seconds. Debug assertions stay on.
+opt-level = 3
+
 [profile.dev.package."*"]
 # Dependencies optimised even in debug builds, so `cargo test` on numeric code
 # is not dominated by unoptimised serde_json parsing of the corpus.

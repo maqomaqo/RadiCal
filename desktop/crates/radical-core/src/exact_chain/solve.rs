@@ -969,12 +969,8 @@ impl ChainSolver<'_> {
             })
             .collect();
         if prior_only {
-            let (likelihood, cumulative) = flat_date_tables(
-                grid,
-                self.measurements,
-                self.element_bounds,
-                masses,
-            )?;
+            let (likelihood, cumulative) =
+                flat_date_tables(grid, self.measurements, self.element_bounds, masses)?;
             tables.likelihood = likelihood;
             tables.cumulative = cumulative;
         }

@@ -17,6 +17,7 @@
 //! a result agrees with Python's to the bit wherever the platform's `exp`,
 //! `ln` and `pow` agree with the ones the corpus was generated with.
 
+pub mod agreement;
 pub mod calibration;
 pub mod curve_mix;
 pub mod curve_registry;
@@ -24,6 +25,7 @@ pub mod curve_view;
 pub mod curves;
 pub mod date_format;
 pub mod exact_chain;
+pub mod exact_parallel;
 pub mod intervals;
 pub mod kde;
 pub mod matrix;
@@ -39,6 +41,7 @@ pub mod special;
 pub mod spline;
 pub mod statistics;
 pub mod stratigraphy;
+pub mod wiggle_match;
 
 use std::fmt;
 
