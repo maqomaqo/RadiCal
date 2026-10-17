@@ -510,6 +510,54 @@ pub fn round_ndigits(x: f64, ndigits: usize) -> f64 {
         .expect("a formatted float parses")
 }
 
+/// `scipy.signal.find_peaks(x, prominence=minimum)`: the indices of the local
+/// maxima whose prominence is at least `minimum`, in order.
+///
+/// A plateau counts as one peak at its middle sample (rounding down), and
+/// neither end of `x` can be one -- SciPy's `_local_maxima_1d`. A peak's
+/// prominence is its height above the higher of the lowest points reached
+/// walking out either side until something higher than it, or the end
+/// (`_peak_prominences` with no window).
+pub fn find_peaks(x: &[f64], minimum: f64) -> Vec<usize> {
+    let n = x.len();
+    let mut peaks = Vec::new();
+    if n < 3 {
+        return peaks;
+    }
+    let mut i = 1;
+    let i_max = n - 1;
+    while i < i_max {
+        if x[i - 1] < x[i] {
+            let mut ahead = i + 1;
+            while ahead < i_max && x[ahead] == x[i] {
+                ahead += 1;
+            }
+            if x[ahead] < x[i] {
+                peaks.push((i + ahead - 1) / 2);
+                i = ahead;
+            }
+        }
+        i += 1;
+    }
+    peaks.retain(|&peak| {
+        let height = x[peak];
+        let mut left_min = height;
+        let mut j = peak as isize;
+        while j >= 0 && x[j as usize] <= height {
+            left_min = left_min.min(x[j as usize]);
+            j -= 1;
+        }
+        let mut right_min = height;
+        let mut j = peak;
+        while j < n && x[j] <= height {
+            right_min = right_min.min(x[j]);
+            j += 1;
+        }
+        minimum <= height - left_min.max(right_min)
+    });
+    peaks
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

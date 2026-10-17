@@ -69,6 +69,40 @@ fn rng() {
                 .map(|v| v.as_u64().unwrap())
                 .collect();
             assert_eq!(got, want, "{name}");
+        } else if name == "interleaved" {
+            let mut rng = Generator::new(i["seed"].as_u64().unwrap());
+            let want = want["values"].as_array().unwrap();
+            let int = |v: &Value| v.as_str().unwrap().parse::<i64>().unwrap();
+            for (k, (op, w)) in i["script"].as_array().unwrap().iter().zip(want).enumerate() {
+                let label = format!("{name}[{k}]");
+                match op[0].as_str().unwrap() {
+                    "random" => same(&label, rng.random(), num(w)),
+                    "integers" => {
+                        assert_eq!(rng.integers(int(&op[1]), int(&op[2])), int(w), "{label}")
+                    }
+                    "normal" => same(&label, rng.normal(num(&op[1]), num(&op[2])), num(w)),
+                    other => panic!("{label}: unknown draw {other}"),
+                }
+            }
+        } else if name == "standard_normal" {
+            let mut rng = Generator::new(i["seed"].as_u64().unwrap());
+            let draws: Vec<f64> = (0..i["count"].as_u64().unwrap())
+                .map(|_| rng.standard_normal())
+                .collect();
+            for (k, w) in nums(&want["first"]).into_iter().enumerate() {
+                same(&format!("{name}[{k}]"), draws[k], w);
+            }
+            let bytes: Vec<u8> = draws.iter().flat_map(|d| d.to_le_bytes()).collect();
+            assert_eq!(
+                radical_corpus::sha256_hex(&bytes),
+                want["sha256_le"].as_str().unwrap(),
+                "{name}: a draw differs"
+            );
+            let tail = draws
+                .iter()
+                .filter(|d| d.abs() > 3.654_152_885_361_008_8)
+                .count() as u64;
+            assert_eq!(tail, want["tail_draws"].as_u64().unwrap(), "{name}");
         } else {
             panic!("{name}: no comparison for this case");
         }
