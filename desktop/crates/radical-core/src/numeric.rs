@@ -383,15 +383,26 @@ pub fn median(a: &[f64]) -> f64 {
     }
 }
 
-/// `numpy.percentile(a, q)` with the default (linear) method: the virtual
-/// index `(n - 1) * q / 100`, and NumPy's `_lerp` between its neighbours --
+/// `numpy.percentile(a, q)` with the default (linear) method: [`quantile`] at
+/// `q / 100`, the division done first as NumPy does it.
+pub fn percentile(a: &[f64], q: f64) -> f64 {
+    quantile(a, q / 100.0)
+}
+
+/// `numpy.quantile(a, q)` with the default (linear) method: the virtual
+/// index `(n - 1) * q`, and NumPy's `_lerp` between its neighbours --
 /// `a + d * t` below the midpoint, `b - d * (1 - t)` from it on, so that the
 /// result is exact at both ends.
-pub fn percentile(a: &[f64], q: f64) -> f64 {
+pub fn quantile(a: &[f64], q: f64) -> f64 {
     let mut sorted = a.to_vec();
     sorted.sort_by(f64::total_cmp);
+    quantile_sorted(&sorted, q)
+}
+
+/// [`quantile`] of an already ascending slice.
+pub fn quantile_sorted(sorted: &[f64], q: f64) -> f64 {
     let n = sorted.len();
-    let virtual_index = (n - 1) as f64 * (q / 100.0);
+    let virtual_index = (n - 1) as f64 * q;
     if virtual_index >= (n - 1) as f64 {
         return sorted[n - 1];
     }
@@ -446,6 +457,57 @@ pub fn convolve_same(a: &[f64], v: &[f64]) -> Vec<f64> {
             total
         })
         .collect()
+}
+
+/// Python's `max(a, b)`: the first unless the second is larger.
+pub fn py_max(a: f64, b: f64) -> f64 {
+    if b > a { b } else { a }
+}
+
+/// Python's `min(a, b)`: the first unless the second is smaller.
+pub fn py_min(a: f64, b: f64) -> f64 {
+    if b < a { b } else { a }
+}
+
+/// `numpy.histogram(values, bins=edges)` with explicit ascending edges: the
+/// count in each `[e_k, e_(k+1))`, the last bin closed on the right too, and
+/// values outside the edges left out -- the cumulative-search form NumPy uses
+/// for edges it is given.
+pub fn histogram(values: &[f64], edges: &[f64]) -> Vec<usize> {
+    let mut sorted = values.to_vec();
+    sorted.sort_by(f64::total_cmp);
+    let n = edges.len();
+    let cumulative: Vec<usize> = edges
+        .iter()
+        .enumerate()
+        .map(|(i, &e)| {
+            if i + 1 < n {
+                searchsorted_left(&sorted, e)
+            } else {
+                searchsorted_right(&sorted, e)
+            }
+        })
+        .collect();
+    cumulative.windows(2).map(|w| w[1] - w[0]).collect()
+}
+
+/// `numpy.unique` of a float array: its distinct values, ascending.
+pub fn unique(values: &[f64]) -> Vec<f64> {
+    let mut sorted = values.to_vec();
+    sorted.sort_by(f64::total_cmp);
+    sorted.dedup_by(|a, b| a == b);
+    sorted
+}
+
+/// Python's `round(x, ndigits)` for a float: the exact binary value rounded
+/// to `ndigits` decimals, ties to even, and read back.
+pub fn round_ndigits(x: f64, ndigits: usize) -> f64 {
+    if !x.is_finite() {
+        return x;
+    }
+    format!("{x:.ndigits$}")
+        .parse()
+        .expect("a formatted float parses")
 }
 
 #[cfg(test)]
@@ -509,6 +571,18 @@ mod tests {
         let sorted: Vec<f64> = t.iter().map(|&i| v[i]).collect();
         assert_eq!(&sorted[..6], [1.0, 1.0, 2.0, 3.0, 4.0, 5.0]);
         assert!(sorted[6].is_nan());
+    }
+
+    #[test]
+    fn histogram_closes_the_last_bin() {
+        let edges = [0.0, 1.0, 2.0, 3.0];
+        assert_eq!(
+            histogram(&[-1.0, 0.0, 0.5, 1.0, 2.999, 3.0, 3.5], &edges),
+            [2, 1, 2]
+        );
+        assert_eq!(round_ndigits(0.0625, 3), 0.062);
+        assert_eq!(round_ndigits(2.675, 2), 2.67);
+        assert_eq!(unique(&[3.0, 1.0, 3.0, 2.0]), [1.0, 2.0, 3.0]);
     }
 
     #[test]

@@ -62,7 +62,7 @@ fn check_spread(c: &mut Closeness, label: &str, got: &Spread, want: &Value) {
     );
 }
 
-fn check_summary(c: &mut Closeness, label: &str, got: Option<Summary>, want: &Value) {
+pub fn check_summary(c: &mut Closeness, label: &str, got: Option<Summary>, want: &Value) {
     if want.is_null() {
         assert!(got.is_none(), "{label}: expected no summary");
         return;

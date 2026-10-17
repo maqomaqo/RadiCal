@@ -31,6 +31,101 @@ pub fn ln_gamma(x: f64) -> f64 {
     0.5 * (2.0 * std::f64::consts::PI).ln() + (x + 0.5) * t.ln() - t + a.ln()
 }
 
+/// cephes' `polevl`: a polynomial with coefficients highest power first,
+/// each step one fused multiply-add as the compiler contracts it in SciPy's
+/// build.
+fn polevl(x: f64, coef: &[f64]) -> f64 {
+    let mut ans = coef[0];
+    for &c in &coef[1..] {
+        ans = ans.mul_add(x, c);
+    }
+    ans
+}
+
+/// cephes' `p1evl`: as [`polevl`] with a leading coefficient of 1 left out.
+fn p1evl(x: f64, coef: &[f64]) -> f64 {
+    let mut ans = x + coef[0];
+    for &c in &coef[1..] {
+        ans = ans.mul_add(x, c);
+    }
+    ans
+}
+
+/// `scipy.special.gammaln(x)` for `x > 0`: cephes' `lgam`, step for step --
+/// a rational approximation after shifting the argument into [2, 3) below
+/// 13, Stirling's series above. Where [`ln_gamma`] is good to about one part
+/// in 10^15, this is the value SciPy returns, which the exact solver's span
+/// correction sums and differences at arguments in the thousands.
+///
+/// SciPy's C++ is compiled with floating-point contraction on, so each
+/// `a * b + c` in it is one fused multiply-add; so it is here. Checked bit for
+/// bit against SciPy 1.18 at 4,000 random arguments either side of 13.
+pub fn gammaln(x: f64) -> f64 {
+    const A: [f64; 5] = [
+        8.116_141_674_705_085e-4,
+        -5.950_619_042_843_014e-4,
+        7.936_503_404_577_169e-4,
+        -2.777_777_777_300_997e-3,
+        8.333_333_333_333_319e-2,
+    ];
+    const B: [f64; 6] = [
+        -1.378_251_525_691_208_6e3,
+        -3.880_163_151_346_378_4e4,
+        -3.316_129_927_388_712e5,
+        -1.162_370_974_927_623e6,
+        -1.721_737_008_208_396_6e6,
+        -8.535_556_642_457_654e5,
+    ];
+    const C: [f64; 6] = [
+        -3.518_157_014_365_234_5e2,
+        -1.706_421_066_518_811_5e4,
+        -2.205_285_905_538_544_5e5,
+        -1.139_334_443_679_825_1e6,
+        -2.532_523_071_775_829_4e6,
+        -2.018_891_414_335_327_7e6,
+    ];
+    const LS2PI: f64 = 0.918_938_533_204_672_7;
+    if x.is_nan() || x <= 0.0 || x.is_infinite() {
+        return if x.is_nan() { x } else { f64::INFINITY };
+    }
+    if x < 13.0 {
+        let mut z = 1.0;
+        let mut p = 0.0;
+        let mut u = x;
+        while u >= 3.0 {
+            p -= 1.0;
+            u = x + p;
+            z *= u;
+        }
+        while u < 2.0 {
+            z /= u;
+            p += 1.0;
+            u = x + p;
+        }
+        if u == 2.0 {
+            return z.ln();
+        }
+        p -= 2.0;
+        let x = x + p;
+        let p = x * polevl(x, &B) / p1evl(x, &C);
+        return z.ln() + p;
+    }
+    let mut q = (x - 0.5).mul_add(x.ln(), -x) + LS2PI;
+    if x > 1.0e8 {
+        return q;
+    }
+    let p = 1.0 / (x * x);
+    if x >= 1000.0 {
+        q += 7.936_507_936_507_937e-4f64
+            .mul_add(p, -2.777_777_777_777_778e-3)
+            .mul_add(p, 0.083_333_333_333_333_33)
+            / x;
+    } else {
+        q += polevl(p, &A) / x;
+    }
+    q
+}
+
 /// `x^a e^-x / Γ(a)`, the factor both incomplete gamma expansions share.
 fn gamma_prefactor(a: f64, x: f64) -> f64 {
     (a * x.ln() - x - ln_gamma(a)).exp()

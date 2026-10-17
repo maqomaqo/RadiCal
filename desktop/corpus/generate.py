@@ -18,7 +18,13 @@ Two kinds of case, kept apart because they are compared differently:
            estimates, curve mixing, expected resolution, same-event tests,
            reservoir combination, date formatting, NumPy's seeded generator,
            the KDE summary, the curve browser's windows and comparisons, and
-           the measured half of the curve registry.
+           the measured half of the curve registry. Then the Phase 2 targets:
+           model trees planned and validated, contexts and relationships
+           migrated, durations and differences from joint draws, the exact
+           chain and parallel solvers piece by piece and whole, agreement
+           indices and wiggle matches. A solve's cases are smaller than an
+           API run (fewer samples and joint draws); the arithmetic is the
+           same.
 
   api/     a whole request through the HTTP API, as the frontend sends it, and
            the JSON that came back. Every .oxcal fixture in backend/tests is
@@ -623,6 +629,821 @@ def units_curve_registry():
     return cases
 
 # ---------------------------------------------------------------------------
+# units/ -- Phase 2: the model tree and the exact solvers
+# ---------------------------------------------------------------------------
+
+def _b(eid, name=None, **kw):
+    return {'id': eid, 'element_type': 'boundary', 'name': name, 'children': [], **kw}
+
+
+def _p(eid, name=None, children=(), **kw):
+    return {'id': eid, 'element_type': 'phase', 'name': name, 'children': list(children), **kw}
+
+
+def _s(eid, name, children, **kw):
+    return {'id': eid, 'element_type': 'sequence', 'name': name, 'children': list(children), **kw}
+
+
+def _h(eid, name='Hiatus'):
+    return {'id': eid, 'element_type': 'hiatus', 'name': name, 'children': []}
+
+
+def _d(eid, element, age, err=25, **kw):
+    return {'id': eid, 'sample_name': eid.upper(), 'age_bp': float(age), 'error_1sigma': float(err),
+            'curve_id': 'intcal20', 'element_id': element, **kw}
+
+
+def _hand_models():
+    """
+    Small models written out by hand, each crossing one thing the planner, the
+    layouts or the solvers treat specially. Ages are IntCal20 ones a few
+    decades apart, so the same models serve the solver cases.
+    """
+    m = {}
+    m['chain'] = (_s('r', 'Site', [_b('b0', 'Start'), _p('p1', 'Lower'), _b('b1', 'Transition'),
+                                   _p('p2', 'Upper'), _b('b2', 'End')]),
+                  [_d('a1', 'p1', 3050), _d('a2', 'p1', 3010, 30), _d('a3', 'p1', 2990),
+                   _d('a4', 'p2', 2900), _d('a5', 'p2', 2880, 35)])
+    m['one-phase'] = (_s('r', 'Site', [_b('b0'), _p('p1', 'Only'), _b('b1')]),
+                      [_d('a1', 'p1', 2450, 30), _d('a2', 'p1', 2480), _d('a3', 'p1', 2400, 35),
+                       _d('a4', 'p1', 2520, 40)])
+    m['hiatus'] = (_s('r', 'Site', [_b('b0'), _p('p1', 'Lower'), _b('b1'), _h('h1'), _b('b2'),
+                                    _p('p2', 'Upper'), _b('b3')]),
+                   [_d('a1', 'p1', 3400), _d('a2', 'p1', 3350), _d('a3', 'p2', 3000),
+                    _d('a4', 'p2', 2950, 30)])
+    m['named-hiatus'] = (_s('r', 'Site', [_b('b0'), _p('p1', 'Lower'), _b('b1'), _h('h1', 'Abandonment'),
+                                          _b('b2'), _p('p2', 'Upper'), _b('b3')]),
+                         [_d('a1', 'p1', 3400), _d('a2', 'p2', 3000)])
+    m['nested'] = (_s('r', 'Site', [_b('b0', 'Start'), _p('p1', 'Early'), _b('b1'),
+                                    _s('s2', 'Inner', [_b('b2'), _p('p2', 'Mid A'), _b('b3'),
+                                                       _p('p3', 'Mid B'), _b('b4')]),
+                                    _b('b5', 'End')]),
+                   [_d('a1', 'p1', 3200), _d('a2', 'p1', 3150), _d('a3', 'p2', 3050),
+                    _d('a4', 'p2', 3020), _d('a5', 'p3', 2950), _d('a6', 'p3', 2900, 30)])
+    m['seq-of-seqs'] = (_s('r', 'Site', [_s('s1', 'First', [_b('b0'), _p('p1'), _b('b1')]),
+                                         _s('s2', 'Second', [_b('b2'), _p('p2'), _b('b3')])]),
+                        [_d('a1', 'p1', 3300), _d('a2', 'p1', 3260), _d('a3', 'p2', 3000),
+                         _d('a4', 'p2', 2980)])
+    m['areas'] = (_s('r', 'Site', [_b('b0', 'Start'), _p('p1', 'Early'), _b('b1', 'Transition'),
+                                   _p('pa', 'Areas', [
+                                       _s('sa', 'Area A', [_b('ba0'), _p('pa1', 'A lower'), _b('ba1'),
+                                                           _p('pa2', 'A upper'), _b('ba2')]),
+                                       _s('sb', 'Area B', [_b('bb0'), _p('pb1', 'B only'), _b('bb1')])]),
+                                   _b('b2', 'End')]),
+                  [_d('a1', 'p1', 3300), _d('a2', 'p1', 3250), _d('a3', 'pa1', 3100),
+                   _d('a4', 'pa1', 3080), _d('a5', 'pa2', 2980), _d('a6', 'pb1', 3050),
+                   _d('a7', 'pb1', 2990, 30)])
+    m['ordered-blocks'] = (_s('r', 'Site', [_b('b0'), _p('p1', 'Lower'), _p('p2', 'Upper'), _b('b1')]),
+                           [_d('a1', 'p1', 3060), _d('a2', 'p1', 3030), _d('a3', 'p2', 2990),
+                            _d('a4', 'p2', 2970, 30), _d('a5', 'p2', 2950)])
+    m['tails'] = (_s('r', 'Site', [_p('p0', 'Before'), _b('b0'), _p('p1', 'Middle'), _b('b1'),
+                                   _p('p2', 'After')]),
+                  [_d('a0', 'p0', 3300), _d('a1', 'p1', 3100), _d('a2', 'p1', 3060),
+                   _d('a3', 'p2', 2900), _d('a4', 'p2', 2870)])
+    m['undated-phase'] = (_s('r', 'Site', [_b('b0'), _p('p1'), _b('b1'), _p('p2', 'Empty'), _b('b2'),
+                                           _p('p3'), _b('b3')]),
+                          [_d('a1', 'p1', 3300), _d('a2', 'p1', 3280), _d('a3', 'p3', 3000),
+                           _d('a4', 'p3', 2970)])
+    m['limits'] = (_s('r', 'Site', [_b('b0'), _p('p1', tpq_age_bp=3500.0), _b('b1'),
+                                    _p('p2', taq_age_bp=2700.0), _b('b2')],
+                      tpq_age_bp=4000.0, taq_age_bp=2500.0),
+                   [_d('a1', 'p1', 3200, tpq_age_bp=3450.0), _d('a2', 'p1', 3150),
+                    _d('a3', 'p2', 2950, taq_age_bp=2800.0), _d('a4', 'p2', 2900)])
+    m['unbounded'] = (_p('r', 'Loose'), [_d('a1', 'r', 3000), _d('a2', 'r', 3040)])
+    m['outliers'] = (_s('r', 'Site', [_b('b0'), _p('p1'), _b('b1')]),
+                     [_d('a1', 'p1', 3000), _d('a2', 'p1', 3030), _d('a3', 'p1', 3400, outlier_prior=0.05),
+                      _d('a4', 'p1', 2990, outlier_prior=0.1, outlier_model='charcoal'),
+                      _d('a5', 'p1', 3010, inbuilt_years=40.0, inbuilt_shape='exponential'),
+                      _d('a6', 'p1', 2980, inbuilt_years=25.0)])
+    m['marine'] = (_s('r', 'Midden', [_b('b0'), _p('p1'), _b('b1')]),
+                   [_d('a1', 'p1', 3400, 30, curve_id='marine20', delta_r=-50.0, delta_r_error=30.0),
+                    _d('a2', 'p1', 3000, 25), _d('a3', 'p1', 3450, 35, curve_id='marine20',
+                                                 delta_r=-50.0, delta_r_error=30.0)])
+    m['wiggle'] = ({'id': 'r', 'element_type': 'phase', 'name': 'Timber', 'children': [
+                        {'id': 'w', 'element_type': 'wiggle_sequence', 'name': None, 'children': [],
+                         'params': {'gap_units': 'rings', 'reference_sample_id': 'a1'}}]},
+                   [_d('a1', 'w', 2480, 20, ring_offset=0.0), _d('a2', 'w', 2520, 20, ring_offset=30.0),
+                    _d('a3', 'w', 2455, 20, ring_offset=10.0, ring_offset_error=3.0),
+                    _d('a4', 'w', 2560, 25, ring_offset=55.0)])
+    m['deposition'] = (_s('r', 'Core', [_b('b0'), {'id': 'dep', 'element_type': 'deposition_sequence',
+                                                   'name': 'Core 1', 'params': {'k': 1.0, 'k_variable': False},
+                                                   'children': [
+                                                       {'id': 'lev', 'element_type': 'interpolated_depth',
+                                                        'name': 'Tephra', 'children': [],
+                                                        'params': {'depth_cm': 47.0}},
+                                                       {'id': 'lev2', 'element_type': 'interpolated_depth',
+                                                        'name': None, 'children': [],
+                                                        'params': {'depth_cm': 12.5}}]},
+                                         _b('b1')]),
+                       [_d('a1', 'dep', 3200, depth_cm=80.0), _d('a2', 'dep', 2900, depth_cm=20.0),
+                        _d('a3', 'dep', 3050, depth_cm=55.0)])
+    return m
+
+
+def _invalid_models():
+    """Trees and dates each validator must refuse, with the reason."""
+    ok = _s('r', 'Site', [_b('b0'), _p('p1'), _b('b1')])
+    return {
+        'empty': (None, []),
+        'boundary-root': (_b('r'), []),
+        'no-id': (_s('r', 'S', [_p('')]), []),
+        'duplicate-id': (_s('r', 'S', [_p('dup'), _p('dup')]), []),
+        'unknown-type': (_s('r', 'S', [{'id': 'x', 'element_type': 'trench', 'children': []}]), []),
+        'boundary-with-children': (_s('r', 'S', [_b('b0', children=[_p('p')])]), []),
+        'wiggle-with-children': (_s('r', 'S', [{'id': 'w', 'element_type': 'wiggle_sequence',
+                                                'children': [_p('p')]}]), []),
+        'empty-wiggle': (_s('r', 'S', [{'id': 'w', 'element_type': 'wiggle_sequence', 'name': 'Rings',
+                                        'children': []}]), []),
+        'deposition-with-phase': (_s('r', 'S', [{'id': 'd', 'element_type': 'deposition_sequence',
+                                                 'children': [_p('p')]}]), []),
+        'empty-deposition': (_s('r', 'S', [{'id': 'd', 'element_type': 'deposition_sequence',
+                                            'children': []}]), []),
+        'one-level': (_s('r', 'S', [{'id': 'd', 'element_type': 'deposition_sequence', 'name': 'Core',
+                                     'children': []}]), [_d('a1', 'd', 3000, depth_cm=10.0)]),
+        'dated-level': (_s('r', 'S', [{'id': 'd', 'element_type': 'deposition_sequence', 'children': [
+                            {'id': 'l', 'element_type': 'interpolated_depth', 'name': 'Lev', 'children': [],
+                             'params': {'depth_cm': 3.0}}]}]),
+                        [_d('a1', 'd', 3000, depth_cm=1.0), _d('a2', 'l', 3000)]),
+        'level-without-depth': (_s('r', 'S', [{'id': 'd', 'element_type': 'deposition_sequence', 'children': [
+                                    {'id': 'l', 'element_type': 'interpolated_depth', 'children': []}]}]),
+                                [_d('a1', 'd', 3000, depth_cm=1.0)]),
+        'boundary-in-phase': (_s('r', 'S', [_p('p', children=[_b('bx')])]), []),
+        'loose-hiatus': (_s('r', 'S', [_b('b0'), _h('h'), _p('p1')]), []),
+        'limits-crossed': (_s('r', 'S', [_p('p', tpq_age_bp=1000.0, taq_age_bp=1500.5)]), []),
+        'unassigned-date': (ok, [_d('a1', None, 3000)]),
+        'unknown-element': (ok, [_d('a1', 'nope', 3000)]),
+        'date-on-boundary': (ok, [_d('a1', 'b0', 3000)]),
+        'nameless-unknown-element': (ok, [{'id': 'a1', 'age_bp': 3000.0, 'error_1sigma': 25.0,
+                                           'element_id': 'zz'}]),
+    }
+
+
+def _invalid_ordinates():
+    def wig(params=None):
+        return _p('r', 'P', [{'id': 'w', 'element_type': 'wiggle_sequence', 'name': 'Rings',
+                              'children': [], 'params': params}])
+
+    def dep(params=None, children=()):
+        return _s('r', 'S', [{'id': 'd', 'element_type': 'deposition_sequence', 'name': 'Core',
+                              'children': list(children), 'params': params}])
+    return {
+        'no-gap': (wig(), [_d('z1', 'w', 3000), _d('a2', 'w', 3000, ring_offset=1.0), _d('b3', 'w', 3000)]),
+        'same-gap': (wig(), [_d('a1', 'w', 3000, ring_offset=5.0), _d('a2', 'w', 3000, ring_offset=5.0)]),
+        'negative-error': (wig(), [_d('a1', 'w', 3000, ring_offset=0.0, ring_offset_error=-1.0)]),
+        'stray-reference': (wig({'reference_sample_id': 'zz'}), [_d('a1', 'w', 3000, ring_offset=0.0)]),
+        'inbuilt': (wig(), [_d('a1', 'w', 3000, ring_offset=0.0, inbuilt_years=20.0)]),
+        'outlier': (wig(), [_d('a1', 'w', 3000, ring_offset=0.0, outlier_prior=0.05),
+                            _d('a0', 'w', 3000, ring_offset=2.0, outlier_prior=0.05)]),
+        'no-depth': (dep(), [_d('a1', 'd', 3000)]),
+        'same-depth': (dep(children=[{'id': 'l', 'element_type': 'interpolated_depth', 'children': [],
+                                      'params': {'depth_cm': 10.0}}]), [_d('a1', 'd', 3000, depth_cm=10.0)]),
+        'bad-k': (dep({'k': -1.5}), [_d('a1', 'd', 3000, depth_cm=1.0), _d('a2', 'd', 2900, depth_cm=0.5)]),
+        'empty-k-range': (dep({'log_k_min': 1.0, 'log_k_max': 1.0}),
+                          [_d('a1', 'd', 3000, depth_cm=1.0), _d('a2', 'd', 2900, depth_cm=0.5)]),
+        'fine': (dep({'k': 2.0}), [_d('a1', 'd', 3000, depth_cm=1.0), _d('a2', 'd', 2900, depth_cm=0.5)]),
+    }
+
+
+def _oxcal_models():
+    """Every .oxcal fixture as the importer reads it, ids made stable: (name,
+    tree, dates, resolution)."""
+    from app.services.date_import import parse_upload
+    out = []
+    for path in _oxcal_fixtures():
+        with open(path, 'rb') as fh:
+            content = fh.read()
+        result = parse_upload(os.path.basename(path), content, 'corpus').as_dict()
+        if not result.get('ok'):
+            continue
+        stable = Stable()
+        tree = stable(result['model_tree'])
+        dates = stable([{k: v for k, v in d.items() if k != 'phase_name'} for d in result['dates']])
+        out.append((os.path.relpath(path, FIXTURES), tree, dates, result.get('resolution')))
+    return out
+
+
+def _all_models():
+    models = [(f'hand/{k}', tree, dates) for k, (tree, dates) in _hand_models().items()]
+    models += [(f'oxcal/{name}', tree, dates) for name, tree, dates, _res in _oxcal_models()]
+    return models
+
+
+def _plan_dict(plan) -> Dict[str, Any]:
+    return {
+        'ordering': [[[list(t) for t in older], [list(t) for t in younger]]
+                     for older, younger in plan.ordering],
+        'span_groups': [{'older': g.older_boundary_id, 'younger': g.younger_boundary_id,
+                         'dates': g.date_ids, 'contained': g.contained_ids}
+                        for g in plan.span_groups],
+        'marginalized': sorted(plan.marginalized_boundaries),
+        'sampled': plan.sampled_boundaries,
+        'boundary_names': [[k, v] for k, v in plan.boundary_names.items()],
+        'wiggle_groups': [{'element_id': g.element_id, 'name': g.name,
+                           'members': [list(m) for m in g.members], 'gap_units': g.gap_units,
+                           'reference_sample_id': g.reference_sample_id}
+                          for g in plan.wiggle_groups],
+        'deposition_groups': [{'element_id': g.element_id, 'name': g.name,
+                               'levels': [list(level) for level in g.levels], 'k': g.k,
+                               'k_variable': g.k_variable, 'log_k_min': g.log_k_min,
+                               'log_k_max': g.log_k_max, 'depth_units': g.depth_units,
+                               'level_names': g.level_names}
+                              for g in plan.deposition_groups],
+    }
+
+
+def units_model_tree():
+    from app.services import model_tree as mt
+    cases = []
+    for name, tree, dates in _all_models():
+        def run(tree=tree, dates=dates):
+            mt.validate_tree(tree, dates)
+            mt.validate_ordinates(tree, dates)
+            elements = list(mt.iter_elements(tree))
+            bounds = mt.inherited_bounds(tree)
+            wiggle = mt.standalone_wiggle_match(tree, dates)
+            ids = [d['id'] for d in dates]
+            return {
+                'plan': _plan_dict(mt.plan_model(tree, dates)),
+                'elements': [e['id'] for e in elements],
+                'labels': [mt.element_label(e) for e in elements],
+                'params': [mt.element_params(e) for e in elements],
+                'inherited_bounds': [list(bounds[e['id']]) for e in elements],
+                'standalone_wiggle_match': None if wiggle is None else wiggle['id'],
+                'flattened': [{**{k: v for k, v in row.items() if k not in ('sample', 'posterior')},
+                               'sample': None if row['sample'] is None else ids.index(row['sample']['id'])}
+                              for row in mt.flatten_structure(tree, dates)],
+            }
+        cases.append(capture(f'model/{name}', {'tree': tree, 'dates': dates}, run))
+    for name, (tree, dates) in _invalid_models().items():
+        cases.append(capture(f'validate_tree/{name}', {'tree': tree, 'dates': dates},
+                             lambda t=tree, d=dates: mt.validate_tree(t, d)))
+    for name, (tree, dates) in _invalid_ordinates().items():
+        cases.append(capture(f'validate_ordinates/{name}', {'tree': tree, 'dates': dates},
+                             lambda t=tree, d=dates: mt.validate_ordinates(t, d)))
+    # A flattened reading with dates in no element, and one found by group_id.
+    tree, dates = _hand_models()['chain']
+    loose = dates + [{**_d('x1', None, 3000), 'group_id': 'p2'}, _d('x2', 'gone', 2000)]
+    ids = [d['id'] for d in loose]
+    cases.append(capture('flatten/orphans', {'tree': tree, 'dates': loose}, lambda: {
+        'flattened': [{**{k: v for k, v in row.items() if k not in ('sample', 'posterior')},
+                       'sample': None if row['sample'] is None else ids.index(row['sample']['id'])}
+                      for row in mt.flatten_structure(tree, loose)]}))
+    return cases
+
+
+def units_stratigraphy():
+    from app.services import model_tree as mt
+    from app.services import stratigraphy as st
+    cases = []
+    groups = [{'id': 'g1', 'name': 'Upper', 'tpq_age_bp': 3000.0, 'taq_age_bp': None},
+              {'id': 'g2', 'name': 'Lower', 'tpq_age_bp': None, 'taq_age_bp': 2000.0},
+              {'id': 'g3', 'name': None, 'tpq_age_bp': None, 'taq_age_bp': None},
+              {'id': 'g4', 'name': 'Empty', 'tpq_age_bp': None, 'taq_age_bp': None}]
+    dates = [{'id': 'a', 'group_id': 'g1'}, {'id': 'b', 'group_id': 'g2'}, {'id': 'c', 'group_id': 'g2'},
+             {'id': 'd', 'group_id': 'g3'}, {'id': 'e', 'group_id': 'g9'}, {'id': 'f', 'group_id': None}]
+    relationship_sets = {
+        'none': [],
+        'chain': [{'from_sample_id': 'g1', 'to_sample_id': 'g2', 'relationship': 'above',
+                   'from_type': 'group', 'to_type': 'group'},
+                  {'from_sample_id': 'g2', 'to_sample_id': 'd', 'relationship': 'above',
+                   'from_type': 'group', 'to_type': 'sample'}],
+        'below-and-equal': [{'from_sample_id': 'a', 'to_sample_id': 'b', 'relationship': 'below'},
+                            {'from_sample_id': 'c', 'to_sample_id': 'b', 'relationship': 'equal'},
+                            {'from_sample_id': 'g2', 'to_sample_id': 'g2', 'relationship': 'above',
+                             'from_type': 'group', 'to_type': 'group'},
+                            {'from_sample_id': 'g4', 'to_sample_id': 'a', 'relationship': 'above',
+                             'from_type': 'group', 'to_type': None}],
+        'cycle': [{'from_sample_id': 'a', 'to_sample_id': 'b', 'relationship': 'above'},
+                  {'from_sample_id': 'b', 'to_sample_id': 'c', 'relationship': 'above'},
+                  {'from_sample_id': 'c', 'to_sample_id': 'a', 'relationship': 'above'},
+                  {'from_sample_id': 'd', 'to_sample_id': 'a', 'relationship': 'above'}],
+        'partial': [{'from_sample_id': 'g3', 'to_sample_id': 'g1', 'relationship': 'above',
+                     'from_type': 'group', 'to_type': 'group'}],
+    }
+    cases.append(capture('group_members', {'dates': dates, 'groups': groups},
+                         lambda: {'members': [[k, v] for k, v in st.group_members(dates, groups).items()]}))
+    for name, rels in relationship_sets.items():
+        def run(rels=rels):
+            older, equal = st.expand_relationships(dates, groups, rels)
+            counter = iter(range(1000))
+            root, linearized, boundaries = mt.migrate_from_relationships(
+                dates, groups, rels, lambda: f'gen{next(counter)}')
+            return {'older_younger': sorted(list(e) for e in older),
+                    'equal': sorted(list(e) for e in equal),
+                    'cycle': st.find_cycle(older),
+                    'migrated': {'root': root, 'linearized': linearized,
+                                 'group_boundaries': [[k, list(v)] for k, v in boundaries.items()]}}
+        cases.append(capture(f'relationships/{name}', {'dates': dates, 'groups': groups,
+                                                       'relationships': rels}, run))
+    pairs = [[None, None, None], [3000.0, None, None], [None, 2500.0, [None, None]],
+             [3000.0, 2000.0, [3100.0, 2100.0]], [3000.0, 2000.0, [2900.0, 1900.0]],
+             [None, None, [2900.0, 1900.0]], [3000.0, None, [None, 2500.0]]]
+    cases.append(capture('effective_bounds', {'cases': pairs}, lambda: {'bounds': [
+        list(st.effective_bounds({'tpq_age_bp': tpq, 'taq_age_bp': taq},
+                                 None if g is None else {'tpq_age_bp': g[0], 'taq_age_bp': g[1]}))
+        for tpq, taq, g in pairs]}))
+    return cases
+
+
+# Joint draws the interval cases are evaluated on. Fewer than a solve's
+# 20,000, to keep the corpus small; the arithmetic is the same at any count.
+INTERVAL_DRAWS = 1000
+
+
+def _joint_draws(tree, dates, count=INTERVAL_DRAWS):
+    """
+    ({parameter id: draws}, grid step) for a model: the exact solver's own
+    joint draws where it can take the model, else draws made up for it --
+    ordered along each deposition sequence, so an age-depth model reads as one.
+    """
+    from app.api.analysis import _exact_layout
+    from app.services import exact_chain, exact_parallel
+    layout, _reason = _exact_layout(tree, dates)
+    if layout is not None:
+        solve = (exact_parallel.solve if isinstance(layout, exact_parallel.Stages)
+                 else exact_chain.solve)
+        solved = solve(dates, tree, layout, num_samples=10, interval_draws=count)
+        draws = {**solved['joint_boundaries'], **solved['joint_draws']}
+        return {k: [float(v) for v in values] for k, values in draws.items()}, solved['grid']['step']
+    from app.services import model_tree as mt
+    rng = np.random.default_rng(17)
+    draws = {}
+    for m in dates:
+        draws[m['id']] = list(np.round(rng.normal(3000.0 - 10.0 * len(draws), 30.0, count), 2))
+    for group in mt.plan_model(tree, dates).deposition_groups:
+        ids = group.parameter_ids
+        stacked = np.sort(np.round(rng.normal(3000.0, 120.0, (len(ids), count)), 2), axis=0)[::-1]
+        for pid, row in zip(ids, stacked):
+            draws[pid] = [float(v) for v in row]
+    return draws, 0.0
+
+
+def _block_dict(block):
+    return plain(block)
+
+
+def units_intervals():
+    from app.services import intervals as iv
+    from app.services import kde
+    cases = []
+    models = _hand_models()
+    for name, (tree, dates) in models.items():
+        draws, grid_step = _joint_draws(tree, dates)
+        steps = [None, 1.0] if name == 'chain' else [None]
+        for step in steps:
+            def run(tree=tree, dates=dates, draws=draws, step=step, grid_step=grid_step):
+                arrays = {k: np.asarray(v) for k, v in draws.items()}
+                differences, note = iv.plan_phase_differences(tree, dates)
+                return {
+                    'durations_plan': [{**spec, 'boundaries': list(spec['boundaries']),
+                                        'dates': list(spec['dates'])}
+                                       for spec in iv.plan_durations(tree, dates)],
+                    'differences_plan': differences, 'note': note,
+                    'activity_plan': iv.plan_phase_activity(tree, dates),
+                    'age_depth_plan': iv.plan_age_depth(tree, dates),
+                    'report': iv.report(tree, dates, arrays, independent=True, step=step),
+                    'phases': kde.report_phases(tree, dates, arrays, grid_step=grid_step),
+                }
+            cases.append(capture(f'report/{name}/step={step}',
+                                 {'tree': tree, 'dates': dates, 'draws': draws, 'step': step,
+                                  'grid_step': grid_step}, run))
+    # Without durations the age-depth section alone.
+    tree, dates = models['deposition']
+    draws, _step = _joint_draws(tree, dates)
+    cases.append(capture('report/deposition/no-durations',
+                         {'tree': tree, 'dates': dates, 'draws': draws, 'step': None},
+                         lambda: iv.report(tree, dates, {k: np.asarray(v) for k, v in draws.items()},
+                                           independent=False, durations=False)))
+
+    rng = np.random.default_rng(23)
+    arrays = {
+        'normal': np.round(rng.normal(40.0, 12.0, 500), 3),
+        'against-zero': np.abs(np.round(rng.normal(0.0, 20.0, 400), 1)),
+        'heavy-tail': np.round(np.concatenate([rng.normal(100.0, 5.0, 300), [900.0, -700.0]]), 2),
+        'wide': np.round(rng.normal(0.0, 3000.0, 800), 1),
+        'one': np.array([12.5]),
+        'two': np.array([3.0, 3.0]),
+        'constant': np.full(50, 7.0),
+        'with-nan': np.array([1.0, np.nan, 5.0, np.inf, 9.0, 2.0, 4.0]),
+        'all-nan': np.array([np.nan, np.nan]),
+        'grid-ties': np.repeat(np.arange(0.0, 60.0, 2.5), 7),
+    }
+    for label, values in arrays.items():
+        for base in (None, 1.0, 0.25, 20.0):
+            cases.append(capture(f'summarise/{label}/base={base}',
+                                 {'values': values, 'base': base},
+                                 lambda v=values, b=base: {'summary': iv.summarise(v, b),
+                                                           'step': iv._step_for(v[np.isfinite(v)], b)
+                                                           if np.isfinite(v).any() else None}))
+    overlaps = [0.0, 0.0455, 0.04550026389635842, 0.2, 0.3173, 0.31731050786291415, 0.5,
+                0.6826894921370859, 0.9, 0.9544997361036416, 0.99, 1.0]
+    cases.append(capture('severity', {'overlaps': overlaps},
+                         lambda: {'words': [iv.severity(o) for o in overlaps]}))
+    named = [{'id': f'd{i}', 'name': f'D-{i}'} for i in range(5)]
+    draws = {d['id']: np.round(rng.normal(3000.0 + 15.0 * i, 25.0, 300), 1) for i, d in enumerate(named)}
+    cases.append(capture('report_dates', {'dates': named, 'draws': draws},
+                         lambda: iv.report_dates(named, draws)))
+    many = [{'id': f'd{i}', 'name': f'D-{i}'} for i in range(26)]
+    cases.append(capture('plan_date_differences/many', {'dates': many},
+                         lambda: dict(zip(('specs', 'note'), iv.plan_date_differences(many)))))
+    band = np.round(rng.normal(2500.0, 40.0, 999), 2)
+    cases.append(capture('calendar_band', {'values': band}, lambda: iv.calendar_band(band)))
+    return cases
+
+
+def _posterior(summary: Dict) -> Dict:
+    """A solver's summary as stored: its HPD ranges as plain lists."""
+    return {k: (list(v) if isinstance(v, tuple) else v) for k, v in summary.items()}
+
+
+def _branching_models():
+    """Shapes the chain solver must decline, each for its own reason."""
+    m = {}
+    m['no-boundaries'] = (_s('r', 'S', [_p('p1'), _p('p2')]), [_d('a1', 'p1', 3000), _d('a2', 'p2', 2900)])
+    m['one-boundary'] = (_s('r', 'S', [_b('b0'), _p('p1')]), [_d('a1', 'p1', 3000)])
+    m['branches'] = (_s('r', 'S', [_b('b0'), _p('pa', 'Areas', [
+                         _s('sa', 'A', [_b('ba0'), _p('pa1'), _b('ba1')]),
+                         _s('sb', 'B', [_b('bb0'), _p('pb1'), _b('bb1')])]), _b('b1')]),
+                     [_d('a1', 'pa1', 3000), _d('a2', 'pb1', 2950)])
+    m['loose-date'] = (_p('r', 'Outer', [_s('s', 'S', [_b('b0'), _p('p1'), _b('b1')]), _p('p2')]),
+                       [_d('a1', 'p1', 3000), _d('a2', 'p2', 3100)])
+    m['flagged-tail'] = (_s('r', 'S', [_p('p0'), _b('b0'), _p('p1'), _b('b1')]),
+                         [_d('a0', 'p0', 3200, outlier_prior=0.05), _d('a1', 'p1', 3000)])
+    m['side-by-side-sequences'] = (_s('r', 'S', [_b('b0'), _p('p', 'Both', [
+                                       _s('x', 'X', [_p('x1'), _p('x2')]),
+                                       _s('y', 'Y', [_p('y1'), _p('y2')])]), _b('b1')]),
+                                   [_d('a1', 'x1', 3050), _d('a2', 'x2', 3000), _d('a3', 'y1', 3040),
+                                    _d('a4', 'y2', 2990)])
+    m['areas-unbounded'] = (_p('r', 'Site', [_s('sa', 'A', [_b('ba0'), _p('pa1'), _b('ba1')]),
+                                             _s('sb', 'B', [_b('bb0'), _p('pb1'), _b('bb1')])]),
+                            [_d('a1', 'pa1', 3000), _d('a2', 'pb1', 2950)])
+    m['areas-in-a-row'] = (_s('r', 'Site', [_b('b0'), _p('p1'), _p('pa', 'Areas', [
+                               _s('sa', 'A', [_b('ba0'), _p('pa1'), _b('ba1')])]), _b('b1')]),
+                           [_d('a1', 'p1', 3100), _d('a2', 'pa1', 3000)])
+    m['area-not-a-line'] = (_s('r', 'Site', [_b('b0'), _p('pa', 'Areas', [
+                                _s('sa', 'A', [_p('pa1'), _p('pa2')])]), _b('b1')]),
+                            [_d('a1', 'pa1', 3000), _d('a2', 'pa2', 2950)])
+    m['area-with-boundary-phase'] = (_s('r', 'Site', [_b('b0'), _p('pa', 'Areas', [
+                                         _s('sa', 'A', [_b('ba0'), _p('pa1'), _b('ba1')]),
+                                         {'id': 'w', 'element_type': 'wiggle_sequence', 'children': []}]),
+                                         _b('b1')]),
+                                     [_d('a1', 'pa1', 3000)])
+    return m
+
+
+def _parallel_models():
+    """Areas side by side, as exact_parallel takes them."""
+    m = {'areas': _hand_models()['areas']}
+    m['three-areas'] = (_s('r', 'Site', [_b('b0', 'Start'), _p('pa', 'Trenches', [
+                            _s('sa', 'T1', [_b('ba0'), _p('pa1'), _b('ba1')]),
+                            _s('sb', 'T2', [_b('bb0'), _p('pb1'), _b('bb1'), _p('pb2'), _b('bb2')]),
+                            _s('sc', 'T3', [_b('bc0'), _p('pc1'), _b('bc1')])]),
+                                         _b('b1', 'End')]),
+                        [_d('a1', 'pa1', 2500), _d('a2', 'pa1', 2470), _d('a3', 'pb1', 2520),
+                         _d('a4', 'pb2', 2440), _d('a5', 'pc1', 2480, 30), _d('a6', 'pc1', 2455)])
+    m['areas-with-own-dates'] = (_s('r', 'Site', [_b('b0'), _p('pa', 'Areas', [
+                                     _s('sa', 'A', [_b('ba0'), _p('pa1'), _b('ba1')]),
+                                     _s('sb', 'B', [_b('bb0'), _p('pb1'), _b('bb1')])]),
+                                                  _b('b1'), _p('p2', 'Late'), _b('b2')]),
+                                 [_d('a0', 'pa', 3060), _d('a1', 'pa1', 3080), _d('a2', 'pa1', 3040),
+                                  _d('a3', 'pb1', 3030), _d('a4', 'p2', 2900), _d('a5', 'p2', 2930)])
+    m['areas-and-tail'] = (_s('r', 'Site', [_p('p0', 'Before'), _b('b0'), _p('pa', 'Areas', [
+                               _s('sa', 'A', [_b('ba0'), _p('pa1'), _b('ba1')]),
+                               _s('sb', 'B', [_b('bb0'), _p('pb1'), _b('bb1')])]), _b('b1')]),
+                           [_d('a0', 'p0', 3250), _d('a1', 'pa1', 3050), _d('a2', 'pb1', 3000),
+                            _d('a3', 'pb1', 2980)])
+    return m
+
+
+def _chain_dict(chain) -> Dict[str, Any]:
+    return {'boundary_ids': chain.boundary_ids, 'groups': chain.groups,
+            'boundary_names': [[k, v] for k, v in chain.boundary_names.items()],
+            'older_tail': chain.older_tail, 'younger_tail': chain.younger_tail,
+            'blocks': chain.blocks, 'older_tail_blocks': chain.older_tail_blocks,
+            'younger_tail_blocks': chain.younger_tail_blocks}
+
+
+# Smaller than an API run: the arithmetic is the same at any count.
+SOLVE_SAMPLES = 40
+SOLVE_DRAWS = 400
+
+
+def _solution_dict(solved: Dict) -> Dict[str, Any]:
+    out = {
+        'measurements': [[k, _posterior(v)] for k, v in solved['measurements'].items()],
+        'boundaries': [[k, {'name': v['name'], 'posterior': _posterior(v['posterior'])}]
+                       for k, v in solved['boundaries'].items()],
+        'joint_draws': solved['joint_draws'],
+        'joint_boundaries': solved['joint_boundaries'],
+        'intervals': solved.get('intervals'),
+        'log_evidence': solved['log_evidence'],
+        'uniform_span_prior': solved['uniform_span_prior'],
+        'grid': solved['grid'],
+        'edge_mass': solved['edge_mass'],
+        'outlier_scale': solved.get('outlier_scale'),
+        'joint_scales': solved.get('joint_scales'),
+        'evidence': solved.get('evidence'),
+    }
+    return out
+
+
+def units_exact_chain():
+    from app.services import exact_chain as ec
+    from app.services.model_tree import inherited_bounds
+    from scipy.special import gammaln
+    cases = []
+    xs = [0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 7.3, 12.9, 13.0, 14.0, 26.0, 100.0, 999.5, 1000.0, 1001.0,
+          2000.5, 3999.0, 5e8, 1e9, 0.1, 1e-5]
+    xs += [float(x) for x in np.random.default_rng(31).uniform(0.001, 3000.0, 200)]
+    cases.append(capture('gammaln', {'x': xs}, lambda: {'gammaln': [float(gammaln(x)) for x in xs]}))
+
+    allowances = [(None, None), (40.0, None), (40.0, 'uniform'), (25.3, 'exponential'), (0.4, 'uniform'),
+                  (3.0, 'exponential'), (12.0, 'sinusoidal')]
+    for step in (0.25, 1.0, 5.0):
+        for years, shape in allowances:
+            m = {'id': 'x', 'sample_name': 'X', 'inbuilt_years': years, 'inbuilt_shape': shape}
+            cases.append(capture(f'inbuilt_kernel/{step}/{years}/{shape}',
+                                 {'step': step, 'measurement': m},
+                                 lambda m=m, step=step: {'reach': ec.inbuilt_reach(m),
+                                                         'kernel': ec.inbuilt_kernel(step, m)}))
+    for years, shape in [(30.0, 'uniform'), (15.0, 'exponential')]:
+        m = _d('e', None, 2450, 30, inbuilt_years=years, inbuilt_shape=shape)
+        grid = 2300.0 + 2.5 * np.arange(160)
+        cases.append(capture(f'event_likelihood/{shape}', {'measurement': m, 'grid': grid},
+                             lambda m=m, grid=grid: {'likelihood': ec.event_likelihood(grid, m)}))
+
+    for model in ec.OUTLIER_MODELS:
+        cases.append(capture(f'scale_nodes/{model}', {'model': model},
+                             lambda model=model: {'nodes': ec.scale_nodes(model)}))
+        for step in (25.0, 100.0):
+            for log_scale in (0.0, 1.3, 3.0, 4.0):
+                cases.append(capture(f'kernel_at_scale/{model}/{step}/{log_scale}',
+                                     {'model': model, 'step': step, 'half_width': 20000.0,
+                                      'log_scale': log_scale},
+                                     lambda model=model, step=step, s=log_scale:
+                                         {'kernel': ec._outlier_kernel_at_scale(step, 20000.0, model, s)}))
+            cases.append(capture(f'outlier_kernel/{model}/{step}',
+                                 {'model': model, 'step': step, 'half_width': 20000.0},
+                                 lambda model=model, step=step:
+                                     {'kernel': ec._outlier_kernel(step, 20000.0, model)}))
+    rng = np.random.default_rng(7)
+    values = np.exp(-0.5 * ((np.arange(300) - 140.0) / 12.0) ** 2) + 0.3 * np.exp(-0.5 * ((np.arange(300) - 60.0) / 5.0) ** 2)
+    for label, kernel in [('short', np.array([0.2, 0.5, 0.3])),
+                          ('long', ec._outlier_kernel_at_scale(1.0, 400.0, 'general', 1.5)),
+                          ('one-sided', ec._outlier_kernel_at_scale(1.0, 400.0, 'charcoal', 1.2)),
+                          ('random', rng.uniform(0.0, 1.0, 51))]:
+        cases.append(capture(f'convolve_on_grid/{label}', {'values': values, 'kernel': kernel},
+                             lambda kernel=kernel: {'convolved': ec.convolve_on_grid(values, kernel)}))
+    for step in (0.3, 1.0, 1.015, 2.6, 5.0, 7.5, 13.0):
+        cases.append(capture(f'reporting_aligned_step/{step}', {'step': step},
+                             lambda step=step: {'step': ec._reporting_aligned_step(step)}))
+    cases.append(capture('point_budget', {'groups': list(range(1, 25))},
+                         lambda: {'budget': [ec._point_budget(n) for n in range(1, 25)]}))
+    cases.append(capture('log_interior_placements', {'spans': list(range(0, 60)), 'interior': [1, 2, 3, 5]},
+                         lambda: {'placements': [ec.log_interior_placements(np.arange(60.0), k)
+                                                 for k in (1, 2, 3, 5)]}))
+    spans = list(np.linspace(-20.0, 400.0, 43))
+    limit_sets = [((np.inf, -np.inf), (np.inf, -np.inf)), ((3500.0, 3100.0), (3000.0, 2600.0)),
+                  ((3500.0, -np.inf), (np.inf, 2600.0)), ((np.inf, 3100.0), (3000.0, -np.inf)),
+                  ((3300.0, 3299.0), (3000.0, 2999.5))]
+    cases.append(capture('log_limits_factor_of_span', {'spans': spans, 'limits': limit_sets},
+                         lambda: {'factor': [ec.log_limits_factor_of_span(np.array(spans), o, y)
+                                             for o, y in limit_sets]}))
+    grid = 2800.0 + 7.5 * np.arange(24)
+    for n, limits in [(2, None), (3, None), (5, None), (2, limit_sets[1]), (4, limit_sets[2])]:
+        o, y = limits if limits else (None, None)
+        cases.append(capture(f'span_prior_correction/{n}/{limits is not None}',
+                             {'grid': grid, 'boundaries': n, 'limits': limits},
+                             lambda n=n, o=o, y=y: {'correction': ec._span_prior_correction(grid, n, True, o, y)}))
+    cases.append(capture('boundary_pair_term', {'grid': grid[:12], 'dates': [0, 1, 3]},
+                         lambda: {'term': [ec._boundary_pair_term(grid[:12], k) for k in (0, 1, 3)]}))
+
+    # Tables on one grid, and what is read off them.
+    models = _hand_models()
+    tree, dates = models['outliers']
+    bounds = inherited_bounds(tree)
+    grid = 2700.0 + 2.5 * np.arange(400)
+    def tables(scale_weights=None):
+        lik, cum, parts = ec.date_tables(grid, dates, bounds, scale_weights)
+        return {'likelihood': lik, 'cumulative': cum,
+                'outlier_parts': {k: {'inlier': v[0], 'broad': v[1], 'prior': v[2]} for k, v in parts.items()}}
+    cases.append(capture('date_tables/outliers', {'tree': tree, 'dates': dates, 'grid': grid}, tables))
+    weights = {'general': np.linspace(1.0, 2.0, 24) / np.linspace(1.0, 2.0, 24).sum(),
+               'charcoal': np.r_[np.zeros(23), 1.0]}
+    cases.append(capture('date_tables/outliers/weighed', {'tree': tree, 'dates': dates, 'grid': grid,
+                                                          'scale_weights': weights},
+                         lambda: tables(weights)))
+    tree, dates = models['limits']
+    bounds = inherited_bounds(tree)
+    cases.append(capture('flat_date_tables/limits', {'tree': tree, 'dates': dates, 'grid': grid},
+                         lambda: dict(zip(('likelihood', 'cumulative'),
+                                          ec.flat_date_tables(grid, dates, bounds)))))
+    for name, (tree, dates) in models.items():
+        if name in ('wiggle', 'deposition'):
+            continue
+        bounds = inherited_bounds(tree)
+        cases.append(capture(f'grid/{name}', {'tree': tree, 'dates': dates}, lambda dates=dates, bounds=bounds: {
+            'extent': ec._dates_extent(dates, bounds),
+            'grid': {str(n): ec._build_grid(dates, bounds, n)[[0, 1, -1]] for n in (1, 3, 9, 25)}}))
+    lik = np.exp(-0.5 * ((grid - 3000.0) / 30.0) ** 2)
+    lik /= lik.sum() * 2.5
+    cum = np.cumsum(lik) * 2.5
+    cases.append(capture('interval_integral', {'grid': grid[:40], 'likelihood': lik[100:140],
+                                               'cumulative': cum[100:140]},
+                         lambda: {'log_date_factor': ec._log_date_factor(cum[100:140], lik[100:140], 2.5)}))
+    on_y, on_o = rng.uniform(0.0, 1.0, 50), rng.uniform(0.0, 1.0, 50)
+    cases.append(capture('straddling', {'rows': on_y, 'cols': on_o},
+                         lambda: {'straddling': ec._straddling(on_y, on_o)}))
+    density = lik * (1.0 + 0.4 * np.sin(grid / 17.0))
+    for step in (5.0, 1.0, 20.0):
+        cases.append(capture(f'summarize/{step}', {'grid': grid, 'density': density, 'step': step, 'seed': 3,
+                                                   'samples': 25},
+                             lambda step=step: _posterior(ec._summarize(grid, density, np.random.default_rng(3),
+                                                                        25, step))))
+    cases.append(capture('edge_mass', {'grid': grid, 'densities': [density, lik[::-1]]},
+                         lambda: {'edge_mass': ec._edge_mass([density, lik[::-1]], grid)}))
+    weights = np.where(np.arange(30) % 7 == 0, 0.0, rng.uniform(0.0, 3.0, 30))
+    cases.append(capture('sample_indices', {'weights': weights, 'seed': 11, 'count': 60},
+                         lambda: {'indices': ec._sample_indices(np.random.default_rng(11), weights, 60)}))
+    rows = rng.uniform(0.0, 1.0, (6, 30)) * (rng.uniform(0.0, 1.0, (6, 30)) > 0.3)
+    keys = rng.integers(0, 6, 80)
+    cases.append(capture('draw_from_rows', {'rows': rows, 'keys': keys, 'seed': 13},
+                         lambda: {'picked': ec._draw_from_rows(np.random.default_rng(13), lambda k: rows[k],
+                                                               keys)}))
+    lows = rng.integers(0, 200, 60)
+    highs = lows + rng.integers(0, 120, 60)
+    cases.append(capture('draw_in', {'likelihood': lik, 'cumulative': cum, 'low': lows, 'high': highs,
+                                     'step': 2.5, 'seed': 17},
+                         lambda: {'half': ec._draw_in(np.random.default_rng(17), cum, lik, lows, highs, 2.5, True),
+                                  'whole': ec._draw_in(np.random.default_rng(17), cum, lik, lows, highs, 2.5, False)}))
+
+    # Layouts: every model, as the API asks.
+    for name, (tree, dates) in list(models.items()) + list(_branching_models().items()):
+        def lay(tree=tree, dates=dates):
+            chain, reason = ec.layout_with_reason(tree, dates, allow_tails=True)
+            strict, strict_reason = ec.layout_with_reason(tree, dates)
+            return {'chain': None if chain is None else _chain_dict(chain), 'reason': reason,
+                    'strict_reason': strict_reason,
+                    'strict': None if strict is None else _chain_dict(strict)}
+        cases.append(capture(f'layout/{name}', {'tree': tree, 'dates': dates}, lay))
+    for name, tree, dates, _res in _oxcal_models():
+        def lay(tree=tree, dates=dates):
+            chain, reason = ec.layout_with_reason(tree, dates, allow_tails=True)
+            return {'chain': None if chain is None else _chain_dict(chain), 'reason': reason}
+        cases.append(capture(f'layout/oxcal/{name}', {'tree': tree, 'dates': dates}, lay))
+
+    # Whole solves.
+    for name, (tree, dates) in models.items():
+        chain, _reason = ec.layout_with_reason(tree, dates, allow_tails=True)
+        if chain is None:
+            continue
+        variants = [{}]
+        if name == 'chain':
+            # Reported coarser than the solver's grid: finer, every bin inside
+            # one grid cell has the same mass exactly, and which of those tied
+            # bins an HPD region takes is decided by rounding.
+            variants += [{'uniform_span_prior': False}, {'resolution': 10.0}]
+        for extra in variants:
+            options = dict(num_samples=SOLVE_SAMPLES, interval_draws=SOLVE_DRAWS, estimate_durations=True, **extra)
+            label = '/'.join(f'{k}={v}' for k, v in extra.items())
+            cases.append(capture(f'solve/{name}' + (f'/{label}' if label else ''),
+                                 {'tree': tree, 'dates': dates, 'options': options},
+                                 lambda tree=tree, dates=dates, chain=chain, options=options:
+                                     _solution_dict(ec.solve(dates, tree, chain, **options))))
+    # Evidence on a model whose outer Boundaries are bounded.
+    tree, dates = models['chain']
+    bounded = {**tree, 'tpq_age_bp': 3600.0, 'taq_age_bp': 2500.0}
+    chain, _ = ec.layout_with_reason(bounded, dates)
+    options = dict(num_samples=SOLVE_SAMPLES, interval_draws=SOLVE_DRAWS)
+    cases.append(capture('solve/chain/bounded', {'tree': bounded, 'dates': dates, 'options': options},
+                         lambda: _solution_dict(ec.solve(dates, bounded, chain, **options))))
+    return cases
+
+
+def units_exact_parallel():
+    from app.services import exact_parallel as ep
+    cases = []
+    rng = np.random.default_rng(19)
+    j = rng.uniform(0.0, 1.0, (7, 7))
+    cases.append(capture('sums', {'matrix': j}, lambda: {
+        'tied_cumsum_0': ep.tied_cumsum(j, 0), 'tied_cumsum_1': ep.tied_cumsum(j, 1),
+        'within': ep.within(j), 'outside': ep.outside(j)}))
+    models = {**_branching_models(), **_parallel_models()}
+    for name, (tree, dates) in models.items():
+        def lay(tree=tree, dates=dates):
+            stages, reason = ep.layout_with_reason(tree, dates)
+            if stages is None:
+                return {'stages': None, 'reason': reason}
+            return {'reason': reason, 'stages': {
+                'boundary_ids': stages.boundary_ids,
+                'stages': [{'older': s.older_id, 'younger': s.younger_id, 'dates': s.dates,
+                            'blocks': s.blocks, 'areas': [_chain_dict(a) for a in s.areas]}
+                           for s in stages.stages],
+                'older_tail': stages.older_tail, 'younger_tail': stages.younger_tail,
+                'all_boundary_ids': stages.all_boundary_ids, 'num_groups': stages.num_groups}}
+        cases.append(capture(f'layout/{name}', {'tree': tree, 'dates': dates}, lay))
+    for name, (tree, dates) in _parallel_models().items():
+        stages, reason = ep.layout_with_reason(tree, dates)
+        assert stages is not None, (name, reason)
+        options = dict(num_samples=SOLVE_SAMPLES, interval_draws=SOLVE_DRAWS, estimate_durations=True)
+        cases.append(capture(f'solve/{name}', {'tree': tree, 'dates': dates, 'options': options},
+                             lambda tree=tree, dates=dates, stages=stages:
+                                 _solution_dict(ep.solve(dates, tree, stages, **options))))
+    return cases
+
+
+def units_agreement():
+    from app.services import agreement as ag
+    from app.services.calibration import get_curve
+    cases = []
+    rng = np.random.default_rng(29)
+    plain = _d('p', None, 2450, 30)
+    marine = _d('m', None, 3400, 30, curve_id='marine20', delta_r=-50.0, delta_r_error=30.0)
+    general = _d('g', None, 3000, 25, outlier_prior=0.05)
+    charcoal = _d('c', None, 3010, 25, outlier_prior=0.1, outlier_model='charcoal')
+    inbuilt = _d('i', None, 2980, 25, inbuilt_years=40.0, inbuilt_shape='exponential')
+    for m in (plain, marine, general, charcoal, inbuilt):
+        cal, prob = get_curve(m['curve_id']).calibrate(m['age_bp'], m['error_1sigma'], m.get('delta_r'),
+                                                       m.get('delta_r_error'))
+        peak = int(np.argmax(prob))
+        # A charcoal date's offset runs one way only: its context is younger.
+        # Moved the other way, past where the kernel reaches, its smeared
+        # likelihood is zero, and SciPy's FFT leaves rounding there that the
+        # index divides by -- Python scores such a date at 6e36.
+        shifts = (0.0, -40.0, -400.0) if m.get('outlier_model') == 'charcoal' else (0.0, 40.0, 400.0)
+        for shift in shifts:
+            ages = cal[max(0, peak - 120):peak + 120] + shift
+            # A modelled posterior: the calibration narrowed and moved.
+            modelled = np.column_stack([ages, prob[max(0, peak - 120):peak + 120] ** 2])
+            for scale in ((None, 2.0) if m.get('outlier_prior') else (None,)):
+                cases.append(capture(f'agreement_index/{m["id"]}/{shift}/{scale}',
+                                     {'measurement': m, 'modelled': modelled, 'log_scale': scale},
+                                     lambda m=m, modelled=modelled, scale=scale:
+                                         {'index': ag.agreement_index(m, modelled, log_scale=scale)}))
+        draws = rng.normal(float(cal[peak]), 25.0, 300).round(1)
+        scales = rng.choice(ec_scale_nodes(m), 300) if m.get('outlier_prior') else None
+        cases.append(capture(f'date_agreement/{m["id"]}', {'measurement': m, 'draws': draws, 'scales': scales},
+                             lambda m=m, draws=draws, scales=scales:
+                                 {'index': ag.date_agreement(m, draws, scales)}))
+    unmodelled = np.column_stack([np.arange(2400.0, 2600.0), np.exp(-0.5 * ((np.arange(2400.0, 2600.0) - 2500.0) / 20.0) ** 2)])
+    modelled = np.column_stack([np.arange(2450.0, 2550.0, 2.0), np.exp(-0.5 * ((np.arange(2450.0, 2550.0, 2.0) - 2490.0) / 10.0) ** 2)])
+    cases.append(capture('agreement_index/supplied', {'measurement': plain, 'modelled': modelled,
+                                                      'unmodelled': unmodelled},
+                         lambda: {'index': ag.agreement_index(plain, modelled, unmodelled)}))
+    cases.append(capture('agreement_index/too-short', {'measurement': plain, 'modelled': [[2450.0, 1.0]]},
+                         lambda: {'index': ag.agreement_index(plain, [[2450.0, 1.0]])}))
+    indices = [[100.0, 95.0, 120.0], [55.0, None, 0.0, 130.0], [], [None], [87.3]]
+    cases.append(capture('overall_agreement', {'indices': indices, 'extra': [0, 1, 2]},
+                         lambda: {'overall': [[ag.overall_agreement(i, e) for e in (0, 1, 2)] for i in indices]}))
+    cases.append(capture('combination_threshold', {'n': list(range(0, 12))},
+                         lambda: {'threshold': [ag.combination_threshold(n) for n in range(0, 12)]}))
+    measurements = [plain, marine, general, charcoal, inbuilt]
+    cases.append(capture('outlier_scale_terms', {'measurements': measurements},
+                         lambda: {'terms': ag.outlier_scale_terms(measurements)}))
+    centres = {'p': 2480.0, 'm': 3030.0, 'g': 3200.0, 'c': 3220.0, 'i': 3150.0}
+    draws = {k: rng.normal(v, 15.0, 250).round(1) for k, v in centres.items()}
+    scales = {'general': rng.choice(np.linspace(0.0, 4.0, 24), 250),
+              'charcoal': rng.choice(np.linspace(0.0, 3.0, 24), 250)}
+    for label, sc in [('marginalised', None), ('sampled', scales)]:
+        cases.append(capture(f'model_agreement/{label}', {'measurements': measurements, 'draws': draws,
+                                                          'scales': sc},
+                             lambda sc=sc: {'index': ag.model_agreement(measurements, draws, sc)}))
+    return cases
+
+
+def ec_scale_nodes(m):
+    from app.services.exact_chain import scale_nodes
+    return scale_nodes(m.get('outlier_model') or 'general')
+
+
+def units_wiggle_match():
+    from app.services import model_tree as mt
+    from app.services import wiggle_match as wm
+    cases = []
+    tree, dates = _hand_models()['wiggle']
+    variants = {
+        'mixed-gaps': (tree, dates),
+        'counted': (tree, [{**d, 'ring_offset_error': None} for d in dates]),
+        'limited': ({**tree, 'tpq_age_bp': 2700.0}, [{**d, 'taq_age_bp': 2300.0} for d in dates]),
+        'flagged': (tree, [{**dates[0], 'outlier_prior': 0.05}] + dates[1:]),
+        'off-the-curve': (tree, [{**d, 'ring_offset': 54990.0 + 10 * i} for i, d in enumerate(dates)]),
+        'wrong-gaps': (tree, [{**d, 'age_bp': [2480.0, 9000.0, 2455.0, 2560.0][i], 'error_1sigma': 15.0}
+                              for i, d in enumerate(dates)]),
+    }
+    for name, (tree, dates) in variants.items():
+        def run(tree=tree, dates=dates):
+            group = mt.plan_model(tree, dates).wiggle_groups[0]
+            solved = wm.solve(dates, group, root=tree, num_samples=SOLVE_SAMPLES)
+            return {**solved, 'reference': _posterior(solved['reference']),
+                    'measurements': [[k, _posterior(v)] for k, v in solved['measurements'].items()]}
+        cases.append(capture(f'solve/{name}', {'tree': tree, 'dates': dates}, run))
+    for step, sigma in [(1.0, 3.0), (1.0, 0.3), (2.5, 10.0)]:
+        cases.append(capture(f'gap_kernel/{step}/{sigma}', {'step': step, 'sigma': sigma},
+                             lambda step=step, sigma=sigma: {'kernel': wm._gap_kernel(step, sigma)}))
+    return cases
+
+
+# ---------------------------------------------------------------------------
 # api/ -- Phases 2, 3 and 5
 # ---------------------------------------------------------------------------
 
@@ -799,6 +1620,10 @@ def main() -> None:
         ('units/reservoir', units_reservoir), ('units/date_format', units_date_format),
         ('units/rng', units_rng), ('units/kde', units_kde),
         ('units/curve_view', units_curve_view), ('units/curve_registry', units_curve_registry),
+        ('units/model_tree', units_model_tree), ('units/stratigraphy', units_stratigraphy),
+        ('units/intervals', units_intervals), ('units/exact_chain', units_exact_chain),
+        ('units/exact_parallel', units_exact_parallel), ('units/agreement', units_agreement),
+        ('units/wiggle_match', units_wiggle_match),
     ]:
         write(family, build())
 

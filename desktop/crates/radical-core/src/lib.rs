@@ -1,7 +1,8 @@
-//! The calibration maths of RadiCal: pure functions over curves and
-//! measurements, with no I/O, no database and no async. A port of
-//! `backend/app/services`, held to the Python implementation by the golden
-//! corpus in `desktop/corpus` (see `tests/units`).
+//! The calibration maths of RadiCal and its exact solvers: pure functions
+//! over curves, measurements and model trees, with no I/O, no database and no
+//! async. A port of `backend/app/services`, held to the Python implementation
+//! by the golden corpus in `desktop/corpus` (see `tests/units`, and
+//! `tests/models` for whole API runs).
 //!
 //! The Python docstrings' reasoning is carried across as doc comments. Where
 //! the port departs from the Python shape, it says so:
@@ -9,7 +10,12 @@
 //! - "Match OxCal 4.4" is a [`Mode`] passed down explicitly rather than a
 //!   context variable.
 //! - Functions return structs where Python returns dicts, and [`Error`] where
-//!   Python raises `ValueError`, with the same message.
+//!   Python raises `ValueError`, with the same message ([`Error::Model`] where
+//!   the message names a sample or an element).
+//! - The exact solvers' matrix products and SciPy's FFT convolutions are
+//!   summed in an order of this crate's own ([`matrix`],
+//!   [`exact_chain::convolve_on_grid`]), so the solvers agree with Python to
+//!   rounding rather than to the bit.
 //! - Only the builtin curves are known here ([`curves`]); stored and mixed
 //!   curves belong to the store, which hands them in.
 //!
@@ -17,21 +23,31 @@
 //! a result agrees with Python's to the bit wherever the platform's `exp`,
 //! `ln` and `pow` agree with the ones the corpus was generated with.
 
+pub mod agreement;
 pub mod calibration;
 pub mod curve_mix;
 pub mod curve_registry;
 pub mod curve_view;
 pub mod curves;
 pub mod date_format;
+pub mod exact_chain;
+pub mod exact_parallel;
+pub mod intervals;
 pub mod kde;
+pub mod matrix;
+pub mod measurement;
+pub mod model_tree;
 pub mod numeric;
 pub mod pyfmt;
 pub mod reservoir;
 pub mod resolution;
 pub mod rng;
+mod sha1;
 pub mod special;
 pub mod spline;
 pub mod statistics;
+pub mod stratigraphy;
+pub mod wiggle_match;
 
 use std::fmt;
 
@@ -40,6 +56,7 @@ pub use calibration::{
     SIGMA_3, cell_edges, f14c, hpd_ranges, hpd_ranges_from_distribution, point_estimate,
 };
 pub use curves::get_curve;
+pub use measurement::Measurement;
 
 /// A refusal. Each message is the one the Python code raises, word for word,
 /// since the API passes them on to the user.
@@ -65,6 +82,9 @@ pub enum Error {
     NothingMapsIntoWindow,
     EmptyCalibration,
     CurvesDoNotOverlap,
+    /// A model, or a date in one, refused with Python's `ValueError` message,
+    /// which names the element or sample at fault.
+    Model(String),
 }
 
 impl fmt::Display for Error {
@@ -103,6 +123,7 @@ impl fmt::Display for Error {
                  range the curve covers."
             }
             Self::EmptyCalibration => "a calibration came out empty; nothing to draw from",
+            Self::Model(message) => message,
             Self::CurvesDoNotOverlap => {
                 "These two curves do not overlap in calendar time, so there is \
                  nothing to compare."

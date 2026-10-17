@@ -40,6 +40,31 @@ fn strip_zeros(text: String) -> String {
     text.trim_end_matches('0').trim_end_matches('.').to_owned()
 }
 
+/// Python's `repr(x)` (and `str(x)`, `f'{x}'`) for a float: the shortest
+/// digits that round-trip, as Rust's `{:?}` also gives, laid out Python's way
+/// -- `3000.0`, `1e+16`, `1e-05`, `inf`, `nan`.
+pub fn repr(x: f64) -> String {
+    if x.is_nan() {
+        return "nan".to_owned();
+    }
+    if x.is_infinite() {
+        return if x > 0.0 { "inf" } else { "-inf" }.to_owned();
+    }
+    // Rust's Debug switches to exponent form at the same thresholds as
+    // Python's repr (below 1e-4, from 1e16); only the exponent's spelling
+    // differs.
+    let debug = format!("{x:?}");
+    match debug.split_once('e') {
+        None => debug,
+        Some((mantissa, exponent)) => {
+            let exponent: i32 = exponent.parse().expect("an integer exponent");
+            let mantissa = mantissa.strip_suffix(".0").unwrap_or(mantissa);
+            let sign = if exponent < 0 { '-' } else { '+' };
+            format!("{mantissa}e{sign}{:02}", exponent.abs())
+        }
+    }
+}
+
 /// Python's `format(x, ',.0f')`: rounded to a whole number, ties to even,
 /// with commas between groups of three digits.
 pub fn thousands(x: f64) -> String {
@@ -61,6 +86,22 @@ pub fn thousands(x: f64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn repr_is_pythons() {
+        for (x, want) in [
+            (3000.0, "3000.0"),
+            (-0.5, "-0.5"),
+            (1e16, "1e+16"),
+            (1.5e-5, "1.5e-05"),
+            (0.0001, "0.0001"),
+            (123456789012345.6, "123456789012345.6"),
+            (0.1 + 0.2, "0.30000000000000004"),
+            (f64::INFINITY, "inf"),
+        ] {
+            assert_eq!(repr(x), want);
+        }
+    }
 
     /// Python's own output for each value, `format(x, 'g')`.
     const G6: [(f64, &str); 30] = [

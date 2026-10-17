@@ -5,21 +5,30 @@
 //! tolerance: [`REL`], one part in 10^12, unless a module says otherwise and
 //! why. Grid positions, counts, choices and text are compared exactly.
 
+mod agreement;
 mod calibrate;
 mod cell_edges;
 mod curve_mix;
 mod curve_registry;
 mod curve_view;
 mod date_format;
+mod exact_chain;
+mod exact_parallel;
 mod f14c;
 mod interpolation;
+mod intervals;
 mod kde;
 mod likelihood;
 mod linspace;
+mod model;
+mod model_tree;
 mod reservoir;
 mod resolution;
 mod rng;
 mod same_event;
+mod solved;
+mod stratigraphy;
+mod wiggle_match;
 
 use std::collections::BTreeSet;
 
@@ -48,22 +57,29 @@ pub const REL: f64 = 1e-12;
 pub const REL_LIKELIHOOD: f64 = 5e-12;
 
 /// The families compared here; every units/ family must be one.
-const COVERED: [&str; 15] = [
+const COVERED: [&str; 22] = [
+    "agreement",
     "calibrate",
     "cell_edges",
     "curve_mix",
     "curve_registry",
     "curve_view",
     "date_format",
+    "exact_chain",
+    "exact_parallel",
     "f14c",
     "interpolation",
+    "intervals",
     "kde",
     "likelihood",
     "linspace",
+    "model_tree",
     "reservoir",
     "resolution",
     "rng",
     "same_event",
+    "stratigraphy",
+    "wiggle_match",
 ];
 
 #[test]
