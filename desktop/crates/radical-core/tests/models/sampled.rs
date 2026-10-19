@@ -11,6 +11,7 @@
 //! two are independent runs of one sampler, held to each other statistically.
 
 use super::*;
+use radical_core::cross_check;
 use radical_core::gibbs::{SampleOptions, Sampled, solve};
 use radical_core::measurement::Measurement;
 
@@ -43,6 +44,10 @@ const STAT_PROBABILITY: f64 = 0.05;
 /// An agreement index or Amodel, relatively: each is read off the run's
 /// correlated joint states.
 const STAT_AGREEMENT: f64 = 0.10;
+/// An independent run's worst Boundary against the direct calculation,
+/// absolutely: a total variation distance, which Monte Carlo error moves by a
+/// few hundredths between runs.
+const STAT_DISTANCE: f64 = 0.05;
 
 fn sample_like_the_api(request: &Value, dates: &[Measurement], root: &Element) -> Sampled {
     let config = &request["bayesian_config"];
@@ -171,6 +176,39 @@ fn check_sampled(case: &Case) -> Option<(Closeness, bool)> {
                 STAT_AGREEMENT * w,
             );
         }
+        let check = cross_check::check(&dates, &root, &sampled, true, &cal);
+        let want = &solver["cross_check"];
+        assert_eq!(
+            check.shape,
+            want["shape"].as_str(),
+            "{name}: cross-check shape"
+        );
+        assert_eq!(
+            check.checked as u64,
+            want["checked"].as_u64().unwrap(),
+            "{name}: cross-check"
+        );
+        let worst = check.worst.as_ref().unwrap();
+        eprintln!(
+            "{name}: cross-check {} (worst {} at {:.3}), Python {} (worst {} at {:.3})",
+            check.status,
+            worst.name,
+            worst.distance,
+            want["status"],
+            want["worst"]["name"],
+            num(&want["worst"]["distance"])
+        );
+        assert_eq!(
+            check.status,
+            want["status"].as_str().unwrap(),
+            "{name}: cross-check"
+        );
+        close(
+            &format!("{name}/cross_check.worst"),
+            worst.distance,
+            num(&want["worst"]["distance"]),
+            STAT_DISTANCE,
+        );
         return Some((c, false));
     }
 
@@ -350,6 +388,71 @@ fn check_sampled(case: &Case) -> Option<(Closeness, bool)> {
         (None, w) => assert!(w.is_null(), "{name}: intervals missing"),
         (Some(b), w) => intervals(&mut c, &format!("{name}/intervals"), b, w),
     }
+
+    let check = cross_check::check(&dates, &root, &sampled, true, &cal);
+    let want = &solver["cross_check"];
+    assert_eq!(
+        check.status,
+        want["status"].as_str().unwrap(),
+        "{name}: cross-check"
+    );
+    assert_eq!(
+        check.reason.as_deref(),
+        want["reason"].as_str(),
+        "{name}: cross-check reason"
+    );
+    assert_eq!(
+        check.shape,
+        want["shape"].as_str(),
+        "{name}: cross-check shape"
+    );
+    assert_eq!(
+        check.checked as u64,
+        want["checked"].as_u64().unwrap(),
+        "{name}"
+    );
+    assert_eq!(check.threshold, num(&want["threshold"]), "{name}");
+    assert_eq!(
+        check.threshold_gap_limit,
+        want["threshold_gap_limit"].as_f64(),
+        "{name}"
+    );
+    let rows = |got: &[cross_check::Row], want: Vec<Value>, label: &str, c: &mut Closeness| {
+        assert_eq!(got.len(), want.len(), "{label}");
+        for (g, w) in got.iter().zip(&want) {
+            assert_eq!(g.name, w["name"].as_str().unwrap(), "{label}");
+            for (field, value) in [
+                ("distance", g.distance),
+                ("threshold_gap", g.threshold_gap),
+                ("sampled_mean", g.sampled_mean),
+                ("direct_mean", g.direct_mean),
+            ] {
+                c.check(
+                    &format!("{label}/{}.{field}", g.name),
+                    value,
+                    num(&w[field]),
+                    REL_OUTLIER_AGREEMENT,
+                );
+            }
+        }
+    };
+    let worst: Vec<Value> = if want["worst"].is_null() {
+        Vec::new()
+    } else {
+        vec![want["worst"].clone()]
+    };
+    rows(
+        check.worst.as_slice(),
+        worst,
+        &format!("{name}/cross_check.worst"),
+        &mut c,
+    );
+    rows(
+        &check.differing,
+        want["differing"].as_array().unwrap().clone(),
+        &format!("{name}/cross_check.differing"),
+        &mut c,
+    );
 
     // A saved run's Boundaries and undated levels, from its stored tree.
     if let Some(analysis) = outputs.pointer("/analysis/data") {

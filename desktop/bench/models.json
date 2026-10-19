@@ -1,0 +1,1216 @@
+{
+ "8 dates, ordered": {
+  "measurements": [
+   {
+    "id": "<id:1>",
+    "sample_name": "LD10012",
+    "age_bp": 685.0,
+    "error_1sigma": 25.0,
+    "material_type": "unknown",
+    "curve_id": "shcal20",
+    "sample_type": "terrestrial",
+    "delta_r": null,
+    "delta_r_error": null,
+    "tpq_age_bp": null,
+    "taq_age_bp": null,
+    "depth_cm": null,
+    "location": null,
+    "notes": null,
+    "outlier_prior": 0.0,
+    "outlier_model": "general",
+    "element_id": "<id:2>"
+   },
+   {
+    "id": "<id:3>",
+    "sample_name": "LD10009",
+    "age_bp": 671.0,
+    "error_1sigma": 21.0,
+    "material_type": "unknown",
+    "curve_id": "shcal20",
+    "sample_type": "terrestrial",
+    "delta_r": null,
+    "delta_r_error": null,
+    "tpq_age_bp": null,
+    "taq_age_bp": null,
+    "depth_cm": null,
+    "location": null,
+    "notes": null,
+    "outlier_prior": 0.0,
+    "outlier_model": "general",
+    "element_id": "<id:2>"
+   },
+   {
+    "id": "<id:4>",
+    "sample_name": "LD10011",
+    "age_bp": 635.0,
+    "error_1sigma": 21.0,
+    "material_type": "unknown",
+    "curve_id": "shcal20",
+    "sample_type": "terrestrial",
+    "delta_r": null,
+    "delta_r_error": null,
+    "tpq_age_bp": null,
+    "taq_age_bp": null,
+    "depth_cm": null,
+    "location": null,
+    "notes": null,
+    "outlier_prior": 0.0,
+    "outlier_model": "general",
+    "element_id": "<id:2>"
+   },
+   {
+    "id": "<id:5>",
+    "sample_name": "LD10006",
+    "age_bp": 671.0,
+    "error_1sigma": 20.0,
+    "material_type": "unknown",
+    "curve_id": "shcal20",
+    "sample_type": "terrestrial",
+    "delta_r": null,
+    "delta_r_error": null,
+    "tpq_age_bp": null,
+    "taq_age_bp": null,
+    "depth_cm": null,
+    "location": null,
+    "notes": null,
+    "outlier_prior": 0.0,
+    "outlier_model": "general",
+    "element_id": "<id:6>"
+   },
+   {
+    "id": "<id:7>",
+    "sample_name": "LD10007",
+    "age_bp": 647.0,
+    "error_1sigma": 21.0,
+    "material_type": "unknown",
+    "curve_id": "shcal20",
+    "sample_type": "terrestrial",
+    "delta_r": null,
+    "delta_r_error": null,
+    "tpq_age_bp": null,
+    "taq_age_bp": null,
+    "depth_cm": null,
+    "location": null,
+    "notes": null,
+    "outlier_prior": 0.0,
+    "outlier_model": "general",
+    "element_id": "<id:6>"
+   },
+   {
+    "id": "<id:8>",
+    "sample_name": "LD10008",
+    "age_bp": 636.0,
+    "error_1sigma": 21.0,
+    "material_type": "unknown",
+    "curve_id": "shcal20",
+    "sample_type": "terrestrial",
+    "delta_r": null,
+    "delta_r_error": null,
+    "tpq_age_bp": null,
+    "taq_age_bp": null,
+    "depth_cm": null,
+    "location": null,
+    "notes": null,
+    "outlier_prior": 0.0,
+    "outlier_model": "general",
+    "element_id": "<id:6>"
+   },
+   {
+    "id": "<id:9>",
+    "sample_name": "LA10003",
+    "age_bp": 676.0,
+    "error_1sigma": 26.0,
+    "material_type": "unknown",
+    "curve_id": "shcal20",
+    "sample_type": "terrestrial",
+    "delta_r": null,
+    "delta_r_error": null,
+    "tpq_age_bp": null,
+    "taq_age_bp": null,
+    "depth_cm": null,
+    "location": null,
+    "notes": null,
+    "outlier_prior": 0.0,
+    "outlier_model": "general",
+    "element_id": "<id:10>"
+   },
+   {
+    "id": "<id:11>",
+    "sample_name": "LA10001",
+    "age_bp": 637.0,
+    "error_1sigma": 24.0,
+    "material_type": "unknown",
+    "curve_id": "shcal20",
+    "sample_type": "terrestrial",
+    "delta_r": null,
+    "delta_r_error": null,
+    "tpq_age_bp": null,
+    "taq_age_bp": null,
+    "depth_cm": null,
+    "location": null,
+    "notes": null,
+    "outlier_prior": 0.0,
+    "outlier_model": "general",
+    "element_id": "<id:10>"
+   }
+  ],
+  "model_tree": {
+   "id": "<id:12>",
+   "element_type": "sequence",
+   "name": "Hillside",
+   "tpq_age_bp": null,
+   "taq_age_bp": null,
+   "children": [
+    {
+     "id": "<id:13>",
+     "element_type": "boundary",
+     "name": "Start Hillside",
+     "tpq_age_bp": null,
+     "taq_age_bp": null,
+     "children": []
+    },
+    {
+     "id": "<id:14>",
+     "element_type": "sequence",
+     "name": "North",
+     "tpq_age_bp": null,
+     "taq_age_bp": null,
+     "children": [
+      {
+       "id": "<id:2>",
+       "element_type": "phase",
+       "name": "Fire_Feature_J",
+       "tpq_age_bp": null,
+       "taq_age_bp": null,
+       "children": []
+      }
+     ]
+    },
+    {
+     "id": "<id:15>",
+     "element_type": "sequence",
+     "name": "South",
+     "tpq_age_bp": null,
+     "taq_age_bp": null,
+     "children": [
+      {
+       "id": "<id:16>",
+       "element_type": "phase",
+       "name": "Fires",
+       "tpq_age_bp": null,
+       "taq_age_bp": null,
+       "children": [
+        {
+         "id": "<id:6>",
+         "element_type": "phase",
+         "name": "Fire_Feature_K",
+         "tpq_age_bp": null,
+         "taq_age_bp": null,
+         "children": []
+        },
+        {
+         "id": "<id:10>",
+         "element_type": "phase",
+         "name": "Fire_Feature_A",
+         "tpq_age_bp": null,
+         "taq_age_bp": null,
+         "children": []
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "id": "<id:17>",
+     "element_type": "boundary",
+     "name": "End Hillside",
+     "tpq_age_bp": null,
+     "taq_age_bp": null,
+     "children": []
+    }
+   ]
+  }
+ },
+ "16 dates, outlier model": {
+  "measurements": [
+   {
+    "id": "<id:1>",
+    "sample_name": "LB10002",
+    "age_bp": 970.0,
+    "error_1sigma": 47.0,
+    "material_type": "unknown",
+    "curve_id": "shcal20",
+    "sample_type": "terrestrial",
+    "delta_r": null,
+    "delta_r_error": null,
+    "tpq_age_bp": null,
+    "taq_age_bp": null,
+    "depth_cm": null,
+    "location": null,
+    "notes": null,
+    "outlier_prior": 0.05,
+    "outlier_model": "general",
+    "element_id": "<id:2>"
+   },
+   {
+    "id": "<id:3>",
+    "sample_name": "LB10010",
+    "age_bp": 660.0,
+    "error_1sigma": 46.0,
+    "material_type": "unknown",
+    "curve_id": "shcal20",
+    "sample_type": "terrestrial",
+    "delta_r": null,
+    "delta_r_error": null,
+    "tpq_age_bp": null,
+    "taq_age_bp": null,
+    "depth_cm": null,
+    "location": null,
+    "notes": null,
+    "outlier_prior": 0.05,
+    "outlier_model": "general",
+    "element_id": "<id:2>"
+   },
+   {
+    "id": "<id:4>",
+    "sample_name": "LB10008",
+    "age_bp": 647.0,
+    "error_1sigma": 47.0,
+    "material_type": "unknown",
+    "curve_id": "shcal20",
+    "sample_type": "terrestrial",
+    "delta_r": null,
+    "delta_r_error": null,
+    "tpq_age_bp": null,
+    "taq_age_bp": null,
+    "depth_cm": null,
+    "location": null,
+    "notes": null,
+    "outlier_prior": 0.05,
+    "outlier_model": "general",
+    "element_id": "<id:2>"
+   },
+   {
+    "id": "<id:5>",
+    "sample_name": "LB10001",
+    "age_bp": 646.0,
+    "error_1sigma": 47.0,
+    "material_type": "unknown",
+    "curve_id": "shcal20",
+    "sample_type": "terrestrial",
+    "delta_r": null,
+    "delta_r_error": null,
+    "tpq_age_bp": null,
+    "taq_age_bp": null,
+    "depth_cm": null,
+    "location": null,
+    "notes": null,
+    "outlier_prior": 0.05,
+    "outlier_model": "general",
+    "element_id": "<id:2>"
+   },
+   {
+    "id": "<id:6>",
+    "sample_name": "LD10003",
+    "age_bp": 630.0,
+    "error_1sigma": 35.0,
+    "material_type": "unknown",
+    "curve_id": "shcal20",
+    "sample_type": "terrestrial",
+    "delta_r": null,
+    "delta_r_error": null,
+    "tpq_age_bp": null,
+    "taq_age_bp": null,
+    "depth_cm": null,
+    "location": null,
+    "notes": null,
+    "outlier_prior": 0.05,
+    "outlier_model": "general",
+    "element_id": "<id:2>"
+   },
+   {
+    "id": "<id:7>",
+    "sample_name": "LB10005",
+    "age_bp": 627.0,
+    "error_1sigma": 40.0,
+    "material_type": "unknown",
+    "curve_id": "shcal20",
+    "sample_type": "terrestrial",
+    "delta_r": null,
+    "delta_r_error": null,
+    "tpq_age_bp": null,
+    "taq_age_bp": null,
+    "depth_cm": null,
+    "location": null,
+    "notes": null,
+    "outlier_prior": 0.05,
+    "outlier_model": "general",
+    "element_id": "<id:2>"
+   },
+   {
+    "id": "<id:8>",
+    "sample_name": "LC10001",
+    "age_bp": 626.0,
+    "error_1sigma": 95.0,
+    "material_type": "unknown",
+    "curve_id": "shcal20",
+    "sample_type": "terrestrial",
+    "delta_r": null,
+    "delta_r_error": null,
+    "tpq_age_bp": null,
+    "taq_age_bp": null,
+    "depth_cm": null,
+    "location": null,
+    "notes": null,
+    "outlier_prior": 0.05,
+    "outlier_model": "general",
+    "element_id": "<id:2>"
+   },
+   {
+    "id": "<id:9>",
+    "sample_name": "LB10007",
+    "age_bp": 600.0,
+    "error_1sigma": 50.0,
+    "material_type": "unknown",
+    "curve_id": "shcal20",
+    "sample_type": "terrestrial",
+    "delta_r": null,
+    "delta_r_error": null,
+    "tpq_age_bp": null,
+    "taq_age_bp": null,
+    "depth_cm": null,
+    "location": null,
+    "notes": null,
+    "outlier_prior": 0.05,
+    "outlier_model": "general",
+    "element_id": "<id:2>"
+   },
+   {
+    "id": "<id:10>",
+    "sample_name": "LD10001",
+    "age_bp": 600.0,
+    "error_1sigma": 50.0,
+    "material_type": "unknown",
+    "curve_id": "shcal20",
+    "sample_type": "terrestrial",
+    "delta_r": null,
+    "delta_r_error": null,
+    "tpq_age_bp": null,
+    "taq_age_bp": null,
+    "depth_cm": null,
+    "location": null,
+    "notes": null,
+    "outlier_prior": 0.05,
+    "outlier_model": "general",
+    "element_id": "<id:2>"
+   },
+   {
+    "id": "<id:11>",
+    "sample_name": "LB10009",
+    "age_bp": 592.0,
+    "error_1sigma": 48.0,
+    "material_type": "unknown",
+    "curve_id": "shcal20",
+    "sample_type": "terrestrial",
+    "delta_r": null,
+    "delta_r_error": null,
+    "tpq_age_bp": null,
+    "taq_age_bp": null,
+    "depth_cm": null,
+    "location": null,
+    "notes": null,
+    "outlier_prior": 0.05,
+    "outlier_model": "general",
+    "element_id": "<id:2>"
+   },
+   {
+    "id": "<id:12>",
+    "sample_name": "LC10002",
+    "age_bp": 585.0,
+    "error_1sigma": 93.0,
+    "material_type": "unknown",
+    "curve_id": "shcal20",
+    "sample_type": "terrestrial",
+    "delta_r": null,
+    "delta_r_error": null,
+    "tpq_age_bp": null,
+    "taq_age_bp": null,
+    "depth_cm": null,
+    "location": null,
+    "notes": null,
+    "outlier_prior": 0.05,
+    "outlier_model": "general",
+    "element_id": "<id:2>"
+   },
+   {
+    "id": "<id:13>",
+    "sample_name": "LB10006",
+    "age_bp": 582.0,
+    "error_1sigma": 47.0,
+    "material_type": "unknown",
+    "curve_id": "shcal20",
+    "sample_type": "terrestrial",
+    "delta_r": null,
+    "delta_r_error": null,
+    "tpq_age_bp": null,
+    "taq_age_bp": null,
+    "depth_cm": null,
+    "location": null,
+    "notes": null,
+    "outlier_prior": 0.05,
+    "outlier_model": "general",
+    "element_id": "<id:2>"
+   },
+   {
+    "id": "<id:14>",
+    "sample_name": "LB10004",
+    "age_bp": 580.0,
+    "error_1sigma": 47.0,
+    "material_type": "unknown",
+    "curve_id": "shcal20",
+    "sample_type": "terrestrial",
+    "delta_r": null,
+    "delta_r_error": null,
+    "tpq_age_bp": null,
+    "taq_age_bp": null,
+    "depth_cm": null,
+    "location": null,
+    "notes": null,
+    "outlier_prior": 0.05,
+    "outlier_model": "general",
+    "element_id": "<id:2>"
+   },
+   {
+    "id": "<id:15>",
+    "sample_name": "LD10004",
+    "age_bp": 570.0,
+    "error_1sigma": 45.0,
+    "material_type": "unknown",
+    "curve_id": "shcal20",
+    "sample_type": "terrestrial",
+    "delta_r": null,
+    "delta_r_error": null,
+    "tpq_age_bp": null,
+    "taq_age_bp": null,
+    "depth_cm": null,
+    "location": null,
+    "notes": null,
+    "outlier_prior": 0.05,
+    "outlier_model": "general",
+    "element_id": "<id:2>"
+   },
+   {
+    "id": "<id:16>",
+    "sample_name": "LD10002",
+    "age_bp": 560.0,
+    "error_1sigma": 40.0,
+    "material_type": "unknown",
+    "curve_id": "shcal20",
+    "sample_type": "terrestrial",
+    "delta_r": null,
+    "delta_r_error": null,
+    "tpq_age_bp": null,
+    "taq_age_bp": null,
+    "depth_cm": null,
+    "location": null,
+    "notes": null,
+    "outlier_prior": 0.05,
+    "outlier_model": "general",
+    "element_id": "<id:2>"
+   },
+   {
+    "id": "<id:17>",
+    "sample_name": "LB10003",
+    "age_bp": 537.0,
+    "error_1sigma": 44.0,
+    "material_type": "unknown",
+    "curve_id": "shcal20",
+    "sample_type": "terrestrial",
+    "delta_r": null,
+    "delta_r_error": null,
+    "tpq_age_bp": null,
+    "taq_age_bp": null,
+    "depth_cm": null,
+    "location": null,
+    "notes": null,
+    "outlier_prior": 0.05,
+    "outlier_model": "general",
+    "element_id": "<id:2>"
+   }
+  ],
+  "model_tree": {
+   "id": "<id:18>",
+   "element_type": "sequence",
+   "name": "Dune Section",
+   "tpq_age_bp": null,
+   "taq_age_bp": null,
+   "children": [
+    {
+     "id": "<id:19>",
+     "element_type": "boundary",
+     "name": "Start",
+     "tpq_age_bp": null,
+     "taq_age_bp": null,
+     "children": []
+    },
+    {
+     "id": "<id:2>",
+     "element_type": "phase",
+     "name": "Start Phase 1",
+     "tpq_age_bp": null,
+     "taq_age_bp": null,
+     "children": []
+    },
+    {
+     "id": "<id:20>",
+     "element_type": "boundary",
+     "name": "End",
+     "tpq_age_bp": null,
+     "taq_age_bp": null,
+     "children": []
+    }
+   ]
+  }
+ },
+ "60 dates, 12 phases": {
+  "measurements": [
+   {
+    "id": "d0_0",
+    "sample_name": "S1-1",
+    "age_bp": 3737,
+    "error_1sigma": 25.0,
+    "curve_id": "intcal20",
+    "element_id": "p0"
+   },
+   {
+    "id": "d0_1",
+    "sample_name": "S1-2",
+    "age_bp": 3777,
+    "error_1sigma": 25.0,
+    "curve_id": "intcal20",
+    "element_id": "p0"
+   },
+   {
+    "id": "d0_2",
+    "sample_name": "S1-3",
+    "age_bp": 3807,
+    "error_1sigma": 25.0,
+    "curve_id": "intcal20",
+    "element_id": "p0"
+   },
+   {
+    "id": "d0_3",
+    "sample_name": "S1-4",
+    "age_bp": 3813,
+    "error_1sigma": 25.0,
+    "curve_id": "intcal20",
+    "element_id": "p0"
+   },
+   {
+    "id": "d0_4",
+    "sample_name": "S1-5",
+    "age_bp": 3891,
+    "error_1sigma": 25.0,
+    "curve_id": "intcal20",
+    "element_id": "p0"
+   },
+   {
+    "id": "d1_0",
+    "sample_name": "S2-1",
+    "age_bp": 3740,
+    "error_1sigma": 25.0,
+    "curve_id": "intcal20",
+    "element_id": "p1"
+   },
+   {
+    "id": "d1_1",
+    "sample_name": "S2-2",
+    "age_bp": 3740,
+    "error_1sigma": 25.0,
+    "curve_id": "intcal20",
+    "element_id": "p1"
+   },
+   {
+    "id": "d1_2",
+    "sample_name": "S2-3",
+    "age_bp": 3756,
+    "error_1sigma": 25.0,
+    "curve_id": "intcal20",
+    "element_id": "p1"
+   },
+   {
+    "id": "d1_3",
+    "sample_name": "S2-4",
+    "age_bp": 3718,
+    "error_1sigma": 25.0,
+    "curve_id": "intcal20",
+    "element_id": "p1"
+   },
+   {
+    "id": "d1_4",
+    "sample_name": "S2-5",
+    "age_bp": 3765,
+    "error_1sigma": 25.0,
+    "curve_id": "intcal20",
+    "element_id": "p1"
+   },
+   {
+    "id": "d2_0",
+    "sample_name": "S3-1",
+    "age_bp": 3685,
+    "error_1sigma": 25.0,
+    "curve_id": "intcal20",
+    "element_id": "p2"
+   },
+   {
+    "id": "d2_1",
+    "sample_name": "S3-2",
+    "age_bp": 3671,
+    "error_1sigma": 25.0,
+    "curve_id": "intcal20",
+    "element_id": "p2"
+   },
+   {
+    "id": "d2_2",
+    "sample_name": "S3-3",
+    "age_bp": 3733,
+    "error_1sigma": 25.0,
+    "curve_id": "intcal20",
+    "element_id": "p2"
+   },
+   {
+    "id": "d2_3",
+    "sample_name": "S3-4",
+    "age_bp": 3695,
+    "error_1sigma": 25.0,
+    "curve_id": "intcal20",
+    "element_id": "p2"
+   },
+   {
+    "id": "d2_4",
+    "sample_name": "S3-5",
+    "age_bp": 3672,
+    "error_1sigma": 25.0,
+    "curve_id": "intcal20",
+    "element_id": "p2"
+   },
+   {
+    "id": "d3_0",
+    "sample_name": "S4-1",
+    "age_bp": 3564,
+    "error_1sigma": 25.0,
+    "curve_id": "intcal20",
+    "element_id": "p3"
+   },
+   {
+    "id": "d3_1",
+    "sample_name": "S4-2",
+    "age_bp": 3643,
+    "error_1sigma": 25.0,
+    "curve_id": "intcal20",
+    "element_id": "p3"
+   },
+   {
+    "id": "d3_2",
+    "sample_name": "S4-3",
+    "age_bp": 3584,
+    "error_1sigma": 25.0,
+    "curve_id": "intcal20",
+    "element_id": "p3"
+   },
+   {
+    "id": "d3_3",
+    "sample_name": "S4-4",
+    "age_bp": 3504,
+    "error_1sigma": 25.0,
+    "curve_id": "intcal20",
+    "element_id": "p3"
+   },
+   {
+    "id": "d3_4",
+    "sample_name": "S4-5",
+    "age_bp": 3588,
+    "error_1sigma": 25.0,
+    "curve_id": "intcal20",
+    "element_id": "p3"
+   },
+   {
+    "id": "d4_0",
+    "sample_name": "S5-1",
+    "age_bp": 3492,
+    "error_1sigma": 25.0,
+    "curve_id": "intcal20",
+    "element_id": "p4"
+   },
+   {
+    "id": "d4_1",
+    "sample_name": "S5-2",
+    "age_bp": 3450,
+    "error_1sigma": 25.0,
+    "curve_id": "intcal20",
+    "element_id": "p4"
+   },
+   {
+    "id": "d4_2",
+    "sample_name": "S5-3",
+    "age_bp": 3487,
+    "error_1sigma": 25.0,
+    "curve_id": "intcal20",
+    "element_id": "p4"
+   },
+   {
+    "id": "d4_3",
+    "sample_name": "S5-4",
+    "age_bp": 3536,
+    "error_1sigma": 25.0,
+    "curve_id": "intcal20",
+    "element_id": "p4"
+   },
+   {
+    "id": "d4_4",
+    "sample_name": "S5-5",
+    "age_bp": 3494,
+    "error_1sigma": 25.0,
+    "curve_id": "intcal20",
+    "element_id": "p4"
+   },
+   {
+    "id": "d5_0",
+    "sample_name": "S6-1",
+    "age_bp": 3457,
+    "error_1sigma": 25.0,
+    "curve_id": "intcal20",
+    "element_id": "p5"
+   },
+   {
+    "id": "d5_1",
+    "sample_name": "S6-2",
+    "age_bp": 3480,
+    "error_1sigma": 25.0,
+    "curve_id": "intcal20",
+    "element_id": "p5"
+   },
+   {
+    "id": "d5_2",
+    "sample_name": "S6-3",
+    "age_bp": 3477,
+    "error_1sigma": 25.0,
+    "curve_id": "intcal20",
+    "element_id": "p5"
+   },
+   {
+    "id": "d5_3",
+    "sample_name": "S6-4",
+    "age_bp": 3474,
+    "error_1sigma": 25.0,
+    "curve_id": "intcal20",
+    "element_id": "p5"
+   },
+   {
+    "id": "d5_4",
+    "sample_name": "S6-5",
+    "age_bp": 3486,
+    "error_1sigma": 25.0,
+    "curve_id": "intcal20",
+    "element_id": "p5"
+   },
+   {
+    "id": "d6_0",
+    "sample_name": "S7-1",
+    "age_bp": 3331,
+    "error_1sigma": 25.0,
+    "curve_id": "intcal20",
+    "element_id": "p6"
+   },
+   {
+    "id": "d6_1",
+    "sample_name": "S7-2",
+    "age_bp": 3349,
+    "error_1sigma": 25.0,
+    "curve_id": "intcal20",
+    "element_id": "p6"
+   },
+   {
+    "id": "d6_2",
+    "sample_name": "S7-3",
+    "age_bp": 3326,
+    "error_1sigma": 25.0,
+    "curve_id": "intcal20",
+    "element_id": "p6"
+   },
+   {
+    "id": "d6_3",
+    "sample_name": "S7-4",
+    "age_bp": 3401,
+    "error_1sigma": 25.0,
+    "curve_id": "intcal20",
+    "element_id": "p6"
+   },
+   {
+    "id": "d6_4",
+    "sample_name": "S7-5",
+    "age_bp": 3322,
+    "error_1sigma": 25.0,
+    "curve_id": "intcal20",
+    "element_id": "p6"
+   },
+   {
+    "id": "d7_0",
+    "sample_name": "S8-1",
+    "age_bp": 3333,
+    "error_1sigma": 25.0,
+    "curve_id": "intcal20",
+    "element_id": "p7"
+   },
+   {
+    "id": "d7_1",
+    "sample_name": "S8-2",
+    "age_bp": 3321,
+    "error_1sigma": 25.0,
+    "curve_id": "intcal20",
+    "element_id": "p7"
+   },
+   {
+    "id": "d7_2",
+    "sample_name": "S8-3",
+    "age_bp": 3279,
+    "error_1sigma": 25.0,
+    "curve_id": "intcal20",
+    "element_id": "p7"
+   },
+   {
+    "id": "d7_3",
+    "sample_name": "S8-4",
+    "age_bp": 3329,
+    "error_1sigma": 25.0,
+    "curve_id": "intcal20",
+    "element_id": "p7"
+   },
+   {
+    "id": "d7_4",
+    "sample_name": "S8-5",
+    "age_bp": 3256,
+    "error_1sigma": 25.0,
+    "curve_id": "intcal20",
+    "element_id": "p7"
+   },
+   {
+    "id": "d8_0",
+    "sample_name": "S9-1",
+    "age_bp": 3243,
+    "error_1sigma": 25.0,
+    "curve_id": "intcal20",
+    "element_id": "p8"
+   },
+   {
+    "id": "d8_1",
+    "sample_name": "S9-2",
+    "age_bp": 3223,
+    "error_1sigma": 25.0,
+    "curve_id": "intcal20",
+    "element_id": "p8"
+   },
+   {
+    "id": "d8_2",
+    "sample_name": "S9-3",
+    "age_bp": 3177,
+    "error_1sigma": 25.0,
+    "curve_id": "intcal20",
+    "element_id": "p8"
+   },
+   {
+    "id": "d8_3",
+    "sample_name": "S9-4",
+    "age_bp": 3189,
+    "error_1sigma": 25.0,
+    "curve_id": "intcal20",
+    "element_id": "p8"
+   },
+   {
+    "id": "d8_4",
+    "sample_name": "S9-5",
+    "age_bp": 3253,
+    "error_1sigma": 25.0,
+    "curve_id": "intcal20",
+    "element_id": "p8"
+   },
+   {
+    "id": "d9_0",
+    "sample_name": "S10-1",
+    "age_bp": 3031,
+    "error_1sigma": 25.0,
+    "curve_id": "intcal20",
+    "element_id": "p9"
+   },
+   {
+    "id": "d9_1",
+    "sample_name": "S10-2",
+    "age_bp": 3051,
+    "error_1sigma": 25.0,
+    "curve_id": "intcal20",
+    "element_id": "p9"
+   },
+   {
+    "id": "d9_2",
+    "sample_name": "S10-3",
+    "age_bp": 3015,
+    "error_1sigma": 25.0,
+    "curve_id": "intcal20",
+    "element_id": "p9"
+   },
+   {
+    "id": "d9_3",
+    "sample_name": "S10-4",
+    "age_bp": 3057,
+    "error_1sigma": 25.0,
+    "curve_id": "intcal20",
+    "element_id": "p9"
+   },
+   {
+    "id": "d9_4",
+    "sample_name": "S10-5",
+    "age_bp": 3082,
+    "error_1sigma": 25.0,
+    "curve_id": "intcal20",
+    "element_id": "p9"
+   },
+   {
+    "id": "d10_0",
+    "sample_name": "S11-1",
+    "age_bp": 3020,
+    "error_1sigma": 25.0,
+    "curve_id": "intcal20",
+    "element_id": "p10"
+   },
+   {
+    "id": "d10_1",
+    "sample_name": "S11-2",
+    "age_bp": 2987,
+    "error_1sigma": 25.0,
+    "curve_id": "intcal20",
+    "element_id": "p10"
+   },
+   {
+    "id": "d10_2",
+    "sample_name": "S11-3",
+    "age_bp": 2985,
+    "error_1sigma": 25.0,
+    "curve_id": "intcal20",
+    "element_id": "p10"
+   },
+   {
+    "id": "d10_3",
+    "sample_name": "S11-4",
+    "age_bp": 3002,
+    "error_1sigma": 25.0,
+    "curve_id": "intcal20",
+    "element_id": "p10"
+   },
+   {
+    "id": "d10_4",
+    "sample_name": "S11-5",
+    "age_bp": 3041,
+    "error_1sigma": 25.0,
+    "curve_id": "intcal20",
+    "element_id": "p10"
+   },
+   {
+    "id": "d11_0",
+    "sample_name": "S12-1",
+    "age_bp": 3000,
+    "error_1sigma": 25.0,
+    "curve_id": "intcal20",
+    "element_id": "p11"
+   },
+   {
+    "id": "d11_1",
+    "sample_name": "S12-2",
+    "age_bp": 2875,
+    "error_1sigma": 25.0,
+    "curve_id": "intcal20",
+    "element_id": "p11"
+   },
+   {
+    "id": "d11_2",
+    "sample_name": "S12-3",
+    "age_bp": 2919,
+    "error_1sigma": 25.0,
+    "curve_id": "intcal20",
+    "element_id": "p11"
+   },
+   {
+    "id": "d11_3",
+    "sample_name": "S12-4",
+    "age_bp": 2871,
+    "error_1sigma": 25.0,
+    "curve_id": "intcal20",
+    "element_id": "p11"
+   },
+   {
+    "id": "d11_4",
+    "sample_name": "S12-5",
+    "age_bp": 2978,
+    "error_1sigma": 25.0,
+    "curve_id": "intcal20",
+    "element_id": "p11"
+   }
+  ],
+  "model_tree": {
+   "id": "site",
+   "element_type": "sequence",
+   "name": "Site",
+   "children": [
+    {
+     "id": "b0",
+     "element_type": "boundary",
+     "name": "Start",
+     "children": []
+    },
+    {
+     "id": "p0",
+     "element_type": "phase",
+     "name": "Phase 1",
+     "children": []
+    },
+    {
+     "id": "b1",
+     "element_type": "boundary",
+     "name": "Transition 1/2",
+     "children": []
+    },
+    {
+     "id": "p1",
+     "element_type": "phase",
+     "name": "Phase 2",
+     "children": []
+    },
+    {
+     "id": "b2",
+     "element_type": "boundary",
+     "name": "Transition 2/3",
+     "children": []
+    },
+    {
+     "id": "p2",
+     "element_type": "phase",
+     "name": "Phase 3",
+     "children": []
+    },
+    {
+     "id": "b3",
+     "element_type": "boundary",
+     "name": "Transition 3/4",
+     "children": []
+    },
+    {
+     "id": "p3",
+     "element_type": "phase",
+     "name": "Phase 4",
+     "children": []
+    },
+    {
+     "id": "b4",
+     "element_type": "boundary",
+     "name": "Transition 4/5",
+     "children": []
+    },
+    {
+     "id": "p4",
+     "element_type": "phase",
+     "name": "Phase 5",
+     "children": []
+    },
+    {
+     "id": "b5",
+     "element_type": "boundary",
+     "name": "Transition 5/6",
+     "children": []
+    },
+    {
+     "id": "p5",
+     "element_type": "phase",
+     "name": "Phase 6",
+     "children": []
+    },
+    {
+     "id": "b6",
+     "element_type": "boundary",
+     "name": "Transition 6/7",
+     "children": []
+    },
+    {
+     "id": "p6",
+     "element_type": "phase",
+     "name": "Phase 7",
+     "children": []
+    },
+    {
+     "id": "b7",
+     "element_type": "boundary",
+     "name": "Transition 7/8",
+     "children": []
+    },
+    {
+     "id": "p7",
+     "element_type": "phase",
+     "name": "Phase 8",
+     "children": []
+    },
+    {
+     "id": "b8",
+     "element_type": "boundary",
+     "name": "Transition 8/9",
+     "children": []
+    },
+    {
+     "id": "p8",
+     "element_type": "phase",
+     "name": "Phase 9",
+     "children": []
+    },
+    {
+     "id": "b9",
+     "element_type": "boundary",
+     "name": "Transition 9/10",
+     "children": []
+    },
+    {
+     "id": "p9",
+     "element_type": "phase",
+     "name": "Phase 10",
+     "children": []
+    },
+    {
+     "id": "b10",
+     "element_type": "boundary",
+     "name": "Transition 10/11",
+     "children": []
+    },
+    {
+     "id": "p10",
+     "element_type": "phase",
+     "name": "Phase 11",
+     "children": []
+    },
+    {
+     "id": "b11",
+     "element_type": "boundary",
+     "name": "Transition 11/12",
+     "children": []
+    },
+    {
+     "id": "p11",
+     "element_type": "phase",
+     "name": "Phase 12",
+     "children": []
+    },
+    {
+     "id": "b12",
+     "element_type": "boundary",
+     "name": "End",
+     "children": []
+    }
+   ]
+  }
+ }
+}

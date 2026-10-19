@@ -97,6 +97,9 @@ pub struct Model {
     pub boundary_priors: HashMap<usize, Vec<(usize, bool)>>,
     edge_younger: Vec<usize>,
     edge_older: Vec<usize>,
+    /// Every tied pair, (younger, older): ordering edges carrying a half,
+    /// date ties and neighbouring boundaries alike.
+    pub tie_pairs: BTreeSet<(usize, usize)>,
     pub tied_with: Vec<Vec<usize>>,
     pub edge_tied_with: Vec<Vec<usize>>,
     pub date_tied_with: Vec<Vec<usize>>,
@@ -156,6 +159,7 @@ impl Clone for Model {
             boundary_priors: self.boundary_priors.clone(),
             edge_younger: self.edge_younger.clone(),
             edge_older: self.edge_older.clone(),
+            tie_pairs: self.tie_pairs.clone(),
             tied_with: self.tied_with.clone(),
             edge_tied_with: self.edge_tied_with.clone(),
             date_tied_with: self.date_tied_with.clone(),
@@ -340,6 +344,7 @@ impl Model {
             boundary_priors: HashMap::new(),
             edge_younger: Vec::new(),
             edge_older: Vec::new(),
+            tie_pairs: BTreeSet::new(),
             tied_with: Vec::new(),
             edge_tied_with: Vec::new(),
             date_tied_with: Vec::new(),
@@ -795,6 +800,7 @@ impl Model {
             tie_pairs.insert((younger, older));
         }
         tie_pairs.extend(self.neighbouring_boundaries());
+        self.tie_pairs = tie_pairs.clone();
         self.tied_with = vec![Vec::new(); n];
         for &(y, o) in &tie_pairs {
             self.tied_with[y].push(o);
@@ -1031,7 +1037,7 @@ impl Model {
 
     /// For every parameter, everything the ordering forces to be YOUNGER
     /// than it, transitively.
-    fn younger_reachable(&self) -> Vec<HashSet<usize>> {
+    pub fn younger_reachable(&self) -> Vec<HashSet<usize>> {
         fn walk(
             model: &Model,
             row: usize,

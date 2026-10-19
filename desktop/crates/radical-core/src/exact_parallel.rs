@@ -126,7 +126,7 @@ pub fn flattened(element: &Element) -> Element {
     out
 }
 
-fn ids(element: &Element, found: &mut HashSet<String>) {
+pub(crate) fn ids(element: &Element, found: &mut HashSet<String>) {
     found.insert(element.id.clone());
     for child in &element.children {
         ids(child, found);

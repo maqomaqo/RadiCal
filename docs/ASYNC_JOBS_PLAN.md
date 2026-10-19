@@ -57,7 +57,21 @@ Wall-clock for `gibbs.run()`, each model run to its own convergence target:
 | synthetic — 30 dates / 6 phases | 37 | 30,000 | **18.4 s** | 0.61 |
 | synthetic — 60 dates / 12 phases | 73 | 30,000 | **43.4 s** | 1.45 |
 
-Two things follow.
+**Measured again on 2026-10-19, against the Rust port** (`desktop/bench/sampler_bench.py` for
+Python, `cargo run --release -p radical-core --example sampler_bench` for Rust; one 12-core Apple
+silicon Mac, each side alone). The table above predates parallel tempering and multiple chains. A
+full solve here is the API's: four chains, three temperatures, seed 42, run to convergence. Both
+sides make the same runs, sweep for sweep:
+
+| Model | Sweeps | Python solve | Rust solve | Python, 10k sweeps of one chain | Rust, the same |
+|---|---|---|---|---|---|
+| `oxcal_fixture` ordered, 8 dates | 40,000 | 4.6 s | **0.56 s** | 1.1 s | **0.16 s** |
+| `dune_section_fixture`, 16 dates, outlier model | 48,000 | 23.5 s | **1.83 s** | 4.8 s | **0.29 s** |
+| synthetic, 60 dates / 12 phases | 48,000 | 38.8 s | **3.14 s** | 5.3 s | **0.39 s** |
+
+At those per-sweep costs a run that goes to the cap -- 200,000 sweeps per chain, at three
+temperatures -- takes about 5 minutes on 60 dates in Python and about 25 seconds in Rust.
+
 
 **The typical case is tens of seconds, not milliseconds and not hours.** That is the awkward
 band: too long to hold a request open behind any reverse proxy (nginx's default

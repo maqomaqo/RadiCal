@@ -15,6 +15,7 @@ mod date_format;
 mod exact_chain;
 mod exact_parallel;
 mod f14c;
+mod influence;
 mod interpolation;
 mod intervals;
 mod kde;
@@ -57,7 +58,7 @@ pub const REL: f64 = 1e-12;
 pub const REL_LIKELIHOOD: f64 = 5e-12;
 
 /// The families compared here; every units/ family must be one.
-const COVERED: [&str; 22] = [
+const COVERED: [&str; 23] = [
     "agreement",
     "calibrate",
     "cell_edges",
@@ -68,6 +69,7 @@ const COVERED: [&str; 22] = [
     "exact_chain",
     "exact_parallel",
     "f14c",
+    "influence",
     "interpolation",
     "intervals",
     "kde",

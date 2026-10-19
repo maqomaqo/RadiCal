@@ -25,6 +25,7 @@
 
 pub mod agreement;
 pub mod calibration;
+pub mod cross_check;
 pub mod curve_mix;
 pub mod curve_registry;
 pub mod curve_view;
@@ -33,6 +34,7 @@ pub mod date_format;
 pub mod exact_chain;
 pub mod exact_parallel;
 pub mod gibbs;
+pub mod influence;
 pub mod intervals;
 pub mod kde;
 pub mod matrix;
