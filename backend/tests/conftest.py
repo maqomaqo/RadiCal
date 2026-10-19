@@ -55,6 +55,25 @@ def _schema():
     init_db()
 
 
+@pytest.fixture(autouse=True)
+def _four_chains(monkeypatch):
+    """
+    Room for four sampler chains, whatever the machine.
+
+    gibbs.solve_chains caps the chains at the cores available, so on GitHub's
+    two-core runners a test asking for four ran two. Some then failed outright
+    (a test counting its chains), and one passed or failed on Monte Carlo
+    noise alone: the parallel-branches cross-check, whose median Boundary sat
+    2.07 years from the direct answer on two chains against a 2.0-year limit,
+    and inside it on four. Running more worker processes than cores is
+    slower, not different, so every test gets the chains it asks for and an
+    answer that does not depend on the computer running it.
+    """
+    from app.services import gibbs
+    cap = gibbs.worker_cap()
+    monkeypatch.setattr(gibbs, 'worker_cap', lambda: max(4, cap))
+
+
 @pytest.fixture
 def remove_stored_curves():
     """
