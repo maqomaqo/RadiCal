@@ -1,0 +1,3194 @@
+{
+ "schema": 2,
+ "family": "units/influence",
+ "cases": [
+  {
+   "name": "plan/leave_out+move+outlier",
+   "inputs": {
+    "tree": {
+     "id": "root",
+     "element_type": "sequence",
+     "name": "Site",
+     "children": [
+      {
+       "id": "b1",
+       "element_type": "boundary",
+       "name": "Start",
+       "children": []
+      },
+      {
+       "id": "pA",
+       "element_type": "phase",
+       "name": "Phase A",
+       "children": []
+      },
+      {
+       "id": "b2",
+       "element_type": "boundary",
+       "name": "A to B",
+       "children": []
+      },
+      {
+       "id": "pB",
+       "element_type": "phase",
+       "name": "Phase B",
+       "children": []
+      },
+      {
+       "id": "h1",
+       "element_type": "hiatus",
+       "name": "Gap",
+       "children": []
+      },
+      {
+       "id": "pC",
+       "element_type": "phase",
+       "name": null,
+       "children": []
+      },
+      {
+       "id": "pD",
+       "element_type": "phase",
+       "name": "Nested",
+       "children": [
+        {
+         "id": "pD1",
+         "element_type": "phase",
+         "name": "Inner",
+         "children": []
+        }
+       ]
+      },
+      {
+       "id": "w1",
+       "element_type": "wiggle_sequence",
+       "name": "Timber",
+       "children": []
+      },
+      {
+       "id": "b3",
+       "element_type": "boundary",
+       "name": "End",
+       "children": []
+      }
+     ]
+    },
+    "measurements": [
+     {
+      "id": "d1",
+      "sample_name": "A-1",
+      "element_id": "pA",
+      "age_bp": 3000.0,
+      "error_1sigma": 25.0,
+      "outlier_prior": null,
+      "outlier_model": null
+     },
+     {
+      "id": "d2",
+      "sample_name": null,
+      "element_id": "pA",
+      "age_bp": 3000.0,
+      "error_1sigma": 25.0,
+      "outlier_prior": 0.05,
+      "outlier_model": "charcoal"
+     },
+     {
+      "id": "d3",
+      "sample_name": "B-1",
+      "element_id": "pB",
+      "age_bp": 3000.0,
+      "error_1sigma": 25.0,
+      "outlier_prior": null,
+      "outlier_model": null
+     },
+     {
+      "id": "d4",
+      "sample_name": "C-1",
+      "element_id": "pC",
+      "age_bp": 3000.0,
+      "error_1sigma": 25.0,
+      "outlier_prior": 1.0,
+      "outlier_model": null
+     },
+     {
+      "id": "d5",
+      "sample_name": "Inner-1",
+      "element_id": "pD1",
+      "age_bp": 3000.0,
+      "error_1sigma": 25.0,
+      "outlier_prior": null,
+      "outlier_model": null
+     },
+     {
+      "id": "d6",
+      "sample_name": "W-1",
+      "element_id": "w1",
+      "age_bp": 3000.0,
+      "error_1sigma": 25.0,
+      "outlier_prior": null,
+      "outlier_model": null
+     },
+     {
+      "id": "d7",
+      "sample_name": "Loose",
+      "element_id": null,
+      "age_bp": 3000.0,
+      "error_1sigma": 25.0,
+      "outlier_prior": null,
+      "outlier_model": null
+     },
+     {
+      "id": "d8",
+      "sample_name": "",
+      "element_id": "pB",
+      "age_bp": 3000.0,
+      "error_1sigma": 25.0,
+      "outlier_prior": null,
+      "outlier_model": null
+     }
+    ],
+    "kinds": ["leave_out","move","outlier"]
+   },
+   "outputs": {
+    "variants": [
+     {
+      "id": "leave_out:d1",
+      "kind": "leave_out",
+      "date_id": "d1",
+      "date_name": "A-1",
+      "label": "A-1 left out"
+     },
+     {
+      "id": "move_younger:d1",
+      "kind": "move",
+      "date_id": "d1",
+      "date_name": "A-1",
+      "to_phase_id": "pB",
+      "to_phase_name": "Phase B",
+      "direction": "younger",
+      "label": "A-1 moved to Phase B, the younger Phase"
+     },
+     {
+      "id": "outlier:d1",
+      "kind": "outlier",
+      "date_id": "d1",
+      "date_name": "A-1",
+      "label": "A-1 as an outlier"
+     },
+     {
+      "id": "leave_out:d2",
+      "kind": "leave_out",
+      "date_id": "d2",
+      "date_name": "d2",
+      "label": "d2 left out"
+     },
+     {
+      "id": "move_younger:d2",
+      "kind": "move",
+      "date_id": "d2",
+      "date_name": "d2",
+      "to_phase_id": "pB",
+      "to_phase_name": "Phase B",
+      "direction": "younger",
+      "label": "d2 moved to Phase B, the younger Phase"
+     },
+     {
+      "id": "outlier:d2",
+      "kind": "outlier",
+      "date_id": "d2",
+      "date_name": "d2",
+      "label": "d2 as an outlier"
+     },
+     {
+      "id": "leave_out:d3",
+      "kind": "leave_out",
+      "date_id": "d3",
+      "date_name": "B-1",
+      "label": "B-1 left out"
+     },
+     {
+      "id": "move_older:d3",
+      "kind": "move",
+      "date_id": "d3",
+      "date_name": "B-1",
+      "to_phase_id": "pA",
+      "to_phase_name": "Phase A",
+      "direction": "older",
+      "label": "B-1 moved to Phase A, the older Phase"
+     },
+     {
+      "id": "move_younger:d3",
+      "kind": "move",
+      "date_id": "d3",
+      "date_name": "B-1",
+      "to_phase_id": "pC",
+      "to_phase_name": "the next Phase",
+      "direction": "younger",
+      "label": "B-1 moved to the next Phase, the younger Phase"
+     },
+     {
+      "id": "outlier:d3",
+      "kind": "outlier",
+      "date_id": "d3",
+      "date_name": "B-1",
+      "label": "B-1 as an outlier"
+     },
+     {
+      "id": "leave_out:d4",
+      "kind": "leave_out",
+      "date_id": "d4",
+      "date_name": "C-1",
+      "label": "C-1 left out"
+     },
+     {
+      "id": "move_older:d4",
+      "kind": "move",
+      "date_id": "d4",
+      "date_name": "C-1",
+      "to_phase_id": "pB",
+      "to_phase_name": "Phase B",
+      "direction": "older",
+      "label": "C-1 moved to Phase B, the older Phase"
+     },
+     {
+      "id": "leave_out:d5",
+      "kind": "leave_out",
+      "date_id": "d5",
+      "date_name": "Inner-1",
+      "label": "Inner-1 left out"
+     },
+     {
+      "id": "outlier:d5",
+      "kind": "outlier",
+      "date_id": "d5",
+      "date_name": "Inner-1",
+      "label": "Inner-1 as an outlier"
+     },
+     {
+      "id": "leave_out:d8",
+      "kind": "leave_out",
+      "date_id": "d8",
+      "date_name": "d8",
+      "label": "d8 left out"
+     },
+     {
+      "id": "move_older:d8",
+      "kind": "move",
+      "date_id": "d8",
+      "date_name": "d8",
+      "to_phase_id": "pA",
+      "to_phase_name": "Phase A",
+      "direction": "older",
+      "label": "d8 moved to Phase A, the older Phase"
+     },
+     {
+      "id": "move_younger:d8",
+      "kind": "move",
+      "date_id": "d8",
+      "date_name": "d8",
+      "to_phase_id": "pC",
+      "to_phase_name": "the next Phase",
+      "direction": "younger",
+      "label": "d8 moved to the next Phase, the younger Phase"
+     },
+     {
+      "id": "outlier:d8",
+      "kind": "outlier",
+      "date_id": "d8",
+      "date_name": "d8",
+      "label": "d8 as an outlier"
+     }
+    ],
+    "applied": [
+     [
+      {
+       "id": "d2",
+       "element_id": "pA",
+       "outlier_prior": 0.05,
+       "outlier_model": "charcoal"
+      },
+      {
+       "id": "d3",
+       "element_id": "pB",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d4",
+       "element_id": "pC",
+       "outlier_prior": 1.0,
+       "outlier_model": null
+      },
+      {
+       "id": "d5",
+       "element_id": "pD1",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d6",
+       "element_id": "w1",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d7",
+       "element_id": null,
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d8",
+       "element_id": "pB",
+       "outlier_prior": null,
+       "outlier_model": null
+      }
+     ],
+     [
+      {
+       "id": "d1",
+       "element_id": "pB",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d2",
+       "element_id": "pA",
+       "outlier_prior": 0.05,
+       "outlier_model": "charcoal"
+      },
+      {
+       "id": "d3",
+       "element_id": "pB",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d4",
+       "element_id": "pC",
+       "outlier_prior": 1.0,
+       "outlier_model": null
+      },
+      {
+       "id": "d5",
+       "element_id": "pD1",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d6",
+       "element_id": "w1",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d7",
+       "element_id": null,
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d8",
+       "element_id": "pB",
+       "outlier_prior": null,
+       "outlier_model": null
+      }
+     ],
+     [
+      {
+       "id": "d1",
+       "element_id": "pA",
+       "outlier_prior": 1.0,
+       "outlier_model": "general"
+      },
+      {
+       "id": "d2",
+       "element_id": "pA",
+       "outlier_prior": 0.05,
+       "outlier_model": "charcoal"
+      },
+      {
+       "id": "d3",
+       "element_id": "pB",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d4",
+       "element_id": "pC",
+       "outlier_prior": 1.0,
+       "outlier_model": null
+      },
+      {
+       "id": "d5",
+       "element_id": "pD1",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d6",
+       "element_id": "w1",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d7",
+       "element_id": null,
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d8",
+       "element_id": "pB",
+       "outlier_prior": null,
+       "outlier_model": null
+      }
+     ],
+     [
+      {
+       "id": "d1",
+       "element_id": "pA",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d3",
+       "element_id": "pB",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d4",
+       "element_id": "pC",
+       "outlier_prior": 1.0,
+       "outlier_model": null
+      },
+      {
+       "id": "d5",
+       "element_id": "pD1",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d6",
+       "element_id": "w1",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d7",
+       "element_id": null,
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d8",
+       "element_id": "pB",
+       "outlier_prior": null,
+       "outlier_model": null
+      }
+     ],
+     [
+      {
+       "id": "d1",
+       "element_id": "pA",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d2",
+       "element_id": "pB",
+       "outlier_prior": 0.05,
+       "outlier_model": "charcoal"
+      },
+      {
+       "id": "d3",
+       "element_id": "pB",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d4",
+       "element_id": "pC",
+       "outlier_prior": 1.0,
+       "outlier_model": null
+      },
+      {
+       "id": "d5",
+       "element_id": "pD1",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d6",
+       "element_id": "w1",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d7",
+       "element_id": null,
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d8",
+       "element_id": "pB",
+       "outlier_prior": null,
+       "outlier_model": null
+      }
+     ],
+     [
+      {
+       "id": "d1",
+       "element_id": "pA",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d2",
+       "element_id": "pA",
+       "outlier_prior": 1.0,
+       "outlier_model": "charcoal"
+      },
+      {
+       "id": "d3",
+       "element_id": "pB",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d4",
+       "element_id": "pC",
+       "outlier_prior": 1.0,
+       "outlier_model": null
+      },
+      {
+       "id": "d5",
+       "element_id": "pD1",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d6",
+       "element_id": "w1",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d7",
+       "element_id": null,
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d8",
+       "element_id": "pB",
+       "outlier_prior": null,
+       "outlier_model": null
+      }
+     ],
+     [
+      {
+       "id": "d1",
+       "element_id": "pA",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d2",
+       "element_id": "pA",
+       "outlier_prior": 0.05,
+       "outlier_model": "charcoal"
+      },
+      {
+       "id": "d4",
+       "element_id": "pC",
+       "outlier_prior": 1.0,
+       "outlier_model": null
+      },
+      {
+       "id": "d5",
+       "element_id": "pD1",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d6",
+       "element_id": "w1",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d7",
+       "element_id": null,
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d8",
+       "element_id": "pB",
+       "outlier_prior": null,
+       "outlier_model": null
+      }
+     ],
+     [
+      {
+       "id": "d1",
+       "element_id": "pA",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d2",
+       "element_id": "pA",
+       "outlier_prior": 0.05,
+       "outlier_model": "charcoal"
+      },
+      {
+       "id": "d3",
+       "element_id": "pA",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d4",
+       "element_id": "pC",
+       "outlier_prior": 1.0,
+       "outlier_model": null
+      },
+      {
+       "id": "d5",
+       "element_id": "pD1",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d6",
+       "element_id": "w1",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d7",
+       "element_id": null,
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d8",
+       "element_id": "pB",
+       "outlier_prior": null,
+       "outlier_model": null
+      }
+     ],
+     [
+      {
+       "id": "d1",
+       "element_id": "pA",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d2",
+       "element_id": "pA",
+       "outlier_prior": 0.05,
+       "outlier_model": "charcoal"
+      },
+      {
+       "id": "d3",
+       "element_id": "pC",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d4",
+       "element_id": "pC",
+       "outlier_prior": 1.0,
+       "outlier_model": null
+      },
+      {
+       "id": "d5",
+       "element_id": "pD1",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d6",
+       "element_id": "w1",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d7",
+       "element_id": null,
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d8",
+       "element_id": "pB",
+       "outlier_prior": null,
+       "outlier_model": null
+      }
+     ],
+     [
+      {
+       "id": "d1",
+       "element_id": "pA",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d2",
+       "element_id": "pA",
+       "outlier_prior": 0.05,
+       "outlier_model": "charcoal"
+      },
+      {
+       "id": "d3",
+       "element_id": "pB",
+       "outlier_prior": 1.0,
+       "outlier_model": "general"
+      },
+      {
+       "id": "d4",
+       "element_id": "pC",
+       "outlier_prior": 1.0,
+       "outlier_model": null
+      },
+      {
+       "id": "d5",
+       "element_id": "pD1",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d6",
+       "element_id": "w1",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d7",
+       "element_id": null,
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d8",
+       "element_id": "pB",
+       "outlier_prior": null,
+       "outlier_model": null
+      }
+     ],
+     [
+      {
+       "id": "d1",
+       "element_id": "pA",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d2",
+       "element_id": "pA",
+       "outlier_prior": 0.05,
+       "outlier_model": "charcoal"
+      },
+      {
+       "id": "d3",
+       "element_id": "pB",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d5",
+       "element_id": "pD1",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d6",
+       "element_id": "w1",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d7",
+       "element_id": null,
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d8",
+       "element_id": "pB",
+       "outlier_prior": null,
+       "outlier_model": null
+      }
+     ],
+     [
+      {
+       "id": "d1",
+       "element_id": "pA",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d2",
+       "element_id": "pA",
+       "outlier_prior": 0.05,
+       "outlier_model": "charcoal"
+      },
+      {
+       "id": "d3",
+       "element_id": "pB",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d4",
+       "element_id": "pB",
+       "outlier_prior": 1.0,
+       "outlier_model": null
+      },
+      {
+       "id": "d5",
+       "element_id": "pD1",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d6",
+       "element_id": "w1",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d7",
+       "element_id": null,
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d8",
+       "element_id": "pB",
+       "outlier_prior": null,
+       "outlier_model": null
+      }
+     ],
+     [
+      {
+       "id": "d1",
+       "element_id": "pA",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d2",
+       "element_id": "pA",
+       "outlier_prior": 0.05,
+       "outlier_model": "charcoal"
+      },
+      {
+       "id": "d3",
+       "element_id": "pB",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d4",
+       "element_id": "pC",
+       "outlier_prior": 1.0,
+       "outlier_model": null
+      },
+      {
+       "id": "d6",
+       "element_id": "w1",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d7",
+       "element_id": null,
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d8",
+       "element_id": "pB",
+       "outlier_prior": null,
+       "outlier_model": null
+      }
+     ],
+     [
+      {
+       "id": "d1",
+       "element_id": "pA",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d2",
+       "element_id": "pA",
+       "outlier_prior": 0.05,
+       "outlier_model": "charcoal"
+      },
+      {
+       "id": "d3",
+       "element_id": "pB",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d4",
+       "element_id": "pC",
+       "outlier_prior": 1.0,
+       "outlier_model": null
+      },
+      {
+       "id": "d5",
+       "element_id": "pD1",
+       "outlier_prior": 1.0,
+       "outlier_model": "general"
+      },
+      {
+       "id": "d6",
+       "element_id": "w1",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d7",
+       "element_id": null,
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d8",
+       "element_id": "pB",
+       "outlier_prior": null,
+       "outlier_model": null
+      }
+     ],
+     [
+      {
+       "id": "d1",
+       "element_id": "pA",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d2",
+       "element_id": "pA",
+       "outlier_prior": 0.05,
+       "outlier_model": "charcoal"
+      },
+      {
+       "id": "d3",
+       "element_id": "pB",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d4",
+       "element_id": "pC",
+       "outlier_prior": 1.0,
+       "outlier_model": null
+      },
+      {
+       "id": "d5",
+       "element_id": "pD1",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d6",
+       "element_id": "w1",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d7",
+       "element_id": null,
+       "outlier_prior": null,
+       "outlier_model": null
+      }
+     ],
+     [
+      {
+       "id": "d1",
+       "element_id": "pA",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d2",
+       "element_id": "pA",
+       "outlier_prior": 0.05,
+       "outlier_model": "charcoal"
+      },
+      {
+       "id": "d3",
+       "element_id": "pB",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d4",
+       "element_id": "pC",
+       "outlier_prior": 1.0,
+       "outlier_model": null
+      },
+      {
+       "id": "d5",
+       "element_id": "pD1",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d6",
+       "element_id": "w1",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d7",
+       "element_id": null,
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d8",
+       "element_id": "pA",
+       "outlier_prior": null,
+       "outlier_model": null
+      }
+     ],
+     [
+      {
+       "id": "d1",
+       "element_id": "pA",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d2",
+       "element_id": "pA",
+       "outlier_prior": 0.05,
+       "outlier_model": "charcoal"
+      },
+      {
+       "id": "d3",
+       "element_id": "pB",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d4",
+       "element_id": "pC",
+       "outlier_prior": 1.0,
+       "outlier_model": null
+      },
+      {
+       "id": "d5",
+       "element_id": "pD1",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d6",
+       "element_id": "w1",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d7",
+       "element_id": null,
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d8",
+       "element_id": "pC",
+       "outlier_prior": null,
+       "outlier_model": null
+      }
+     ],
+     [
+      {
+       "id": "d1",
+       "element_id": "pA",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d2",
+       "element_id": "pA",
+       "outlier_prior": 0.05,
+       "outlier_model": "charcoal"
+      },
+      {
+       "id": "d3",
+       "element_id": "pB",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d4",
+       "element_id": "pC",
+       "outlier_prior": 1.0,
+       "outlier_model": null
+      },
+      {
+       "id": "d5",
+       "element_id": "pD1",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d6",
+       "element_id": "w1",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d7",
+       "element_id": null,
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d8",
+       "element_id": "pB",
+       "outlier_prior": 1.0,
+       "outlier_model": "general"
+      }
+     ]
+    ]
+   }
+  },
+  {
+   "name": "plan/move",
+   "inputs": {
+    "tree": {
+     "id": "root",
+     "element_type": "sequence",
+     "name": "Site",
+     "children": [
+      {
+       "id": "b1",
+       "element_type": "boundary",
+       "name": "Start",
+       "children": []
+      },
+      {
+       "id": "pA",
+       "element_type": "phase",
+       "name": "Phase A",
+       "children": []
+      },
+      {
+       "id": "b2",
+       "element_type": "boundary",
+       "name": "A to B",
+       "children": []
+      },
+      {
+       "id": "pB",
+       "element_type": "phase",
+       "name": "Phase B",
+       "children": []
+      },
+      {
+       "id": "h1",
+       "element_type": "hiatus",
+       "name": "Gap",
+       "children": []
+      },
+      {
+       "id": "pC",
+       "element_type": "phase",
+       "name": null,
+       "children": []
+      },
+      {
+       "id": "pD",
+       "element_type": "phase",
+       "name": "Nested",
+       "children": [
+        {
+         "id": "pD1",
+         "element_type": "phase",
+         "name": "Inner",
+         "children": []
+        }
+       ]
+      },
+      {
+       "id": "w1",
+       "element_type": "wiggle_sequence",
+       "name": "Timber",
+       "children": []
+      },
+      {
+       "id": "b3",
+       "element_type": "boundary",
+       "name": "End",
+       "children": []
+      }
+     ]
+    },
+    "measurements": [
+     {
+      "id": "d1",
+      "sample_name": "A-1",
+      "element_id": "pA",
+      "age_bp": 3000.0,
+      "error_1sigma": 25.0,
+      "outlier_prior": null,
+      "outlier_model": null
+     },
+     {
+      "id": "d2",
+      "sample_name": null,
+      "element_id": "pA",
+      "age_bp": 3000.0,
+      "error_1sigma": 25.0,
+      "outlier_prior": 0.05,
+      "outlier_model": "charcoal"
+     },
+     {
+      "id": "d3",
+      "sample_name": "B-1",
+      "element_id": "pB",
+      "age_bp": 3000.0,
+      "error_1sigma": 25.0,
+      "outlier_prior": null,
+      "outlier_model": null
+     },
+     {
+      "id": "d4",
+      "sample_name": "C-1",
+      "element_id": "pC",
+      "age_bp": 3000.0,
+      "error_1sigma": 25.0,
+      "outlier_prior": 1.0,
+      "outlier_model": null
+     },
+     {
+      "id": "d5",
+      "sample_name": "Inner-1",
+      "element_id": "pD1",
+      "age_bp": 3000.0,
+      "error_1sigma": 25.0,
+      "outlier_prior": null,
+      "outlier_model": null
+     },
+     {
+      "id": "d6",
+      "sample_name": "W-1",
+      "element_id": "w1",
+      "age_bp": 3000.0,
+      "error_1sigma": 25.0,
+      "outlier_prior": null,
+      "outlier_model": null
+     },
+     {
+      "id": "d7",
+      "sample_name": "Loose",
+      "element_id": null,
+      "age_bp": 3000.0,
+      "error_1sigma": 25.0,
+      "outlier_prior": null,
+      "outlier_model": null
+     },
+     {
+      "id": "d8",
+      "sample_name": "",
+      "element_id": "pB",
+      "age_bp": 3000.0,
+      "error_1sigma": 25.0,
+      "outlier_prior": null,
+      "outlier_model": null
+     }
+    ],
+    "kinds": ["move"]
+   },
+   "outputs": {
+    "variants": [
+     {
+      "id": "move_younger:d1",
+      "kind": "move",
+      "date_id": "d1",
+      "date_name": "A-1",
+      "to_phase_id": "pB",
+      "to_phase_name": "Phase B",
+      "direction": "younger",
+      "label": "A-1 moved to Phase B, the younger Phase"
+     },
+     {
+      "id": "move_younger:d2",
+      "kind": "move",
+      "date_id": "d2",
+      "date_name": "d2",
+      "to_phase_id": "pB",
+      "to_phase_name": "Phase B",
+      "direction": "younger",
+      "label": "d2 moved to Phase B, the younger Phase"
+     },
+     {
+      "id": "move_older:d3",
+      "kind": "move",
+      "date_id": "d3",
+      "date_name": "B-1",
+      "to_phase_id": "pA",
+      "to_phase_name": "Phase A",
+      "direction": "older",
+      "label": "B-1 moved to Phase A, the older Phase"
+     },
+     {
+      "id": "move_younger:d3",
+      "kind": "move",
+      "date_id": "d3",
+      "date_name": "B-1",
+      "to_phase_id": "pC",
+      "to_phase_name": "the next Phase",
+      "direction": "younger",
+      "label": "B-1 moved to the next Phase, the younger Phase"
+     },
+     {
+      "id": "move_older:d4",
+      "kind": "move",
+      "date_id": "d4",
+      "date_name": "C-1",
+      "to_phase_id": "pB",
+      "to_phase_name": "Phase B",
+      "direction": "older",
+      "label": "C-1 moved to Phase B, the older Phase"
+     },
+     {
+      "id": "move_older:d8",
+      "kind": "move",
+      "date_id": "d8",
+      "date_name": "d8",
+      "to_phase_id": "pA",
+      "to_phase_name": "Phase A",
+      "direction": "older",
+      "label": "d8 moved to Phase A, the older Phase"
+     },
+     {
+      "id": "move_younger:d8",
+      "kind": "move",
+      "date_id": "d8",
+      "date_name": "d8",
+      "to_phase_id": "pC",
+      "to_phase_name": "the next Phase",
+      "direction": "younger",
+      "label": "d8 moved to the next Phase, the younger Phase"
+     }
+    ],
+    "applied": [
+     [
+      {
+       "id": "d1",
+       "element_id": "pB",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d2",
+       "element_id": "pA",
+       "outlier_prior": 0.05,
+       "outlier_model": "charcoal"
+      },
+      {
+       "id": "d3",
+       "element_id": "pB",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d4",
+       "element_id": "pC",
+       "outlier_prior": 1.0,
+       "outlier_model": null
+      },
+      {
+       "id": "d5",
+       "element_id": "pD1",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d6",
+       "element_id": "w1",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d7",
+       "element_id": null,
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d8",
+       "element_id": "pB",
+       "outlier_prior": null,
+       "outlier_model": null
+      }
+     ],
+     [
+      {
+       "id": "d1",
+       "element_id": "pA",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d2",
+       "element_id": "pB",
+       "outlier_prior": 0.05,
+       "outlier_model": "charcoal"
+      },
+      {
+       "id": "d3",
+       "element_id": "pB",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d4",
+       "element_id": "pC",
+       "outlier_prior": 1.0,
+       "outlier_model": null
+      },
+      {
+       "id": "d5",
+       "element_id": "pD1",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d6",
+       "element_id": "w1",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d7",
+       "element_id": null,
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d8",
+       "element_id": "pB",
+       "outlier_prior": null,
+       "outlier_model": null
+      }
+     ],
+     [
+      {
+       "id": "d1",
+       "element_id": "pA",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d2",
+       "element_id": "pA",
+       "outlier_prior": 0.05,
+       "outlier_model": "charcoal"
+      },
+      {
+       "id": "d3",
+       "element_id": "pA",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d4",
+       "element_id": "pC",
+       "outlier_prior": 1.0,
+       "outlier_model": null
+      },
+      {
+       "id": "d5",
+       "element_id": "pD1",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d6",
+       "element_id": "w1",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d7",
+       "element_id": null,
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d8",
+       "element_id": "pB",
+       "outlier_prior": null,
+       "outlier_model": null
+      }
+     ],
+     [
+      {
+       "id": "d1",
+       "element_id": "pA",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d2",
+       "element_id": "pA",
+       "outlier_prior": 0.05,
+       "outlier_model": "charcoal"
+      },
+      {
+       "id": "d3",
+       "element_id": "pC",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d4",
+       "element_id": "pC",
+       "outlier_prior": 1.0,
+       "outlier_model": null
+      },
+      {
+       "id": "d5",
+       "element_id": "pD1",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d6",
+       "element_id": "w1",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d7",
+       "element_id": null,
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d8",
+       "element_id": "pB",
+       "outlier_prior": null,
+       "outlier_model": null
+      }
+     ],
+     [
+      {
+       "id": "d1",
+       "element_id": "pA",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d2",
+       "element_id": "pA",
+       "outlier_prior": 0.05,
+       "outlier_model": "charcoal"
+      },
+      {
+       "id": "d3",
+       "element_id": "pB",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d4",
+       "element_id": "pB",
+       "outlier_prior": 1.0,
+       "outlier_model": null
+      },
+      {
+       "id": "d5",
+       "element_id": "pD1",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d6",
+       "element_id": "w1",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d7",
+       "element_id": null,
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d8",
+       "element_id": "pB",
+       "outlier_prior": null,
+       "outlier_model": null
+      }
+     ],
+     [
+      {
+       "id": "d1",
+       "element_id": "pA",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d2",
+       "element_id": "pA",
+       "outlier_prior": 0.05,
+       "outlier_model": "charcoal"
+      },
+      {
+       "id": "d3",
+       "element_id": "pB",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d4",
+       "element_id": "pC",
+       "outlier_prior": 1.0,
+       "outlier_model": null
+      },
+      {
+       "id": "d5",
+       "element_id": "pD1",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d6",
+       "element_id": "w1",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d7",
+       "element_id": null,
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d8",
+       "element_id": "pA",
+       "outlier_prior": null,
+       "outlier_model": null
+      }
+     ],
+     [
+      {
+       "id": "d1",
+       "element_id": "pA",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d2",
+       "element_id": "pA",
+       "outlier_prior": 0.05,
+       "outlier_model": "charcoal"
+      },
+      {
+       "id": "d3",
+       "element_id": "pB",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d4",
+       "element_id": "pC",
+       "outlier_prior": 1.0,
+       "outlier_model": null
+      },
+      {
+       "id": "d5",
+       "element_id": "pD1",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d6",
+       "element_id": "w1",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d7",
+       "element_id": null,
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d8",
+       "element_id": "pC",
+       "outlier_prior": null,
+       "outlier_model": null
+      }
+     ]
+    ]
+   }
+  },
+  {
+   "name": "plan/outlier+leave_out",
+   "inputs": {
+    "tree": {
+     "id": "root",
+     "element_type": "sequence",
+     "name": "Site",
+     "children": [
+      {
+       "id": "b1",
+       "element_type": "boundary",
+       "name": "Start",
+       "children": []
+      },
+      {
+       "id": "pA",
+       "element_type": "phase",
+       "name": "Phase A",
+       "children": []
+      },
+      {
+       "id": "b2",
+       "element_type": "boundary",
+       "name": "A to B",
+       "children": []
+      },
+      {
+       "id": "pB",
+       "element_type": "phase",
+       "name": "Phase B",
+       "children": []
+      },
+      {
+       "id": "h1",
+       "element_type": "hiatus",
+       "name": "Gap",
+       "children": []
+      },
+      {
+       "id": "pC",
+       "element_type": "phase",
+       "name": null,
+       "children": []
+      },
+      {
+       "id": "pD",
+       "element_type": "phase",
+       "name": "Nested",
+       "children": [
+        {
+         "id": "pD1",
+         "element_type": "phase",
+         "name": "Inner",
+         "children": []
+        }
+       ]
+      },
+      {
+       "id": "w1",
+       "element_type": "wiggle_sequence",
+       "name": "Timber",
+       "children": []
+      },
+      {
+       "id": "b3",
+       "element_type": "boundary",
+       "name": "End",
+       "children": []
+      }
+     ]
+    },
+    "measurements": [
+     {
+      "id": "d1",
+      "sample_name": "A-1",
+      "element_id": "pA",
+      "age_bp": 3000.0,
+      "error_1sigma": 25.0,
+      "outlier_prior": null,
+      "outlier_model": null
+     },
+     {
+      "id": "d2",
+      "sample_name": null,
+      "element_id": "pA",
+      "age_bp": 3000.0,
+      "error_1sigma": 25.0,
+      "outlier_prior": 0.05,
+      "outlier_model": "charcoal"
+     },
+     {
+      "id": "d3",
+      "sample_name": "B-1",
+      "element_id": "pB",
+      "age_bp": 3000.0,
+      "error_1sigma": 25.0,
+      "outlier_prior": null,
+      "outlier_model": null
+     },
+     {
+      "id": "d4",
+      "sample_name": "C-1",
+      "element_id": "pC",
+      "age_bp": 3000.0,
+      "error_1sigma": 25.0,
+      "outlier_prior": 1.0,
+      "outlier_model": null
+     },
+     {
+      "id": "d5",
+      "sample_name": "Inner-1",
+      "element_id": "pD1",
+      "age_bp": 3000.0,
+      "error_1sigma": 25.0,
+      "outlier_prior": null,
+      "outlier_model": null
+     },
+     {
+      "id": "d6",
+      "sample_name": "W-1",
+      "element_id": "w1",
+      "age_bp": 3000.0,
+      "error_1sigma": 25.0,
+      "outlier_prior": null,
+      "outlier_model": null
+     },
+     {
+      "id": "d7",
+      "sample_name": "Loose",
+      "element_id": null,
+      "age_bp": 3000.0,
+      "error_1sigma": 25.0,
+      "outlier_prior": null,
+      "outlier_model": null
+     },
+     {
+      "id": "d8",
+      "sample_name": "",
+      "element_id": "pB",
+      "age_bp": 3000.0,
+      "error_1sigma": 25.0,
+      "outlier_prior": null,
+      "outlier_model": null
+     }
+    ],
+    "kinds": ["outlier","leave_out"]
+   },
+   "outputs": {
+    "variants": [
+     {
+      "id": "leave_out:d1",
+      "kind": "leave_out",
+      "date_id": "d1",
+      "date_name": "A-1",
+      "label": "A-1 left out"
+     },
+     {
+      "id": "outlier:d1",
+      "kind": "outlier",
+      "date_id": "d1",
+      "date_name": "A-1",
+      "label": "A-1 as an outlier"
+     },
+     {
+      "id": "leave_out:d2",
+      "kind": "leave_out",
+      "date_id": "d2",
+      "date_name": "d2",
+      "label": "d2 left out"
+     },
+     {
+      "id": "outlier:d2",
+      "kind": "outlier",
+      "date_id": "d2",
+      "date_name": "d2",
+      "label": "d2 as an outlier"
+     },
+     {
+      "id": "leave_out:d3",
+      "kind": "leave_out",
+      "date_id": "d3",
+      "date_name": "B-1",
+      "label": "B-1 left out"
+     },
+     {
+      "id": "outlier:d3",
+      "kind": "outlier",
+      "date_id": "d3",
+      "date_name": "B-1",
+      "label": "B-1 as an outlier"
+     },
+     {
+      "id": "leave_out:d4",
+      "kind": "leave_out",
+      "date_id": "d4",
+      "date_name": "C-1",
+      "label": "C-1 left out"
+     },
+     {
+      "id": "leave_out:d5",
+      "kind": "leave_out",
+      "date_id": "d5",
+      "date_name": "Inner-1",
+      "label": "Inner-1 left out"
+     },
+     {
+      "id": "outlier:d5",
+      "kind": "outlier",
+      "date_id": "d5",
+      "date_name": "Inner-1",
+      "label": "Inner-1 as an outlier"
+     },
+     {
+      "id": "leave_out:d8",
+      "kind": "leave_out",
+      "date_id": "d8",
+      "date_name": "d8",
+      "label": "d8 left out"
+     },
+     {
+      "id": "outlier:d8",
+      "kind": "outlier",
+      "date_id": "d8",
+      "date_name": "d8",
+      "label": "d8 as an outlier"
+     }
+    ],
+    "applied": [
+     [
+      {
+       "id": "d2",
+       "element_id": "pA",
+       "outlier_prior": 0.05,
+       "outlier_model": "charcoal"
+      },
+      {
+       "id": "d3",
+       "element_id": "pB",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d4",
+       "element_id": "pC",
+       "outlier_prior": 1.0,
+       "outlier_model": null
+      },
+      {
+       "id": "d5",
+       "element_id": "pD1",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d6",
+       "element_id": "w1",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d7",
+       "element_id": null,
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d8",
+       "element_id": "pB",
+       "outlier_prior": null,
+       "outlier_model": null
+      }
+     ],
+     [
+      {
+       "id": "d1",
+       "element_id": "pA",
+       "outlier_prior": 1.0,
+       "outlier_model": "general"
+      },
+      {
+       "id": "d2",
+       "element_id": "pA",
+       "outlier_prior": 0.05,
+       "outlier_model": "charcoal"
+      },
+      {
+       "id": "d3",
+       "element_id": "pB",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d4",
+       "element_id": "pC",
+       "outlier_prior": 1.0,
+       "outlier_model": null
+      },
+      {
+       "id": "d5",
+       "element_id": "pD1",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d6",
+       "element_id": "w1",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d7",
+       "element_id": null,
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d8",
+       "element_id": "pB",
+       "outlier_prior": null,
+       "outlier_model": null
+      }
+     ],
+     [
+      {
+       "id": "d1",
+       "element_id": "pA",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d3",
+       "element_id": "pB",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d4",
+       "element_id": "pC",
+       "outlier_prior": 1.0,
+       "outlier_model": null
+      },
+      {
+       "id": "d5",
+       "element_id": "pD1",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d6",
+       "element_id": "w1",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d7",
+       "element_id": null,
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d8",
+       "element_id": "pB",
+       "outlier_prior": null,
+       "outlier_model": null
+      }
+     ],
+     [
+      {
+       "id": "d1",
+       "element_id": "pA",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d2",
+       "element_id": "pA",
+       "outlier_prior": 1.0,
+       "outlier_model": "charcoal"
+      },
+      {
+       "id": "d3",
+       "element_id": "pB",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d4",
+       "element_id": "pC",
+       "outlier_prior": 1.0,
+       "outlier_model": null
+      },
+      {
+       "id": "d5",
+       "element_id": "pD1",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d6",
+       "element_id": "w1",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d7",
+       "element_id": null,
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d8",
+       "element_id": "pB",
+       "outlier_prior": null,
+       "outlier_model": null
+      }
+     ],
+     [
+      {
+       "id": "d1",
+       "element_id": "pA",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d2",
+       "element_id": "pA",
+       "outlier_prior": 0.05,
+       "outlier_model": "charcoal"
+      },
+      {
+       "id": "d4",
+       "element_id": "pC",
+       "outlier_prior": 1.0,
+       "outlier_model": null
+      },
+      {
+       "id": "d5",
+       "element_id": "pD1",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d6",
+       "element_id": "w1",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d7",
+       "element_id": null,
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d8",
+       "element_id": "pB",
+       "outlier_prior": null,
+       "outlier_model": null
+      }
+     ],
+     [
+      {
+       "id": "d1",
+       "element_id": "pA",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d2",
+       "element_id": "pA",
+       "outlier_prior": 0.05,
+       "outlier_model": "charcoal"
+      },
+      {
+       "id": "d3",
+       "element_id": "pB",
+       "outlier_prior": 1.0,
+       "outlier_model": "general"
+      },
+      {
+       "id": "d4",
+       "element_id": "pC",
+       "outlier_prior": 1.0,
+       "outlier_model": null
+      },
+      {
+       "id": "d5",
+       "element_id": "pD1",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d6",
+       "element_id": "w1",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d7",
+       "element_id": null,
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d8",
+       "element_id": "pB",
+       "outlier_prior": null,
+       "outlier_model": null
+      }
+     ],
+     [
+      {
+       "id": "d1",
+       "element_id": "pA",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d2",
+       "element_id": "pA",
+       "outlier_prior": 0.05,
+       "outlier_model": "charcoal"
+      },
+      {
+       "id": "d3",
+       "element_id": "pB",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d5",
+       "element_id": "pD1",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d6",
+       "element_id": "w1",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d7",
+       "element_id": null,
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d8",
+       "element_id": "pB",
+       "outlier_prior": null,
+       "outlier_model": null
+      }
+     ],
+     [
+      {
+       "id": "d1",
+       "element_id": "pA",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d2",
+       "element_id": "pA",
+       "outlier_prior": 0.05,
+       "outlier_model": "charcoal"
+      },
+      {
+       "id": "d3",
+       "element_id": "pB",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d4",
+       "element_id": "pC",
+       "outlier_prior": 1.0,
+       "outlier_model": null
+      },
+      {
+       "id": "d6",
+       "element_id": "w1",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d7",
+       "element_id": null,
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d8",
+       "element_id": "pB",
+       "outlier_prior": null,
+       "outlier_model": null
+      }
+     ],
+     [
+      {
+       "id": "d1",
+       "element_id": "pA",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d2",
+       "element_id": "pA",
+       "outlier_prior": 0.05,
+       "outlier_model": "charcoal"
+      },
+      {
+       "id": "d3",
+       "element_id": "pB",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d4",
+       "element_id": "pC",
+       "outlier_prior": 1.0,
+       "outlier_model": null
+      },
+      {
+       "id": "d5",
+       "element_id": "pD1",
+       "outlier_prior": 1.0,
+       "outlier_model": "general"
+      },
+      {
+       "id": "d6",
+       "element_id": "w1",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d7",
+       "element_id": null,
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d8",
+       "element_id": "pB",
+       "outlier_prior": null,
+       "outlier_model": null
+      }
+     ],
+     [
+      {
+       "id": "d1",
+       "element_id": "pA",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d2",
+       "element_id": "pA",
+       "outlier_prior": 0.05,
+       "outlier_model": "charcoal"
+      },
+      {
+       "id": "d3",
+       "element_id": "pB",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d4",
+       "element_id": "pC",
+       "outlier_prior": 1.0,
+       "outlier_model": null
+      },
+      {
+       "id": "d5",
+       "element_id": "pD1",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d6",
+       "element_id": "w1",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d7",
+       "element_id": null,
+       "outlier_prior": null,
+       "outlier_model": null
+      }
+     ],
+     [
+      {
+       "id": "d1",
+       "element_id": "pA",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d2",
+       "element_id": "pA",
+       "outlier_prior": 0.05,
+       "outlier_model": "charcoal"
+      },
+      {
+       "id": "d3",
+       "element_id": "pB",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d4",
+       "element_id": "pC",
+       "outlier_prior": 1.0,
+       "outlier_model": null
+      },
+      {
+       "id": "d5",
+       "element_id": "pD1",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d6",
+       "element_id": "w1",
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d7",
+       "element_id": null,
+       "outlier_prior": null,
+       "outlier_model": null
+      },
+      {
+       "id": "d8",
+       "element_id": "pB",
+       "outlier_prior": 1.0,
+       "outlier_model": "general"
+      }
+     ]
+    ]
+   }
+  },
+  {
+   "name": "neighbouring_phases/pA",
+   "inputs": {
+    "tree": {
+     "id": "root",
+     "element_type": "sequence",
+     "name": "Site",
+     "children": [
+      {
+       "id": "b1",
+       "element_type": "boundary",
+       "name": "Start",
+       "children": []
+      },
+      {
+       "id": "pA",
+       "element_type": "phase",
+       "name": "Phase A",
+       "children": []
+      },
+      {
+       "id": "b2",
+       "element_type": "boundary",
+       "name": "A to B",
+       "children": []
+      },
+      {
+       "id": "pB",
+       "element_type": "phase",
+       "name": "Phase B",
+       "children": []
+      },
+      {
+       "id": "h1",
+       "element_type": "hiatus",
+       "name": "Gap",
+       "children": []
+      },
+      {
+       "id": "pC",
+       "element_type": "phase",
+       "name": null,
+       "children": []
+      },
+      {
+       "id": "pD",
+       "element_type": "phase",
+       "name": "Nested",
+       "children": [
+        {
+         "id": "pD1",
+         "element_type": "phase",
+         "name": "Inner",
+         "children": []
+        }
+       ]
+      },
+      {
+       "id": "w1",
+       "element_type": "wiggle_sequence",
+       "name": "Timber",
+       "children": []
+      },
+      {
+       "id": "b3",
+       "element_type": "boundary",
+       "name": "End",
+       "children": []
+      }
+     ]
+    },
+    "phase_id": "pA"
+   },
+   "outputs": {
+    "older": null,
+    "younger": "pB"
+   }
+  },
+  {
+   "name": "neighbouring_phases/pB",
+   "inputs": {
+    "tree": {
+     "id": "root",
+     "element_type": "sequence",
+     "name": "Site",
+     "children": [
+      {
+       "id": "b1",
+       "element_type": "boundary",
+       "name": "Start",
+       "children": []
+      },
+      {
+       "id": "pA",
+       "element_type": "phase",
+       "name": "Phase A",
+       "children": []
+      },
+      {
+       "id": "b2",
+       "element_type": "boundary",
+       "name": "A to B",
+       "children": []
+      },
+      {
+       "id": "pB",
+       "element_type": "phase",
+       "name": "Phase B",
+       "children": []
+      },
+      {
+       "id": "h1",
+       "element_type": "hiatus",
+       "name": "Gap",
+       "children": []
+      },
+      {
+       "id": "pC",
+       "element_type": "phase",
+       "name": null,
+       "children": []
+      },
+      {
+       "id": "pD",
+       "element_type": "phase",
+       "name": "Nested",
+       "children": [
+        {
+         "id": "pD1",
+         "element_type": "phase",
+         "name": "Inner",
+         "children": []
+        }
+       ]
+      },
+      {
+       "id": "w1",
+       "element_type": "wiggle_sequence",
+       "name": "Timber",
+       "children": []
+      },
+      {
+       "id": "b3",
+       "element_type": "boundary",
+       "name": "End",
+       "children": []
+      }
+     ]
+    },
+    "phase_id": "pB"
+   },
+   "outputs": {
+    "older": "pA",
+    "younger": "pC"
+   }
+  },
+  {
+   "name": "neighbouring_phases/pC",
+   "inputs": {
+    "tree": {
+     "id": "root",
+     "element_type": "sequence",
+     "name": "Site",
+     "children": [
+      {
+       "id": "b1",
+       "element_type": "boundary",
+       "name": "Start",
+       "children": []
+      },
+      {
+       "id": "pA",
+       "element_type": "phase",
+       "name": "Phase A",
+       "children": []
+      },
+      {
+       "id": "b2",
+       "element_type": "boundary",
+       "name": "A to B",
+       "children": []
+      },
+      {
+       "id": "pB",
+       "element_type": "phase",
+       "name": "Phase B",
+       "children": []
+      },
+      {
+       "id": "h1",
+       "element_type": "hiatus",
+       "name": "Gap",
+       "children": []
+      },
+      {
+       "id": "pC",
+       "element_type": "phase",
+       "name": null,
+       "children": []
+      },
+      {
+       "id": "pD",
+       "element_type": "phase",
+       "name": "Nested",
+       "children": [
+        {
+         "id": "pD1",
+         "element_type": "phase",
+         "name": "Inner",
+         "children": []
+        }
+       ]
+      },
+      {
+       "id": "w1",
+       "element_type": "wiggle_sequence",
+       "name": "Timber",
+       "children": []
+      },
+      {
+       "id": "b3",
+       "element_type": "boundary",
+       "name": "End",
+       "children": []
+      }
+     ]
+    },
+    "phase_id": "pC"
+   },
+   "outputs": {
+    "older": "pB",
+    "younger": null
+   }
+  },
+  {
+   "name": "neighbouring_phases/pD",
+   "inputs": {
+    "tree": {
+     "id": "root",
+     "element_type": "sequence",
+     "name": "Site",
+     "children": [
+      {
+       "id": "b1",
+       "element_type": "boundary",
+       "name": "Start",
+       "children": []
+      },
+      {
+       "id": "pA",
+       "element_type": "phase",
+       "name": "Phase A",
+       "children": []
+      },
+      {
+       "id": "b2",
+       "element_type": "boundary",
+       "name": "A to B",
+       "children": []
+      },
+      {
+       "id": "pB",
+       "element_type": "phase",
+       "name": "Phase B",
+       "children": []
+      },
+      {
+       "id": "h1",
+       "element_type": "hiatus",
+       "name": "Gap",
+       "children": []
+      },
+      {
+       "id": "pC",
+       "element_type": "phase",
+       "name": null,
+       "children": []
+      },
+      {
+       "id": "pD",
+       "element_type": "phase",
+       "name": "Nested",
+       "children": [
+        {
+         "id": "pD1",
+         "element_type": "phase",
+         "name": "Inner",
+         "children": []
+        }
+       ]
+      },
+      {
+       "id": "w1",
+       "element_type": "wiggle_sequence",
+       "name": "Timber",
+       "children": []
+      },
+      {
+       "id": "b3",
+       "element_type": "boundary",
+       "name": "End",
+       "children": []
+      }
+     ]
+    },
+    "phase_id": "pD"
+   },
+   "outputs": {
+    "older": "pC",
+    "younger": null
+   }
+  },
+  {
+   "name": "neighbouring_phases/pD1",
+   "inputs": {
+    "tree": {
+     "id": "root",
+     "element_type": "sequence",
+     "name": "Site",
+     "children": [
+      {
+       "id": "b1",
+       "element_type": "boundary",
+       "name": "Start",
+       "children": []
+      },
+      {
+       "id": "pA",
+       "element_type": "phase",
+       "name": "Phase A",
+       "children": []
+      },
+      {
+       "id": "b2",
+       "element_type": "boundary",
+       "name": "A to B",
+       "children": []
+      },
+      {
+       "id": "pB",
+       "element_type": "phase",
+       "name": "Phase B",
+       "children": []
+      },
+      {
+       "id": "h1",
+       "element_type": "hiatus",
+       "name": "Gap",
+       "children": []
+      },
+      {
+       "id": "pC",
+       "element_type": "phase",
+       "name": null,
+       "children": []
+      },
+      {
+       "id": "pD",
+       "element_type": "phase",
+       "name": "Nested",
+       "children": [
+        {
+         "id": "pD1",
+         "element_type": "phase",
+         "name": "Inner",
+         "children": []
+        }
+       ]
+      },
+      {
+       "id": "w1",
+       "element_type": "wiggle_sequence",
+       "name": "Timber",
+       "children": []
+      },
+      {
+       "id": "b3",
+       "element_type": "boundary",
+       "name": "End",
+       "children": []
+      }
+     ]
+    },
+    "phase_id": "pD1"
+   },
+   "outputs": {
+    "older": null,
+    "younger": null
+   }
+  },
+  {
+   "name": "neighbouring_phases/missing",
+   "inputs": {
+    "tree": {
+     "id": "root",
+     "element_type": "sequence",
+     "name": "Site",
+     "children": [
+      {
+       "id": "b1",
+       "element_type": "boundary",
+       "name": "Start",
+       "children": []
+      },
+      {
+       "id": "pA",
+       "element_type": "phase",
+       "name": "Phase A",
+       "children": []
+      },
+      {
+       "id": "b2",
+       "element_type": "boundary",
+       "name": "A to B",
+       "children": []
+      },
+      {
+       "id": "pB",
+       "element_type": "phase",
+       "name": "Phase B",
+       "children": []
+      },
+      {
+       "id": "h1",
+       "element_type": "hiatus",
+       "name": "Gap",
+       "children": []
+      },
+      {
+       "id": "pC",
+       "element_type": "phase",
+       "name": null,
+       "children": []
+      },
+      {
+       "id": "pD",
+       "element_type": "phase",
+       "name": "Nested",
+       "children": [
+        {
+         "id": "pD1",
+         "element_type": "phase",
+         "name": "Inner",
+         "children": []
+        }
+       ]
+      },
+      {
+       "id": "w1",
+       "element_type": "wiggle_sequence",
+       "name": "Timber",
+       "children": []
+      },
+      {
+       "id": "b3",
+       "element_type": "boundary",
+       "name": "End",
+       "children": []
+      }
+     ]
+    },
+    "phase_id": "missing"
+   },
+   "outputs": {
+    "older": null,
+    "younger": null
+   }
+  },
+  {
+   "name": "neighbouring_phases/root",
+   "inputs": {
+    "tree": {
+     "id": "root",
+     "element_type": "sequence",
+     "name": "Site",
+     "children": [
+      {
+       "id": "b1",
+       "element_type": "boundary",
+       "name": "Start",
+       "children": []
+      },
+      {
+       "id": "pA",
+       "element_type": "phase",
+       "name": "Phase A",
+       "children": []
+      },
+      {
+       "id": "b2",
+       "element_type": "boundary",
+       "name": "A to B",
+       "children": []
+      },
+      {
+       "id": "pB",
+       "element_type": "phase",
+       "name": "Phase B",
+       "children": []
+      },
+      {
+       "id": "h1",
+       "element_type": "hiatus",
+       "name": "Gap",
+       "children": []
+      },
+      {
+       "id": "pC",
+       "element_type": "phase",
+       "name": null,
+       "children": []
+      },
+      {
+       "id": "pD",
+       "element_type": "phase",
+       "name": "Nested",
+       "children": [
+        {
+         "id": "pD1",
+         "element_type": "phase",
+         "name": "Inner",
+         "children": []
+        }
+       ]
+      },
+      {
+       "id": "w1",
+       "element_type": "wiggle_sequence",
+       "name": "Timber",
+       "children": []
+      },
+      {
+       "id": "b3",
+       "element_type": "boundary",
+       "name": "End",
+       "children": []
+      }
+     ]
+    },
+    "phase_id": "root"
+   },
+   "outputs": {
+    "older": null,
+    "younger": null
+   }
+  },
+  {
+   "name": "compact_distribution/long",
+   "inputs": {
+    "distribution": {
+     "$series": {
+      "x": {
+       "linspace": [2400.3,3100.7,523]
+      },
+      "y": [0.8647975870165865,0.855302514932059,0.8110233987843422,0.2614463614164766,0.0771994577184214,0.9464657804460633,0.6137916910471019,0.00263075362629972,0.9104071780658378,0.9848034752375554,0.2862966041661704,0.8136611230389795,0.08240794388130823,0.4382800473034214,0.8177037747448075,0.40873333268977363,0.5177497071869771,0.11703988347506633,0.8140065192501118,0.4978674083325122,0.24827919488667194,0.7766861560008684,0.9792282891895626,0.53834323407629,0.7371502226207836,0.9927606888483627,0.03012749637532397,0.5989776523667713,0.9672952777915866,0.11733657384331686,0.2231014949939203,0.5502283889833729,0.722327310719796,0.5527524153948293,0.5477017956423661,0.0515388294743615,0.7392297121947433,0.32070150992281876,0.07396187379140517,0.9584683194126471,0.6596713208492915,0.45578296007926533,0.7326514668471766,0.4778900309019434,0.12472133330591129,0.6045798880373442,0.7469364245619166,0.7441468288332692,0.5515674012638448,0.9284915198370209,0.9457125619000804,0.8748696622696762,0.3716436351591228,0.2677700742588114,0.5298119827496722,0.6543102125920736,0.1605932683017619,0.5594645356105491,0.4389482531021668,0.0016647948525158052,0.41882978512031743,0.3998988932189942,0.9633892562820303,0.054514811423870047,0.9285460335053835,0.9083194924222268,0.5998002500769789,0.1872290474547189,0.7913043338720918,0.16152169054797472,0.3206403846444068,0.6664230870814164,0.4252353008413222,0.4609252157924165,0.30315722537378154,0.03723728048946706,0.3607681347214251,0.8266223901229942,0.8301617250714785,0.08106201414430547,0.5529808291772408,0.35379305429085994,0.39895884700342044,0.9878944722755058,0.8092349746949816,0.506979159656347,0.5074810993396169,0.9169820251078087,0.3751431315727951,0.7819015932890875,0.7295663682628989,0.7373428426158386,0.455644593371049,0.6853336152660934,0.8373008844122413,0.2956929737894719,0.7631672813564926,0.4820033348551256,0.5343144694417364,0.4648226294716957,0.37487735071832295,0.7522522616715118,0.3918673241198446,0.18129726846890626,0.7877380644214595,0.3996925907105383,0.5791395642923887,0.9823398128646649,0.6476274821299767,0.5243955743780132,0.2837995297825423,0.7090405589928502,0.9604127136102141,0.7083008830614438,0.7698934412335314,0.3181710023770149,0.31330560295856147,0.3576135166464367,0.4788058593176858,0.8932667890944914,0.466342077256252,0.17641094137590407,0.5331406686314473,0.25967925319138874,0.635902562623811,0.3386744104794799,0.9515292774778156,0.4368996076759395,0.5826751472313618,0.5846239831347064,0.41382912038553643,0.9779562189859162,0.043004139081292636,0.7436639122731936,0.26434611106445016,0.06083575016988163,0.17955021398935023,0.7509052690936603,0.9087045247188648,0.7753926564869995,0.28479976960185205,0.4965432547720038,0.11847925323379305,0.41964226299439755,0.2578401892960598,0.03161801427778976,0.29120038868152565,0.9283868852397259,0.5307137606465506,0.2738534779206814,0.11396803242364872,0.8978159520635121,0.09149887827127934,0.03830831744226193,0.11211952688299942,0.752627300775268,0.9340885565021908,0.09568781723043784,0.6378193931030044,0.6520114409122275,0.5263376960823736,0.003855378797995135,0.6923162689349365,0.4301281416069842,0.9316696950160419,0.99712065574137,0.6365731366207454,0.11599595947452979,0.3173934565126827,0.6297575886283645,0.8712110779231333,0.42120603516896316,0.36093353971665,0.6066372567914184,0.8551143041152546,0.19511318878204176,0.5953474124807717,0.6160283262114216,0.4751537926442202,0.36005894138796957,0.9482640178488939,0.8164054408657649,0.15542066382270603,0.0008170796731188368,0.2581175444027134,0.42283366744604534,0.1621379983554475,0.3378196028000717,0.6805715877174788,0.739312479773845,0.8183804052060978,0.814196468401186,0.3227782559936032,0.5328025513162492,0.7379230062898781,0.6122811943831451,0.5798602529286988,0.812275134139126,0.9452194571414971,0.8976365360569837,0.27019392520477026,0.1198973410860541,0.2884466914979352,0.8010266701843263,0.3162296115606915,0.7434845099244799,0.5923894028040427,0.9930811692917605,0.11893082061916838,0.8284110446632765,0.04635094400851081,0.6395408110558748,0.5379612947827311,0.24480879039669656,0.26274139275890906,0.38707101482505535,0.4840016005716953,0.15773794074753011,0.44058428248201964,0.0884202248111694,0.49927118527834957,0.5397862133857477,0.38753867831264943,0.4931130050688899,0.5689958313452708,0.521383497740482,0.18049060452998222,0.21983823233996114,0.26573040293001404,0.9994829285865717,0.5016374537492927,0.7072897178759088,0.2028260339594391,0.5202088985388901,0.437567009921941,0.20246893446815994,0.21944920584294103,0.24060774536439256,0.7386134668864597,0.7440973447311324,0.8673316534099575,0.3366232325883518,0.5188449254889007,0.7264913790241713,0.5610264553936898,0.860490644287888,0.02172644550473435,0.6961994916034985,0.13112805112841852,0.516052966358792,0.39249709989554493,0.4522928069574713,0.7677316391642671,0.09059594650318947,0.04903668714337195,0.9378105830669068,0.48623689567522144,0.4110560510084169,0.15225941371846963,0.5030905033689127,0.666234416040551,0.894390464658812,0.3906329418752241,0.12927940406855476,0.7569448470257386,0.3046824021351616,0.714373880003264,0.801032940524003,0.9631544568953118,0.17085516101339626,0.2627760286905263,0.3878612239955531,0.8183183609262096,0.4356323665801559,0.4346043625856032,0.8387575563807282,0.1195495387726021,0.10879300122536895,0.0913852351963993,0.5099018785569993,0.21063891893069742,0.3591414989534297,0.49344916528687754,0.5293451237171175,0.3917563908504196,0.13818454550717563,0.8178788581802757,0.8658768009216458,0.5646871316558331,0.28835130800621167,0.9994427183309668,0.11939670276499514,0.8815304213539406,0.6273339794390743,0.2589437085584584,0.5910779258150205,0.552617403254291,0.009849092945594329,0.46552841050211125,0.7750908596941178,0.6354305414825567,0.12979822550022502,0.21155772350658952,0.6951464286647532,0.027267829420099754,0.6907970872297808,0.5340033889318186,0.38449306451449705,0.4202880606357171,0.4784893731503794,0.09958292371652822,0.9272733663903746,0.42094505838746143,0.6631108844204829,0.1040550487728833,0.8790004011247999,0.6965005366202054,0.2540211633818247,0.9035125676381213,0.8780764498279212,0.4620658753054725,0.2786112584556363,0.8256036881385189,0.004497324121112478,0.9516205876152649,0.9629385209462097,0.08141931296446503,0.9429011284635345,0.28368037792233847,0.8125748879837964,0.8646042740184294,0.17818783153517614,0.3420671150398443,0.9568445119253497,0.784248837529599,0.7021682624146792,0.23438272181916986,0.7324255238721241,0.03935987695300436,0.26406799570745865,0.24931065218976323,0.0571643121858062,0.46884512602687334,0.033327209144146885,0.9845335075498312,0.4876392265513815,0.7727914434735793,0.529446348121977,0.12317883371219152,0.4515769916390733,0.0075485823325230905,0.2998879456395749,0.6351690199305328,0.18019341697966207,0.9169906605861575,0.6347418176069384,0.025449388364391257,0.42923062922098254,0.8959032346430146,0.25611698417470397,0.11954397950976936,0.2765093364478892,0.48469059403805703,0.3938263583268784,0.24342036895102181,0.4653318188499225,0.48444411789801656,0.6986353774425088,0.9976263199225169,0.6339821628055636,0.07839371760829028,0.15130247483560122,0.29998376578296504,0.9406466581963121,0.0640696456158486,0.6507685372846022,0.4050015288848764,0.2454285548186329,0.6420806829157298,0.757037353658164,0.7705717384112382,0.21668269378218963,0.19229385449045733,0.19106170938758604,0.22258853789212063,0.2155560202720721,0.5227619234883345,0.316317482258354,0.619372950187677,0.9715713891438215,0.791788729209418,0.08984306714145363,0.9449357986641965,0.38756122913061186,0.17709143676880512,0.24487051534906623,0.05573448834531736,0.28245057163477927,0.46931570182765936,0.10569634398023309,0.9666347295461262,0.4267343445420583,0.5378479254982517,0.31742997892885805,0.9047539068866137,0.8561281878674459,0.48258271504990546,0.0010197370659925653,0.6587299675583452,0.3350879083682442,0.13877069836735823,0.4638287327000383,0.7290164805636493,0.6608600523637412,0.09822107532085933,0.9134297102812631,0.48142289138743966,0.9069585371017277,0.41960564737083883,0.907109728625093,0.8430473179680391,0.03717025339632374,0.8872439432165986,0.6807021638361632,0.5812285424321623,0.0026504677220341444,0.6319032001202717,0.6425257710163538,0.8652762973514623,0.3929546995469332,0.06274026746739159,0.7364987078110099,0.3674424045008081,0.32790064432857613,0.6723616852786437,0.04007821967832392,0.031221451626093133,0.974963733660904,0.8708098621080353,0.8001006731647976,0.4829355473441963,0.38861444664988976,0.18399516797363746,0.03217515222515632,0.7949401438039662,0.2543638512990608,0.7497227457614515,0.05931574716529253,0.24489442547149576,0.428731805291951,0.3768078935345037,0.20686322307709326,0.7765353656793422,0.07083937340017332,0.611445756425712,0.562709555807041,0.5219579369562939,0.18149833574761987,0.6495112602227047,0.7178214771348593,0.5669134564418938,0.580997392597325,0.5452389924043687,0.4341112443847074,0.5771217088922048,0.5159938130912833,0.2857373452873261,0.8468979155306843,0.3417872692085504,0.10025521350424094,0.6261600748444303,0.856576236025231,0.11263546781091449,0.028820967793305785,0.31935681029025365,0.2717512284769963,0.15517145262219134,0.27792805645634133,0.42440679777616463,0.2220757764706448,0.5314702780915561,0.408449982035305,0.39475427478532954,0.11054160075961506,0.7554421918577802,0.6200542269197805,0.5559842733496153,0.3116732240813035,0.9976431962819027,0.7324978387128,0.8318716867235406,0.5587568165937282,0.618036866501217,0.6911576221327618,0.2815810004241118,0.2552336591086316,0.7672003609252954,0.3151834694787581,0.02787711930898018,0.46145120415418783,0.8613317023895674,0.42290656023915363,0.5630940137696925,0.9013213427173413,0.15112710471629687,0.1843122882049596,0.01791347207176852,0.35556594092834126,0.1290281735514962,0.5733277696582918,0.3329776456311222,0.08989870242789932,0.7272485623165919,0.7565559388769352,0.9085857450904983,0.3549654892964974,0.5440181042825009,0.6387793760529804,0.875892706421744,0.944655279456563,0.3344496452921488,0.21627268279892442,0.27621651989427676]
+     }
+    }
+   },
+   "outputs": {
+    "compact": {
+     "$series": {
+      "x": [2400.3,2406.186,2412.071,2417.957,2423.843,2429.729,2435.614,2441.5,2447.386,2453.271,2459.157,2465.043,2470.929,2476.814,2482.7,2488.586,2494.471,2500.357,2506.243,2512.129,2518.014,2523.9,2529.786,2535.671,2541.557,2547.443,2553.329,2559.214,2565.1,2570.986,2576.871,2582.757,2588.643,2594.529,2600.414,2606.3,2612.186,2618.071,2623.957,2629.843,2635.729,2641.614,2647.5,2653.386,2659.271,2665.157,2671.043,2676.929,2682.814,2688.7,2694.586,2700.471,2706.357,2712.243,2718.129,2724.014,2729.9,2735.786,2741.671,2747.557,2753.443,2759.329,2765.214,2771.1,2776.986,2782.871,2788.757,2794.643,2800.529,2806.414,2812.3,2818.186,2824.071,2829.957,2835.843,2841.729,2847.614,2853.5,2859.386,2865.271,2871.157,2877.043,2882.929,2888.814,2894.7,2900.586,2906.471,2912.357,2918.243,2924.129,2930.014,2935.9,2941.786,2947.671,2953.557,2959.443,2965.329,2971.214,2977.1,2982.986,2988.871,2994.757,3000.643,3006.529,3012.414,3018.3,3024.186,3030.071,3035.957,3041.843,3047.729,3053.614,3059.5,3065.386,3071.271,3077.157,3083.043,3088.929,3094.814,3100.7],
+      "y": [0.8647975870165865,0.41321837238605624,0.9679236431061746,0.4988603063066723,0.4977359450327174,0.9656120113281874,0.2117771260196646,0.45401459663346866,0.11510689426379521,0.8153470679999372,0.17220620020962973,0.646590288299168,0.305304218113541,0.5564263100011153,0.6319243368332642,0.6620226182810449,0.3845665985402674,0.15120297115414752,0.1125367919143035,0.9263395193276216,0.5208477079855426,0.4826668312410634,0.6214039469860955,0.7110264310631845,0.44945519682987445,0.3646721498146649,0.7471175199466547,0.6599148370352627,0.30793715003378475,0.46752472102791853,0.4201276671101309,0.17755501291674128,0.3630914784042629,0.08674778802176755,0.2510126999925571,0.07738484008735973,0.5922621178195012,0.6129988522643178,0.27785609018384105,0.41664761114316945,0.38009539301251755,0.8592918214094515,0.2968742792364517,0.7170995373995852,0.5345262526185597,0.8647825558291158,0.25162078300463153,0.6597325568356182,0.3753470047238522,0.37975750764468885,0.2230688589138903,0.5473150238377223,0.3397222542569284,0.35751684190575417,0.237940702567569,0.3840927492262907,0.3177608686045873,0.3945070396287116,0.42247109719544695,0.43528281377264755,0.25059289304340293,0.8950361727056553,0.8038492134664083,0.11575311375593265,0.3204559528971033,0.2238602992055275,0.6528603502734603,0.296092307302824,0.5539748245569852,0.5366593740330489,0.38659865252162906,0.7017658006411751,0.7271727827554433,0.4219833539769896,0.9584684128239034,0.808130396302579,0.8915772400950129,0.20243414681638192,0.4029684663303674,0.6419167703433702,0.2777782458937192,0.44529795305255204,0.16086018260167068,0.2620683899508991,0.8264996577498983,0.8491233878513931,0.34209167847259925,0.20131157658151821,0.5192922690138587,0.508650983165277,0.23063121312630436,0.2576266473152019,0.64810815685468,0.6255681071973956,0.7061067567989654,0.7889528538363821,0.1300354464018903,0.3146329148773392,0.10158902418264494,0.5023358794029616,0.8244626626326249,0.0642241014511046,0.13884946643936166,0.6712178267107602,0.45329381570414373,0.5751981247686161,0.5175348524812118,0.2902880625599156,0.24611248024895332,0.3972026268443698,0.2466770832761435,0.3342565983834713,0.5761921253900603,0.6037151956392902,0.8318577432535125,0.16618592747586,0.5023891786832522,0.7910500965892208,0.7842354526658041,0.27621651989427676]
+     }
+    }
+   }
+  },
+  {
+   "name": "compact_distribution/unsorted",
+   "inputs": {
+    "distribution": [
+     [3.0,0.2],
+     [1.0,0.1],
+     [2.0,0.4]
+    ]
+   },
+   "outputs": {
+    "compact": [
+     [1.0,0.1],
+     [2.0,0.4],
+     [3.0,0.2]
+    ]
+   }
+  },
+  {
+   "name": "compact_distribution/one",
+   "inputs": {
+    "distribution": [
+     [1.0,1.0]
+    ]
+   },
+   "outputs": {
+    "compact": null
+   }
+  },
+  {
+   "name": "compact_distribution/none",
+   "inputs": {
+    "distribution": null
+   },
+   "outputs": {
+    "compact": null
+   }
+  },
+  {
+   "name": "summarise",
+   "inputs": {
+    "boundaries": {
+     "b1": {
+      "name": "Start",
+      "posterior": {
+       "posterior_median": 3050.5,
+       "hpd_95": [3120.0,2990.0],
+       "probability_distribution": {
+        "$series": {
+         "x": [2400.3,2401.6417624521073,2402.983524904215,2404.325287356322,2405.6670498084295,2407.0088122605366,2408.3505747126437,2409.6923371647513,2411.0340996168584,2412.3758620689655,2413.717624521073,2415.05938697318,2416.4011494252877,2417.742911877395,2419.084674329502,2420.4264367816095,2421.7681992337166,2423.109961685824,2424.4517241379313,2425.7934865900384,2427.135249042146,2428.477011494253,2429.81877394636,2431.1605363984677,2432.502298850575,2433.8440613026823,2435.1858237547895,2436.5275862068966,2437.869348659004,2439.211111111111,2440.552873563219,2441.894636015326,2443.236398467433,2444.5781609195406,2445.9199233716477,2447.2616858237548,2448.6034482758623,2449.9452107279694,2451.286973180077,2452.628735632184,2453.970498084291,2455.3122605363988,2456.654022988506,2457.995785440613,2459.3375478927205,2460.6793103448276,2462.021072796935,2463.3628352490423,2464.7045977011494,2466.046360153257,2467.388122605364,2468.7298850574716,2470.0716475095787,2471.413409961686,2472.7551724137934,2474.0969348659005,2475.4386973180076,2476.780459770115,2478.1222222222223,2479.46398467433,2480.805747126437,2482.147509578544,2483.4892720306516,2484.8310344827587,2486.1727969348663,2487.5145593869734,2488.8563218390805,2490.198084291188,2491.539846743295,2492.8816091954022,2494.22337164751,2495.565134099617,2496.9068965517245,2498.2486590038316,2499.5904214559387,2500.932183908046,2502.2739463601533,2503.615708812261,2504.957471264368,2506.299233716475,2507.6409961685827,2508.9827586206898,2510.324521072797,2511.6662835249044,2513.0080459770115,2514.349808429119,2515.691570881226,2517.0333333333333,2518.375095785441,2519.716858237548,2521.058620689655,2522.4003831417626,2523.7421455938697,2525.0839080459773,2526.4256704980844,2527.7674329501915,2529.109195402299,2530.450957854406,2531.7927203065137,2533.134482758621,2534.476245210728,2535.8180076628355,2537.1597701149426,2538.50153256705,2539.8432950191573,2541.1850574712644,2542.526819923372,2543.868582375479,2545.210344827586,2546.5521072796937,2547.893869731801,2549.2356321839084,2550.5773946360155,2551.9191570881226,2553.26091954023,2554.6026819923372,2555.9444444444443,2557.286206896552,2558.627969348659,2559.9697318007666,2561.3114942528737,2562.653256704981,2563.9950191570883,2565.3367816091954,2566.678544061303,2568.02030651341,2569.362068965517,2570.7038314176248,2572.045593869732,2573.387356321839,2574.7291187739465,2576.0708812260536,2577.412643678161,2578.7544061302683,2580.0961685823754,2581.437931034483,2582.77969348659,2584.121455938697,2585.4632183908047,2586.804980842912,2588.1467432950194,2589.4885057471265,2590.8302681992336,2592.172030651341,2593.5137931034483,2594.855555555556,2596.197318007663,2597.53908045977,2598.8808429118776,2600.2226053639847,2601.5643678160923,2602.9061302681994,2604.2478927203065,2605.589655172414,2606.931417624521,2608.2731800766283,2609.614942528736,2610.956704980843,2612.2984674329505,2613.6402298850576,2614.9819923371647,2616.3237547892722,2617.6655172413793,2619.0072796934865,2620.349042145594,2621.690804597701,2623.0325670498087,2624.374329501916,2625.716091954023,2627.0578544061304,2628.3996168582376,2629.741379310345,2631.083141762452,2632.4249042145593,2633.766666666667,2635.108429118774,2636.450191570881,2637.7919540229886,2639.1337164750958,2640.4754789272033,2641.8172413793104,2643.1590038314175,2644.500766283525,2645.842528735632,2647.1842911877393,2648.526053639847,2649.867816091954,2651.2095785440615,2652.5513409961686,2653.8931034482757,2655.2348659003833,2656.5766283524904,2657.918390804598,2659.260153256705,2660.601915708812,2661.9436781609197,2663.285440613027,2664.6272030651344,2665.9689655172415,2667.3107279693486],
+         "y": [0.8647975870165865,0.855302514932059,0.8110233987843422,0.2614463614164766,0.0771994577184214,0.9464657804460633,0.6137916910471019,0.00263075362629972,0.9104071780658378,0.9848034752375554,0.2862966041661704,0.8136611230389795,0.08240794388130823,0.4382800473034214,0.8177037747448075,0.40873333268977363,0.5177497071869771,0.11703988347506633,0.8140065192501118,0.4978674083325122,0.24827919488667194,0.7766861560008684,0.9792282891895626,0.53834323407629,0.7371502226207836,0.9927606888483627,0.03012749637532397,0.5989776523667713,0.9672952777915866,0.11733657384331686,0.2231014949939203,0.5502283889833729,0.722327310719796,0.5527524153948293,0.5477017956423661,0.0515388294743615,0.7392297121947433,0.32070150992281876,0.07396187379140517,0.9584683194126471,0.6596713208492915,0.45578296007926533,0.7326514668471766,0.4778900309019434,0.12472133330591129,0.6045798880373442,0.7469364245619166,0.7441468288332692,0.5515674012638448,0.9284915198370209,0.9457125619000804,0.8748696622696762,0.3716436351591228,0.2677700742588114,0.5298119827496722,0.6543102125920736,0.1605932683017619,0.5594645356105491,0.4389482531021668,0.0016647948525158052,0.41882978512031743,0.3998988932189942,0.9633892562820303,0.054514811423870047,0.9285460335053835,0.9083194924222268,0.5998002500769789,0.1872290474547189,0.7913043338720918,0.16152169054797472,0.3206403846444068,0.6664230870814164,0.4252353008413222,0.4609252157924165,0.30315722537378154,0.03723728048946706,0.3607681347214251,0.8266223901229942,0.8301617250714785,0.08106201414430547,0.5529808291772408,0.35379305429085994,0.39895884700342044,0.9878944722755058,0.8092349746949816,0.506979159656347,0.5074810993396169,0.9169820251078087,0.3751431315727951,0.7819015932890875,0.7295663682628989,0.7373428426158386,0.455644593371049,0.6853336152660934,0.8373008844122413,0.2956929737894719,0.7631672813564926,0.4820033348551256,0.5343144694417364,0.4648226294716957,0.37487735071832295,0.7522522616715118,0.3918673241198446,0.18129726846890626,0.7877380644214595,0.3996925907105383,0.5791395642923887,0.9823398128646649,0.6476274821299767,0.5243955743780132,0.2837995297825423,0.7090405589928502,0.9604127136102141,0.7083008830614438,0.7698934412335314,0.3181710023770149,0.31330560295856147,0.3576135166464367,0.4788058593176858,0.8932667890944914,0.466342077256252,0.17641094137590407,0.5331406686314473,0.25967925319138874,0.635902562623811,0.3386744104794799,0.9515292774778156,0.4368996076759395,0.5826751472313618,0.5846239831347064,0.41382912038553643,0.9779562189859162,0.043004139081292636,0.7436639122731936,0.26434611106445016,0.06083575016988163,0.17955021398935023,0.7509052690936603,0.9087045247188648,0.7753926564869995,0.28479976960185205,0.4965432547720038,0.11847925323379305,0.41964226299439755,0.2578401892960598,0.03161801427778976,0.29120038868152565,0.9283868852397259,0.5307137606465506,0.2738534779206814,0.11396803242364872,0.8978159520635121,0.09149887827127934,0.03830831744226193,0.11211952688299942,0.752627300775268,0.9340885565021908,0.09568781723043784,0.6378193931030044,0.6520114409122275,0.5263376960823736,0.003855378797995135,0.6923162689349365,0.4301281416069842,0.9316696950160419,0.99712065574137,0.6365731366207454,0.11599595947452979,0.3173934565126827,0.6297575886283645,0.8712110779231333,0.42120603516896316,0.36093353971665,0.6066372567914184,0.8551143041152546,0.19511318878204176,0.5953474124807717,0.6160283262114216,0.4751537926442202,0.36005894138796957,0.9482640178488939,0.8164054408657649,0.15542066382270603,0.0008170796731188368,0.2581175444027134,0.42283366744604534,0.1621379983554475,0.3378196028000717,0.6805715877174788,0.739312479773845,0.8183804052060978,0.814196468401186,0.3227782559936032,0.5328025513162492,0.7379230062898781,0.6122811943831451,0.5798602529286988,0.812275134139126,0.9452194571414971,0.8976365360569837]
+        }
+       }
+      }
+     },
+     "b2": {
+      "name": "A to B",
+      "posterior": {
+       "posterior_median": null
+      }
+     },
+     "b3": {
+      "name": "End",
+      "posterior": {
+       "posterior_median": 2800.0,
+       "hpd_95": null,
+       "probability_distribution": [
+        [2800.0,1.0]
+       ]
+      }
+     }
+    },
+    "intervals": {
+     "durations": [
+      {
+       "kind": "phase_duration",
+       "id": "phase:b1:b2",
+       "element_id": null,
+       "name": "Phase A",
+       "years": {
+        "median": 40.0,
+        "hpd_95": [10.0,90.0],
+        "distribution": {
+         "$series": {
+          "x": [2400.3,2401.6417624521073,2402.983524904215,2404.325287356322,2405.6670498084295,2407.0088122605366,2408.3505747126437,2409.6923371647513,2411.0340996168584,2412.3758620689655,2413.717624521073,2415.05938697318,2416.4011494252877,2417.742911877395,2419.084674329502,2420.4264367816095,2421.7681992337166,2423.109961685824,2424.4517241379313,2425.7934865900384,2427.135249042146,2428.477011494253,2429.81877394636,2431.1605363984677,2432.502298850575,2433.8440613026823,2435.1858237547895,2436.5275862068966,2437.869348659004,2439.211111111111,2440.552873563219,2441.894636015326,2443.236398467433,2444.5781609195406,2445.9199233716477,2447.2616858237548,2448.6034482758623,2449.9452107279694,2451.286973180077,2452.628735632184,2453.970498084291,2455.3122605363988,2456.654022988506,2457.995785440613,2459.3375478927205,2460.6793103448276,2462.021072796935,2463.3628352490423,2464.7045977011494,2466.046360153257,2467.388122605364,2468.7298850574716,2470.0716475095787,2471.413409961686,2472.7551724137934,2474.0969348659005,2475.4386973180076,2476.780459770115,2478.1222222222223,2479.46398467433,2480.805747126437,2482.147509578544,2483.4892720306516,2484.8310344827587,2486.1727969348663,2487.5145593869734,2488.8563218390805,2490.198084291188,2491.539846743295,2492.8816091954022,2494.22337164751,2495.565134099617,2496.9068965517245,2498.2486590038316,2499.5904214559387,2500.932183908046,2502.2739463601533,2503.615708812261,2504.957471264368,2506.299233716475,2507.6409961685827,2508.9827586206898,2510.324521072797,2511.6662835249044,2513.0080459770115,2514.349808429119,2515.691570881226,2517.0333333333333,2518.375095785441,2519.716858237548,2521.058620689655,2522.4003831417626,2523.7421455938697,2525.0839080459773,2526.4256704980844,2527.7674329501915,2529.109195402299,2530.450957854406,2531.7927203065137,2533.134482758621,2534.476245210728,2535.8180076628355,2537.1597701149426,2538.50153256705,2539.8432950191573,2541.1850574712644,2542.526819923372,2543.868582375479,2545.210344827586,2546.5521072796937,2547.893869731801,2549.2356321839084,2550.5773946360155,2551.9191570881226,2553.26091954023,2554.6026819923372,2555.9444444444443,2557.286206896552,2558.627969348659,2559.9697318007666,2561.3114942528737,2562.653256704981,2563.9950191570883,2565.3367816091954,2566.678544061303,2568.02030651341,2569.362068965517,2570.7038314176248,2572.045593869732,2573.387356321839,2574.7291187739465,2576.0708812260536,2577.412643678161,2578.7544061302683,2580.0961685823754,2581.437931034483,2582.77969348659,2584.121455938697,2585.4632183908047,2586.804980842912,2588.1467432950194,2589.4885057471265,2590.8302681992336,2592.172030651341,2593.5137931034483,2594.855555555556,2596.197318007663,2597.53908045977,2598.8808429118776,2600.2226053639847],
+          "y": [0.8647975870165865,0.855302514932059,0.8110233987843422,0.2614463614164766,0.0771994577184214,0.9464657804460633,0.6137916910471019,0.00263075362629972,0.9104071780658378,0.9848034752375554,0.2862966041661704,0.8136611230389795,0.08240794388130823,0.4382800473034214,0.8177037747448075,0.40873333268977363,0.5177497071869771,0.11703988347506633,0.8140065192501118,0.4978674083325122,0.24827919488667194,0.7766861560008684,0.9792282891895626,0.53834323407629,0.7371502226207836,0.9927606888483627,0.03012749637532397,0.5989776523667713,0.9672952777915866,0.11733657384331686,0.2231014949939203,0.5502283889833729,0.722327310719796,0.5527524153948293,0.5477017956423661,0.0515388294743615,0.7392297121947433,0.32070150992281876,0.07396187379140517,0.9584683194126471,0.6596713208492915,0.45578296007926533,0.7326514668471766,0.4778900309019434,0.12472133330591129,0.6045798880373442,0.7469364245619166,0.7441468288332692,0.5515674012638448,0.9284915198370209,0.9457125619000804,0.8748696622696762,0.3716436351591228,0.2677700742588114,0.5298119827496722,0.6543102125920736,0.1605932683017619,0.5594645356105491,0.4389482531021668,0.0016647948525158052,0.41882978512031743,0.3998988932189942,0.9633892562820303,0.054514811423870047,0.9285460335053835,0.9083194924222268,0.5998002500769789,0.1872290474547189,0.7913043338720918,0.16152169054797472,0.3206403846444068,0.6664230870814164,0.4252353008413222,0.4609252157924165,0.30315722537378154,0.03723728048946706,0.3607681347214251,0.8266223901229942,0.8301617250714785,0.08106201414430547,0.5529808291772408,0.35379305429085994,0.39895884700342044,0.9878944722755058,0.8092349746949816,0.506979159656347,0.5074810993396169,0.9169820251078087,0.3751431315727951,0.7819015932890875,0.7295663682628989,0.7373428426158386,0.455644593371049,0.6853336152660934,0.8373008844122413,0.2956929737894719,0.7631672813564926,0.4820033348551256,0.5343144694417364,0.4648226294716957,0.37487735071832295,0.7522522616715118,0.3918673241198446,0.18129726846890626,0.7877380644214595,0.3996925907105383,0.5791395642923887,0.9823398128646649,0.6476274821299767,0.5243955743780132,0.2837995297825423,0.7090405589928502,0.9604127136102141,0.7083008830614438,0.7698934412335314,0.3181710023770149,0.31330560295856147,0.3576135166464367,0.4788058593176858,0.8932667890944914,0.466342077256252,0.17641094137590407,0.5331406686314473,0.25967925319138874,0.635902562623811,0.3386744104794799,0.9515292774778156,0.4368996076759395,0.5826751472313618,0.5846239831347064,0.41382912038553643,0.9779562189859162,0.043004139081292636,0.7436639122731936,0.26434611106445016,0.06083575016988163,0.17955021398935023,0.7509052690936603,0.9087045247188648,0.7753926564869995,0.28479976960185205,0.4965432547720038,0.11847925323379305,0.41964226299439755,0.2578401892960598,0.03161801427778976,0.29120038868152565,0.9283868852397259,0.5307137606465506,0.2738534779206814]
+         }
+        }
+       }
+      },
+      {
+       "kind": "sample_duration",
+       "id": "sample:pB",
+       "element_id": "pB",
+       "name": "Phase B",
+       "years": {
+        "median": null
+       }
+      }
+     ]
+    }
+   },
+   "outputs": {
+    "boundaries": {
+     "b1": {
+      "name": "Start",
+      "median": 3050.5,
+      "hpd_95": [2990.0,3120.0],
+      "distribution": {
+       "$series": {
+        "x": [2400.3,2402.544,2404.788,2407.031,2409.275,2411.519,2413.763,2416.007,2418.25,2420.494,2422.738,2424.982,2427.225,2429.469,2431.713,2433.957,2436.201,2438.444,2440.688,2442.932,2445.176,2447.42,2449.663,2451.907,2454.151,2456.395,2458.638,2460.882,2463.126,2465.37,2467.614,2469.857,2472.101,2474.345,2476.589,2478.833,2481.076,2483.32,2485.564,2487.808,2490.052,2492.295,2494.539,2496.783,2499.027,2501.27,2503.514,2505.758,2508.002,2510.246,2512.489,2514.733,2516.977,2519.221,2521.465,2523.708,2525.952,2528.196,2530.44,2532.683,2534.927,2537.171,2539.415,2541.659,2543.902,2546.146,2548.39,2550.634,2552.878,2555.121,2557.365,2559.609,2561.853,2564.096,2566.34,2568.584,2570.828,2573.072,2575.315,2577.559,2579.803,2582.047,2584.291,2586.534,2588.778,2591.022,2593.266,2595.51,2597.753,2599.997,2602.241,2604.485,2606.728,2608.972,2611.216,2613.46,2615.704,2617.947,2620.191,2622.435,2624.679,2626.923,2629.166,2631.41,2633.654,2635.898,2638.141,2640.385,2642.629,2644.873,2647.117,2649.36,2651.604,2653.848,2656.092,2658.336,2660.579,2662.823,2665.067,2667.311],
+        "y": [0.8647975870165865,0.8255350418915756,0.19796633577259623,0.9408746192796582,0.19265558290852144,0.9372898736825055,0.30402314261561203,0.2974824083395198,0.581759608100608,0.4142299566140008,0.2281610950926539,0.6891448535935268,0.2838023519362364,0.9264652124765449,0.6202049352416579,0.9118671432625246,0.4603503034277503,0.6030272618137156,0.2560890809424272,0.6832796562081525,0.5505029797067584,0.13244363920619853,0.40862760283708743,0.48276737386838425,0.6322577597373261,0.6791390663794599,0.3087251925576707,0.6261128095284426,0.7446391104324426,0.7384457457665023,0.9338061922142975,0.45199064789106563,0.40209407777095346,0.5630348111265521,0.5024829259949308,0.20744524579359777,0.4150117901150096,0.8923610592572265,0.5319268234851512,0.840911926867787,0.2322998511025241,0.43672082880731733,0.4020010205118764,0.4475299701576877,0.3694462969782491,0.11879968071598807,0.7913897153446673,0.3832198807366932,0.4994177300481226,0.39630203566738564,0.8782966292219277,0.507122570994424,0.8997761038570723,0.6315035066040683,0.7319189151259743,0.4627462299065822,0.783665377654741,0.4449704837688167,0.4843660570946481,0.48818123114230677,0.5017260602824265,0.39009782785385955,0.5940847010080254,0.4630268166806246,0.9739016868798158,0.5616758153786258,0.4410315069694973,0.9498197795535603,0.7522955674700749,0.316290259744671,0.36474247798004444,0.7818151104989298,0.3493950644642119,0.5124587128419152,0.5410563501617872,0.5961764554367603,0.4503746575507984,0.5841654335103904,0.6603384407823989,0.11954680337934802,0.36907100880756155,0.11470617912996141,0.77079593156744,0.8022790836934185,0.3844437626230957,0.16150254034250916,0.28775317771090664,0.15813715474341108,0.8648928569433536,0.3170232733368107,0.5091854708974177,0.08211230871321426,0.10095480612726077,0.8471701398934585,0.2004695503821827,0.6501032664168671,0.2453388027530165,0.6372347295803255,0.8726648063796622,0.7971531241282526,0.161691189894904,0.5982586845493859,0.6140653392065736,0.42081091614660476,0.8342338799703513,0.43054508507543626,0.5793299183073631,0.3677964103799946,0.8684840384977796,0.1125474009913462,0.2451444117272753,0.26072039423005966,0.43862901012867306,0.7373379960072516,0.8157083111122043,0.3880799276484658,0.7344756036852571,0.5910304932617493,0.8558451223499522,0.8976365360569837]
+       }
+      }
+     },
+     "b3": {
+      "name": "End",
+      "median": 2800.0,
+      "hpd_95": null,
+      "distribution": null
+     }
+    },
+    "durations": {
+     "phase_duration:phase:b1:b2": {
+      "name": "Phase A",
+      "kind": "phase_duration",
+      "median": 40.0,
+      "hpd_95": [10.0,90.0],
+      "distribution": {
+       "$series": {
+        "x": [2400.3,2401.98,2403.66,2405.34,2407.02,2408.7,2410.38,2412.06,2413.74,2415.42,2417.1,2418.78,2420.46,2422.14,2423.82,2425.5,2427.18,2428.86,2430.54,2432.22,2433.9,2435.58,2437.26,2438.941,2440.621,2442.301,2443.981,2445.661,2447.341,2449.021,2450.701,2452.381,2454.061,2455.741,2457.421,2459.101,2460.781,2462.461,2464.141,2465.821,2467.501,2469.181,2470.861,2472.541,2474.221,2475.901,2477.581,2479.261,2480.941,2482.621,2484.301,2485.981,2487.661,2489.341,2491.021,2492.701,2494.381,2496.061,2497.741,2499.421,2501.101,2502.781,2504.461,2506.141,2507.821,2509.501,2511.181,2512.861,2514.541,2516.222,2517.902,2519.582,2521.262,2522.942,2524.622,2526.302,2527.982,2529.662,2531.342,2533.022,2534.702,2536.382,2538.062,2539.742,2541.422,2543.102,2544.782,2546.462,2548.142,2549.822,2551.502,2553.182,2554.862,2556.542,2558.222,2559.902,2561.582,2563.262,2564.942,2566.622,2568.302,2569.982,2571.662,2573.342,2575.022,2576.702,2578.382,2580.062,2581.742,2583.422,2585.102,2586.782,2588.462,2590.142,2591.822,2593.503,2595.183,2596.863,2598.543,2600.223],
+        "y": [0.8647975870165865,0.8441397125418703,0.5339257328846563,0.12209996366166907,0.9436701998628608,0.4545816989459489,0.4679615258179156,0.9672984641383411,0.2951598733909806,0.6170216126772924,0.26782030028609455,0.7316160382665984,0.41148164465186876,0.40662849556938957,0.486022220061869,0.5669398191212477,0.26604077341145416,0.8345553369119534,0.7421136377001192,0.6953840485568149,0.9523139160554437,0.19743636578449378,0.8001595486071956,0.2887568166563648,0.23959528796817375,0.602291928332192,0.6282773687748574,0.5486779658466231,0.09199123434028002,0.609099094681637,0.18178087445386037,0.7949461193816756,0.6459645402933089,0.5441947521564198,0.5870735034499128,0.18704522111699687,0.6153463487829175,0.7460221873063102,0.6324831271333498,0.8651429284801814,0.9397593770571769,0.7057180565183343,0.3105415405118746,0.48797335870492414,0.6086725118593964,0.29801950325691756,0.48755986285343333,0.06780851122651968,0.41692078761766355,0.5987778448883685,0.41348202914111387,0.8036844303507124,0.8746157096450069,0.4507198995495371,0.5577962399627847,0.24619834847381136,0.3613207025782002,0.5772444098161996,0.4474290294663702,0.32304394685508975,0.07801848060267275,0.5369315086127443,0.828853063409854,0.16919139190050317,0.5261992796127154,0.3712521002133676,0.7750858009586012,0.8287523988004216,0.5070508653253855,0.6692167590968718,0.5663803881146294,0.7408839332840947,0.7307426416944379,0.6237166580465437,0.6061970615039195,0.823253489785299,0.37033172877914433,0.6473938916206524,0.5167308947907739,0.47066227988936027,0.4383017055003747,0.6008300190027461,0.25030762284196706,0.7418727941392438,0.43135970369558146,0.7519396708233838,0.7545104112721537,0.532680072378154,0.3624155183760918,0.8188838534474372,0.7866885950808015,0.7662703495763485,0.31723063106084376,0.33303937964307756,0.44214262960202416,0.8723695993577183,0.4078685708602319,0.33828829660112886,0.34010908126195605,0.620094860546722,0.4674254329581201,0.7136752284096659,0.5410249930726485,0.5845584760455186,0.5370837805839677,0.5379787696192022,0.5493633029005858,0.27642975311164475,0.0877709646499014,0.4532244840813502,0.8662711114415074,0.7776331920875043,0.334621766112438,0.31227676662729625,0.34118803356099453,0.2591998705876512,0.09487758451060042,0.6071163827734972,0.6309674895356588,0.2738534779206814]
+       }
+      }
+     }
+    }
+   }
+  }
+ ]
+}

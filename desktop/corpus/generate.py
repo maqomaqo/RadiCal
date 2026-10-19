@@ -473,6 +473,39 @@ def units_rng():
                                                              [3.0, 3.0]],
                                      'array': [-0.5, 0.5, 6]}, uniforms))
 
+    # Draws interleaved as the sampler takes them: integers come from PCG64's
+    # buffered 32-bit output, which a double draw between two of them must
+    # neither use nor clear.
+    script = [['integers', 0, 5], ['random'], ['integers', -3, 4], ['integers', 0, 12],
+              ['normal', 0.0, 2.5], ['integers', 0, 1], ['integers', 0, 2**40],
+              ['integers', 0, 2**32], ['integers', -2**62, 2**62], ['random'],
+              ['integers', 0, 7], ['integers', 0, 7], ['normal', 3.0, 60.0],
+              ['integers', 0, 3], ['random'], ['integers', 0, 1000003]] * 4
+    def interleaved():
+        rng = np.random.default_rng(17)
+        out = []
+        for op in script:
+            if op[0] == 'random':
+                out.append(float(rng.random()))
+            elif op[0] == 'integers':
+                out.append(str(int(rng.integers(op[1], op[2]))))
+            else:
+                out.append(float(rng.normal(op[1], op[2])))
+        return {'values': out}
+    # Integers as decimal strings, for the same reason as the seeds.
+    cases.append(capture('interleaved', {'seed': 17, 'script': [
+        [op[0]] + [str(v) if isinstance(v, int) else v for v in op[1:]] for op in script]},
+        interleaved))
+
+    def normals():
+        rng = np.random.default_rng(23)
+        draws = rng.standard_normal(200_000)
+        # The ziggurat's tail (layer 0, about one draw in 3,800) is reached
+        # some fifty times in this many; the hash holds every draw to the bit.
+        return {'first': draws[:20], 'sha256_le': hashlib.sha256(draws.astype('<f8').tobytes()).hexdigest(),
+                'tail_draws': int((np.abs(draws) > 3.6541528853610088).sum())}
+    cases.append(capture('standard_normal', {'seed': 23, 'count': 200_000}, normals))
+
     p = [0.1, 0.0, 0.25, 0.4, 0.25]
     def choices():
         rng = np.random.default_rng(9)
@@ -1443,6 +1476,69 @@ def units_wiggle_match():
     return cases
 
 
+
+def units_influence():
+    """
+    services/influence.py on a tree built to cross each of its rules: a Phase
+    either side of a Boundary and of a Hiatus, a Phase whose neighbour is not
+    a plain Phase, one outside any Sequence, and dates in a wiggle match and
+    with an outlier prior already at one.
+    """
+    from app.services import influence
+    def el(eid, etype, name=None, children=()):
+        return {'id': eid, 'element_type': etype, 'name': name, 'children': list(children)}
+    tree = el('root', 'sequence', 'Site', [
+        el('b1', 'boundary', 'Start'),
+        el('pA', 'phase', 'Phase A'),
+        el('b2', 'boundary', 'A to B'),
+        el('pB', 'phase', 'Phase B'),
+        el('h1', 'hiatus', 'Gap'),
+        el('pC', 'phase', None),
+        el('pD', 'phase', 'Nested', [el('pD1', 'phase', 'Inner')]),
+        el('w1', 'wiggle_sequence', 'Timber'),
+        el('b3', 'boundary', 'End'),
+    ])
+    def m(mid, element, name=None, prior=None, model=None):
+        return {'id': mid, 'sample_name': name, 'element_id': element, 'age_bp': 3000.0,
+                'error_1sigma': 25.0, 'outlier_prior': prior, 'outlier_model': model}
+    dates = [m('d1', 'pA', 'A-1'), m('d2', 'pA', None, 0.05, 'charcoal'), m('d3', 'pB', 'B-1'),
+             m('d4', 'pC', 'C-1', 1.0), m('d5', 'pD1', 'Inner-1'), m('d6', 'w1', 'W-1'),
+             m('d7', None, 'Loose'), m('d8', 'pB', '')]
+    cases = []
+    for kinds in (['leave_out', 'move', 'outlier'], ['move'], ['outlier', 'leave_out']):
+        def run(kinds=kinds):
+            variants = influence.plan(dates, tree, kinds)
+            return {'variants': variants,
+                    'applied': [[{k: d.get(k) for k in ('id', 'element_id', 'outlier_prior', 'outlier_model')}
+                                 for d in influence.apply(v, dates)] for v in variants]}
+        cases.append(capture(f"plan/{'+'.join(kinds)}", {'tree': tree, 'measurements': dates, 'kinds': kinds}, run))
+    for phase in ('pA', 'pB', 'pC', 'pD', 'pD1', 'missing', 'root'):
+        cases.append(capture(f'neighbouring_phases/{phase}', {'tree': tree, 'phase_id': phase},
+                             lambda phase=phase: {k: (v or {}).get('id') for k, v in
+                                                  influence.neighbouring_phases(tree, phase).items()}))
+    rng = np.random.default_rng(13)
+    long = [[float(x), float(y)] for x, y in zip(np.linspace(2400.3, 3100.7, 523), rng.random(523))]
+    unsorted = [[3.0, 0.2], [1.0, 0.1], [2.0, 0.4]]
+    for label, series in [('long', long), ('unsorted', unsorted), ('one', [[1.0, 1.0]]), ('none', None)]:
+        cases.append(capture(f'compact_distribution/{label}', {'distribution': series},
+                             lambda series=series: {'compact': influence.compact_distribution(series)}))
+    boundaries = {
+        'b1': {'name': 'Start', 'posterior': {'posterior_median': 3050.5, 'hpd_95': [3120.0, 2990.0],
+                                              'probability_distribution': long[:200]}},
+        'b2': {'name': 'A to B', 'posterior': {'posterior_median': None}},
+        'b3': {'name': 'End', 'posterior': {'posterior_median': 2800.0, 'hpd_95': None,
+                                            'probability_distribution': [[2800.0, 1.0]]}},
+    }
+    block = {'durations': [
+        {'kind': 'phase_duration', 'id': 'phase:b1:b2', 'element_id': None, 'name': 'Phase A',
+         'years': {'median': 40.0, 'hpd_95': [10.0, 90.0], 'distribution': long[:150]}},
+        {'kind': 'sample_duration', 'id': 'sample:pB', 'element_id': 'pB', 'name': 'Phase B',
+         'years': {'median': None}},
+    ]}
+    cases.append(capture('summarise', {'boundaries': boundaries, 'intervals': block},
+                         lambda: influence.summarise(boundaries, block)))
+    return cases
+
 # ---------------------------------------------------------------------------
 # api/ -- Phases 2, 3 and 5
 # ---------------------------------------------------------------------------
@@ -1620,6 +1716,7 @@ def main() -> None:
         ('units/reservoir', units_reservoir), ('units/date_format', units_date_format),
         ('units/rng', units_rng), ('units/kde', units_kde),
         ('units/curve_view', units_curve_view), ('units/curve_registry', units_curve_registry),
+        ('units/influence', units_influence),
         ('units/model_tree', units_model_tree), ('units/stratigraphy', units_stratigraphy),
         ('units/intervals', units_intervals), ('units/exact_chain', units_exact_chain),
         ('units/exact_parallel', units_exact_parallel), ('units/agreement', units_agreement),

@@ -146,6 +146,14 @@ pub fn searchsorted_right(a: &[f64], key: f64) -> usize {
 /// outside `xp`, exact at a grid point, and otherwise
 /// `slope * (x - xp[j]) + fp[j]`, retried from the right-hand point if that is
 /// NaN. `xp` must be ascending and non-empty.
+///
+/// That last expression is ONE fused multiply-add, as the corpus's NumPy
+/// computes it: its arm64 build is compiled with floating-point contraction,
+/// and the compiler fuses the multiply into the add. The two roundings differ
+/// in the last bit, and where values are exactly tied in exact arithmetic --
+/// a cell's mass split across finer reporting bins -- that bit decides which
+/// bins an HPD region takes. A NumPy built without contraction (x86-64's
+/// baseline has no FMA) rounds twice instead; the corpus is the arm64 one.
 pub fn interp_one(x: f64, xp: &[f64], fp: &[f64]) -> f64 {
     let n = xp.len();
     if x.is_nan() {
@@ -165,9 +173,9 @@ pub fn interp_one(x: f64, xp: &[f64], fp: &[f64]) -> f64 {
         return fp[j];
     }
     let slope = (fp[j + 1] - fp[j]) / (xp[j + 1] - xp[j]);
-    let mut value = slope * (x - xp[j]) + fp[j];
+    let mut value = slope.mul_add(x - xp[j], fp[j]);
     if value.is_nan() {
-        value = slope * (x - xp[j + 1]) + fp[j + 1];
+        value = slope.mul_add(x - xp[j + 1], fp[j + 1]);
         if value.is_nan() && fp[j] == fp[j + 1] {
             value = fp[j];
         }
@@ -197,6 +205,24 @@ pub fn argmax(a: &[f64]) -> Option<usize> {
     let mut best = 0;
     for (i, &v) in a.iter().enumerate().skip(1) {
         if v > a[best] {
+            best = i;
+        }
+    }
+    Some(best)
+}
+
+/// `numpy.argmin`: the first index of the smallest value (NaN counts as
+/// smallest), or None for an empty slice.
+pub fn argmin(a: &[f64]) -> Option<usize> {
+    if a.is_empty() {
+        return None;
+    }
+    if let Some(nan) = a.iter().position(|v| v.is_nan()) {
+        return Some(nan);
+    }
+    let mut best = 0;
+    for (i, &v) in a.iter().enumerate().skip(1) {
+        if v < a[best] {
             best = i;
         }
     }
@@ -508,6 +534,54 @@ pub fn round_ndigits(x: f64, ndigits: usize) -> f64 {
     format!("{x:.ndigits$}")
         .parse()
         .expect("a formatted float parses")
+}
+
+/// `scipy.signal.find_peaks(x, prominence=minimum)`: the indices of the local
+/// maxima whose prominence is at least `minimum`, in order.
+///
+/// A plateau counts as one peak at its middle sample (rounding down), and
+/// neither end of `x` can be one -- SciPy's `_local_maxima_1d`. A peak's
+/// prominence is its height above the higher of the lowest points reached
+/// walking out either side until something higher than it, or the end
+/// (`_peak_prominences` with no window).
+pub fn find_peaks(x: &[f64], minimum: f64) -> Vec<usize> {
+    let n = x.len();
+    let mut peaks = Vec::new();
+    if n < 3 {
+        return peaks;
+    }
+    let mut i = 1;
+    let i_max = n - 1;
+    while i < i_max {
+        if x[i - 1] < x[i] {
+            let mut ahead = i + 1;
+            while ahead < i_max && x[ahead] == x[i] {
+                ahead += 1;
+            }
+            if x[ahead] < x[i] {
+                peaks.push((i + ahead - 1) / 2);
+                i = ahead;
+            }
+        }
+        i += 1;
+    }
+    peaks.retain(|&peak| {
+        let height = x[peak];
+        let mut left_min = height;
+        let mut j = peak as isize;
+        while j >= 0 && x[j as usize] <= height {
+            left_min = left_min.min(x[j as usize]);
+            j -= 1;
+        }
+        let mut right_min = height;
+        let mut j = peak;
+        while j < n && x[j] <= height {
+            right_min = right_min.min(x[j]);
+            j += 1;
+        }
+        minimum <= height - left_min.max(right_min)
+    });
+    peaks
 }
 
 #[cfg(test)]
