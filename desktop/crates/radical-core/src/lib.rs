@@ -32,6 +32,7 @@ pub mod curves;
 pub mod date_format;
 pub mod exact_chain;
 pub mod exact_parallel;
+pub mod gibbs;
 pub mod intervals;
 pub mod kde;
 pub mod matrix;

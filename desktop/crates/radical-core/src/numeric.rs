@@ -146,6 +146,14 @@ pub fn searchsorted_right(a: &[f64], key: f64) -> usize {
 /// outside `xp`, exact at a grid point, and otherwise
 /// `slope * (x - xp[j]) + fp[j]`, retried from the right-hand point if that is
 /// NaN. `xp` must be ascending and non-empty.
+///
+/// That last expression is ONE fused multiply-add, as the corpus's NumPy
+/// computes it: its arm64 build is compiled with floating-point contraction,
+/// and the compiler fuses the multiply into the add. The two roundings differ
+/// in the last bit, and where values are exactly tied in exact arithmetic --
+/// a cell's mass split across finer reporting bins -- that bit decides which
+/// bins an HPD region takes. A NumPy built without contraction (x86-64's
+/// baseline has no FMA) rounds twice instead; the corpus is the arm64 one.
 pub fn interp_one(x: f64, xp: &[f64], fp: &[f64]) -> f64 {
     let n = xp.len();
     if x.is_nan() {
@@ -165,9 +173,9 @@ pub fn interp_one(x: f64, xp: &[f64], fp: &[f64]) -> f64 {
         return fp[j];
     }
     let slope = (fp[j + 1] - fp[j]) / (xp[j + 1] - xp[j]);
-    let mut value = slope * (x - xp[j]) + fp[j];
+    let mut value = slope.mul_add(x - xp[j], fp[j]);
     if value.is_nan() {
-        value = slope * (x - xp[j + 1]) + fp[j + 1];
+        value = slope.mul_add(x - xp[j + 1], fp[j + 1]);
         if value.is_nan() && fp[j] == fp[j + 1] {
             value = fp[j];
         }
@@ -197,6 +205,24 @@ pub fn argmax(a: &[f64]) -> Option<usize> {
     let mut best = 0;
     for (i, &v) in a.iter().enumerate().skip(1) {
         if v > a[best] {
+            best = i;
+        }
+    }
+    Some(best)
+}
+
+/// `numpy.argmin`: the first index of the smallest value (NaN counts as
+/// smallest), or None for an empty slice.
+pub fn argmin(a: &[f64]) -> Option<usize> {
+    if a.is_empty() {
+        return None;
+    }
+    if let Some(nan) = a.iter().position(|v| v.is_nan()) {
+        return Some(nan);
+    }
+    let mut best = 0;
+    for (i, &v) in a.iter().enumerate().skip(1) {
+        if v < a[best] {
             best = i;
         }
     }

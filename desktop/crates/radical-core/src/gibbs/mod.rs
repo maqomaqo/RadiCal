@@ -38,10 +38,10 @@ pub mod solve;
 pub use chain::{Cancelled, RunOptions, run};
 pub use chains::{chain_starts, solve_chains, start_quantiles};
 pub use model::Model;
-pub use solve::{Sampled, SampleOptions, solve};
+pub use solve::{SampleOptions, Sampled, solve};
 
-use crate::special::gammaln;
 use crate::numeric::sum;
+use crate::special::gammaln;
 
 /// Matching OxCal 4.4: every parameter's hard limits are pulled in to the
 /// range it has sampled, once, at the end of the first round from the fourth
@@ -157,7 +157,11 @@ pub fn log_deposition_density(gaps: &[f64], alpha: &[f64]) -> f64 {
     let total = sum(gaps);
     let big_a = sum(alpha);
     let gamma_terms: Vec<f64> = alpha.iter().map(|&a| gammaln(a)).collect();
-    let log_terms: Vec<f64> = alpha.iter().zip(gaps).map(|(a, g)| (a - 1.0) * g.ln()).collect();
+    let log_terms: Vec<f64> = alpha
+        .iter()
+        .zip(gaps)
+        .map(|(a, g)| (a - 1.0) * g.ln())
+        .collect();
     gammaln(big_a) - sum(&gamma_terms) + sum(&log_terms) - (big_a - 1.0) * total.ln()
 }
 

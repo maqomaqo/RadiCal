@@ -297,8 +297,10 @@ impl Generator {
 
     /// `rng.standard_normal()`: NumPy's ziggurat, step for step.
     pub fn standard_normal(&mut self) -> f64 {
-        const R: f64 = 3.654_152_885_361_008_796_351_947_251_8;
-        const INV_R: f64 = 0.273_661_237_329_758_272_033_382_475_96;
+        // NumPy's ziggurat_nor_r and ziggurat_nor_inv_r, written as the
+        // doubles its 29-digit literals round to.
+        const R: f64 = 3.654_152_885_361_009;
+        const INV_R: f64 = 0.273_661_237_329_758_3;
         loop {
             let mut r = self.bits.next_u64();
             let idx = (r & 0xff) as usize;

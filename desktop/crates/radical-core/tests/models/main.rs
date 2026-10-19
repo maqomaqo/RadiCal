@@ -9,6 +9,7 @@
 #[path = "../units/model.rs"]
 #[allow(dead_code)]
 mod model;
+mod sampled;
 
 use std::collections::HashMap;
 
@@ -258,7 +259,89 @@ fn intervals(c: &mut Closeness, label: &str, got: &Block, want: &Value) {
         );
         years(c, &l, &g.years, &w["years"]);
     }
-    assert!(want["age_depth"].as_array().unwrap().is_empty() && got.age_depth.is_empty());
+    let age_depth = want["age_depth"].as_array().unwrap();
+    assert_eq!(got.age_depth.len(), age_depth.len(), "{label}: age-depth");
+    for (g, w) in got.age_depth.iter().zip(age_depth) {
+        let l = format!("{label}/age_depth/{}", g.element_id);
+        assert_eq!(g.element_id, w["element_id"], "{l}");
+        assert_eq!(g.name, w["name"], "{l}");
+        assert_eq!(g.depth_units, w["depth_units"], "{l}");
+        let levels = w["levels"].as_array().unwrap();
+        assert_eq!(g.levels.len(), levels.len(), "{l}: levels");
+        for (gl, wl) in g.levels.iter().zip(levels) {
+            let ll = format!("{l}/{}", gl.id);
+            assert_eq!(gl.id, wl["id"], "{ll}");
+            assert_eq!(gl.name, wl["name"], "{ll}");
+            assert_eq!(
+                (gl.depth, gl.dated),
+                (num(&wl["depth"]), wl["dated"].as_bool().unwrap()),
+                "{ll}"
+            );
+            c.check(
+                &format!("{ll}.median"),
+                gl.band.median,
+                num(&wl["median"]),
+                REL,
+            );
+            c.check(&format!("{ll}.mean"), gl.band.mean, num(&wl["mean"]), REL);
+            assert_eq!(
+                gl.band.band_68.to_vec(),
+                nums(&wl["band_68"]),
+                "{ll}.band_68"
+            );
+            assert_eq!(
+                gl.band.band_95.to_vec(),
+                nums(&wl["band_95"]),
+                "{ll}.band_95"
+            );
+        }
+        let accumulation = w["accumulation"].as_array().unwrap();
+        assert_eq!(
+            g.accumulation.len(),
+            accumulation.len(),
+            "{l}: accumulation"
+        );
+        for (ga, wa) in g.accumulation.iter().zip(accumulation) {
+            let la = format!("{l}/{}-{}", ga.from_name, ga.to_name);
+            assert_eq!(
+                (ga.from_name.as_str(), ga.to_name.as_str()),
+                (
+                    wa["from_name"].as_str().unwrap(),
+                    wa["to_name"].as_str().unwrap()
+                ),
+                "{la}"
+            );
+            assert_eq!(
+                [ga.from_depth, ga.to_depth, ga.depth_gap],
+                [
+                    num(&wa["from_depth"]),
+                    num(&wa["to_depth"]),
+                    num(&wa["depth_gap"])
+                ],
+                "{la}"
+            );
+            years(c, &la, &ga.years, &wa["years"]);
+            c.check(
+                &format!("{la}.rate_median"),
+                ga.rate_median,
+                num(&wa["rate_median"]),
+                REL,
+            );
+            let band = nums(&wa["rate_band_68"]);
+            c.check(
+                &format!("{la}.rate_68.lo"),
+                ga.rate_band_68[0],
+                band[0],
+                REL,
+            );
+            c.check(
+                &format!("{la}.rate_68.hi"),
+                ga.rate_band_68[1],
+                band[1],
+                REL,
+            );
+        }
+    }
     match (&got.phase_activity, want["phase_activity"].is_null()) {
         (None, true) => {}
         (Some(a), false) => {

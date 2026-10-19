@@ -3,15 +3,15 @@
 
 use std::collections::HashMap;
 
-use crate::numeric::{linspace, sum};
+use crate::Error;
+use crate::numeric::sum;
 use crate::rng::Generator;
-use crate::{Error, py_pow};
 
 use super::model::Model;
 use super::{
     ADAPT_INTERVAL, BURN_IN_FRACTION, COLDEST_HOT_BETA, DEFAULT_TEMPERATURES, GROUP_SHIFT_YEARS,
-    MAX_SWEEPS, MOVES_PER_SWEEP, ROUNDS, SHRINK_AFTER_FRACTION, SHRINK_MIN_CONVERGENCE, SHRINK_TRIM,
-    State, TARGET_ACCEPTANCE, TARGET_CONVERGENCE,
+    MAX_SWEEPS, MOVES_PER_SWEEP, ROUNDS, SHRINK_AFTER_FRACTION, SHRINK_MIN_CONVERGENCE,
+    SHRINK_TRIM, State, TARGET_ACCEPTANCE, TARGET_CONVERGENCE,
 };
 
 /// A count per grid cell, per parameter row.
@@ -95,6 +95,7 @@ pub struct ChainResult {
 }
 
 impl Chain {
+    #[allow(clippy::too_many_arguments)] // Python's _Chain takes these as positional arguments.
     pub fn new(
         model: Model,
         sweeps: usize,
@@ -122,12 +123,24 @@ impl Chain {
         let move_sets = model.move_sets();
         let sets = move_sets.len();
         let scales = vec![(GROUP_SHIFT_YEARS / model.dt).max(1.0); sets];
-        let scale_counts = model.scale_grid.iter().map(|g| vec![0.0; g.len()]).collect();
-        let rate_counts = model.depositions.iter().map(|d| vec![0.0; d.k_nodes.len()]).collect();
+        let scale_counts = model
+            .scale_grid
+            .iter()
+            .map(|g| vec![0.0; g.len()])
+            .collect();
+        let rate_counts = model
+            .depositions
+            .iter()
+            .map(|d| vec![0.0; d.k_nodes.len()])
+            .collect();
         let mut flagged: Vec<usize> = model.likelihood_at.keys().copied().collect();
         flagged.sort_unstable();
         let outlier_total = flagged.into_iter().map(|r| (r, 0.0)).collect();
-        let per_round_draws = if collect_draws > 0 { (collect_draws / ROUNDS).max(1) } else { 0 };
+        let per_round_draws = if collect_draws > 0 {
+            (collect_draws / ROUNDS).max(1)
+        } else {
+            0
+        };
         let round_length = ((sweeps - burn_in) / ROUNDS).max(1);
         Ok(Self {
             model,
@@ -163,7 +176,14 @@ impl Chain {
     /// min(1, exp((b_i - b_j)(L_j - L_i))), which leaves every copy's target
     /// invariant.
     pub fn sweep(&mut self) {
-        let state = std::mem::replace(&mut self.state, State { index: Vec::new(), scale: Vec::new(), rate: Vec::new() });
+        let state = std::mem::replace(
+            &mut self.state,
+            State {
+                index: Vec::new(),
+                scale: Vec::new(),
+                rate: Vec::new(),
+            },
+        );
         self.state = self.sweep_state(state, 1.0, true);
         if self.hot_states.is_empty() {
             self.swept += 1;
@@ -171,16 +191,31 @@ impl Chain {
         }
         for k in 0..self.hot_states.len() {
             let beta = self.betas[k + 1];
-            let hot = std::mem::replace(&mut self.hot_states[k], State { index: Vec::new(), scale: Vec::new(), rate: Vec::new() });
+            let hot = std::mem::replace(
+                &mut self.hot_states[k],
+                State {
+                    index: Vec::new(),
+                    scale: Vec::new(),
+                    rate: Vec::new(),
+                },
+            );
             self.hot_states[k] = self.sweep_state(hot, beta, false);
         }
         let mut states = Vec::with_capacity(self.hot_states.len() + 1);
-        states.push(std::mem::replace(&mut self.state, State { index: Vec::new(), scale: Vec::new(), rate: Vec::new() }));
+        states.push(std::mem::replace(
+            &mut self.state,
+            State {
+                index: Vec::new(),
+                scale: Vec::new(),
+                rate: Vec::new(),
+            },
+        ));
         states.append(&mut self.hot_states);
         for k in 0..states.len() - 1 {
             self.swaps_proposed[k] += 1;
             let exponent = (self.betas[k] - self.betas[k + 1])
-                * (self.model.log_likelihood_sum(&states[k + 1]) - self.model.log_likelihood_sum(&states[k]));
+                * (self.model.log_likelihood_sum(&states[k + 1])
+                    - self.model.log_likelihood_sum(&states[k]));
             if exponent >= 0.0 || self.rng.random() < exponent.exp() {
                 states.swap(k, k + 1);
                 self.swaps_accepted[k] += 1;
@@ -217,8 +252,14 @@ impl Chain {
         let mut current_lp = None;
         for index in 0..self.move_sets.len() {
             for _ in 0..MOVES_PER_SWEEP {
-                let (next, lp, took, wide) =
-                    model.shift(state, &mut self.rng, &self.move_sets[index], self.scales[index], current_lp, beta);
+                let (next, lp, took, wide) = model.shift(
+                    state,
+                    &mut self.rng,
+                    &self.move_sets[index],
+                    self.scales[index],
+                    current_lp,
+                    beta,
+                );
                 state = next;
                 current_lp = Some(lp);
                 if !adapt {
@@ -253,7 +294,9 @@ impl Chain {
     /// tempered copies, which OxCal has none of.
     pub fn shrink(&mut self, ranges: &HashMap<usize, (i64, i64)>) -> Result<(), Error> {
         if !self.hot_states.is_empty() {
-            return Err(Error::Model("limits cannot be shrunk on a tempered chain".into()));
+            return Err(Error::Model(
+                "limits cannot be shrunk on a tempered chain".into(),
+            ));
         }
         self.model.shrink_limits(ranges);
         self.limits_shrunk = true;
@@ -266,7 +309,10 @@ impl Chain {
     pub fn round(&mut self) -> Histograms {
         let n = self.model.params.len();
         let mut current: Histograms = vec![vec![0.0; self.model.m]; n];
-        let stride = if self.per_round_draws > 0 { (self.round_length / self.per_round_draws).max(1) } else { 0 };
+        let stride = self
+            .round_length
+            .checked_div(self.per_round_draws)
+            .map_or(0, |s| s.max(1));
         let mut kept: Vec<Vec<i32>> = Vec::new();
         for step in 0..self.round_length {
             self.sweep();
@@ -300,12 +346,12 @@ impl Chain {
             if self.per_round_draws > 0 {
                 let draws = std::mem::take(&mut self.round_draws);
                 let mut merged = Vec::new();
-                let mut pairs = draws.chunks_exact(2);
-                for pair in &mut pairs {
-                    let joined: Vec<Vec<i32>> = pair[0].iter().chain(&pair[1]).cloned().collect();
+                let (pairs, rest) = draws.as_chunks::<2>();
+                for [a, b] in pairs {
+                    let joined: Vec<Vec<i32>> = a.iter().chain(b).cloned().collect();
                     merged.push(joined.into_iter().step_by(2).collect());
                 }
-                if let [last] = pairs.remainder() {
+                if let [last] = rest {
                     merged.push(last.clone());
                 }
                 self.round_draws = merged;
@@ -352,7 +398,16 @@ impl Chain {
             outlier_probability: self
                 .outlier_total
                 .iter()
-                .map(|&(r, v)| (r, if self.accumulated > 0 { v / accumulated } else { 0.0 }))
+                .map(|&(r, v)| {
+                    (
+                        r,
+                        if self.accumulated > 0 {
+                            v / accumulated
+                        } else {
+                            0.0
+                        },
+                    )
+                })
                 .collect(),
             sweeps: self.swept,
             sweeps_kept,
@@ -395,7 +450,10 @@ pub fn shrink_round() -> usize {
 
 /// The rounds added together, cell by cell.
 pub fn total(rounds: &[Histograms]) -> Histograms {
-    let mut out: Histograms = rounds.first().map(|r| r.iter().map(|h| vec![0.0; h.len()]).collect()).unwrap_or_default();
+    let mut out: Histograms = rounds
+        .first()
+        .map(|r| r.iter().map(|h| vec![0.0; h.len()]).collect())
+        .unwrap_or_default();
     for round in rounds {
         for (h, r) in out.iter_mut().zip(round) {
             for (a, b) in h.iter_mut().zip(r) {
@@ -410,7 +468,9 @@ pub fn total(rounds: &[Histograms]) -> Histograms {
 /// SHRINK_MIN_CONVERGENCE over everything sampled so far.
 pub fn shrink_due(rounds: &[Histograms]) -> Option<HashMap<usize, (i64, i64)>> {
     let measure = convergence(rounds);
-    if measure.is_empty() || measure.iter().copied().fold(f64::INFINITY, f64::min) <= SHRINK_MIN_CONVERGENCE {
+    if measure.is_empty()
+        || measure.iter().copied().fold(f64::INFINITY, f64::min) <= SHRINK_MIN_CONVERGENCE
+    {
         return None;
     }
     Some(sampled_ranges(&total(rounds), SHRINK_TRIM))
@@ -438,7 +498,7 @@ pub fn folded(rounds: Vec<Histograms>) -> Vec<Histograms> {
 pub fn burn_chunks(burn_in: usize) -> Vec<usize> {
     let chunk = (burn_in / 10).max(1);
     let mut chunks = vec![chunk; burn_in / chunk];
-    if burn_in % chunk > 0 {
+    if !burn_in.is_multiple_of(chunk) {
         chunks.push(burn_in % chunk);
     }
     chunks
@@ -451,7 +511,11 @@ pub fn after_burn_in(rounds: &[Histograms]) -> &[Histograms] {
 }
 
 pub fn burn_in_start(count: usize) -> usize {
-    if count < 3 { 0 } else { (count as f64 * BURN_IN_FRACTION) as usize }
+    if count < 3 {
+        0
+    } else {
+        (count as f64 * BURN_IN_FRACTION) as usize
+    }
 }
 
 /// OxCal's convergence measure per parameter: the overlap between the
@@ -553,10 +617,12 @@ pub fn run(
     let measure = loop {
         chain.round();
         completed += 1;
-        if options.match_oxcal && !chain.limits_shrunk && completed >= shrink_round() {
-            if let Some(ranges) = shrink_due(&chain.rounds) {
-                chain.shrink(&ranges)?;
-            }
+        if options.match_oxcal
+            && !chain.limits_shrunk
+            && completed >= shrink_round()
+            && let Some(ranges) = shrink_due(&chain.rounds)
+        {
+            chain.shrink(&ranges)?;
         }
         let (measure, worst, kept) = chain.convergence();
         if !report(&chain, "sampling", worst) {
@@ -573,16 +639,4 @@ pub fn run(
         }
     };
     Ok(Ok(chain.result(measure)))
-}
-
-/// Python's `**`, for the betas of a tempered chain where NumPy's power is
-/// libm's pow, as here.
-#[allow(dead_code)]
-fn power(x: f64, y: f64) -> f64 {
-    py_pow(x, y)
-}
-
-#[allow(dead_code)]
-fn _linspace_is_used() -> Vec<f64> {
-    linspace(0.0, 1.0, 2)
 }

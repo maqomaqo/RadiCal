@@ -5,16 +5,16 @@
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
+use crate::Error;
 use crate::exact_chain::prior::{log_interior_placements, log_limits_factor_of_span, pair_limits};
 use crate::exact_chain::tables::{
-    DEFAULT_OUTLIER_MODEL, ElementBounds, OUTLIER_KERNEL_HALF_WIDTH_YEARS, OutlierPart, build_grid,
-    convolve_on_grid, date_tables, effective_date_bounds, outlier_kernel_at_scale, scale_nodes,
+    ElementBounds, OUTLIER_KERNEL_HALF_WIDTH_YEARS, OutlierPart, build_grid, convolve_on_grid,
+    date_tables, effective_date_bounds, outlier_kernel_at_scale, scale_nodes,
 };
 use crate::measurement::{Calibrator, Measurement};
 use crate::model_tree::{Element, ModelPlan, inherited_bounds, plan_model};
 use crate::numeric::{argmax, cumsum, find_peaks, linspace, mean, searchsorted_left, sum};
 use crate::rng::Generator;
-use crate::{Error, py_pow};
 
 use super::{
     DEPOSITION_K_NODES, Deposition, EQUALISED_EDGE, LOBE_HELD_FRACTION, LOBE_MIN_MASS,
@@ -34,6 +34,11 @@ pub type Wishes = HashMap<usize, Vec<(Lobe, Option<i64>)>>;
 fn round_even(x: f64) -> i64 {
     x.round_ties_even() as i64
 }
+
+/// (row, scale node, beta's bits): a tempered likelihood table's key.
+type TemperedKey = (usize, Option<usize>, u64);
+/// A likelihood row and its cumulative sum.
+type Tables = (Vec<f64>, Vec<f64>);
 
 /// The sampler's model of one analysis.
 #[derive(Debug)]
@@ -102,7 +107,7 @@ pub struct Model {
     pub blocks: Vec<Vec<usize>>,
 
     cluster_weights: RefCell<HashMap<Vec<usize>, f64>>,
-    tempered: RefCell<HashMap<(usize, Option<usize>, u64), (Vec<f64>, Vec<f64>)>>,
+    tempered: RefCell<HashMap<TemperedKey, Tables>>,
     peak_gaps_cache: RefCell<HashMap<Vec<usize>, Vec<i64>>>,
     lobes_cache: RefCell<HashMap<usize, Vec<Lobe>>>,
 }
@@ -220,18 +225,24 @@ impl Model {
                     .get(pid)
                     .filter(|n| !n.is_empty())
                     .cloned()
-                    .unwrap_or_else(|| format!("{} {}", crate::pyfmt::g(*depth, 6), group.depth_units));
+                    .unwrap_or_else(|| {
+                        format!("{} {}", crate::pyfmt::g(*depth, 6), group.depth_units)
+                    });
                 level_names_by_id.insert(pid.clone(), name);
             }
             deposition_specs.push((group, depth_gaps));
         }
 
-        let boundary_ids: Vec<String> = plan.boundary_names.iter().map(|(b, _)| b.clone()).collect();
+        let boundary_ids: Vec<String> =
+            plan.boundary_names.iter().map(|(b, _)| b.clone()).collect();
         let mut params: Vec<String> = date_ids.clone();
         params.extend(level_ids.iter().cloned());
         params.extend(boundary_ids.iter().cloned());
-        let param_row: HashMap<String, usize> =
-            params.iter().enumerate().map(|(i, p)| (p.clone(), i)).collect();
+        let param_row: HashMap<String, usize> = params
+            .iter()
+            .enumerate()
+            .map(|(i, p)| (p.clone(), i))
+            .collect();
         let num_dates = date_ids.len();
         let num_drawable = num_dates + level_ids.len();
         let date_rows: Vec<usize> = (0..num_dates).collect();
@@ -257,7 +268,11 @@ impl Model {
             .map(|(group, depth_gaps)| Deposition {
                 element_id: group.element_id.clone(),
                 name: group.name.clone(),
-                ids: group.levels.iter().map(|(pid, _, _)| param_row[pid]).collect(),
+                ids: group
+                    .levels
+                    .iter()
+                    .map(|(pid, _, _)| param_row[pid])
+                    .collect(),
                 depth_gaps: depth_gaps.clone(),
                 fixed_k: group.k,
                 k_nodes: match group.k {
@@ -278,7 +293,10 @@ impl Model {
                 deposition_of.insert(row, (d, position));
             }
         }
-        let level_names = level_names_by_id.into_iter().map(|(id, n)| (param_row[&id], n)).collect();
+        let level_names = level_names_by_id
+            .into_iter()
+            .map(|(id, n)| (param_row[&id], n))
+            .collect();
 
         let mut model = Self {
             measurements: measurements.to_vec(),
@@ -373,7 +391,11 @@ impl Model {
         self.model_of = vec![None; self.params.len()];
         for (row, x) in self.measurements.iter().enumerate() {
             if self.outlier_parts.contains_key(&x.id) {
-                let model = self.outlier_models.iter().position(|n| n == x.outlier_model()).unwrap();
+                let model = self
+                    .outlier_models
+                    .iter()
+                    .position(|n| n == x.outlier_model())
+                    .unwrap();
                 self.scaled_dates[model].push(row);
                 self.model_of[row] = Some(model);
             }
@@ -396,7 +418,13 @@ impl Model {
                         mixture
                             .iter()
                             .zip(&broad)
-                            .map(|(&mx, &b)| if mx > 0.0 { prior * b / mx.max(1e-300) } else { 0.0 })
+                            .map(|(&mx, &b)| {
+                                if mx > 0.0 {
+                                    prior * b / mx.max(1e-300)
+                                } else {
+                                    0.0
+                                }
+                            })
                             .collect(),
                     );
                     mixtures.push(mixture);
@@ -412,7 +440,6 @@ impl Model {
                 self.responsibility_at.insert(row, responsibility);
             }
         }
-        let _ = DEFAULT_OUTLIER_MODEL;
     }
 
     /// The node this date's outlier model sits at, or None if it has none.
@@ -422,7 +449,12 @@ impl Model {
 
     /// (density, cumulative) of a drawable row's likelihood at power `beta`,
     /// cached per power.
-    fn likelihood_tables(&self, row: usize, node: Option<usize>, beta: f64) -> (Vec<f64>, Vec<f64>) {
+    fn likelihood_tables(
+        &self,
+        row: usize,
+        node: Option<usize>,
+        beta: f64,
+    ) -> (Vec<f64>, Vec<f64>) {
         let density = match node {
             None => &self.likelihood[row],
             Some(n) => &self.likelihood_at[&row][n],
@@ -440,7 +472,9 @@ impl Model {
         }
         let powered: Vec<f64> = density.iter().map(|&d| d.powf(beta)).collect();
         let cumulative = cumsum(&powered);
-        self.tempered.borrow_mut().insert(key, (powered.clone(), cumulative.clone()));
+        self.tempered
+            .borrow_mut()
+            .insert(key, (powered.clone(), cumulative.clone()));
         (powered, cumulative)
     }
 
@@ -475,7 +509,10 @@ impl Model {
                 *w += beta * table[node][cell];
             }
         }
-        let peak = log_weights.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        let peak = log_weights
+            .iter()
+            .copied()
+            .fold(f64::NEG_INFINITY, f64::max);
         let weights: Vec<f64> = log_weights.iter().map(|w| (w - peak).exp()).collect();
         let total = sum(&weights);
         if !total.is_finite() || total <= 0.0 {
@@ -488,7 +525,11 @@ impl Model {
     // -- deposition ---------------------------------------------------------
 
     fn deposition_gaps(&self, deposition: &Deposition, state: &State) -> Vec<f64> {
-        let ages: Vec<f64> = deposition.ids.iter().map(|&r| self.grid[state.index[r] as usize]).collect();
+        let ages: Vec<f64> = deposition
+            .ids
+            .iter()
+            .map(|&r| self.grid[state.index[r] as usize])
+            .collect();
         ages.windows(2).map(|w| -(w[1] - w[0])).collect()
     }
 
@@ -500,7 +541,12 @@ impl Model {
 
     /// The deposition prior as a function of where `row` sits, over the grid
     /// cells `candidates`, or None if it is in no sequence.
-    fn log_deposition_terms(&self, row: usize, state: &State, candidates: &[usize]) -> Option<Vec<f64>> {
+    fn log_deposition_terms(
+        &self,
+        row: usize,
+        state: &State,
+        candidates: &[usize],
+    ) -> Option<Vec<f64>> {
         let &(d, position) = self.deposition_of.get(&row)?;
         let deposition = &self.depositions[d];
         let alpha = self.alpha_of(d, state);
@@ -508,7 +554,11 @@ impl Model {
         let ages: Vec<f64> = candidates.iter().map(|&c| self.grid[c]).collect();
         let mut log_dens = vec![0.0; candidates.len()];
         let term = |gap: f64, exponent: f64| -> f64 {
-            if gap > 0.0 { exponent * gap.ln() } else { f64::NEG_INFINITY }
+            if gap > 0.0 {
+                exponent * gap.ln()
+            } else {
+                f64::NEG_INFINITY
+            }
         };
         if position > 0 {
             let older = self.grid[state.index[ids[position - 1]] as usize];
@@ -525,12 +575,20 @@ impl Model {
         if position == 0 || position == ids.len() - 1 {
             // Written so the span is positive when the ordering holds, rather
             // than an absolute value that would weigh a crossed candidate.
-            let other_row = if position == 0 { ids[ids.len() - 1] } else { ids[0] };
+            let other_row = if position == 0 {
+                ids[ids.len() - 1]
+            } else {
+                ids[0]
+            };
             let other = self.grid[state.index[other_row] as usize];
             let big_a = sum(&alpha);
             for (l, a) in log_dens.iter_mut().zip(&ages) {
                 let total = if position == 0 { a - other } else { other - a };
-                *l += if total > 0.0 { -(big_a - 1.0) * total.ln() } else { f64::NEG_INFINITY };
+                *l += if total > 0.0 {
+                    -(big_a - 1.0) * total.ln()
+                } else {
+                    f64::NEG_INFINITY
+                };
             }
         }
         Some(log_dens)
@@ -556,8 +614,13 @@ impl Model {
                 let alpha: Vec<f64> = deposition.depth_gaps.iter().map(|dz| k * dz).collect();
                 let big_a = sum(&alpha);
                 let gammas: Vec<f64> = alpha.iter().map(|&a| crate::special::gammaln(a)).collect();
-                let logs: Vec<f64> = alpha.iter().zip(&log_gaps).map(|(a, lg)| (a - 1.0) * lg).collect();
-                crate::special::gammaln(big_a) - sum(&gammas) + sum(&logs) - (big_a - 1.0) * log_total
+                let logs: Vec<f64> = alpha
+                    .iter()
+                    .zip(&log_gaps)
+                    .map(|(a, lg)| (a - 1.0) * lg)
+                    .collect();
+                crate::special::gammaln(big_a) - sum(&gammas) + sum(&logs)
+                    - (big_a - 1.0) * log_total
             })
             .collect();
         let finite_max = log_weights
@@ -570,7 +633,13 @@ impl Model {
         }
         let weights: Vec<f64> = log_weights
             .iter()
-            .map(|&w| if w.is_finite() { (w - finite_max).exp() } else { 0.0 })
+            .map(|&w| {
+                if w.is_finite() {
+                    (w - finite_max).exp()
+                } else {
+                    0.0
+                }
+            })
             .collect();
         let total = sum(&weights);
         if !total.is_finite() || total <= 0.0 {
@@ -587,7 +656,10 @@ impl Model {
         let (taq, tpq) = if row < self.num_dates {
             effective_date_bounds(&self.measurements[row], &self.element_bounds)
         } else {
-            self.element_bounds.get(&self.params[row]).copied().unwrap_or((None, None))
+            self.element_bounds
+                .get(&self.params[row])
+                .copied()
+                .unwrap_or((None, None))
         };
         let mut lo = 0_i64;
         let mut hi = self.m as i64 - 1;
@@ -606,14 +678,20 @@ impl Model {
         let n = self.params.len();
         self.below = vec![Vec::new(); n];
         self.above = vec![Vec::new(); n];
-        let mut add = |below: &mut Vec<Vec<usize>>, above: &mut Vec<Vec<usize>>, younger: Option<usize>, older: Option<usize>| {
+        let add = |below: &mut Vec<Vec<usize>>,
+                   above: &mut Vec<Vec<usize>>,
+                   younger: Option<usize>,
+                   older: Option<usize>| {
             if let (Some(y), Some(o)) = (younger, older) {
                 below[y].push(o);
                 above[o].push(y);
             }
         };
         let row_of = |id: &str| self.param_row.get(id).copied();
-        let (mut below, mut above) = (std::mem::take(&mut self.below), std::mem::take(&mut self.above));
+        let (mut below, mut above) = (
+            std::mem::take(&mut self.below),
+            std::mem::take(&mut self.above),
+        );
         for (older_terms, younger_terms) in &self.plan.ordering {
             for (_, older) in older_terms {
                 for (_, younger) in younger_terms {
@@ -637,7 +715,9 @@ impl Model {
                 add(&mut below, &mut above, younger, Some(d));
             }
             for contained in &group.contained_ids {
-                let Some(c) = row_of(contained).filter(|&r| self.is_drawable(r)) else { continue };
+                let Some(c) = row_of(contained).filter(|&r| self.is_drawable(r)) else {
+                    continue;
+                };
                 add(&mut below, &mut above, Some(c), older);
                 add(&mut below, &mut above, younger, Some(c));
             }
@@ -650,7 +730,11 @@ impl Model {
         self.group_dates = group_dates;
 
         self.window = (0..n).map(|r| self.own_window(r)).collect();
-        self.span_priors = if self.uniform_span_prior { self.compute_span_priors() } else { Vec::new() };
+        self.span_priors = if self.uniform_span_prior {
+            self.compute_span_priors()
+        } else {
+            Vec::new()
+        };
         self.limits_tables = self.limits_factor_tables();
         self.span_prior_rows = self.compute_span_prior_rows();
 
@@ -661,26 +745,39 @@ impl Model {
         // of a cell.
         self.log_span_of_cells[0] = (self.dt / 4.0).ln();
 
-        let mut boundary_groups: HashMap<usize, Vec<(usize, bool)>> =
-            self.boundary_rows.iter().map(|&b| (b, Vec::new())).collect();
+        let mut boundary_groups: HashMap<usize, Vec<(usize, bool)>> = self
+            .boundary_rows
+            .iter()
+            .map(|&b| (b, Vec::new()))
+            .collect();
         for (gi, (older, younger, dates)) in self.group_dates.iter().enumerate() {
             if dates.is_empty() {
                 continue;
             }
             boundary_groups.entry(*older).or_default().push((gi, true));
-            boundary_groups.entry(*younger).or_default().push((gi, false));
+            boundary_groups
+                .entry(*younger)
+                .or_default()
+                .push((gi, false));
         }
         self.boundary_groups = boundary_groups;
-        let mut boundary_priors: HashMap<usize, Vec<(usize, bool)>> =
-            self.boundary_rows.iter().map(|&b| (b, Vec::new())).collect();
+        let mut boundary_priors: HashMap<usize, Vec<(usize, bool)>> = self
+            .boundary_rows
+            .iter()
+            .map(|&b| (b, Vec::new()))
+            .collect();
         for (pi, &(oldest, youngest, _)) in self.span_priors.iter().enumerate() {
             boundary_priors.entry(oldest).or_default().push((pi, true));
-            boundary_priors.entry(youngest).or_default().push((pi, false));
+            boundary_priors
+                .entry(youngest)
+                .or_default()
+                .push((pi, false));
         }
         self.boundary_priors = boundary_priors;
 
-        let pairs: Vec<(usize, usize)> =
-            (0..n).flat_map(|p| self.below[p].iter().map(move |&o| (p, o))).collect();
+        let pairs: Vec<(usize, usize)> = (0..n)
+            .flat_map(|p| self.below[p].iter().map(move |&o| (p, o)))
+            .collect();
         self.edge_younger = pairs.iter().map(|&(y, _)| y).collect();
         self.edge_older = pairs.iter().map(|&(_, o)| o).collect();
 
@@ -706,10 +803,16 @@ impl Model {
         // Ties between two DATES are weighted per cluster (cluster_weight);
         // every other keeps its half per edge.
         let is_plain_date = |r: usize| r < self.num_dates && !self.deposition_of.contains_key(&r);
-        let date_ties: Vec<(usize, usize)> =
-            tie_pairs.iter().copied().filter(|&(y, o)| is_plain_date(y) && is_plain_date(o)).collect();
-        let edge_ties: Vec<(usize, usize)> =
-            tie_pairs.iter().copied().filter(|pair| !date_ties.contains(pair)).collect();
+        let date_ties: Vec<(usize, usize)> = tie_pairs
+            .iter()
+            .copied()
+            .filter(|&(y, o)| is_plain_date(y) && is_plain_date(o))
+            .collect();
+        let edge_ties: Vec<(usize, usize)> = tie_pairs
+            .iter()
+            .copied()
+            .filter(|pair| !date_ties.contains(pair))
+            .collect();
         self.date_tied_with = vec![Vec::new(); n];
         self.edge_tied_with = vec![Vec::new(); n];
         for &(y, o) in &date_ties {
@@ -726,7 +829,16 @@ impl Model {
             let reachable = self.younger_reachable();
             self.younger_dates = (0..self.num_dates)
                 .filter(|&d| is_plain_date(d))
-                .map(|d| (d, reachable[d].iter().copied().filter(|&r| is_plain_date(r)).collect()))
+                .map(|d| {
+                    (
+                        d,
+                        reachable[d]
+                            .iter()
+                            .copied()
+                            .filter(|&r| is_plain_date(r))
+                            .collect(),
+                    )
+                })
                 .collect();
         }
         self.date_tie_pairs = date_ties;
@@ -746,7 +858,8 @@ impl Model {
         let weight = if k < 2 {
             1.0
         } else {
-            let position: HashMap<usize, usize> = key.iter().enumerate().map(|(i, &d)| (d, i)).collect();
+            let position: HashMap<usize, usize> =
+                key.iter().enumerate().map(|(i, &d)| (d, i)).collect();
             let mut older = vec![0_u64; k];
             for &d in &key {
                 for younger in self.younger_dates.get(&d).into_iter().flatten() {
@@ -775,7 +888,13 @@ impl Model {
     }
 
     /// The dates in `cell` joined to `start` through date ties.
-    fn cluster(&self, start: &[usize], cell: i64, index: &[i64], leave_out: Option<usize>) -> BTreeSet<usize> {
+    fn cluster(
+        &self,
+        start: &[usize],
+        cell: i64,
+        index: &[i64],
+        leave_out: Option<usize>,
+    ) -> BTreeSet<usize> {
         let mut found = BTreeSet::new();
         let mut stack: Vec<usize> = start.to_vec();
         while let Some(d) = stack.pop() {
@@ -792,8 +911,11 @@ impl Model {
     /// by: its cluster there with it, over the clusters its tied neighbours
     /// there form without it.
     fn date_tie_factor(&self, row: usize, cell: i64, index: &[i64]) -> f64 {
-        let neighbours: Vec<usize> =
-            self.date_tied_with[row].iter().copied().filter(|&o| index[o] == cell).collect();
+        let neighbours: Vec<usize> = self.date_tied_with[row]
+            .iter()
+            .copied()
+            .filter(|&o| index[o] == cell)
+            .collect();
         if neighbours.is_empty() {
             return 1.0;
         }
@@ -882,12 +1004,24 @@ impl Model {
         let below: HashMap<usize, HashSet<usize>> = self
             .boundary_rows
             .iter()
-            .map(|&b| (b, reachable[b].iter().copied().filter(|&r| self.is_boundary(r)).collect()))
+            .map(|&b| {
+                (
+                    b,
+                    reachable[b]
+                        .iter()
+                        .copied()
+                        .filter(|&r| self.is_boundary(r))
+                        .collect(),
+                )
+            })
             .collect();
         let mut pairs = BTreeSet::new();
         for &older in &self.boundary_rows {
             for &younger in &below[&older] {
-                if !below[&older].iter().any(|between| below[between].contains(&younger)) {
+                if !below[&older]
+                    .iter()
+                    .any(|between| below[between].contains(&younger))
+                {
                     pairs.insert((younger, older));
                 }
             }
@@ -898,7 +1032,11 @@ impl Model {
     /// For every parameter, everything the ordering forces to be YOUNGER
     /// than it, transitively.
     fn younger_reachable(&self) -> Vec<HashSet<usize>> {
-        fn walk(model: &Model, row: usize, reachable: &mut Vec<Option<HashSet<usize>>>) -> HashSet<usize> {
+        fn walk(
+            model: &Model,
+            row: usize,
+            reachable: &mut Vec<Option<HashSet<usize>>>,
+        ) -> HashSet<usize> {
             if let Some(found) = &reachable[row] {
                 return found.clone();
             }
@@ -915,7 +1053,10 @@ impl Model {
         for row in 0..self.params.len() {
             walk(self, row, &mut reachable);
         }
-        reachable.into_iter().map(Option::unwrap_or_default).collect()
+        reachable
+            .into_iter()
+            .map(Option::unwrap_or_default)
+            .collect()
     }
 
     /// The UniformSpanPrior corrections, as (oldest boundary, youngest
@@ -929,9 +1070,19 @@ impl Model {
         let younger_boundaries: HashMap<usize, HashSet<usize>> = self
             .boundary_rows
             .iter()
-            .map(|&b| (b, reachable[b].iter().copied().filter(|&r| self.is_boundary(r)).collect()))
+            .map(|&b| {
+                (
+                    b,
+                    reachable[b]
+                        .iter()
+                        .copied()
+                        .filter(|&r| self.is_boundary(r))
+                        .collect(),
+                )
+            })
             .collect();
-        let mut parent: HashMap<usize, usize> = self.boundary_rows.iter().map(|&b| (b, b)).collect();
+        let mut parent: HashMap<usize, usize> =
+            self.boundary_rows.iter().map(|&b| (b, b)).collect();
         fn find(parent: &mut HashMap<usize, usize>, mut b: usize) -> usize {
             while parent[&b] != b {
                 let grand = parent[&parent[&b]];
@@ -966,12 +1117,18 @@ impl Model {
             let oldest: Vec<usize> = members
                 .iter()
                 .copied()
-                .filter(|b| rest.iter().all(|o| o == b || younger_boundaries[b].contains(o)))
+                .filter(|b| {
+                    rest.iter()
+                        .all(|o| o == b || younger_boundaries[b].contains(o))
+                })
                 .collect();
             let youngest: Vec<usize> = members
                 .iter()
                 .copied()
-                .filter(|b| rest.iter().all(|o| o == b || younger_boundaries[o].contains(b)))
+                .filter(|b| {
+                    rest.iter()
+                        .all(|o| o == b || younger_boundaries[o].contains(b))
+                })
                 .collect();
             if oldest.len() == 1 && youngest.len() == 1 && oldest[0] != youngest[0] {
                 priors.push((oldest[0], youngest[0], exponent));
@@ -1035,7 +1192,9 @@ impl Model {
         let mut by_colour: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
         for d in order {
             let taken: HashSet<usize> = conflicts[d].iter().filter_map(|&n| colour[n]).collect();
-            let c = (0..=self.num_drawable).find(|c| !taken.contains(c)).unwrap();
+            let c = (0..=self.num_drawable)
+                .find(|c| !taken.contains(c))
+                .unwrap();
             colour[d] = Some(c);
             by_colour.entry(c).or_default().push(d);
         }
@@ -1077,7 +1236,11 @@ impl Model {
     pub fn draw_date(&self, row: usize, state: &State, u: f64, beta: f64) -> i64 {
         let (lo, hi) = self.allowed(row, state);
         if hi <= lo {
-            return if hi >= 0 { lo.max(hi.min(state.index[row])) } else { state.index[row] };
+            return if hi >= 0 {
+                lo.max(hi.min(state.index[row]))
+            } else {
+                state.index[row]
+            };
         }
         if self.deposition_of.contains_key(&row) {
             return self.draw_deposition_level(row, state, u, lo, hi, beta);
@@ -1121,26 +1284,46 @@ impl Model {
     /// Exact draw from a deposition level's full conditional: its likelihood
     /// times the deposition prior's neighbour terms, built over [lo, hi]. No
     /// endpoint weighting: a level is charged no span term.
-    fn draw_deposition_level(&self, row: usize, state: &State, u: f64, lo: i64, hi: i64, beta: f64) -> i64 {
+    fn draw_deposition_level(
+        &self,
+        row: usize,
+        state: &State,
+        u: f64,
+        lo: i64,
+        hi: i64,
+        beta: f64,
+    ) -> i64 {
         let candidates: Vec<usize> = (lo as usize..=hi as usize).collect();
         let density = match self.scale_of(row, state) {
             None => &self.likelihood[row],
             Some(n) => &self.likelihood_at[&row][n],
         };
-        let mut log_dens: Vec<f64> =
-            candidates.iter().map(|&c| beta * density[c].max(1e-300).ln()).collect();
+        let mut log_dens: Vec<f64> = candidates
+            .iter()
+            .map(|&c| beta * density[c].max(1e-300).ln())
+            .collect();
         if let Some(terms) = self.log_deposition_terms(row, state, &candidates) {
             for (l, t) in log_dens.iter_mut().zip(terms) {
                 *l += t;
             }
         }
-        let finite_max = log_dens.iter().copied().filter(|v| v.is_finite()).fold(f64::NEG_INFINITY, f64::max);
+        let finite_max = log_dens
+            .iter()
+            .copied()
+            .filter(|v| v.is_finite())
+            .fold(f64::NEG_INFINITY, f64::max);
         if finite_max == f64::NEG_INFINITY {
             return state.index[row];
         }
         let weights: Vec<f64> = log_dens
             .iter()
-            .map(|&v| if v.is_finite() { (v - finite_max).exp() } else { 0.0 })
+            .map(|&v| {
+                if v.is_finite() {
+                    (v - finite_max).exp()
+                } else {
+                    0.0
+                }
+            })
             .collect();
         let total = sum(&weights);
         if total <= 0.0 {
@@ -1161,14 +1344,23 @@ impl Model {
         }
         let width = (hi - lo + 1) as usize;
         let mut log_dens = vec![0.0; width];
-        let gather = |table: &[f64], cells: i64| table[cells.clamp(0, table.len() as i64 - 1) as usize];
+        let gather =
+            |table: &[f64], cells: i64| table[cells.clamp(0, table.len() as i64 - 1) as usize];
         for &(gi, is_older) in self.boundary_groups.get(&row).into_iter().flatten() {
             let (older, younger, dates) = &self.group_dates[gi];
             let k = dates.len() as f64;
             for (offset, l) in log_dens.iter_mut().enumerate() {
                 let candidate = lo + offset as i64;
-                let cells = if is_older { candidate - state.index[*younger] } else { state.index[*older] - candidate };
-                *l += if cells >= 0 { -k * gather(&self.log_span_of_cells, cells) } else { f64::NEG_INFINITY };
+                let cells = if is_older {
+                    candidate - state.index[*younger]
+                } else {
+                    state.index[*older] - candidate
+                };
+                *l += if cells >= 0 {
+                    -k * gather(&self.log_span_of_cells, cells)
+                } else {
+                    f64::NEG_INFINITY
+                };
             }
         }
         for &other in &self.tied_with[row] {
@@ -1181,8 +1373,11 @@ impl Model {
             let (oldest, youngest, _) = self.span_priors[pi];
             for (offset, l) in log_dens.iter_mut().enumerate() {
                 let candidate = lo + offset as i64;
-                let cells =
-                    if is_oldest { candidate - state.index[youngest] } else { state.index[oldest] - candidate };
+                let cells = if is_oldest {
+                    candidate - state.index[youngest]
+                } else {
+                    state.index[oldest] - candidate
+                };
                 *l += if cells >= 0 && cells < self.m as i64 {
                     gather(&self.span_prior_rows[pi], cells)
                 } else {
@@ -1190,13 +1385,23 @@ impl Model {
                 };
             }
         }
-        let finite_max = log_dens.iter().copied().filter(|v| v.is_finite()).fold(f64::NEG_INFINITY, f64::max);
+        let finite_max = log_dens
+            .iter()
+            .copied()
+            .filter(|v| v.is_finite())
+            .fold(f64::NEG_INFINITY, f64::max);
         if finite_max == f64::NEG_INFINITY {
             return state.index[row];
         }
         let dens: Vec<f64> = log_dens
             .iter()
-            .map(|&v| if v.is_finite() { (v - finite_max).exp() } else { 0.0 })
+            .map(|&v| {
+                if v.is_finite() {
+                    (v - finite_max).exp()
+                } else {
+                    0.0
+                }
+            })
             .collect();
         let total = sum(&dens);
         if total <= 0.0 {
@@ -1215,18 +1420,34 @@ impl Model {
                 return f64::NEG_INFINITY;
             }
         }
-        if self.edge_younger.iter().zip(&self.edge_older).any(|(&y, &o)| index[y] > index[o]) {
+        if self
+            .edge_younger
+            .iter()
+            .zip(&self.edge_older)
+            .any(|(&y, &o)| index[y] > index[o])
+        {
             return f64::NEG_INFINITY;
         }
         let mut total = beta * self.log_likelihood_sum(state);
-        let halves = self.tie_younger.iter().zip(&self.tie_older).filter(|&(&y, &o)| index[y] == index[o]).count();
+        let halves = self
+            .tie_younger
+            .iter()
+            .zip(&self.tie_older)
+            .filter(|&(&y, &o)| index[y] == index[o])
+            .count();
         total -= halves as f64 * std::f64::consts::LN_2;
-        if self.date_tie_pairs.iter().any(|&(y, o)| index[y] == index[o]) {
+        if self
+            .date_tie_pairs
+            .iter()
+            .any(|&(y, o)| index[y] == index[o])
+        {
             total += self.log_cluster_weights(index);
         }
         for (d, deposition) in self.depositions.iter().enumerate() {
-            let contribution =
-                log_deposition_density(&self.deposition_gaps(deposition, state), &self.alpha_of(d, state));
+            let contribution = log_deposition_density(
+                &self.deposition_gaps(deposition, state),
+                &self.alpha_of(d, state),
+            );
             if !contribution.is_finite() {
                 return f64::NEG_INFINITY;
             }
@@ -1272,7 +1493,12 @@ impl Model {
         let n = self.params.len();
         // Longest chain of "must be older than" above each parameter.
         let mut depth: Vec<Option<usize>> = vec![None; n];
-        fn compute_depth(model: &Model, row: usize, seen: &mut Vec<usize>, depth: &mut Vec<Option<usize>>) -> Result<usize, Error> {
+        fn compute_depth(
+            model: &Model,
+            row: usize,
+            seen: &mut Vec<usize>,
+            depth: &mut Vec<Option<usize>>,
+        ) -> Result<usize, Error> {
             if let Some(d) = depth[row] {
                 return Ok(d);
             }
@@ -1295,13 +1521,15 @@ impl Model {
         let wishes = match wishes {
             Some(w) => w,
             None => match lobe {
-                Some((rank, ranks, strategy, seed)) => self.start_lobes(*rank, *ranks, strategy, *seed)?,
+                Some((rank, ranks, strategy, seed)) => {
+                    self.start_lobes(*rank, *ranks, strategy, *seed)?
+                }
                 None => HashMap::new(),
             },
         };
         let mut preferred: Vec<i64> = vec![0; n];
-        for d in 0..self.num_dates {
-            preferred[d] = if let Some(wished) = wishes.get(&d) {
+        for (d, slot) in preferred.iter_mut().enumerate().take(self.num_dates) {
+            *slot = if let Some(wished) = wishes.get(&d) {
                 let ((peak, _, _, _), target) = wished[0];
                 target.unwrap_or(peak as i64)
             } else if let Some(q) = quantile {
@@ -1321,7 +1549,11 @@ impl Model {
                 .filter(|r| placed.contains(r))
                 .map(|&r| preferred[r] as f64)
                 .collect();
-            preferred[level] = if neighbours.is_empty() { (self.m / 2) as i64 } else { mean(&neighbours) as i64 };
+            preferred[level] = if neighbours.is_empty() {
+                (self.m / 2) as i64
+            } else {
+                mean(&neighbours) as i64
+            };
             placed.insert(level);
         }
         for &b in &self.boundary_rows {
@@ -1331,7 +1563,11 @@ impl Model {
                 .filter(|(o, y, _)| *o == b || *y == b)
                 .flat_map(|(_, _, dates)| dates.iter().map(|&d| preferred[d] as f64))
                 .collect();
-            preferred[b] = if neighbours.is_empty() { (self.m / 2) as i64 } else { mean(&neighbours) as i64 };
+            preferred[b] = if neighbours.is_empty() {
+                (self.m / 2) as i64
+            } else {
+                mean(&neighbours) as i64
+            };
             if !wishes.is_empty() {
                 // Just outside every date it bounds, where the posterior puts
                 // it anyway, so the walk does not drag the dates into
@@ -1374,10 +1610,17 @@ impl Model {
 
         // What each parameter must clear to leave the wished lobes of the
         // dates younger than it open.
-        let lobe_floor: HashMap<usize, i64> =
-            wishes.iter().map(|(&d, w)| (d, self.lobe_floor(d, &w[0].0))).collect();
+        let lobe_floor: HashMap<usize, i64> = wishes
+            .iter()
+            .map(|(&d, w)| (d, self.lobe_floor(d, &w[0].0)))
+            .collect();
         let mut clears: Vec<Option<i64>> = vec![None; n];
-        fn compute_clears(model: &Model, row: usize, lobe_floor: &HashMap<usize, i64>, clears: &mut Vec<Option<i64>>) -> i64 {
+        fn compute_clears(
+            model: &Model,
+            row: usize,
+            lobe_floor: &HashMap<usize, i64>,
+            clears: &mut Vec<Option<i64>>,
+        ) -> i64 {
             if let Some(c) = clears[row] {
                 return c;
             }
@@ -1414,16 +1657,24 @@ impl Model {
                     self.params[row]
                 )));
             }
-            let start = wishes.get(&row).and_then(|w| self.start_in_lobe(row, w, lo, hi));
+            let start = wishes
+                .get(&row)
+                .and_then(|w| self.start_in_lobe(row, w, lo, hi));
             index[row] = start.unwrap_or_else(|| preferred[row].clamp(lo, hi));
             set[row] = true;
         }
         // Mid-prior: its conditional is drawn exactly on the first sweep.
         let scale = self.scale_grid.iter().map(|g| g.len() / 2).collect();
-        let rate = self.depositions.iter().map(|d| d.k_nodes.len() / 2).collect();
+        let rate = self
+            .depositions
+            .iter()
+            .map(|d| d.k_nodes.len() / 2)
+            .collect();
         let state = State { index, scale, rate };
         if !self.log_posterior(&state, 1.0).is_finite() {
-            return Err(Error::Model("could not find a feasible starting state for this model".into()));
+            return Err(Error::Model(
+                "could not find a feasible starting state for this model".into(),
+            ));
         }
         Ok(state)
     }
@@ -1433,13 +1684,21 @@ impl Model {
     fn lobe_floor(&self, row: usize, lobe: &Lobe) -> i64 {
         let &(peak, _, first, last) = lobe;
         let inlier = self.inlier_row(row);
-        let held = (first..last).find(|&c| inlier[c] >= LOBE_HELD_FRACTION * inlier[peak]).unwrap();
+        let held = (first..last)
+            .find(|&c| inlier[c] >= LOBE_HELD_FRACTION * inlier[peak])
+            .unwrap();
         held as i64
     }
 
     /// The cell in [lo, hi] a date starts at: in the first wished lobe the
     /// window still holds, or None.
-    fn start_in_lobe(&self, row: usize, wished: &[(Lobe, Option<i64>)], lo: i64, hi: i64) -> Option<i64> {
+    fn start_in_lobe(
+        &self,
+        row: usize,
+        wished: &[(Lobe, Option<i64>)],
+        lo: i64,
+        hi: i64,
+    ) -> Option<i64> {
         let inlier = self.inlier_row(row);
         for &((peak, _, first, last), target) in wished {
             let a = lo.max(first as i64);
@@ -1478,12 +1737,20 @@ impl Model {
         for deposition in &self.depositions {
             let mut members: BTreeSet<usize> = deposition.ids.iter().copied().collect();
             for group in &self.plan.span_groups {
-                let contained: HashSet<usize> =
-                    group.contained_ids.iter().filter_map(|c| self.param_row.get(c).copied()).collect();
+                let contained: HashSet<usize> = group
+                    .contained_ids
+                    .iter()
+                    .filter_map(|c| self.param_row.get(c).copied())
+                    .collect();
                 if deposition.ids.iter().any(|r| contained.contains(r)) {
                     members.insert(self.param_row[&group.older_boundary_id]);
                     members.insert(self.param_row[&group.younger_boundary_id]);
-                    members.extend(group.date_ids.iter().filter_map(|d| self.param_row.get(d).copied()));
+                    members.extend(
+                        group
+                            .date_ids
+                            .iter()
+                            .filter_map(|d| self.param_row.get(d).copied()),
+                    );
                 }
             }
             sets.push(by_id(&members));
@@ -1503,7 +1770,7 @@ impl Model {
                 }
             }
             sets.push(by_id(&members));
-            sets.extend(self.with_enclosure(&members).iter().map(|m| by_id(m)));
+            sets.extend(self.with_enclosure(&members).iter().map(&by_id));
             if dates.len() > 1 {
                 for &d in dates {
                     if !self.outlier_parts.contains_key(&self.params[d]) {
@@ -1520,7 +1787,11 @@ impl Model {
     /// `members` with the nearest boundary penning it in from outside, once
     /// per side.
     fn with_enclosure(&self, members: &BTreeSet<usize>) -> Vec<BTreeSet<usize>> {
-        let own: Vec<usize> = members.iter().copied().filter(|&m| self.is_boundary(m)).collect();
+        let own: Vec<usize> = members
+            .iter()
+            .copied()
+            .filter(|&m| self.is_boundary(m))
+            .collect();
         let mut variants = Vec::new();
         for (outward, inward) in [(&self.below, &self.above), (&self.above, &self.below)] {
             let outside: BTreeSet<usize> = own
@@ -1528,8 +1799,11 @@ impl Model {
                 .flat_map(|&m| outward[m].iter().copied())
                 .filter(|&b| self.is_boundary(b) && !members.contains(&b))
                 .collect();
-            let nearest: BTreeSet<usize> =
-                outside.iter().copied().filter(|&b| !inward[b].iter().any(|o| outside.contains(o))).collect();
+            let nearest: BTreeSet<usize> = outside
+                .iter()
+                .copied()
+                .filter(|&b| !inward[b].iter().any(|o| outside.contains(o)))
+                .collect();
             if !nearest.is_empty() {
                 variants.push(members.union(&nearest).copied().collect());
             }
@@ -1576,7 +1850,9 @@ impl Model {
         common.sort_by_key(|g| (std::cmp::Reverse(counts[g]), *g));
         common.truncate(MAX_PEAK_GAPS);
         common.sort_unstable();
-        self.peak_gaps_cache.borrow_mut().insert(rows.to_vec(), common.clone());
+        self.peak_gaps_cache
+            .borrow_mut()
+            .insert(rows.to_vec(), common.clone());
         common
     }
 
@@ -1624,16 +1900,33 @@ impl Model {
     /// For each date with several lobes, the lobes chain `rank` of the
     /// `ranks` that do not start at the modes would like to start in, first
     /// choice first. See the Python docstring for the strategies.
-    pub fn start_lobes(&self, rank: usize, ranks: usize, strategy: &str, seed: u64) -> Result<Wishes, Error> {
+    pub fn start_lobes(
+        &self,
+        rank: usize,
+        ranks: usize,
+        strategy: &str,
+        seed: u64,
+    ) -> Result<Wishes, Error> {
         if !START_STRATEGIES.contains(&strategy) || strategy == "quantile" {
-            return Err(Error::Model(format!("no lobe start for strategy '{strategy}'")));
+            return Err(Error::Model(format!(
+                "no lobe start for strategy '{strategy}'"
+            )));
         }
-        let mut groups: Vec<Vec<usize>> = self.group_dates.iter().map(|(_, _, d)| d.clone()).collect();
+        let mut groups: Vec<Vec<usize>> =
+            self.group_dates.iter().map(|(_, _, d)| d.clone()).collect();
         let grouped: HashSet<usize> = groups.iter().flatten().copied().collect();
-        groups.extend((0..self.num_dates).filter(|d| !grouped.contains(d)).map(|d| vec![d]));
+        groups.extend(
+            (0..self.num_dates)
+                .filter(|d| !grouped.contains(d))
+                .map(|d| vec![d]),
+        );
         let mut wishes = Wishes::new();
         for (index, dates) in groups.iter().enumerate() {
-            let members: Vec<usize> = dates.iter().copied().filter(|&d| !self.lobes(d).is_empty()).collect();
+            let members: Vec<usize> = dates
+                .iter()
+                .copied()
+                .filter(|&d| !self.lobes(d).is_empty())
+                .collect();
             if members.is_empty() {
                 continue;
             }
@@ -1644,8 +1937,16 @@ impl Model {
                 f = (((rank + shift) % ranks) as f64 + 0.5) / ranks as f64;
             }
             let when = if strategy == "calendar" {
-                let peaks: Vec<f64> = members.iter().flat_map(|&d| self.lobes(d)).map(|l| l.0 as f64).collect();
-                let (lo, hi) = peaks.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), &p| (a.min(p), b.max(p)));
+                let peaks: Vec<f64> = members
+                    .iter()
+                    .flat_map(|&d| self.lobes(d))
+                    .map(|l| l.0 as f64)
+                    .collect();
+                let (lo, hi) = peaks
+                    .iter()
+                    .fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), &p| {
+                        (a.min(p), b.max(p))
+                    });
                 lo + f * (hi - lo)
             } else {
                 0.0
@@ -1664,14 +1965,19 @@ impl Model {
                 } else {
                     order.sort_by_key(|&i| (i.abs_diff(first), i));
                 }
-                let mut targets: HashMap<usize, Option<i64>> = order.iter().map(|&i| (i, None)).collect();
+                let mut targets: HashMap<usize, Option<i64>> =
+                    order.iter().map(|&i| (i, None)).collect();
                 if strategy == "equalised" {
-                    let inside = (lobes.len() as f64 * f - first as f64).max(EQUALISED_EDGE).min(1.0 - EQUALISED_EDGE);
+                    let inside = (lobes.len() as f64 * f - first as f64)
+                        .clamp(EQUALISED_EDGE, 1.0 - EQUALISED_EDGE);
                     let inlier = self.inlier_row(d);
                     for (i, &(_, _, lo, hi)) in lobes.iter().enumerate() {
                         let cdf = cumsum(&inlier[lo..hi]);
                         let last = cdf[cdf.len() - 1];
-                        targets.insert(i, Some((lo + searchsorted_left(&cdf, inside * last)) as i64));
+                        targets.insert(
+                            i,
+                            Some((lo + searchsorted_left(&cdf, inside * last)) as i64),
+                        );
                     }
                 }
                 wishes.insert(d, order.iter().map(|&i| (lobes[i], targets[&i])).collect());
@@ -1698,7 +2004,14 @@ impl Model {
             }
         }
         let mut own = vec![(lobe, None)];
-        own.extend(wishes.get(&row).into_iter().flatten().filter(|w| w.0.2 != first).copied());
+        own.extend(
+            wishes
+                .get(&row)
+                .into_iter()
+                .flatten()
+                .filter(|w| w.0.2 != first)
+                .copied(),
+        );
         wishes.insert(row, own);
         let state = self.initial_state(None, None, Some(wishes)).ok()?;
         let at = state.index[row];
@@ -1720,14 +2033,22 @@ impl Model {
     ) -> (State, f64, bool, bool) {
         let current_lp = current_lp.unwrap_or_else(|| self.log_posterior(&state, beta));
         let wide = rng.random() < WIDE_MOVE_FRACTION;
-        let gaps = if wide { self.peak_gaps(rows) } else { Vec::new() };
+        let gaps = if wide {
+            self.peak_gaps(rows)
+        } else {
+            Vec::new()
+        };
         let steps = if !gaps.is_empty() && rng.random() < PEAK_JUMP_FRACTION {
             let jitter = round_even(PEAK_JUMP_JITTER_YEARS / self.dt);
             let gap = gaps[rng.integers(0, gaps.len() as i64) as usize];
             let sign = if rng.random() < 0.5 { 1 } else { -1 };
             gap * sign + rng.integers(-jitter, jitter + 1)
         } else {
-            let scale = if wide { WIDE_MOVE_YEARS / self.dt } else { scale };
+            let scale = if wide {
+                WIDE_MOVE_YEARS / self.dt
+            } else {
+                scale
+            };
             round_even(rng.normal(0.0, scale.max(1e-9)))
         };
         if steps == 0 {
@@ -1749,12 +2070,5 @@ impl Model {
             return (proposal, proposed_lp, true, wide);
         }
         (state, current_lp, false, wide)
-    }
-
-    /// Python's `**` on two floats, here for the scale weights: kept so a
-    /// reader can see where powers come from.
-    #[allow(dead_code)]
-    fn pow(x: f64, y: f64) -> f64 {
-        py_pow(x, y)
     }
 }

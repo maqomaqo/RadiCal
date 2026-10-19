@@ -100,7 +100,7 @@ fn rng() {
             );
             let tail = draws
                 .iter()
-                .filter(|d| d.abs() > 3.654_152_885_361_008_8)
+                .filter(|d| d.abs() > 3.654_152_885_361_009)
                 .count() as u64;
             assert_eq!(tail, want["tail_draws"].as_u64().unwrap(), "{name}");
         } else {
