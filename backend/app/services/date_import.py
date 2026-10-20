@@ -528,6 +528,10 @@ def parse_csv(text: str, owner_id: str, filename: Optional[str] = None) -> Impor
         result.errors.append('The file is empty.')
         return result
 
+    # Old Mac line endings (a lone CR) are a convention, not a fault: read
+    # them as line breaks. CRLF is left alone; the csv reader handles it.
+    text = re.sub(r'\r(?!\n)', '\n', text)
+
     delimiter = _sniff_delimiter(text)
     reader = csv.DictReader(io.StringIO(text), delimiter=delimiter)
     if not reader.fieldnames:
