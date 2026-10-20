@@ -18,6 +18,8 @@ tested is that there is NO route to another account's snapshot -- not listing,
 not reading, not deleting -- because each of those is a separate way in and
 each got the check separately. Mirrors test_curve_privacy.py.
 """
+import csv
+import io
 import os
 
 import pytest
@@ -340,6 +342,19 @@ class TestTheBundledSnapshot:
         with pytest.raises(ingest.IngestError) as raised:
             ingest.rows_from_csv('lat,lon\n54.5,-5.6\n')
         assert 'expected columns' in str(raised.value)
+
+    @pytest.mark.parametrize('year', ['inf', '-inf'])
+    def test_an_infinite_collection_year_is_refused(self, year):
+        rows, _ = _fixture_rows()
+        header, values = csv.reader(io.StringIO(ingest.rows_to_csv(rows[:1])))
+        values[ingest.CSV_COLUMNS.index('collection_year')] = year
+        out = io.StringIO()
+        csv.writer(out).writerows([header, values])
+        with pytest.raises(ingest.IngestError) as raised:
+            ingest.rows_from_csv(out.getvalue())
+        assert str(raised.value) == (
+            'Row 2 of the bundled snapshot could not be read: '
+            'cannot convert float infinity to integer')
 
     def test_a_file_with_a_header_and_no_rows_is_refused(self):
         text = ingest.rows_to_csv([]).strip()

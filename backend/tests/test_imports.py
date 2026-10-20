@@ -587,6 +587,24 @@ class TestTranslationChoices:
         assert result.resolution is None
         assert any('Resolution=0.5 was not carried over' in n for n in result.notes)
 
+    @pytest.mark.parametrize('value', ['"inf"', '"-inf"', '"nan"'])
+    def test_a_resolution_that_is_not_a_number_is_noted(self, value):
+        result = parse_oxcal(oxcal_model(
+            f'Options(){{ Resolution={value}; }}; '
+            'Sequence(){ Boundary(); Phase("A"){ R_Date("a",3000,25); }; Boundary(); };'
+        ), 't.oxcal')
+
+        assert result.ok, result.errors
+        assert result.resolution is None
+        assert any('was not carried over' in n and 'whole number' in n for n in result.notes)
+
+    @pytest.mark.parametrize('text', ['R_Date(', 'Options(){ Resolution='])
+    def test_a_file_cut_off_mid_value_is_a_syntax_error(self, text):
+        result = parse_oxcal(text, 't.oxcal')
+
+        assert not result.ok
+        assert result.errors == ['The file ends where a value was expected.']
+
     def test_a_file_without_options_sets_no_resolution(self):
         result = parse_oxcal(oxcal_model(
             'Sequence(){ Boundary(); Phase("A"){ R_Date("a",3000,25); }; Boundary(); };'
@@ -868,6 +886,16 @@ class TestCsvColumns:
 
         assert result.ok, result.errors
         assert len(result.dates) == 2
+
+    @pytest.mark.parametrize('newline', ['\r\n', '\r'])
+    def test_windows_and_old_mac_line_endings(self, newline):
+        """A lone CR is how an old Mac spreadsheet ends its lines; it is read
+        as a line break, not handed to the csv reader to raise on."""
+        text = newline.join(['name,age,error', 'OxA-1,3000,25', 'OxA-2,3100,30', ''])
+        result = parse_csv(text)
+
+        assert result.ok, result.errors
+        assert [d['age_bp'] for d in result.dates] == [3000, 3100]
 
 
 class TestCsvValues:
