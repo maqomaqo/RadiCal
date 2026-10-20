@@ -1,0 +1,22 @@
+[package]
+name = "radical-io"
+description = "Reading and writing RadiCal's file formats -- date tables, curve files, OxCal models, project exports -- ported from backend/app/services."
+publish = false
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+radical-core = { path = "../radical-core" }
+regex = "1"
+serde_json.workspace = true
+# The reservoir snapshot content hash, as hashlib.sha256 computes it.
+sha2.workspace = true
+
+[dev-dependencies]
+radical-corpus = { path = "../radical-corpus" }
+regex = "1"
+
+[lints]
+workspace = true

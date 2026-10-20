@@ -1,0 +1,2302 @@
+[
+ {
+  "kind": "derive_sites",
+  "root": {
+   "id": "root",
+   "element_type": "sequence",
+   "name": "root",
+   "children": [
+    {
+     "id": "b0",
+     "element_type": "boundary",
+     "name": "b0"
+    },
+    {
+     "id": "p0",
+     "element_type": "phase",
+     "name": "Aarhus",
+     "children": []
+    },
+    {
+     "id": "b1",
+     "element_type": "boundary",
+     "name": "b1"
+    },
+    {
+     "id": "p1",
+     "element_type": "phase",
+     "name": "Bergen",
+     "children": []
+    },
+    {
+     "id": "b2",
+     "element_type": "boundary",
+     "name": "b2"
+    }
+   ]
+  },
+  "measurements": [
+   {
+    "id": "d0",
+    "element_id": "p0",
+    "sample_name": "d0",
+    "latitude": 56.15,
+    "longitude": 10.2
+   },
+   {
+    "id": "d1",
+    "element_id": "p1",
+    "sample_name": "d1",
+    "latitude": 60.39,
+    "longitude": 5.32
+   }
+  ]
+ },
+ {
+  "kind": "derive_sites",
+  "root": {
+   "id": "root",
+   "element_type": "sequence",
+   "name": "root",
+   "children": [
+    {
+     "id": "r0",
+     "element_type": "boundary",
+     "name": "r0"
+    },
+    {
+     "id": "siteA",
+     "element_type": "sequence",
+     "name": "Skara Brae",
+     "children": [
+      {
+       "id": "a0",
+       "element_type": "boundary",
+       "name": "a0"
+      },
+      {
+       "id": "a1",
+       "element_type": "phase",
+       "name": "a1",
+       "children": []
+      },
+      {
+       "id": "a1b",
+       "element_type": "boundary",
+       "name": "a1b"
+      },
+      {
+       "id": "a2",
+       "element_type": "phase",
+       "name": "a2",
+       "children": []
+      },
+      {
+       "id": "a2b",
+       "element_type": "boundary",
+       "name": "a2b"
+      }
+     ]
+    },
+    {
+     "id": "r1",
+     "element_type": "boundary",
+     "name": "r1"
+    }
+   ]
+  },
+  "measurements": [
+   {
+    "id": "d1",
+    "element_id": "a1",
+    "sample_name": "d1",
+    "latitude": 59.05,
+    "longitude": -3.34
+   },
+   {
+    "id": "d2",
+    "element_id": "a2",
+    "sample_name": "d2",
+    "latitude": 59.05,
+    "longitude": -3.34
+   }
+  ]
+ },
+ {
+  "kind": "derive_sites",
+  "root": {
+   "id": "root",
+   "element_type": "sequence",
+   "name": "root",
+   "children": [
+    {
+     "id": "r0",
+     "element_type": "boundary",
+     "name": "r0"
+    },
+    {
+     "id": "siteA",
+     "element_type": "sequence",
+     "name": "Aarhus",
+     "children": [
+      {
+       "id": "a0",
+       "element_type": "boundary",
+       "name": "a0"
+      },
+      {
+       "id": "a1",
+       "element_type": "phase",
+       "name": "a1",
+       "children": []
+      },
+      {
+       "id": "a2",
+       "element_type": "boundary",
+       "name": "a2"
+      }
+     ]
+    },
+    {
+     "id": "r1",
+     "element_type": "boundary",
+     "name": "r1"
+    }
+   ]
+  },
+  "measurements": [
+   {
+    "id": "d1",
+    "element_id": "a1",
+    "sample_name": "d1",
+    "latitude": 56.15,
+    "longitude": 10.2
+   }
+  ]
+ },
+ {
+  "kind": "derive_sites",
+  "root": {
+   "id": "root",
+   "element_type": "sequence",
+   "name": "root",
+   "children": [
+    {
+     "id": "r0",
+     "element_type": "boundary",
+     "name": "r0"
+    },
+    {
+     "id": "siteA",
+     "element_type": "sequence",
+     "name": "Aarhus",
+     "children": [
+      {
+       "id": "a0",
+       "element_type": "boundary",
+       "name": "a0"
+      },
+      {
+       "id": "a1",
+       "element_type": "phase",
+       "name": "a1",
+       "children": []
+      },
+      {
+       "id": "a2",
+       "element_type": "boundary",
+       "name": "a2"
+      }
+     ]
+    },
+    {
+     "id": "rm",
+     "element_type": "boundary",
+     "name": "rm"
+    },
+    {
+     "id": "siteB",
+     "element_type": "sequence",
+     "name": "Bergen",
+     "children": [
+      {
+       "id": "b0",
+       "element_type": "boundary",
+       "name": "b0"
+      },
+      {
+       "id": "b1",
+       "element_type": "phase",
+       "name": "b1",
+       "children": []
+      },
+      {
+       "id": "b2",
+       "element_type": "boundary",
+       "name": "b2"
+      }
+     ]
+    },
+    {
+     "id": "r1",
+     "element_type": "boundary",
+     "name": "r1"
+    }
+   ]
+  },
+  "measurements": [
+   {
+    "id": "d1",
+    "element_id": "a1",
+    "sample_name": "d1",
+    "latitude": 56.15,
+    "longitude": 10.2
+   },
+   {
+    "id": "d2",
+    "element_id": "b1",
+    "sample_name": "d2",
+    "latitude": 60.39,
+    "longitude": 5.32
+   }
+  ]
+ },
+ {
+  "kind": "derive_sites",
+  "root": {
+   "id": "root",
+   "element_type": "sequence",
+   "name": "root",
+   "children": [
+    {
+     "id": "b0",
+     "element_type": "boundary",
+     "name": "b0"
+    },
+    {
+     "id": "p0",
+     "element_type": "phase",
+     "name": "Mixed",
+     "children": []
+    },
+    {
+     "id": "b1",
+     "element_type": "boundary",
+     "name": "b1"
+    }
+   ]
+  },
+  "measurements": [
+   {
+    "id": "d1",
+    "element_id": "p0",
+    "sample_name": "d1",
+    "latitude": 56.15,
+    "longitude": 10.2
+   },
+   {
+    "id": "d2",
+    "element_id": "p0",
+    "sample_name": "d2",
+    "latitude": 56.4,
+    "longitude": 10.2
+   }
+  ]
+ },
+ {
+  "kind": "derive_sites",
+  "root": {
+   "id": "root",
+   "element_type": "sequence",
+   "name": "root",
+   "children": [
+    {
+     "id": "b0",
+     "element_type": "boundary",
+     "name": "b0"
+    },
+    {
+     "id": "p0",
+     "element_type": "phase",
+     "name": "Close enough",
+     "children": []
+    },
+    {
+     "id": "b1",
+     "element_type": "boundary",
+     "name": "b1"
+    }
+   ]
+  },
+  "measurements": [
+   {
+    "id": "d1",
+    "element_id": "p0",
+    "sample_name": "d1",
+    "latitude": 56.15,
+    "longitude": 10.2
+   },
+   {
+    "id": "d2",
+    "element_id": "p0",
+    "sample_name": "d2",
+    "latitude": 56.19,
+    "longitude": 10.2
+   }
+  ]
+ },
+ {
+  "kind": "derive_sites",
+  "root": {
+   "id": "root",
+   "element_type": "sequence",
+   "name": "root",
+   "children": [
+    {
+     "id": "b0",
+     "element_type": "boundary",
+     "name": "b0"
+    },
+    {
+     "id": "p0",
+     "element_type": "phase",
+     "name": "Anakena",
+     "children": []
+    },
+    {
+     "id": "b1",
+     "element_type": "boundary",
+     "name": "b1"
+    }
+   ]
+  },
+  "measurements": [
+   {
+    "id": "d1",
+    "element_id": "p0",
+    "sample_name": "d1",
+    "latitude": 56.15,
+    "longitude": 10.2
+   },
+   {
+    "id": "d2",
+    "element_id": "p0",
+    "sample_name": "d2",
+    "latitude": 56.19,
+    "longitude": 10.2
+   },
+   {
+    "id": "d3",
+    "element_id": "p0",
+    "sample_name": "d3",
+    "latitude": 56.11,
+    "longitude": 10.2
+   }
+  ]
+ },
+ {
+  "kind": "derive_sites",
+  "root": {
+   "id": "root",
+   "element_type": "sequence",
+   "name": "root",
+   "children": [
+    {
+     "id": "b0",
+     "element_type": "boundary",
+     "name": "b0"
+    },
+    {
+     "id": "p0",
+     "element_type": "phase",
+     "name": "Dateline",
+     "children": []
+    },
+    {
+     "id": "b1",
+     "element_type": "boundary",
+     "name": "b1"
+    }
+   ]
+  },
+  "measurements": [
+   {
+    "id": "d1",
+    "element_id": "p0",
+    "sample_name": "d1",
+    "latitude": -16.5,
+    "longitude": 179.98
+   },
+   {
+    "id": "d2",
+    "element_id": "p0",
+    "sample_name": "d2",
+    "latitude": -16.5,
+    "longitude": -179.98
+   }
+  ]
+ },
+ {
+  "kind": "derive_sites",
+  "root": {
+   "id": "root",
+   "element_type": "sequence",
+   "name": "root",
+   "children": [
+    {
+     "id": "b0",
+     "element_type": "boundary",
+     "name": "b0"
+    },
+    {
+     "id": "p0",
+     "element_type": "phase",
+     "name": "Aarhus",
+     "children": []
+    },
+    {
+     "id": "p9",
+     "element_type": "phase",
+     "name": "Unplaced",
+     "children": []
+    },
+    {
+     "id": "b1",
+     "element_type": "boundary",
+     "name": "b1"
+    }
+   ]
+  },
+  "measurements": [
+   {
+    "id": "d0",
+    "element_id": "p0",
+    "sample_name": "d0",
+    "latitude": 56.15,
+    "longitude": 10.2
+   },
+   {
+    "id": "d9",
+    "element_id": "p0",
+    "sample_name": "d9",
+    "latitude": null,
+    "longitude": null
+   }
+  ]
+ },
+ {
+  "kind": "derive_sites",
+  "root": {
+   "id": "root",
+   "element_type": "sequence",
+   "name": "root",
+   "children": [
+    {
+     "id": "b0",
+     "element_type": "boundary",
+     "name": "b0"
+    },
+    {
+     "id": "p0",
+     "element_type": "phase",
+     "name": "Taputapuatea",
+     "children": []
+    },
+    {
+     "id": "b1",
+     "element_type": "boundary",
+     "name": "b1"
+    }
+   ]
+  },
+  "measurements": [
+   {
+    "id": "d1",
+    "element_id": "p0",
+    "sample_name": "d1",
+    "latitude": -16.8,
+    "longitude": 179.99
+   },
+   {
+    "id": "d2",
+    "element_id": "p0",
+    "sample_name": "d2",
+    "latitude": -16.8,
+    "longitude": -179.99
+   }
+  ]
+ },
+ {
+  "kind": "derive_sites",
+  "root": null,
+  "measurements": []
+ },
+ {
+  "kind": "round_step",
+  "raw": 32.00125769098504
+ },
+ {
+  "kind": "unproject",
+  "x": 71.4613284264836,
+  "y": 100.58383235213465,
+  "centre": [
+   50.72232420623199,
+   1.1351346054100948
+  ]
+ },
+ {
+  "kind": "unproject",
+  "x": 71.07253375475716,
+  "y": 75.22573218851977,
+  "centre": [
+   50.72232420623199,
+   1.1351346054100948
+  ]
+ },
+ {
+  "kind": "unproject",
+  "x": 70.68373908303072,
+  "y": 49.86763202490491,
+  "centre": [
+   50.72232420623199,
+   1.1351346054100948
+  ]
+ },
+ {
+  "kind": "unproject",
+  "x": 70.29494441130427,
+  "y": 24.509531861290032,
+  "centre": [
+   50.72232420623199,
+   1.1351346054100948
+  ]
+ },
+ {
+  "kind": "unproject",
+  "x": 69.90614973957783,
+  "y": -0.8485683023248395,
+  "centre": [
+   50.72232420623199,
+   1.1351346054100948
+  ]
+ },
+ {
+  "kind": "unproject",
+  "x": 69.51735506785138,
+  "y": -26.206668465939714,
+  "centre": [
+   50.72232420623199,
+   1.1351346054100948
+  ]
+ },
+ {
+  "kind": "unproject",
+  "x": 69.12856039612494,
+  "y": -51.56476862955459,
+  "centre": [
+   50.72232420623199,
+   1.1351346054100948
+  ]
+ },
+ {
+  "kind": "unproject",
+  "x": 68.7397657243985,
+  "y": -76.92286879316947,
+  "centre": [
+   50.72232420623199,
+   1.1351346054100948
+  ]
+ },
+ {
+  "kind": "unproject",
+  "x": 68.35097105267205,
+  "y": -102.28096895678433,
+  "centre": [
+   50.72232420623199,
+   1.1351346054100948
+  ]
+ },
+ {
+  "kind": "unproject",
+  "x": 21.530808851055298,
+  "y": 101.34937550569131,
+  "centre": [
+   50.72232420623199,
+   1.1351346054100948
+  ]
+ },
+ {
+  "kind": "unproject",
+  "x": 21.142014179328854,
+  "y": 75.99127534207643,
+  "centre": [
+   50.72232420623199,
+   1.1351346054100948
+  ]
+ },
+ {
+  "kind": "unproject",
+  "x": 20.75321950760241,
+  "y": 50.63317517846157,
+  "centre": [
+   50.72232420623199,
+   1.1351346054100948
+  ]
+ },
+ {
+  "kind": "unproject",
+  "x": 20.364424835875965,
+  "y": 25.275075014846696,
+  "centre": [
+   50.72232420623199,
+   1.1351346054100948
+  ]
+ },
+ {
+  "kind": "unproject",
+  "x": 19.975630164149518,
+  "y": -0.08302514876817607,
+  "centre": [
+   50.72232420623199,
+   1.1351346054100948
+  ]
+ },
+ {
+  "kind": "unproject",
+  "x": 19.586835492423074,
+  "y": -25.44112531238305,
+  "centre": [
+   50.72232420623199,
+   1.1351346054100948
+  ]
+ },
+ {
+  "kind": "unproject",
+  "x": 19.19804082069663,
+  "y": -50.79922547599793,
+  "centre": [
+   50.72232420623199,
+   1.1351346054100948
+  ]
+ },
+ {
+  "kind": "unproject",
+  "x": 18.809246148970185,
+  "y": -76.15732563961281,
+  "centre": [
+   50.72232420623199,
+   1.1351346054100948
+  ]
+ },
+ {
+  "kind": "unproject",
+  "x": 18.42045147724374,
+  "y": -101.51542580322767,
+  "centre": [
+   50.72232420623199,
+   1.1351346054100948
+  ]
+ },
+ {
+  "kind": "unproject",
+  "x": -28.399710724373005,
+  "y": 102.11491865924798,
+  "centre": [
+   50.72232420623199,
+   1.1351346054100948
+  ]
+ },
+ {
+  "kind": "unproject",
+  "x": -28.78850539609945,
+  "y": 76.7568184956331,
+  "centre": [
+   50.72232420623199,
+   1.1351346054100948
+  ]
+ },
+ {
+  "kind": "unproject",
+  "x": -29.177300067825893,
+  "y": 51.398718332018234,
+  "centre": [
+   50.72232420623199,
+   1.1351346054100948
+  ]
+ },
+ {
+  "kind": "unproject",
+  "x": -29.566094739552337,
+  "y": 26.04061816840336,
+  "centre": [
+   50.72232420623199,
+   1.1351346054100948
+  ]
+ },
+ {
+  "kind": "unproject",
+  "x": -29.954889411278785,
+  "y": 0.6825180047884872,
+  "centre": [
+   50.72232420623199,
+   1.1351346054100948
+  ]
+ },
+ {
+  "kind": "unproject",
+  "x": -30.34368408300523,
+  "y": -24.675582158826387,
+  "centre": [
+   50.72232420623199,
+   1.1351346054100948
+  ]
+ },
+ {
+  "kind": "unproject",
+  "x": -30.732478754731673,
+  "y": -50.033682322441265,
+  "centre": [
+   50.72232420623199,
+   1.1351346054100948
+  ]
+ },
+ {
+  "kind": "unproject",
+  "x": -31.121273426458117,
+  "y": -75.39178248605614,
+  "centre": [
+   50.72232420623199,
+   1.1351346054100948
+  ]
+ },
+ {
+  "kind": "unproject",
+  "x": -31.51006809818456,
+  "y": -100.74988264967101,
+  "centre": [
+   50.72232420623199,
+   1.1351346054100948
+  ]
+ },
+ {
+  "kind": "unproject",
+  "x": -78.33023029980131,
+  "y": 102.88046181280464,
+  "centre": [
+   50.72232420623199,
+   1.1351346054100948
+  ]
+ },
+ {
+  "kind": "unproject",
+  "x": -78.71902497152776,
+  "y": 77.52236164918976,
+  "centre": [
+   50.72232420623199,
+   1.1351346054100948
+  ]
+ },
+ {
+  "kind": "unproject",
+  "x": -79.1078196432542,
+  "y": 52.1642614855749,
+  "centre": [
+   50.72232420623199,
+   1.1351346054100948
+  ]
+ },
+ {
+  "kind": "unproject",
+  "x": -79.49661431498065,
+  "y": 26.806161321960023,
+  "centre": [
+   50.72232420623199,
+   1.1351346054100948
+  ]
+ },
+ {
+  "kind": "unproject",
+  "x": -79.88540898670709,
+  "y": 1.4480611583451504,
+  "centre": [
+   50.72232420623199,
+   1.1351346054100948
+  ]
+ },
+ {
+  "kind": "unproject",
+  "x": -80.27420365843354,
+  "y": -23.910039005269724,
+  "centre": [
+   50.72232420623199,
+   1.1351346054100948
+  ]
+ },
+ {
+  "kind": "unproject",
+  "x": -80.66299833015998,
+  "y": -49.2681391688846,
+  "centre": [
+   50.72232420623199,
+   1.1351346054100948
+  ]
+ },
+ {
+  "kind": "unproject",
+  "x": -81.05179300188642,
+  "y": -74.62623933249948,
+  "centre": [
+   50.72232420623199,
+   1.1351346054100948
+  ]
+ },
+ {
+  "kind": "unproject",
+  "x": -81.44058767361287,
+  "y": -99.98433949611434,
+  "centre": [
+   50.72232420623199,
+   1.1351346054100948
+  ]
+ },
+ {
+  "kind": "round_step",
+  "raw": 80.00314422746251
+ },
+ {
+  "kind": "unproject",
+  "x": 81.44743234156941,
+  "y": 100.43072372142339,
+  "centre": [
+   50.72232420623199,
+   1.1351346054100948
+  ]
+ },
+ {
+  "kind": "unproject",
+  "x": 81.05863766984295,
+  "y": 75.07262355780848,
+  "centre": [
+   50.72232420623199,
+   1.1351346054100948
+  ]
+ },
+ {
+  "kind": "unproject",
+  "x": 80.66984299811648,
+  "y": 49.71452339419357,
+  "centre": [
+   50.72232420623199,
+   1.1351346054100948
+  ]
+ },
+ {
+  "kind": "unproject",
+  "x": 80.28104832639002,
+  "y": 24.356423230578667,
+  "centre": [
+   50.72232420623199,
+   1.1351346054100948
+  ]
+ },
+ {
+  "kind": "round_step",
+  "raw": 32.12514855271748
+ },
+ {
+  "kind": "round_step",
+  "raw": 32.12514855271729
+ },
+ {
+  "kind": "round_step",
+  "raw": 32.00125769098486
+ },
+ {
+  "kind": "round_step",
+  "raw": 45.25559452855104
+ },
+ {
+  "kind": "round_step",
+  "raw": 45.25559452855123
+ },
+ {
+  "kind": "round_step",
+  "raw": 32.01597750827223
+ },
+ {
+  "kind": "round_step",
+  "raw": 32.2362597158979
+ },
+ {
+  "kind": "round_step",
+  "raw": 32.392781670007025
+ },
+ {
+  "kind": "round_step",
+  "raw": 175.95490166393284
+ },
+ {
+  "kind": "lon_extent",
+  "lons": [
+   -10.0,
+   2.0,
+   15.0
+  ]
+ },
+ {
+  "kind": "lon_extent",
+  "lons": [
+   178.0,
+   -172.0,
+   -140.0,
+   -109.0
+  ]
+ },
+ {
+  "kind": "lon_extent",
+  "lons": [
+   5.0,
+   5.0
+  ]
+ },
+ {
+  "kind": "lon_extent",
+  "lons": [
+   1.5,
+   3.0,
+   4.5,
+   6.0,
+   7.5,
+   9.0,
+   10.5,
+   12.0
+  ]
+ },
+ {
+  "kind": "lon_extent",
+  "lons": [
+   -178.5,
+   -177.0,
+   -175.5,
+   -174.0,
+   -172.5,
+   -171.0,
+   -169.5,
+   -168.0
+  ]
+ },
+ {
+  "kind": "lon_extent",
+  "lons": [
+   -60.0,
+   -45.0,
+   -30.0,
+   -15.0,
+   0.0,
+   15.0,
+   30.0,
+   45.0
+  ]
+ },
+ {
+  "kind": "lon_extent",
+  "lons": [
+   1.5,
+   3.0,
+   4.5,
+   6.0,
+   27.5,
+   29.0,
+   30.5,
+   32.0
+  ]
+ },
+ {
+  "kind": "propose_sequence",
+  "sites": [
+   {
+    "element_id": "e0",
+    "name": "Site 0",
+    "parameter_id": "b0",
+    "basis": "boundary",
+    "latitude": 50.0,
+    "longitude": 0.0,
+    "date_ids": [],
+    "scatter_km": null,
+    "refusal": null
+   },
+   {
+    "element_id": "e1",
+    "name": "Site 1",
+    "parameter_id": "b1",
+    "basis": "boundary",
+    "latitude": 50.0,
+    "longitude": 1.0,
+    "date_ids": [],
+    "scatter_km": null,
+    "refusal": null
+   },
+   {
+    "element_id": "e2",
+    "name": "Site 2",
+    "parameter_id": "b2",
+    "basis": "boundary",
+    "latitude": 50.0,
+    "longitude": 2.0,
+    "date_ids": [],
+    "scatter_km": null,
+    "refusal": null
+   }
+  ],
+  "origin": null
+ },
+ {
+  "kind": "propose_sequence",
+  "sites": [
+   {
+    "element_id": "e0",
+    "name": "Site 0",
+    "parameter_id": "b0",
+    "basis": "boundary",
+    "latitude": 50.0,
+    "longitude": 0.0,
+    "date_ids": [],
+    "scatter_km": null,
+    "refusal": null
+   },
+   {
+    "element_id": "e1",
+    "name": "Site 1",
+    "parameter_id": "b1",
+    "basis": "boundary",
+    "latitude": 50.0,
+    "longitude": 1.0,
+    "date_ids": [],
+    "scatter_km": null,
+    "refusal": null
+   },
+   {
+    "element_id": "e2",
+    "name": "Site 2",
+    "parameter_id": "b2",
+    "basis": "boundary",
+    "latitude": 50.0,
+    "longitude": 2.0,
+    "date_ids": [],
+    "scatter_km": null,
+    "refusal": null
+   },
+   {
+    "element_id": "e3",
+    "name": "Site 3",
+    "parameter_id": "b3",
+    "basis": "boundary",
+    "latitude": 50.0,
+    "longitude": 3.0,
+    "date_ids": [],
+    "scatter_km": null,
+    "refusal": null
+   }
+  ],
+  "origin": [
+   50.0,
+   -1.0
+  ]
+ },
+ {
+  "kind": "propose_sequence",
+  "sites": [
+   {
+    "element_id": "e0",
+    "name": "Site 0",
+    "parameter_id": "b0",
+    "basis": "boundary",
+    "latitude": 50.0,
+    "longitude": 0.0,
+    "date_ids": [],
+    "scatter_km": null,
+    "refusal": null
+   },
+   {
+    "element_id": "e1",
+    "name": "Site 1",
+    "parameter_id": "b1",
+    "basis": "boundary",
+    "latitude": 50.0,
+    "longitude": 1.0,
+    "date_ids": [],
+    "scatter_km": null,
+    "refusal": null
+   },
+   {
+    "element_id": "e2",
+    "name": "Site 2",
+    "parameter_id": "b2",
+    "basis": "boundary",
+    "latitude": 50.0,
+    "longitude": 2.0,
+    "date_ids": [],
+    "scatter_km": null,
+    "refusal": null
+   },
+   {
+    "element_id": "e3",
+    "name": "Site 3",
+    "parameter_id": "b3",
+    "basis": "boundary",
+    "latitude": 50.0,
+    "longitude": 3.0,
+    "date_ids": [],
+    "scatter_km": null,
+    "refusal": null
+   }
+  ],
+  "origin": [
+   50.0,
+   9.0
+  ]
+ },
+ {
+  "kind": "propose_sequence",
+  "sites": [
+   {
+    "element_id": "e0",
+    "name": "Site 0",
+    "parameter_id": "b0",
+    "basis": "boundary",
+    "latitude": 50.0,
+    "longitude": 2.0,
+    "date_ids": [],
+    "scatter_km": null,
+    "refusal": null
+   },
+   {
+    "element_id": "e1",
+    "name": "Site 1",
+    "parameter_id": "b1",
+    "basis": "boundary",
+    "latitude": 50.0,
+    "longitude": 0.0,
+    "date_ids": [],
+    "scatter_km": null,
+    "refusal": null
+   },
+   {
+    "element_id": "e2",
+    "name": "Site 2",
+    "parameter_id": "b2",
+    "basis": "boundary",
+    "latitude": 50.0,
+    "longitude": 1.0,
+    "date_ids": [],
+    "scatter_km": null,
+    "refusal": null
+   },
+   {
+    "element_id": "e3",
+    "name": "Site 3",
+    "parameter_id": "b3",
+    "basis": "boundary",
+    "latitude": 50.0,
+    "longitude": 3.0,
+    "date_ids": [],
+    "scatter_km": null,
+    "refusal": null
+   }
+  ],
+  "origin": null
+ },
+ {
+  "kind": "propose_sequence",
+  "sites": [
+   {
+    "element_id": "e0",
+    "name": "Site 0",
+    "parameter_id": "b0",
+    "basis": "boundary",
+    "latitude": 50.0,
+    "longitude": 0.0,
+    "date_ids": [],
+    "scatter_km": null,
+    "refusal": null
+   },
+   {
+    "element_id": "e1",
+    "name": "Site 1",
+    "parameter_id": "b1",
+    "basis": "boundary",
+    "latitude": 50.0,
+    "longitude": 1.0,
+    "date_ids": [],
+    "scatter_km": null,
+    "refusal": null
+   },
+   {
+    "element_id": "e2",
+    "name": "Site 2",
+    "parameter_id": "b2",
+    "basis": "boundary",
+    "latitude": 51.0,
+    "longitude": 0.0,
+    "date_ids": [],
+    "scatter_km": null,
+    "refusal": null
+   },
+   {
+    "element_id": "e3",
+    "name": "Site 3",
+    "parameter_id": "b3",
+    "basis": "boundary",
+    "latitude": 51.0,
+    "longitude": 1.0,
+    "date_ids": [],
+    "scatter_km": null,
+    "refusal": null
+   }
+  ],
+  "origin": null
+ },
+ {
+  "kind": "propose_sequence",
+  "sites": [
+   {
+    "element_id": "e0",
+    "name": "Site 0",
+    "parameter_id": "b0",
+    "basis": "boundary",
+    "latitude": 50.0,
+    "longitude": 0.0,
+    "date_ids": [],
+    "scatter_km": null,
+    "refusal": null
+   },
+   {
+    "element_id": "e1",
+    "name": "Site 1",
+    "parameter_id": "b1",
+    "basis": "boundary",
+    "latitude": 51.0,
+    "longitude": 1.0,
+    "date_ids": [],
+    "scatter_km": null,
+    "refusal": null
+   },
+   {
+    "element_id": "e2",
+    "name": "Site 2",
+    "parameter_id": "b2",
+    "basis": "boundary",
+    "latitude": 49.0,
+    "longitude": 2.0,
+    "date_ids": [],
+    "scatter_km": null,
+    "refusal": null
+   },
+   {
+    "element_id": "e3",
+    "name": "Site 3",
+    "parameter_id": "b3",
+    "basis": "boundary",
+    "latitude": 52.0,
+    "longitude": 0.5,
+    "date_ids": [],
+    "scatter_km": null,
+    "refusal": null
+   },
+   {
+    "element_id": "e4",
+    "name": "Site 4",
+    "parameter_id": "b4",
+    "basis": "boundary",
+    "latitude": 50.5,
+    "longitude": 3.0,
+    "date_ids": [],
+    "scatter_km": null,
+    "refusal": null
+   },
+   {
+    "element_id": "e5",
+    "name": "Site 5",
+    "parameter_id": "b5",
+    "basis": "boundary",
+    "latitude": 48.0,
+    "longitude": 1.5,
+    "date_ids": [],
+    "scatter_km": null,
+    "refusal": null
+   }
+  ],
+  "origin": null
+ },
+ {
+  "kind": "propose_sequence",
+  "sites": [
+   {
+    "element_id": "e0",
+    "name": "Site 0",
+    "parameter_id": "b0",
+    "basis": "boundary",
+    "latitude": 50.0,
+    "longitude": 0.0,
+    "date_ids": [],
+    "scatter_km": null,
+    "refusal": null
+   }
+  ],
+  "origin": null
+ },
+ {
+  "kind": "propose_sequence",
+  "sites": [
+   {
+    "element_id": "e0",
+    "name": "Site 0",
+    "parameter_id": "b0",
+    "basis": "boundary",
+    "latitude": 50.0,
+    "longitude": 0.0,
+    "date_ids": [],
+    "scatter_km": null,
+    "refusal": null
+   },
+   {
+    "element_id": "e1",
+    "name": "Site 1",
+    "parameter_id": "b1",
+    "basis": "boundary",
+    "latitude": 50.0,
+    "longitude": 1.0,
+    "date_ids": [],
+    "scatter_km": null,
+    "refusal": null
+   },
+   {
+    "element_id": "bad",
+    "name": "Mixed",
+    "parameter_id": "bbad",
+    "basis": "boundary",
+    "latitude": null,
+    "longitude": null,
+    "date_ids": [],
+    "scatter_km": null,
+    "refusal": "two places in one phase"
+   }
+  ],
+  "origin": null
+ },
+ {
+  "kind": "propose_sequence",
+  "sites": [
+   {
+    "element_id": "e0",
+    "name": "Site 0",
+    "parameter_id": "b0",
+    "basis": "boundary",
+    "latitude": 50.0,
+    "longitude": 0.0,
+    "date_ids": [],
+    "scatter_km": null,
+    "refusal": null
+   },
+   {
+    "element_id": "e1",
+    "name": "Site 1",
+    "parameter_id": "b1",
+    "basis": "boundary",
+    "latitude": 50.0,
+    "longitude": 1.0,
+    "date_ids": [],
+    "scatter_km": null,
+    "refusal": null
+   },
+   {
+    "element_id": "nowhere",
+    "name": "Unplaced",
+    "parameter_id": "bn",
+    "basis": "boundary",
+    "latitude": null,
+    "longitude": null,
+    "date_ids": [],
+    "scatter_km": null,
+    "refusal": null
+   }
+  ],
+  "origin": null
+ },
+ {
+  "kind": "derive_sites",
+  "root": {
+   "id": "root",
+   "element_type": "sequence",
+   "name": "Region",
+   "children": [
+    {
+     "id": "b0",
+     "element_type": "boundary",
+     "name": "b0",
+     "children": []
+    },
+    {
+     "id": "p0",
+     "element_type": "phase",
+     "name": "Aarhus",
+     "children": []
+    },
+    {
+     "id": "b1",
+     "element_type": "boundary",
+     "name": "b1",
+     "children": []
+    },
+    {
+     "id": "p1",
+     "element_type": "phase",
+     "name": "Bruges",
+     "children": []
+    },
+    {
+     "id": "b2",
+     "element_type": "boundary",
+     "name": "b2",
+     "children": []
+    },
+    {
+     "id": "p2",
+     "element_type": "phase",
+     "name": "Cologne",
+     "children": []
+    },
+    {
+     "id": "b3",
+     "element_type": "boundary",
+     "name": "b3",
+     "children": []
+    },
+    {
+     "id": "p3",
+     "element_type": "phase",
+     "name": "Dresden",
+     "children": []
+    },
+    {
+     "id": "b4",
+     "element_type": "boundary",
+     "name": "b4",
+     "children": []
+    }
+   ]
+  },
+  "measurements": [
+   {
+    "id": "d0",
+    "sample_name": "Aarhus",
+    "element_id": "p0",
+    "latitude": 50.0,
+    "longitude": 0.0
+   },
+   {
+    "id": "d1",
+    "sample_name": "Bruges",
+    "element_id": "p1",
+    "latitude": 50.0,
+    "longitude": 1.0
+   },
+   {
+    "id": "d2",
+    "sample_name": "Cologne",
+    "element_id": "p2",
+    "latitude": 50.0,
+    "longitude": 2.0
+   },
+   {
+    "id": "d3",
+    "sample_name": "Dresden",
+    "element_id": "p3",
+    "latitude": 50.0,
+    "longitude": 3.0
+   }
+  ]
+ },
+ {
+  "kind": "propose_sequence",
+  "sites": [
+   {
+    "element_id": "p0",
+    "name": "Aarhus",
+    "parameter_id": "b0",
+    "basis": "boundary",
+    "latitude": 50.0,
+    "longitude": 0.0,
+    "date_ids": [
+     "d0"
+    ],
+    "scatter_km": 0.0,
+    "refusal": null
+   },
+   {
+    "element_id": "p1",
+    "name": "Bruges",
+    "parameter_id": "b1",
+    "basis": "boundary",
+    "latitude": 50.0,
+    "longitude": 1.0,
+    "date_ids": [
+     "d1"
+    ],
+    "scatter_km": 0.0,
+    "refusal": null
+   },
+   {
+    "element_id": "p2",
+    "name": "Cologne",
+    "parameter_id": "b2",
+    "basis": "boundary",
+    "latitude": 50.0,
+    "longitude": 1.9999999999999996,
+    "date_ids": [
+     "d2"
+    ],
+    "scatter_km": 0.0,
+    "refusal": null
+   },
+   {
+    "element_id": "p3",
+    "name": "Dresden",
+    "parameter_id": "b3",
+    "basis": "boundary",
+    "latitude": 50.0,
+    "longitude": 3.0000000000000004,
+    "date_ids": [
+     "d3"
+    ],
+    "scatter_km": 0.0,
+    "refusal": null
+   }
+  ],
+  "origin": [
+   50.0,
+   -2.0
+  ]
+ },
+ {
+  "kind": "propose_sequence",
+  "sites": [
+   {
+    "element_id": "p0",
+    "name": "Aarhus",
+    "parameter_id": "b0",
+    "basis": "boundary",
+    "latitude": 50.0,
+    "longitude": 0.0,
+    "date_ids": [
+     "d0"
+    ],
+    "scatter_km": 0.0,
+    "refusal": null
+   },
+   {
+    "element_id": "p1",
+    "name": "Bruges",
+    "parameter_id": "b1",
+    "basis": "boundary",
+    "latitude": 50.0,
+    "longitude": 1.0,
+    "date_ids": [
+     "d1"
+    ],
+    "scatter_km": 0.0,
+    "refusal": null
+   },
+   {
+    "element_id": "p2",
+    "name": "Cologne",
+    "parameter_id": "b2",
+    "basis": "boundary",
+    "latitude": 50.0,
+    "longitude": 1.9999999999999996,
+    "date_ids": [
+     "d2"
+    ],
+    "scatter_km": 0.0,
+    "refusal": null
+   },
+   {
+    "element_id": "p3",
+    "name": "Dresden",
+    "parameter_id": "b3",
+    "basis": "boundary",
+    "latitude": 50.0,
+    "longitude": 3.0000000000000004,
+    "date_ids": [
+     "d3"
+    ],
+    "scatter_km": 0.0,
+    "refusal": null
+   }
+  ],
+  "origin": null
+ },
+ {
+  "kind": "propose_sequence",
+  "sites": [
+   {
+    "element_id": "p0",
+    "name": "Aarhus",
+    "parameter_id": "b0",
+    "basis": "boundary",
+    "latitude": 50.0,
+    "longitude": 0.0,
+    "date_ids": [
+     "d0"
+    ],
+    "scatter_km": 0.0,
+    "refusal": null
+   },
+   {
+    "element_id": "p1",
+    "name": "Bruges",
+    "parameter_id": "b1",
+    "basis": "boundary",
+    "latitude": 50.0,
+    "longitude": 1.0,
+    "date_ids": [
+     "d1"
+    ],
+    "scatter_km": 0.0,
+    "refusal": null
+   },
+   {
+    "element_id": "p2",
+    "name": "Cologne",
+    "parameter_id": "b2",
+    "basis": "boundary",
+    "latitude": 50.0,
+    "longitude": 1.9999999999999996,
+    "date_ids": [
+     "d2"
+    ],
+    "scatter_km": 0.0,
+    "refusal": null
+   },
+   {
+    "element_id": "p3",
+    "name": "Dresden",
+    "parameter_id": "b3",
+    "basis": "boundary",
+    "latitude": 50.0,
+    "longitude": 3.0000000000000004,
+    "date_ids": [
+     "d3"
+    ],
+    "scatter_km": 0.0,
+    "refusal": null
+   }
+  ],
+  "origin": [
+   50.0,
+   9.0
+  ]
+ },
+ {
+  "kind": "derive_sites",
+  "root": {
+   "id": "root",
+   "element_type": "sequence",
+   "name": "Region",
+   "children": [
+    {
+     "id": "b0",
+     "element_type": "boundary",
+     "name": "b0",
+     "children": []
+    },
+    {
+     "id": "p0",
+     "element_type": "phase",
+     "name": "Aarhus",
+     "children": []
+    },
+    {
+     "id": "b1",
+     "element_type": "boundary",
+     "name": "b1",
+     "children": []
+    }
+   ]
+  },
+  "measurements": [
+   {
+    "id": "d0",
+    "sample_name": "Aarhus",
+    "element_id": "p0",
+    "latitude": 50.0,
+    "longitude": 0.0
+   }
+  ]
+ },
+ {
+  "kind": "propose_sequence",
+  "sites": [
+   {
+    "element_id": "root",
+    "name": "Region",
+    "parameter_id": "b0",
+    "basis": "boundary",
+    "latitude": 50.0,
+    "longitude": 0.0,
+    "date_ids": [
+     "d0"
+    ],
+    "scatter_km": 0.0,
+    "refusal": null
+   }
+  ],
+  "origin": null
+ },
+ {
+  "kind": "derive_sites",
+  "root": {
+   "id": "root",
+   "element_type": "sequence",
+   "name": "Region",
+   "children": [
+    {
+     "id": "b0",
+     "element_type": "boundary",
+     "name": "b0",
+     "children": []
+    },
+    {
+     "id": "p0",
+     "element_type": "phase",
+     "name": "Aarhus",
+     "children": []
+    },
+    {
+     "id": "b1",
+     "element_type": "boundary",
+     "name": "b1",
+     "children": []
+    },
+    {
+     "id": "p1",
+     "element_type": "phase",
+     "name": "Bruges",
+     "children": []
+    },
+    {
+     "id": "b2",
+     "element_type": "boundary",
+     "name": "b2",
+     "children": []
+    },
+    {
+     "id": "p2",
+     "element_type": "phase",
+     "name": "Cologne",
+     "children": []
+    },
+    {
+     "id": "b3",
+     "element_type": "boundary",
+     "name": "b3",
+     "children": []
+    },
+    {
+     "id": "p3",
+     "element_type": "phase",
+     "name": "Dresden",
+     "children": []
+    },
+    {
+     "id": "b4",
+     "element_type": "boundary",
+     "name": "b4",
+     "children": []
+    }
+   ]
+  },
+  "measurements": [
+   {
+    "id": "d0",
+    "sample_name": "Aarhus",
+    "element_id": "p0",
+    "latitude": 50.0,
+    "longitude": 0.0
+   },
+   {
+    "id": "d1",
+    "sample_name": "Bruges",
+    "element_id": "p1",
+    "latitude": 50.0,
+    "longitude": 1.0
+   },
+   {
+    "id": "d2",
+    "sample_name": "Cologne",
+    "element_id": "p2",
+    "latitude": 50.0,
+    "longitude": 2.0
+   },
+   {
+    "id": "d3",
+    "sample_name": "Dresden",
+    "element_id": "p3",
+    "latitude": 50.0,
+    "longitude": 3.0
+   },
+   {
+    "id": "stray",
+    "sample_name": "Stray",
+    "element_id": "p0",
+    "latitude": 50.4,
+    "longitude": 0.0
+   }
+  ]
+ },
+ {
+  "kind": "propose_sequence",
+  "sites": [
+   {
+    "element_id": "p0",
+    "name": "Aarhus",
+    "parameter_id": "b0",
+    "basis": "boundary",
+    "latitude": null,
+    "longitude": null,
+    "date_ids": [
+     "d0",
+     "stray"
+    ],
+    "scatter_km": 44.478032093413226,
+    "refusal": "\"Aarhus\" holds dates 44.5 km apart (50.0000, 0.0000) and (50.4000, 0.0000). Dates from two sites in one phase is a modelling error, and placing the phase between them would hide it. Split them into separate phases, or correct the coordinates."
+   },
+   {
+    "element_id": "p1",
+    "name": "Bruges",
+    "parameter_id": "b1",
+    "basis": "boundary",
+    "latitude": 50.0,
+    "longitude": 1.0,
+    "date_ids": [
+     "d1"
+    ],
+    "scatter_km": 0.0,
+    "refusal": null
+   },
+   {
+    "element_id": "p2",
+    "name": "Cologne",
+    "parameter_id": "b2",
+    "basis": "boundary",
+    "latitude": 50.0,
+    "longitude": 1.9999999999999996,
+    "date_ids": [
+     "d2"
+    ],
+    "scatter_km": 0.0,
+    "refusal": null
+   },
+   {
+    "element_id": "p3",
+    "name": "Dresden",
+    "parameter_id": "b3",
+    "basis": "boundary",
+    "latitude": 50.0,
+    "longitude": 3.0000000000000004,
+    "date_ids": [
+     "d3"
+    ],
+    "scatter_km": 0.0,
+    "refusal": null
+   }
+  ],
+  "origin": null
+ },
+ {
+  "kind": "derive_sites",
+  "root": {
+   "id": "root",
+   "element_type": "sequence",
+   "name": "Region",
+   "children": [
+    {
+     "id": "b0",
+     "element_type": "boundary",
+     "name": "b0",
+     "children": []
+    },
+    {
+     "id": "p0",
+     "element_type": "phase",
+     "name": "Aarhus",
+     "children": []
+    },
+    {
+     "id": "b1",
+     "element_type": "boundary",
+     "name": "b1",
+     "children": []
+    },
+    {
+     "id": "p1",
+     "element_type": "phase",
+     "name": "Bruges",
+     "children": []
+    },
+    {
+     "id": "b2",
+     "element_type": "boundary",
+     "name": "b2",
+     "children": []
+    },
+    {
+     "id": "p2",
+     "element_type": "phase",
+     "name": "Cologne",
+     "children": []
+    },
+    {
+     "id": "b3",
+     "element_type": "boundary",
+     "name": "b3",
+     "children": []
+    },
+    {
+     "id": "p3",
+     "element_type": "phase",
+     "name": "Dresden",
+     "children": []
+    },
+    {
+     "id": "b4",
+     "element_type": "boundary",
+     "name": "b4",
+     "children": []
+    }
+   ]
+  },
+  "measurements": [
+   {
+    "id": "d0",
+    "sample_name": "Aarhus",
+    "element_id": "p0",
+    "latitude": null,
+    "longitude": null
+   },
+   {
+    "id": "d1",
+    "sample_name": "Bruges",
+    "element_id": "p1",
+    "latitude": null,
+    "longitude": null
+   },
+   {
+    "id": "d2",
+    "sample_name": "Cologne",
+    "element_id": "p2",
+    "latitude": null,
+    "longitude": null
+   },
+   {
+    "id": "d3",
+    "sample_name": "Dresden",
+    "element_id": "p3",
+    "latitude": null,
+    "longitude": null
+   }
+  ]
+ },
+ {
+  "kind": "propose_sequence",
+  "sites": [],
+  "origin": null
+ },
+ {
+  "kind": "derive_sites",
+  "root": {
+   "id": "root",
+   "element_type": "sequence",
+   "name": "Region",
+   "children": [
+    {
+     "id": "b0",
+     "element_type": "boundary",
+     "name": "Start 0",
+     "children": []
+    },
+    {
+     "id": "p0",
+     "element_type": "phase",
+     "name": "Site 0",
+     "children": []
+    },
+    {
+     "id": "b1",
+     "element_type": "boundary",
+     "name": "Start 1",
+     "children": []
+    },
+    {
+     "id": "p1",
+     "element_type": "phase",
+     "name": "Site 1",
+     "children": []
+    },
+    {
+     "id": "b2",
+     "element_type": "boundary",
+     "name": "Start 2",
+     "children": []
+    },
+    {
+     "id": "p2",
+     "element_type": "phase",
+     "name": "Site 2",
+     "children": []
+    },
+    {
+     "id": "b3",
+     "element_type": "boundary",
+     "name": "Start 3",
+     "children": []
+    },
+    {
+     "id": "p3",
+     "element_type": "phase",
+     "name": "Site 3",
+     "children": []
+    },
+    {
+     "id": "b4",
+     "element_type": "boundary",
+     "name": "Start 4",
+     "children": []
+    },
+    {
+     "id": "p4",
+     "element_type": "phase",
+     "name": "Site 4",
+     "children": []
+    },
+    {
+     "id": "b5",
+     "element_type": "boundary",
+     "name": "Start 5",
+     "children": []
+    },
+    {
+     "id": "p5",
+     "element_type": "phase",
+     "name": "Site 5",
+     "children": []
+    },
+    {
+     "id": "b6",
+     "element_type": "boundary",
+     "name": "Start 6",
+     "children": []
+    },
+    {
+     "id": "p6",
+     "element_type": "phase",
+     "name": "Site 6",
+     "children": []
+    },
+    {
+     "id": "b7",
+     "element_type": "boundary",
+     "name": "Start 7",
+     "children": []
+    },
+    {
+     "id": "p7",
+     "element_type": "phase",
+     "name": "Site 7",
+     "children": []
+    },
+    {
+     "id": "b8",
+     "element_type": "boundary",
+     "name": "End",
+     "children": []
+    }
+   ]
+  },
+  "measurements": [
+   {
+    "id": "d00",
+    "sample_name": "S0-0",
+    "age_bp": 5636.82913618984,
+    "error_1sigma": 25.0,
+    "curve_id": "intcal20",
+    "element_id": "p0",
+    "latitude": 50.0,
+    "longitude": 0.0
+   },
+   {
+    "id": "d01",
+    "sample_name": "S0-1",
+    "age_bp": 5724.774328051542,
+    "error_1sigma": 25.0,
+    "curve_id": "intcal20",
+    "element_id": "p0",
+    "latitude": 50.0,
+    "longitude": 0.0
+   },
+   {
+    "id": "d10",
+    "sample_name": "S1-0",
+    "age_bp": 5447.049771165897,
+    "error_1sigma": 25.0,
+    "curve_id": "intcal20",
+    "element_id": "p1",
+    "latitude": 50.0,
+    "longitude": 1.4
+   },
+   {
+    "id": "d11",
+    "sample_name": "S1-1",
+    "age_bp": 5581.693827140998,
+    "error_1sigma": 25.0,
+    "curve_id": "intcal20",
+    "element_id": "p1",
+    "latitude": 50.0,
+    "longitude": 1.4
+   },
+   {
+    "id": "d20",
+    "sample_name": "S2-0",
+    "age_bp": 5393.449407657518,
+    "error_1sigma": 25.0,
+    "curve_id": "intcal20",
+    "element_id": "p2",
+    "latitude": 50.0,
+    "longitude": 2.8
+   },
+   {
+    "id": "d21",
+    "sample_name": "S2-1",
+    "age_bp": 5324.2847258539105,
+    "error_1sigma": 25.0,
+    "curve_id": "intcal20",
+    "element_id": "p2",
+    "latitude": 50.0,
+    "longitude": 2.8
+   },
+   {
+    "id": "d30",
+    "sample_name": "S3-0",
+    "age_bp": 5311.087929846917,
+    "error_1sigma": 25.0,
+    "curve_id": "intcal20",
+    "element_id": "p3",
+    "latitude": 50.0,
+    "longitude": 4.199999999999999
+   },
+   {
+    "id": "d31",
+    "sample_name": "S3-1",
+    "age_bp": 5255.161177566766,
+    "error_1sigma": 25.0,
+    "curve_id": "intcal20",
+    "element_id": "p3",
+    "latitude": 50.0,
+    "longitude": 4.199999999999999
+   },
+   {
+    "id": "d40",
+    "sample_name": "S4-0",
+    "age_bp": 5207.4823892486875,
+    "error_1sigma": 25.0,
+    "curve_id": "intcal20",
+    "element_id": "p4",
+    "latitude": 50.0,
+    "longitude": 5.6
+   },
+   {
+    "id": "d41",
+    "sample_name": "S4-1",
+    "age_bp": 5336.173968569229,
+    "error_1sigma": 25.0,
+    "curve_id": "intcal20",
+    "element_id": "p4",
+    "latitude": 50.0,
+    "longitude": 5.6
+   },
+   {
+    "id": "d50",
+    "sample_name": "S5-0",
+    "age_bp": 5292.070750747937,
+    "error_1sigma": 25.0,
+    "curve_id": "intcal20",
+    "element_id": "p5",
+    "latitude": 50.0,
+    "longitude": 7.0
+   },
+   {
+    "id": "d51",
+    "sample_name": "S5-1",
+    "age_bp": 5111.392686572752,
+    "error_1sigma": 25.0,
+    "curve_id": "intcal20",
+    "element_id": "p5",
+    "latitude": 50.0,
+    "longitude": 7.0
+   },
+   {
+    "id": "d60",
+    "sample_name": "S6-0",
+    "age_bp": 5080.597495836164,
+    "error_1sigma": 25.0,
+    "curve_id": "intcal20",
+    "element_id": "p6",
+    "latitude": 50.0,
+    "longitude": 8.399999999999999
+   },
+   {
+    "id": "d61",
+    "sample_name": "S6-1",
+    "age_bp": 5016.713772712715,
+    "error_1sigma": 25.0,
+    "curve_id": "intcal20",
+    "element_id": "p6",
+    "latitude": 50.0,
+    "longitude": 8.399999999999999
+   },
+   {
+    "id": "d70",
+    "sample_name": "S7-0",
+    "age_bp": 4975.040240545248,
+    "error_1sigma": 25.0,
+    "curve_id": "intcal20",
+    "element_id": "p7",
+    "latitude": 50.0,
+    "longitude": 9.799999999999999
+   },
+   {
+    "id": "d71",
+    "sample_name": "S7-1",
+    "age_bp": 4962.474915354705,
+    "error_1sigma": 25.0,
+    "curve_id": "intcal20",
+    "element_id": "p7",
+    "latitude": 50.0,
+    "longitude": 9.799999999999999
+   }
+  ]
+ },
+ {
+  "kind": "lon_extent",
+  "lons": [
+   0.0,
+   1.4000000000000004,
+   2.8,
+   4.199999999999998,
+   5.6,
+   6.999999999999999,
+   8.399999999999999,
+   9.799999999999999
+  ]
+ }
+]

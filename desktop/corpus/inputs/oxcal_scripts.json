@@ -1,0 +1,390 @@
+[
+ {
+  "filename": "Hillside_sites_3.oxcal",
+  "fixture": "backend/tests/fixtures/oxcal/Hillside_sites_3.oxcal"
+ },
+ {
+  "filename": "Hillside_sites_3_unordered.oxcal",
+  "fixture": "backend/tests/fixtures/oxcal/Hillside_sites_3_unordered.oxcal"
+ },
+ {
+  "filename": "Hillside_sites_3_shared_boundary.oxcal",
+  "fixture": "backend/tests/fixtures/oxcal/Hillside_sites_3_shared_boundary.oxcal"
+ },
+ {
+  "filename": "x.oxcal",
+  "fixture": "backend/tests/fixtures/oxcal/Hillside_sites_3.oxcal"
+ },
+ {
+  "filename": "Hillside_Seq.oxcal",
+  "fixture": "backend/tests/fixtures/oxcal_charcoal/Hillside_Seq.oxcal"
+ },
+ {
+  "filename": "Dune_Section.oxcal",
+  "fixture": "backend/tests/fixtures/oxcal_outlier/Dune_Section.oxcal"
+ },
+ {
+  "filename": "Coastal_midden.oxcal",
+  "fixture": "backend/tests/fixtures/oxcal_delta_r/Coastal_midden.oxcal"
+ },
+ {
+  "filename": "Dune_layers.oxcal",
+  "fixture": "backend/tests/fixtures/oxcal_display/Dune_layers.oxcal"
+ },
+ {
+  "filename": null,
+  "text": "Plot(){ Phase(\"P\"){ color=\"red\"; R_Date(\"A\",1000,25); } }"
+ },
+ {
+  "filename": null,
+  "text": "Plot(){ Phase(\"P\"){ R_Date(\"A\",1000,25){ resolution=5; }; } }"
+ },
+ {
+  "filename": null,
+  "text": "Plot(){ Phase(\"P\"){ R_Date(\"A\",1000,25){ color=\"red\"; z=47; }; } }"
+ },
+ {
+  "filename": "t.oxcal",
+  "text": "Plot(){ Sequence(){ Tau_Boundary(\"t\"); Phase(\"A\"){ R_Date(\"a\",3000,25); }; Boundary(); }; }"
+ },
+ {
+  "filename": "t.oxcal",
+  "text": "Plot(){ Sequence(){ Sigma_Boundary(\"s\"); Phase(\"A\"){ R_Date(\"a\",3000,25); }; Boundary(); }; }"
+ },
+ {
+  "filename": "t.oxcal",
+  "text": "Plot(){ Sequence(){ Zero_Boundary(\"z\"); Phase(\"A\"){ R_Date(\"a\",3000,25); }; Boundary(); }; }"
+ },
+ {
+  "filename": "t.oxcal",
+  "text": "Plot(){ Phase(\"A\"){ R_Date(\"a\",3000,25); C_Date(\"h\",1500,10); }; }"
+ },
+ {
+  "filename": "t.oxcal",
+  "text": "Plot(){ Phase(\"A\"){ R_Combine(\"c\"){ R_Date(\"a\",3000,25); }; }; }"
+ },
+ {
+  "filename": "t.oxcal",
+  "text": "Plot(){ U_Sequence(\"u\",1){ Boundary(); Phase(\"A\"){ R_Date(\"a\",3000,25); }; Boundary(); }; }"
+ },
+ {
+  "filename": "t.oxcal",
+  "text": "Plot(){ Phase(\"A\"){ After(R_Date(\"a\",3000,25)); }; }"
+ },
+ {
+  "filename": "t.oxcal",
+  "text": "Plot(){ Sequence(){ Boundary(); Wiggle_Match(\"w\"); Phase(\"A\"){ R_Date(\"a\",3000,25); }; Boundary(); }; }"
+ },
+ {
+  "filename": "t.oxcal",
+  "text": "Plot(){ Curve(\"IntCal13\",\"intcal13.14c\"); Phase(\"A\"){ R_Date(\"a\",3000,25); }; }"
+ },
+ {
+  "filename": "t.oxcal",
+  "text": "Plot(){ Outlier_Model(\"SSimple\",N(0,10),0,\"s\"); Sequence(){ Boundary(); Phase(\"A\"){ R_Date(\"a\",3000,25){ Outlier(\"SSimple\",0.05); }; }; Boundary(); }; }"
+ },
+ {
+  "filename": "t.oxcal",
+  "text": "Plot(){ Sequence(){ Tau_Boundary(\"t\"); Phase(\"A\"){ R_Date(\"a\",3000,25); }; }; }"
+ },
+ {
+  "filename": "t.oxcal",
+  "text": "Plot(){ Outlier_Model(\"General\",T(3),U(0,2),\"t\"); Sequence(){ Boundary(); Phase(\"A\"){ R_Date(\"a\",3000,25){ Outlier(\"General\",0.05); }; }; Boundary(); }; }"
+ },
+ {
+  "filename": "t.oxcal",
+  "text": "Plot(){ Sequence(){ Boundary(); Phase(\"A\"){ R_Date(\"a\",3000,25); }; Boundary(); }; Sum(\"s\"){ R_Date(\"b\",3100,25); R_Date(\"c\",3200,25); }; }"
+ },
+ {
+  "filename": "t.oxcal",
+  "text": "Plot(){ Sequence(){ Tau_Boundary(\"t\"); Phase(\"A\"){ R_Date(\"a\",3000,25); After(R_Date(\"b\",3100,25)); }; Boundary(); }; }"
+ },
+ {
+  "filename": "t.oxcal",
+  "text": "Plot(){ Curve(\"Marine20\",\"marine20.14c\"); Delta_R(\"local\",-162,28); Sum(\"S\"){ R_Date(\"a\",3000,25); R_Date(\"b\",3100,25); }; }"
+ },
+ {
+  "filename": "t.oxcal",
+  "text": "Plot(){ Phase(\"A\"){ Tau_Boundary(\"t\"); R_Date(\"a\",3000,25){ Outlier(\"Mine\",0.1); }; }; }"
+ },
+ {
+  "filename": "t.oxcal",
+  "text": "Plot(){ Phase(\"A\"){ R_Date(\"a\",3000,25); }; }"
+ },
+ {
+  "filename": "t.oxcal",
+  "text": "Plot(){ Sequence(\"Core\"){ Boundary(\"s\"); R_Date(\"deep\",3300,25); R_Date(\"mid\",3100,25); R_Date(\"top\",2900,25); Boundary(\"e\"); }; }"
+ },
+ {
+  "filename": "t.oxcal",
+  "text": "Plot(){ Sequence(\"S\"){ R_Date(\"first\",3300,25); Phase(\"Middle\"){ R_Date(\"m\",3100,25); }; R_Date(\"last\",2900,25); }; }"
+ },
+ {
+  "filename": "t.oxcal",
+  "text": "Plot(){ R_Date(\"a\",3000,25); R_Date(\"b\",3100,30); }"
+ },
+ {
+  "filename": "t.oxcal",
+  "text": "Plot(){ Sequence(\"S1\"){ Boundary(); Phase(\"A\"){ R_Date(\"a\",3000,25); }; Boundary(); }; Sequence(\"S2\"){ Boundary(); Phase(\"B\"){ R_Date(\"b\",3100,25); }; Boundary(); }; }"
+ },
+ {
+  "filename": "t.oxcal",
+  "text": "Plot(){ Options(){ Resolution=1; kIterations=30; }; Sequence(){ Boundary(); Phase(\"A\"){ R_Date(\"a\",3000,25); }; Boundary(); }; }"
+ },
+ {
+  "filename": "t.oxcal",
+  "text": "Plot(){ Options(){ Resolution=0.5; }; Sequence(){ Boundary(); Phase(\"A\"){ R_Date(\"a\",3000,25); }; Boundary(); }; }"
+ },
+ {
+  "filename": "t.oxcal",
+  "text": "Plot(){ Sequence(){ Boundary(); Phase(\"A\"){ R_Date(\"a\",3000,25); }; Boundary(); }; }"
+ },
+ {
+  "filename": "t.oxcal",
+  "text": "Plot(){ Curve(\"Marine20\",\"marine20.14c\"); Delta_R(\"local\",-7,45); Sequence(){ Boundary(); Phase(\"Midden\"){ R_Date(\"shell\",1200,30); }; Boundary(); }; }"
+ },
+ {
+  "filename": "t.oxcal",
+  "text": "Plot(){ Curve(\"SHCal20\",\"SHCal20.14c\"); Curve(\"Marine20\",\"Marine20.14c\"); Delta_R(\"LocalMarine\",-162,28); Phase(\"Midden\"){ Curve(\"=Marine20\"); Delta_R(\"=LocalMarine\", ); R_Date(\"shell\",900,20); }; }"
+ },
+ {
+  "filename": "t.oxcal",
+  "text": "Plot(){ Curve(\"SHCal20\",\"SHCal20.14c\"); Curve(\"Marine20\",\"Marine20.14c\"); Delta_R(\"LocalMarine\",-162,28); Phase(\"L4\"){ Curve(\"=SHCal20\"); R_Date(\"charcoal\",473,19); Curve(\"=Marine20\"); Delta_R(\"=LocalMarine\", ); R_Date(\"shell\",886,22); }; }"
+ },
+ {
+  "filename": "t.oxcal",
+  "text": "Plot(){ Curve(\"SHCal20\",\"SHCal20.14c\"); Curve(\"Marine20\",\"Marine20.14c\"); Delta_R(\"LocalMarine\",-162,28); Phase(\"L4\"){ R_Date(\"shell\",886,22); Curve(\"=SHCal20\"); R_Date(\"charcoal\",473,19); Curve(\"=Marine20\"); R_Date(\"shell2\",900,20); }; }"
+ },
+ {
+  "filename": "t.oxcal",
+  "text": "Plot(){ Curve(\"Marine20\",\"Marine20.14c\"); Phase(\"A\"){ Delta_R(\"Bay\",-162,28); R_Date(\"a\",900,20); }; Phase(\"B\"){ R_Date(\"b\",900,20); }; }"
+ },
+ {
+  "filename": "t.oxcal",
+  "text": "Plot(){ Curve(\"Marine20\",\"Marine20.14c\"); Delta_R(\"LocalMarine\",-162,28); Phase(\"M\"){ R_Date(\"a\",900,20); R_Date(\"b\",910,20); }; }"
+ },
+ {
+  "filename": "t.oxcal",
+  "text": "Plot(){ Curve(\"Marine20\",\"Marine20.14c\"); Phase(\"M\"){ Delta_R(\"=LocalMarine\", ); R_Date(\"shell\",900,20); }; }"
+ },
+ {
+  "filename": "t.oxcal",
+  "text": "Plot(){ Curve(\"Marine20\",\"marine20.14c\"); Delta_R(\"local\",-7); Phase(\"M\"){ R_Date(\"shell\",1200,30); }; }"
+ },
+ {
+  "filename": "t.oxcal",
+  "text": "Plot(){ Sequence(){ Boundary(\"Start\", U(1000,1200)); Phase(\"A\"){ R_Date(\"a\",3000,25); }; Boundary(); }; }"
+ },
+ {
+  "filename": "t.oxcal",
+  "text": "Plot(){ Sequence(){ Boundary(); Phase(\"A\"){ R_Date(\"d0\",3000,25); R_Date(\"d1\",3000,25); R_Date(\"d2\",3000,25); R_Date(\"d3\",3000,25); R_Date(\"d4\",3000,25); R_Date(\"d5\",3000,25); R_Date(\"d6\",3000,25); R_Date(\"d7\",3000,25); R_Date(\"d8\",3000,25); R_Date(\"d9\",3000,25); R_Date(\"d10\",3000,25); R_Date(\"d11\",3000,25); R_Date(\"d12\",3000,25); R_Date(\"d13\",3000,25); R_Date(\"d14\",3000,25); R_Date(\"d15\",3000,25); R_Date(\"d16\",3000,25); R_Date(\"d17\",3000,25); R_Date(\"d18\",3000,25); R_Date(\"d19\",3000,25); R_Date(\"d20\",3000,25); R_Date(\"d21\",3000,25); R_Date(\"d22\",3000,25); R_Date(\"d23\",3000,25); R_Date(\"d24\",3000,25); R_Date(\"d25\",3000,25); R_Date(\"d26\",3000,25); R_Date(\"d27\",3000,25); R_Date(\"d28\",3000,25); R_Date(\"d29\",3000,25); R_Date(\"d30\",3000,25); R_Date(\"d31\",3000,25); R_Date(\"d32\",3000,25); R_Date(\"d33\",3000,25); R_Date(\"d34\",3000,25); R_Date(\"d35\",3000,25); R_Date(\"d36\",3000,25); R_Date(\"d37\",3000,25); R_Date(\"d38\",3000,25); R_Date(\"d39\",3000,25); R_Date(\"d40\",3000,25); R_Date(\"d41\",3000,25); R_Date(\"d42\",3000,25); R_Date(\"d43\",3000,25); R_Date(\"d44\",3000,25); R_Date(\"d45\",3000,25); R_Date(\"d46\",3000,25); R_Date(\"d47\",3000,25); R_Date(\"d48\",3000,25); R_Date(\"d49\",3000,25); R_Date(\"d50\",3000,25); R_Date(\"d51\",3000,25); R_Date(\"d52\",3000,25); R_Date(\"d53\",3000,25); R_Date(\"d54\",3000,25); R_Date(\"d55\",3000,25); R_Date(\"d56\",3000,25); R_Date(\"d57\",3000,25); R_Date(\"d58\",3000,25); R_Date(\"d59\",3000,25); R_Date(\"d60\",3000,25); R_Date(\"d61\",3000,25); R_Date(\"d62\",3000,25); R_Date(\"d63\",3000,25); R_Date(\"d64\",3000,25); R_Date(\"d65\",3000,25); R_Date(\"d66\",3000,25); R_Date(\"d67\",3000,25); R_Date(\"d68\",3000,25); R_Date(\"d69\",3000,25); R_Date(\"d70\",3000,25); R_Date(\"d71\",3000,25); R_Date(\"d72\",3000,25); R_Date(\"d73\",3000,25); R_Date(\"d74\",3000,25); R_Date(\"d75\",3000,25); R_Date(\"d76\",3000,25); R_Date(\"d77\",3000,25); R_Date(\"d78\",3000,25); R_Date(\"d79\",3000,25); R_Date(\"d80\",3000,25); R_Date(\"d81\",3000,25); R_Date(\"d82\",3000,25); R_Date(\"d83\",3000,25); R_Date(\"d84\",3000,25); R_Date(\"d85\",3000,25); R_Date(\"d86\",3000,25); R_Date(\"d87\",3000,25); R_Date(\"d88\",3000,25); R_Date(\"d89\",3000,25); R_Date(\"d90\",3000,25); R_Date(\"d91\",3000,25); R_Date(\"d92\",3000,25); R_Date(\"d93\",3000,25); R_Date(\"d94\",3000,25); R_Date(\"d95\",3000,25); R_Date(\"d96\",3000,25); R_Date(\"d97\",3000,25); R_Date(\"d98\",3000,25); R_Date(\"d99\",3000,25); R_Date(\"d100\",3000,25); R_Date(\"d101\",3000,25); R_Date(\"d102\",3000,25); R_Date(\"d103\",3000,25); R_Date(\"d104\",3000,25); R_Date(\"d105\",3000,25); R_Date(\"d106\",3000,25); R_Date(\"d107\",3000,25); R_Date(\"d108\",3000,25); R_Date(\"d109\",3000,25); R_Date(\"d110\",3000,25); R_Date(\"d111\",3000,25); R_Date(\"d112\",3000,25); R_Date(\"d113\",3000,25); R_Date(\"d114\",3000,25); R_Date(\"d115\",3000,25); R_Date(\"d116\",3000,25); R_Date(\"d117\",3000,25); R_Date(\"d118\",3000,25); R_Date(\"d119\",3000,25); R_Date(\"d120\",3000,25); R_Date(\"d121\",3000,25); R_Date(\"d122\",3000,25); R_Date(\"d123\",3000,25); R_Date(\"d124\",3000,25); R_Date(\"d125\",3000,25); R_Date(\"d126\",3000,25); R_Date(\"d127\",3000,25); R_Date(\"d128\",3000,25); R_Date(\"d129\",3000,25); R_Date(\"d130\",3000,25); R_Date(\"d131\",3000,25); R_Date(\"d132\",3000,25); R_Date(\"d133\",3000,25); R_Date(\"d134\",3000,25); R_Date(\"d135\",3000,25); R_Date(\"d136\",3000,25); R_Date(\"d137\",3000,25); R_Date(\"d138\",3000,25); R_Date(\"d139\",3000,25); R_Date(\"d140\",3000,25); R_Date(\"d141\",3000,25); R_Date(\"d142\",3000,25); R_Date(\"d143\",3000,25); R_Date(\"d144\",3000,25); R_Date(\"d145\",3000,25); R_Date(\"d146\",3000,25); R_Date(\"d147\",3000,25); R_Date(\"d148\",3000,25); R_Date(\"d149\",3000,25); R_Date(\"d150\",3000,25); R_Date(\"d151\",3000,25); R_Date(\"d152\",3000,25); R_Date(\"d153\",3000,25); R_Date(\"d154\",3000,25); R_Date(\"d155\",3000,25); R_Date(\"d156\",3000,25); R_Date(\"d157\",3000,25); R_Date(\"d158\",3000,25); R_Date(\"d159\",3000,25); R_Date(\"d160\",3000,25); R_Date(\"d161\",3000,25); R_Date(\"d162\",3000,25); R_Date(\"d163\",3000,25); R_Date(\"d164\",3000,25); R_Date(\"d165\",3000,25); R_Date(\"d166\",3000,25); R_Date(\"d167\",3000,25); R_Date(\"d168\",3000,25); R_Date(\"d169\",3000,25); R_Date(\"d170\",3000,25); R_Date(\"d171\",3000,25); R_Date(\"d172\",3000,25); R_Date(\"d173\",3000,25); R_Date(\"d174\",3000,25); R_Date(\"d175\",3000,25); R_Date(\"d176\",3000,25); R_Date(\"d177\",3000,25); R_Date(\"d178\",3000,25); R_Date(\"d179\",3000,25); R_Date(\"d180\",3000,25); R_Date(\"d181\",3000,25); R_Date(\"d182\",3000,25); R_Date(\"d183\",3000,25); R_Date(\"d184\",3000,25); R_Date(\"d185\",3000,25); R_Date(\"d186\",3000,25); R_Date(\"d187\",3000,25); R_Date(\"d188\",3000,25); R_Date(\"d189\",3000,25); R_Date(\"d190\",3000,25); R_Date(\"d191\",3000,25); R_Date(\"d192\",3000,25); R_Date(\"d193\",3000,25); R_Date(\"d194\",3000,25); R_Date(\"d195\",3000,25); R_Date(\"d196\",3000,25); R_Date(\"d197\",3000,25); R_Date(\"d198\",3000,25); R_Date(\"d199\",3000,25); R_Date(\"d200\",3000,25); R_Date(\"d201\",3000,25); R_Date(\"d202\",3000,25); R_Date(\"d203\",3000,25); R_Date(\"d204\",3000,25); R_Date(\"d205\",3000,25); R_Date(\"d206\",3000,25); R_Date(\"d207\",3000,25); R_Date(\"d208\",3000,25); R_Date(\"d209\",3000,25); R_Date(\"d210\",3000,25); R_Date(\"d211\",3000,25); R_Date(\"d212\",3000,25); R_Date(\"d213\",3000,25); R_Date(\"d214\",3000,25); R_Date(\"d215\",3000,25); R_Date(\"d216\",3000,25); R_Date(\"d217\",3000,25); R_Date(\"d218\",3000,25); R_Date(\"d219\",3000,25); R_Date(\"d220\",3000,25); R_Date(\"d221\",3000,25); R_Date(\"d222\",3000,25); R_Date(\"d223\",3000,25); R_Date(\"d224\",3000,25); R_Date(\"d225\",3000,25); R_Date(\"d226\",3000,25); R_Date(\"d227\",3000,25); R_Date(\"d228\",3000,25); R_Date(\"d229\",3000,25); R_Date(\"d230\",3000,25); R_Date(\"d231\",3000,25); R_Date(\"d232\",3000,25); R_Date(\"d233\",3000,25); R_Date(\"d234\",3000,25); R_Date(\"d235\",3000,25); R_Date(\"d236\",3000,25); R_Date(\"d237\",3000,25); R_Date(\"d238\",3000,25); R_Date(\"d239\",3000,25); R_Date(\"d240\",3000,25); R_Date(\"d241\",3000,25); R_Date(\"d242\",3000,25); R_Date(\"d243\",3000,25); R_Date(\"d244\",3000,25); R_Date(\"d245\",3000,25); R_Date(\"d246\",3000,25); R_Date(\"d247\",3000,25); R_Date(\"d248\",3000,25); R_Date(\"d249\",3000,25); R_Date(\"d250\",3000,25); R_Date(\"d251\",3000,25); R_Date(\"d252\",3000,25); R_Date(\"d253\",3000,25); R_Date(\"d254\",3000,25); R_Date(\"d255\",3000,25); R_Date(\"d256\",3000,25); R_Date(\"d257\",3000,25); R_Date(\"d258\",3000,25); R_Date(\"d259\",3000,25); R_Date(\"d260\",3000,25); R_Date(\"d261\",3000,25); R_Date(\"d262\",3000,25); R_Date(\"d263\",3000,25); R_Date(\"d264\",3000,25); R_Date(\"d265\",3000,25); R_Date(\"d266\",3000,25); R_Date(\"d267\",3000,25); R_Date(\"d268\",3000,25); R_Date(\"d269\",3000,25); R_Date(\"d270\",3000,25); R_Date(\"d271\",3000,25); R_Date(\"d272\",3000,25); R_Date(\"d273\",3000,25); R_Date(\"d274\",3000,25); R_Date(\"d275\",3000,25); R_Date(\"d276\",3000,25); R_Date(\"d277\",3000,25); R_Date(\"d278\",3000,25); R_Date(\"d279\",3000,25); R_Date(\"d280\",3000,25); R_Date(\"d281\",3000,25); R_Date(\"d282\",3000,25); R_Date(\"d283\",3000,25); R_Date(\"d284\",3000,25); R_Date(\"d285\",3000,25); R_Date(\"d286\",3000,25); R_Date(\"d287\",3000,25); R_Date(\"d288\",3000,25); R_Date(\"d289\",3000,25); R_Date(\"d290\",3000,25); R_Date(\"d291\",3000,25); R_Date(\"d292\",3000,25); R_Date(\"d293\",3000,25); R_Date(\"d294\",3000,25); R_Date(\"d295\",3000,25); R_Date(\"d296\",3000,25); R_Date(\"d297\",3000,25); R_Date(\"d298\",3000,25); R_Date(\"d299\",3000,25); R_Date(\"d300\",3000,25); R_Date(\"d301\",3000,25); R_Date(\"d302\",3000,25); R_Date(\"d303\",3000,25); R_Date(\"d304\",3000,25); R_Date(\"d305\",3000,25); R_Date(\"d306\",3000,25); R_Date(\"d307\",3000,25); R_Date(\"d308\",3000,25); R_Date(\"d309\",3000,25); R_Date(\"d310\",3000,25); R_Date(\"d311\",3000,25); R_Date(\"d312\",3000,25); R_Date(\"d313\",3000,25); R_Date(\"d314\",3000,25); R_Date(\"d315\",3000,25); R_Date(\"d316\",3000,25); R_Date(\"d317\",3000,25); R_Date(\"d318\",3000,25); R_Date(\"d319\",3000,25); R_Date(\"d320\",3000,25); R_Date(\"d321\",3000,25); R_Date(\"d322\",3000,25); R_Date(\"d323\",3000,25); R_Date(\"d324\",3000,25); R_Date(\"d325\",3000,25); R_Date(\"d326\",3000,25); R_Date(\"d327\",3000,25); R_Date(\"d328\",3000,25); R_Date(\"d329\",3000,25); R_Date(\"d330\",3000,25); R_Date(\"d331\",3000,25); R_Date(\"d332\",3000,25); R_Date(\"d333\",3000,25); R_Date(\"d334\",3000,25); R_Date(\"d335\",3000,25); R_Date(\"d336\",3000,25); R_Date(\"d337\",3000,25); R_Date(\"d338\",3000,25); R_Date(\"d339\",3000,25); R_Date(\"d340\",3000,25); R_Date(\"d341\",3000,25); R_Date(\"d342\",3000,25); R_Date(\"d343\",3000,25); R_Date(\"d344\",3000,25); R_Date(\"d345\",3000,25); R_Date(\"d346\",3000,25); R_Date(\"d347\",3000,25); R_Date(\"d348\",3000,25); R_Date(\"d349\",3000,25); R_Date(\"d350\",3000,25); R_Date(\"d351\",3000,25); R_Date(\"d352\",3000,25); R_Date(\"d353\",3000,25); R_Date(\"d354\",3000,25); R_Date(\"d355\",3000,25); R_Date(\"d356\",3000,25); R_Date(\"d357\",3000,25); R_Date(\"d358\",3000,25); R_Date(\"d359\",3000,25); R_Date(\"d360\",3000,25); R_Date(\"d361\",3000,25); R_Date(\"d362\",3000,25); R_Date(\"d363\",3000,25); R_Date(\"d364\",3000,25); R_Date(\"d365\",3000,25); R_Date(\"d366\",3000,25); R_Date(\"d367\",3000,25); R_Date(\"d368\",3000,25); R_Date(\"d369\",3000,25); R_Date(\"d370\",3000,25); R_Date(\"d371\",3000,25); R_Date(\"d372\",3000,25); R_Date(\"d373\",3000,25); R_Date(\"d374\",3000,25); R_Date(\"d375\",3000,25); R_Date(\"d376\",3000,25); R_Date(\"d377\",3000,25); R_Date(\"d378\",3000,25); R_Date(\"d379\",3000,25); R_Date(\"d380\",3000,25); R_Date(\"d381\",3000,25); R_Date(\"d382\",3000,25); R_Date(\"d383\",3000,25); R_Date(\"d384\",3000,25); R_Date(\"d385\",3000,25); R_Date(\"d386\",3000,25); R_Date(\"d387\",3000,25); R_Date(\"d388\",3000,25); R_Date(\"d389\",3000,25); R_Date(\"d390\",3000,25); R_Date(\"d391\",3000,25); R_Date(\"d392\",3000,25); R_Date(\"d393\",3000,25); R_Date(\"d394\",3000,25); R_Date(\"d395\",3000,25); R_Date(\"d396\",3000,25); R_Date(\"d397\",3000,25); R_Date(\"d398\",3000,25); R_Date(\"d399\",3000,25); R_Date(\"d400\",3000,25); R_Date(\"d401\",3000,25); R_Date(\"d402\",3000,25); R_Date(\"d403\",3000,25); R_Date(\"d404\",3000,25); R_Date(\"d405\",3000,25); R_Date(\"d406\",3000,25); R_Date(\"d407\",3000,25); R_Date(\"d408\",3000,25); R_Date(\"d409\",3000,25); R_Date(\"d410\",3000,25); R_Date(\"d411\",3000,25); R_Date(\"d412\",3000,25); R_Date(\"d413\",3000,25); R_Date(\"d414\",3000,25); R_Date(\"d415\",3000,25); R_Date(\"d416\",3000,25); R_Date(\"d417\",3000,25); R_Date(\"d418\",3000,25); R_Date(\"d419\",3000,25); R_Date(\"d420\",3000,25); R_Date(\"d421\",3000,25); R_Date(\"d422\",3000,25); R_Date(\"d423\",3000,25); R_Date(\"d424\",3000,25); R_Date(\"d425\",3000,25); R_Date(\"d426\",3000,25); R_Date(\"d427\",3000,25); R_Date(\"d428\",3000,25); R_Date(\"d429\",3000,25); R_Date(\"d430\",3000,25); R_Date(\"d431\",3000,25); R_Date(\"d432\",3000,25); R_Date(\"d433\",3000,25); R_Date(\"d434\",3000,25); R_Date(\"d435\",3000,25); R_Date(\"d436\",3000,25); R_Date(\"d437\",3000,25); R_Date(\"d438\",3000,25); R_Date(\"d439\",3000,25); R_Date(\"d440\",3000,25); R_Date(\"d441\",3000,25); R_Date(\"d442\",3000,25); R_Date(\"d443\",3000,25); R_Date(\"d444\",3000,25); R_Date(\"d445\",3000,25); R_Date(\"d446\",3000,25); R_Date(\"d447\",3000,25); R_Date(\"d448\",3000,25); R_Date(\"d449\",3000,25); R_Date(\"d450\",3000,25); R_Date(\"d451\",3000,25); R_Date(\"d452\",3000,25); R_Date(\"d453\",3000,25); R_Date(\"d454\",3000,25); R_Date(\"d455\",3000,25); R_Date(\"d456\",3000,25); R_Date(\"d457\",3000,25); R_Date(\"d458\",3000,25); R_Date(\"d459\",3000,25); R_Date(\"d460\",3000,25); R_Date(\"d461\",3000,25); R_Date(\"d462\",3000,25); R_Date(\"d463\",3000,25); R_Date(\"d464\",3000,25); R_Date(\"d465\",3000,25); R_Date(\"d466\",3000,25); R_Date(\"d467\",3000,25); R_Date(\"d468\",3000,25); R_Date(\"d469\",3000,25); R_Date(\"d470\",3000,25); R_Date(\"d471\",3000,25); R_Date(\"d472\",3000,25); R_Date(\"d473\",3000,25); R_Date(\"d474\",3000,25); R_Date(\"d475\",3000,25); R_Date(\"d476\",3000,25); R_Date(\"d477\",3000,25); R_Date(\"d478\",3000,25); R_Date(\"d479\",3000,25); R_Date(\"d480\",3000,25); R_Date(\"d481\",3000,25); R_Date(\"d482\",3000,25); R_Date(\"d483\",3000,25); R_Date(\"d484\",3000,25); R_Date(\"d485\",3000,25); R_Date(\"d486\",3000,25); R_Date(\"d487\",3000,25); R_Date(\"d488\",3000,25); R_Date(\"d489\",3000,25); R_Date(\"d490\",3000,25); R_Date(\"d491\",3000,25); R_Date(\"d492\",3000,25); R_Date(\"d493\",3000,25); R_Date(\"d494\",3000,25); R_Date(\"d495\",3000,25); R_Date(\"d496\",3000,25); R_Date(\"d497\",3000,25); R_Date(\"d498\",3000,25); R_Date(\"d499\",3000,25); R_Date(\"d500\",3000,25); }; Boundary(); }; }"
+ },
+ {
+  "filename": "t.oxcal",
+  "text": "Plot(){ Sequence(){ Boundary(); Phase(\"A\"){ R_Simulate(\"s\",-1000,25); R_Date(\"a\",2900,25); }; Boundary(); }; }"
+ },
+ {
+  "filename": "t.oxcal",
+  "text": "Plot(){ Curve(\"Marine20\",\"marine20.14c\"); Delta_R(\"local\",-162,28); Phase(\"M\"){ R_Simulate(\"shell\",-1000,20); }; }"
+ },
+ {
+  "filename": "t.oxcal",
+  "text": "Plot(){ Phase(\"A\"){ R_Simulate(\"s\",-80000,25); R_Date(\"a\",2900,25); }; }"
+ },
+ {
+  "filename": "t.oxcal",
+  "text": "// a leading comment\n/* and a block\n   one */\nPlot(){ Phase(\"A\"){ R_Date(\"a\",3000,25); }; }"
+ },
+ {
+  "filename": "model.oxcal",
+  "text": "Plot(){ R_Date(\"a\",3000,25); }"
+ },
+ {
+  "filename": "model.txt",
+  "text": "Plot(){ R_Date(\"a\",3000,25); }"
+ },
+ {
+  "filename": "Timber_D_Sequence.oxcal",
+  "fixture": "backend/tests/fixtures/oxcal_wiggle/Timber_D_Sequence.oxcal"
+ },
+ {
+  "filename": "Varves_V_Sequence.oxcal",
+  "fixture": "backend/tests/fixtures/oxcal_wiggle/Varves_V_Sequence.oxcal"
+ },
+ {
+  "filename": "t.oxcal",
+  "text": "Plot(){ D_Sequence(\"d\"){ R_Date(\"a\",2500,25); R_Date(\"b\",2520,25); }; }"
+ },
+ {
+  "filename": "t.oxcal",
+  "text": "Plot(){ Phase(\"A\"){ R_Date(\"a\",3000,25); Gap(10); R_Date(\"b\",3010,25); }; }"
+ },
+ {
+  "filename": "t.oxcal",
+  "text": "Plot(){ D_Sequence(\"d\"){ R_Date(\"a\",2500,25); Gap(10); R_Date(\"b\",2520,25); Boundary(\"Felling\"); }; }"
+ },
+ {
+  "filename": "t.oxcal",
+  "text": "Plot(){ Sequence(){ Boundary(\"Start\"); D_Sequence(\"d\"){ R_Date(\"a\",2500,25); Gap(10); R_Date(\"b\",2520,25); }; Boundary(\"End\"); }; }"
+ },
+ {
+  "filename": "t.oxcal",
+  "text": "Plot(){ D_Sequence(\"d\"){ R_Date(\"a\",2500,25); Gap(10); R_Date(\"b\",2520,25); Gap(12); }; }"
+ },
+ {
+  "filename": "Core_P_Sequence.oxcal",
+  "fixture": "backend/tests/fixtures/oxcal_wiggle/Core_P_Sequence.oxcal"
+ },
+ {
+  "filename": "t.oxcal",
+  "text": "Plot(){ P_Sequence(\"c\",10,0,U(-1,1)){ R_Date(\"a\",2500,25){z=20;}; R_Date(\"b\",2400,25){z=10;}; }; }"
+ },
+ {
+  "filename": "t.oxcal",
+  "text": "Plot(){ P_Sequence(\"c\",1){ R_Date(\"a\",2500,25){z=20;}; R_Date(\"b\",2400,25){z=10;}; }; }"
+ },
+ {
+  "filename": "t.oxcal",
+  "text": "Plot(){ P_Sequence(\"c\",1){ R_Date(\"a\",2500,25){z=20;}; R_Date(\"b\",2400,25); }; }"
+ },
+ {
+  "filename": "t.oxcal",
+  "text": "Plot(){ P_Sequence(\"c\",1){ R_Date(\"a\",2500,25){z=20;}; Date(\"tephra\"){z=15;}; R_Date(\"b\",2400,25){z=10;}; }; }"
+ },
+ {
+  "filename": "t.oxcal",
+  "text": "Plot(){ Phase(\"A\"){ R_Date(\"a\",3000,25); Date(\"d\"); }; }"
+ },
+ {
+  "filename": "t.oxcal",
+  "text": "Plot(){ P_Sequence(\"c\",1){ Boundary(\"Base\"){z=30;}; R_Date(\"a\",2500,25){z=20;}; R_Date(\"b\",2400,25){z=10;}; Boundary(\"Top\"){z=0;}; }; }"
+ },
+ {
+  "filename": "t.oxcal",
+  "text": "Plot(){ P_Sequence(\"c\",1){ R_Date(\"a\",2400,25){z=10;}; R_Date(\"b\",2500,25){z=20;}; }; }"
+ },
+ {
+  "filename": "t.oxcal",
+  "text": "Plot(){ P_Sequence(\"c\",1){ Date(\"a\"){z=20;}; Date(\"b\"){z=10;}; }; }"
+ },
+ {
+  "filename": "t.oxcal",
+  "text": "Plot(){ Phase(\"A\"){ R_Combine(\"pooled\"){ R_Date(\"a\",3000,25); R_Date(\"b\",3020,25); }; R_Date(\"c\",3100,30); }; }"
+ },
+ {
+  "filename": "t.oxcal",
+  "text": "Plot(){ Phase(\"A\"){ R_Combine(\"p\"){ R_Date(\"a\",3000,20); R_Date(\"b\",3040,30); R_Date(\"c\",3010,25); }; }; }"
+ },
+ {
+  "filename": "t.oxcal",
+  "text": "Plot(){ Phase(\"A\"){ R_Combine(\"shells\"){ Curve(\"Marine20\",\"marine20.14c\"); Delta_R(\"local\",-162,28); R_Date(\"a\",3000,25); R_Date(\"b\",3010,25); }; }; }"
+ },
+ {
+  "filename": "t.oxcal",
+  "text": "Plot(){ Phase(\"A\"){ R_Combine(\"mixed\"){ R_Date(\"a\",3000,25); R_Date(\"b\",3400,25); }; }; }"
+ },
+ {
+  "filename": "t.oxcal",
+  "text": "Plot(){ Curve(\"Marine20\",\"marine20.14c\"); Phase(\"A\"){ R_Combine(\"p\"){ R_Date(\"a\",3000,25){ Delta_R(\"x\",-100,20); }; R_Date(\"b\",3010,25){ Delta_R(\"y\",-150,20); }; }; }; }"
+ },
+ {
+  "filename": "t.oxcal",
+  "text": "Plot(){ Phase(\"A\"){ R_Combine(\"p\"){ Outlier(0.1); R_Date(\"a\",3000,25); R_Date(\"b\",3010,25); }; }; }"
+ },
+ {
+  "filename": "t.oxcal",
+  "text": "Plot(){ Phase(\"A\"){ R_Combine(\"p\"){ R_Date(\"a\",3000,25){ Outlier(0.1); }; R_Date(\"b\",3010,25); }; }; }"
+ },
+ {
+  "filename": "t.oxcal",
+  "text": "Plot(){ Phase(\"A\"){ R_Combine(\"p\", 10){ R_Date(\"a\",3000,25); R_Date(\"b\",3010,25); }; }; }"
+ },
+ {
+  "filename": "t.oxcal",
+  "text": "Plot(){ Sequence(){ Boundary(\"S\"); R_Combine(\"p\"){ R_Date(\"a\",3000,25); R_Date(\"b\",3010,25); }; R_Date(\"c\",2900,25); Boundary(\"E\"); }; }"
+ },
+ {
+  "filename": null,
+  "text": "/*\n  Hillside\n  Exported from RadiCal on 2026-10-20.\n*/\nOptions()\n{\n  Resolution=10;\n};\nPlot()\n{\n  Outlier_Model(\"Charcoal\",Exp(1,-10,0),U(0,3),\"t\");\n  Outlier_Model(\"General\",T(5),U(0,4),\"t\");\n  Curve(\"Marine20\",\"marine20.14c\");\n  Curve(\"SHCal20\",\"shcal20.14c\");\n  Delta_R(\"LocalMarine\",-7,45);\n  Delta_R(\"None\",0,0);\n  Sequence(\"Hillside\")\n  {\n    Boundary(\"Start\");\n    Phase(\"Layer 3\")\n    {\n      Curve(\"SHCal20\");\n      Delta_R(\"=None\", );\n      R_Date(\"LA10003\",702,25)\n      {\n        Outlier(\"General\",0.05);\n      };\n      Curve(\"Marine20\");\n      Delta_R(\"=LocalMarine\", );\n      R_Date(\"LB-10002\",970,25);\n    };\n    Boundary(\"Transition\");\n    Phase(\"Layer 2\")\n    {\n      Curve(\"SHCal20\");\n      Delta_R(\"=None\", );\n      R_Date(\"LA10001\",614,25)\n      {\n        Outlier(\"Charcoal\",1);\n      };\n      R_Date(\"LA10002\",640,25);\n    };\n    Boundary(\"End\");\n  };\n};\n"
+ },
+ {
+  "filename": null,
+  "text": "/*\n  Group\n  Exported from RadiCal on 2026-10-20.\n*/\nPlot()\n{\n  Curve(\"IntCal20\",\"intcal20.14c\");\n  Curve(\"SHCal20\",\"shcal20.14c\");\n  Curve(\"SHCal20\");\n  R_Date(\"G1\",656,25);\n  Curve(\"IntCal20\");\n  R_Date(\"G2\",660,25);\n};\n"
+ },
+ {
+  "filename": null,
+  "text": "/*\n  Timber\n  Exported from RadiCal on 2026-10-20.\n*/\nPlot()\n{\n  Curve(\"SHCal20\",\"shcal20.14c\");\n  D_Sequence(\"Timber 1\")\n  {\n    Curve(\"SHCal20\");\n    R_Date(\"R0\",2500,25);\n    Gap(40);\n    R_Date(\"R1\",2490,25);\n    Gap(40);\n    R_Date(\"R2\",2480,25);\n    Gap(20);\n    R_Date(\"R3\",2470,25);\n  };\n};\n"
+ },
+ {
+  "filename": null,
+  "text": "/*\n  Varves\n  Exported from RadiCal on 2026-10-20.\n*/\nPlot()\n{\n  Curve(\"SHCal20\",\"shcal20.14c\");\n  V_Sequence(\"Varves\")\n  {\n    Curve(\"SHCal20\");\n    R_Date(\"V0\",3000,25);\n    Gap(100,4);\n    R_Date(\"V1\",2980,25);\n    Gap(100,3);\n    R_Date(\"V2\",2960,25);\n  };\n};\n"
+ },
+ {
+  "filename": null,
+  "text": "/*\n  Core\n  Exported from RadiCal on 2026-10-20.\n*/\nPlot()\n{\n  Curve(\"SHCal20\",\"shcal20.14c\");\n  P_Sequence(\"Core\",0.5,1)\n  {\n    Curve(\"SHCal20\");\n    R_Date(\"100 cm\",2000,25)\n    {\n      z=100;\n    };\n    R_Date(\"60 cm\",2400,25)\n    {\n      z=60;\n    };\n    Date(\"47 cm\")\n    {\n      z=47;\n    };\n    R_Date(\"20 cm\",2800,25)\n    {\n      z=20;\n    };\n  };\n};\n"
+ },
+ {
+  "filename": null,
+  "text": "/*\n  Core\n  Exported from RadiCal on 2026-10-20.\n*/\nPlot()\n{\n  Curve(\"SHCal20\",\"shcal20.14c\");\n  P_Sequence(\"Core\",1,1,U(-1.5,1))\n  {\n    Curve(\"SHCal20\");\n    R_Date(\"60 cm\",2400,25)\n    {\n      z=60;\n    };\n    R_Date(\"20 cm\",2800,25)\n    {\n      z=20;\n    };\n  };\n};\n"
+ },
+ {
+  "filename": null,
+  "text": "/*\n  S\n  Exported from RadiCal on 2026-10-20.\n*/\nPlot()\n{\n  Curve(\"SHCal20\",\"shcal20.14c\");\n  Sequence(\"S\")\n  {\n    Boundary(\"End of A\");\n    /* Hiatus Abandonment: in OxCal the gap is the two Boundaries either side of it. */\n    Boundary(\"Start of B\");\n    Phase(\"B\")\n    {\n      Curve(\"SHCal20\");\n      R_Date(\"X\",600,25);\n    };\n    Boundary(\"End\");\n  };\n};\n"
+ },
+ {
+  "filename": null,
+  "text": "/*\n  S\n  Exported from RadiCal on 2026-10-20.\n*/\nOptions()\n{\n  Resolution=5;\n};\nPlot()\n{\n  Curve(\"Marine20\",\"marine20.14c\");\n  Curve(\"SHCal20\",\"shcal20.14c\");\n  Delta_R(\"LocalMarine\",-7,45);\n  Delta_R(\"None\",0,0);\n  Sequence(\"S\")\n  {\n    Boundary(\"Start\");\n    Phase(\"A\")\n    {\n      Curve(\"SHCal20\");\n      Delta_R(\"=None\", );\n      R_Date(\"A1\",702,25);\n      Curve(\"Marine20\");\n      Delta_R(\"=LocalMarine\", );\n      R_Date(\"A2\",970,25);\n    };\n    Boundary(\"Mid\");\n    Phase(\"B\")\n    {\n      Curve(\"SHCal20\");\n      Delta_R(\"=None\", );\n      R_Date(\"B1\",614,25);\n      Curve(\"Marine20\");\n      Delta_R(\"=None\", );\n      R_Date(\"B2\",640,25);\n    };\n    Boundary(\"End\");\n  };\n};\n"
+ },
+ {
+  "filename": null,
+  "text": "/*\n  G\n  Exported from RadiCal on 2026-10-20.\n*/\nPlot()\n{\n  Curve(\"Marine20\",\"marine20.14c\");\n  Delta_R(\"LocalMarine1\",-7,45);\n  Delta_R(\"LocalMarine2\",30,20);\n  Curve(\"Marine20\");\n  Delta_R(\"=LocalMarine1\", );\n  R_Date(\"M1\",900,25);\n  Curve(\"Marine20\");\n  Delta_R(\"=LocalMarine2\", );\n  R_Date(\"M2\",950,25);\n};\n"
+ },
+ {
+  "filename": null,
+  "text": "/*\n  S\n  Exported from RadiCal on 2026-10-20.\n  Not written, because OxCal's language here cannot say it:\n    - Phase Layer: TPQ 900 cal BP, TAQ 400 cal BP\n    - Date X: TPQ 800 cal BP\n    - Date X: inbuilt age up to 50 years (exponential)\n*/\nPlot()\n{\n  Curve(\"SHCal20\",\"shcal20.14c\");\n  Sequence(\"S\")\n  {\n    Boundary(\"Start\");\n    Phase(\"Layer\")\n    {\n      Curve(\"SHCal20\");\n      R_Date(\"X\",600,25);\n    };\n    Boundary(\"End\");\n  };\n};\n"
+ },
+ {
+  "filename": null,
+  "text": "/*\n  P\n  Exported from RadiCal on 2026-10-20.\n*/\nPlot()\n{\n  Curve(\"SHCal20\",\"shcal20.14c\");\n  Phase(\"Pit 'A'\")\n  {\n    Curve(\"SHCal20\");\n    R_Date(\"X '1'\",600,25);\n  };\n};\n"
+ },
+ {
+  "filename": null,
+  "text": "/*\n  Site / model\n  Exported from RadiCal (08fdb5c4f5d6) on 2026-10-20.\n  Not written, because OxCal's language here cannot say it:\n    - Sequence Site: TPQ 900 cal BP, TAQ 400 cal BP\n*/\nOptions()\n{\n  Resolution=10;\n};\nPlot()\n{\n  Curve(\"SHCal20\",\"shcal20.14c\");\n  Sequence(\"Site\")\n  {\n    Boundary(\"Start\");\n    Phase(\"Layer\")\n    {\n      Curve(\"SHCal20\");\n      R_Date(\"LA0\",614,25);\n      R_Date(\"LA1\",640,25);\n      R_Date(\"LA2\",655,25);\n    };\n    Boundary(\"End\");\n  };\n};\n"
+ },
+ {
+  "filename": null,
+  "text": "/*\n  M\n  Exported from RadiCal on 2026-10-20.\n  Curves other than IntCal20, SHCal20 and Marine20 must be loaded into OxCal under the file names given.\n*/\nPlot()\n{\n  Curve(\"Ox parent 2\",\"oxparent1.14c\");\n  Curve(\"IntCal20\",\"intcal20.14c\");\n  Mix_Curves(\"Ox mix 3\",\"Ox parent 2\",\"IntCal20\",30,5);\n  Delta_R(\"LocalMarine\",10,5);\n  Curve(\"Ox mix 3\");\n  Delta_R(\"=LocalMarine\", );\n  R_Date(\"Bone\",500,25);\n};\n"
+ },
+ {
+  "filename": "diet.oxcal",
+  "text": "Plot(){ Mix_Curves(\"diet\",\"IntCal20\",\"Marine20\",31,11); Curve(\"=diet\"); Phase(\"A\"){ R_Date(\"a\",3000,25); }; };"
+ },
+ {
+  "filename": "flip.oxcal",
+  "text": "Plot(){ Mix_Curves(\"d\",\"IntCal20\",\"Marine20\",32,12); Curve(\"=d\"); Phase(\"A\"){ R_Date(\"a\",3000,25); }; };"
+ },
+ {
+  "filename": null,
+  "text": "Plot(){ Mix_Curves(\"d\",\"IntCal20\",\"Marine20\",42,7); Curve(\"=d\"); Phase(\"A\"){ R_Date(\"a\",3000,25); }; };"
+ },
+ {
+  "filename": null,
+  "text": "Plot(){ Mix_Curves(\"d\",\"IntCal20\",\"Marine20\",30,10); Curve(\"=d\"); Phase(\"A\"){ R_Date(\"a\",3000,25); }; };"
+ },
+ {
+  "filename": "DS_Layers.oxcal",
+  "fixture": "backend/tests/fixtures/oxcal_resolution/DS_Layers.oxcal"
+ },
+ {
+  "filename": "DS_Layers_res1.oxcal",
+  "fixture": "backend/tests/fixtures/oxcal_resolution/DS_Layers_res1.oxcal"
+ },
+ {
+  "filename": "Dune_Section_res1.oxcal",
+  "fixture": "backend/tests/fixtures/oxcal_resolution/Dune_Section_res1.oxcal"
+ },
+ {
+  "filename": "Hillside_sites_3_res1.oxcal",
+  "fixture": "backend/tests/fixtures/oxcal_resolution/Hillside_sites_3_res1.oxcal"
+ }
+]

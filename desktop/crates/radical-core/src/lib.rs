@@ -31,6 +31,7 @@ pub mod curve_registry;
 pub mod curve_view;
 pub mod curves;
 pub mod date_format;
+pub mod dispersal;
 pub mod exact_chain;
 pub mod exact_parallel;
 pub mod gibbs;

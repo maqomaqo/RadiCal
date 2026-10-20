@@ -1,12 +1,87 @@
 //! The arithmetic of a local marine reservoir offset taken from the reservoir
-//! database: distances between points and the weighted mean of nearby
-//! Delta-R values. A port of `haversine_km` and `combine` from
+//! database: the feeding classes its organisms are filed under, distances
+//! between points and the weighted mean of nearby Delta-R values. A port of
+//! `normalise_feeding`, `haversine_km` and `combine` from
 //! `backend/app/services/reservoir.py`. It needs no network: a mirror of the
 //! database is what lets a site's Delta-R be derived without sending its
 //! coordinates to a third party on every lookup.
 
 use crate::numeric::python_sum;
 use crate::py_pow;
+
+/// The classes a point's feeding habit is filed under. 'unknown' is a real
+/// answer, not a suspect class.
+pub const FEEDING_CLASSES: [&str; 7] = [
+    "suspension",
+    "deposit",
+    "carnivore",
+    "grazer",
+    "migratory",
+    "ambiguous",
+    "unknown",
+];
+
+/// Every spelling the source has used (lowercased, stripped) -> class.
+const FEEDING_SPELLINGS: [(&str, &str); 15] = [
+    ("suspension", "suspension"),
+    ("filter", "suspension"),
+    ("deposit", "deposit"),
+    ("carnivore", "carnivore"),
+    ("predator", "carnivore"),
+    ("scavenger", "carnivore"),
+    ("omnivore", "carnivore"),
+    ("herbivore", "grazer"),
+    ("browser", "grazer"),
+    ("algal grazer", "grazer"),
+    ("commensalism", "grazer"),
+    ("migratory", "migratory"),
+    ("unknown", "unknown"),
+    ("null", "unknown"),
+    ("", "unknown"),
+];
+
+/// Compound judgements the source truncates at sixteen characters, matched
+/// as prefixes: they cannot be filed under one class without deciding what
+/// their author declined to.
+pub const AMBIGUOUS_PREFIXES: [&str; 5] = [
+    "deposit or suspe",
+    "suspension/depos",
+    "deposit feeder o",
+    "herbivore/deposi",
+    "carnivore/scaven",
+];
+
+/// Python's `str.strip().lower()`.
+fn folded(raw: &str) -> String {
+    raw.trim_matches(|c: char| c.is_whitespace() || ('\u{1c}'..='\u{1f}').contains(&c))
+        .to_lowercase()
+}
+
+/// One of [`FEEDING_CLASSES`], from whatever the source said. Prefixes
+/// first: 'deposit or suspe' starts with 'deposit', and is a hedge.
+pub fn normalise_feeding(raw: Option<&str>) -> &'static str {
+    let Some(raw) = raw else { return "unknown" };
+    let text = folded(raw);
+    if text.is_empty() {
+        return "unknown";
+    }
+    if AMBIGUOUS_PREFIXES.iter().any(|p| text.starts_with(p)) {
+        return "ambiguous";
+    }
+    FEEDING_SPELLINGS
+        .iter()
+        .find(|(k, _)| *k == text)
+        .map_or("unknown", |(_, v)| v)
+}
+
+/// Whether the source's spelling is one the table knows, as distinct from a
+/// novel one that also normalises to 'unknown'.
+pub fn is_recognised_feeding(raw: Option<&str>) -> bool {
+    let Some(raw) = raw else { return true };
+    let text = folded(raw);
+    AMBIGUOUS_PREFIXES.iter().any(|p| text.starts_with(p))
+        || FEEDING_SPELLINGS.iter().any(|(k, _)| *k == text)
+}
 
 /// Mean Earth radius, IUGG. The same figure calib.org's "nearest points"
 /// ranks by, so the point list this produces is the one their page would show

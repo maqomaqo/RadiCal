@@ -1,0 +1,1313 @@
+[
+ {
+  "name": "Hillside",
+  "analysis_type": "bayesian",
+  "measurements": [
+   {
+    "sample_name": "LA10003",
+    "age_bp": 702,
+    "error_1sigma": 25,
+    "curve_id": "shcal20",
+    "delta_r": null,
+    "delta_r_error": null,
+    "outlier_prior": 0.05,
+    "outlier_model": "general",
+    "depth_cm": null,
+    "ring_offset": null,
+    "ring_offset_error": null,
+    "tpq_age_bp": null,
+    "taq_age_bp": null,
+    "inbuilt_years": null,
+    "inbuilt_shape": null,
+    "element_id": "p3"
+   },
+   {
+    "sample_name": "LB-10002",
+    "age_bp": 970,
+    "error_1sigma": 25,
+    "curve_id": "marine20",
+    "delta_r": -7,
+    "delta_r_error": 45,
+    "outlier_prior": null,
+    "outlier_model": null,
+    "depth_cm": null,
+    "ring_offset": null,
+    "ring_offset_error": null,
+    "tpq_age_bp": null,
+    "taq_age_bp": null,
+    "inbuilt_years": null,
+    "inbuilt_shape": null,
+    "element_id": "p3"
+   },
+   {
+    "sample_name": "LA10001",
+    "age_bp": 614,
+    "error_1sigma": 25,
+    "curve_id": "shcal20",
+    "delta_r": null,
+    "delta_r_error": null,
+    "outlier_prior": 1.0,
+    "outlier_model": "charcoal",
+    "depth_cm": null,
+    "ring_offset": null,
+    "ring_offset_error": null,
+    "tpq_age_bp": null,
+    "taq_age_bp": null,
+    "inbuilt_years": null,
+    "inbuilt_shape": null,
+    "element_id": "p2"
+   },
+   {
+    "sample_name": "LA10002",
+    "age_bp": 640,
+    "error_1sigma": 25,
+    "curve_id": "shcal20",
+    "delta_r": null,
+    "delta_r_error": null,
+    "outlier_prior": null,
+    "outlier_model": null,
+    "depth_cm": null,
+    "ring_offset": null,
+    "ring_offset_error": null,
+    "tpq_age_bp": null,
+    "taq_age_bp": null,
+    "inbuilt_years": null,
+    "inbuilt_shape": null,
+    "element_id": "p2"
+   }
+  ],
+  "tree": {
+   "id": "root",
+   "element_type": "sequence",
+   "name": "Hillside",
+   "tpq_age_bp": null,
+   "taq_age_bp": null,
+   "children": [
+    {
+     "id": "b0",
+     "element_type": "boundary",
+     "name": "Start",
+     "tpq_age_bp": null,
+     "taq_age_bp": null,
+     "children": []
+    },
+    {
+     "id": "p3",
+     "element_type": "phase",
+     "name": "Layer 3",
+     "tpq_age_bp": null,
+     "taq_age_bp": null,
+     "children": []
+    },
+    {
+     "id": "b1",
+     "element_type": "boundary",
+     "name": "Transition",
+     "tpq_age_bp": null,
+     "taq_age_bp": null,
+     "children": []
+    },
+    {
+     "id": "p2",
+     "element_type": "phase",
+     "name": "Layer 2",
+     "tpq_age_bp": null,
+     "taq_age_bp": null,
+     "children": []
+    },
+    {
+     "id": "b2",
+     "element_type": "boundary",
+     "name": "End",
+     "tpq_age_bp": null,
+     "taq_age_bp": null,
+     "children": []
+    }
+   ]
+  },
+  "config": {
+   "resolution": 10
+  },
+  "app_commit": null
+ },
+ {
+  "name": "Group",
+  "analysis_type": "group_calibration",
+  "measurements": [
+   {
+    "sample_name": "G1",
+    "age_bp": 656,
+    "error_1sigma": 25,
+    "curve_id": "shcal20",
+    "delta_r": null,
+    "delta_r_error": null,
+    "outlier_prior": null,
+    "outlier_model": null,
+    "depth_cm": null,
+    "ring_offset": null,
+    "ring_offset_error": null,
+    "tpq_age_bp": null,
+    "taq_age_bp": null,
+    "inbuilt_years": null,
+    "inbuilt_shape": null,
+    "element_id": null
+   },
+   {
+    "sample_name": "G2",
+    "age_bp": 660,
+    "error_1sigma": 25,
+    "curve_id": "intcal20",
+    "delta_r": null,
+    "delta_r_error": null,
+    "outlier_prior": null,
+    "outlier_model": null,
+    "depth_cm": null,
+    "ring_offset": null,
+    "ring_offset_error": null,
+    "tpq_age_bp": null,
+    "taq_age_bp": null,
+    "inbuilt_years": null,
+    "inbuilt_shape": null,
+    "element_id": null
+   }
+  ],
+  "tree": null,
+  "config": {},
+  "app_commit": null
+ },
+ {
+  "name": "Timber",
+  "analysis_type": "bayesian",
+  "measurements": [
+   {
+    "sample_name": "R0",
+    "age_bp": 2500,
+    "error_1sigma": 25,
+    "curve_id": "shcal20",
+    "delta_r": null,
+    "delta_r_error": null,
+    "outlier_prior": null,
+    "outlier_model": null,
+    "depth_cm": null,
+    "ring_offset": 100.0,
+    "ring_offset_error": null,
+    "tpq_age_bp": null,
+    "taq_age_bp": null,
+    "inbuilt_years": null,
+    "inbuilt_shape": null,
+    "element_id": "w"
+   },
+   {
+    "sample_name": "R1",
+    "age_bp": 2490,
+    "error_1sigma": 25,
+    "curve_id": "shcal20",
+    "delta_r": null,
+    "delta_r_error": null,
+    "outlier_prior": null,
+    "outlier_model": null,
+    "depth_cm": null,
+    "ring_offset": 60.0,
+    "ring_offset_error": null,
+    "tpq_age_bp": null,
+    "taq_age_bp": null,
+    "inbuilt_years": null,
+    "inbuilt_shape": null,
+    "element_id": "w"
+   },
+   {
+    "sample_name": "R2",
+    "age_bp": 2480,
+    "error_1sigma": 25,
+    "curve_id": "shcal20",
+    "delta_r": null,
+    "delta_r_error": null,
+    "outlier_prior": null,
+    "outlier_model": null,
+    "depth_cm": null,
+    "ring_offset": 20.0,
+    "ring_offset_error": null,
+    "tpq_age_bp": null,
+    "taq_age_bp": null,
+    "inbuilt_years": null,
+    "inbuilt_shape": null,
+    "element_id": "w"
+   },
+   {
+    "sample_name": "R3",
+    "age_bp": 2470,
+    "error_1sigma": 25,
+    "curve_id": "shcal20",
+    "delta_r": null,
+    "delta_r_error": null,
+    "outlier_prior": null,
+    "outlier_model": null,
+    "depth_cm": null,
+    "ring_offset": 0.0,
+    "ring_offset_error": null,
+    "tpq_age_bp": null,
+    "taq_age_bp": null,
+    "inbuilt_years": null,
+    "inbuilt_shape": null,
+    "element_id": "w"
+   }
+  ],
+  "tree": {
+   "id": "w",
+   "element_type": "wiggle_sequence",
+   "name": "Timber 1",
+   "tpq_age_bp": null,
+   "taq_age_bp": null,
+   "children": [],
+   "params": {
+    "gap_units": "rings"
+   }
+  },
+  "config": {},
+  "app_commit": null
+ },
+ {
+  "name": "Varves",
+  "analysis_type": "bayesian",
+  "measurements": [
+   {
+    "sample_name": "V0",
+    "age_bp": 3000,
+    "error_1sigma": 25,
+    "curve_id": "shcal20",
+    "delta_r": null,
+    "delta_r_error": null,
+    "outlier_prior": null,
+    "outlier_model": null,
+    "depth_cm": null,
+    "ring_offset": 200.0,
+    "ring_offset_error": 5.0,
+    "tpq_age_bp": null,
+    "taq_age_bp": null,
+    "inbuilt_years": null,
+    "inbuilt_shape": null,
+    "element_id": "w"
+   },
+   {
+    "sample_name": "V1",
+    "age_bp": 2980,
+    "error_1sigma": 25,
+    "curve_id": "shcal20",
+    "delta_r": null,
+    "delta_r_error": null,
+    "outlier_prior": null,
+    "outlier_model": null,
+    "depth_cm": null,
+    "ring_offset": 100.0,
+    "ring_offset_error": 3.0,
+    "tpq_age_bp": null,
+    "taq_age_bp": null,
+    "inbuilt_years": null,
+    "inbuilt_shape": null,
+    "element_id": "w"
+   },
+   {
+    "sample_name": "V2",
+    "age_bp": 2960,
+    "error_1sigma": 25,
+    "curve_id": "shcal20",
+    "delta_r": null,
+    "delta_r_error": null,
+    "outlier_prior": null,
+    "outlier_model": null,
+    "depth_cm": null,
+    "ring_offset": 0.0,
+    "ring_offset_error": null,
+    "tpq_age_bp": null,
+    "taq_age_bp": null,
+    "inbuilt_years": null,
+    "inbuilt_shape": null,
+    "element_id": "w"
+   }
+  ],
+  "tree": {
+   "id": "w",
+   "element_type": "wiggle_sequence",
+   "name": "Varves",
+   "tpq_age_bp": null,
+   "taq_age_bp": null,
+   "children": []
+  },
+  "config": {},
+  "app_commit": null
+ },
+ {
+  "name": "Core",
+  "analysis_type": "bayesian",
+  "measurements": [
+   {
+    "sample_name": "20 cm",
+    "age_bp": 2800,
+    "error_1sigma": 25,
+    "curve_id": "shcal20",
+    "delta_r": null,
+    "delta_r_error": null,
+    "outlier_prior": null,
+    "outlier_model": null,
+    "depth_cm": 20.0,
+    "ring_offset": null,
+    "ring_offset_error": null,
+    "tpq_age_bp": null,
+    "taq_age_bp": null,
+    "inbuilt_years": null,
+    "inbuilt_shape": null,
+    "element_id": "d"
+   },
+   {
+    "sample_name": "60 cm",
+    "age_bp": 2400,
+    "error_1sigma": 25,
+    "curve_id": "shcal20",
+    "delta_r": null,
+    "delta_r_error": null,
+    "outlier_prior": null,
+    "outlier_model": null,
+    "depth_cm": 60.0,
+    "ring_offset": null,
+    "ring_offset_error": null,
+    "tpq_age_bp": null,
+    "taq_age_bp": null,
+    "inbuilt_years": null,
+    "inbuilt_shape": null,
+    "element_id": "d"
+   },
+   {
+    "sample_name": "100 cm",
+    "age_bp": 2000,
+    "error_1sigma": 25,
+    "curve_id": "shcal20",
+    "delta_r": null,
+    "delta_r_error": null,
+    "outlier_prior": null,
+    "outlier_model": null,
+    "depth_cm": 100.0,
+    "ring_offset": null,
+    "ring_offset_error": null,
+    "tpq_age_bp": null,
+    "taq_age_bp": null,
+    "inbuilt_years": null,
+    "inbuilt_shape": null,
+    "element_id": "d"
+   }
+  ],
+  "tree": {
+   "id": "d",
+   "element_type": "deposition_sequence",
+   "name": "Core",
+   "tpq_age_bp": null,
+   "taq_age_bp": null,
+   "children": [
+    {
+     "id": "lv",
+     "element_type": "interpolated_depth",
+     "name": "47 cm",
+     "tpq_age_bp": null,
+     "taq_age_bp": null,
+     "children": [],
+     "params": {
+      "depth_cm": 47.0
+     }
+    }
+   ],
+   "params": {
+    "k": 0.5,
+    "k_variable": false,
+    "log_k_min": -2,
+    "log_k_max": 2,
+    "depth_units": "cm"
+   }
+  },
+  "config": {},
+  "app_commit": null
+ },
+ {
+  "name": "Core",
+  "analysis_type": "bayesian",
+  "measurements": [
+   {
+    "sample_name": "20 cm",
+    "age_bp": 2800,
+    "error_1sigma": 25,
+    "curve_id": "shcal20",
+    "delta_r": null,
+    "delta_r_error": null,
+    "outlier_prior": null,
+    "outlier_model": null,
+    "depth_cm": 20.0,
+    "ring_offset": null,
+    "ring_offset_error": null,
+    "tpq_age_bp": null,
+    "taq_age_bp": null,
+    "inbuilt_years": null,
+    "inbuilt_shape": null,
+    "element_id": "d"
+   },
+   {
+    "sample_name": "60 cm",
+    "age_bp": 2400,
+    "error_1sigma": 25,
+    "curve_id": "shcal20",
+    "delta_r": null,
+    "delta_r_error": null,
+    "outlier_prior": null,
+    "outlier_model": null,
+    "depth_cm": 60.0,
+    "ring_offset": null,
+    "ring_offset_error": null,
+    "tpq_age_bp": null,
+    "taq_age_bp": null,
+    "inbuilt_years": null,
+    "inbuilt_shape": null,
+    "element_id": "d"
+   }
+  ],
+  "tree": {
+   "id": "d",
+   "element_type": "deposition_sequence",
+   "name": "Core",
+   "tpq_age_bp": null,
+   "taq_age_bp": null,
+   "children": [],
+   "params": {
+    "k": null,
+    "k_variable": true,
+    "log_k_min": -1.5,
+    "log_k_max": 1.0
+   }
+  },
+  "config": {},
+  "app_commit": null
+ },
+ {
+  "name": "S",
+  "analysis_type": "bayesian",
+  "measurements": [
+   {
+    "sample_name": "X",
+    "age_bp": 600,
+    "error_1sigma": 25,
+    "curve_id": "shcal20",
+    "delta_r": null,
+    "delta_r_error": null,
+    "outlier_prior": null,
+    "outlier_model": null,
+    "depth_cm": null,
+    "ring_offset": null,
+    "ring_offset_error": null,
+    "tpq_age_bp": null,
+    "taq_age_bp": null,
+    "inbuilt_years": null,
+    "inbuilt_shape": null,
+    "element_id": "p"
+   }
+  ],
+  "tree": {
+   "id": "root",
+   "element_type": "sequence",
+   "name": "S",
+   "tpq_age_bp": null,
+   "taq_age_bp": null,
+   "children": [
+    {
+     "id": "b0",
+     "element_type": "boundary",
+     "name": "End of A",
+     "tpq_age_bp": null,
+     "taq_age_bp": null,
+     "children": []
+    },
+    {
+     "id": "h",
+     "element_type": "hiatus",
+     "name": "Abandonment",
+     "tpq_age_bp": null,
+     "taq_age_bp": null,
+     "children": []
+    },
+    {
+     "id": "b1",
+     "element_type": "boundary",
+     "name": "Start of B",
+     "tpq_age_bp": null,
+     "taq_age_bp": null,
+     "children": []
+    },
+    {
+     "id": "p",
+     "element_type": "phase",
+     "name": "B",
+     "tpq_age_bp": null,
+     "taq_age_bp": null,
+     "children": []
+    },
+    {
+     "id": "b2",
+     "element_type": "boundary",
+     "name": "End",
+     "tpq_age_bp": null,
+     "taq_age_bp": null,
+     "children": []
+    }
+   ]
+  },
+  "config": {},
+  "app_commit": null
+ },
+ {
+  "name": "S",
+  "analysis_type": "bayesian",
+  "measurements": [
+   {
+    "sample_name": "A1",
+    "age_bp": 702,
+    "error_1sigma": 25,
+    "curve_id": "shcal20",
+    "delta_r": null,
+    "delta_r_error": null,
+    "outlier_prior": null,
+    "outlier_model": null,
+    "depth_cm": null,
+    "ring_offset": null,
+    "ring_offset_error": null,
+    "tpq_age_bp": null,
+    "taq_age_bp": null,
+    "inbuilt_years": null,
+    "inbuilt_shape": null,
+    "element_id": "p1"
+   },
+   {
+    "sample_name": "A2",
+    "age_bp": 970,
+    "error_1sigma": 25,
+    "curve_id": "marine20",
+    "delta_r": -7,
+    "delta_r_error": 45,
+    "outlier_prior": null,
+    "outlier_model": null,
+    "depth_cm": null,
+    "ring_offset": null,
+    "ring_offset_error": null,
+    "tpq_age_bp": null,
+    "taq_age_bp": null,
+    "inbuilt_years": null,
+    "inbuilt_shape": null,
+    "element_id": "p1"
+   },
+   {
+    "sample_name": "B1",
+    "age_bp": 614,
+    "error_1sigma": 25,
+    "curve_id": "shcal20",
+    "delta_r": null,
+    "delta_r_error": null,
+    "outlier_prior": null,
+    "outlier_model": null,
+    "depth_cm": null,
+    "ring_offset": null,
+    "ring_offset_error": null,
+    "tpq_age_bp": null,
+    "taq_age_bp": null,
+    "inbuilt_years": null,
+    "inbuilt_shape": null,
+    "element_id": "p2"
+   },
+   {
+    "sample_name": "B2",
+    "age_bp": 640,
+    "error_1sigma": 25,
+    "curve_id": "marine20",
+    "delta_r": null,
+    "delta_r_error": null,
+    "outlier_prior": null,
+    "outlier_model": null,
+    "depth_cm": null,
+    "ring_offset": null,
+    "ring_offset_error": null,
+    "tpq_age_bp": null,
+    "taq_age_bp": null,
+    "inbuilt_years": null,
+    "inbuilt_shape": null,
+    "element_id": "p2"
+   }
+  ],
+  "tree": {
+   "id": "root",
+   "element_type": "sequence",
+   "name": "S",
+   "tpq_age_bp": null,
+   "taq_age_bp": null,
+   "children": [
+    {
+     "id": "b0",
+     "element_type": "boundary",
+     "name": "Start",
+     "tpq_age_bp": null,
+     "taq_age_bp": null,
+     "children": []
+    },
+    {
+     "id": "p1",
+     "element_type": "phase",
+     "name": "A",
+     "tpq_age_bp": null,
+     "taq_age_bp": null,
+     "children": []
+    },
+    {
+     "id": "b1",
+     "element_type": "boundary",
+     "name": "Mid",
+     "tpq_age_bp": null,
+     "taq_age_bp": null,
+     "children": []
+    },
+    {
+     "id": "p2",
+     "element_type": "phase",
+     "name": "B",
+     "tpq_age_bp": null,
+     "taq_age_bp": null,
+     "children": []
+    },
+    {
+     "id": "b2",
+     "element_type": "boundary",
+     "name": "End",
+     "tpq_age_bp": null,
+     "taq_age_bp": null,
+     "children": []
+    }
+   ]
+  },
+  "config": {
+   "resolution": 5
+  },
+  "app_commit": null
+ },
+ {
+  "name": "S",
+  "analysis_type": "bayesian",
+  "measurements": [
+   {
+    "sample_name": "A1",
+    "age_bp": 702,
+    "error_1sigma": 25,
+    "curve_id": "shcal20",
+    "delta_r": null,
+    "delta_r_error": null,
+    "outlier_prior": null,
+    "outlier_model": null,
+    "depth_cm": null,
+    "ring_offset": null,
+    "ring_offset_error": null,
+    "tpq_age_bp": null,
+    "taq_age_bp": null,
+    "inbuilt_years": null,
+    "inbuilt_shape": null,
+    "element_id": "p1"
+   },
+   {
+    "sample_name": "A2",
+    "age_bp": 970,
+    "error_1sigma": 25,
+    "curve_id": "marine20",
+    "delta_r": -7,
+    "delta_r_error": 45,
+    "outlier_prior": null,
+    "outlier_model": null,
+    "depth_cm": null,
+    "ring_offset": null,
+    "ring_offset_error": null,
+    "tpq_age_bp": null,
+    "taq_age_bp": null,
+    "inbuilt_years": null,
+    "inbuilt_shape": null,
+    "element_id": "p1"
+   },
+   {
+    "sample_name": "B1",
+    "age_bp": 614,
+    "error_1sigma": 25,
+    "curve_id": "shcal20",
+    "delta_r": null,
+    "delta_r_error": null,
+    "outlier_prior": null,
+    "outlier_model": null,
+    "depth_cm": null,
+    "ring_offset": null,
+    "ring_offset_error": null,
+    "tpq_age_bp": null,
+    "taq_age_bp": null,
+    "inbuilt_years": null,
+    "inbuilt_shape": null,
+    "element_id": "p2"
+   },
+   {
+    "sample_name": "B2",
+    "age_bp": 640,
+    "error_1sigma": 25,
+    "curve_id": "marine20",
+    "delta_r": null,
+    "delta_r_error": null,
+    "outlier_prior": null,
+    "outlier_model": null,
+    "depth_cm": null,
+    "ring_offset": null,
+    "ring_offset_error": null,
+    "tpq_age_bp": null,
+    "taq_age_bp": null,
+    "inbuilt_years": null,
+    "inbuilt_shape": null,
+    "element_id": "p2"
+   }
+  ],
+  "tree": {
+   "id": "root",
+   "element_type": "sequence",
+   "name": "S",
+   "tpq_age_bp": null,
+   "taq_age_bp": null,
+   "children": [
+    {
+     "id": "b0",
+     "element_type": "boundary",
+     "name": "Start",
+     "tpq_age_bp": null,
+     "taq_age_bp": null,
+     "children": []
+    },
+    {
+     "id": "p1",
+     "element_type": "phase",
+     "name": "A",
+     "tpq_age_bp": null,
+     "taq_age_bp": null,
+     "children": []
+    },
+    {
+     "id": "b1",
+     "element_type": "boundary",
+     "name": "Mid",
+     "tpq_age_bp": null,
+     "taq_age_bp": null,
+     "children": []
+    },
+    {
+     "id": "p2",
+     "element_type": "phase",
+     "name": "B",
+     "tpq_age_bp": null,
+     "taq_age_bp": null,
+     "children": []
+    },
+    {
+     "id": "b2",
+     "element_type": "boundary",
+     "name": "End",
+     "tpq_age_bp": null,
+     "taq_age_bp": null,
+     "children": []
+    }
+   ]
+  },
+  "config": {
+   "resolution": 5
+  },
+  "app_commit": null
+ },
+ {
+  "name": "S",
+  "analysis_type": "bayesian",
+  "measurements": [
+   {
+    "sample_name": "A1",
+    "age_bp": 702,
+    "error_1sigma": 25,
+    "curve_id": "shcal20",
+    "delta_r": null,
+    "delta_r_error": null,
+    "outlier_prior": null,
+    "outlier_model": null,
+    "depth_cm": null,
+    "ring_offset": null,
+    "ring_offset_error": null,
+    "tpq_age_bp": null,
+    "taq_age_bp": null,
+    "inbuilt_years": null,
+    "inbuilt_shape": null,
+    "element_id": "p1"
+   },
+   {
+    "sample_name": "A2",
+    "age_bp": 970,
+    "error_1sigma": 25,
+    "curve_id": "marine20",
+    "delta_r": -7,
+    "delta_r_error": 45,
+    "outlier_prior": null,
+    "outlier_model": null,
+    "depth_cm": null,
+    "ring_offset": null,
+    "ring_offset_error": null,
+    "tpq_age_bp": null,
+    "taq_age_bp": null,
+    "inbuilt_years": null,
+    "inbuilt_shape": null,
+    "element_id": "p1"
+   },
+   {
+    "sample_name": "B1",
+    "age_bp": 614,
+    "error_1sigma": 25,
+    "curve_id": "shcal20",
+    "delta_r": null,
+    "delta_r_error": null,
+    "outlier_prior": null,
+    "outlier_model": null,
+    "depth_cm": null,
+    "ring_offset": null,
+    "ring_offset_error": null,
+    "tpq_age_bp": null,
+    "taq_age_bp": null,
+    "inbuilt_years": null,
+    "inbuilt_shape": null,
+    "element_id": "p2"
+   },
+   {
+    "sample_name": "B2",
+    "age_bp": 640,
+    "error_1sigma": 25,
+    "curve_id": "marine20",
+    "delta_r": null,
+    "delta_r_error": null,
+    "outlier_prior": null,
+    "outlier_model": null,
+    "depth_cm": null,
+    "ring_offset": null,
+    "ring_offset_error": null,
+    "tpq_age_bp": null,
+    "taq_age_bp": null,
+    "inbuilt_years": null,
+    "inbuilt_shape": null,
+    "element_id": "p2"
+   }
+  ],
+  "tree": {
+   "id": "root",
+   "element_type": "sequence",
+   "name": "S",
+   "tpq_age_bp": null,
+   "taq_age_bp": null,
+   "children": [
+    {
+     "id": "b0",
+     "element_type": "boundary",
+     "name": "Start",
+     "tpq_age_bp": null,
+     "taq_age_bp": null,
+     "children": []
+    },
+    {
+     "id": "p1",
+     "element_type": "phase",
+     "name": "A",
+     "tpq_age_bp": null,
+     "taq_age_bp": null,
+     "children": []
+    },
+    {
+     "id": "b1",
+     "element_type": "boundary",
+     "name": "Mid",
+     "tpq_age_bp": null,
+     "taq_age_bp": null,
+     "children": []
+    },
+    {
+     "id": "p2",
+     "element_type": "phase",
+     "name": "B",
+     "tpq_age_bp": null,
+     "taq_age_bp": null,
+     "children": []
+    },
+    {
+     "id": "b2",
+     "element_type": "boundary",
+     "name": "End",
+     "tpq_age_bp": null,
+     "taq_age_bp": null,
+     "children": []
+    }
+   ]
+  },
+  "config": {
+   "resolution": 5
+  },
+  "app_commit": null
+ },
+ {
+  "name": "G",
+  "analysis_type": "group_calibration",
+  "measurements": [
+   {
+    "sample_name": "M1",
+    "age_bp": 900,
+    "error_1sigma": 25,
+    "curve_id": "marine20",
+    "delta_r": -7,
+    "delta_r_error": 45,
+    "outlier_prior": null,
+    "outlier_model": null,
+    "depth_cm": null,
+    "ring_offset": null,
+    "ring_offset_error": null,
+    "tpq_age_bp": null,
+    "taq_age_bp": null,
+    "inbuilt_years": null,
+    "inbuilt_shape": null,
+    "element_id": null
+   },
+   {
+    "sample_name": "M2",
+    "age_bp": 950,
+    "error_1sigma": 25,
+    "curve_id": "marine20",
+    "delta_r": 30,
+    "delta_r_error": 20,
+    "outlier_prior": null,
+    "outlier_model": null,
+    "depth_cm": null,
+    "ring_offset": null,
+    "ring_offset_error": null,
+    "tpq_age_bp": null,
+    "taq_age_bp": null,
+    "inbuilt_years": null,
+    "inbuilt_shape": null,
+    "element_id": null
+   }
+  ],
+  "tree": null,
+  "config": {},
+  "app_commit": null
+ },
+ {
+  "name": "G",
+  "analysis_type": "group_calibration",
+  "measurements": [
+   {
+    "sample_name": "T",
+    "age_bp": 600,
+    "error_1sigma": 25,
+    "curve_id": "shcal20",
+    "delta_r": null,
+    "delta_r_error": null,
+    "outlier_prior": null,
+    "outlier_model": null,
+    "depth_cm": null,
+    "ring_offset": null,
+    "ring_offset_error": null,
+    "tpq_age_bp": null,
+    "taq_age_bp": null,
+    "inbuilt_years": null,
+    "inbuilt_shape": null,
+    "element_id": null
+   }
+  ],
+  "tree": null,
+  "config": {},
+  "app_commit": null
+ },
+ {
+  "name": "S",
+  "analysis_type": "bayesian",
+  "measurements": [
+   {
+    "sample_name": "X",
+    "age_bp": 600,
+    "error_1sigma": 25,
+    "curve_id": "shcal20",
+    "delta_r": null,
+    "delta_r_error": null,
+    "outlier_prior": null,
+    "outlier_model": null,
+    "depth_cm": null,
+    "ring_offset": null,
+    "ring_offset_error": null,
+    "tpq_age_bp": 800,
+    "taq_age_bp": null,
+    "inbuilt_years": 50,
+    "inbuilt_shape": "exponential",
+    "element_id": "p"
+   }
+  ],
+  "tree": {
+   "id": "root",
+   "element_type": "sequence",
+   "name": "S",
+   "tpq_age_bp": null,
+   "taq_age_bp": null,
+   "children": [
+    {
+     "id": "b0",
+     "element_type": "boundary",
+     "name": "Start",
+     "tpq_age_bp": null,
+     "taq_age_bp": null,
+     "children": []
+    },
+    {
+     "id": "p",
+     "element_type": "phase",
+     "name": "Layer",
+     "tpq_age_bp": 900,
+     "taq_age_bp": 400,
+     "children": []
+    },
+    {
+     "id": "b1",
+     "element_type": "boundary",
+     "name": "End",
+     "tpq_age_bp": null,
+     "taq_age_bp": null,
+     "children": []
+    }
+   ]
+  },
+  "config": {},
+  "app_commit": null
+ },
+ {
+  "name": "P",
+  "analysis_type": "bayesian",
+  "measurements": [
+   {
+    "sample_name": "In",
+    "age_bp": 600,
+    "error_1sigma": 25,
+    "curve_id": "shcal20",
+    "delta_r": null,
+    "delta_r_error": null,
+    "outlier_prior": null,
+    "outlier_model": null,
+    "depth_cm": null,
+    "ring_offset": null,
+    "ring_offset_error": null,
+    "tpq_age_bp": null,
+    "taq_age_bp": null,
+    "inbuilt_years": null,
+    "inbuilt_shape": null,
+    "element_id": "root"
+   },
+   {
+    "sample_name": "Out",
+    "age_bp": 610,
+    "error_1sigma": 25,
+    "curve_id": "shcal20",
+    "delta_r": null,
+    "delta_r_error": null,
+    "outlier_prior": null,
+    "outlier_model": null,
+    "depth_cm": null,
+    "ring_offset": null,
+    "ring_offset_error": null,
+    "tpq_age_bp": null,
+    "taq_age_bp": null,
+    "inbuilt_years": null,
+    "inbuilt_shape": null,
+    "element_id": null
+   }
+  ],
+  "tree": {
+   "id": "root",
+   "element_type": "phase",
+   "name": "P",
+   "tpq_age_bp": null,
+   "taq_age_bp": null,
+   "children": []
+  },
+  "config": {},
+  "app_commit": null
+ },
+ {
+  "name": "P",
+  "analysis_type": "bayesian",
+  "measurements": [
+   {
+    "sample_name": "X \"1\"",
+    "age_bp": 600,
+    "error_1sigma": 25,
+    "curve_id": "shcal20",
+    "delta_r": null,
+    "delta_r_error": null,
+    "outlier_prior": null,
+    "outlier_model": null,
+    "depth_cm": null,
+    "ring_offset": null,
+    "ring_offset_error": null,
+    "tpq_age_bp": null,
+    "taq_age_bp": null,
+    "inbuilt_years": null,
+    "inbuilt_shape": null,
+    "element_id": "root"
+   }
+  ],
+  "tree": {
+   "id": "root",
+   "element_type": "phase",
+   "name": "Pit \"A\"",
+   "tpq_age_bp": null,
+   "taq_age_bp": null,
+   "children": []
+  },
+  "config": {},
+  "app_commit": null
+ },
+ {
+  "name": "Site / model",
+  "analysis_type": "bayesian",
+  "measurements": [
+   {
+    "sample_name": "LA0",
+    "age_bp": 614.0,
+    "error_1sigma": 25.0,
+    "curve_id": "shcal20",
+    "delta_r": null,
+    "delta_r_error": null,
+    "outlier_prior": 0.0,
+    "outlier_model": "general",
+    "depth_cm": null,
+    "ring_offset": null,
+    "ring_offset_error": null,
+    "tpq_age_bp": null,
+    "taq_age_bp": null,
+    "inbuilt_years": null,
+    "inbuilt_shape": null,
+    "element_id": "ox0-p"
+   },
+   {
+    "sample_name": "LA1",
+    "age_bp": 640.0,
+    "error_1sigma": 25.0,
+    "curve_id": "shcal20",
+    "delta_r": null,
+    "delta_r_error": null,
+    "outlier_prior": 0.0,
+    "outlier_model": "general",
+    "depth_cm": null,
+    "ring_offset": null,
+    "ring_offset_error": null,
+    "tpq_age_bp": null,
+    "taq_age_bp": null,
+    "inbuilt_years": null,
+    "inbuilt_shape": null,
+    "element_id": "ox0-p"
+   },
+   {
+    "sample_name": "LA2",
+    "age_bp": 655.0,
+    "error_1sigma": 25.0,
+    "curve_id": "shcal20",
+    "delta_r": null,
+    "delta_r_error": null,
+    "outlier_prior": 0.0,
+    "outlier_model": "general",
+    "depth_cm": null,
+    "ring_offset": null,
+    "ring_offset_error": null,
+    "tpq_age_bp": null,
+    "taq_age_bp": null,
+    "inbuilt_years": null,
+    "inbuilt_shape": null,
+    "element_id": "ox0-p"
+   }
+  ],
+  "tree": {
+   "id": "ox0-root",
+   "element_type": "sequence",
+   "name": "Site",
+   "tpq_age_bp": 900.0,
+   "taq_age_bp": 400.0,
+   "params": null,
+   "children": [
+    {
+     "id": "ox0-b0",
+     "element_type": "boundary",
+     "name": "Start",
+     "tpq_age_bp": null,
+     "taq_age_bp": null,
+     "params": null,
+     "children": []
+    },
+    {
+     "id": "ox0-p",
+     "element_type": "phase",
+     "name": "Layer",
+     "tpq_age_bp": null,
+     "taq_age_bp": null,
+     "params": null,
+     "children": []
+    },
+    {
+     "id": "ox0-b1",
+     "element_type": "boundary",
+     "name": "End",
+     "tpq_age_bp": null,
+     "taq_age_bp": null,
+     "params": null,
+     "children": []
+    }
+   ]
+  },
+  "config": {
+   "solver": "auto",
+   "mcmc_samples": 4000,
+   "mcmc_min_sweeps": 0,
+   "apply_inbuilt": true,
+   "seed": null,
+   "mcmc_tune": 1000,
+   "mcmc_chains": 4,
+   "mcmc_temperatures": 3,
+   "uniform_span_prior": true,
+   "match_oxcal": false,
+   "resolution": 10,
+   "estimate_durations": false,
+   "estimate_kde": false,
+   "estimate_dispersal": false,
+   "dispersal_origin": null
+  },
+  "app_commit": "08fdb5c4f5d6"
+ },
+ {
+  "name": "M",
+  "analysis_type": "group_calibration",
+  "measurements": [
+   {
+    "sample_name": "Bone",
+    "age_bp": 500,
+    "error_1sigma": 25,
+    "curve_id": "corpus-diet",
+    "delta_r": 10,
+    "delta_r_error": 5,
+    "outlier_prior": null,
+    "outlier_model": null,
+    "depth_cm": null,
+    "ring_offset": null,
+    "ring_offset_error": null,
+    "tpq_age_bp": null,
+    "taq_age_bp": null,
+    "inbuilt_years": null,
+    "inbuilt_shape": null,
+    "element_id": null
+   }
+  ],
+  "tree": null,
+  "config": {},
+  "app_commit": null
+ }
+]

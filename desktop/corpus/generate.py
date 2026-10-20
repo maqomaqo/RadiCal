@@ -63,6 +63,7 @@ two runs of this script on one commit write identical files.
 """
 from __future__ import annotations
 
+import datetime
 import hashlib
 import io
 import json
@@ -230,10 +231,15 @@ def write(family: str, cases: List[Dict[str, Any]]) -> str:
 
 def capture(name: str, inputs: Dict[str, Any], fn: Callable[[], Any]) -> Dict[str, Any]:
     """One case. A refusal is an answer too, so an exception is recorded, not raised."""
+    import csv as _csv
+    from app.services.reservoir_ingest import IngestError
     try:
         return {'name': name, 'inputs': inputs, 'outputs': fn()}
-    except ValueError as exc:
-        return {'name': name, 'inputs': inputs, 'error': {'type': 'ValueError', 'message': str(exc)}}
+    except (ValueError, _csv.Error, IngestError) as exc:
+        # csv.Error too: Python's csv module refuses some inputs outright, and
+        # the importer does not catch it -- what the port must match. And the
+        # reservoir ingest's own refusals, which are its answers.
+        return {'name': name, 'inputs': inputs, 'error': {'type': type(exc).__name__, 'message': str(exc)}}
 
 
 # ---------------------------------------------------------------------------
@@ -1539,6 +1545,598 @@ def units_influence():
                          lambda: influence.summarise(boundaries, block)))
     return cases
 
+
+# ---------------------------------------------------------------------------
+# units/ -- Phase 4: reading files in
+# ---------------------------------------------------------------------------
+
+CORPUS_OWNER = 'corpus-owner'
+
+DATE_CSVS = {
+    'basic-with-phases': ('site.csv',
+        'name,age,error,curve,phase,material\n'
+        'A-1,3000,25,intcal20,Pit 12,charcoal\n'
+        'A-2,3050,30,IntCal 20,Pit 12,\n'
+        'B-1,2900,25,SHCal20.14c,Layer 3,bone\n'),
+    'tab-separated': ('tab.tsv', 'sample\tbp\tsd\nX-1\t1200\t20\nX-2\t1250\t20\n'),
+    'semicolon': ('excel.csv', 'Lab code;CRA;±1σ\nE-1;4,100;35\nE-2;4150;35\n'),
+    'missing-required': ('m.csv', 'name,age\nA,3000\n'),
+    'unknown-and-duplicate': ('u.csv', 'name,age,error,eror,sigma,colour\nA,3000,25,1,2,red\n'),
+    'bad-cells': ('b.csv',
+        'name,age,error,delta_r,delta_r_error\n'
+        ',3000,25,,\n'
+        'B,,25,,\n'
+        'C,3000,,,\n'
+        'D,three thousand,25,,\n'
+        'E,±3000,+/-25,~-50,40\n'
+        'F,−120,25,,\n'),
+    'curves': ('c.csv', 'name,age,error,curve\nA,3000,25,IntCal13\nB,3000,25,=Marine20\nC,3000,25,\n'),
+    'kinds': ('k.csv',
+        'name,age,error,type,outlier_model,outlier_prior,inbuilt_shape,inbuilt_years\n'
+        'A,3000,25,lake,general,5%,uniform,50\n'
+        'B,3000,25,marine,stratigraphic,0.1,,\n'
+        'C,3000,25,terrestrial,charcoal,120%,cone,\n'
+        'D,3000,25,,,2,exponential,20\n'
+        'E,3000,25,,,-0.5,,\n'),
+    'coordinates': ('xy.csv',
+        'name,age,error,lat,lon\n'
+        'A,3000,25,54°30\',-5.6\n'
+        'B,3000,25,54.5,5 36\n'
+        'C,3000,25,"54,5",-5.6\n'
+        'D,3000,25,N54.5,-5.6\n'
+        'E,3000,25,54.5 deg,-5.6\n'),
+    'coordinate-validation': ('xy2.csv',
+        'name,age,error,lat,lon\n'
+        'A,3000,25,0,0\n'
+        'B,3000,25,95,10\n'
+        'C,3000,25,10,\n'),
+    'results-export': ('results.csv',
+        'Order,Row Type,Depth,Sample Name,Age BP,Error (1σ),Posterior Mean,95.4% HPD,95% HPD,TPQ BP (BC/AD),Phase\n'
+        '1,sequence,0,Site,,,,,,,\n'
+        '2,phase,1,Pit,,,,,,,\n'
+        '3,date,2,A-1,3000,25,2700,1,1,1,Site > Pit\n'
+        '4,boundary,1,Start,,,,,,,\n'),
+    'depth-without-row-type': ('d.csv', 'name,age,error,depth\nA,3000,25,120\n'),
+    'delta-r': ('dr.csv',
+        'name,age,error,curve,delta_r,delta_r_error,delta_r_source\n'
+        'A,4000,30,marine20,50,,\n'
+        'B,4000,30,marine20,50,20,"{""method"": ""nearest_n"", ""n"": 3}"\n'
+        'C,4000,30,marine20,50,20,not json\n'
+        'D,4000,30,marine20,50,20,[1]\n'),
+    'repeated-names': ('r.csv', 'name,age,error\nA,3000,25\na,3010,25\nB,3020,25\n'),
+    'some-unnamed-phases': ('p.csv', 'name,age,error,phase\nA,3000,25,Pit\nB,3010,25,\nC,3020,25,Pit\n'),
+    'empty': ('e.csv', ''),
+    'whitespace-only': ('w.csv', '  \n \n'),
+    'header-only': ('h.csv', 'name,age,error\n'),
+    'bom-and-crlf': ('bom.csv', '﻿name,age,error\r\nA,3000,25\r\n\r\nB,3010,25\r\n'),
+    'quoting': ('q.csv',
+        'name,age,error,notes\n'
+        'A,3000,25,"has, a comma"\n'
+        'B,3010,25,"two\nlines"\n'
+        'C,3020,25,"say ""hi"""\n'
+        'D,3030,25,mid"quote\n'
+        'E,3040,25,"open quote never closed\n'),
+    'ragged': ('rag.csv', 'name,age,error\nA,3000,25,extra,more\nB,3010\n'),
+    'carriage-returns': ('cr.csv', 'name,age,error\rA,3000,25\rB,3010,25\r'),
+    'paths-and-limits': ('pl.csv',
+        'name,age,error,phase,tpq,taq,ring_offset,ring_offset_error,depth_cm\n'
+        'A,3000,25,Hillside > North > Feature J,500,600,,,\n'
+        'B,3000,25,Feature J,,,,5,\n'
+        'C,3000,25,Feature J,,,10,2,15\n'),
+    'odd-numbers': ('n.csv', 'name,age,error\nA,nan,25\nB,inf,25\nC,1_000,25\nD,1e3,2.5e1\nE, 3000 ,25\n'),
+    'long-strings': ('l.csv', 'name,age,error,material\nA,3000,25,' + 'x' * 101 + '\n'),
+    'too-many': ('t.csv', 'name,age,error\n' + ''.join(f'S{i},{3000 + i},25\n' for i in range(501))),
+}
+
+
+def units_date_import():
+    from app.services import date_import
+    cases = []
+    for label, (filename, text) in DATE_CSVS.items():
+        cases.append(capture(f'parse_csv/{label}', {'filename': filename, 'text': text},
+                             lambda f=filename, t=text: Stable()(
+                                 date_import.parse_csv(t, CORPUS_OWNER, f).as_dict())))
+    uploads = {
+        'utf8-sig.csv': '﻿name,age,error\nA,3000,25\n'.encode('utf-8'),
+        'latin.csv': 'name,age,error,notes\nA,3000,25,caf\xe9 \u20ac sample\n'.encode('cp1252'),
+        'undecodable.csv': b'name,age,error\nA,3000,25,\x81\xff\n',
+        'table.txt': b'name,age,error\nSequence(3),3000,25\n',
+        'notes.csv': b'name,age,error,notes\nA,3000,25,see Phase( 2 )\n',
+    }
+    for filename, content in uploads.items():
+        def run(filename=filename, content=content):
+            result = date_import.parse_upload(filename, content, CORPUS_OWNER)
+            return Stable()(result.as_dict())
+        cases.append(capture(f'parse_upload/{filename}', {'filename': filename, 'hex': content.hex()}, run))
+    headers = ['Sample Name', '± 1σ', 'ΔR', '95.4% HPD', '  Lab-No. ', '', 'C14_Age (BP)', 'δ13C ‰']
+    cases.append(capture('normalise_header', {'headers': headers},
+                         lambda: {'keys': [date_import.normalise_header(h) for h in headers]}))
+    texts = ['Plot()\n{\n R_Date("A",3000,25);\n};', 'name,Sequence\nA,1', '// Sequence(\nname,age',
+             'Options(){ };', 'R_Simulate ("x", 1000, 20);', 'Curve("IntCal20","IntCal20.14c");']
+    cases.append(capture('looks_like_cql2', {'texts': texts},
+                         lambda: {'cql2': [date_import.looks_like_cql2(t) for t in texts]}))
+    cases.append(capture('template_csv', {}, lambda: {'csv': date_import.template_csv(),
+                                                      'columns': date_import.COLUMN_ALIASES}))
+    return cases
+
+# The stored curves the corpus owner has, for the OxCal reader's Curve() and
+# Mix_Curves(): one mixture it can match, one archived, which a file may still
+# name but the curve lists offered back leave out of date_import's.
+CORPUS_LIBRARY = [
+    {'id': 'corpus-diet', 'name': 'Corpus diet', 'aliases': ['Diet mix'], 'archived': False,
+     'recipe': {'a': 'intcal20', 'b': 'marine20', 'percent_a': 30.0, 'percent_a_error': 10.0}},
+    {'id': 'corpus-old', 'name': 'Old shell mix', 'aliases': [], 'archived': True,
+     'recipe': {'a': 'shcal20', 'b': 'marine20', 'percent_a': 50.0, 'percent_a_error': 0.0}},
+]
+
+
+def _store_corpus_library():
+    """CORPUS_LIBRARY as rows the registry reads, owned by CORPUS_OWNER."""
+    from app.database import SessionLocal, init_db
+    from app.models import StoredCalibrationCurve, User
+    from app.services import curve_registry
+    from app.services.curve_mix import mix
+    from app.services.calibration import get_curve
+    init_db()
+    with SessionLocal() as db:
+        if db.get(User, CORPUS_OWNER) is None:
+            db.add(User(id=CORPUS_OWNER, email='corpus-owner@radical.example.com',
+                        password_hash='-', display_name='Corpus owner'))
+        for i, row in enumerate(CORPUS_LIBRARY):
+            if db.get(StoredCalibrationCurve, row['id']) is not None:
+                continue
+            r = row['recipe']
+            curve = mix(get_curve(r['a']), get_curve(r['b']), r['percent_a'], r['percent_a_error'])
+            db.add(StoredCalibrationCurve(
+                id=row['id'], kind='mixed', name=row['name'], recipe=r, aliases=row['aliases'],
+                archived=row['archived'], content_sha256=curve_registry.content_hash(curve),
+                type='terrestrial', sample_type='terrestrial', created_by=CORPUS_OWNER,
+                created_at=datetime.datetime(2026, 1, 1, 0, 0, i)))
+        db.commit()
+    curve_registry.invalidate()
+
+
+def units_oxcal_script():
+    """parse_oxcal over every script the import tests read, and the fixtures."""
+    from app.services import oxcal_script, date_import
+    _store_corpus_library()
+    cases = [capture('library', {}, lambda: {'curves': CORPUS_LIBRARY})]
+    with open(os.path.join(HERE, 'inputs', 'oxcal_scripts.json'), encoding='utf-8') as fh:
+        scripts = json.load(fh)
+    for i, entry in enumerate(scripts):
+        if 'fixture' in entry:
+            with open(os.path.join(ROOT, entry['fixture']), encoding='utf-8') as fh:
+                text = fh.read()
+        else:
+            text = entry['text']
+        cases.append(capture(f'parse_oxcal/{i:03d}', entry,
+                             lambda t=text, f=entry['filename']: Stable()(
+                                 oxcal_script.parse_oxcal(t, CORPUS_OWNER, f).as_dict())))
+    uploads = {
+        'model.oxcal': b'Plot(){ R_Date("a",3000,25); }',
+        'model.txt': b'Plot(){ Phase("P"){ R_Date("a",3000,25); R_Date("b",3010,25); }; };',
+        'dates.csv': b'name,age,error,phase\nA,3000,25,Sequence\n',
+        'notes.txt': b'Just some prose about the site.\n',
+        'model.OXCAL': b'Phase("A"){ Tau_Boundary("T"); R_Date("a",3000,25); };',
+    }
+    for filename, content in uploads.items():
+        cases.append(capture(f'parse_upload/{filename}', {'filename': filename, 'hex': content.hex()},
+                             lambda f=filename, c=content: Stable()(
+                                 date_import.parse_upload(f, c, CORPUS_OWNER).as_dict())))
+    big = b'x' * (date_import.MAX_CONTENT_BYTES + 1)
+    cases.append(capture('parse_upload/big.csv', {'filename': 'big.csv', 'repeat': 'x',
+                                                  'length': len(big)},
+                         lambda: Stable()(date_import.parse_upload('big.csv', big, CORPUS_OWNER).as_dict())))
+    return cases
+
+
+def _export_extra_cases():
+    """Export inputs the tests do not reach: the omissions and odd names."""
+    def m(name, age, err, element=None, **kw):
+        return {'sample_name': name, 'age_bp': age, 'error_1sigma': err, 'element_id': element, **kw}
+    tree = {'id': 'e-root', 'element_type': 'sequence', 'name': 'Say "hi"\n*/ now',
+            'tpq_age_bp': 5000.0, 'taq_age_bp': None, 'children': [
+                {'id': 'e-start', 'element_type': 'boundary', 'name': None, 'children': []},
+                {'id': 'e-a', 'element_type': 'phase', 'name': 'A', 'taq_age_bp': 100.5, 'children': []},
+                {'id': 'e-gap', 'element_type': 'hiatus', 'name': 'Gap */', 'children': []},
+                {'id': 'e-odd', 'element_type': 'interpolated_depth', 'name': 'Loose', 'children': []},
+                {'id': 'e-w', 'element_type': 'wiggle_sequence', 'name': None, 'children': []},
+                {'id': 'e-p', 'element_type': 'deposition_sequence', 'name': 'Core',
+                 'params': {'k_variable': True, 'log_k_min': -1.5, 'log_k_max': 0.25}, 'children': [
+                     {'id': 'e-l', 'element_type': 'interpolated_depth', 'name': 'Level 47',
+                      'params': {'depth_cm': 47.0}, 'children': []}]},
+                {'id': 'e-end', 'element_type': 'boundary', 'name': 'End', 'children': []}]}
+    dates = [
+        m('a1', 3000.0, 25.0, 'e-a', outlier_prior=0.05, outlier_model='CHARCOAL', tpq_age_bp=3500.0,
+          inbuilt_years=50.0),
+        m('a2', 3010.0, 25.0, 'e-a', outlier_prior=0.1, outlier_model='mystery', curve_id='marine20',
+          delta_r=-120.0, delta_r_error=30.0, inbuilt_years=20.0, inbuilt_shape='exponential'),
+        m(None, 3020.0, 25.0, 'e-a', curve_id='marine20', delta_r=-120.0, delta_r_error=None),
+        m('w1', 3100.0, 20.0, 'e-w', ring_offset=0.0, ring_offset_error=5.0),
+        m('w2', 3150.0, 20.0, 'e-w', ring_offset=40.0, ring_offset_error=3.0),
+        m('w3', 3190.0, 20.0, 'e-w', ring_offset=80.0, ring_offset_error=4.0),
+        m('p1', 4000.0, 30.0, 'e-p', depth_cm=10.0, curve_id='corpus-diet'),
+        m('p2', 4400.0, 30.0, 'e-p', depth_cm=90.0, delta_r=12.5, delta_r_error=1e-7),
+        m('loose', 2000.0, 20.0, 'e-nowhere'),
+        m('unplaced', 2100.0, 20.0, None),
+    ]
+    return [
+        {'name': 'Edges', 'analysis_type': 'bayesian', 'measurements': dates, 'tree': tree,
+         'config': {'resolution': 2.0, 'uniform_span_prior': False}, 'app_commit': 'abc'},
+        {'name': 'Edges as dates', 'analysis_type': 'group_calibration', 'measurements': dates,
+         'tree': tree, 'config': {'resolution': 2}, 'app_commit': None},
+        {'name': 'Fixed k', 'analysis_type': 'bayesian', 'measurements': [
+            m('q1', 4000.0, 30.0, 'e-p', depth_cm=None), m('q2', 4100.0, 30.0, 'e-p', depth_cm=5.0)],
+         'tree': {'id': 'e-p', 'element_type': 'deposition_sequence', 'name': '', 'params': {'k': 0.5},
+                  'children': [{'id': 'e-l', 'element_type': 'interpolated_depth', 'name': 'L',
+                                'params': {}, 'children': []}]},
+         'config': None, 'app_commit': None},
+    ]
+
+
+def units_oxcal_export():
+    """write_oxcal over the inputs the export tests make, and each result read
+    back by parse_oxcal and written again -- the round trip."""
+    from app.services import oxcal_export, oxcal_script
+
+    class Fixed(datetime.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime.datetime(2026, 1, 1, tzinfo=tz)
+
+    oxcal_export.datetime = Fixed
+    _store_corpus_library()
+    with open(os.path.join(HERE, 'inputs', 'oxcal_exports.json'), encoding='utf-8') as fh:
+        inputs = json.load(fh) + _export_extra_cases()
+    cases = []
+    for i, entry in enumerate(inputs):
+        def run(e=entry):
+            text, omitted = oxcal_export.write_oxcal(e['name'], e['analysis_type'], e['measurements'],
+                                                     e['tree'], e['config'], e['app_commit'])
+            back = oxcal_script.parse_oxcal(text, CORPUS_OWNER, 'export.oxcal')
+            again = None
+            if back.ok:
+                again, _ = oxcal_export.write_oxcal(
+                    e['name'], 'bayesian' if back.model_tree is not None else 'group_calibration',
+                    back.dates, back.model_tree,
+                    {'resolution': back.resolution} if back.resolution else {}, e['app_commit'])
+            return {'text': text, 'omitted': omitted, 'reimported_ok': back.ok, 'reexported': again}
+        cases.append(capture(f'write_oxcal/{i:03d}', entry, run))
+    return cases
+
+
+CURVE_TEXTS = {
+    'bc-ad-header': ('bc_ad', None, 'year,c14,sigma\n-500,2400,20\n1,1950,15\n1000,1000,15\n'),
+    'bc-ad': ('bc_ad', None, '-500,2400,20\n-1,1960,15\n1,1950,15\n1000,1000,15\n1950,10,5\n'),
+    'whitespace-tab': ('cal_bp', None, '# title\n0 100 10\n10   110\t11\n20 120 12\n'),
+    'whitespace': ('cal_bp', None, '# title\n  0 100 10\n10   110  11 extra\n20 120\n30\u3000130 13\n'),
+    'tabs': ('cal_bp', None, 'cal\tc14\terr\n0\t100\t10\n10\t110\t11\n'),
+    'columns-given': ('cal_bp', {'cal_bp': 2, 'c14_age': 0, 'error': 1}, 'c,e,cal\n100,10,0\n110,11,10\n'),
+    'reordered-header': ('cal_bp', None, 'Sigma,Cal BP,14C Age\n10,0,100\n11,10,110\n'),
+    'missing-column': ('cal_bp', None, 'cal_bp,age,foo\n0,100,1\n'),
+    'duplicates': ('cal_bp', None, ''.join(f'{y},{100 + y},5\n{y},{101 + y},5\n' for y in range(0, 70, 10))),
+    'f14c': ('cal_bp', None, '0,1.0,0.01\n10,0.99,0.01\n'),
+    'descending': ('cal_bp', None, '20,120,5\n10,110,5\n0,100,5\n'),
+    'unsorted': ('cal_bp', None, '10,110,5\n0,100,5\n20,120,5\n'),
+    'too-few': ('cal_bp', None, '0,100,5\n'),
+    'comments-only': ('cal_bp', None, '# only\n\n   \n# this\n'),
+    'bad-rows': ('cal_bp', None, '0,100,5\n10,abc,5\n20,120\n30,130,0\n-5,90,5\nnan,1,1\n40,140,-1e-3\n'),
+    'many-bad': ('cal_bp', None, '0,1,5\n' + ''.join(f'{y},x,5\n' for y in range(1, 40))),
+    'quoted-header': ('cal_bp', None, '"cal BP","14C age","error"\n"0","100","5"\n"10","110","5"\n'),
+    'line-breaks': ('cal_bp', None, '0,100,5\r\n10,110,5\r20,120,5\x0c30,130,5\u202840,140,5\x1c50,150,5\n'),
+    'suggestions': ('cal_bp', None, '# Marine 20 calibration curve\n#  Heaton et al., 2020 Radiocarbon\n'
+                    '#  SHCal-13 is older\n0,100,5\n10,110,5\n'),
+    'numbers': ('cal_bp', None, ' 1_0 , +100 , 5e0 \n20,1.2e2,.5\n'),
+}
+
+
+def _points_digest(points):
+    text = '\n'.join(f'{a!r},{b!r},{c!r}' for a, b, c in points)
+    return hashlib.sha256(text.encode('utf-8')).hexdigest()
+
+
+def units_curve_import():
+    from app.services import curve_import
+    cases = []
+
+    def answer(result):
+        out = result.as_dict()
+        out['points_sha256'] = _points_digest(result.points)
+        if len(result.points) <= 40:
+            out['points'] = [list(p) for p in result.points]
+        return out
+
+    with open(os.path.join(HERE, 'inputs', 'curve_imports.json'), encoding='utf-8') as fh:
+        harvested = json.load(fh)
+    for i, entry in enumerate(harvested):
+        def run(e=entry):
+            if e['kind'] == 'parse_curve':
+                if 'file' in e:
+                    with open(os.path.join(ROOT, e['file']), 'rb') as fh:
+                        text = fh.read().decode(e['encoding'])
+                else:
+                    text = e['text']
+                return answer(curve_import.parse_curve(text, e['calendar'], e['columns']))
+            if 'file' in e:
+                with open(os.path.join(ROOT, e['file']), 'rb') as fh:
+                    content = fh.read()
+            else:
+                content = bytes.fromhex(e['hex'])
+            return answer(curve_import.parse_upload(e['filename'], content, e['calendar']))
+        cases.append(capture(f'harvested/{i:03d}', entry, run))
+    for label, (calendar, columns, text) in CURVE_TEXTS.items():
+        cases.append(capture(f'parse_curve/{label}', {'text': text, 'calendar': calendar, 'columns': columns},
+                             lambda t=text, c=calendar, k=columns: answer(curve_import.parse_curve(t, c, k))))
+    uploads = {
+        'path/to/Old Curve.v2.csv': '# Ünïcode header\n0,100,5\n10,110,5\n'.encode('latin-1'),
+        'C:\\curves\\bom.14c': '\ufeff0,100,5\n10,110,5\n'.encode('utf-8'),
+        '': b'0,100,5\n10,110,5\n',
+        'noext': b'# IntCal 13 rows\n0,100,5\n10,110,5\n',
+    }
+    for filename, content in uploads.items():
+        cases.append(capture(f'parse_upload/{filename or "unnamed"}',
+                             {'filename': filename, 'hex': content.hex(), 'calendar': 'cal_bp'},
+                             lambda f=filename, c=content: answer(curve_import.parse_upload(f, c))))
+    points = [(0.0, 100.0, 5.0), (10.5, 110.25, 5.125), (123456789.0, 1e-7, 3.0)]
+    for header in ('', 'Two lines\n\nof header'):
+        cases.append(capture(f'to_14c_text/{len(header)}', {'points': points, 'header': header},
+                             lambda h=header: {'text': curve_import.to_14c_text(points, h)}))
+    return cases
+
+
+def units_reservoir_ingest():
+    """The ingest's parsing, end to end over the captured calib.org response,
+    and each stage's edges on its own. Nothing here touches a network."""
+    from dataclasses import asdict
+    import html as html_module
+    from app.services import reservoir, reservoir_ingest as ri
+    fixtures = os.path.join(FIXTURES, 'calib_marine')
+    cases = []
+
+    def rows_json(rows):
+        return [asdict(r) for r in rows]
+
+    def pipeline(raw):
+        records, declared = ri.extract_records(raw)
+        rows, report = ri.records_to_rows(records, declared=declared)
+        text = ri.rows_to_csv(rows)
+        back = ri.rows_from_csv(text) if rows else []
+        return {'declared': declared, 'record_count': len(records), 'rows': rows_json(rows),
+                'report': report.as_dict(), 'content_sha256': ri.content_hash(rows),
+                'csv': text, 'csv_round_trip': back == sorted(rows, key=lambda r: r.map_no)}
+
+    with open(os.path.join(fixtures, 'query_response.html'), 'rb') as fh:
+        query = fh.read()
+    with open(os.path.join(fixtures, 'freshness_response.html'), 'rb') as fh:
+        fresh = fh.read()
+    def digested(raw):
+        # The fixture's rows quote the source's citations verbatim; held by
+        # digest, so the corpus does not repeat them. rows_to_csv writes every
+        # field, so the digest is as exact as the rows.
+        out = pipeline(raw)
+        del out['rows']
+        out['csv_sha256'] = hashlib.sha256(out.pop('csv').encode('utf-8')).hexdigest()
+        return out
+
+    cases.append(capture('pipeline/fixture', {'file': 'backend/tests/fixtures/calib_marine/query_response.html'},
+                         lambda: digested(query)))
+    cases.append(capture('freshness/fixture', {'file': 'backend/tests/fixtures/calib_marine/freshness_response.html'},
+                         lambda: ri.extract_freshness(fresh).as_dict()))
+
+    head = '<tr>' + ''.join(f'<td>{c}</td>' for c in ri.EXPECTED_COLUMNS) + '</tr>\n'
+
+    def row(**cells):
+        values = {c: '' for c in ri.EXPECTED_COLUMNS}
+        values.update(cells)
+        return '<tr>\n' + ''.join(f'<TD>{values[c]}</td>' for c in ri.EXPECTED_COLUMNS) + '\n</TR>\n'
+
+    pages = {
+        'no-table': b'<html>nothing</html>',
+        'no-rows': b'3 records<table border>\n</table>',
+        'wrong-header': ('<table  border >' + head.replace('<td>lon</td><td>lat</td>', '<td>lat</td><td>LON\xff</td>')
+                         + row(mapno=1, lat=1, lon=1)).encode('latin-1'),
+        'short-row': ('<table border>' + head + '<tr><td>1</td><td>2</td></tr>').encode(),
+        'declared-mismatch': ('7\n RECORDS <table border>' + head + row(mapno=1, lat=50, lon=-5)).encode(),
+        'small': ('2 records<table border>' + head
+                  + row(mapno=10, lat='54.5', lon='183.5', deltar='-50', deltarerr='&nbsp;',
+                        locality='Caf\xe9 &amp; bar', feeding='\xa0Filter', last_changed='2024-02-29 23:59:59')
+                  + row(mapno=9, lat='-12', lon='-181', deltar='20', deltarerr='30', feeding='New habit',
+                        notes='&#x41;&#128;&#0;&#xD800;&#1;&#x110000;&ampx &notit; &unknown;',
+                        last_changed='2024-02-30')).encode('latin-1')
+                 + b'',
+    }
+    for label, raw in pages.items():
+        cases.append(capture(f'pipeline/{label}', {'hex': raw.hex()}, lambda r=raw: pipeline(r)))
+    probes = {
+        'no-table': b'none',
+        'no-count': b'<table border><tr><td>max(last_changed)</td><td>2020-01-01</td></tr>',
+        'bad-count': b'<table border><tr><td>COUNT(*) </td><td>many</td></tr>',
+        'no-stamp': b'<table border><tr><td>count(*)</td><td> 12 </td></tr><tr><td>max(last_changed)</td><td>soon</td></tr>',
+    }
+    for label, raw in probes.items():
+        cases.append(capture(f'freshness/{label}', {'hex': raw.hex()},
+                             lambda r=raw: ri.extract_freshness(r).as_dict()))
+
+    fields = [b'plain', 'H\xe5kansson'.encode('utf-8'), 'Thybor\xf8n'.encode('cp1252'),
+              b'\x81\x8d bad \\ \' "', b"it's", b'', b'\x00\t\n\r\x7f']
+    cases.append(capture('decode_field', {'hex': [f.hex() for f in fields]},
+                         lambda: {'decoded': [list(ri.decode_field(f)) for f in fields]}))
+
+    def records_case(records, declared=None):
+        rows, report = ri.records_to_rows(records, declared=declared)
+        return {'rows': rows_json(rows), 'report': report.as_dict(), 'content_sha256': ri.content_hash(rows)}
+
+    base = {'mapno': '1', 'lat': '50', 'lon': '-5'}
+    record_sets = {
+        'problems': [
+            {'mapno': '1', 'lat': ' ', 'lon': 'NULL'},
+            {'mapno': 'x\xa0', 'lat': '1', 'lon': '2'},
+            {'mapno': '2.9', 'lat': '91', 'lon': '0'},
+            dict(base),
+            dict(base, lat='10'),
+            {'mapno': '3', 'lat': '-', 'lon': '--'},
+        ],
+        'values': [
+            dict(base, deltar=' 12.5 ', deltarerr='NULL', collectionyear='1931.7', c14age='1e3',
+                 reference='  ', species='null', feeding='DEPOSIT OR SUSPENSION', last_changed='1999-12-31'),
+            dict(base, mapno='2', deltar='-', feeding='Unheard of', last_changed='2000-1-2 3:4:5'),
+            dict(base, mapno='3', feeding=None, last_changed='2000-01-02T03:04:05'),
+            dict(base, mapno='4', lon='-540', feeding='unheard OF ', last_changed=' 2001-06-30 12:00:00 '),
+        ],
+        'empty': [],
+    }
+    for label, records in record_sets.items():
+        cases.append(capture(f'records_to_rows/{label}', {'records': records},
+                             lambda r=records: records_case(r)))
+    cases.append(capture('records_to_rows/declared', {'records': [base], 'declared': 2},
+                         lambda: records_case([base], 2)))
+
+    header = ','.join(ri.CSV_COLUMNS)
+    csvs = {
+        'empty': '',
+        'blank-header': '\n1,2\n',
+        'wrong-header': 'a,b\n',
+        'header-only': header + '\n\n , \n',
+        'ragged': header + '\n1,2,3\n',
+        'bad-map': header + '\nx,1,2' + ',' * 15 + '\n',
+        'bad-lat': header + '\n1,north,2' + ',' * 15 + '\n',
+        'nan-year': header + '\n' + ','.join(['1', '1', '2'] + [''] * 9 + ['nan'] + [''] * 5) + '\n',
+        'good': (' ' + header.replace(',', ' ,') + '\n 1_0 ,+1.5,-2e1,NULL,-,"a, b",,,,,,,1931.9,,,,'
+                 'suspension,Filter\n'),
+    }
+    for label, text in csvs.items():
+        cases.append(capture(f'rows_from_csv/{label}', {'text': text},
+                             lambda t=text: {'rows': rows_json(ri.rows_from_csv(t))}))
+
+    entities = ['&nbsp;x', 'a &amp b', '&AMP;&lt&gt;', '&#65;&#x42;&#X43', '&#128;&#159;&#0;',
+                '&#xd800;&#1114112;&#99999999999999999999;', '&#1;&#11;&#xfffe;', '&notin;&notit;&noti',
+                '&ampamp;', '&#;&#x;&;', '& lone', '&' + 'a' * 40 + ';', '&ZeroWidthSpace;&zwnj;',
+                '&acE;']
+    cases.append(capture('html_unescape', {'texts': entities},
+                         lambda: {'unescaped': [html_module.unescape(t) for t in entities]}))
+    stamps = ['2024-02-29 23:59:59', '2023-02-29', '2024-1-2', '2024-01-02  3:04:05', '2024-01-02 24:00:00',
+              '2024-01-02 23:59:60', '0000-01-01', '24-01-01', '2024-01-02 03:04', 'NULL', ' 2024-01-02 ',
+              '2024-01- 2', '2024-13-01', '2024-12-31 23:59:59 ']
+    cases.append(capture('parse_timestamp', {'texts': stamps}, lambda: {'parsed': [
+        None if (d := ri._parse_timestamp(t)) is None else d.isoformat() for t in stamps]}))
+    longitudes = [180.0, -180.0, 183.5, -181.0, 540.0, -540.0, 1e6, 359.999]
+    cases.append(capture('wrap_longitude', {'values': longitudes},
+                         lambda: {'wrapped': [ri._wrap_longitude(v) for v in longitudes]}))
+    cases.append(capture('snapshot_id', {'slug': 'calib-marine', 'stamp': '2026-05-11T10:00:00'},
+                         lambda: {'id': ri.snapshot_id('calib-marine', datetime.datetime(2026, 5, 11, 10))}))
+    spellings = [None, '', ' Filter ', 'NULL', 'deposit or suspension feeder', 'Carnivore/Scavenger',
+                 'algal grazer', 'Nonsense', '\xa0Herbivore']
+    cases.append(capture('feeding', {'spellings': spellings}, lambda: {
+        'normalised': [reservoir.normalise_feeding(s) for s in spellings],
+        'recognised': [reservoir.is_recognised_feeding(s) for s in spellings]}))
+    return cases
+
+
+def _recipe_draws(recipe):
+    """Joint draws from a recipe both sides can replay: one shared shift per
+    draw (what makes them JOINT), then each parameter's own scatter."""
+    rng = np.random.default_rng(recipe['seed'])
+    common = rng.normal(0.0, recipe['common_sd'], recipe['j'])
+    return {pid: mean + common + rng.normal(0.0, sd, recipe['j'])
+            for pid, mean, sd in recipe['params']}
+
+
+def _dispersal_scenarios():
+    from app.services.reservoir import haversine_km
+    out = {}
+
+    def front(name, positions, ages, sd=30.0, common=50.0, j=240, seed=11, origin=None):
+        sites = [{'element_id': f'e{i}', 'name': f'Site {i}', 'parameter_id': f'b{i}',
+                  'basis': 'boundary', 'latitude': lat, 'longitude': lon}
+                 for i, (lat, lon) in enumerate(positions)]
+        recipe = {'seed': seed, 'j': j, 'common_sd': common,
+                  'params': [[f'b{i}', age, sd] for i, age in enumerate(ages)]}
+        out[name] = {'sites': sites, 'recipe': recipe, 'origin': origin}
+
+    eq = [(0.0, 1.5 * (i + 1)) for i in range(8)]
+    front('equator-east', eq, [7500.0 - haversine_km(0, 0, 0, lon) for _lat, lon in eq], origin=[0.0, 0.0])
+    front('equator-reversed', eq, [5000.0 + 0.5 * haversine_km(0, 0, 0, lon) for _lat, lon in eq],
+          origin=[0.0, 0.0], seed=12)
+    front('exact', eq, [7500.0 - haversine_km(0, 0, 0, lon) / 2.0 for _lat, lon in eq],
+          sd=0.0, common=0.0, j=50, origin=[0.0, 0.0])
+    grid = []
+    for i in range(3):
+        for k in range(3):
+            lat = 50.0 + 80.0 * i / 111.32
+            lon = 80.0 * k / (111.32 * math.cos(math.radians(lat)))
+            grid.append((lat, lon))
+    bearing = math.radians(60.0)
+    front('grid-60', grid, [6500.0 - (80.0 * k * math.sin(bearing) + 80.0 * i * math.cos(bearing)) / 1.2
+                            for i in range(3) for k in range(3)], sd=20.0, common=40.0, j=200, seed=5,
+          origin=[49.0, -2.0])
+    pacific = [(-18.0, 177.0), (-14.0, 179.0), (-20.0, -179.5), (-15.0, -177.0), (-21.5, -175.0),
+               (-12.0, -172.5), (-17.0, -170.0)]
+    front('pacific', pacific, [3200.0 - 0.6 * haversine_km(-18.0, 177.0, lat, lon) for lat, lon in pacific],
+          sd=25.0, common=30.0, j=160, seed=21, origin=[-19.0, 176.0])
+    front('five-sites', eq[:5], [7000.0, 6900.0, 6800.0, 6700.0, 6600.0], origin=[0.0, 0.0])
+    circle = [(10.0 * math.cos(math.radians(a)), 10.0 * math.sin(math.radians(a))) for a in (0, 60, 120, 180, 240, 300)]
+    front('one-circle', circle, [6000.0] * 6, origin=[0.0, 0.0], seed=3)
+    meridian = [(40.0 + 0.7 * i, 10.0) for i in range(7)]
+    front('meridian', meridian, [5000.0 - 30.0 * i for i in range(7)], origin=[39.0, 10.0], seed=4)
+    return out
+
+
+def units_dispersal():
+    """The spatial models over replayable joint draws, and the draw-free
+    pieces over every input the dispersal tests use."""
+    from app.services import dispersal as d
+    cases = []
+
+    def site(spec):
+        return d.SiteSpec(**{**spec, 'date_ids': tuple(spec.get('date_ids', ()))})
+
+    for name, sc in _dispersal_scenarios().items():
+        sites = [site(s) for s in sc['sites']]
+        draws = _recipe_draws(sc['recipe'])
+        origin = tuple(sc['origin']) if sc['origin'] else None
+        inputs = {'sites': sc['sites'], 'recipe': sc['recipe'], 'origin': sc['origin']}
+        cases.append(capture(f'fit_wave/{name}', inputs, lambda s=sites, dr=draws, o=origin: d.fit_wave(s, dr, o)))
+        cases.append(capture(f'fit_trend/{name}', inputs, lambda s=sites, dr=draws: d.fit_trend(s, dr)))
+        cases.append(capture(f'profile_origin/{name}', inputs,
+                             lambda s=sites, dr=draws: d.profile_origin(s, dr)))
+    refused = [{'element_id': 'bad', 'name': 'Bad', 'parameter_id': 'x', 'basis': 'boundary',
+                'refusal': 'two places'}]
+    for fn in ('fit_wave', 'fit_trend', 'profile_origin'):
+        call = {'fit_wave': lambda: d.fit_wave([site(refused[0])], {}, (0.0, 0.0)),
+                'fit_trend': lambda: d.fit_trend([site(refused[0])], {}),
+                'profile_origin': lambda: d.profile_origin([site(refused[0])], {})}[fn]
+        cases.append(capture(f'{fn}/refused-site', {'sites': refused, 'recipe': None, 'origin': [0.0, 0.0]}, call))
+
+    clusters = [('a1', 50.0, 1.0, 6000.0), ('a2', 50.01, 1.02, 6100.0), ('b1', 51.0, 2.0, 5800.0),
+                ('b2', 51.02, 2.01, 5900.0), ('c1', 52.0, 3.0, 5600.0), ('lone', None, None, 5000.0),
+                ('nodraws', 50.0, 1.0, None)]
+    measurements = [{'id': i, 'sample_name': None if i == 'b1' else f'S-{i}', 'latitude': lat, 'longitude': lon}
+                    for i, lat, lon, _age in clusters]
+    recipe = {'seed': 9, 'j': 101, 'common_sd': 10.0,
+              'params': [[i, age, 25.0] for i, _lat, _lon, age in clusters if age is not None]}
+    cases.append(capture('derive_sites_from_dates', {'measurements': measurements, 'recipe': recipe},
+                         lambda: {'sites': [s.as_dict() for s in
+                                            d.derive_sites_from_dates(measurements, _recipe_draws(recipe))]}))
+
+    with open(os.path.join(HERE, 'inputs', 'dispersal.json'), encoding='utf-8') as fh:
+        harvested = json.load(fh)
+    for i, e in enumerate(harvested):
+        kind = e['kind']
+        if kind == 'derive_sites':
+            fn = lambda e=e: {'sites': [s.as_dict() for s in d.derive_sites(e['root'], e['measurements'])]}
+        elif kind == 'propose_sequence':
+            fn = lambda e=e: d.propose_sequence([site(s) for s in e['sites']],
+                                                tuple(e['origin']) if e['origin'] else None)
+        elif kind == 'lon_extent':
+            fn = lambda e=e: {'extent': list(d._lon_extent(e['lons']))}
+        elif kind == 'unproject':
+            fn = lambda e=e: {'point': list(d._unproject(e['x'], e['y'], tuple(e['centre'])))}
+        else:
+            fn = lambda e=e: {'step': d._round_step(e['raw'])}
+        cases.append(capture(f'{kind}/{i:03d}', e, fn))
+    return cases
+
+
 # ---------------------------------------------------------------------------
 # api/ -- Phases 2, 3 and 5
 # ---------------------------------------------------------------------------
@@ -1717,6 +2315,9 @@ def main() -> None:
         ('units/rng', units_rng), ('units/kde', units_kde),
         ('units/curve_view', units_curve_view), ('units/curve_registry', units_curve_registry),
         ('units/influence', units_influence),
+        ('units/date_import', units_date_import), ('units/oxcal_script', units_oxcal_script),
+        ('units/oxcal_export', units_oxcal_export), ('units/curve_import', units_curve_import),
+        ('units/reservoir_ingest', units_reservoir_ingest), ('units/dispersal', units_dispersal),
         ('units/model_tree', units_model_tree), ('units/stratigraphy', units_stratigraphy),
         ('units/intervals', units_intervals), ('units/exact_chain', units_exact_chain),
         ('units/exact_parallel', units_exact_parallel), ('units/agreement', units_agreement),

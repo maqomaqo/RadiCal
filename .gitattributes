@@ -4,3 +4,6 @@
 # tests check.
 calibration_data/** -text
 desktop/corpus/** -text
+# The desktop corpus tests read some backend fixtures directly (OxCal models,
+# the captured reservoir response) and compare to what Python read from them.
+backend/tests/fixtures/** -text

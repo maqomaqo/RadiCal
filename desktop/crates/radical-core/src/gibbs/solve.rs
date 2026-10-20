@@ -48,6 +48,8 @@ pub struct SampleOptions {
     pub max_sweeps: Option<usize>,
     pub min_sweeps: usize,
     pub estimate_durations: bool,
+    /// Fit the spatial models off the joint states.
+    pub dispersal: Option<crate::dispersal::DispersalSpec>,
     pub interval_draws: usize,
     pub chains: usize,
     pub resolution: f64,
@@ -67,6 +69,7 @@ impl Default for SampleOptions {
             max_sweeps: None,
             min_sweeps: 0,
             estimate_durations: false,
+            dispersal: None,
             interval_draws: DEFAULT_DRAWS,
             chains: 1,
             resolution: REPORTING_STEP_YEARS,
@@ -295,7 +298,8 @@ pub fn solve(
         options.uniform_span_prior,
         cal,
     )?;
-    let wants_intervals = options.estimate_durations || !model.depositions.is_empty();
+    let wants_intervals =
+        options.estimate_durations || !model.depositions.is_empty() || options.dispersal.is_some();
     let pooled = if options.chains > 1 {
         let chains = ChainsOptions {
             chains: options.chains,
@@ -496,6 +500,7 @@ pub fn solve(
                 &joint,
                 false,
                 options.estimate_durations,
+                options.dispersal.as_ref(),
                 Some(options.resolution),
             ));
         }

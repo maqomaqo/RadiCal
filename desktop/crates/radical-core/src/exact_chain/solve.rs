@@ -40,6 +40,8 @@ pub struct SolveOptions {
     /// Report durations and differences (the `intervals` block) off the joint
     /// draws.
     pub estimate_durations: bool,
+    /// Fit the spatial models off the same joint draws.
+    pub dispersal: Option<crate::dispersal::DispersalSpec>,
     /// Joint draws taken whatever was asked for, since Amodel needs them.
     pub interval_draws: usize,
     /// The calendar step, in years, the HPD ranges and any durations are
@@ -54,6 +56,7 @@ impl Default for SolveOptions {
             seed: 42,
             uniform_span_prior: true,
             estimate_durations: false,
+            dispersal: None,
             interval_draws: DEFAULT_DRAWS,
             resolution: REPORTING_STEP_YEARS,
         }
@@ -864,7 +867,7 @@ pub(crate) fn results(
         .iter()
         .map(|(d, idx)| (d.clone(), at(idx)))
         .collect();
-    let intervals = options.estimate_durations.then(|| {
+    let intervals = (options.estimate_durations || options.dispersal.is_some()).then(|| {
         let mut joint = joint_boundaries.clone();
         joint.extend(joint_draws.iter().map(|(k, v)| (k.clone(), v.clone())));
         intervals::report(
@@ -872,7 +875,8 @@ pub(crate) fn results(
             m.measurements,
             &joint,
             true,
-            true,
+            options.estimate_durations,
+            options.dispersal.as_ref(),
             Some(options.resolution),
         )
     });

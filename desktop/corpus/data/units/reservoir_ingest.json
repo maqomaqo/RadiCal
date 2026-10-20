@@ -1,0 +1,699 @@
+{
+ "schema": 2,
+ "family": "units/reservoir_ingest",
+ "cases": [
+  {
+   "name": "pipeline/fixture",
+   "inputs": {
+    "file": "backend/tests/fixtures/calib_marine/query_response.html"
+   },
+   "outputs": {
+    "declared": 106,
+    "record_count": 106,
+    "report": {
+     "ok": true,
+     "row_count": 106,
+     "source_last_changed": "2025-10-15T14:03:35",
+     "content_sha256": "",
+     "without_error": 3,
+     "cp1252_fallbacks": 60,
+     "undecodable_fields": 0,
+     "wrapped_longitudes": 3,
+     "unrecognised_feeding": {},
+     "errors": []
+    },
+    "content_sha256": "6cbbe315d8aeb80234ec51211d4d56df52ed5001e14b12bcc43c7d04e2db97e6",
+    "csv_round_trip": true,
+    "csv_sha256": "a4c00094e50e044c0cb027238c775a7830b1410fc2461c1f24ad9fc3675901ec"
+   }
+  },
+  {
+   "name": "freshness/fixture",
+   "inputs": {
+    "file": "backend/tests/fixtures/calib_marine/freshness_response.html"
+   },
+   "outputs": {
+    "record_count": 2060,
+    "source_last_changed": "2026-05-11T10:15:16"
+   }
+  },
+  {
+   "name": "pipeline/no-table",
+   "inputs": {
+    "hex": "3c68746d6c3e6e6f7468696e673c2f68746d6c3e"
+   },
+   "error": {
+    "type": "IngestError",
+    "message": "The response has no result table in it. The query interface may have changed, or the query may have been rejected."
+   }
+  },
+  {
+   "name": "pipeline/no-rows",
+   "inputs": {
+    "hex": "33207265636f7264733c7461626c6520626f726465723e0a3c2f7461626c653e"
+   },
+   "error": {
+    "type": "IngestError",
+    "message": "The response has a result table with no rows in it."
+   }
+  },
+  {
+   "name": "pipeline/wrong-header",
+   "inputs": {
+    "hex": "3c7461626c652020626f72646572203e3c74723e3c74643e6d61706e6f3c2f74643e3c74643e6c61743c2f74643e3c74643e4c4f4eff3c2f74643e3c74643e64656c7461723c2f74643e3c74643e64656c7461726572723c2f74643e3c74643e7265666572656e63653c2f74643e3c74643e6c6f63616c6974793c2f74643e3c74643e737562726567696f6e3c2f74643e3c74643e6e6f7465733c2f74643e3c74643e636f6c6c656374696f6e796561723c2f74643e3c74643e7265736572766f69726167653c2f74643e3c74643e6331346167653c2f74643e3c74643e6331346572723c2f74643e3c74643e6c616269643c2f74643e3c74643e6c6173745f6368616e6765643c2f74643e3c74643e67656e75733c2f74643e3c74643e737065636965733c2f74643e3c74643e66656564696e673c2f74643e3c2f74723e0a3c74723e0a3c54443e313c2f74643e3c54443e313c2f74643e3c54443e313c2f74643e3c54443e3c2f74643e3c54443e3c2f74643e3c54443e3c2f74643e3c54443e3c2f74643e3c54443e3c2f74643e3c54443e3c2f74643e3c54443e3c2f74643e3c54443e3c2f74643e3c54443e3c2f74643e3c54443e3c2f74643e3c54443e3c2f74643e3c54443e3c2f74643e3c54443e3c2f74643e3c54443e3c2f74643e3c54443e3c2f74643e0a3c2f54523e0a"
+   },
+   "error": {
+    "type": "IngestError",
+    "message": "The result table does not have the columns this ingest asks for. Found ['mapno', 'lat', 'lon�', 'deltar', 'deltarerr', 'reference', 'locality', 'subregion', 'notes', 'collectionyear', 'reservoirage', 'c14age', 'c14err', 'labid', 'last_changed', 'genus', 'species', 'feeding']; wanted ['mapno', 'lon', 'lat', 'deltar', 'deltarerr', 'reference', 'locality', 'subregion', 'notes', 'collectionyear', 'reservoirage', 'c14age', 'c14err', 'labid', 'last_changed', 'genus', 'species', 'feeding']. The source has changed shape and the parser must be updated rather than the rows read positionally."
+   }
+  },
+  {
+   "name": "pipeline/short-row",
+   "inputs": {
+    "hex": "3c7461626c6520626f726465723e3c74723e3c74643e6d61706e6f3c2f74643e3c74643e6c6f6e3c2f74643e3c74643e6c61743c2f74643e3c74643e64656c7461723c2f74643e3c74643e64656c7461726572723c2f74643e3c74643e7265666572656e63653c2f74643e3c74643e6c6f63616c6974793c2f74643e3c74643e737562726567696f6e3c2f74643e3c74643e6e6f7465733c2f74643e3c74643e636f6c6c656374696f6e796561723c2f74643e3c74643e7265736572766f69726167653c2f74643e3c74643e6331346167653c2f74643e3c74643e6331346572723c2f74643e3c74643e6c616269643c2f74643e3c74643e6c6173745f6368616e6765643c2f74643e3c74643e67656e75733c2f74643e3c74643e737065636965733c2f74643e3c74643e66656564696e673c2f74643e3c2f74723e0a3c74723e3c74643e313c2f74643e3c74643e323c2f74643e3c2f74723e"
+   },
+   "error": {
+    "type": "IngestError",
+    "message": "Row 1 of the result table has 2 cells, not 18. Refusing to read it positionally."
+   }
+  },
+  {
+   "name": "pipeline/declared-mismatch",
+   "inputs": {
+    "hex": "370a205245434f524453203c7461626c6520626f726465723e3c74723e3c74643e6d61706e6f3c2f74643e3c74643e6c6f6e3c2f74643e3c74643e6c61743c2f74643e3c74643e64656c7461723c2f74643e3c74643e64656c7461726572723c2f74643e3c74643e7265666572656e63653c2f74643e3c74643e6c6f63616c6974793c2f74643e3c74643e737562726567696f6e3c2f74643e3c74643e6e6f7465733c2f74643e3c74643e636f6c6c656374696f6e796561723c2f74643e3c74643e7265736572766f69726167653c2f74643e3c74643e6331346167653c2f74643e3c74643e6331346572723c2f74643e3c74643e6c616269643c2f74643e3c74643e6c6173745f6368616e6765643c2f74643e3c74643e67656e75733c2f74643e3c74643e737065636965733c2f74643e3c74643e66656564696e673c2f74643e3c2f74723e0a3c74723e0a3c54443e313c2f74643e3c54443e2d353c2f74643e3c54443e35303c2f74643e3c54443e3c2f74643e3c54443e3c2f74643e3c54443e3c2f74643e3c54443e3c2f74643e3c54443e3c2f74643e3c54443e3c2f74643e3c54443e3c2f74643e3c54443e3c2f74643e3c54443e3c2f74643e3c54443e3c2f74643e3c54443e3c2f74643e3c54443e3c2f74643e3c54443e3c2f74643e3c54443e3c2f74643e3c54443e3c2f74643e0a3c2f54523e0a"
+   },
+   "outputs": {
+    "declared": 7,
+    "record_count": 1,
+    "rows": [
+     {
+      "map_no": 1,
+      "latitude": 50.0,
+      "longitude": -5.0,
+      "delta_r": null,
+      "delta_r_error": null,
+      "reference": null,
+      "locality": null,
+      "subregion": null,
+      "notes": null,
+      "c14_age": null,
+      "c14_error": null,
+      "lab_id": null,
+      "collection_year": null,
+      "reservoir_age": null,
+      "genus": null,
+      "species": null,
+      "feeding": "unknown",
+      "feeding_raw": null
+     }
+    ],
+    "report": {
+     "ok": false,
+     "row_count": 1,
+     "source_last_changed": null,
+     "content_sha256": "",
+     "without_error": 0,
+     "cp1252_fallbacks": 0,
+     "undecodable_fields": 0,
+     "wrapped_longitudes": 0,
+     "unrecognised_feeding": {},
+     "errors": ["The source said 7 records and 1 were read. Refusing to store a partial mirror."]
+    },
+    "content_sha256": "15ea24dd212e81f92539a2523df279347017c83ea3920b8aa78f244dc1f1df21",
+    "csv": "map_no,latitude,longitude,delta_r,delta_r_error,reference,locality,subregion,notes,c14_age,c14_error,lab_id,collection_year,reservoir_age,genus,species,feeding,feeding_raw\r\n1,50.0,-5.0,,,,,,,,,,,,,,unknown,\r\n",
+    "csv_round_trip": true
+   }
+  },
+  {
+   "name": "pipeline/small",
+   "inputs": {
+    "hex": "32207265636f7264733c7461626c6520626f726465723e3c74723e3c74643e6d61706e6f3c2f74643e3c74643e6c6f6e3c2f74643e3c74643e6c61743c2f74643e3c74643e64656c7461723c2f74643e3c74643e64656c7461726572723c2f74643e3c74643e7265666572656e63653c2f74643e3c74643e6c6f63616c6974793c2f74643e3c74643e737562726567696f6e3c2f74643e3c74643e6e6f7465733c2f74643e3c74643e636f6c6c656374696f6e796561723c2f74643e3c74643e7265736572766f69726167653c2f74643e3c74643e6331346167653c2f74643e3c74643e6331346572723c2f74643e3c74643e6c616269643c2f74643e3c74643e6c6173745f6368616e6765643c2f74643e3c74643e67656e75733c2f74643e3c74643e737065636965733c2f74643e3c74643e66656564696e673c2f74643e3c2f74723e0a3c74723e0a3c54443e31303c2f74643e3c54443e3138332e353c2f74643e3c54443e35342e353c2f74643e3c54443e2d35303c2f74643e3c54443e266e6273703b3c2f74643e3c54443e3c2f74643e3c54443e436166e92026616d703b206261723c2f74643e3c54443e3c2f74643e3c54443e3c2f74643e3c54443e3c2f74643e3c54443e3c2f74643e3c54443e3c2f74643e3c54443e3c2f74643e3c54443e3c2f74643e3c54443e323032342d30322d32392032333a35393a35393c2f74643e3c54443e3c2f74643e3c54443e3c2f74643e3c54443ea046696c7465723c2f74643e0a3c2f54523e0a3c74723e0a3c54443e393c2f74643e3c54443e2d3138313c2f74643e3c54443e2d31323c2f74643e3c54443e32303c2f74643e3c54443e33303c2f74643e3c54443e3c2f74643e3c54443e3c2f74643e3c54443e3c2f74643e3c54443e26237834313b26233132383b2623303b262378443830303b2623313b2623783131303030303b26616d707820266e6f7469743b2026756e6b6e6f776e3b3c2f74643e3c54443e3c2f74643e3c54443e3c2f74643e3c54443e3c2f74643e3c54443e3c2f74643e3c54443e3c2f74643e3c54443e323032342d30322d33303c2f74643e3c54443e3c2f74643e3c54443e3c2f74643e3c54443e4e65772068616269743c2f74643e0a3c2f54523e0a"
+   },
+   "outputs": {
+    "declared": 2,
+    "record_count": 2,
+    "rows": [
+     {
+      "map_no": 10,
+      "latitude": 54.5,
+      "longitude": -176.5,
+      "delta_r": -50.0,
+      "delta_r_error": null,
+      "reference": null,
+      "locality": "Café & bar",
+      "subregion": null,
+      "notes": null,
+      "c14_age": null,
+      "c14_error": null,
+      "lab_id": null,
+      "collection_year": null,
+      "reservoir_age": null,
+      "genus": null,
+      "species": null,
+      "feeding": "suspension",
+      "feeding_raw": "Filter"
+     },
+     {
+      "map_no": 9,
+      "latitude": -12.0,
+      "longitude": 179.0,
+      "delta_r": 20.0,
+      "delta_r_error": 30.0,
+      "reference": null,
+      "locality": null,
+      "subregion": null,
+      "notes": "A€���&x ¬it; &unknown;",
+      "c14_age": null,
+      "c14_error": null,
+      "lab_id": null,
+      "collection_year": null,
+      "reservoir_age": null,
+      "genus": null,
+      "species": null,
+      "feeding": "unknown",
+      "feeding_raw": "New habit"
+     }
+    ],
+    "report": {
+     "ok": true,
+     "row_count": 2,
+     "source_last_changed": "2024-02-29T23:59:59",
+     "content_sha256": "",
+     "without_error": 1,
+     "cp1252_fallbacks": 2,
+     "undecodable_fields": 0,
+     "wrapped_longitudes": 2,
+     "unrecognised_feeding": {
+      "New habit": 1
+     },
+     "errors": []
+    },
+    "content_sha256": "258313f48939e98e07e1d9b477387971bd3d256419352d72bbfff51b60ded986",
+    "csv": "map_no,latitude,longitude,delta_r,delta_r_error,reference,locality,subregion,notes,c14_age,c14_error,lab_id,collection_year,reservoir_age,genus,species,feeding,feeding_raw\r\n9,-12.0,179.0,20.0,30.0,,,,A€���&x ¬it; &unknown;,,,,,,,,unknown,New habit\r\n10,54.5,-176.5,-50.0,,,Café & bar,,,,,,,,,,suspension,Filter\r\n",
+    "csv_round_trip": true
+   }
+  },
+  {
+   "name": "freshness/no-table",
+   "inputs": {
+    "hex": "6e6f6e65"
+   },
+   "error": {
+    "type": "IngestError",
+    "message": "The freshness probe returned no result table. The query interface may have changed, or the query may have been rejected."
+   }
+  },
+  {
+   "name": "freshness/no-count",
+   "inputs": {
+    "hex": "3c7461626c6520626f726465723e3c74723e3c74643e6d6178286c6173745f6368616e676564293c2f74643e3c74643e323032302d30312d30313c2f74643e3c2f74723e"
+   },
+   "error": {
+    "type": "IngestError",
+    "message": "The freshness probe did not report a row count. Got ['max(last_changed)']."
+   }
+  },
+  {
+   "name": "freshness/bad-count",
+   "inputs": {
+    "hex": "3c7461626c6520626f726465723e3c74723e3c74643e434f554e54282a29203c2f74643e3c74643e6d616e793c2f74643e3c2f74723e"
+   },
+   "error": {
+    "type": "IngestError",
+    "message": "The freshness probe reported a row count of 'many', which is not a number."
+   }
+  },
+  {
+   "name": "freshness/no-stamp",
+   "inputs": {
+    "hex": "3c7461626c6520626f726465723e3c74723e3c74643e636f756e74282a293c2f74643e3c74643e203132203c2f74643e3c2f74723e3c74723e3c74643e6d6178286c6173745f6368616e676564293c2f74643e3c74643e736f6f6e3c2f74643e3c2f74723e"
+   },
+   "outputs": {
+    "record_count": 12,
+    "source_last_changed": null
+   }
+  },
+  {
+   "name": "decode_field",
+   "inputs": {
+    "hex": ["706c61696e","48c3a56b616e73736f6e","546879626f72f86e","818d20626164205c20272022","69742773","","00090a0d7f"]
+   },
+   "outputs": {
+    "decoded": [
+     ["plain","utf-8"],
+     ["Håkansson","utf-8"],
+     ["Thyborøn","cp1252"],
+     ["\\x81\\x8d bad \\\\ \\' \"","escaped"],
+     ["it's","utf-8"],
+     ["","utf-8"],
+     ["\u0000\t\n\r","utf-8"]
+    ]
+   }
+  },
+  {
+   "name": "records_to_rows/problems",
+   "inputs": {
+    "records": [
+     {
+      "mapno": "1",
+      "lat": " ",
+      "lon": "NULL"
+     },
+     {
+      "mapno": "x ",
+      "lat": "1",
+      "lon": "2"
+     },
+     {
+      "mapno": "2.9",
+      "lat": "91",
+      "lon": "0"
+     },
+     {
+      "mapno": "1",
+      "lat": "50",
+      "lon": "-5"
+     },
+     {
+      "mapno": "1",
+      "lat": "10",
+      "lon": "-5"
+     },
+     {
+      "mapno": "3",
+      "lat": "-",
+      "lon": "--"
+     }
+    ]
+   },
+   "outputs": {
+    "rows": [
+     {
+      "map_no": 1,
+      "latitude": 50.0,
+      "longitude": -5.0,
+      "delta_r": null,
+      "delta_r_error": null,
+      "reference": null,
+      "locality": null,
+      "subregion": null,
+      "notes": null,
+      "c14_age": null,
+      "c14_error": null,
+      "lab_id": null,
+      "collection_year": null,
+      "reservoir_age": null,
+      "genus": null,
+      "species": null,
+      "feeding": "unknown",
+      "feeding_raw": null
+     }
+    ],
+    "report": {
+     "ok": false,
+     "row_count": 1,
+     "source_last_changed": null,
+     "content_sha256": "",
+     "without_error": 0,
+     "cp1252_fallbacks": 0,
+     "undecodable_fields": 0,
+     "wrapped_longitudes": 0,
+     "unrecognised_feeding": {},
+     "errors": ["Row 1: lat, lon missing -- a reservoir point needs a map number and a position","Row 2: map number and position must be numbers, got mapno='x\\xa0', lat='1', lon='2'","Row 3 (map no 2): latitude 91.0 is not a latitude","Row 5: map number 1 already appeared at row 4 -- it identifies a point and cannot repeat","Row 6: map number and position must be numbers, got mapno='3', lat='-', lon='--'"]
+    },
+    "content_sha256": "15ea24dd212e81f92539a2523df279347017c83ea3920b8aa78f244dc1f1df21"
+   }
+  },
+  {
+   "name": "records_to_rows/values",
+   "inputs": {
+    "records": [
+     {
+      "mapno": "1",
+      "lat": "50",
+      "lon": "-5",
+      "deltar": " 12.5 ",
+      "deltarerr": "NULL",
+      "collectionyear": "1931.7",
+      "c14age": "1e3",
+      "reference": "  ",
+      "species": "null",
+      "feeding": "DEPOSIT OR SUSPENSION",
+      "last_changed": "1999-12-31"
+     },
+     {
+      "mapno": "2",
+      "lat": "50",
+      "lon": "-5",
+      "deltar": "-",
+      "feeding": "Unheard of",
+      "last_changed": "2000-1-2 3:4:5"
+     },
+     {
+      "mapno": "3",
+      "lat": "50",
+      "lon": "-5",
+      "feeding": null,
+      "last_changed": "2000-01-02T03:04:05"
+     },
+     {
+      "mapno": "4",
+      "lat": "50",
+      "lon": "-540",
+      "feeding": "unheard OF ",
+      "last_changed": " 2001-06-30 12:00:00 "
+     }
+    ]
+   },
+   "outputs": {
+    "rows": [
+     {
+      "map_no": 1,
+      "latitude": 50.0,
+      "longitude": -5.0,
+      "delta_r": 12.5,
+      "delta_r_error": null,
+      "reference": null,
+      "locality": null,
+      "subregion": null,
+      "notes": null,
+      "c14_age": 1000.0,
+      "c14_error": null,
+      "lab_id": null,
+      "collection_year": 1931,
+      "reservoir_age": null,
+      "genus": null,
+      "species": null,
+      "feeding": "ambiguous",
+      "feeding_raw": "DEPOSIT OR SUSPENSION"
+     },
+     {
+      "map_no": 2,
+      "latitude": 50.0,
+      "longitude": -5.0,
+      "delta_r": null,
+      "delta_r_error": null,
+      "reference": null,
+      "locality": null,
+      "subregion": null,
+      "notes": null,
+      "c14_age": null,
+      "c14_error": null,
+      "lab_id": null,
+      "collection_year": null,
+      "reservoir_age": null,
+      "genus": null,
+      "species": null,
+      "feeding": "unknown",
+      "feeding_raw": "Unheard of"
+     },
+     {
+      "map_no": 3,
+      "latitude": 50.0,
+      "longitude": -5.0,
+      "delta_r": null,
+      "delta_r_error": null,
+      "reference": null,
+      "locality": null,
+      "subregion": null,
+      "notes": null,
+      "c14_age": null,
+      "c14_error": null,
+      "lab_id": null,
+      "collection_year": null,
+      "reservoir_age": null,
+      "genus": null,
+      "species": null,
+      "feeding": "unknown",
+      "feeding_raw": null
+     },
+     {
+      "map_no": 4,
+      "latitude": 50.0,
+      "longitude": -180.0,
+      "delta_r": null,
+      "delta_r_error": null,
+      "reference": null,
+      "locality": null,
+      "subregion": null,
+      "notes": null,
+      "c14_age": null,
+      "c14_error": null,
+      "lab_id": null,
+      "collection_year": null,
+      "reservoir_age": null,
+      "genus": null,
+      "species": null,
+      "feeding": "unknown",
+      "feeding_raw": "unheard OF"
+     }
+    ],
+    "report": {
+     "ok": true,
+     "row_count": 4,
+     "source_last_changed": "2001-06-30T12:00:00",
+     "content_sha256": "",
+     "without_error": 1,
+     "cp1252_fallbacks": 0,
+     "undecodable_fields": 0,
+     "wrapped_longitudes": 1,
+     "unrecognised_feeding": {
+      "Unheard of": 1,
+      "unheard OF": 1
+     },
+     "errors": []
+    },
+    "content_sha256": "249f8f78993f49055126a82420c967a25c68c72d43312077919054a89d045c72"
+   }
+  },
+  {
+   "name": "records_to_rows/empty",
+   "inputs": {
+    "records": []
+   },
+   "outputs": {
+    "rows": [],
+    "report": {
+     "ok": false,
+     "row_count": 0,
+     "source_last_changed": null,
+     "content_sha256": "",
+     "without_error": 0,
+     "cp1252_fallbacks": 0,
+     "undecodable_fields": 0,
+     "wrapped_longitudes": 0,
+     "unrecognised_feeding": {},
+     "errors": ["The fetch returned no rows at all."]
+    },
+    "content_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+   }
+  },
+  {
+   "name": "records_to_rows/declared",
+   "inputs": {
+    "records": [
+     {
+      "mapno": "1",
+      "lat": "50",
+      "lon": "-5"
+     }
+    ],
+    "declared": 2
+   },
+   "outputs": {
+    "rows": [
+     {
+      "map_no": 1,
+      "latitude": 50.0,
+      "longitude": -5.0,
+      "delta_r": null,
+      "delta_r_error": null,
+      "reference": null,
+      "locality": null,
+      "subregion": null,
+      "notes": null,
+      "c14_age": null,
+      "c14_error": null,
+      "lab_id": null,
+      "collection_year": null,
+      "reservoir_age": null,
+      "genus": null,
+      "species": null,
+      "feeding": "unknown",
+      "feeding_raw": null
+     }
+    ],
+    "report": {
+     "ok": false,
+     "row_count": 1,
+     "source_last_changed": null,
+     "content_sha256": "",
+     "without_error": 0,
+     "cp1252_fallbacks": 0,
+     "undecodable_fields": 0,
+     "wrapped_longitudes": 0,
+     "unrecognised_feeding": {},
+     "errors": ["The source said 2 records and 1 were read. Refusing to store a partial mirror."]
+    },
+    "content_sha256": "15ea24dd212e81f92539a2523df279347017c83ea3920b8aa78f244dc1f1df21"
+   }
+  },
+  {
+   "name": "rows_from_csv/empty",
+   "inputs": {
+    "text": ""
+   },
+   "error": {
+    "type": "IngestError",
+    "message": "The bundled snapshot file is empty."
+   }
+  },
+  {
+   "name": "rows_from_csv/blank-header",
+   "inputs": {
+    "text": "\n1,2\n"
+   },
+   "error": {
+    "type": "IngestError",
+    "message": "The bundled snapshot does not have the expected columns. Found []; wanted ['map_no', 'latitude', 'longitude', 'delta_r', 'delta_r_error', 'reference', 'locality', 'subregion', 'notes', 'c14_age', 'c14_error', 'lab_id', 'collection_year', 'reservoir_age', 'genus', 'species', 'feeding', 'feeding_raw']."
+   }
+  },
+  {
+   "name": "rows_from_csv/wrong-header",
+   "inputs": {
+    "text": "a,b\n"
+   },
+   "error": {
+    "type": "IngestError",
+    "message": "The bundled snapshot does not have the expected columns. Found ['a', 'b']; wanted ['map_no', 'latitude', 'longitude', 'delta_r', 'delta_r_error', 'reference', 'locality', 'subregion', 'notes', 'c14_age', 'c14_error', 'lab_id', 'collection_year', 'reservoir_age', 'genus', 'species', 'feeding', 'feeding_raw']."
+   }
+  },
+  {
+   "name": "rows_from_csv/header-only",
+   "inputs": {
+    "text": "map_no,latitude,longitude,delta_r,delta_r_error,reference,locality,subregion,notes,c14_age,c14_error,lab_id,collection_year,reservoir_age,genus,species,feeding,feeding_raw\n\n , \n"
+   },
+   "error": {
+    "type": "IngestError",
+    "message": "The bundled snapshot has a header and no rows."
+   }
+  },
+  {
+   "name": "rows_from_csv/ragged",
+   "inputs": {
+    "text": "map_no,latitude,longitude,delta_r,delta_r_error,reference,locality,subregion,notes,c14_age,c14_error,lab_id,collection_year,reservoir_age,genus,species,feeding,feeding_raw\n1,2,3\n"
+   },
+   "error": {
+    "type": "IngestError",
+    "message": "Row 2 of the bundled snapshot has 3 values, not 18."
+   }
+  },
+  {
+   "name": "rows_from_csv/bad-map",
+   "inputs": {
+    "text": "map_no,latitude,longitude,delta_r,delta_r_error,reference,locality,subregion,notes,c14_age,c14_error,lab_id,collection_year,reservoir_age,genus,species,feeding,feeding_raw\nx,1,2,,,,,,,,,,,,,,,\n"
+   },
+   "error": {
+    "type": "IngestError",
+    "message": "Row 2 of the bundled snapshot could not be read: invalid literal for int() with base 10: 'x'"
+   }
+  },
+  {
+   "name": "rows_from_csv/bad-lat",
+   "inputs": {
+    "text": "map_no,latitude,longitude,delta_r,delta_r_error,reference,locality,subregion,notes,c14_age,c14_error,lab_id,collection_year,reservoir_age,genus,species,feeding,feeding_raw\n1,north,2,,,,,,,,,,,,,,,\n"
+   },
+   "error": {
+    "type": "IngestError",
+    "message": "Row 2 of the bundled snapshot could not be read: could not convert string to float: 'north'"
+   }
+  },
+  {
+   "name": "rows_from_csv/nan-year",
+   "inputs": {
+    "text": "map_no,latitude,longitude,delta_r,delta_r_error,reference,locality,subregion,notes,c14_age,c14_error,lab_id,collection_year,reservoir_age,genus,species,feeding,feeding_raw\n1,1,2,,,,,,,,,,nan,,,,,\n"
+   },
+   "error": {
+    "type": "IngestError",
+    "message": "Row 2 of the bundled snapshot could not be read: cannot convert float NaN to integer"
+   }
+  },
+  {
+   "name": "rows_from_csv/good",
+   "inputs": {
+    "text": " map_no ,latitude ,longitude ,delta_r ,delta_r_error ,reference ,locality ,subregion ,notes ,c14_age ,c14_error ,lab_id ,collection_year ,reservoir_age ,genus ,species ,feeding ,feeding_raw\n 1_0 ,+1.5,-2e1,NULL,-,\"a, b\",,,,,,,1931.9,,,,suspension,Filter\n"
+   },
+   "outputs": {
+    "rows": [
+     {
+      "map_no": 10,
+      "latitude": 1.5,
+      "longitude": -20.0,
+      "delta_r": null,
+      "delta_r_error": null,
+      "reference": "a, b",
+      "locality": null,
+      "subregion": null,
+      "notes": null,
+      "c14_age": null,
+      "c14_error": null,
+      "lab_id": null,
+      "collection_year": 1931,
+      "reservoir_age": null,
+      "genus": null,
+      "species": null,
+      "feeding": "suspension",
+      "feeding_raw": "Filter"
+     }
+    ]
+   }
+  },
+  {
+   "name": "html_unescape",
+   "inputs": {
+    "texts": ["&nbsp;x","a &amp b","&AMP;&lt&gt;","&#65;&#x42;&#X43","&#128;&#159;&#0;","&#xd800;&#1114112;&#99999999999999999999;","&#1;&#11;&#xfffe;","&notin;&notit;&noti","&ampamp;","&#;&#x;&;","& lone","&aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa;","&ZeroWidthSpace;&zwnj;","&acE;"]
+   },
+   "outputs": {
+    "unescaped": [" x","a & b","&<>","ABC","€Ÿ�","���","","∉¬it;¬i","&amp;","&#;&#x;&;","& lone","&aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa;","​‌","∾̳"]
+   }
+  },
+  {
+   "name": "parse_timestamp",
+   "inputs": {
+    "texts": ["2024-02-29 23:59:59","2023-02-29","2024-1-2","2024-01-02  3:04:05","2024-01-02 24:00:00","2024-01-02 23:59:60","0000-01-01","24-01-01","2024-01-02 03:04","NULL"," 2024-01-02 ","2024-01- 2","2024-13-01","2024-12-31 23:59:59 "]
+   },
+   "outputs": {
+    "parsed": ["2024-02-29T23:59:59",null,"2024-01-02T00:00:00","2024-01-02T03:04:05",null,null,null,null,null,null,"2024-01-02T00:00:00","2024-01-02T00:00:00",null,"2024-12-31T23:59:59"]
+   }
+  },
+  {
+   "name": "wrap_longitude",
+   "inputs": {
+    "values": [180.0,-180.0,183.5,-181.0,540.0,-540.0,1000000.0,359.999]
+   },
+   "outputs": {
+    "wrapped": [180.0,-180.0,-176.5,179.0,-180.0,-180.0,-80.0,-0.0009999999999763531]
+   }
+  },
+  {
+   "name": "snapshot_id",
+   "inputs": {
+    "slug": "calib-marine",
+    "stamp": "2026-05-11T10:00:00"
+   },
+   "outputs": {
+    "id": "calib-marine-2026-05-11"
+   }
+  },
+  {
+   "name": "feeding",
+   "inputs": {
+    "spellings": [null,""," Filter ","NULL","deposit or suspension feeder","Carnivore/Scavenger","algal grazer","Nonsense"," Herbivore"]
+   },
+   "outputs": {
+    "normalised": ["unknown","unknown","suspension","unknown","ambiguous","ambiguous","grazer","unknown","grazer"],
+    "recognised": [true,true,true,true,true,true,true,false,true]
+   }
+  }
+ ]
+}
