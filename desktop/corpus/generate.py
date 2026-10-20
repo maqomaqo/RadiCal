@@ -1618,6 +1618,7 @@ DATE_CSVS = {
         'E,3040,25,"open quote never closed\n'),
     'ragged': ('rag.csv', 'name,age,error\nA,3000,25,extra,more\nB,3010\n'),
     'carriage-returns': ('cr.csv', 'name,age,error\rA,3000,25\rB,3010,25\r'),
+    'mixed-line-endings': ('m.csv', 'name,age,error,notes\r\nA,3000,25,"one\rtwo"\rB,3010,25,\n'),
     'paths-and-limits': ('pl.csv',
         'name,age,error,phase,tpq,taq,ring_offset,ring_offset_error,depth_cm\n'
         'A,3000,25,Hillside > North > Feature J,500,600,,,\n'
@@ -1712,6 +1713,18 @@ def units_oxcal_script():
         cases.append(capture(f'parse_oxcal/{i:03d}', entry,
                              lambda t=text, f=entry['filename']: Stable()(
                                  oxcal_script.parse_oxcal(t, CORPUS_OWNER, f).as_dict())))
+    # Files the reader once raised on rather than refused.
+    edges = {
+        'ends-in-a-call': 'R_Date(',
+        'ends-in-an-assignment': 'Options(){ Resolution=',
+        'resolution-inf': 'Options(){ Resolution="inf"; }; Phase("P"){ R_Date("a",3000,25); };',
+        'resolution-minus-inf': 'Options(){ Resolution="-inf"; }; Phase("P"){ R_Date("a",3000,25); };',
+        'resolution-nan': 'Options(){ Resolution="nan"; }; Phase("P"){ R_Date("a",3000,25); };',
+    }
+    for label, text in edges.items():
+        cases.append(capture(f'parse_oxcal/{label}', {'filename': 't.oxcal', 'text': text},
+                             lambda t=text: Stable()(
+                                 oxcal_script.parse_oxcal(t, CORPUS_OWNER, 't.oxcal').as_dict())))
     uploads = {
         'model.oxcal': b'Plot(){ R_Date("a",3000,25); }',
         'model.txt': b'Plot(){ Phase("P"){ R_Date("a",3000,25); R_Date("b",3010,25); }; };',
@@ -2001,6 +2014,8 @@ def units_reservoir_ingest():
         'bad-map': header + '\nx,1,2' + ',' * 15 + '\n',
         'bad-lat': header + '\n1,north,2' + ',' * 15 + '\n',
         'nan-year': header + '\n' + ','.join(['1', '1', '2'] + [''] * 9 + ['nan'] + [''] * 5) + '\n',
+        'inf-year': header + '\n' + ','.join(['1', '1', '2'] + [''] * 9 + ['inf'] + [''] * 5) + '\n',
+        'minus-inf-year': header + '\n' + ','.join(['1', '1', '2'] + [''] * 9 + ['-inf'] + [''] * 5) + '\n',
         'good': (' ' + header.replace(',', ' ,') + '\n 1_0 ,+1.5,-2e1,NULL,-,"a, b",,,,,,,1931.9,,,,'
                  'suspension,Filter\n'),
     }

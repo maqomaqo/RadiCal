@@ -655,6 +655,20 @@ fn delta_r_source(
 // CSV
 // --------------------------------------------------------------------------
 
+/// `re.sub(r'\r(?!\n)', '\n', text)`: each CR not followed by LF becomes LF.
+fn lone_cr_to_lf(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        out.push(if c == '\r' && chars.peek() != Some(&'\n') {
+            '\n'
+        } else {
+            c
+        });
+    }
+    out
+}
+
 /// Comma, tab or semicolon, whichever the header line uses most; ties go to
 /// that order.
 fn sniff_delimiter(text: &str) -> char {
@@ -702,6 +716,10 @@ pub fn parse_csv(
         result.errors.push("The file is empty.".to_owned());
         return Ok(result);
     }
+    // Old Mac line endings (a lone CR) are a convention, not a fault: read
+    // them as line breaks. CRLF is left alone; the csv reader handles it.
+    let normalised = lone_cr_to_lf(text);
+    let text = normalised.as_str();
     let delimiter = sniff_delimiter(text);
     let (fieldnames, raw_rows) = pycsv::dict_rows(text, delimiter)?;
     let Some(fieldnames) = fieldnames.filter(|f| !f.is_empty()) else {

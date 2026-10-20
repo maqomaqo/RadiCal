@@ -10514,6 +10514,211 @@
    }
   },
   {
+   "name": "parse_oxcal/ends-in-a-call",
+   "inputs": {
+    "filename": "t.oxcal",
+    "text": "R_Date("
+   },
+   "outputs": {
+    "ok": false,
+    "dates": [],
+    "model_tree": null,
+    "element_assignments": {},
+    "errors": ["The file ends where a value was expected."],
+    "warnings": [],
+    "notes": [],
+    "source_format": "oxcal",
+    "analysis_name": "t",
+    "resolution": null,
+    "suggested_analysis_type": "group_calibration",
+    "date_count": 0,
+    "dates_only": null,
+    "blocking_commands": []
+   }
+  },
+  {
+   "name": "parse_oxcal/ends-in-an-assignment",
+   "inputs": {
+    "filename": "t.oxcal",
+    "text": "Options(){ Resolution="
+   },
+   "outputs": {
+    "ok": false,
+    "dates": [],
+    "model_tree": null,
+    "element_assignments": {},
+    "errors": ["The file ends where a value was expected."],
+    "warnings": [],
+    "notes": [],
+    "source_format": "oxcal",
+    "analysis_name": "t",
+    "resolution": null,
+    "suggested_analysis_type": "group_calibration",
+    "date_count": 0,
+    "dates_only": null,
+    "blocking_commands": []
+   }
+  },
+  {
+   "name": "parse_oxcal/resolution-inf",
+   "inputs": {
+    "filename": "t.oxcal",
+    "text": "Options(){ Resolution=\"inf\"; }; Phase(\"P\"){ R_Date(\"a\",3000,25); };"
+   },
+   "outputs": {
+    "ok": true,
+    "dates": [
+     {
+      "id": "<id:1>",
+      "sample_name": "a",
+      "age_bp": 3000.0,
+      "error_1sigma": 25.0,
+      "material_type": "unknown",
+      "curve_id": "intcal20",
+      "sample_type": "terrestrial",
+      "delta_r": null,
+      "delta_r_error": null,
+      "tpq_age_bp": null,
+      "taq_age_bp": null,
+      "depth_cm": null,
+      "location": null,
+      "notes": null,
+      "outlier_prior": 0.0,
+      "outlier_model": "general",
+      "phase_name": "P",
+      "element_id": "<id:2>"
+     }
+    ],
+    "model_tree": {
+     "id": "<id:2>",
+     "element_type": "phase",
+     "name": "P",
+     "tpq_age_bp": null,
+     "taq_age_bp": null,
+     "children": []
+    },
+    "element_assignments": {
+     "<id:1>": "<id:2>"
+    },
+    "errors": [],
+    "warnings": [],
+    "notes": ["Resolution=inf was not carried over: the reporting resolution here is a whole number of years from 1 to 100. The analysis uses the default of 5."],
+    "source_format": "oxcal",
+    "analysis_name": "t",
+    "resolution": null,
+    "suggested_analysis_type": "bayesian",
+    "date_count": 1,
+    "dates_only": null,
+    "blocking_commands": []
+   }
+  },
+  {
+   "name": "parse_oxcal/resolution-minus-inf",
+   "inputs": {
+    "filename": "t.oxcal",
+    "text": "Options(){ Resolution=\"-inf\"; }; Phase(\"P\"){ R_Date(\"a\",3000,25); };"
+   },
+   "outputs": {
+    "ok": true,
+    "dates": [
+     {
+      "id": "<id:1>",
+      "sample_name": "a",
+      "age_bp": 3000.0,
+      "error_1sigma": 25.0,
+      "material_type": "unknown",
+      "curve_id": "intcal20",
+      "sample_type": "terrestrial",
+      "delta_r": null,
+      "delta_r_error": null,
+      "tpq_age_bp": null,
+      "taq_age_bp": null,
+      "depth_cm": null,
+      "location": null,
+      "notes": null,
+      "outlier_prior": 0.0,
+      "outlier_model": "general",
+      "phase_name": "P",
+      "element_id": "<id:2>"
+     }
+    ],
+    "model_tree": {
+     "id": "<id:2>",
+     "element_type": "phase",
+     "name": "P",
+     "tpq_age_bp": null,
+     "taq_age_bp": null,
+     "children": []
+    },
+    "element_assignments": {
+     "<id:1>": "<id:2>"
+    },
+    "errors": [],
+    "warnings": [],
+    "notes": ["Resolution=-inf was not carried over: the reporting resolution here is a whole number of years from 1 to 100. The analysis uses the default of 5."],
+    "source_format": "oxcal",
+    "analysis_name": "t",
+    "resolution": null,
+    "suggested_analysis_type": "bayesian",
+    "date_count": 1,
+    "dates_only": null,
+    "blocking_commands": []
+   }
+  },
+  {
+   "name": "parse_oxcal/resolution-nan",
+   "inputs": {
+    "filename": "t.oxcal",
+    "text": "Options(){ Resolution=\"nan\"; }; Phase(\"P\"){ R_Date(\"a\",3000,25); };"
+   },
+   "outputs": {
+    "ok": true,
+    "dates": [
+     {
+      "id": "<id:1>",
+      "sample_name": "a",
+      "age_bp": 3000.0,
+      "error_1sigma": 25.0,
+      "material_type": "unknown",
+      "curve_id": "intcal20",
+      "sample_type": "terrestrial",
+      "delta_r": null,
+      "delta_r_error": null,
+      "tpq_age_bp": null,
+      "taq_age_bp": null,
+      "depth_cm": null,
+      "location": null,
+      "notes": null,
+      "outlier_prior": 0.0,
+      "outlier_model": "general",
+      "phase_name": "P",
+      "element_id": "<id:2>"
+     }
+    ],
+    "model_tree": {
+     "id": "<id:2>",
+     "element_type": "phase",
+     "name": "P",
+     "tpq_age_bp": null,
+     "taq_age_bp": null,
+     "children": []
+    },
+    "element_assignments": {
+     "<id:1>": "<id:2>"
+    },
+    "errors": [],
+    "warnings": [],
+    "notes": ["Resolution=nan was not carried over: the reporting resolution here is a whole number of years from 1 to 100. The analysis uses the default of 5."],
+    "source_format": "oxcal",
+    "analysis_name": "t",
+    "resolution": null,
+    "suggested_analysis_type": "bayesian",
+    "date_count": 1,
+    "dates_only": null,
+    "blocking_commands": []
+   }
+  },
+  {
    "name": "parse_upload/model.oxcal",
    "inputs": {
     "filename": "model.oxcal",
