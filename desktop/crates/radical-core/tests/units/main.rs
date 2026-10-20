@@ -12,6 +12,7 @@ mod curve_mix;
 mod curve_registry;
 mod curve_view;
 mod date_format;
+mod dispersal;
 mod exact_chain;
 mod exact_parallel;
 mod f14c;
@@ -58,7 +59,7 @@ pub const REL: f64 = 1e-12;
 pub const REL_LIKELIHOOD: f64 = 5e-12;
 
 /// The families compared here; every units/ family must be one.
-const COVERED: [&str; 23] = [
+const COVERED: [&str; 24] = [
     "agreement",
     "calibrate",
     "cell_edges",
@@ -66,6 +67,7 @@ const COVERED: [&str; 23] = [
     "curve_registry",
     "curve_view",
     "date_format",
+    "dispersal",
     "exact_chain",
     "exact_parallel",
     "f14c",
@@ -84,6 +86,16 @@ const COVERED: [&str; 23] = [
     "wiggle_match",
 ];
 
+/// The families compared in another crate's tests, which keep a list of
+/// their own (radical-io: `tests/units/main.rs`).
+const ELSEWHERE: [&str; 5] = [
+    "curve_import",
+    "date_import",
+    "oxcal_export",
+    "oxcal_script",
+    "reservoir_ingest",
+];
+
 #[test]
 fn every_units_family_has_a_parity_test() {
     let listed: BTreeSet<String> = load_manifest()
@@ -96,7 +108,11 @@ fn every_units_family_has_a_parity_test() {
                 .map(str::to_owned)
         })
         .collect();
-    let covered: BTreeSet<String> = COVERED.iter().map(|s| (*s).to_owned()).collect();
+    let covered: BTreeSet<String> = COVERED
+        .iter()
+        .chain(&ELSEWHERE)
+        .map(|s| (*s).to_owned())
+        .collect();
     assert_eq!(listed, covered);
 }
 

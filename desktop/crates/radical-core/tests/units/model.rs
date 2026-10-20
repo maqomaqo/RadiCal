@@ -69,6 +69,8 @@ pub fn measurement(v: &Value) -> Measurement {
         ring_offset: opt_num(&v["ring_offset"]),
         ring_offset_error: opt_num(&v["ring_offset_error"]),
         depth_cm: opt_num(&v["depth_cm"]),
+        latitude: opt_num(&v["latitude"]),
+        longitude: opt_num(&v["longitude"]),
     }
 }
 

@@ -33,6 +33,9 @@ pub struct Measurement {
     pub ring_offset: Option<f64>,
     pub ring_offset_error: Option<f64>,
     pub depth_cm: Option<f64>,
+    /// WGS84 decimal degrees, for the dispersal models.
+    pub latitude: Option<f64>,
+    pub longitude: Option<f64>,
 }
 
 /// `value or default` for an optional string: Python's empty string is false.

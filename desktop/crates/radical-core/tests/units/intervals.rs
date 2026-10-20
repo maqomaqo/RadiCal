@@ -292,7 +292,7 @@ fn intervals() {
             let joint = draws(&inputs["draws"]);
             let step = opt_num(&inputs["step"]);
             if rest == "deposition/no-durations" {
-                let got = report(root.as_ref(), &dates, &joint, false, false, step);
+                let got = report(root.as_ref(), &dates, &joint, false, false, None, step);
                 check_block(&mut c, &name, &got, &want, REL);
                 continue;
             }
@@ -340,7 +340,7 @@ fn intervals() {
                 }
             }
 
-            let got = report(root.as_ref(), &dates, &joint, true, true, step);
+            let got = report(root.as_ref(), &dates, &joint, true, true, None, step);
             check_block(&mut c, &name, &got, &want["report"], REL);
 
             let phases =
@@ -385,7 +385,7 @@ fn intervals() {
                     name: d["name"].as_str().unwrap().into(),
                 })
                 .collect();
-            let got = report_dates(&named, &draws(&inputs["draws"]));
+            let got = report_dates(&named, &draws(&inputs["draws"]), None);
             check_block(&mut c, &name, &got, &want, REL);
         } else if name == "plan_date_differences/many" {
             let named: Vec<NamedDate> = inputs["dates"]

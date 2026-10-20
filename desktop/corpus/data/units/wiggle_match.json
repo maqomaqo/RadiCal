@@ -1101,7 +1101,7 @@
     ]
    },
    "error": {
-    "type": "ValueError",
+    "type": "WiggleMatchError",
     "message": "A1 carries an outlier model, which a wiggle match cannot apply: its gaps are asserted, so there is nothing for a date to be an outlier from. A member that does not belong shows up in the agreement index instead"
    }
   },
@@ -1569,7 +1569,7 @@
     ]
    },
    "error": {
-    "type": "ValueError",
+    "type": "WiggleMatchError",
     "message": "no calendar age fits every member of this series at the gaps given. Either the gaps are wrong, or one of the dates does not belong to the series"
    }
   },

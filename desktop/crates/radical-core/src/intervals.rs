@@ -81,8 +81,7 @@
 //! `draws` and `independent` are reported alongside the numbers, so the
 //! qualification travels with them.
 //!
-//! Not here: the dispersal section `report` adds when asked, which belongs to
-//! `services/dispersal.py` and plan Phase 4.
+//! The dispersal section `report` adds when asked is [`crate::dispersal`]'s.
 
 use std::collections::{HashMap, HashSet};
 
@@ -1638,6 +1637,8 @@ pub struct Block {
     /// autocorrelation makes the effective count smaller than the count.
     pub independent: bool,
     pub note: Option<String>,
+    /// The spatial models, where a run asked for them.
+    pub dispersal: Option<crate::dispersal::Section>,
 }
 
 fn block(
@@ -1655,6 +1656,7 @@ fn block(
         draws: draws.values().map(Vec::len).min().unwrap_or(0),
         independent,
         note,
+        dispersal: None,
     }
 }
 
@@ -1673,6 +1675,7 @@ pub fn report(
     draws: &Draws,
     independent: bool,
     durations: bool,
+    dispersal: Option<&crate::dispersal::DispersalSpec>,
     step: Option<f64>,
 ) -> Block {
     let wanted = root.is_some() && durations;
@@ -1693,6 +1696,10 @@ pub fn report(
             evaluate_phase_activity(&plan_phase_activity(root, measurements), draws);
     }
     out.age_depth = evaluate_age_depth(&plan_age_depth(root, measurements), draws, step);
+    if let Some(spec) = dispersal {
+        let sites = crate::dispersal::derive_sites(root, measurements);
+        out.dispersal = Some(crate::dispersal::section(&sites, draws, spec));
+    }
     out
 }
 
@@ -1702,8 +1709,20 @@ pub fn report(
 /// no sequence, so they have no duration: the table is pairwise differences
 /// only. Independent by construction: a group calibration asserts no
 /// relationship, so drawing each date separately IS drawing from the joint.
-pub fn report_dates(dates: &[NamedDate], draws: &Draws) -> Block {
+///
+/// A dispersal fit here runs on the fallback -- each place's earliest dated
+/// event, a terminus ante quem -- and needs the dates' coordinates.
+pub fn report_dates(
+    dates: &[NamedDate],
+    draws: &Draws,
+    dispersal: Option<(&crate::dispersal::DispersalSpec, &[Measurement])>,
+) -> Block {
     let (specs, note) = plan_date_differences(dates);
     let (_durations, differences) = evaluate(&[], &specs, draws, None);
-    block(Vec::new(), differences, draws, true, note)
+    let mut out = block(Vec::new(), differences, draws, true, note);
+    if let Some((spec, measurements)) = dispersal {
+        let sites = crate::dispersal::derive_sites_from_dates(measurements, draws);
+        out.dispersal = Some(crate::dispersal::section(&sites, draws, spec));
+    }
+    out
 }

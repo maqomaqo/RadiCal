@@ -1,0 +1,1664 @@
+{
+ "schema": 2,
+ "family": "units/date_import",
+ "cases": [
+  {
+   "name": "parse_csv/basic-with-phases",
+   "inputs": {
+    "filename": "site.csv",
+    "text": "name,age,error,curve,phase,material\nA-1,3000,25,intcal20,Pit 12,charcoal\nA-2,3050,30,IntCal 20,Pit 12,\nB-1,2900,25,SHCal20.14c,Layer 3,bone\n"
+   },
+   "outputs": {
+    "ok": true,
+    "dates": [
+     {
+      "sample_name": "A-1",
+      "age_bp": 3000.0,
+      "error_1sigma": 25.0,
+      "material_type": "charcoal",
+      "curve_id": "intcal20",
+      "sample_type": null,
+      "delta_r": null,
+      "delta_r_error": null,
+      "latitude": null,
+      "longitude": null,
+      "tpq_age_bp": null,
+      "taq_age_bp": null,
+      "depth_cm": null,
+      "ring_offset": null,
+      "ring_offset_error": null,
+      "inbuilt_years": null,
+      "inbuilt_shape": null,
+      "delta_r_source": null,
+      "location": null,
+      "notes": null,
+      "outlier_model": "general",
+      "outlier_prior": 0.0,
+      "phase_name": "Pit 12",
+      "id": "<id:1>",
+      "element_id": "<id:2>"
+     },
+     {
+      "sample_name": "A-2",
+      "age_bp": 3050.0,
+      "error_1sigma": 30.0,
+      "material_type": "unknown",
+      "curve_id": "intcal20",
+      "sample_type": null,
+      "delta_r": null,
+      "delta_r_error": null,
+      "latitude": null,
+      "longitude": null,
+      "tpq_age_bp": null,
+      "taq_age_bp": null,
+      "depth_cm": null,
+      "ring_offset": null,
+      "ring_offset_error": null,
+      "inbuilt_years": null,
+      "inbuilt_shape": null,
+      "delta_r_source": null,
+      "location": null,
+      "notes": null,
+      "outlier_model": "general",
+      "outlier_prior": 0.0,
+      "phase_name": "Pit 12",
+      "id": "<id:3>",
+      "element_id": "<id:2>"
+     },
+     {
+      "sample_name": "B-1",
+      "age_bp": 2900.0,
+      "error_1sigma": 25.0,
+      "material_type": "bone",
+      "curve_id": "shcal20",
+      "sample_type": null,
+      "delta_r": null,
+      "delta_r_error": null,
+      "latitude": null,
+      "longitude": null,
+      "tpq_age_bp": null,
+      "taq_age_bp": null,
+      "depth_cm": null,
+      "ring_offset": null,
+      "ring_offset_error": null,
+      "inbuilt_years": null,
+      "inbuilt_shape": null,
+      "delta_r_source": null,
+      "location": null,
+      "notes": null,
+      "outlier_model": "general",
+      "outlier_prior": 0.0,
+      "phase_name": "Layer 3",
+      "id": "<id:4>",
+      "element_id": "<id:5>"
+     }
+    ],
+    "model_tree": {
+     "id": "<id:6>",
+     "element_type": "sequence",
+     "name": "site",
+     "tpq_age_bp": null,
+     "taq_age_bp": null,
+     "children": [
+      {
+       "id": "<id:7>",
+       "element_type": "boundary",
+       "name": "Start",
+       "tpq_age_bp": null,
+       "taq_age_bp": null,
+       "children": []
+      },
+      {
+       "id": "<id:8>",
+       "element_type": "phase",
+       "name": "Contexts",
+       "tpq_age_bp": null,
+       "taq_age_bp": null,
+       "children": [
+        {
+         "id": "<id:2>",
+         "element_type": "phase",
+         "name": "Pit 12",
+         "tpq_age_bp": null,
+         "taq_age_bp": null,
+         "children": []
+        },
+        {
+         "id": "<id:5>",
+         "element_type": "phase",
+         "name": "Layer 3",
+         "tpq_age_bp": null,
+         "taq_age_bp": null,
+         "children": []
+        }
+       ]
+      },
+      {
+       "id": "<id:9>",
+       "element_type": "boundary",
+       "name": "End",
+       "tpq_age_bp": null,
+       "taq_age_bp": null,
+       "children": []
+      }
+     ]
+    },
+    "element_assignments": {
+     "<id:1>": "<id:2>",
+     "<id:3>": "<id:2>",
+     "<id:4>": "<id:5>"
+    },
+    "errors": [],
+    "warnings": [],
+    "notes": ["Built a starting structure from the phase column: 2 phase(s) inside one Start/End pair. The phases are UNORDERED with respect to each other -- a CSV does not say which came first. Open Model Structure to order them or move the boundaries."],
+    "source_format": "csv",
+    "analysis_name": "site",
+    "resolution": null,
+    "suggested_analysis_type": "bayesian",
+    "date_count": 3,
+    "dates_only": null,
+    "blocking_commands": []
+   }
+  },
+  {
+   "name": "parse_csv/tab-separated",
+   "inputs": {
+    "filename": "tab.tsv",
+    "text": "sample\tbp\tsd\nX-1\t1200\t20\nX-2\t1250\t20\n"
+   },
+   "outputs": {
+    "ok": true,
+    "dates": [
+     {
+      "sample_name": "X-1",
+      "age_bp": 1200.0,
+      "error_1sigma": 20.0,
+      "material_type": "unknown",
+      "curve_id": "intcal20",
+      "sample_type": null,
+      "delta_r": null,
+      "delta_r_error": null,
+      "latitude": null,
+      "longitude": null,
+      "tpq_age_bp": null,
+      "taq_age_bp": null,
+      "depth_cm": null,
+      "ring_offset": null,
+      "ring_offset_error": null,
+      "inbuilt_years": null,
+      "inbuilt_shape": null,
+      "delta_r_source": null,
+      "location": null,
+      "notes": null,
+      "outlier_model": "general",
+      "outlier_prior": 0.0,
+      "phase_name": null,
+      "id": "<id:1>"
+     },
+     {
+      "sample_name": "X-2",
+      "age_bp": 1250.0,
+      "error_1sigma": 20.0,
+      "material_type": "unknown",
+      "curve_id": "intcal20",
+      "sample_type": null,
+      "delta_r": null,
+      "delta_r_error": null,
+      "latitude": null,
+      "longitude": null,
+      "tpq_age_bp": null,
+      "taq_age_bp": null,
+      "depth_cm": null,
+      "ring_offset": null,
+      "ring_offset_error": null,
+      "inbuilt_years": null,
+      "inbuilt_shape": null,
+      "delta_r_source": null,
+      "location": null,
+      "notes": null,
+      "outlier_model": "general",
+      "outlier_prior": 0.0,
+      "phase_name": null,
+      "id": "<id:2>"
+     }
+    ],
+    "model_tree": null,
+    "element_assignments": {},
+    "errors": [],
+    "warnings": [],
+    "notes": ["Read as tab-separated.","No phase/context column, so the dates come in with no model structure -- they will be calibrated independently. Add a \"phase\" column, or group them in the Model Structure editor, to model them together."],
+    "source_format": "csv",
+    "analysis_name": "tab",
+    "resolution": null,
+    "suggested_analysis_type": "group_calibration",
+    "date_count": 2,
+    "dates_only": null,
+    "blocking_commands": []
+   }
+  },
+  {
+   "name": "parse_csv/semicolon",
+   "inputs": {
+    "filename": "excel.csv",
+    "text": "Lab code;CRA;±1σ\nE-1;4,100;35\nE-2;4150;35\n"
+   },
+   "outputs": {
+    "ok": false,
+    "dates": [],
+    "model_tree": null,
+    "element_assignments": {},
+    "errors": ["The file is missing required column(s): error_1sigma. Found: 'Lab code', 'CRA', '±1σ'. Download the template for the column names this reads."],
+    "warnings": [],
+    "notes": [],
+    "source_format": "csv",
+    "analysis_name": "excel",
+    "resolution": null,
+    "suggested_analysis_type": "group_calibration",
+    "date_count": 0,
+    "dates_only": null,
+    "blocking_commands": []
+   }
+  },
+  {
+   "name": "parse_csv/missing-required",
+   "inputs": {
+    "filename": "m.csv",
+    "text": "name,age\nA,3000\n"
+   },
+   "outputs": {
+    "ok": false,
+    "dates": [],
+    "model_tree": null,
+    "element_assignments": {},
+    "errors": ["The file is missing required column(s): error_1sigma. Found: 'name', 'age'. Download the template for the column names this reads."],
+    "warnings": [],
+    "notes": [],
+    "source_format": "csv",
+    "analysis_name": "m",
+    "resolution": null,
+    "suggested_analysis_type": "group_calibration",
+    "date_count": 0,
+    "dates_only": null,
+    "blocking_commands": []
+   }
+  },
+  {
+   "name": "parse_csv/unknown-and-duplicate",
+   "inputs": {
+    "filename": "u.csv",
+    "text": "name,age,error,eror,sigma,colour\nA,3000,25,1,2,red\n"
+   },
+   "outputs": {
+    "ok": false,
+    "dates": [],
+    "model_tree": null,
+    "element_assignments": {},
+    "errors": ["Two columns mean the same thing: 'error' and 'sigma' both mean error_1sigma."],
+    "warnings": ["These columns were not recognised and were ignored: 'eror', 'colour'. Check for a misspelling -- a column this importer does not recognise is one whose values are not being used."],
+    "notes": [],
+    "source_format": "csv",
+    "analysis_name": "u",
+    "resolution": null,
+    "suggested_analysis_type": "group_calibration",
+    "date_count": 0,
+    "dates_only": null,
+    "blocking_commands": []
+   }
+  },
+  {
+   "name": "parse_csv/bad-cells",
+   "inputs": {
+    "filename": "b.csv",
+    "text": "name,age,error,delta_r,delta_r_error\n,3000,25,,\nB,,25,,\nC,3000,,,\nD,three thousand,25,,\nE,±3000,+/-25,~-50,40\nF,−120,25,,\n"
+   },
+   "outputs": {
+    "ok": false,
+    "dates": [],
+    "model_tree": null,
+    "element_assignments": {},
+    "errors": ["Row 2: sample name is blank","Row 3: age BP is missing","Row 4: 1-sigma error is missing","Row 5: age BP is not a number ('three thousand')","'F': age_bp -- Input should be greater than or equal to 0"],
+    "warnings": [],
+    "notes": [],
+    "source_format": "csv",
+    "analysis_name": "b",
+    "resolution": null,
+    "suggested_analysis_type": "group_calibration",
+    "date_count": 0,
+    "dates_only": null,
+    "blocking_commands": []
+   }
+  },
+  {
+   "name": "parse_csv/curves",
+   "inputs": {
+    "filename": "c.csv",
+    "text": "name,age,error,curve\nA,3000,25,IntCal13\nB,3000,25,=Marine20\nC,3000,25,\n"
+   },
+   "outputs": {
+    "ok": false,
+    "dates": [],
+    "model_tree": null,
+    "element_assignments": {},
+    "errors": ["Row 2: unknown calibration curve 'IntCal13'. This app calibrates against IntCal20, SHCal20, Marine20; a curve it does not have cannot be substituted for one it does."],
+    "warnings": [],
+    "notes": [],
+    "source_format": "csv",
+    "analysis_name": "c",
+    "resolution": null,
+    "suggested_analysis_type": "group_calibration",
+    "date_count": 0,
+    "dates_only": null,
+    "blocking_commands": []
+   }
+  },
+  {
+   "name": "parse_csv/kinds",
+   "inputs": {
+    "filename": "k.csv",
+    "text": "name,age,error,type,outlier_model,outlier_prior,inbuilt_shape,inbuilt_years\nA,3000,25,lake,general,5%,uniform,50\nB,3000,25,marine,stratigraphic,0.1,,\nC,3000,25,terrestrial,charcoal,120%,cone,\nD,3000,25,,,2,exponential,20\nE,3000,25,,,-0.5,,\n"
+   },
+   "outputs": {
+    "ok": false,
+    "dates": [],
+    "model_tree": null,
+    "element_assignments": {},
+    "errors": ["Row 2: sample type 'lake' should be 'terrestrial' or 'marine'","Row 3: unknown outlier model 'stratigraphic' (expected 'general' or 'charcoal')","Row 4: unknown inbuilt-age shape 'cone' (expected 'uniform' or 'exponential')","Row 4: outlier prior 120% is above 1. Give it as a probability (0.05) or a percentage with a % sign (5%).","Row 5: outlier prior 2 is above 1. Give it as a probability (0.05) or a percentage with a % sign (5%).","'E': outlier_prior -- Input should be greater than or equal to 0"],
+    "warnings": [],
+    "notes": [],
+    "source_format": "csv",
+    "analysis_name": "k",
+    "resolution": null,
+    "suggested_analysis_type": "group_calibration",
+    "date_count": 0,
+    "dates_only": null,
+    "blocking_commands": []
+   }
+  },
+  {
+   "name": "parse_csv/coordinates",
+   "inputs": {
+    "filename": "xy.csv",
+    "text": "name,age,error,lat,lon\nA,3000,25,54°30',-5.6\nB,3000,25,54.5,5 36\nC,3000,25,\"54,5\",-5.6\nD,3000,25,N54.5,-5.6\nE,3000,25,54.5 deg,-5.6\n"
+   },
+   "outputs": {
+    "ok": false,
+    "dates": [],
+    "model_tree": null,
+    "element_assignments": {},
+    "errors": ["Row 2: latitude '54°30'' is in degrees and minutes. Give latitude in decimal degrees, with a point and a leading minus for south and west -- 54.5 and -5.6, not 54°30'N and 5°36'W.","Row 3: longitude '5 36' is in degrees and minutes. Give longitude in decimal degrees, with a point and a leading minus for south and west -- 54.5 and -5.6, not 54°30'N and 5°36'W.","Row 4: latitude '54,5' uses a comma as its decimal mark. Give latitude in decimal degrees, with a point and a leading minus for south and west -- 54.5 and -5.6, not 54°30'N and 5°36'W.","Row 5: latitude 'N54.5' is in degrees and minutes. Give latitude in decimal degrees, with a point and a leading minus for south and west -- 54.5 and -5.6, not 54°30'N and 5°36'W.","Row 6: latitude '54.5 deg' is in degrees and minutes. Give latitude in decimal degrees, with a point and a leading minus for south and west -- 54.5 and -5.6, not 54°30'N and 5°36'W."],
+    "warnings": [],
+    "notes": [],
+    "source_format": "csv",
+    "analysis_name": "xy",
+    "resolution": null,
+    "suggested_analysis_type": "group_calibration",
+    "date_count": 0,
+    "dates_only": null,
+    "blocking_commands": []
+   }
+  },
+  {
+   "name": "parse_csv/coordinate-validation",
+   "inputs": {
+    "filename": "xy2.csv",
+    "text": "name,age,error,lat,lon\nA,3000,25,0,0\nB,3000,25,95,10\nC,3000,25,10,\n"
+   },
+   "outputs": {
+    "ok": false,
+    "dates": [],
+    "model_tree": null,
+    "element_assignments": {},
+    "errors": ["'B': latitude -- Input should be less than or equal to 90","'C': row -- Value error, longitude is required when the other half of the coordinate is given -- a position needs both, and a half-located date would be silently dropped from anything that uses one"],
+    "warnings": ["These dates are at latitude 0, longitude 0: A. That is a real place in the Gulf of Guinea, but it is usually an empty spreadsheet cell -- check the file before relying on the positions."],
+    "notes": [],
+    "source_format": "csv",
+    "analysis_name": "xy2",
+    "resolution": null,
+    "suggested_analysis_type": "group_calibration",
+    "date_count": 0,
+    "dates_only": null,
+    "blocking_commands": []
+   }
+  },
+  {
+   "name": "parse_csv/results-export",
+   "inputs": {
+    "filename": "results.csv",
+    "text": "Order,Row Type,Depth,Sample Name,Age BP,Error (1σ),Posterior Mean,95.4% HPD,95% HPD,TPQ BP (BC/AD),Phase\n1,sequence,0,Site,,,,,,,\n2,phase,1,Pit,,,,,,,\n3,date,2,A-1,3000,25,2700,1,1,1,Site > Pit\n4,boundary,1,Start,,,,,,,\n"
+   },
+   "outputs": {
+    "ok": true,
+    "dates": [
+     {
+      "sample_name": "A-1",
+      "age_bp": 3000.0,
+      "error_1sigma": 25.0,
+      "material_type": "unknown",
+      "curve_id": "intcal20",
+      "sample_type": null,
+      "delta_r": null,
+      "delta_r_error": null,
+      "latitude": null,
+      "longitude": null,
+      "tpq_age_bp": null,
+      "taq_age_bp": null,
+      "depth_cm": null,
+      "ring_offset": null,
+      "ring_offset_error": null,
+      "inbuilt_years": null,
+      "inbuilt_shape": null,
+      "delta_r_source": null,
+      "location": null,
+      "notes": null,
+      "outlier_model": "general",
+      "outlier_prior": 0.0,
+      "phase_name": "Pit",
+      "id": "<id:1>",
+      "element_id": "<id:2>"
+     }
+    ],
+    "model_tree": {
+     "id": "<id:3>",
+     "element_type": "sequence",
+     "name": "results",
+     "tpq_age_bp": null,
+     "taq_age_bp": null,
+     "children": [
+      {
+       "id": "<id:4>",
+       "element_type": "boundary",
+       "name": "Start",
+       "tpq_age_bp": null,
+       "taq_age_bp": null,
+       "children": []
+      },
+      {
+       "id": "<id:5>",
+       "element_type": "phase",
+       "name": "Contexts",
+       "tpq_age_bp": null,
+       "taq_age_bp": null,
+       "children": [
+        {
+         "id": "<id:2>",
+         "element_type": "phase",
+         "name": "Pit",
+         "tpq_age_bp": null,
+         "taq_age_bp": null,
+         "children": []
+        }
+       ]
+      },
+      {
+       "id": "<id:6>",
+       "element_type": "boundary",
+       "name": "End",
+       "tpq_age_bp": null,
+       "taq_age_bp": null,
+       "children": []
+      }
+     ]
+    },
+    "element_assignments": {
+     "<id:1>": "<id:2>"
+    },
+    "errors": [],
+    "warnings": [],
+    "notes": ["Skipped 3 structural row(s) (sequences, phases and boundaries) -- only date rows carry a measurement to import.","Built a starting structure from the phase column: 1 phase(s) inside one Start/End pair. The phases are UNORDERED with respect to each other -- a CSV does not say which came first. Open Model Structure to order them or move the boundaries."],
+    "source_format": "csv",
+    "analysis_name": "results",
+    "resolution": null,
+    "suggested_analysis_type": "bayesian",
+    "date_count": 1,
+    "dates_only": null,
+    "blocking_commands": []
+   }
+  },
+  {
+   "name": "parse_csv/depth-without-row-type",
+   "inputs": {
+    "filename": "d.csv",
+    "text": "name,age,error,depth\nA,3000,25,120\n"
+   },
+   "outputs": {
+    "ok": true,
+    "dates": [
+     {
+      "sample_name": "A",
+      "age_bp": 3000.0,
+      "error_1sigma": 25.0,
+      "material_type": "unknown",
+      "curve_id": "intcal20",
+      "sample_type": null,
+      "delta_r": null,
+      "delta_r_error": null,
+      "latitude": null,
+      "longitude": null,
+      "tpq_age_bp": null,
+      "taq_age_bp": null,
+      "depth_cm": 120.0,
+      "ring_offset": null,
+      "ring_offset_error": null,
+      "inbuilt_years": null,
+      "inbuilt_shape": null,
+      "delta_r_source": null,
+      "location": null,
+      "notes": null,
+      "outlier_model": "general",
+      "outlier_prior": 0.0,
+      "phase_name": null,
+      "id": "<id:1>"
+     }
+    ],
+    "model_tree": null,
+    "element_assignments": {},
+    "errors": [],
+    "warnings": [],
+    "notes": ["No phase/context column, so the dates come in with no model structure -- they will be calibrated independently. Add a \"phase\" column, or group them in the Model Structure editor, to model them together."],
+    "source_format": "csv",
+    "analysis_name": "d",
+    "resolution": null,
+    "suggested_analysis_type": "group_calibration",
+    "date_count": 1,
+    "dates_only": null,
+    "blocking_commands": []
+   }
+  },
+  {
+   "name": "parse_csv/delta-r",
+   "inputs": {
+    "filename": "dr.csv",
+    "text": "name,age,error,curve,delta_r,delta_r_error,delta_r_source\nA,4000,30,marine20,50,,\nB,4000,30,marine20,50,20,\"{\"\"method\"\": \"\"nearest_n\"\", \"\"n\"\": 3}\"\nC,4000,30,marine20,50,20,not json\nD,4000,30,marine20,50,20,[1]\n"
+   },
+   "outputs": {
+    "ok": false,
+    "dates": [],
+    "model_tree": null,
+    "element_assignments": {},
+    "errors": ["Row 4: delta_r_source is not the record the app exports (a JSON object). Clear the cell to import the date without it.","Row 5: delta_r_source is not the record the app exports (a JSON object). Clear the cell to import the date without it.","'A': row -- Value error, delta_r_error is required when delta_r is given -- a reservoir offset has its own uncertainty, and omitting it would understate the uncertainty of the calibrated date"],
+    "warnings": [],
+    "notes": [],
+    "source_format": "csv",
+    "analysis_name": "dr",
+    "resolution": null,
+    "suggested_analysis_type": "group_calibration",
+    "date_count": 0,
+    "dates_only": null,
+    "blocking_commands": []
+   }
+  },
+  {
+   "name": "parse_csv/repeated-names",
+   "inputs": {
+    "filename": "r.csv",
+    "text": "name,age,error\nA,3000,25\na,3010,25\nB,3020,25\n"
+   },
+   "outputs": {
+    "ok": true,
+    "dates": [
+     {
+      "sample_name": "A",
+      "age_bp": 3000.0,
+      "error_1sigma": 25.0,
+      "material_type": "unknown",
+      "curve_id": "intcal20",
+      "sample_type": null,
+      "delta_r": null,
+      "delta_r_error": null,
+      "latitude": null,
+      "longitude": null,
+      "tpq_age_bp": null,
+      "taq_age_bp": null,
+      "depth_cm": null,
+      "ring_offset": null,
+      "ring_offset_error": null,
+      "inbuilt_years": null,
+      "inbuilt_shape": null,
+      "delta_r_source": null,
+      "location": null,
+      "notes": null,
+      "outlier_model": "general",
+      "outlier_prior": 0.0,
+      "phase_name": null,
+      "id": "<id:1>"
+     },
+     {
+      "sample_name": "a",
+      "age_bp": 3010.0,
+      "error_1sigma": 25.0,
+      "material_type": "unknown",
+      "curve_id": "intcal20",
+      "sample_type": null,
+      "delta_r": null,
+      "delta_r_error": null,
+      "latitude": null,
+      "longitude": null,
+      "tpq_age_bp": null,
+      "taq_age_bp": null,
+      "depth_cm": null,
+      "ring_offset": null,
+      "ring_offset_error": null,
+      "inbuilt_years": null,
+      "inbuilt_shape": null,
+      "delta_r_source": null,
+      "location": null,
+      "notes": null,
+      "outlier_model": "general",
+      "outlier_prior": 0.0,
+      "phase_name": null,
+      "id": "<id:2>"
+     },
+     {
+      "sample_name": "B",
+      "age_bp": 3020.0,
+      "error_1sigma": 25.0,
+      "material_type": "unknown",
+      "curve_id": "intcal20",
+      "sample_type": null,
+      "delta_r": null,
+      "delta_r_error": null,
+      "latitude": null,
+      "longitude": null,
+      "tpq_age_bp": null,
+      "taq_age_bp": null,
+      "depth_cm": null,
+      "ring_offset": null,
+      "ring_offset_error": null,
+      "inbuilt_years": null,
+      "inbuilt_shape": null,
+      "delta_r_source": null,
+      "location": null,
+      "notes": null,
+      "outlier_model": "general",
+      "outlier_prior": 0.0,
+      "phase_name": null,
+      "id": "<id:3>"
+     }
+    ],
+    "model_tree": null,
+    "element_assignments": {},
+    "errors": [],
+    "warnings": ["These sample names appear more than once: a. They import as separate dates -- check the file does not repeat a row."],
+    "notes": ["No phase/context column, so the dates come in with no model structure -- they will be calibrated independently. Add a \"phase\" column, or group them in the Model Structure editor, to model them together."],
+    "source_format": "csv",
+    "analysis_name": "r",
+    "resolution": null,
+    "suggested_analysis_type": "group_calibration",
+    "date_count": 3,
+    "dates_only": null,
+    "blocking_commands": []
+   }
+  },
+  {
+   "name": "parse_csv/some-unnamed-phases",
+   "inputs": {
+    "filename": "p.csv",
+    "text": "name,age,error,phase\nA,3000,25,Pit\nB,3010,25,\nC,3020,25,Pit\n"
+   },
+   "outputs": {
+    "ok": true,
+    "dates": [
+     {
+      "sample_name": "A",
+      "age_bp": 3000.0,
+      "error_1sigma": 25.0,
+      "material_type": "unknown",
+      "curve_id": "intcal20",
+      "sample_type": null,
+      "delta_r": null,
+      "delta_r_error": null,
+      "latitude": null,
+      "longitude": null,
+      "tpq_age_bp": null,
+      "taq_age_bp": null,
+      "depth_cm": null,
+      "ring_offset": null,
+      "ring_offset_error": null,
+      "inbuilt_years": null,
+      "inbuilt_shape": null,
+      "delta_r_source": null,
+      "location": null,
+      "notes": null,
+      "outlier_model": "general",
+      "outlier_prior": 0.0,
+      "phase_name": "Pit",
+      "id": "<id:1>",
+      "element_id": "<id:2>"
+     },
+     {
+      "sample_name": "B",
+      "age_bp": 3010.0,
+      "error_1sigma": 25.0,
+      "material_type": "unknown",
+      "curve_id": "intcal20",
+      "sample_type": null,
+      "delta_r": null,
+      "delta_r_error": null,
+      "latitude": null,
+      "longitude": null,
+      "tpq_age_bp": null,
+      "taq_age_bp": null,
+      "depth_cm": null,
+      "ring_offset": null,
+      "ring_offset_error": null,
+      "inbuilt_years": null,
+      "inbuilt_shape": null,
+      "delta_r_source": null,
+      "location": null,
+      "notes": null,
+      "outlier_model": "general",
+      "outlier_prior": 0.0,
+      "phase_name": null,
+      "id": "<id:3>",
+      "element_id": "<id:4>"
+     },
+     {
+      "sample_name": "C",
+      "age_bp": 3020.0,
+      "error_1sigma": 25.0,
+      "material_type": "unknown",
+      "curve_id": "intcal20",
+      "sample_type": null,
+      "delta_r": null,
+      "delta_r_error": null,
+      "latitude": null,
+      "longitude": null,
+      "tpq_age_bp": null,
+      "taq_age_bp": null,
+      "depth_cm": null,
+      "ring_offset": null,
+      "ring_offset_error": null,
+      "inbuilt_years": null,
+      "inbuilt_shape": null,
+      "delta_r_source": null,
+      "location": null,
+      "notes": null,
+      "outlier_model": "general",
+      "outlier_prior": 0.0,
+      "phase_name": "Pit",
+      "id": "<id:5>",
+      "element_id": "<id:2>"
+     }
+    ],
+    "model_tree": {
+     "id": "<id:6>",
+     "element_type": "sequence",
+     "name": "p",
+     "tpq_age_bp": null,
+     "taq_age_bp": null,
+     "children": [
+      {
+       "id": "<id:7>",
+       "element_type": "boundary",
+       "name": "Start",
+       "tpq_age_bp": null,
+       "taq_age_bp": null,
+       "children": []
+      },
+      {
+       "id": "<id:8>",
+       "element_type": "phase",
+       "name": "Contexts",
+       "tpq_age_bp": null,
+       "taq_age_bp": null,
+       "children": [
+        {
+         "id": "<id:2>",
+         "element_type": "phase",
+         "name": "Pit",
+         "tpq_age_bp": null,
+         "taq_age_bp": null,
+         "children": []
+        },
+        {
+         "id": "<id:4>",
+         "element_type": "phase",
+         "name": "Unassigned dates",
+         "tpq_age_bp": null,
+         "taq_age_bp": null,
+         "children": []
+        }
+       ]
+      },
+      {
+       "id": "<id:9>",
+       "element_type": "boundary",
+       "name": "End",
+       "tpq_age_bp": null,
+       "taq_age_bp": null,
+       "children": []
+      }
+     ]
+    },
+    "element_assignments": {
+     "<id:1>": "<id:2>",
+     "<id:3>": "<id:4>",
+     "<id:5>": "<id:2>"
+    },
+    "errors": [],
+    "warnings": ["1 date(s) have no phase/context value. They are grouped under \"Unassigned dates\" so none is lost -- move them in the Model Structure editor."],
+    "notes": ["Built a starting structure from the phase column: 1 phase(s) inside one Start/End pair. The phases are UNORDERED with respect to each other -- a CSV does not say which came first. Open Model Structure to order them or move the boundaries."],
+    "source_format": "csv",
+    "analysis_name": "p",
+    "resolution": null,
+    "suggested_analysis_type": "bayesian",
+    "date_count": 3,
+    "dates_only": null,
+    "blocking_commands": []
+   }
+  },
+  {
+   "name": "parse_csv/empty",
+   "inputs": {
+    "filename": "e.csv",
+    "text": ""
+   },
+   "outputs": {
+    "ok": false,
+    "dates": [],
+    "model_tree": null,
+    "element_assignments": {},
+    "errors": ["The file is empty."],
+    "warnings": [],
+    "notes": [],
+    "source_format": "csv",
+    "analysis_name": "e",
+    "resolution": null,
+    "suggested_analysis_type": "group_calibration",
+    "date_count": 0,
+    "dates_only": null,
+    "blocking_commands": []
+   }
+  },
+  {
+   "name": "parse_csv/whitespace-only",
+   "inputs": {
+    "filename": "w.csv",
+    "text": "  \n \n"
+   },
+   "outputs": {
+    "ok": false,
+    "dates": [],
+    "model_tree": null,
+    "element_assignments": {},
+    "errors": ["The file is empty."],
+    "warnings": [],
+    "notes": [],
+    "source_format": "csv",
+    "analysis_name": "w",
+    "resolution": null,
+    "suggested_analysis_type": "group_calibration",
+    "date_count": 0,
+    "dates_only": null,
+    "blocking_commands": []
+   }
+  },
+  {
+   "name": "parse_csv/header-only",
+   "inputs": {
+    "filename": "h.csv",
+    "text": "name,age,error\n"
+   },
+   "outputs": {
+    "ok": false,
+    "dates": [],
+    "model_tree": null,
+    "element_assignments": {},
+    "errors": ["No dates found in the file."],
+    "warnings": [],
+    "notes": [],
+    "source_format": "csv",
+    "analysis_name": "h",
+    "resolution": null,
+    "suggested_analysis_type": "group_calibration",
+    "date_count": 0,
+    "dates_only": null,
+    "blocking_commands": []
+   }
+  },
+  {
+   "name": "parse_csv/bom-and-crlf",
+   "inputs": {
+    "filename": "bom.csv",
+    "text": "﻿name,age,error\r\nA,3000,25\r\n\r\nB,3010,25\r\n"
+   },
+   "outputs": {
+    "ok": true,
+    "dates": [
+     {
+      "sample_name": "A",
+      "age_bp": 3000.0,
+      "error_1sigma": 25.0,
+      "material_type": "unknown",
+      "curve_id": "intcal20",
+      "sample_type": null,
+      "delta_r": null,
+      "delta_r_error": null,
+      "latitude": null,
+      "longitude": null,
+      "tpq_age_bp": null,
+      "taq_age_bp": null,
+      "depth_cm": null,
+      "ring_offset": null,
+      "ring_offset_error": null,
+      "inbuilt_years": null,
+      "inbuilt_shape": null,
+      "delta_r_source": null,
+      "location": null,
+      "notes": null,
+      "outlier_model": "general",
+      "outlier_prior": 0.0,
+      "phase_name": null,
+      "id": "<id:1>"
+     },
+     {
+      "sample_name": "B",
+      "age_bp": 3010.0,
+      "error_1sigma": 25.0,
+      "material_type": "unknown",
+      "curve_id": "intcal20",
+      "sample_type": null,
+      "delta_r": null,
+      "delta_r_error": null,
+      "latitude": null,
+      "longitude": null,
+      "tpq_age_bp": null,
+      "taq_age_bp": null,
+      "depth_cm": null,
+      "ring_offset": null,
+      "ring_offset_error": null,
+      "inbuilt_years": null,
+      "inbuilt_shape": null,
+      "delta_r_source": null,
+      "location": null,
+      "notes": null,
+      "outlier_model": "general",
+      "outlier_prior": 0.0,
+      "phase_name": null,
+      "id": "<id:2>"
+     }
+    ],
+    "model_tree": null,
+    "element_assignments": {},
+    "errors": [],
+    "warnings": [],
+    "notes": ["No phase/context column, so the dates come in with no model structure -- they will be calibrated independently. Add a \"phase\" column, or group them in the Model Structure editor, to model them together."],
+    "source_format": "csv",
+    "analysis_name": "bom",
+    "resolution": null,
+    "suggested_analysis_type": "group_calibration",
+    "date_count": 2,
+    "dates_only": null,
+    "blocking_commands": []
+   }
+  },
+  {
+   "name": "parse_csv/quoting",
+   "inputs": {
+    "filename": "q.csv",
+    "text": "name,age,error,notes\nA,3000,25,\"has, a comma\"\nB,3010,25,\"two\nlines\"\nC,3020,25,\"say \"\"hi\"\"\"\nD,3030,25,mid\"quote\nE,3040,25,\"open quote never closed\n"
+   },
+   "outputs": {
+    "ok": true,
+    "dates": [
+     {
+      "sample_name": "A",
+      "age_bp": 3000.0,
+      "error_1sigma": 25.0,
+      "material_type": "unknown",
+      "curve_id": "intcal20",
+      "sample_type": null,
+      "delta_r": null,
+      "delta_r_error": null,
+      "latitude": null,
+      "longitude": null,
+      "tpq_age_bp": null,
+      "taq_age_bp": null,
+      "depth_cm": null,
+      "ring_offset": null,
+      "ring_offset_error": null,
+      "inbuilt_years": null,
+      "inbuilt_shape": null,
+      "delta_r_source": null,
+      "location": null,
+      "notes": "has, a comma",
+      "outlier_model": "general",
+      "outlier_prior": 0.0,
+      "phase_name": null,
+      "id": "<id:1>"
+     },
+     {
+      "sample_name": "B",
+      "age_bp": 3010.0,
+      "error_1sigma": 25.0,
+      "material_type": "unknown",
+      "curve_id": "intcal20",
+      "sample_type": null,
+      "delta_r": null,
+      "delta_r_error": null,
+      "latitude": null,
+      "longitude": null,
+      "tpq_age_bp": null,
+      "taq_age_bp": null,
+      "depth_cm": null,
+      "ring_offset": null,
+      "ring_offset_error": null,
+      "inbuilt_years": null,
+      "inbuilt_shape": null,
+      "delta_r_source": null,
+      "location": null,
+      "notes": "two\nlines",
+      "outlier_model": "general",
+      "outlier_prior": 0.0,
+      "phase_name": null,
+      "id": "<id:2>"
+     },
+     {
+      "sample_name": "C",
+      "age_bp": 3020.0,
+      "error_1sigma": 25.0,
+      "material_type": "unknown",
+      "curve_id": "intcal20",
+      "sample_type": null,
+      "delta_r": null,
+      "delta_r_error": null,
+      "latitude": null,
+      "longitude": null,
+      "tpq_age_bp": null,
+      "taq_age_bp": null,
+      "depth_cm": null,
+      "ring_offset": null,
+      "ring_offset_error": null,
+      "inbuilt_years": null,
+      "inbuilt_shape": null,
+      "delta_r_source": null,
+      "location": null,
+      "notes": "say \"hi\"",
+      "outlier_model": "general",
+      "outlier_prior": 0.0,
+      "phase_name": null,
+      "id": "<id:3>"
+     },
+     {
+      "sample_name": "D",
+      "age_bp": 3030.0,
+      "error_1sigma": 25.0,
+      "material_type": "unknown",
+      "curve_id": "intcal20",
+      "sample_type": null,
+      "delta_r": null,
+      "delta_r_error": null,
+      "latitude": null,
+      "longitude": null,
+      "tpq_age_bp": null,
+      "taq_age_bp": null,
+      "depth_cm": null,
+      "ring_offset": null,
+      "ring_offset_error": null,
+      "inbuilt_years": null,
+      "inbuilt_shape": null,
+      "delta_r_source": null,
+      "location": null,
+      "notes": "mid\"quote",
+      "outlier_model": "general",
+      "outlier_prior": 0.0,
+      "phase_name": null,
+      "id": "<id:4>"
+     },
+     {
+      "sample_name": "E",
+      "age_bp": 3040.0,
+      "error_1sigma": 25.0,
+      "material_type": "unknown",
+      "curve_id": "intcal20",
+      "sample_type": null,
+      "delta_r": null,
+      "delta_r_error": null,
+      "latitude": null,
+      "longitude": null,
+      "tpq_age_bp": null,
+      "taq_age_bp": null,
+      "depth_cm": null,
+      "ring_offset": null,
+      "ring_offset_error": null,
+      "inbuilt_years": null,
+      "inbuilt_shape": null,
+      "delta_r_source": null,
+      "location": null,
+      "notes": "open quote never closed",
+      "outlier_model": "general",
+      "outlier_prior": 0.0,
+      "phase_name": null,
+      "id": "<id:5>"
+     }
+    ],
+    "model_tree": null,
+    "element_assignments": {},
+    "errors": [],
+    "warnings": [],
+    "notes": ["No phase/context column, so the dates come in with no model structure -- they will be calibrated independently. Add a \"phase\" column, or group them in the Model Structure editor, to model them together."],
+    "source_format": "csv",
+    "analysis_name": "q",
+    "resolution": null,
+    "suggested_analysis_type": "group_calibration",
+    "date_count": 5,
+    "dates_only": null,
+    "blocking_commands": []
+   }
+  },
+  {
+   "name": "parse_csv/ragged",
+   "inputs": {
+    "filename": "rag.csv",
+    "text": "name,age,error\nA,3000,25,extra,more\nB,3010\n"
+   },
+   "outputs": {
+    "ok": false,
+    "dates": [],
+    "model_tree": null,
+    "element_assignments": {},
+    "errors": ["Row 3: 1-sigma error is missing"],
+    "warnings": [],
+    "notes": [],
+    "source_format": "csv",
+    "analysis_name": "rag",
+    "resolution": null,
+    "suggested_analysis_type": "group_calibration",
+    "date_count": 0,
+    "dates_only": null,
+    "blocking_commands": []
+   }
+  },
+  {
+   "name": "parse_csv/carriage-returns",
+   "inputs": {
+    "filename": "cr.csv",
+    "text": "name,age,error\rA,3000,25\rB,3010,25\r"
+   },
+   "outputs": {
+    "ok": true,
+    "dates": [
+     {
+      "sample_name": "A",
+      "age_bp": 3000.0,
+      "error_1sigma": 25.0,
+      "material_type": "unknown",
+      "curve_id": "intcal20",
+      "sample_type": null,
+      "delta_r": null,
+      "delta_r_error": null,
+      "latitude": null,
+      "longitude": null,
+      "tpq_age_bp": null,
+      "taq_age_bp": null,
+      "depth_cm": null,
+      "ring_offset": null,
+      "ring_offset_error": null,
+      "inbuilt_years": null,
+      "inbuilt_shape": null,
+      "delta_r_source": null,
+      "location": null,
+      "notes": null,
+      "outlier_model": "general",
+      "outlier_prior": 0.0,
+      "phase_name": null,
+      "id": "<id:1>"
+     },
+     {
+      "sample_name": "B",
+      "age_bp": 3010.0,
+      "error_1sigma": 25.0,
+      "material_type": "unknown",
+      "curve_id": "intcal20",
+      "sample_type": null,
+      "delta_r": null,
+      "delta_r_error": null,
+      "latitude": null,
+      "longitude": null,
+      "tpq_age_bp": null,
+      "taq_age_bp": null,
+      "depth_cm": null,
+      "ring_offset": null,
+      "ring_offset_error": null,
+      "inbuilt_years": null,
+      "inbuilt_shape": null,
+      "delta_r_source": null,
+      "location": null,
+      "notes": null,
+      "outlier_model": "general",
+      "outlier_prior": 0.0,
+      "phase_name": null,
+      "id": "<id:2>"
+     }
+    ],
+    "model_tree": null,
+    "element_assignments": {},
+    "errors": [],
+    "warnings": [],
+    "notes": ["No phase/context column, so the dates come in with no model structure -- they will be calibrated independently. Add a \"phase\" column, or group them in the Model Structure editor, to model them together."],
+    "source_format": "csv",
+    "analysis_name": "cr",
+    "resolution": null,
+    "suggested_analysis_type": "group_calibration",
+    "date_count": 2,
+    "dates_only": null,
+    "blocking_commands": []
+   }
+  },
+  {
+   "name": "parse_csv/mixed-line-endings",
+   "inputs": {
+    "filename": "m.csv",
+    "text": "name,age,error,notes\r\nA,3000,25,\"one\rtwo\"\rB,3010,25,\n"
+   },
+   "outputs": {
+    "ok": true,
+    "dates": [
+     {
+      "sample_name": "A",
+      "age_bp": 3000.0,
+      "error_1sigma": 25.0,
+      "material_type": "unknown",
+      "curve_id": "intcal20",
+      "sample_type": null,
+      "delta_r": null,
+      "delta_r_error": null,
+      "latitude": null,
+      "longitude": null,
+      "tpq_age_bp": null,
+      "taq_age_bp": null,
+      "depth_cm": null,
+      "ring_offset": null,
+      "ring_offset_error": null,
+      "inbuilt_years": null,
+      "inbuilt_shape": null,
+      "delta_r_source": null,
+      "location": null,
+      "notes": "one\ntwo",
+      "outlier_model": "general",
+      "outlier_prior": 0.0,
+      "phase_name": null,
+      "id": "<id:1>"
+     },
+     {
+      "sample_name": "B",
+      "age_bp": 3010.0,
+      "error_1sigma": 25.0,
+      "material_type": "unknown",
+      "curve_id": "intcal20",
+      "sample_type": null,
+      "delta_r": null,
+      "delta_r_error": null,
+      "latitude": null,
+      "longitude": null,
+      "tpq_age_bp": null,
+      "taq_age_bp": null,
+      "depth_cm": null,
+      "ring_offset": null,
+      "ring_offset_error": null,
+      "inbuilt_years": null,
+      "inbuilt_shape": null,
+      "delta_r_source": null,
+      "location": null,
+      "notes": null,
+      "outlier_model": "general",
+      "outlier_prior": 0.0,
+      "phase_name": null,
+      "id": "<id:2>"
+     }
+    ],
+    "model_tree": null,
+    "element_assignments": {},
+    "errors": [],
+    "warnings": [],
+    "notes": ["No phase/context column, so the dates come in with no model structure -- they will be calibrated independently. Add a \"phase\" column, or group them in the Model Structure editor, to model them together."],
+    "source_format": "csv",
+    "analysis_name": "m",
+    "resolution": null,
+    "suggested_analysis_type": "group_calibration",
+    "date_count": 2,
+    "dates_only": null,
+    "blocking_commands": []
+   }
+  },
+  {
+   "name": "parse_csv/paths-and-limits",
+   "inputs": {
+    "filename": "pl.csv",
+    "text": "name,age,error,phase,tpq,taq,ring_offset,ring_offset_error,depth_cm\nA,3000,25,Hillside > North > Feature J,500,600,,,\nB,3000,25,Feature J,,,,5,\nC,3000,25,Feature J,,,10,2,15\n"
+   },
+   "outputs": {
+    "ok": false,
+    "dates": [],
+    "model_tree": null,
+    "element_assignments": {},
+    "errors": ["'A': row -- Value error, taq_age_bp (minimum age -- terminus ante quem) cannot be greater than tpq_age_bp (maximum age -- terminus post quem); the valid range [taq_age_bp, tpq_age_bp] would be empty","'B': row -- Value error, ring_offset_error cannot be set on its own -- it is the uncertainty on a gap, so send the gap it belongs to"],
+    "warnings": [],
+    "notes": [],
+    "source_format": "csv",
+    "analysis_name": "pl",
+    "resolution": null,
+    "suggested_analysis_type": "group_calibration",
+    "date_count": 0,
+    "dates_only": null,
+    "blocking_commands": []
+   }
+  },
+  {
+   "name": "parse_csv/odd-numbers",
+   "inputs": {
+    "filename": "n.csv",
+    "text": "name,age,error\nA,nan,25\nB,inf,25\nC,1_000,25\nD,1e3,2.5e1\nE, 3000 ,25\n"
+   },
+   "outputs": {
+    "ok": false,
+    "dates": [],
+    "model_tree": null,
+    "element_assignments": {},
+    "errors": ["'A': age_bp -- Input should be less than or equal to 60000","'B': age_bp -- Input should be less than or equal to 60000"],
+    "warnings": [],
+    "notes": [],
+    "source_format": "csv",
+    "analysis_name": "n",
+    "resolution": null,
+    "suggested_analysis_type": "group_calibration",
+    "date_count": 0,
+    "dates_only": null,
+    "blocking_commands": []
+   }
+  },
+  {
+   "name": "parse_csv/long-strings",
+   "inputs": {
+    "filename": "l.csv",
+    "text": "name,age,error,material\nA,3000,25,xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n"
+   },
+   "outputs": {
+    "ok": false,
+    "dates": [],
+    "model_tree": null,
+    "element_assignments": {},
+    "errors": ["'A': material_type -- String should have at most 100 characters"],
+    "warnings": [],
+    "notes": [],
+    "source_format": "csv",
+    "analysis_name": "l",
+    "resolution": null,
+    "suggested_analysis_type": "group_calibration",
+    "date_count": 0,
+    "dates_only": null,
+    "blocking_commands": []
+   }
+  },
+  {
+   "name": "parse_csv/too-many",
+   "inputs": {
+    "filename": "t.csv",
+    "text": "name,age,error\nS0,3000,25\nS1,3001,25\nS2,3002,25\nS3,3003,25\nS4,3004,25\nS5,3005,25\nS6,3006,25\nS7,3007,25\nS8,3008,25\nS9,3009,25\nS10,3010,25\nS11,3011,25\nS12,3012,25\nS13,3013,25\nS14,3014,25\nS15,3015,25\nS16,3016,25\nS17,3017,25\nS18,3018,25\nS19,3019,25\nS20,3020,25\nS21,3021,25\nS22,3022,25\nS23,3023,25\nS24,3024,25\nS25,3025,25\nS26,3026,25\nS27,3027,25\nS28,3028,25\nS29,3029,25\nS30,3030,25\nS31,3031,25\nS32,3032,25\nS33,3033,25\nS34,3034,25\nS35,3035,25\nS36,3036,25\nS37,3037,25\nS38,3038,25\nS39,3039,25\nS40,3040,25\nS41,3041,25\nS42,3042,25\nS43,3043,25\nS44,3044,25\nS45,3045,25\nS46,3046,25\nS47,3047,25\nS48,3048,25\nS49,3049,25\nS50,3050,25\nS51,3051,25\nS52,3052,25\nS53,3053,25\nS54,3054,25\nS55,3055,25\nS56,3056,25\nS57,3057,25\nS58,3058,25\nS59,3059,25\nS60,3060,25\nS61,3061,25\nS62,3062,25\nS63,3063,25\nS64,3064,25\nS65,3065,25\nS66,3066,25\nS67,3067,25\nS68,3068,25\nS69,3069,25\nS70,3070,25\nS71,3071,25\nS72,3072,25\nS73,3073,25\nS74,3074,25\nS75,3075,25\nS76,3076,25\nS77,3077,25\nS78,3078,25\nS79,3079,25\nS80,3080,25\nS81,3081,25\nS82,3082,25\nS83,3083,25\nS84,3084,25\nS85,3085,25\nS86,3086,25\nS87,3087,25\nS88,3088,25\nS89,3089,25\nS90,3090,25\nS91,3091,25\nS92,3092,25\nS93,3093,25\nS94,3094,25\nS95,3095,25\nS96,3096,25\nS97,3097,25\nS98,3098,25\nS99,3099,25\nS100,3100,25\nS101,3101,25\nS102,3102,25\nS103,3103,25\nS104,3104,25\nS105,3105,25\nS106,3106,25\nS107,3107,25\nS108,3108,25\nS109,3109,25\nS110,3110,25\nS111,3111,25\nS112,3112,25\nS113,3113,25\nS114,3114,25\nS115,3115,25\nS116,3116,25\nS117,3117,25\nS118,3118,25\nS119,3119,25\nS120,3120,25\nS121,3121,25\nS122,3122,25\nS123,3123,25\nS124,3124,25\nS125,3125,25\nS126,3126,25\nS127,3127,25\nS128,3128,25\nS129,3129,25\nS130,3130,25\nS131,3131,25\nS132,3132,25\nS133,3133,25\nS134,3134,25\nS135,3135,25\nS136,3136,25\nS137,3137,25\nS138,3138,25\nS139,3139,25\nS140,3140,25\nS141,3141,25\nS142,3142,25\nS143,3143,25\nS144,3144,25\nS145,3145,25\nS146,3146,25\nS147,3147,25\nS148,3148,25\nS149,3149,25\nS150,3150,25\nS151,3151,25\nS152,3152,25\nS153,3153,25\nS154,3154,25\nS155,3155,25\nS156,3156,25\nS157,3157,25\nS158,3158,25\nS159,3159,25\nS160,3160,25\nS161,3161,25\nS162,3162,25\nS163,3163,25\nS164,3164,25\nS165,3165,25\nS166,3166,25\nS167,3167,25\nS168,3168,25\nS169,3169,25\nS170,3170,25\nS171,3171,25\nS172,3172,25\nS173,3173,25\nS174,3174,25\nS175,3175,25\nS176,3176,25\nS177,3177,25\nS178,3178,25\nS179,3179,25\nS180,3180,25\nS181,3181,25\nS182,3182,25\nS183,3183,25\nS184,3184,25\nS185,3185,25\nS186,3186,25\nS187,3187,25\nS188,3188,25\nS189,3189,25\nS190,3190,25\nS191,3191,25\nS192,3192,25\nS193,3193,25\nS194,3194,25\nS195,3195,25\nS196,3196,25\nS197,3197,25\nS198,3198,25\nS199,3199,25\nS200,3200,25\nS201,3201,25\nS202,3202,25\nS203,3203,25\nS204,3204,25\nS205,3205,25\nS206,3206,25\nS207,3207,25\nS208,3208,25\nS209,3209,25\nS210,3210,25\nS211,3211,25\nS212,3212,25\nS213,3213,25\nS214,3214,25\nS215,3215,25\nS216,3216,25\nS217,3217,25\nS218,3218,25\nS219,3219,25\nS220,3220,25\nS221,3221,25\nS222,3222,25\nS223,3223,25\nS224,3224,25\nS225,3225,25\nS226,3226,25\nS227,3227,25\nS228,3228,25\nS229,3229,25\nS230,3230,25\nS231,3231,25\nS232,3232,25\nS233,3233,25\nS234,3234,25\nS235,3235,25\nS236,3236,25\nS237,3237,25\nS238,3238,25\nS239,3239,25\nS240,3240,25\nS241,3241,25\nS242,3242,25\nS243,3243,25\nS244,3244,25\nS245,3245,25\nS246,3246,25\nS247,3247,25\nS248,3248,25\nS249,3249,25\nS250,3250,25\nS251,3251,25\nS252,3252,25\nS253,3253,25\nS254,3254,25\nS255,3255,25\nS256,3256,25\nS257,3257,25\nS258,3258,25\nS259,3259,25\nS260,3260,25\nS261,3261,25\nS262,3262,25\nS263,3263,25\nS264,3264,25\nS265,3265,25\nS266,3266,25\nS267,3267,25\nS268,3268,25\nS269,3269,25\nS270,3270,25\nS271,3271,25\nS272,3272,25\nS273,3273,25\nS274,3274,25\nS275,3275,25\nS276,3276,25\nS277,3277,25\nS278,3278,25\nS279,3279,25\nS280,3280,25\nS281,3281,25\nS282,3282,25\nS283,3283,25\nS284,3284,25\nS285,3285,25\nS286,3286,25\nS287,3287,25\nS288,3288,25\nS289,3289,25\nS290,3290,25\nS291,3291,25\nS292,3292,25\nS293,3293,25\nS294,3294,25\nS295,3295,25\nS296,3296,25\nS297,3297,25\nS298,3298,25\nS299,3299,25\nS300,3300,25\nS301,3301,25\nS302,3302,25\nS303,3303,25\nS304,3304,25\nS305,3305,25\nS306,3306,25\nS307,3307,25\nS308,3308,25\nS309,3309,25\nS310,3310,25\nS311,3311,25\nS312,3312,25\nS313,3313,25\nS314,3314,25\nS315,3315,25\nS316,3316,25\nS317,3317,25\nS318,3318,25\nS319,3319,25\nS320,3320,25\nS321,3321,25\nS322,3322,25\nS323,3323,25\nS324,3324,25\nS325,3325,25\nS326,3326,25\nS327,3327,25\nS328,3328,25\nS329,3329,25\nS330,3330,25\nS331,3331,25\nS332,3332,25\nS333,3333,25\nS334,3334,25\nS335,3335,25\nS336,3336,25\nS337,3337,25\nS338,3338,25\nS339,3339,25\nS340,3340,25\nS341,3341,25\nS342,3342,25\nS343,3343,25\nS344,3344,25\nS345,3345,25\nS346,3346,25\nS347,3347,25\nS348,3348,25\nS349,3349,25\nS350,3350,25\nS351,3351,25\nS352,3352,25\nS353,3353,25\nS354,3354,25\nS355,3355,25\nS356,3356,25\nS357,3357,25\nS358,3358,25\nS359,3359,25\nS360,3360,25\nS361,3361,25\nS362,3362,25\nS363,3363,25\nS364,3364,25\nS365,3365,25\nS366,3366,25\nS367,3367,25\nS368,3368,25\nS369,3369,25\nS370,3370,25\nS371,3371,25\nS372,3372,25\nS373,3373,25\nS374,3374,25\nS375,3375,25\nS376,3376,25\nS377,3377,25\nS378,3378,25\nS379,3379,25\nS380,3380,25\nS381,3381,25\nS382,3382,25\nS383,3383,25\nS384,3384,25\nS385,3385,25\nS386,3386,25\nS387,3387,25\nS388,3388,25\nS389,3389,25\nS390,3390,25\nS391,3391,25\nS392,3392,25\nS393,3393,25\nS394,3394,25\nS395,3395,25\nS396,3396,25\nS397,3397,25\nS398,3398,25\nS399,3399,25\nS400,3400,25\nS401,3401,25\nS402,3402,25\nS403,3403,25\nS404,3404,25\nS405,3405,25\nS406,3406,25\nS407,3407,25\nS408,3408,25\nS409,3409,25\nS410,3410,25\nS411,3411,25\nS412,3412,25\nS413,3413,25\nS414,3414,25\nS415,3415,25\nS416,3416,25\nS417,3417,25\nS418,3418,25\nS419,3419,25\nS420,3420,25\nS421,3421,25\nS422,3422,25\nS423,3423,25\nS424,3424,25\nS425,3425,25\nS426,3426,25\nS427,3427,25\nS428,3428,25\nS429,3429,25\nS430,3430,25\nS431,3431,25\nS432,3432,25\nS433,3433,25\nS434,3434,25\nS435,3435,25\nS436,3436,25\nS437,3437,25\nS438,3438,25\nS439,3439,25\nS440,3440,25\nS441,3441,25\nS442,3442,25\nS443,3443,25\nS444,3444,25\nS445,3445,25\nS446,3446,25\nS447,3447,25\nS448,3448,25\nS449,3449,25\nS450,3450,25\nS451,3451,25\nS452,3452,25\nS453,3453,25\nS454,3454,25\nS455,3455,25\nS456,3456,25\nS457,3457,25\nS458,3458,25\nS459,3459,25\nS460,3460,25\nS461,3461,25\nS462,3462,25\nS463,3463,25\nS464,3464,25\nS465,3465,25\nS466,3466,25\nS467,3467,25\nS468,3468,25\nS469,3469,25\nS470,3470,25\nS471,3471,25\nS472,3472,25\nS473,3473,25\nS474,3474,25\nS475,3475,25\nS476,3476,25\nS477,3477,25\nS478,3478,25\nS479,3479,25\nS480,3480,25\nS481,3481,25\nS482,3482,25\nS483,3483,25\nS484,3484,25\nS485,3485,25\nS486,3486,25\nS487,3487,25\nS488,3488,25\nS489,3489,25\nS490,3490,25\nS491,3491,25\nS492,3492,25\nS493,3493,25\nS494,3494,25\nS495,3495,25\nS496,3496,25\nS497,3497,25\nS498,3498,25\nS499,3499,25\nS500,3500,25\n"
+   },
+   "outputs": {
+    "ok": false,
+    "dates": [],
+    "model_tree": null,
+    "element_assignments": {},
+    "errors": ["The file holds 501 dates; the limit is 500 per import."],
+    "warnings": [],
+    "notes": [],
+    "source_format": "csv",
+    "analysis_name": "t",
+    "resolution": null,
+    "suggested_analysis_type": "group_calibration",
+    "date_count": 0,
+    "dates_only": null,
+    "blocking_commands": []
+   }
+  },
+  {
+   "name": "parse_upload/utf8-sig.csv",
+   "inputs": {
+    "filename": "utf8-sig.csv",
+    "hex": "efbbbf6e616d652c6167652c6572726f720a412c333030302c32350a"
+   },
+   "outputs": {
+    "ok": true,
+    "dates": [
+     {
+      "sample_name": "A",
+      "age_bp": 3000.0,
+      "error_1sigma": 25.0,
+      "material_type": "unknown",
+      "curve_id": "intcal20",
+      "sample_type": null,
+      "delta_r": null,
+      "delta_r_error": null,
+      "latitude": null,
+      "longitude": null,
+      "tpq_age_bp": null,
+      "taq_age_bp": null,
+      "depth_cm": null,
+      "ring_offset": null,
+      "ring_offset_error": null,
+      "inbuilt_years": null,
+      "inbuilt_shape": null,
+      "delta_r_source": null,
+      "location": null,
+      "notes": null,
+      "outlier_model": "general",
+      "outlier_prior": 0.0,
+      "phase_name": null,
+      "id": "<id:1>"
+     }
+    ],
+    "model_tree": null,
+    "element_assignments": {},
+    "errors": [],
+    "warnings": [],
+    "notes": ["No phase/context column, so the dates come in with no model structure -- they will be calibrated independently. Add a \"phase\" column, or group them in the Model Structure editor, to model them together."],
+    "source_format": "csv",
+    "analysis_name": "utf8-sig",
+    "resolution": null,
+    "suggested_analysis_type": "group_calibration",
+    "date_count": 1,
+    "dates_only": null,
+    "blocking_commands": []
+   }
+  },
+  {
+   "name": "parse_upload/latin.csv",
+   "inputs": {
+    "filename": "latin.csv",
+    "hex": "6e616d652c6167652c6572726f722c6e6f7465730a412c333030302c32352c636166e920802073616d706c650a"
+   },
+   "outputs": {
+    "ok": true,
+    "dates": [
+     {
+      "sample_name": "A",
+      "age_bp": 3000.0,
+      "error_1sigma": 25.0,
+      "material_type": "unknown",
+      "curve_id": "intcal20",
+      "sample_type": null,
+      "delta_r": null,
+      "delta_r_error": null,
+      "latitude": null,
+      "longitude": null,
+      "tpq_age_bp": null,
+      "taq_age_bp": null,
+      "depth_cm": null,
+      "ring_offset": null,
+      "ring_offset_error": null,
+      "inbuilt_years": null,
+      "inbuilt_shape": null,
+      "delta_r_source": null,
+      "location": null,
+      "notes": "café € sample",
+      "outlier_model": "general",
+      "outlier_prior": 0.0,
+      "phase_name": null,
+      "id": "<id:1>"
+     }
+    ],
+    "model_tree": null,
+    "element_assignments": {},
+    "errors": [],
+    "warnings": [],
+    "notes": ["No phase/context column, so the dates come in with no model structure -- they will be calibrated independently. Add a \"phase\" column, or group them in the Model Structure editor, to model them together."],
+    "source_format": "csv",
+    "analysis_name": "latin",
+    "resolution": null,
+    "suggested_analysis_type": "group_calibration",
+    "date_count": 1,
+    "dates_only": null,
+    "blocking_commands": []
+   }
+  },
+  {
+   "name": "parse_upload/undecodable.csv",
+   "inputs": {
+    "filename": "undecodable.csv",
+    "hex": "6e616d652c6167652c6572726f720a412c333030302c32352c81ff0a"
+   },
+   "outputs": {
+    "ok": false,
+    "dates": [],
+    "model_tree": null,
+    "element_assignments": {},
+    "errors": ["The file is not text this importer can read (it decoded as neither UTF-8 nor Windows-1252). If it is a spreadsheet, save it as CSV first."],
+    "warnings": [],
+    "notes": [],
+    "source_format": "csv",
+    "analysis_name": null,
+    "resolution": null,
+    "suggested_analysis_type": "group_calibration",
+    "date_count": 0,
+    "dates_only": null,
+    "blocking_commands": []
+   }
+  },
+  {
+   "name": "parse_upload/table.txt",
+   "inputs": {
+    "filename": "table.txt",
+    "hex": "6e616d652c6167652c6572726f720a53657175656e63652833292c333030302c32350a"
+   },
+   "outputs": {
+    "ok": false,
+    "dates": [],
+    "model_tree": null,
+    "element_assignments": {},
+    "errors": ["Line 1: expected a command but found ','."],
+    "warnings": [],
+    "notes": [],
+    "source_format": "oxcal",
+    "analysis_name": "table",
+    "resolution": null,
+    "suggested_analysis_type": "group_calibration",
+    "date_count": 0,
+    "dates_only": null,
+    "blocking_commands": []
+   }
+  },
+  {
+   "name": "parse_upload/notes.csv",
+   "inputs": {
+    "filename": "notes.csv",
+    "hex": "6e616d652c6167652c6572726f722c6e6f7465730a412c333030302c32352c73656520506861736528203220290a"
+   },
+   "outputs": {
+    "ok": true,
+    "dates": [
+     {
+      "sample_name": "A",
+      "age_bp": 3000.0,
+      "error_1sigma": 25.0,
+      "material_type": "unknown",
+      "curve_id": "intcal20",
+      "sample_type": null,
+      "delta_r": null,
+      "delta_r_error": null,
+      "latitude": null,
+      "longitude": null,
+      "tpq_age_bp": null,
+      "taq_age_bp": null,
+      "depth_cm": null,
+      "ring_offset": null,
+      "ring_offset_error": null,
+      "inbuilt_years": null,
+      "inbuilt_shape": null,
+      "delta_r_source": null,
+      "location": null,
+      "notes": "see Phase( 2 )",
+      "outlier_model": "general",
+      "outlier_prior": 0.0,
+      "phase_name": null,
+      "id": "<id:1>"
+     }
+    ],
+    "model_tree": null,
+    "element_assignments": {},
+    "errors": [],
+    "warnings": [],
+    "notes": ["No phase/context column, so the dates come in with no model structure -- they will be calibrated independently. Add a \"phase\" column, or group them in the Model Structure editor, to model them together."],
+    "source_format": "csv",
+    "analysis_name": "notes",
+    "resolution": null,
+    "suggested_analysis_type": "group_calibration",
+    "date_count": 1,
+    "dates_only": null,
+    "blocking_commands": []
+   }
+  },
+  {
+   "name": "normalise_header",
+   "inputs": {
+    "headers": ["Sample Name","± 1σ","ΔR","95.4% HPD","  Lab-No. ","","C14_Age (BP)","δ13C ‰"]
+   },
+   "outputs": {
+    "keys": ["sample_name","error_1sigma","deltar","95_4percent_hpd","lab_no","","c14_age_bp","delta13c"]
+   }
+  },
+  {
+   "name": "looks_like_cql2",
+   "inputs": {
+    "texts": ["Plot()\n{\n R_Date(\"A\",3000,25);\n};","name,Sequence\nA,1","// Sequence(\nname,age","Options(){ };","R_Simulate (\"x\", 1000, 20);","Curve(\"IntCal20\",\"IntCal20.14c\");"]
+   },
+   "outputs": {
+    "cql2": [true,false,false,false,true,true]
+   }
+  },
+  {
+   "name": "template_csv",
+   "inputs": {},
+   "outputs": {
+    "csv": "sample_name,age_bp,error_1sigma,material_type,curve_id,phase,delta_r,delta_r_error,outlier_model,outlier_prior,tpq_age_bp,taq_age_bp,latitude,longitude,notes\r\nLd-10012,685,25,charcoal,shcal20,Fire Feature J,,,general,0.05,,,,,short-lived twig\r\nLd-10010,842,21,charcoal,shcal20,Fire Feature J,,,charcoal,1.0,,,,,old wood -- declared residual\r\nLB-10002,970,47,marine shell,marine20,Midden 1,-7,45,general,0.05,,,-45.8742,170.5036,delta_r needs its error; decimal degrees only\r\n",
+    "columns": {
+     "sample_name": ["sample_name","name","sample","sample_id","lab_code","labcode","lab_no","lab_number","lab_id","code","laboratory_code","r_date"],
+     "age_bp": ["age_bp","age","bp","c14_age","c14_age_bp","radiocarbon_age","uncal_bp","uncalibrated_age","cra","age_14c"],
+     "error_1sigma": ["error_1sigma","error","error_bp","1_sigma_error","1sigma_error","1sigma","sigma","sd","std","stdev","uncertainty","error_1"],
+     "material_type": ["material_type","material","sample_material"],
+     "curve_id": ["curve_id","curve","calibration_curve","cal_curve"],
+     "sample_type": ["sample_type","type","reservoir_type"],
+     "delta_r": ["delta_r","deltar","dr","delta_r_value","marine_offset"],
+     "delta_r_error": ["delta_r_error","deltar_error","dr_error","delta_r_sd","delta_r_1sigma","delta_r_uncertainty"],
+     "phase": ["phase","context","group","context_name","phase_name","default_context","default_context_name","feature","structure_path"],
+     "tpq_age_bp": ["tpq_age_bp","tpq","tpq_bp","tpq_cal_bp","max_age_bp"],
+     "taq_age_bp": ["taq_age_bp","taq","taq_bp","taq_cal_bp","min_age_bp"],
+     "outlier_model": ["outlier_model"],
+     "outlier_prior": ["outlier_prior","outlier","outlier_probability","outlier_p"],
+     "depth_cm": ["depth_cm","depth"],
+     "ring_offset": ["ring_offset","ring_offsets","ring","rings","gap","gap_years","offset","ring_gap","varve_offset"],
+     "ring_offset_error": ["ring_offset_error","ring_error","gap_error","offset_error","ring_offset_sd","gap_sd"],
+     "inbuilt_years": ["inbuilt_years","inbuilt_max","inbuilt","inbuilt_age","max_inbuilt","inbuilt_max_years","inbuilt_mean"],
+     "inbuilt_shape": ["inbuilt_shape","inbuilt_kernel","inbuilt_model"],
+     "delta_r_source": ["delta_r_source"],
+     "latitude": ["latitude","lat","y","dec_lat","decimal_latitude","lat_dd"],
+     "longitude": ["longitude","lon","long","lng","x","dec_long","decimal_longitude","lon_dd"],
+     "location": ["location","site","site_name"],
+     "notes": ["notes","note","comment","comments","remarks"],
+     "row_type": ["row_type"]
+    }
+   }
+  }
+ ]
+}
