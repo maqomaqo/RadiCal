@@ -697,7 +697,8 @@ def rows_from_csv(text: str) -> List[ReservoirRow]:
                 feeding=_text(record['feeding']),
                 feeding_raw=_text(record['feeding_raw']),
             ))
-        except ValueError as exc:
+        except (ValueError, OverflowError) as exc:
+            # OverflowError: a collection_year of inf, which int() refuses.
             raise IngestError(
                 f'Row {line} of the bundled snapshot could not be read: {exc}')
     if not rows:

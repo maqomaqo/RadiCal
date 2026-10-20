@@ -23,6 +23,7 @@ Resolution is read, as the step the model's ranges are reported at; the rest
 -- kIterations and the like -- configure OxCal's own run length, which this
 app does not have.
 """
+import math
 import re
 import uuid
 from typing import Any, Dict, List, Optional, Tuple
@@ -142,6 +143,8 @@ class _Parser:
         return None if self.at_end() else self.tokens[self.position]
 
     def next(self) -> Token:
+        if self.at_end():
+            raise OxcalSyntaxError('The file ends where a value was expected.')
         token = self.tokens[self.position]
         self.position += 1
         return token
@@ -963,7 +966,8 @@ class _Translator:
             years = float(value)
         except (TypeError, ValueError):
             return False
-        if years != int(years) or not 1 <= years <= 100:
+        # A non-finite value is not a whole number; int() would raise on it.
+        if not math.isfinite(years) or years != int(years) or not 1 <= years <= 100:
             self.result.notes.append(
                 f'Resolution={value} was not carried over: the reporting '
                 'resolution here is a whole number of years from 1 to 100. '
