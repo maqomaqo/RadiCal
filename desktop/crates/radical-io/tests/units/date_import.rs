@@ -20,12 +20,13 @@ fn date_import() {
         let name = case.name.as_str();
         match name.split('/').next().unwrap() {
             "parse_csv" => {
-                let got = parse_csv(text(&i["text"]), &library, i["filename"].as_str(), &mut ids);
-                match (&got, &case.error) {
-                    (Ok(r), None) => same_json(name, &r.to_json(), &outputs(&case)),
-                    (Err(e), Some(want)) => assert_eq!(e.0, text(&want["message"]), "{name}"),
-                    _ => panic!("{name}: {got:?} vs {:?}", case.error),
-                }
+                let got = parse_csv(&case_text(&i), &library, i["filename"].as_str(), &mut ids);
+                assert!(
+                    case.error.is_none(),
+                    "{name}: the Python raised {:?}",
+                    case.error
+                );
+                same_json(name, &got.to_json(), &outputs(&case));
             }
             "parse_upload" => check_upload(&case, &library, &mut ids),
             "normalise_header" => {
@@ -71,6 +72,6 @@ pub fn check_upload(case: &Case, library: &Library, ids: &mut RandomIds) {
             .repeat(i["length"].as_u64().unwrap() as usize)
             .into_bytes(),
     };
-    let got = parse_upload(text(&i["filename"]), &content, library, ids).unwrap();
+    let got = parse_upload(text(&i["filename"]), &content, library, ids);
     same_json(&case.name, &got.to_json(), &outputs(case));
 }

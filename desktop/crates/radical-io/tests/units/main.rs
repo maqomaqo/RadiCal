@@ -44,6 +44,23 @@ pub fn family(name: &str) -> Family {
     load_family(&format!("units/{name}")).unwrap()
 }
 
+/// A case's text: `text`, or `head` + `fill` * `count` + `tail` for one
+/// too long to store.
+pub fn case_text(i: &Value) -> String {
+    match i["text"].as_str() {
+        Some(t) => t.to_owned(),
+        None => format!(
+            "{}{}{}",
+            i["head"].as_str().unwrap(),
+            i["fill"]
+                .as_str()
+                .unwrap()
+                .repeat(i["count"].as_u64().unwrap() as usize),
+            i["tail"].as_str().unwrap()
+        ),
+    }
+}
+
 pub fn outputs(case: &Case) -> Value {
     case.expanded_outputs()
         .unwrap_or_else(|| panic!("{}: expected outputs, found {:?}", case.name, case.error))

@@ -3848,6 +3848,33 @@
    }
   },
   {
+   "name": "parse_curve/cell-past-the-limit",
+   "inputs": {
+    "head": "0,100,5\n10,110,5\n20,\"",
+    "fill": "x",
+    "count": 131073,
+    "tail": "\",5\n",
+    "calendar": "cal_bp",
+    "columns": null
+   },
+   "outputs": {
+    "ok": false,
+    "errors": ["A single cell runs past 131,072 characters, which no column here needs. This is usually a quote mark earlier in the file that opens a cell and never closes it."],
+    "warnings": [],
+    "notes": [],
+    "source_format": "14c",
+    "parse_options": {
+     "calendar": "cal_bp"
+    },
+    "suggested_name": null,
+    "suggested_reference": null,
+    "summary": {},
+    "preview": [],
+    "points_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "points": []
+   }
+  },
+  {
    "name": "parse_upload/path/to/Old Curve.v2.csv",
    "inputs": {
     "filename": "path/to/Old Curve.v2.csv",

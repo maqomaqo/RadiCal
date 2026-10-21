@@ -313,25 +313,28 @@ fn column_indices(header: &[String], errors: &mut Vec<String>) -> Option<Columns
 /// Read a calibration curve from the text of an uploaded file. `columns`,
 /// when given, is used instead of detecting them -- what a stored curve
 /// passes back in, so re-reading it cannot depend on today's detection.
-/// `Err` only where Python's csv reader raises.
-pub fn parse_curve(
-    text: &str,
-    calendar: Calendar,
-    columns: Option<Columns>,
-) -> Result<CurveImportResult, pycsv::CsvError> {
+pub fn parse_curve(text: &str, calendar: Calendar, columns: Option<Columns>) -> CurveImportResult {
     let mut result = CurveImportResult {
         calendar,
         source_format: "14c",
         ..CurveImportResult::default()
     };
     (result.suggested_name, result.suggested_reference) = suggestions(text);
-    let (rows, header, source_format) = rows_from_delimited(text)?;
+    let (rows, header, source_format) = match rows_from_delimited(text) {
+        Ok(read) => read,
+        Err(exc) => {
+            result
+                .errors
+                .push(crate::date_import::unreadable_table(&exc));
+            return result.refuse();
+        }
+    };
     result.source_format = source_format;
     if rows.is_empty() {
         result
             .errors
             .push("The file has no data rows -- only comments or blank lines.".to_owned());
-        return Ok(result.refuse());
+        return result.refuse();
     }
     let indices = if let Some(columns) = columns {
         result.notes.push(
@@ -341,7 +344,7 @@ pub fn parse_curve(
         columns
     } else if let Some(header) = &header {
         let Some(indices) = column_indices(header, &mut result.errors) else {
-            return Ok(result.refuse());
+            return result.refuse();
         };
         result.notes.push(format!(
             "Read columns by name: calendar age from '{}', radiocarbon age from '{}', error from '{}'.",
@@ -365,7 +368,7 @@ pub fn parse_curve(
             result.errors.push(format!(
                 "Stopped after {MAX_REPORTED_ERRORS} problems; the file's layout is probably not what was expected."
             ));
-            return Ok(result.refuse());
+            return result.refuse();
         }
         if widest >= row.len() {
             result.errors.push(format!(
@@ -425,14 +428,14 @@ pub fn parse_curve(
         parsed.push((cal, c14, sigma));
     }
     if !result.errors.is_empty() {
-        return Ok(result.refuse());
+        return result.refuse();
     }
     if parsed.len() < 2 {
         result.errors.push(format!(
             "Only {} usable row(s). A calibration curve needs at least two points to interpolate between.",
             parsed.len()
         ));
-        return Ok(result.refuse());
+        return result.refuse();
     }
     let largest = parsed
         .iter()
@@ -444,7 +447,7 @@ pub fn parse_curve(
             "The radiocarbon age column tops out at {}, which looks like F14C (fraction modern) rather than a conventional radiocarbon age in years. Calibrating those values as ages would date every sample to within a century of the present.",
             g(top, 6)
         ));
-        return Ok(result.refuse());
+        return result.refuse();
     }
     let ascending = parsed.windows(2).all(|w| w[0].0 < w[1].0);
     if !ascending {
@@ -472,28 +475,24 @@ pub fn parse_curve(
             shown.join(", "),
             if duplicates.len() > 5 { ", ..." } else { "" }
         ));
-        return Ok(result.refuse());
+        return result.refuse();
     }
     result.points = parsed;
-    Ok(result)
+    result
 }
 
 static PATH_SEPARATOR: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[\\/]").unwrap());
 
 /// Decode an uploaded curve file and read it, the format decided by content
 /// rather than extension.
-pub fn parse_upload(
-    filename: &str,
-    content: &[u8],
-    calendar: Calendar,
-) -> Result<CurveImportResult, pycsv::CsvError> {
-    let mut result = parse_curve(&decode(content), calendar, None)?;
+pub fn parse_upload(filename: &str, content: &[u8], calendar: Calendar) -> CurveImportResult {
+    let mut result = parse_curve(&decode(content), calendar, None);
     if result.suggested_name.is_none() && !filename.is_empty() {
         let last = PATH_SEPARATOR.split(filename).last().unwrap_or("");
         let stem = last.rsplit_once('.').map_or(last, |(stem, _)| stem);
         result.suggested_name = (!stem.is_empty()).then(|| stem.to_owned());
     }
-    Ok(result)
+    result
 }
 
 /// A curve in the .14c format the bundled curves use.

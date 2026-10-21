@@ -36,6 +36,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import hashlib
 import html
+import math
 import re
 
 from app.models import MarineReservoirPoint, MarineReservoirSnapshot
@@ -512,6 +513,10 @@ def records_to_rows(
             report.without_error += 1
 
         collection_year = _number(decoded.get('collectionyear'))
+        if collection_year is not None and not math.isfinite(collection_year):
+            # 'inf' and 'nan' parse as numbers and are not years. Descriptive
+            # metadata, like last_changed: the measurement stands without it.
+            collection_year = None
 
         # What the SOURCE says about its own currency. The maximum across the
         # rows is what identifies the snapshot, so it is collected here rather

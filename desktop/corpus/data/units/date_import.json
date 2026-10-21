@@ -1414,6 +1414,58 @@
    }
   },
   {
+   "name": "parse_csv/cell-at-the-limit",
+   "inputs": {
+    "filename": "long.csv",
+    "head": "name,age,error,location\nA,3000,25,",
+    "fill": "y",
+    "count": 131072,
+    "tail": "\n"
+   },
+   "outputs": {
+    "ok": false,
+    "dates": [],
+    "model_tree": null,
+    "element_assignments": {},
+    "errors": ["'A': location -- String should have at most 500 characters"],
+    "warnings": [],
+    "notes": [],
+    "source_format": "csv",
+    "analysis_name": "long",
+    "resolution": null,
+    "suggested_analysis_type": "group_calibration",
+    "date_count": 0,
+    "dates_only": null,
+    "blocking_commands": []
+   }
+  },
+  {
+   "name": "parse_csv/quote-never-closes",
+   "inputs": {
+    "filename": "long.csv",
+    "head": "name,age,error,notes\nA,3000,25,\"see below\nB,3010,25,",
+    "fill": "x",
+    "count": 131072,
+    "tail": "\n"
+   },
+   "outputs": {
+    "ok": false,
+    "dates": [],
+    "model_tree": null,
+    "element_assignments": {},
+    "errors": ["Reading stopped at line 3. A single cell runs past 131,072 characters, which no column here needs. This is usually a quote mark earlier in the file that opens a cell and never closes it."],
+    "warnings": [],
+    "notes": [],
+    "source_format": "csv",
+    "analysis_name": "long",
+    "resolution": null,
+    "suggested_analysis_type": "group_calibration",
+    "date_count": 0,
+    "dates_only": null,
+    "blocking_commands": []
+   }
+  },
+  {
    "name": "parse_upload/utf8-sig.csv",
    "inputs": {
     "filename": "utf8-sig.csv",

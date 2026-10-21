@@ -102,6 +102,10 @@ class TestParsingWhatMustBeRefused:
         assert result.points == []          # refuse() drops a partial curve
         return ' '.join(result.errors)
 
+    def test_a_cell_past_the_csv_field_limit(self):
+        text = curve_text(RISING) + '40,"' + 'x' * 131073 + '",20\n'
+        assert 'never closes' in self._errors(text=text)
+
     def test_non_numeric_cell(self):
         rows = curve_text(RISING).splitlines()
         rows[3] = '30,abc,20'

@@ -1637,6 +1637,17 @@ def units_date_import():
         cases.append(capture(f'parse_csv/{label}', {'filename': filename, 'text': text},
                              lambda f=filename, t=text: Stable()(
                                  date_import.parse_csv(t, CORPUS_OWNER, f).as_dict())))
+    # Cells at and past the csv reader's field limit, written as a recipe
+    # (head + fill * count + tail) rather than 128 KB of text.
+    long_cells = {
+        'cell-at-the-limit': ('name,age,error,location\nA,3000,25,', 'y', 131072, '\n'),
+        'quote-never-closes': ('name,age,error,notes\nA,3000,25,"see below\nB,3010,25,', 'x', 131072, '\n'),
+    }
+    for label, (head, fill, count, tail) in long_cells.items():
+        text = head + fill * count + tail
+        cases.append(capture(f'parse_csv/{label}',
+                             {'filename': 'long.csv', 'head': head, 'fill': fill, 'count': count, 'tail': tail},
+                             lambda t=text: Stable()(date_import.parse_csv(t, CORPUS_OWNER, 'long.csv').as_dict())))
     uploads = {
         'utf8-sig.csv': '﻿name,age,error\nA,3000,25\n'.encode('utf-8'),
         'latin.csv': 'name,age,error,notes\nA,3000,25,caf\xe9 \u20ac sample\n'.encode('cp1252'),
@@ -1880,6 +1891,11 @@ def units_curve_import():
     for label, (calendar, columns, text) in CURVE_TEXTS.items():
         cases.append(capture(f'parse_curve/{label}', {'text': text, 'calendar': calendar, 'columns': columns},
                              lambda t=text, c=calendar, k=columns: answer(curve_import.parse_curve(t, c, k))))
+    head, fill, count, tail = '0,100,5\n10,110,5\n20,"', 'x', 131073, '",5\n'
+    cases.append(capture('parse_curve/cell-past-the-limit',
+                         {'head': head, 'fill': fill, 'count': count, 'tail': tail,
+                          'calendar': 'cal_bp', 'columns': None},
+                         lambda: answer(curve_import.parse_curve(head + fill * count + tail))))
     uploads = {
         'path/to/Old Curve.v2.csv': '# Ünïcode header\n0,100,5\n10,110,5\n'.encode('latin-1'),
         'C:\\curves\\bom.14c': '\ufeff0,100,5\n10,110,5\n'.encode('utf-8'),
@@ -1997,6 +2013,8 @@ def units_reservoir_ingest():
             dict(base, mapno='4', lon='-540', feeding='unheard OF ', last_changed=' 2001-06-30 12:00:00 '),
         ],
         'empty': [],
+        'years-that-are-not': [dict(base, mapno=str(i + 1), collectionyear=y)
+                               for i, y in enumerate(['inf', '-inf', 'nan', 'NaN', ' 1931.9 '])],
     }
     for label, records in record_sets.items():
         cases.append(capture(f'records_to_rows/{label}', {'records': records},

@@ -59,25 +59,24 @@ fn curve_import() {
                         file(path).iter().map(|&b| char::from(b)).collect()
                     }
                     Some(path) => String::from_utf8(file(path)).unwrap(),
-                    None => i["text"].as_str().unwrap().to_owned(),
+                    None => case_text(&i),
                 };
-                answer(
-                    &parse_curve(&text, calendar(&i["calendar"]), columns(&i["columns"])).unwrap(),
-                )
+                answer(&parse_curve(
+                    &text,
+                    calendar(&i["calendar"]),
+                    columns(&i["columns"]),
+                ))
             }
             "parse_upload" => {
                 let content = match i["file"].as_str() {
                     Some(path) => file(path),
                     None => crate::date_import::hex(i["hex"].as_str().unwrap()),
                 };
-                answer(
-                    &parse_upload(
-                        i["filename"].as_str().unwrap(),
-                        &content,
-                        calendar(&i["calendar"]),
-                    )
-                    .unwrap(),
-                )
+                answer(&parse_upload(
+                    i["filename"].as_str().unwrap(),
+                    &content,
+                    calendar(&i["calendar"]),
+                ))
             }
             "to_14c_text" => {
                 let points: Vec<(f64, f64, f64)> = i["points"]

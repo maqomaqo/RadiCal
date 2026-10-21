@@ -18,7 +18,7 @@ use serde_json::{Map, Value, json};
 
 use crate::ids::Ids;
 use crate::library::Library;
-use crate::pycsv::{self, CsvError};
+use crate::pycsv::{self, CsvError, FIELD_LIMIT};
 use crate::python;
 use crate::schema::{self, Values};
 
@@ -669,6 +669,21 @@ fn lone_cr_to_lf(text: &str) -> String {
     out
 }
 
+/// Why the csv reader gave up, for a person (`date_import.unreadable_table`).
+/// The one way the non-strict reader still fails is a cell past
+/// [`FIELD_LIMIT`], and the usual cause of that is a quote mark that opens a
+/// cell and never closes, swallowing the rest of the file -- so the message
+/// points there.
+pub fn unreadable_table(exc: &CsvError) -> String {
+    if exc.message.contains("field larger than field limit") {
+        return format!(
+            "A single cell runs past {} characters, which no column here needs. This is usually a quote mark earlier in the file that opens a cell and never closes it.",
+            radical_core::pyfmt::thousands(FIELD_LIMIT as f64)
+        );
+    }
+    format!("The file could not be read as a table ({}).", exc.message)
+}
+
 /// Comma, tab or semicolon, whichever the header line uses most; ties go to
 /// that order.
 fn sniff_delimiter(text: &str) -> char {
@@ -702,29 +717,38 @@ pub(crate) fn name_from_filename(filename: Option<&str>) -> Option<String> {
 
 /// Read a delimited table of dates: header-driven and order-independent (see
 /// [`COLUMN_ALIASES`]). A `phase` column turns a list of dates into a model.
-/// `Err` only where Python's csv reader itself raises.
 pub fn parse_csv(
     text: &str,
     library: &Library,
     filename: Option<&str>,
     ids: &mut dyn Ids,
-) -> Result<ImportResult, CsvError> {
+) -> ImportResult {
     let mut result = ImportResult::new("csv");
     result.analysis_name = name_from_filename(filename);
     let text = text.trim_start_matches('\u{feff}');
     if python::strip(text).is_empty() {
         result.errors.push("The file is empty.".to_owned());
-        return Ok(result);
+        return result;
     }
     // Old Mac line endings (a lone CR) are a convention, not a fault: read
     // them as line breaks. CRLF is left alone; the csv reader handles it.
     let normalised = lone_cr_to_lf(text);
     let text = normalised.as_str();
     let delimiter = sniff_delimiter(text);
-    let (fieldnames, raw_rows) = pycsv::dict_rows(text, delimiter)?;
+    let (fieldnames, raw_rows) = match pycsv::dict_rows(text, delimiter) {
+        Ok(read) => read,
+        Err(exc) => {
+            result.errors.push(format!(
+                "Reading stopped at line {}. {}",
+                exc.line,
+                unreadable_table(&exc)
+            ));
+            return result.refuse();
+        }
+    };
     let Some(fieldnames) = fieldnames.filter(|f| !f.is_empty()) else {
         result.errors.push("The file has no header row.".to_owned());
-        return Ok(result);
+        return result;
     };
     let (mapping, unknown, duplicated) = resolve_columns(&fieldnames);
     let missing: Vec<&str> = REQUIRED_COLUMNS
@@ -744,7 +768,7 @@ pub fn parse_csv(
             missing.join(", "),
             if found.is_empty() { "nothing".to_owned() } else { found.join(", ") }
         ));
-        return Ok(result.refuse());
+        return result.refuse();
     }
     for problem in duplicated {
         result
@@ -795,7 +819,7 @@ pub fn parse_csv(
             "The file holds {} dates; the limit is {MAX_DATES} per import.",
             rows.len()
         ));
-        return Ok(result.refuse());
+        return result.refuse();
     }
     if skipped_structural > 0 {
         result.notes.push(format!(
@@ -809,10 +833,10 @@ pub fn parse_csv(
     }
     if result.dates.is_empty() && result.errors.is_empty() {
         result.errors.push("No dates found in the file.".to_owned());
-        return Ok(result.refuse());
+        return result.refuse();
     }
     finish(&mut result, ids);
-    Ok(result.refuse())
+    result.refuse()
 }
 
 /// One row as a date, or None with its errors appended, in the order the
@@ -1190,13 +1214,13 @@ pub fn decode(content: &[u8]) -> Option<String> {
 
 /// An uploaded file, read by the reader its extension names, or by its
 /// content where the extension says nothing (`.txt` names both tables and
-/// saved OxCal models). `Err` only where Python's csv reader raises.
+/// saved OxCal models).
 pub fn parse_upload(
     filename: &str,
     content: &[u8],
     library: &Library,
     ids: &mut dyn Ids,
-) -> Result<ImportResult, CsvError> {
+) -> ImportResult {
     if content.len() > MAX_CONTENT_BYTES {
         let mut result = ImportResult::new("csv");
         result.errors.push(format!(
@@ -1204,34 +1228,24 @@ pub fn parse_upload(
             content.len() / 1024,
             MAX_CONTENT_BYTES / 1024
         ));
-        return Ok(result);
+        return result;
     }
     let Some(text) = decode(content) else {
         let mut result = ImportResult::new("csv");
         result.errors.push(
             "The file is not text this importer can read (it decoded as neither UTF-8 nor Windows-1252). If it is a spreadsheet, save it as CSV first.".to_owned(),
         );
-        return Ok(result);
+        return result;
     };
     let lower = filename.to_lowercase();
     if lower.ends_with(".oxcal") {
-        return Ok(crate::oxcal_script::parse_oxcal(
-            &text,
-            library,
-            Some(filename),
-            ids,
-        ));
+        return crate::oxcal_script::parse_oxcal(&text, library, Some(filename), ids);
     }
     if lower.ends_with(".csv") || lower.ends_with(".tsv") {
         return parse_csv(&text, library, Some(filename), ids);
     }
     if looks_like_cql2(&text) {
-        return Ok(crate::oxcal_script::parse_oxcal(
-            &text,
-            library,
-            Some(filename),
-            ids,
-        ));
+        return crate::oxcal_script::parse_oxcal(&text, library, Some(filename), ids);
     }
     parse_csv(&text, library, Some(filename), ids)
 }
