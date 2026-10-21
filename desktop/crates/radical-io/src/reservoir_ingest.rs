@@ -565,7 +565,11 @@ pub fn records_to_rows(
             c14_age: number(get("c14age")),
             c14_error: number(get("c14err")),
             lab_id: text(get("labid")),
-            collection_year: number(get("collectionyear")).map(|y| y.trunc() as i64),
+            // 'inf' and 'nan' parse as numbers and are not years. Descriptive
+            // metadata, like last_changed: the measurement stands without it.
+            collection_year: number(get("collectionyear"))
+                .filter(|y| y.is_finite())
+                .map(|y| y.trunc() as i64),
             reservoir_age: number(get("reservoirage")),
             genus: text(get("genus")),
             species: text(get("species")),
@@ -666,7 +670,7 @@ pub fn rows_to_csv(rows: &[ReservoirRow]) -> String {
 /// A bundled snapshot read back, strict about its header: a file whose
 /// columns are not these is not this format.
 pub fn rows_from_csv(text_in: &str) -> Result<Vec<ReservoirRow>, IngestError> {
-    let records = pycsv::records(text_in, ',').map_err(|e| IngestError(e.0))?;
+    let records = pycsv::records(text_in, ',').map_err(|e| IngestError(e.message))?;
     let mut records = records.into_iter();
     let Some(header) = records.next() else {
         return Err(IngestError(

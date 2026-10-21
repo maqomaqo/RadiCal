@@ -267,7 +267,12 @@ def parse_curve(
     result.parse_options = {'calendar': calendar}
     result.suggested_name, result.suggested_reference = _suggestions(text)
 
-    rows, header, source_format = _rows_from_delimited(text)
+    try:
+        rows, header, source_format = _rows_from_delimited(text)
+    except csv.Error as exc:
+        from app.services.date_import import unreadable_table
+        result.errors.append(unreadable_table(exc))
+        return result.refuse()
     result.source_format = source_format
 
     if not rows:

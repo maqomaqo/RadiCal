@@ -897,6 +897,18 @@ class TestCsvColumns:
         assert result.ok, result.errors
         assert [d['age_bp'] for d in result.dates] == [3000, 3100]
 
+    def test_a_quote_that_never_closes_is_refused_not_raised(self):
+        """An unclosed quote swallows the rest of the file into one cell, and
+        past the csv reader's field limit that is an error to report -- naming
+        where reading stopped and the likely cause -- not a 500."""
+        text = 'name,age,error,notes\nOxA-1,3000,25,"see below\nOxA-2,3100,30,' + 'x' * 131072 + '\n'
+        result = parse_csv(text)
+
+        assert not result.ok
+        assert result.dates == []
+        assert result.errors[0].startswith('Reading stopped at line 3. A single cell runs past 131,072')
+        assert 'never closes' in result.errors[0]
+
 
 class TestCsvValues:
     def test_every_bad_row_is_reported_not_just_the_first(self):

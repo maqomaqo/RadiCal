@@ -7,9 +7,17 @@
 //! what the importer reports -- a stray quote, a ragged row, a line ending
 //! the reader refuses -- and those are the cases libraries disagree on.
 
-/// Python's `_csv.Error`, with its message.
+/// Python's `_csv.Error`: its message, and the reader's `line_num` when it
+/// stopped -- the lines read so far, the one it stopped in included.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CsvError(pub String);
+pub struct CsvError {
+    pub message: String,
+    pub line: usize,
+}
+
+/// The longest cell the reader accepts, in characters: Python's default
+/// `csv.field_size_limit()`, which the importers leave as it is.
+pub const FIELD_LIMIT: usize = 131_072;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum State {
@@ -33,6 +41,7 @@ fn lines(text: &str) -> impl Iterator<Item = &str> {
 pub fn records(text: &str, delimiter: char) -> Result<Vec<Vec<String>>, CsvError> {
     let mut out = Vec::new();
     let mut input = lines(text);
+    let mut line_num = 0usize;
     loop {
         let mut state = State::StartRecord;
         let mut fields: Vec<String> = Vec::new();
@@ -48,6 +57,7 @@ pub fn records(text: &str, delimiter: char) -> Result<Vec<Vec<String>>, CsvError
                 }
                 return Ok(out);
             };
+            line_num += 1;
             for c in line.chars().map(Some).chain(std::iter::once(None)) {
                 // None is the end of the line, CPython's EOL.
                 let is_end = |c: Option<char>| matches!(c, None | Some('\n' | '\r'));
@@ -55,9 +65,17 @@ pub fn records(text: &str, delimiter: char) -> Result<Vec<Vec<String>>, CsvError
                     fields.push(std::mem::take(field));
                     *field_len = 0;
                 };
+                // Refused before the character that would pass the limit.
                 let add = |field: &mut String, field_len: &mut usize, ch: char| {
+                    if *field_len >= FIELD_LIMIT {
+                        return Err(CsvError {
+                            message: format!("field larger than field limit ({FIELD_LIMIT})"),
+                            line: line_num,
+                        });
+                    }
                     field.push(ch);
                     *field_len += 1;
+                    Ok(())
                 };
                 // START_RECORD falls through to START_FIELD.
                 if state == State::StartRecord {
@@ -85,7 +103,7 @@ pub fn records(text: &str, delimiter: char) -> Result<Vec<Vec<String>>, CsvError
                         } else if c == Some(delimiter) {
                             save(&mut fields, &mut field, &mut field_len);
                         } else {
-                            add(&mut field, &mut field_len, c.unwrap());
+                            add(&mut field, &mut field_len, c.unwrap())?;
                             state = State::InField;
                         }
                     }
@@ -101,17 +119,17 @@ pub fn records(text: &str, delimiter: char) -> Result<Vec<Vec<String>>, CsvError
                             save(&mut fields, &mut field, &mut field_len);
                             state = State::StartField;
                         } else {
-                            add(&mut field, &mut field_len, c.unwrap());
+                            add(&mut field, &mut field_len, c.unwrap())?;
                         }
                     }
                     State::InQuotedField => match c {
                         None => {}
                         Some('"') => state = State::QuoteInQuotedField,
-                        Some(ch) => add(&mut field, &mut field_len, ch),
+                        Some(ch) => add(&mut field, &mut field_len, ch)?,
                     },
                     State::QuoteInQuotedField => {
                         if c == Some('"') {
-                            add(&mut field, &mut field_len, '"');
+                            add(&mut field, &mut field_len, '"')?;
                             state = State::InQuotedField;
                         } else if c == Some(delimiter) {
                             save(&mut fields, &mut field, &mut field_len);
@@ -124,7 +142,7 @@ pub fn records(text: &str, delimiter: char) -> Result<Vec<Vec<String>>, CsvError
                                 State::EatCrnl
                             };
                         } else {
-                            add(&mut field, &mut field_len, c.unwrap());
+                            add(&mut field, &mut field_len, c.unwrap())?;
                             state = State::InField;
                         }
                     }
@@ -132,11 +150,12 @@ pub fn records(text: &str, delimiter: char) -> Result<Vec<Vec<String>>, CsvError
                         Some('\n' | '\r') => {}
                         None => state = State::StartRecord,
                         Some(_) => {
-                            return Err(CsvError(
-                                "new-line character seen in unquoted field - do you need to open \
-                                 the file with newline=''?"
+                            return Err(CsvError {
+                                message: "new-line character seen in unquoted field - do you \
+                                          need to open the file with newline=''?"
                                     .to_owned(),
-                            ));
+                                line: line_num,
+                            });
                         }
                     },
                 }
@@ -204,6 +223,18 @@ mod tests {
 
     fn r(text: &str) -> Vec<Vec<String>> {
         records(text, ',').unwrap()
+    }
+
+    /// Python refuses the character that would take a cell past the limit,
+    /// quotes not counted, and says how many lines it had read.
+    #[test]
+    fn a_cell_past_the_field_limit_is_refused() {
+        let at = format!("a\n\"{}\"\n", "x".repeat(FIELD_LIMIT));
+        assert_eq!(r(&at)[1][0].len(), FIELD_LIMIT);
+        let past = format!("a\n\"open\n{}\n", "x".repeat(FIELD_LIMIT));
+        let err = records(&past, ',').unwrap_err();
+        assert_eq!(err.message, "field larger than field limit (131072)");
+        assert_eq!(err.line, 3);
     }
 
     #[test]

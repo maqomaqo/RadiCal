@@ -491,6 +491,26 @@ def _outlier_prior(value: str, line: int, errors: List[str]) -> Optional[float]:
 # CSV
 # --------------------------------------------------------------------------
 
+# Python's csv reader refuses a single cell longer than this (its default
+# field_size_limit), and the limit is deliberately left alone: it is
+# process-wide, and no column of a date list or a curve comes near it.
+CSV_FIELD_LIMIT = 131072
+
+
+def unreadable_table(exc: csv.Error) -> str:
+    """
+    Why the csv reader gave up, for a person. The one way a non-strict reader
+    still fails is a cell past CSV_FIELD_LIMIT, and the usual cause of THAT is
+    a quote mark that opens a cell and never closes it, which swallows the
+    rest of the file into one cell -- so the message points there.
+    """
+    if 'field larger than field limit' in str(exc):
+        return (f'A single cell runs past {CSV_FIELD_LIMIT:,} characters, which no '
+                'column here needs. This is usually a quote mark earlier in the file '
+                'that opens a cell and never closes it.')
+    return f'The file could not be read as a table ({exc}).'
+
+
 def _sniff_delimiter(text: str) -> str:
     """
     Comma, tab or semicolon, whichever the header line actually uses.
@@ -534,11 +554,17 @@ def parse_csv(text: str, owner_id: str, filename: Optional[str] = None) -> Impor
 
     delimiter = _sniff_delimiter(text)
     reader = csv.DictReader(io.StringIO(text), delimiter=delimiter)
-    if not reader.fieldnames:
+    try:
+        fieldnames = reader.fieldnames
+        raw_rows = list(reader)
+    except csv.Error as exc:
+        result.errors.append(f'Reading stopped at line {reader.reader.line_num}. {unreadable_table(exc)}')
+        return result.refuse()
+    if not fieldnames:
         result.errors.append('The file has no header row.')
         return result
 
-    mapping, unknown, duplicated = _resolve_columns(reader.fieldnames)
+    mapping, unknown, duplicated = _resolve_columns(fieldnames)
     canonical = set(mapping.values())
 
     missing = [c for c in REQUIRED_COLUMNS if c not in canonical]
@@ -547,7 +573,7 @@ def parse_csv(text: str, owner_id: str, filename: Optional[str] = None) -> Impor
             'The file is missing required column(s): '
             + ', '.join(missing)
             + '. Found: '
-            + (', '.join(f"'{f.strip()}'" for f in reader.fieldnames if f and f.strip()) or 'nothing')
+            + (', '.join(f"'{f.strip()}'" for f in fieldnames if f and f.strip()) or 'nothing')
             + '. Download the template for the column names this reads.'
         )
         return result.refuse()
@@ -571,7 +597,7 @@ def parse_csv(text: str, owner_id: str, filename: Optional[str] = None) -> Impor
     skipped_structural = 0
     rows: List[Dict[str, Any]] = []
 
-    for offset, raw_row in enumerate(reader):
+    for offset, raw_row in enumerate(raw_rows):
         # +2: the header is line 1 and enumerate starts at 0.
         line = offset + 2
         row = {

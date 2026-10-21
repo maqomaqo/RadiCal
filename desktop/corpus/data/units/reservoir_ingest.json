@@ -489,6 +489,160 @@
    }
   },
   {
+   "name": "records_to_rows/years-that-are-not",
+   "inputs": {
+    "records": [
+     {
+      "mapno": "1",
+      "lat": "50",
+      "lon": "-5",
+      "collectionyear": "inf"
+     },
+     {
+      "mapno": "2",
+      "lat": "50",
+      "lon": "-5",
+      "collectionyear": "-inf"
+     },
+     {
+      "mapno": "3",
+      "lat": "50",
+      "lon": "-5",
+      "collectionyear": "nan"
+     },
+     {
+      "mapno": "4",
+      "lat": "50",
+      "lon": "-5",
+      "collectionyear": "NaN"
+     },
+     {
+      "mapno": "5",
+      "lat": "50",
+      "lon": "-5",
+      "collectionyear": " 1931.9 "
+     }
+    ]
+   },
+   "outputs": {
+    "rows": [
+     {
+      "map_no": 1,
+      "latitude": 50.0,
+      "longitude": -5.0,
+      "delta_r": null,
+      "delta_r_error": null,
+      "reference": null,
+      "locality": null,
+      "subregion": null,
+      "notes": null,
+      "c14_age": null,
+      "c14_error": null,
+      "lab_id": null,
+      "collection_year": null,
+      "reservoir_age": null,
+      "genus": null,
+      "species": null,
+      "feeding": "unknown",
+      "feeding_raw": null
+     },
+     {
+      "map_no": 2,
+      "latitude": 50.0,
+      "longitude": -5.0,
+      "delta_r": null,
+      "delta_r_error": null,
+      "reference": null,
+      "locality": null,
+      "subregion": null,
+      "notes": null,
+      "c14_age": null,
+      "c14_error": null,
+      "lab_id": null,
+      "collection_year": null,
+      "reservoir_age": null,
+      "genus": null,
+      "species": null,
+      "feeding": "unknown",
+      "feeding_raw": null
+     },
+     {
+      "map_no": 3,
+      "latitude": 50.0,
+      "longitude": -5.0,
+      "delta_r": null,
+      "delta_r_error": null,
+      "reference": null,
+      "locality": null,
+      "subregion": null,
+      "notes": null,
+      "c14_age": null,
+      "c14_error": null,
+      "lab_id": null,
+      "collection_year": null,
+      "reservoir_age": null,
+      "genus": null,
+      "species": null,
+      "feeding": "unknown",
+      "feeding_raw": null
+     },
+     {
+      "map_no": 4,
+      "latitude": 50.0,
+      "longitude": -5.0,
+      "delta_r": null,
+      "delta_r_error": null,
+      "reference": null,
+      "locality": null,
+      "subregion": null,
+      "notes": null,
+      "c14_age": null,
+      "c14_error": null,
+      "lab_id": null,
+      "collection_year": null,
+      "reservoir_age": null,
+      "genus": null,
+      "species": null,
+      "feeding": "unknown",
+      "feeding_raw": null
+     },
+     {
+      "map_no": 5,
+      "latitude": 50.0,
+      "longitude": -5.0,
+      "delta_r": null,
+      "delta_r_error": null,
+      "reference": null,
+      "locality": null,
+      "subregion": null,
+      "notes": null,
+      "c14_age": null,
+      "c14_error": null,
+      "lab_id": null,
+      "collection_year": 1931,
+      "reservoir_age": null,
+      "genus": null,
+      "species": null,
+      "feeding": "unknown",
+      "feeding_raw": null
+     }
+    ],
+    "report": {
+     "ok": true,
+     "row_count": 5,
+     "source_last_changed": null,
+     "content_sha256": "",
+     "without_error": 0,
+     "cp1252_fallbacks": 0,
+     "undecodable_fields": 0,
+     "wrapped_longitudes": 0,
+     "unrecognised_feeding": {},
+     "errors": []
+    },
+    "content_sha256": "3cc79fdc077e07e58ebcf261e99f79fef0dfdcecbcaabfd1854354a4d2ee1d37"
+   }
+  },
+  {
    "name": "records_to_rows/declared",
    "inputs": {
     "records": [

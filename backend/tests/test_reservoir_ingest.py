@@ -289,6 +289,17 @@ class TestRecordsToRows:
         assert not report.ok
         assert any('not a latitude' in e for e in report.errors)
 
+    @pytest.mark.parametrize('year', [b'inf', b'-inf', b'nan'])
+    def test_a_collection_year_that_is_not_a_year_is_left_out(self, year):
+        """'inf' and 'nan' parse as numbers. The year is descriptive, so the
+        row stays and the year is absent, rather than the ingest raising."""
+        records, _ = _records()
+        broken = dict(records[0])
+        broken['collectionyear'] = year
+        rows, report = ingest.records_to_rows([broken])
+        assert report.ok, report.errors
+        assert rows[0].collection_year is None
+
     def test_the_source_last_changed_is_the_latest_the_rows_carry(self):
         """What identifies the snapshot. Taken from the rows rather than from
         a second query."""
