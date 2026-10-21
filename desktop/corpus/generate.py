@@ -2170,6 +2170,32 @@ def units_dispersal():
     return cases
 
 
+def schema_sqlite():
+    """The schema the backend's migrations build on SQLite, table by table:
+    what radical-store's own schema is held to."""
+    from app.database import engine, init_db
+    init_db()
+    cases = []
+    with engine.connect() as conn:
+        raw = conn.connection.dbapi_connection
+        tables = [r[0] for r in raw.execute(
+            "select name from sqlite_master where type='table' and name not like 'sqlite_%' order by name")]
+        for table in tables:
+            columns = [{'name': c[1], 'type': c[2], 'notnull': bool(c[3]), 'default': c[4], 'pk': c[5]}
+                       for c in raw.execute(f'pragma table_info("{table}")')]
+            foreign = [{'column': f[3], 'references': f[2], 'to': f[4], 'on_delete': f[6]}
+                       for f in raw.execute(f'pragma foreign_key_list("{table}")')]
+            indexes = []
+            for ix in raw.execute(f'pragma index_list("{table}")'):
+                if ix[3] != 'c':          # only declared indexes, not the PK's own
+                    continue
+                cols = [c[2] for c in raw.execute(f'pragma index_info("{ix[1]}")')]
+                indexes.append({'columns': cols, 'unique': bool(ix[2])})
+            cases.append({'name': table, 'inputs': {},
+                          'outputs': {'columns': columns, 'foreign_keys': foreign, 'indexes': indexes}})
+    return cases
+
+
 # ---------------------------------------------------------------------------
 # api/ -- Phases 2, 3 and 5
 # ---------------------------------------------------------------------------
@@ -2357,6 +2383,8 @@ def main() -> None:
         ('units/wiggle_match', units_wiggle_match),
     ]:
         write(family, build())
+
+    write('schema/sqlite', schema_sqlite())
 
     if '--units-only' not in sys.argv:
         print('api/')
