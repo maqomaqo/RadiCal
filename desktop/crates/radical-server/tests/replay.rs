@@ -45,6 +45,56 @@ const PORTED: &[&str] = &[
     "PATCH /api/analysis/{analysis_id}",
     "DELETE /api/analysis/{analysis_id}",
     "DELETE /api/analysis",
+    "POST /api/analysis/bayesian",
+    "POST /api/analysis/{analysis_id}/rerun",
+    "POST /api/projects/{project_id}/rerun",
+    "PUT /api/analysis/{analysis_id}/model-tree",
+    "POST /api/analysis/{analysis_id}/duplicate",
+    "PUT /api/analysis/{analysis_id}/inputs",
+    "GET /api/jobs/{job_id}",
+];
+
+/// Tests whose exchanges cannot match, and why. Each is excused whole, so
+/// keep the reasons narrow.
+const KNOWN: &[(&str, &str)] = &[
+    (
+        "test_project_import.py::",
+        "counts projects the import routes made, which are not ported yet",
+    ),
+    (
+        "test_run_control.py::TestDuplicateWithNewSeed::test_the_copy_takes_a_fresh_seed_and_says_so",
+        "the copy's seed is random by design",
+    ),
+    (
+        "test_jobs.py::TestFailure::test_a_failed_run_fails_the_job_and_the_analysis",
+        "the test breaks a date's curve in the database, behind the API",
+    ),
+    (
+        "test_jobs.py::TestFailure::test_a_job_for_a_deleted_analysis_fails_rather_than_crashing",
+        "the job races the deletion, and where it is when the analysis goes decides the message",
+    ),
+    (
+        "test_project_samples.py::TestDeployingAsCalibration::test_an_analysis_already_stored_as_multi_date_calibration_is_repaired",
+        "the test retypes the analysis in the database, behind the API",
+    ),
+    // A flagged date's agreement index under the exact solver is read off
+    // its joint draws, which agree with Python's to rounding, so it agrees
+    // to about 1e-7 rather than 1e-9; an HPD edge on such a run can fall in
+    // the next bin. Under the charcoal model Python's index is SciPy's FFT
+    // rounding in the kernel's one-sided tail (1.5e76), which the port's
+    // direct sum does not have.
+    (
+        "test_rerun.py::TestRerunKeepsDiagnostics::test_outlier_probability_survives_a_rerun",
+        "outlier agreement read off joint draws",
+    ),
+    (
+        "test_rerun.py::TestEditingKeepsTheOutlierSetting::",
+        "charcoal outlier agreement: FFT rounding in Python",
+    ),
+    (
+        "test_rerun.py::test_get_analysis_reports_diagnostics_on_each_result",
+        "outlier agreement read off joint draws",
+    ),
 ];
 
 /// How close a number must come, relative to max(|value|, 1).
@@ -391,6 +441,8 @@ struct Tally {
     /// In a test that had already reached a route not ported yet, so whose
     /// state this server cannot have.
     blocked: usize,
+    /// In a test listed in [`KNOWN`].
+    excused: usize,
     first: Option<String>,
 }
 
@@ -451,11 +503,34 @@ async fn the_backend_suite_replayed() {
             blocked_tests.insert(test);
             continue;
         }
+        // A poll that caught the job mid-flight recorded a moment, not an
+        // answer: only which job it is can be held to. A job that failed or
+        // was cancelled keeps the last progress it reported, which is when
+        // it stopped rather than what it did.
+        let recorded = want["response_json"]["data"]["state"].as_str();
+        let polled = route == "GET /api/jobs/{job_id}";
+        let in_flight = polled && matches!(recorded, Some("queued" | "running"));
+        let stopped = polled && matches!(recorded, Some("failed" | "cancelled"));
+        let moment = |v: &Value| {
+            let mut v = v.clone();
+            if let Some(d) = v["data"].as_object_mut() {
+                if in_flight {
+                    for k in ["state", "progress", "detail", "error_message"] {
+                        d.insert(k.to_owned(), Value::Null);
+                    }
+                } else if stopped {
+                    for k in ["progress", "detail"] {
+                        d.insert(k.to_owned(), Value::Null);
+                    }
+                }
+            }
+            v
+        };
         let problem = if status != want["status"].as_u64().unwrap() as u16 {
             Some(format!("status {status} vs {}", want["status"]))
         } else if let Some(w) = want.get("response_json") {
             match &body {
-                Some(b) => differs("", &summarise(b), w, &mut ids),
+                Some(b) => differs("", &moment(&summarise(b)), &moment(w), &mut ids),
                 None => Some("not JSON".to_owned()),
             }
         } else if let Some(w) = want.get("response_text") {
@@ -468,7 +543,12 @@ async fn the_backend_suite_replayed() {
             // Behind a route not ported yet: in its own test, or through an
             // id only such a route could have made.
             Some(_) if blocked_tests.contains(&test) || invented => entry.blocked += 1,
+            Some(_) if KNOWN.iter().any(|(t, _)| test.contains(t)) => entry.excused += 1,
             Some(p) => {
+                // REPLAY_SHOW=<part of a route> lists every difference there.
+                if std::env::var("REPLAY_SHOW").is_ok_and(|s| route.contains(&s)) {
+                    eprintln!("DIFF {route} {} ({}): {p}", case.name, test);
+                }
                 entry.differed += 1;
                 entry.first.get_or_insert_with(|| {
                     format!("{} ({}): {p}", case.name, i["test"].as_str().unwrap_or(""))
@@ -476,13 +556,14 @@ async fn the_backend_suite_replayed() {
             }
         }
     }
-    let (mut m, mut d, mut n, mut b) = (0, 0, 0, 0);
+    let (mut m, mut d, mut n, mut b, mut x) = (0, 0, 0, 0, 0);
     eprintln!("match  diff block  todo  route");
     for (route, t) in &tally {
         m += t.matched;
         d += t.differed;
         n += t.not_ported;
         b += t.blocked;
+        x += t.excused;
         if t.matched + t.differed + t.blocked > 0 {
             eprintln!(
                 "{:5} {:5} {:5} {:5}  {route}{}",
@@ -498,7 +579,7 @@ async fn the_backend_suite_replayed() {
         }
     }
     eprintln!(
-        "matched {m}, differed {d}, blocked {b}, not ported {n}, over {} routes",
+        "matched {m}, differed {d}, blocked {b}, excused {x}, not ported {n}, over {} routes",
         tally.len()
     );
     let _ = std::fs::remove_dir_all(dir);

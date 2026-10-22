@@ -155,7 +155,7 @@ pub fn persist_tree(
 }
 
 /// A core element as the migration's JSON (no params, no posterior).
-fn migrated_json(e: &radical_core::model_tree::Element) -> Value {
+pub fn migrated_json(e: &radical_core::model_tree::Element) -> Value {
     json!({
         "id": e.id,
         "element_type": e.element_type,
@@ -609,7 +609,7 @@ fn query_int(
     }
 }
 
-fn query_bool(q: &HashMap<String, String>, name: &str, problems: &mut Problems) -> bool {
+pub fn query_bool(q: &HashMap<String, String>, name: &str, problems: &mut Problems) -> bool {
     let Some(raw) = q.get(name) else { return false };
     match raw.trim().to_lowercase().as_str() {
         "1" | "on" | "t" | "true" | "y" | "yes" => true,

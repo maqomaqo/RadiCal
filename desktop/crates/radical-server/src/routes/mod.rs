@@ -7,6 +7,8 @@ use crate::State;
 
 pub mod analysis;
 pub mod auth;
+pub mod bayesian;
+pub mod inputs;
 pub mod jobs;
 pub mod project_samples;
 pub mod projects;
@@ -24,6 +26,8 @@ pub fn router() -> Router<State> {
         .merge(jobs::router())
         .merge(analysis::router())
         .merge(runs::router())
+        .merge(bayesian::router())
+        .merge(inputs::router())
         .merge(projects::router())
         .merge(project_samples::router())
 }

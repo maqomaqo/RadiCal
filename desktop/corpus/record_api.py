@@ -13,6 +13,7 @@ ones a second account or an anonymous client made: the desktop app has one
 user and no sign-in.
 """
 import base64
+import copy
 import hashlib
 import json
 import os
@@ -57,6 +58,9 @@ def pytest_configure(config):
     original = TestClient.request
 
     def recording(self, method, url, **kwargs):
+        # Copied before sending: a test that edits its body and posts it
+        # again would otherwise rewrite the earlier exchange's request too.
+        sent = copy.deepcopy({k: kwargs.get(k) for k in ('json', 'params')})
         response = original(self, method, url, **kwargs)
         auth = (kwargs.get('headers') or {}).get('Authorization') or self.headers.get('Authorization')
         data = kwargs.get('data')
@@ -66,8 +70,8 @@ def pytest_configure(config):
             'auth': hashlib.sha256(auth.encode()).hexdigest()[:8] if auth else None,
             'method': method.upper(),
             'url': str(url).replace('http://testserver', ''),
-            'params': kwargs.get('params'),
-            'request_json': kwargs.get('json'),
+            'params': sent['params'],
+            'request_json': sent['json'],
             'request_data': data if isinstance(data, (dict, str)) else None,
             'request_content': (content.decode('utf-8', 'replace') if isinstance(content, bytes)
                                 else content if isinstance(content, str) else None),

@@ -22,6 +22,7 @@ pub mod curves;
 pub mod history;
 pub mod routes;
 pub mod schemas;
+pub mod solve;
 pub mod validate;
 
 /// What every handler can reach.

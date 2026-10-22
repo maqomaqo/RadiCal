@@ -471,6 +471,15 @@ impl<'a, 'p> Fields<'a, 'p> {
         self.literal(name, v, allowed)
     }
 
+    /// A required `Literal[...]`.
+    pub fn literal_req(&mut self, name: &str, allowed: &[&str]) -> Option<String> {
+        let Some(v) = self.raw(name) else {
+            self.missing(name);
+            return None;
+        };
+        self.literal(name, v, allowed)
+    }
+
     /// A `Literal[...]` with a default.
     pub fn literal_or(&mut self, name: &str, allowed: &[&str], default: &str) -> Option<String> {
         match self.raw(name) {
@@ -674,6 +683,40 @@ impl<'a, 'p> Fields<'a, 'p> {
             return None;
         }
         Some(out)
+    }
+
+    /// A list of models with an empty default (`default_factory=list`).
+    pub fn models_or<T>(
+        &mut self,
+        name: &str,
+        class_name: &str,
+        item: impl FnMut(&mut Fields) -> Option<T>,
+    ) -> Option<Vec<T>> {
+        if self.raw(name).is_none() {
+            return Some(Vec::new());
+        }
+        self.models(name, class_name, None, None, item)
+    }
+
+    /// A nested model: `Some(None)` when absent (or null, where
+    /// `nullable`), None when it failed.
+    pub fn model<T>(
+        &mut self,
+        name: &str,
+        class_name: &str,
+        nullable: bool,
+        item: impl FnOnce(&mut Fields) -> Option<T>,
+    ) -> Option<Option<T>> {
+        let Some(v) = self.raw(name).filter(|v| !(nullable && v.is_null())) else {
+            return Some(None);
+        };
+        let loc = self.at(name);
+        let mut fields = Fields::new(v, loc, class_name, self.problems);
+        fields.map?;
+        match item(&mut fields) {
+            Some(t) if fields.clean() => Some(Some(t)),
+            _ => None,
+        }
     }
 
     /// Whether this model's input was an object at all.
