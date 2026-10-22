@@ -101,8 +101,8 @@
 //! Everything elementwise, every cumulative sum and every pairwise reduction
 //! follows NumPy's order, and the seeded draws use the same generator with
 //! the same uniforms in the same order. Two things cannot follow it: matrix
-//! products (BLAS's order is its own; see [`crate::matrix`]) and SciPy's
-//! `fftconvolve`, which is replaced by the direct sum it approximates
+//! products (BLAS's order is its own; see [`crate::matrix`]) and NumPy's
+//! `convolve`, whose inner sums are its own too
 //! ([`tables::convolve_on_grid`]). So the marginals agree with Python's to
 //! rounding, and a draw lands on another grid cell only when its uniform falls
 //! within rounding of a cell edge.

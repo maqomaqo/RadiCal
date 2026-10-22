@@ -77,24 +77,6 @@ const KNOWN: &[(&str, &str)] = &[
         "test_project_samples.py::TestDeployingAsCalibration::test_an_analysis_already_stored_as_multi_date_calibration_is_repaired",
         "the test retypes the analysis in the database, behind the API",
     ),
-    // A flagged date's agreement index under the exact solver is read off
-    // its joint draws, which agree with Python's to rounding, so it agrees
-    // to about 1e-7 rather than 1e-9; an HPD edge on such a run can fall in
-    // the next bin. Under the charcoal model Python's index is SciPy's FFT
-    // rounding in the kernel's one-sided tail (1.5e76), which the port's
-    // direct sum does not have.
-    (
-        "test_rerun.py::TestRerunKeepsDiagnostics::test_outlier_probability_survives_a_rerun",
-        "outlier agreement read off joint draws",
-    ),
-    (
-        "test_rerun.py::TestEditingKeepsTheOutlierSetting::",
-        "charcoal outlier agreement: FFT rounding in Python",
-    ),
-    (
-        "test_rerun.py::test_get_analysis_reports_diagnostics_on_each_result",
-        "outlier agreement read off joint draws",
-    ),
 ];
 
 /// How close a number must come, relative to max(|value|, 1).

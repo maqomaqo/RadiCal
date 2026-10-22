@@ -6,15 +6,6 @@ use radical_core::agreement::{
 };
 use radical_core::measurement::Calibrator;
 
-/// Agreement indices of dates under an outlier model read a convolution
-/// SciPy forms by FFT, where the port sums it directly; see the models test.
-const REL_OUTLIER: f64 = 1e-8;
-
-/// An index this close to zero, in percent, is zero. A date far from its own
-/// likelihood scores 1e-15 or less, and there the FFT's rounding in an
-/// inbuilt-age allowance's convolution is the whole of Python's value.
-const ZERO: f64 = 1e-9;
-
 fn pairs(v: &Value) -> Vec<[f64; 2]> {
     v.as_array()
         .unwrap()
@@ -31,14 +22,9 @@ fn agreement() {
         let name = case.name.clone();
         let i = case.expanded_inputs();
         let want = outputs(&case);
-        let flagged = i
-            .get("measurement")
-            .is_some_and(|m| opt_num(&m["outlier_prior"]).is_some_and(|p| p > 0.0));
-        let rel = if flagged { REL_OUTLIER } else { REL };
         let check = |c: &mut Closeness, got: Option<f64>, want: &Value| match got {
             None => assert!(want.is_null(), "{name}: None, Python had {want}"),
-            Some(g) if g.abs() < ZERO && num(want).abs() < ZERO => c.compared += 1,
-            Some(g) => c.check(&name, g, num(want), rel),
+            Some(g) => c.check(&name, g, num(want), REL),
         };
         match name.split('/').next().unwrap() {
             "agreement_index" => {
@@ -98,7 +84,7 @@ fn agreement() {
                 .unwrap();
                 match got {
                     None => assert!(want["index"].is_null(), "{name}"),
-                    Some(g) => c.check(&name, g, num(&want["index"]), REL_OUTLIER),
+                    Some(g) => c.check(&name, g, num(&want["index"]), REL),
                 }
             }
             other => panic!("unhandled case {other}"),

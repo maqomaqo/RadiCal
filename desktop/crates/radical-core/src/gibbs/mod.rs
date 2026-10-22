@@ -25,10 +25,10 @@
 //!
 //! The draws are NumPy's ([`crate::rng`]): with the same seed and the same
 //! arithmetic, a chain here is the chain Python runs, draw for draw. Where the
-//! arithmetic differs in its last bit -- a sum NumPy hands to BLAS, an outlier
-//! smear Python forms by FFT -- an inverse-CDF draw or an acceptance can come
-//! out the other way, and from there the two chains are independent runs of
-//! one sampler, compared statistically.
+//! arithmetic differs in its last bit -- a sum NumPy hands to BLAS -- an
+//! inverse-CDF draw or an acceptance could come out the other way, and from
+//! there the two chains would be independent runs of one sampler. Every
+//! sampled fixture in the corpus is reproduced exactly.
 
 pub mod chain;
 pub mod chains;

@@ -12,8 +12,8 @@
 //! - Functions return structs where Python returns dicts, and [`Error`] where
 //!   Python raises `ValueError`, with the same message ([`Error::Model`] where
 //!   the message names a sample or an element).
-//! - The exact solvers' matrix products and SciPy's FFT convolutions are
-//!   summed in an order of this crate's own ([`matrix`],
+//! - The exact solvers' matrix products and convolutions are summed in an
+//!   order of this crate's own ([`matrix`],
 //!   [`exact_chain::convolve_on_grid`]), so the solvers agree with Python to
 //!   rounding rather than to the bit.
 //! - Only the builtin curves are known here ([`curves`]); stored and mixed

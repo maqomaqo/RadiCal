@@ -4,50 +4,16 @@
 //! returned.
 //!
 //! The port draws NumPy's numbers in NumPy's order, so a run here IS the
-//! Python run, draw for draw, wherever the arithmetic agrees to the bit: the
-//! same sweeps, the same histograms, and every summary to the exact solvers'
-//! tolerances. Where it does not -- see [`diverges`] -- an acceptance or an
-//! inverse-CDF draw eventually comes out the other way, and from there the
-//! two are independent runs of one sampler, held to each other statistically.
+//! Python run, draw for draw: the same sweeps, the same histograms, and every
+//! summary to the exact solvers' tolerances. That holds for the charcoal
+//! outlier model too now that the backend sums its one-sided smear directly
+//! rather than by FFT, whose rounding in the far tail once sent an
+//! inverse-CDF draw of the shared scale into the other cell.
 
 use super::*;
 use radical_core::cross_check;
 use radical_core::gibbs::{SampleOptions, Sampled, solve};
 use radical_core::measurement::Measurement;
-
-/// Whether a run is expected to part company with Python's.
-///
-/// The charcoal outlier model's kernel is one-sided, so a flagged date's
-/// smeared likelihood is many orders of magnitude below its peak on one side
-/// of it. Python forms that smear with SciPy's FFT convolution, whose
-/// rounding is about 1e-16 of the PEAK in every cell; the port sums it
-/// directly (exact_chain::convolve_on_grid). Out in the tail the two differ
-/// relatively by far more than an ulp, the shared scale's conditional is a
-/// product of those values over the flagged dates, and sooner or later an
-/// inverse-CDF draw of the scale lands in the other cell. The general model's
-/// kernel is symmetric, its tails share the peak's scale, and its runs
-/// reproduce exactly.
-fn diverges(dates: &[Measurement]) -> bool {
-    dates
-        .iter()
-        .any(|m| m.outlier_prior() > 0.0 && m.outlier_model() == "charcoal")
-}
-
-/// How far an independent run may sit from Python's: a posterior's mean and
-/// median within this fraction of its own standard deviation, its spread
-/// within this fraction of itself. Monte Carlo error at the lengths these
-/// runs reach is a few hundredths of a standard deviation.
-const STAT_LOCATION: f64 = 0.15;
-const STAT_SPREAD: f64 = 0.10;
-/// An outlier probability or a convergence measure, absolutely.
-const STAT_PROBABILITY: f64 = 0.05;
-/// An agreement index or Amodel, relatively: each is read off the run's
-/// correlated joint states.
-const STAT_AGREEMENT: f64 = 0.10;
-/// An independent run's worst Boundary against the direct calculation,
-/// absolutely: a total variation distance, which Monte Carlo error moves by a
-/// few hundredths between runs.
-const STAT_DISTANCE: f64 = 0.05;
 
 fn sample_like_the_api(request: &Value, dates: &[Measurement], root: &Element) -> Sampled {
     let config = &request["bayesian_config"];
@@ -76,15 +42,8 @@ fn sample_like_the_api(request: &Value, dates: &[Measurement], root: &Element) -
     sampled
 }
 
-fn close(label: &str, got: f64, want: f64, allowed: f64) {
-    assert!(
-        (got - want).abs() <= allowed,
-        "{label}: {got} against Python's {want} (allowed {allowed})"
-    );
-}
-
 /// One sampled case; None if it is not one.
-fn check_sampled(case: &Case) -> Option<(Closeness, bool)> {
+fn check_sampled(case: &Case) -> Option<Closeness> {
     let outputs = case.expanded_outputs()?;
     let response = &outputs["response"]["data"];
     if response["solver"]["method"] != "gibbs" {
@@ -115,104 +74,8 @@ fn check_sampled(case: &Case) -> Option<(Closeness, bool)> {
     let solver = &response["solver"];
     let results = &response["results"];
     let mut c = Closeness::default();
-    let exact = !diverges(&dates);
 
-    if !exact {
-        assert_eq!(
-            sampled.converged,
-            solver["converged"].as_bool().unwrap(),
-            "{name}"
-        );
-        close(
-            &format!("{name}/convergence"),
-            sampled.convergence,
-            num(&solver["convergence"]),
-            STAT_PROBABILITY,
-        );
-        for (id, got) in &sampled.measurements {
-            let want = &results[id.as_str()];
-            let label = format!("{name}/{id}");
-            let sd = num(&want["posterior_std"]);
-            close(
-                &format!("{label}.mean"),
-                got.posterior_mean,
-                num(&want["posterior_mean"]),
-                STAT_LOCATION * sd,
-            );
-            close(
-                &format!("{label}.median"),
-                got.posterior_median,
-                num(&want["posterior_median"]),
-                STAT_LOCATION * sd,
-            );
-            close(
-                &format!("{label}.std"),
-                got.posterior_std,
-                sd,
-                STAT_SPREAD * sd,
-            );
-            if let Some(p) = got.outlier_probability {
-                close(
-                    &format!("{label}.outlier"),
-                    p,
-                    num(&want["outlier_probability"]),
-                    STAT_PROBABILITY,
-                );
-            }
-            let a = num(&want["agreement_index"]);
-            close(
-                &format!("{label}.agreement"),
-                got.agreement_index.unwrap(),
-                a,
-                STAT_AGREEMENT * a,
-            );
-        }
-        for (field, got) in [("model_agreement", amodel), ("overall_agreement", overall)] {
-            let w = num(&solver[field]);
-            close(
-                &format!("{name}/{field}"),
-                got.unwrap(),
-                w,
-                STAT_AGREEMENT * w,
-            );
-        }
-        let check = cross_check::check(&dates, &root, &sampled, true, &cal);
-        let want = &solver["cross_check"];
-        assert_eq!(
-            check.shape,
-            want["shape"].as_str(),
-            "{name}: cross-check shape"
-        );
-        assert_eq!(
-            check.checked as u64,
-            want["checked"].as_u64().unwrap(),
-            "{name}: cross-check"
-        );
-        let worst = check.worst.as_ref().unwrap();
-        eprintln!(
-            "{name}: cross-check {} (worst {} at {:.3}), Python {} (worst {} at {:.3})",
-            check.status,
-            worst.name,
-            worst.distance,
-            want["status"],
-            want["worst"]["name"],
-            num(&want["worst"]["distance"])
-        );
-        assert_eq!(
-            check.status,
-            want["status"].as_str().unwrap(),
-            "{name}: cross-check"
-        );
-        close(
-            &format!("{name}/cross_check.worst"),
-            worst.distance,
-            num(&want["worst"]["distance"]),
-            STAT_DISTANCE,
-        );
-        return Some((c, false));
-    }
-
-    // Reproduced: the run itself first, exactly.
+    // The run itself first, exactly.
     assert_eq!(
         sampled.sweeps as u64,
         solver["sweeps"].as_u64().unwrap(),
@@ -258,42 +121,34 @@ fn check_sampled(case: &Case) -> Option<(Closeness, bool)> {
         c.check(&format!("{name}/per_chain[{k}]"), *g, num(w), REL);
     }
 
-    let flagged_any = dates.iter().any(|m| m.outlier_prior() > 0.0);
     for (id, got) in &sampled.measurements {
         let want = &results[id.as_str()];
         let label = format!("{name}/{id}");
         posterior(&mut c, &label, got, want);
-        let flagged = want["outlier_probability"].is_number();
-        let rel = if flagged { REL_OUTLIER_AGREEMENT } else { REL };
         c.opt(
             &format!("{label}.agreement"),
             got.agreement_index,
             &want["agreement_index"],
-            rel,
+            REL,
         );
         c.opt(
             &format!("{label}.outlier_probability"),
             got.outlier_probability,
             &want["outlier_probability"],
-            REL_OUTLIER_AGREEMENT,
+            REL,
         );
     }
-    let rel = if flagged_any {
-        REL_OUTLIER_AGREEMENT
-    } else {
-        REL
-    };
     c.opt(
         &format!("{name}/model_agreement"),
         amodel,
         &solver["model_agreement"],
-        rel,
+        REL,
     );
     c.opt(
         &format!("{name}/overall_agreement"),
         overall,
         &solver["overall_agreement"],
-        rel,
+        REL,
     );
 
     let want_scales = solver["outlier_scale"].as_object().unwrap();
@@ -431,7 +286,7 @@ fn check_sampled(case: &Case) -> Option<(Closeness, bool)> {
                     &format!("{label}/{}.{field}", g.name),
                     value,
                     num(&w[field]),
-                    REL_OUTLIER_AGREEMENT,
+                    REL,
                 );
             }
         }
@@ -465,34 +320,24 @@ fn check_sampled(case: &Case) -> Option<(Closeness, bool)> {
             posterior(&mut c, &format!("{name}/boundary {id}"), got, want);
         }
     }
-    Some((c, true))
+    Some(c)
 }
 
-/// Every case the API sampled is sampled here: the runs Python's arithmetic
-/// allows to be reproduced are, value for value, and the rest agree as two
-/// runs of one sampler should.
+/// Every case the API sampled is sampled here and reproduced, value for
+/// value.
 #[test]
 fn every_sampled_case_matches_python() {
     let family = load_family("api/models").unwrap();
-    let (mut reproduced, mut independent) = (0, 0);
+    let mut reproduced = 0;
     for case in &family.cases {
-        let Some((c, exact)) = check_sampled(case) else {
+        let Some(c) = check_sampled(case) else {
             continue;
         };
-        if exact {
-            reproduced += 1;
-            eprintln!(
-                "{}: reproduced, {} values, worst relative difference {:e} {}",
-                case.name, c.compared, c.worst, c.worst_at
-            );
-        } else {
-            independent += 1;
-            eprintln!(
-                "{}: an independent run, within its statistical bounds",
-                case.name
-            );
-        }
+        reproduced += 1;
+        eprintln!(
+            "{}: reproduced, {} values, worst relative difference {:e} {}",
+            case.name, c.compared, c.worst, c.worst_at
+        );
     }
-    assert!(reproduced >= 11, "only {reproduced} runs reproduced");
-    assert!(independent >= 2, "only {independent} independent runs");
+    assert!(reproduced >= 13, "only {reproduced} runs reproduced");
 }

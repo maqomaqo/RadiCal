@@ -15,10 +15,10 @@
  },
  "files": {
   "data/api/calibrate.json": "d8c3ffec90c632e4083f33ef9cc5f0fc027e75b9f2733387c5d515e12156a428",
-  "data/api/exchanges.json": "267985874eb0fcccd130b9b1f24b002ba5bec90ce5b6d8d5b321bcc1312289a4",
-  "data/api/models.json": "71342f62c7e74c1844c5be74b46b72c1c677ca2cfb04c46441b4a9d1fafee7fa",
+  "data/api/exchanges.json": "856cba931bdfc0715d51c868b86dcef80cef69b18b67aa2a3184f85eaf49807c",
+  "data/api/models.json": "ec1131489d2aa9dd0d8b52950b74eef0ec88e98b2322c43a2e7fdf62e6d1dca7",
   "data/schema/sqlite.json": "e988635662941744e4cdf7e4b32597ac9e97074a44e07e7d4baecf6ffafb696a",
-  "data/units/agreement.json": "d9c41d99cc6408701da6963deb1a2e6d4bdcc1a777a77b83220b6b2b4b61393f",
+  "data/units/agreement.json": "43748019453979c4f3050d0e412d331e22d4c7ae7ee390eb974ba8a9cc14eea7",
   "data/units/calibrate.json": "979813d23f9db0e24a9a0d6ea18d93dceddb247b4d3ec55a8e39dc9feecd9f39",
   "data/units/cell_edges.json": "530b19fc70de602bbd3935ea5c12eeb93a31d08b957c640c8f3fda14bd9dd6da",
   "data/units/curve_import.json": "1751ef2b17d52a3ab98940148da200a48c870a3e448d7e94915f54f6185286f2",
@@ -28,7 +28,7 @@
   "data/units/date_format.json": "68f068ce6c2f44f1164412cb93f9ce80a7563148adb4fe4e02ec416dbba78811",
   "data/units/date_import.json": "5f151d4195d40dfa0a0d71ace2b98168d9d43e60933c603111a1422e915ce6be",
   "data/units/dispersal.json": "f28f53e1dec9eee2eefe027c3edb4a0c885ed198fef51859e1fb4551ea372c64",
-  "data/units/exact_chain.json": "b3a87e2bd32357ae32a199940f3ceefeaee22f5b6350c26abba559be9de281f1",
+  "data/units/exact_chain.json": "860e0285cbde3e062636b043d11383a26b45bcf7c4307b7d4dae0793747c797d",
   "data/units/exact_parallel.json": "0d8eaf327b12af5e56f5d27e53ad60b58ad4c428094d960c694cde2a937fa0c6",
   "data/units/f14c.json": "ad4bcdd6116239d48519765ae4edff56309fe4b06e7ff61ede16649a0e4537f6",
   "data/units/influence.json": "7725d70aafe143d970a5a955845e9a70abf9d37d7b6f051411d4814d275495fc",
@@ -46,11 +46,11 @@
   "data/units/rng.json": "3ecfe5e849df7a471bdc1ba89c00269becbf816d7f9ba203f3c458a0115015ef",
   "data/units/same_event.json": "c83b0a249bbb909bb6a2920be1c4de168307be6677e6f634364f5f5d6e397c6f",
   "data/units/stratigraphy.json": "822181207e1517c50ff2c935bd3d08db4c7093db3765adb075f7ea788d9ca41e",
-  "data/units/wiggle_match.json": "1b6d7aa37992de387d4331ca99af1cdb80b3fecbfa27c252f821f87c762770f6"
+  "data/units/wiggle_match.json": "8b66c3d44c85f373ec1d48501457f53f8586c34ef918d69a24430551a0b519e3"
  },
  "generated_from": {
-  "commit": "1f210fb4aa9ac2e4b1905f85bc251224dbb99949",
-  "dirty": true,
+  "commit": "a0d0096118b9d02fd774461ece0725c5da9a5a81",
+  "dirty": false,
   "numpy": "2.4.6",
   "python": "3.13.9",
   "scipy": "1.18.0"
