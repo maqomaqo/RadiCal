@@ -31,7 +31,7 @@ async fn list_jobs(
             let Ok(n) = raw.trim().parse::<i64>() else {
                 return Err(ApiError::invalid(vec![problem(
                     "int_parsing",
-                    &["query", "limit"],
+                    &[json!("query"), json!("limit")],
                     "Input should be a valid integer, unable to parse string as an integer",
                     Value::from(raw.as_str()),
                     None,
@@ -40,7 +40,7 @@ async fn list_jobs(
             if n < 1 {
                 return Err(ApiError::invalid(vec![problem(
                     "greater_than_equal",
-                    &["query", "limit"],
+                    &[json!("query"), json!("limit")],
                     "Input should be greater than or equal to 1",
                     Value::from(raw.as_str()),
                     Some(json!({"ge": 1})),
@@ -49,7 +49,7 @@ async fn list_jobs(
             if n > 100 {
                 return Err(ApiError::invalid(vec![problem(
                     "less_than_equal",
-                    &["query", "limit"],
+                    &[json!("query"), json!("limit")],
                     "Input should be less than or equal to 100",
                     Value::from(raw.as_str()),
                     Some(json!({"le": 100})),

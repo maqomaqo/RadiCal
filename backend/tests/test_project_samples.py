@@ -130,7 +130,9 @@ class TestProjectSampleCrud:
         response = client.patch(
             f"/api/projects/{pid}/samples/{sample_id}", json={"longitude": None})
         assert response.status_code == 422
-        assert "longitude" in response.text
+        # Described as the edit would leave it: the latitude stays, the
+        # longitude goes.
+        assert "a latitude and no longitude" in response.json()["detail"]
 
         # And the refusal rolled back rather than half-applying.
         item = client.get(f"/api/projects/{pid}/samples").json()["data"]["items"][0]

@@ -18,6 +18,8 @@ use radical_store::Store;
 use serde_json::{Value, json};
 
 pub mod routes;
+pub mod schemas;
+pub mod validate;
 
 /// What every handler can reach.
 #[derive(Clone)]
@@ -109,14 +111,7 @@ impl From<radical_store::Error> for ApiError {
 
 pub type ApiResult<T = Json<Value>> = Result<T, ApiError>;
 
-/// One Pydantic validation problem, as FastAPI lists it.
-pub fn problem(kind: &str, loc: &[&str], msg: &str, input: Value, ctx: Option<Value>) -> Value {
-    let mut out = json!({"type": kind, "loc": loc, "msg": msg, "input": input});
-    if let Some(ctx) = ctx {
-        out["ctx"] = ctx;
-    }
-    out
-}
+pub use validate::problem;
 
 /// The whole API.
 pub fn app(state: State) -> axum::Router {
