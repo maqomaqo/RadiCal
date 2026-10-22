@@ -768,6 +768,42 @@ class TestOutlierModels:
         older = agreement.agreement_index(m, self._pushed(m, 150.0, 20.0))
         assert older < younger / 5.0, (older, younger)
 
+    def test_charcoal_beyond_the_kernels_reach_scores_near_zero(self):
+        """
+        At log scale 1.565 the charcoal shift is truncated at 10 scale lengths,
+        about 370 years. A context 800 years younger than the wood is past
+        anywhere the shift can take it, so the outlier branch is exactly zero
+        there and the date scores near zero. Read off an FFT's smear the branch
+        was rounding noise over a near-zero mixture, and scored 2e114.
+        """
+        m = self._measurement(age=3600, prior=0.05, model='charcoal')
+        score = agreement.agreement_index(m, self._pushed(m, -800.0), log_scale=1.5652173913043477)
+        assert 0.0 <= score < 1e-6, score
+        # Within reach, the same date fits through the outlier branch as usual.
+        reached = agreement.agreement_index(m, self._pushed(m, -800.0), log_scale=3.0)
+        assert reached == pytest.approx(100 * 0.05 / (0.95 ** 2 + 0.05 ** 2), abs=0.5), reached
+
+    def test_a_residual_charcoal_date_scores_sanely_end_to_end(self, client):
+        """
+        The case that exposed the FFT smear: three charcoal-flagged dates in a
+        phase, one of them 600 radiocarbon years older than the others. The
+        exact solver runs, and the residual date scored 1.46e76 (Amodel 8e38).
+        It reads 6.97, as the desktop port's direct-sum convolution gives.
+        """
+        from test_rerun import TestEditingKeepsTheOutlierSetting
+        payload = TestEditingKeepsTheOutlierSetting()._payload('ag_residual')
+        response = client.post('/api/analysis/bayesian?wait=true', json=payload)
+        assert response.status_code == 200, response.text
+        data = response.json()['data']
+        assert data['solver']['method'] == 'exact'
+        scores = {m['age_bp']: data['results'][m['id']]['agreement_index']
+                  for m in payload['measurements']}
+        assert scores[3600] == pytest.approx(6.969, abs=0.01), scores
+        assert scores[3000] == pytest.approx(111.53, abs=0.01), scores
+        assert scores[3030] == pytest.approx(109.38, abs=0.01), scores
+        assert 0 < data['solver']['model_agreement'] < 200
+        assert 0 < data['solver']['overall_agreement'] < 200
+
     @pytest.mark.parametrize('stem', rf.ONE_YEAR_OUTLIER_RUNS)
     def test_reproduces_oxcal_on_its_one_year_outlier_runs(self, stem):
         """
