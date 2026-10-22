@@ -180,3 +180,46 @@ pub fn unique_ids(
     }
     Some(ids)
 }
+
+/// `BayesianMeasurementInput`: a measurement with the client's own id, its
+/// place in the model, and its outlier setting.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct BayesianMeasurement {
+    pub m: Measurement,
+    pub id: String,
+    pub group_id: Option<String>,
+    pub element_id: Option<String>,
+    pub outlier_prior: f64,
+    pub outlier_model: String,
+}
+
+pub fn bayesian_measurement(f: &mut Fields, store: &Store) -> Option<BayesianMeasurement> {
+    let m = measurement_fields(f, store);
+    let id = f.string("id", Some(1), None);
+    let group_id = f.opt_str("group_id", None);
+    let element_id = f.opt_str("element_id", None);
+    let outlier_prior = f.float_or("outlier_prior", 0.0, Bounds::range(0.0, 1.0));
+    let outlier_model = f.literal_or("outlier_model", &["general", "charcoal"], "general");
+    measurement_checks(f, &m);
+    f.clean().then(|| BayesianMeasurement {
+        m,
+        id: id.unwrap_or_default(),
+        group_id,
+        element_id,
+        outlier_prior: outlier_prior.unwrap_or_default(),
+        outlier_model: outlier_model.unwrap_or_default(),
+    })
+}
+
+/// `CalibrateRequest`: one measurement, the project to file it under, and
+/// whether to save it at all.
+pub fn calibrate_request(
+    f: &mut Fields,
+    store: &Store,
+) -> Option<(Measurement, Option<String>, bool)> {
+    let m = measurement_fields(f, store);
+    let project_id = f.opt_str("project_id", None);
+    let save = f.bool_or("save", true);
+    measurement_checks(f, &m);
+    f.clean().then(|| (m, project_id, save.unwrap_or(true)))
+}

@@ -17,6 +17,9 @@ use radical_jobs::Jobs;
 use radical_store::Store;
 use serde_json::{Value, json};
 
+pub mod blocks;
+pub mod curves;
+pub mod history;
 pub mod routes;
 pub mod schemas;
 pub mod validate;
@@ -26,6 +29,7 @@ pub mod validate;
 pub struct State {
     pub store: Arc<Store>,
     pub jobs: Arc<Jobs>,
+    pub curves: Arc<curves::StoreCurves>,
 }
 
 impl State {
@@ -38,7 +42,12 @@ impl State {
             eprintln!("Failed {orphans} job(s) left mid-flight by a restart");
         }
         let jobs = Arc::new(Jobs::start(Arc::clone(&store), workers));
-        Ok(Self { store, jobs })
+        let curves = Arc::new(curves::StoreCurves::new(Arc::clone(&store)));
+        Ok(Self {
+            store,
+            jobs,
+            curves,
+        })
     }
 }
 

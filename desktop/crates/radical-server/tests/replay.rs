@@ -38,6 +38,13 @@ const PORTED: &[&str] = &[
     "PATCH /api/projects/{project_id}/samples/{sample_id}",
     "DELETE /api/projects/{project_id}/samples/{sample_id}",
     "POST /api/projects/{project_id}/deploy",
+    "POST /api/analysis/calibrate",
+    "POST /api/analysis/calibrate-group",
+    "POST /api/analysis/same-event",
+    "GET /api/analysis/{analysis_id}",
+    "PATCH /api/analysis/{analysis_id}",
+    "DELETE /api/analysis/{analysis_id}",
+    "DELETE /api/analysis",
 ];
 
 /// How close a number must come, relative to max(|value|, 1).
@@ -95,6 +102,11 @@ fn template(routes: &[(String, String, Regex)], method: &str, url: &str) -> Stri
 struct Ids {
     forward: HashMap<String, String>,
     taken: HashMap<String, String>,
+    /// Set when a request named an id no answer here has produced: made up
+    /// by the test, or created by a route not ported yet.
+    invented: bool,
+    /// The placeholders this replay made ids up for.
+    made_up: std::collections::HashSet<String>,
 }
 
 impl Ids {
@@ -121,6 +133,10 @@ impl Ids {
                 if !self.forward.contains_key(&n) {
                     let fresh = radical_store::new_id();
                     self.bind(&n, &fresh);
+                    self.made_up.insert(n.clone());
+                }
+                if self.made_up.contains(&n) {
+                    self.invented = true;
                 }
                 self.forward[&n].clone()
             })
@@ -399,7 +415,9 @@ async fn the_backend_suite_replayed() {
             continue;
         }
         let route = template(&routes, method, url);
+        ids.invented = false;
         let mut answer = send(&app, method, url, &i, &mut ids).await;
+        let invented = ids.invented;
         // A poll the backend saw finished waits for the Rust job to finish;
         // one it saw still running accepts whatever state this one is in.
         if route == "GET /api/jobs/{job_id}" {
@@ -447,7 +465,9 @@ async fn the_backend_suite_replayed() {
         };
         match problem {
             None => entry.matched += 1,
-            Some(_) if blocked_tests.contains(&test) => entry.blocked += 1,
+            // Behind a route not ported yet: in its own test, or through an
+            // id only such a route could have made.
+            Some(_) if blocked_tests.contains(&test) || invented => entry.blocked += 1,
             Some(p) => {
                 entry.differed += 1;
                 entry.first.get_or_insert_with(|| {

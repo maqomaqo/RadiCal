@@ -335,6 +335,15 @@ impl<'a, 'p> Fields<'a, 'p> {
         self.bounded(name, v, x, b, false)
     }
 
+    /// A `float` with a default.
+    pub fn float_or(&mut self, name: &str, default: f64, b: Bounds) -> Option<f64> {
+        let Some(v) = self.raw(name) else {
+            return Some(default);
+        };
+        let x = self.number(name, v, false)?;
+        self.bounded(name, v, x, b, false)
+    }
+
     /// An `int` with a default.
     pub fn int_or(&mut self, name: &str, default: i64, b: Bounds) -> Option<i64> {
         let Some(v) = self.raw(name) else {

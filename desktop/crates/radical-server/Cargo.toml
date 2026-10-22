@@ -15,6 +15,7 @@ radical-jobs = { path = "../radical-jobs" }
 radical-store = { path = "../radical-store" }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
+sha2.workspace = true
 tokio = { version = "1.54.0", features = ["rt-multi-thread", "macros", "net", "signal", "time"] }
 
 [lints]
