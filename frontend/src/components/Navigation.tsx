@@ -7,6 +7,7 @@ import ManageAccountsIcon from '@mui/icons-material/ManageAccounts'
 import PersonOutlineIcon from '@mui/icons-material/PersonOutline'
 import { Link as RouterLink, useLocation } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
+import { isSingleUser } from '@/api/client'
 
 const NAV_LINKS = [
   { to: '/', label: 'Dashboard' },
@@ -219,74 +220,79 @@ export default function Navigation() {
               width -- the previous arrangement hid the button below `md` and
               the burger above `sm`, leaving 600-899px with no identity and
               no way to sign out at all. */}
-          <Tooltip title={`Signed in as ${user?.display_name || user?.email || ''}`}>
-            <Button
-              color="inherit"
-              onClick={(e) => setAccountAnchor(e.currentTarget)}
-              aria-label="Account"
-              aria-haspopup="menu"
-              startIcon={<PersonOutlineIcon />}
-              sx={{
-                flexShrink: 0,
-                maxWidth: 220,
-                minWidth: 0,
-                px: { xs: 1.25, md: 1.5 },
-                '& .MuiButton-startIcon': { mr: { xs: 0, md: 0.5 }, ml: 0 },
-                '&:hover': { backgroundColor: 'rgba(255,255,255,0.1)' },
-              }}
-            >
-              <Box
-                component="span"
-                sx={{
-                  display: { xs: 'none', md: 'block' },
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                }}
+          {/* The desktop app has no accounts: nothing to show or sign out of. */}
+          {!isSingleUser() && (
+            <>
+              <Tooltip title={`Signed in as ${user?.display_name || user?.email || ''}`}>
+                <Button
+                  color="inherit"
+                  onClick={(e) => setAccountAnchor(e.currentTarget)}
+                  aria-label="Account"
+                  aria-haspopup="menu"
+                  startIcon={<PersonOutlineIcon />}
+                  sx={{
+                    flexShrink: 0,
+                    maxWidth: 220,
+                    minWidth: 0,
+                    px: { xs: 1.25, md: 1.5 },
+                    '& .MuiButton-startIcon': { mr: { xs: 0, md: 0.5 }, ml: 0 },
+                    '&:hover': { backgroundColor: 'rgba(255,255,255,0.1)' },
+                  }}
+                >
+                  <Box
+                    component="span"
+                    sx={{
+                      display: { xs: 'none', md: 'block' },
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {user?.display_name || user?.email}
+                  </Box>
+                </Button>
+              </Tooltip>
+              <Menu
+                anchorEl={accountAnchor}
+                open={!!accountAnchor}
+                onClose={() => setAccountAnchor(null)}
+                anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+                transformOrigin={{ vertical: 'top', horizontal: 'right' }}
               >
-                {user?.display_name || user?.email}
-              </Box>
-            </Button>
-          </Tooltip>
-          <Menu
-            anchorEl={accountAnchor}
-            open={!!accountAnchor}
-            onClose={() => setAccountAnchor(null)}
-            anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
-            transformOrigin={{ vertical: 'top', horizontal: 'right' }}
-          >
-            {/* A heading, not a MenuItem: it is the answer to "which
-                account", not a thing to choose. Unwrapped and untruncated,
-                which is the whole reason the trigger is allowed to shorten
-                it. */}
-            <Box sx={{ px: 2, pt: 0.5, pb: 1.5, maxWidth: 320 }}>
-              <Typography variant="caption" color="text.secondary" component="div">
-                Signed in as
-              </Typography>
-              <Typography variant="body2" sx={{ fontWeight: 600, wordBreak: 'break-all' }}>
-                {user?.email}
-              </Typography>
-              {user?.display_name && (
-                <Typography variant="body2" color="text.secondary">
-                  {user.display_name}
-                </Typography>
-              )}
-            </Box>
-            <Divider />
-            <MenuItem
-              component={RouterLink}
-              to="/account"
-              onClick={() => setAccountAnchor(null)}
-              sx={{ mt: 0.5, gap: 1.5 }}
-            >
-              <ManageAccountsIcon fontSize="small" />
-              Account and access tokens
-            </MenuItem>
-            <MenuItem onClick={() => { setAccountAnchor(null); signOut() }} sx={{ gap: 1.5 }}>
-              <LogoutIcon fontSize="small" />
-              Sign out
-            </MenuItem>
-          </Menu>
+                {/* A heading, not a MenuItem: it is the answer to "which
+                    account", not a thing to choose. Unwrapped and untruncated,
+                    which is the whole reason the trigger is allowed to shorten
+                    it. */}
+                <Box sx={{ px: 2, pt: 0.5, pb: 1.5, maxWidth: 320 }}>
+                  <Typography variant="caption" color="text.secondary" component="div">
+                    Signed in as
+                  </Typography>
+                  <Typography variant="body2" sx={{ fontWeight: 600, wordBreak: 'break-all' }}>
+                    {user?.email}
+                  </Typography>
+                  {user?.display_name && (
+                    <Typography variant="body2" color="text.secondary">
+                      {user.display_name}
+                    </Typography>
+                  )}
+                </Box>
+                <Divider />
+                <MenuItem
+                  component={RouterLink}
+                  to="/account"
+                  onClick={() => setAccountAnchor(null)}
+                  sx={{ mt: 0.5, gap: 1.5 }}
+                >
+                  <ManageAccountsIcon fontSize="small" />
+                  Account and access tokens
+                </MenuItem>
+                <MenuItem onClick={() => { setAccountAnchor(null); signOut() }} sx={{ gap: 1.5 }}>
+                  <LogoutIcon fontSize="small" />
+                  Sign out
+                </MenuItem>
+              </Menu>
+            </>
+          )}
 
           <Button
             color="inherit"

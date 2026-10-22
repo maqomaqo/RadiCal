@@ -64,6 +64,7 @@ two runs of this script on one commit write identical files.
 from __future__ import annotations
 
 import datetime
+from collections import Counter
 import hashlib
 import io
 import json
@@ -2196,6 +2197,61 @@ def schema_sqlite():
     return cases
 
 
+# Numeric arrays longer than this are recorded as a summary in the exchange
+# corpus: the units families hold the numbers themselves to the bit, and the
+# exchanges are about routes, statuses, fields and shapes.
+EXCHANGE_ARRAY_LIMIT = 64
+
+
+def summarise_long_arrays(value: Any) -> Any:
+    """Every all-numeric (possibly nested) list with more than
+    EXCHANGE_ARRAY_LIMIT numbers in it, as {'$summary': len, count, min, max,
+    sum}. radical-server's replay test summarises its own answers the same way."""
+    def numbers(v, out):
+        if isinstance(v, bool):
+            return False
+        if isinstance(v, (int, float)):
+            out.append(float(v))
+            return True
+        if isinstance(v, list):
+            return all(numbers(x, out) for x in v)
+        return False
+
+    if isinstance(value, list):
+        flat: List[float] = []
+        if value and numbers(value, flat) and len(flat) > EXCHANGE_ARRAY_LIMIT:
+            return {'$summary': {'len': len(value), 'count': len(flat), 'min': min(flat),
+                                 'max': max(flat), 'sum': math.fsum(flat)}}
+        return [summarise_long_arrays(v) for v in value]
+    if isinstance(value, dict):
+        return {k: summarise_long_arrays(v) for k, v in value.items()}
+    return value
+
+
+def api_exchanges(recording: str) -> List[Dict[str, Any]]:
+    """The backend's own API tests as HTTP exchanges (corpus/record_api.py), in
+    the order they ran, ids placeholdered across the whole run and the
+    credentials reduced to whose they were."""
+    with open(recording, encoding='utf-8') as fh:
+        raw = json.load(fh)
+    suite = Counter(x['auth'] for x in raw if x['auth']).most_common(1)[0][0]
+    stable = Stable()
+    cases = []
+    for i, x in enumerate(raw):
+        who = 'none' if x['auth'] is None else 'suite' if x['auth'] == suite else 'other'
+        inputs = {k: x[k] for k in ('test', 'method', 'url', 'params', 'request_json',
+                                    'request_data', 'request_content', 'files')}
+        inputs['auth'] = who
+        outputs = {'status': x['status'], 'content_type': x['content_type']}
+        for k in ('response_json', 'response_text', 'response_sha256', 'response_len'):
+            if k in x:
+                outputs[k] = summarise_long_arrays(x[k]) if k == 'response_json' else x[k]
+        case = stable({'name': f"{i:04d} {x['method']} {x['url'].split('?')[0]}",
+                       'inputs': inputs, 'outputs': outputs})
+        cases.append(case)
+    return cases
+
+
 # ---------------------------------------------------------------------------
 # api/ -- Phases 2, 3 and 5
 # ---------------------------------------------------------------------------
@@ -2385,6 +2441,10 @@ def main() -> None:
         write(family, build())
 
     write('schema/sqlite', schema_sqlite())
+
+    if '--exchanges' in sys.argv:
+        # A recording made by corpus/record_api.py over the backend suite.
+        write('api/exchanges', api_exchanges(sys.argv[sys.argv.index('--exchanges') + 1]))
 
     if '--units-only' not in sys.argv:
         print('api/')

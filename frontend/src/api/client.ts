@@ -219,6 +219,24 @@ export async function canEmailResetLinks(): Promise<boolean> {
   }
 }
 
+// Set at startup when the server is the desktop app's: see fetchCurrentUser.
+let singleUser = false
+
+/** Whether this server has no accounts: the desktop app, for one person. */
+export function isSingleUser(): boolean {
+  return singleUser
+}
+
+async function serverIsSingleUser(): Promise<boolean> {
+  try {
+    const response = await fetch('/api/auth/options')
+    if (!response.ok) return false
+    return Boolean((await response.json()).data?.single_user)
+  } catch {
+    return false
+  }
+}
+
 /** POST /api/auth/forgot-password. Succeeds whether or not the address has an account. */
 export async function requestPasswordReset(email: string): Promise<void> {
   await postOpen('/api/auth/forgot-password', { email })
@@ -271,7 +289,13 @@ export async function signOut() {
  * first page failed at once.
  */
 export async function fetchCurrentUser(): Promise<AuthUser | null> {
-  if (!memoryToken && !storedToken()) return null
+  if (!memoryToken && !storedToken()) {
+    // No session -- unless the server is the desktop app's, which serves one
+    // person on their own computer and has no accounts to sign in to. It says
+    // so in /auth/options, and then /auth/me answers without a token.
+    if (!(await serverIsSingleUser())) return null
+    singleUser = true
+  }
   try {
     const response = await fetch('/api/auth/me')
     if (!response.ok) return null
