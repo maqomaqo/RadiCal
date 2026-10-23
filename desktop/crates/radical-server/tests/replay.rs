@@ -908,10 +908,10 @@ async fn the_backend_suite_replayed() {
                 entry.excused += 1;
             }
             Some(p) => {
-                // REPLAY_SHOW=<part of a route> lists every difference there.
-                if std::env::var("REPLAY_SHOW").is_ok_and(|s| route.contains(&s)) {
-                    eprintln!("DIFF {route} {} ({}): {p}", case.name, test);
-                }
+                // Every difference is listed, not only each route's first:
+                // a run on a machine that cannot be reached otherwise (a CI
+                // runner) has to say everything it saw.
+                eprintln!("DIFF {route} {} ({}): {p}", case.name, test);
                 entry.differed += 1;
                 entry.first.get_or_insert_with(|| {
                     format!("{} ({}): {p}", case.name, i["test"].as_str().unwrap_or(""))
