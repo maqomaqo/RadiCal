@@ -160,9 +160,11 @@ const WINDOWS_TIES: &[&str] = &[
 ];
 
 /// How close a number must come, relative to max(|value|, 1). Windows' last
-/// bits drift to about 1.3e-9 over a long integration, so it is allowed ten
-/// times as much.
-const TOL: f64 = if cfg!(windows) { 1e-8 } else { 1e-9 };
+/// bits drift to about 1.3e-9 over a long integration, and a ratio of two
+/// near-zero overlaps (the agreement index of a date at 0.37%) magnifies
+/// that to 1.1e-7, so it is allowed 1e-6: still far inside the 0.1 any of
+/// these is reported to.
+const TOL: f64 = if cfg!(windows) { 1e-6 } else { 1e-9 };
 
 static PLACEHOLDER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"<id:(\d+)>").unwrap());
 static STAMP: LazyLock<Regex> =
