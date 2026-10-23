@@ -421,6 +421,47 @@ def units_reservoir():
                                            delta_r=dr, delta_r_error=e) for n, dr, e in rows]
         cases.append(capture(f'combine/{name}', {'points': [list(r) for r in rows]},
                              lambda p=points: reservoir.combine(p).as_dict()))
+
+    # A made-up coast: (map_no, lat, lon, delta_r, error, habit, raw habit).
+    coast = [
+        (101, -41.10, 174.00, 30.0, 40.0, 'suspension', 'filter'),
+        (102, -41.20, 174.10, -20.0, 35.0, 'suspension', 'suspension'),
+        (103, -41.05, 173.90, 250.0, 60.0, 'deposit', 'deposit'),
+        (104, -41.30, 174.30, 80.0, None, 'grazer', 'herbivore'),
+        (105, -40.90, 173.80, 15.0, 25.0, 'carnivore', 'predator'),
+        (106, -41.60, 174.70, 60.0, 45.0, 'unknown', None),
+        (107, -41.15, 174.05, None, None, 'suspension', 'filter'),
+        (108, -42.50, 175.50, -5.0, 30.0, 'suspension', 'filter'),
+        (109, -41.10, 174.00, 45.0, 50.0, 'migratory', 'migratory'),
+    ]
+    points = [reservoir.ReservoirPoint(map_no=m, latitude=la, longitude=lo, delta_r=dr,
+                                       delta_r_error=e, feeding=f, feeding_raw=raw,
+                                       locality=f'Point {m}', reference='Made up')
+              for m, la, lo, dr, e, f, raw in coast]
+    cases.append(capture('nearest', {'points': coast, 'at': [-41.12, 174.02], 'n': 4},
+                         lambda: [[p.map_no, p.distance_km]
+                                  for p in reservoir.nearest(-41.12, 174.02, points, 4)]))
+    for name, opts in {
+        'default': {'n': 6},
+        'all': {'n': 50},
+        'within': {'n': 10, 'max_km': 20.0},
+        'nothing-within': {'n': 10, 'max_km': 0.5},
+        'excluded': {'n': 6, 'exclude_map_nos': [101, 103]},
+        'suspension-only': {'n': 9, 'suspension_only': True},
+        'suspension-only-refused': {'n': 2, 'suspension_only': True},
+        'too-few-weighted': {'n': 10, 'exclude_map_nos': [101, 102, 103, 105, 106, 108, 109]},
+    }.items():
+        def run(opts=opts):
+            try:
+                result = reservoir.lookup(-41.12, 174.02, points, snapshot_id='snap-1', **opts)
+            except reservoir.LookupRefused as exc:
+                return {'refused': str(exc)}
+            source = reservoir.provenance(result, max_km=opts.get('max_km'),
+                                          suspension_only=opts.get('suspension_only', False))
+            source.pop('computed_at')
+            return {'lookup': result.as_dict(), 'provenance': source}
+        cases.append(capture(f'lookup/{name}', {'points': coast, 'at': [-41.12, 174.02],
+                                                'options': opts}, run))
     return cases
 
 

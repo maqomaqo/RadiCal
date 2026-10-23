@@ -18,6 +18,7 @@ pub mod project_export;
 pub mod project_import;
 pub mod project_samples;
 pub mod projects;
+pub mod reservoir;
 pub mod results;
 pub mod run_history;
 pub mod runs;
@@ -52,6 +53,7 @@ pub fn router() -> Router<State> {
         .merge(model_templates::router())
         .merge(run_history::router())
         .merge(influence::router())
+        .merge(reservoir::router())
         .merge(projects::router())
         .merge(project_samples::router())
 }

@@ -88,6 +88,979 @@
     "scatter": 282.842712474619,
     "excluded_no_error": []
    }
+  },
+  {
+   "name": "nearest",
+   "inputs": {
+    "points": [
+     [101,-41.1,174.0,30.0,40.0,"suspension","filter"],
+     [102,-41.2,174.1,-20.0,35.0,"suspension","suspension"],
+     [103,-41.05,173.9,250.0,60.0,"deposit","deposit"],
+     [104,-41.3,174.3,80.0,null,"grazer","herbivore"],
+     [105,-40.9,173.8,15.0,25.0,"carnivore","predator"],
+     [106,-41.6,174.7,60.0,45.0,"unknown",null],
+     [107,-41.15,174.05,null,null,"suspension","filter"],
+     [108,-42.5,175.5,-5.0,30.0,"suspension","filter"],
+     [109,-41.1,174.0,45.0,50.0,"migratory","migratory"]
+    ],
+    "at": [-41.12,174.02],
+    "n": 4
+   },
+   "outputs": {
+    "$series": {
+     "x": [101,109,102,103],
+     "y": [2.7844854178425917,2.7844854178425917,11.134868261812183,12.717568718810796]
+    }
+   }
+  },
+  {
+   "name": "lookup/default",
+   "inputs": {
+    "points": [
+     [101,-41.1,174.0,30.0,40.0,"suspension","filter"],
+     [102,-41.2,174.1,-20.0,35.0,"suspension","suspension"],
+     [103,-41.05,173.9,250.0,60.0,"deposit","deposit"],
+     [104,-41.3,174.3,80.0,null,"grazer","herbivore"],
+     [105,-40.9,173.8,15.0,25.0,"carnivore","predator"],
+     [106,-41.6,174.7,60.0,45.0,"unknown",null],
+     [107,-41.15,174.05,null,null,"suspension","filter"],
+     [108,-42.5,175.5,-5.0,30.0,"suspension","filter"],
+     [109,-41.1,174.0,45.0,50.0,"migratory","migratory"]
+    ],
+    "at": [-41.12,174.02],
+    "options": {
+     "n": 6
+    }
+   },
+   "outputs": {
+    "lookup": {
+     "delta_r": 30.617026141300205,
+     "delta_r_error": 73.18062575319993,
+     "n": 5,
+     "snapshot_id": "snap-1",
+     "centre": {
+      "lat": -41.12,
+      "lon": 174.02
+     },
+     "nearest_km": 2.7844854178425917,
+     "farthest_km": 30.64619895147639,
+     "excluded_no_error": [104],
+     "excluded_by_user": [],
+     "feeding": {
+      "suspension": 2,
+      "migratory": 1,
+      "deposit": 1,
+      "carnivore": 1
+     },
+     "feeding_raw": {
+      "101": "filter",
+      "109": "migratory",
+      "102": "suspension",
+      "103": "deposit",
+      "105": "predator"
+     },
+     "included_all": {
+      "delta_r": 30.617026141300205,
+      "delta_r_error": 73.18062575319993,
+      "n": 5,
+      "map_nos": [101,109,102,103,105],
+      "internal": 16.397620100908128,
+      "scatter": 73.18062575319993,
+      "excluded_no_error": [104]
+     },
+     "suspension_equivalent": {
+      "delta_r": 1.6814159292035384,
+      "delta_r_error": 35.042459952607665,
+      "n": 2,
+      "map_nos": [101,102],
+      "internal": 26.34018431474073,
+      "scatter": 35.042459952607665,
+      "excluded_no_error": [104]
+     },
+     "feeding_shift": 28.935610212096666,
+     "feeding_shift_matters": false,
+     "feeding_shift_warn_years": 35.0,
+     "points": [
+      {
+       "map_no": 101,
+       "latitude": -41.1,
+       "longitude": 174.0,
+       "delta_r": 30.0,
+       "delta_r_error": 40.0,
+       "feeding": "suspension",
+       "feeding_raw": "filter",
+       "locality": "Point 101",
+       "reference": "Made up",
+       "distance_km": 2.7844854178425917
+      },
+      {
+       "map_no": 109,
+       "latitude": -41.1,
+       "longitude": 174.0,
+       "delta_r": 45.0,
+       "delta_r_error": 50.0,
+       "feeding": "migratory",
+       "feeding_raw": "migratory",
+       "locality": "Point 109",
+       "reference": "Made up",
+       "distance_km": 2.7844854178425917
+      },
+      {
+       "map_no": 102,
+       "latitude": -41.2,
+       "longitude": 174.1,
+       "delta_r": -20.0,
+       "delta_r_error": 35.0,
+       "feeding": "suspension",
+       "feeding_raw": "suspension",
+       "locality": "Point 102",
+       "reference": "Made up",
+       "distance_km": 11.134868261812183
+      },
+      {
+       "map_no": 103,
+       "latitude": -41.05,
+       "longitude": 173.9,
+       "delta_r": 250.0,
+       "delta_r_error": 60.0,
+       "feeding": "deposit",
+       "feeding_raw": "deposit",
+       "locality": "Point 103",
+       "reference": "Made up",
+       "distance_km": 12.717568718810796
+      },
+      {
+       "map_no": 105,
+       "latitude": -40.9,
+       "longitude": 173.8,
+       "delta_r": 15.0,
+       "delta_r_error": 25.0,
+       "feeding": "carnivore",
+       "feeding_raw": "predator",
+       "locality": "Point 105",
+       "reference": "Made up",
+       "distance_km": 30.64619895147639
+      },
+      {
+       "map_no": 104,
+       "latitude": -41.3,
+       "longitude": 174.3,
+       "delta_r": 80.0,
+       "delta_r_error": null,
+       "feeding": "grazer",
+       "feeding_raw": "herbivore",
+       "locality": "Point 104",
+       "reference": "Made up",
+       "distance_km": 30.8094114877053
+      }
+     ]
+    },
+    "provenance": {
+     "method": "nearest_n",
+     "snapshot_id": "snap-1",
+     "centre": {
+      "lat": -41.12,
+      "lon": 174.02
+     },
+     "n": 5,
+     "map_nos": [101,109,102,103,105],
+     "excluded_no_error": [104],
+     "excluded_by_user": [],
+     "filters": {
+      "feeding_preset": null,
+      "max_km": null
+     },
+     "feeding": {
+      "suspension": 2,
+      "migratory": 1,
+      "deposit": 1,
+      "carnivore": 1
+     },
+     "feeding_raw": {
+      "101": "filter",
+      "109": "migratory",
+      "102": "suspension",
+      "103": "deposit",
+      "105": "predator"
+     },
+     "counterfactual_suspension_only": {
+      "delta_r": 1.6814159292035384,
+      "delta_r_error": 35.042459952607665,
+      "n": 2
+     },
+     "nearest_km": 2.7844854178425917,
+     "farthest_km": 30.64619895147639
+    }
+   }
+  },
+  {
+   "name": "lookup/all",
+   "inputs": {
+    "points": [
+     [101,-41.1,174.0,30.0,40.0,"suspension","filter"],
+     [102,-41.2,174.1,-20.0,35.0,"suspension","suspension"],
+     [103,-41.05,173.9,250.0,60.0,"deposit","deposit"],
+     [104,-41.3,174.3,80.0,null,"grazer","herbivore"],
+     [105,-40.9,173.8,15.0,25.0,"carnivore","predator"],
+     [106,-41.6,174.7,60.0,45.0,"unknown",null],
+     [107,-41.15,174.05,null,null,"suspension","filter"],
+     [108,-42.5,175.5,-5.0,30.0,"suspension","filter"],
+     [109,-41.1,174.0,45.0,50.0,"migratory","migratory"]
+    ],
+    "at": [-41.12,174.02],
+    "options": {
+     "n": 50
+    }
+   },
+   "outputs": {
+    "lookup": {
+     "delta_r": 25.909257079308368,
+     "delta_r_error": 62.19366997037553,
+     "n": 7,
+     "snapshot_id": "snap-1",
+     "centre": {
+      "lat": -41.12,
+      "lon": 174.02
+     },
+     "nearest_km": 2.7844854178425917,
+     "farthest_km": 196.4433718556479,
+     "excluded_no_error": [104],
+     "excluded_by_user": [],
+     "feeding": {
+      "suspension": 3,
+      "migratory": 1,
+      "deposit": 1,
+      "carnivore": 1,
+      "unknown": 1
+     },
+     "feeding_raw": {
+      "101": "filter",
+      "109": "migratory",
+      "102": "suspension",
+      "103": "deposit",
+      "105": "predator",
+      "108": "filter"
+     },
+     "included_all": {
+      "delta_r": 25.909257079308368,
+      "delta_r_error": 62.19366997037553,
+      "n": 7,
+      "map_nos": [101,109,102,103,105,106,108],
+      "internal": 13.705006312707049,
+      "scatter": 62.19366997037553,
+      "excluded_no_error": [104]
+     },
+     "suspension_equivalent": {
+      "delta_r": 8.698371672266735,
+      "delta_r_error": 32.84087856335671,
+      "n": 4,
+      "map_nos": [101,102,106,108],
+      "internal": 18.11824690818913,
+      "scatter": 32.84087856335671,
+      "excluded_no_error": [104]
+     },
+     "feeding_shift": 17.210885407041633,
+     "feeding_shift_matters": false,
+     "feeding_shift_warn_years": 35.0,
+     "points": [
+      {
+       "map_no": 101,
+       "latitude": -41.1,
+       "longitude": 174.0,
+       "delta_r": 30.0,
+       "delta_r_error": 40.0,
+       "feeding": "suspension",
+       "feeding_raw": "filter",
+       "locality": "Point 101",
+       "reference": "Made up",
+       "distance_km": 2.7844854178425917
+      },
+      {
+       "map_no": 109,
+       "latitude": -41.1,
+       "longitude": 174.0,
+       "delta_r": 45.0,
+       "delta_r_error": 50.0,
+       "feeding": "migratory",
+       "feeding_raw": "migratory",
+       "locality": "Point 109",
+       "reference": "Made up",
+       "distance_km": 2.7844854178425917
+      },
+      {
+       "map_no": 102,
+       "latitude": -41.2,
+       "longitude": 174.1,
+       "delta_r": -20.0,
+       "delta_r_error": 35.0,
+       "feeding": "suspension",
+       "feeding_raw": "suspension",
+       "locality": "Point 102",
+       "reference": "Made up",
+       "distance_km": 11.134868261812183
+      },
+      {
+       "map_no": 103,
+       "latitude": -41.05,
+       "longitude": 173.9,
+       "delta_r": 250.0,
+       "delta_r_error": 60.0,
+       "feeding": "deposit",
+       "feeding_raw": "deposit",
+       "locality": "Point 103",
+       "reference": "Made up",
+       "distance_km": 12.717568718810796
+      },
+      {
+       "map_no": 105,
+       "latitude": -40.9,
+       "longitude": 173.8,
+       "delta_r": 15.0,
+       "delta_r_error": 25.0,
+       "feeding": "carnivore",
+       "feeding_raw": "predator",
+       "locality": "Point 105",
+       "reference": "Made up",
+       "distance_km": 30.64619895147639
+      },
+      {
+       "map_no": 104,
+       "latitude": -41.3,
+       "longitude": 174.3,
+       "delta_r": 80.0,
+       "delta_r_error": null,
+       "feeding": "grazer",
+       "feeding_raw": "herbivore",
+       "locality": "Point 104",
+       "reference": "Made up",
+       "distance_km": 30.8094114877053
+      },
+      {
+       "map_no": 106,
+       "latitude": -41.6,
+       "longitude": 174.7,
+       "delta_r": 60.0,
+       "delta_r_error": 45.0,
+       "feeding": "unknown",
+       "feeding_raw": null,
+       "locality": "Point 106",
+       "reference": "Made up",
+       "distance_km": 77.90728258824169
+      },
+      {
+       "map_no": 108,
+       "latitude": -42.5,
+       "longitude": 175.5,
+       "delta_r": -5.0,
+       "delta_r_error": 30.0,
+       "feeding": "suspension",
+       "feeding_raw": "filter",
+       "locality": "Point 108",
+       "reference": "Made up",
+       "distance_km": 196.4433718556479
+      }
+     ]
+    },
+    "provenance": {
+     "method": "nearest_n",
+     "snapshot_id": "snap-1",
+     "centre": {
+      "lat": -41.12,
+      "lon": 174.02
+     },
+     "n": 7,
+     "map_nos": [101,109,102,103,105,106,108],
+     "excluded_no_error": [104],
+     "excluded_by_user": [],
+     "filters": {
+      "feeding_preset": null,
+      "max_km": null
+     },
+     "feeding": {
+      "suspension": 3,
+      "migratory": 1,
+      "deposit": 1,
+      "carnivore": 1,
+      "unknown": 1
+     },
+     "feeding_raw": {
+      "101": "filter",
+      "109": "migratory",
+      "102": "suspension",
+      "103": "deposit",
+      "105": "predator",
+      "108": "filter"
+     },
+     "counterfactual_suspension_only": {
+      "delta_r": 8.698371672266735,
+      "delta_r_error": 32.84087856335671,
+      "n": 4
+     },
+     "nearest_km": 2.7844854178425917,
+     "farthest_km": 196.4433718556479
+    }
+   }
+  },
+  {
+   "name": "lookup/within",
+   "inputs": {
+    "points": [
+     [101,-41.1,174.0,30.0,40.0,"suspension","filter"],
+     [102,-41.2,174.1,-20.0,35.0,"suspension","suspension"],
+     [103,-41.05,173.9,250.0,60.0,"deposit","deposit"],
+     [104,-41.3,174.3,80.0,null,"grazer","herbivore"],
+     [105,-40.9,173.8,15.0,25.0,"carnivore","predator"],
+     [106,-41.6,174.7,60.0,45.0,"unknown",null],
+     [107,-41.15,174.05,null,null,"suspension","filter"],
+     [108,-42.5,175.5,-5.0,30.0,"suspension","filter"],
+     [109,-41.1,174.0,45.0,50.0,"migratory","migratory"]
+    ],
+    "at": [-41.12,174.02],
+    "options": {
+     "n": 10,
+     "max_km": 20.0
+    }
+   },
+   "outputs": {
+    "lookup": {
+     "delta_r": 42.40844279179262,
+     "delta_r_error": 97.95207658644468,
+     "n": 4,
+     "snapshot_id": "snap-1",
+     "centre": {
+      "lat": -41.12,
+      "lon": 174.02
+     },
+     "nearest_km": 2.7844854178425917,
+     "farthest_km": 12.717568718810796,
+     "excluded_no_error": [],
+     "excluded_by_user": [],
+     "feeding": {
+      "suspension": 2,
+      "migratory": 1,
+      "deposit": 1
+     },
+     "feeding_raw": {
+      "101": "filter",
+      "109": "migratory",
+      "102": "suspension",
+      "103": "deposit"
+     },
+     "included_all": {
+      "delta_r": 42.40844279179262,
+      "delta_r_error": 97.95207658644468,
+      "n": 4,
+      "map_nos": [101,109,102,103],
+      "internal": 21.723201606316636,
+      "scatter": 97.95207658644468,
+      "excluded_no_error": []
+     },
+     "suspension_equivalent": {
+      "delta_r": 1.6814159292035384,
+      "delta_r_error": 35.042459952607665,
+      "n": 2,
+      "map_nos": [101,102],
+      "internal": 26.34018431474073,
+      "scatter": 35.042459952607665,
+      "excluded_no_error": []
+     },
+     "feeding_shift": 40.727026862589085,
+     "feeding_shift_matters": true,
+     "feeding_shift_warn_years": 35.0,
+     "points": [
+      {
+       "map_no": 101,
+       "latitude": -41.1,
+       "longitude": 174.0,
+       "delta_r": 30.0,
+       "delta_r_error": 40.0,
+       "feeding": "suspension",
+       "feeding_raw": "filter",
+       "locality": "Point 101",
+       "reference": "Made up",
+       "distance_km": 2.7844854178425917
+      },
+      {
+       "map_no": 109,
+       "latitude": -41.1,
+       "longitude": 174.0,
+       "delta_r": 45.0,
+       "delta_r_error": 50.0,
+       "feeding": "migratory",
+       "feeding_raw": "migratory",
+       "locality": "Point 109",
+       "reference": "Made up",
+       "distance_km": 2.7844854178425917
+      },
+      {
+       "map_no": 102,
+       "latitude": -41.2,
+       "longitude": 174.1,
+       "delta_r": -20.0,
+       "delta_r_error": 35.0,
+       "feeding": "suspension",
+       "feeding_raw": "suspension",
+       "locality": "Point 102",
+       "reference": "Made up",
+       "distance_km": 11.134868261812183
+      },
+      {
+       "map_no": 103,
+       "latitude": -41.05,
+       "longitude": 173.9,
+       "delta_r": 250.0,
+       "delta_r_error": 60.0,
+       "feeding": "deposit",
+       "feeding_raw": "deposit",
+       "locality": "Point 103",
+       "reference": "Made up",
+       "distance_km": 12.717568718810796
+      }
+     ]
+    },
+    "provenance": {
+     "method": "nearest_n",
+     "snapshot_id": "snap-1",
+     "centre": {
+      "lat": -41.12,
+      "lon": 174.02
+     },
+     "n": 4,
+     "map_nos": [101,109,102,103],
+     "excluded_no_error": [],
+     "excluded_by_user": [],
+     "filters": {
+      "feeding_preset": null,
+      "max_km": 20.0
+     },
+     "feeding": {
+      "suspension": 2,
+      "migratory": 1,
+      "deposit": 1
+     },
+     "feeding_raw": {
+      "101": "filter",
+      "109": "migratory",
+      "102": "suspension",
+      "103": "deposit"
+     },
+     "counterfactual_suspension_only": {
+      "delta_r": 1.6814159292035384,
+      "delta_r_error": 35.042459952607665,
+      "n": 2
+     },
+     "nearest_km": 2.7844854178425917,
+     "farthest_km": 12.717568718810796
+    }
+   }
+  },
+  {
+   "name": "lookup/nothing-within",
+   "inputs": {
+    "points": [
+     [101,-41.1,174.0,30.0,40.0,"suspension","filter"],
+     [102,-41.2,174.1,-20.0,35.0,"suspension","suspension"],
+     [103,-41.05,173.9,250.0,60.0,"deposit","deposit"],
+     [104,-41.3,174.3,80.0,null,"grazer","herbivore"],
+     [105,-40.9,173.8,15.0,25.0,"carnivore","predator"],
+     [106,-41.6,174.7,60.0,45.0,"unknown",null],
+     [107,-41.15,174.05,null,null,"suspension","filter"],
+     [108,-42.5,175.5,-5.0,30.0,"suspension","filter"],
+     [109,-41.1,174.0,45.0,50.0,"migratory","migratory"]
+    ],
+    "at": [-41.12,174.02],
+    "options": {
+     "n": 10,
+     "max_km": 0.5
+    }
+   },
+   "outputs": {
+    "refused": "No reservoir measurements near this position within 0.5 km. Widen the search, or enter a ΔR by hand."
+   }
+  },
+  {
+   "name": "lookup/excluded",
+   "inputs": {
+    "points": [
+     [101,-41.1,174.0,30.0,40.0,"suspension","filter"],
+     [102,-41.2,174.1,-20.0,35.0,"suspension","suspension"],
+     [103,-41.05,173.9,250.0,60.0,"deposit","deposit"],
+     [104,-41.3,174.3,80.0,null,"grazer","herbivore"],
+     [105,-40.9,173.8,15.0,25.0,"carnivore","predator"],
+     [106,-41.6,174.7,60.0,45.0,"unknown",null],
+     [107,-41.15,174.05,null,null,"suspension","filter"],
+     [108,-42.5,175.5,-5.0,30.0,"suspension","filter"],
+     [109,-41.1,174.0,45.0,50.0,"migratory","migratory"]
+    ],
+    "at": [-41.12,174.02],
+    "options": {
+     "n": 6,
+     "exclude_map_nos": [101,103]
+    }
+   },
+   "outputs": {
+    "lookup": {
+     "delta_r": 9.115942028985506,
+     "delta_r_error": 25.93095869376155,
+     "n": 3,
+     "snapshot_id": "snap-1",
+     "centre": {
+      "lat": -41.12,
+      "lon": 174.02
+     },
+     "nearest_km": 2.7844854178425917,
+     "farthest_km": 30.64619895147639,
+     "excluded_no_error": [104],
+     "excluded_by_user": [101,103],
+     "feeding": {
+      "migratory": 1,
+      "suspension": 1,
+      "carnivore": 1
+     },
+     "feeding_raw": {
+      "109": "migratory",
+      "102": "suspension",
+      "105": "predator"
+     },
+     "included_all": {
+      "delta_r": 9.115942028985506,
+      "delta_r_error": 25.93095869376155,
+      "n": 3,
+      "map_nos": [109,102,105],
+      "internal": 18.843366572035794,
+      "scatter": 25.93095869376155,
+      "excluded_no_error": [104]
+     },
+     "suspension_equivalent": null,
+     "feeding_shift": null,
+     "feeding_shift_matters": false,
+     "feeding_shift_warn_years": 35.0,
+     "points": [
+      {
+       "map_no": 109,
+       "latitude": -41.1,
+       "longitude": 174.0,
+       "delta_r": 45.0,
+       "delta_r_error": 50.0,
+       "feeding": "migratory",
+       "feeding_raw": "migratory",
+       "locality": "Point 109",
+       "reference": "Made up",
+       "distance_km": 2.7844854178425917
+      },
+      {
+       "map_no": 102,
+       "latitude": -41.2,
+       "longitude": 174.1,
+       "delta_r": -20.0,
+       "delta_r_error": 35.0,
+       "feeding": "suspension",
+       "feeding_raw": "suspension",
+       "locality": "Point 102",
+       "reference": "Made up",
+       "distance_km": 11.134868261812183
+      },
+      {
+       "map_no": 105,
+       "latitude": -40.9,
+       "longitude": 173.8,
+       "delta_r": 15.0,
+       "delta_r_error": 25.0,
+       "feeding": "carnivore",
+       "feeding_raw": "predator",
+       "locality": "Point 105",
+       "reference": "Made up",
+       "distance_km": 30.64619895147639
+      },
+      {
+       "map_no": 104,
+       "latitude": -41.3,
+       "longitude": 174.3,
+       "delta_r": 80.0,
+       "delta_r_error": null,
+       "feeding": "grazer",
+       "feeding_raw": "herbivore",
+       "locality": "Point 104",
+       "reference": "Made up",
+       "distance_km": 30.8094114877053
+      }
+     ]
+    },
+    "provenance": {
+     "method": "nearest_n",
+     "snapshot_id": "snap-1",
+     "centre": {
+      "lat": -41.12,
+      "lon": 174.02
+     },
+     "n": 3,
+     "map_nos": [109,102,105],
+     "excluded_no_error": [104],
+     "excluded_by_user": [101,103],
+     "filters": {
+      "feeding_preset": null,
+      "max_km": null
+     },
+     "feeding": {
+      "migratory": 1,
+      "suspension": 1,
+      "carnivore": 1
+     },
+     "feeding_raw": {
+      "109": "migratory",
+      "102": "suspension",
+      "105": "predator"
+     },
+     "counterfactual_suspension_only": null,
+     "nearest_km": 2.7844854178425917,
+     "farthest_km": 30.64619895147639
+    }
+   }
+  },
+  {
+   "name": "lookup/suspension-only",
+   "inputs": {
+    "points": [
+     [101,-41.1,174.0,30.0,40.0,"suspension","filter"],
+     [102,-41.2,174.1,-20.0,35.0,"suspension","suspension"],
+     [103,-41.05,173.9,250.0,60.0,"deposit","deposit"],
+     [104,-41.3,174.3,80.0,null,"grazer","herbivore"],
+     [105,-40.9,173.8,15.0,25.0,"carnivore","predator"],
+     [106,-41.6,174.7,60.0,45.0,"unknown",null],
+     [107,-41.15,174.05,null,null,"suspension","filter"],
+     [108,-42.5,175.5,-5.0,30.0,"suspension","filter"],
+     [109,-41.1,174.0,45.0,50.0,"migratory","migratory"]
+    ],
+    "at": [-41.12,174.02],
+    "options": {
+     "n": 9,
+     "suspension_only": true
+    }
+   },
+   "outputs": {
+    "lookup": {
+     "delta_r": 8.698371672266735,
+     "delta_r_error": 32.84087856335671,
+     "n": 4,
+     "snapshot_id": "snap-1",
+     "centre": {
+      "lat": -41.12,
+      "lon": 174.02
+     },
+     "nearest_km": 2.7844854178425917,
+     "farthest_km": 196.4433718556479,
+     "excluded_no_error": [104],
+     "excluded_by_user": [],
+     "feeding": {
+      "suspension": 3,
+      "unknown": 1
+     },
+     "feeding_raw": {
+      "101": "filter",
+      "102": "suspension",
+      "108": "filter"
+     },
+     "included_all": {
+      "delta_r": 25.909257079308368,
+      "delta_r_error": 62.19366997037553,
+      "n": 7,
+      "map_nos": [101,109,102,103,105,106,108],
+      "internal": 13.705006312707049,
+      "scatter": 62.19366997037553,
+      "excluded_no_error": [104]
+     },
+     "suspension_equivalent": {
+      "delta_r": 8.698371672266735,
+      "delta_r_error": 32.84087856335671,
+      "n": 4,
+      "map_nos": [101,102,106,108],
+      "internal": 18.11824690818913,
+      "scatter": 32.84087856335671,
+      "excluded_no_error": [104]
+     },
+     "feeding_shift": 17.210885407041633,
+     "feeding_shift_matters": false,
+     "feeding_shift_warn_years": 35.0,
+     "points": [
+      {
+       "map_no": 101,
+       "latitude": -41.1,
+       "longitude": 174.0,
+       "delta_r": 30.0,
+       "delta_r_error": 40.0,
+       "feeding": "suspension",
+       "feeding_raw": "filter",
+       "locality": "Point 101",
+       "reference": "Made up",
+       "distance_km": 2.7844854178425917
+      },
+      {
+       "map_no": 109,
+       "latitude": -41.1,
+       "longitude": 174.0,
+       "delta_r": 45.0,
+       "delta_r_error": 50.0,
+       "feeding": "migratory",
+       "feeding_raw": "migratory",
+       "locality": "Point 109",
+       "reference": "Made up",
+       "distance_km": 2.7844854178425917
+      },
+      {
+       "map_no": 102,
+       "latitude": -41.2,
+       "longitude": 174.1,
+       "delta_r": -20.0,
+       "delta_r_error": 35.0,
+       "feeding": "suspension",
+       "feeding_raw": "suspension",
+       "locality": "Point 102",
+       "reference": "Made up",
+       "distance_km": 11.134868261812183
+      },
+      {
+       "map_no": 103,
+       "latitude": -41.05,
+       "longitude": 173.9,
+       "delta_r": 250.0,
+       "delta_r_error": 60.0,
+       "feeding": "deposit",
+       "feeding_raw": "deposit",
+       "locality": "Point 103",
+       "reference": "Made up",
+       "distance_km": 12.717568718810796
+      },
+      {
+       "map_no": 105,
+       "latitude": -40.9,
+       "longitude": 173.8,
+       "delta_r": 15.0,
+       "delta_r_error": 25.0,
+       "feeding": "carnivore",
+       "feeding_raw": "predator",
+       "locality": "Point 105",
+       "reference": "Made up",
+       "distance_km": 30.64619895147639
+      },
+      {
+       "map_no": 104,
+       "latitude": -41.3,
+       "longitude": 174.3,
+       "delta_r": 80.0,
+       "delta_r_error": null,
+       "feeding": "grazer",
+       "feeding_raw": "herbivore",
+       "locality": "Point 104",
+       "reference": "Made up",
+       "distance_km": 30.8094114877053
+      },
+      {
+       "map_no": 106,
+       "latitude": -41.6,
+       "longitude": 174.7,
+       "delta_r": 60.0,
+       "delta_r_error": 45.0,
+       "feeding": "unknown",
+       "feeding_raw": null,
+       "locality": "Point 106",
+       "reference": "Made up",
+       "distance_km": 77.90728258824169
+      },
+      {
+       "map_no": 108,
+       "latitude": -42.5,
+       "longitude": 175.5,
+       "delta_r": -5.0,
+       "delta_r_error": 30.0,
+       "feeding": "suspension",
+       "feeding_raw": "filter",
+       "locality": "Point 108",
+       "reference": "Made up",
+       "distance_km": 196.4433718556479
+      }
+     ]
+    },
+    "provenance": {
+     "method": "nearest_n",
+     "snapshot_id": "snap-1",
+     "centre": {
+      "lat": -41.12,
+      "lon": 174.02
+     },
+     "n": 4,
+     "map_nos": [101,109,102,103,105,106,108],
+     "excluded_no_error": [104],
+     "excluded_by_user": [],
+     "filters": {
+      "feeding_preset": "suspension_only",
+      "max_km": null
+     },
+     "feeding": {
+      "suspension": 3,
+      "unknown": 1
+     },
+     "feeding_raw": {
+      "101": "filter",
+      "102": "suspension",
+      "108": "filter"
+     },
+     "counterfactual_suspension_only": {
+      "delta_r": 8.698371672266735,
+      "delta_r_error": 32.84087856335671,
+      "n": 4
+     },
+     "nearest_km": 2.7844854178425917,
+     "farthest_km": 196.4433718556479
+    }
+   }
+  },
+  {
+   "name": "lookup/suspension-only-refused",
+   "inputs": {
+    "points": [
+     [101,-41.1,174.0,30.0,40.0,"suspension","filter"],
+     [102,-41.2,174.1,-20.0,35.0,"suspension","suspension"],
+     [103,-41.05,173.9,250.0,60.0,"deposit","deposit"],
+     [104,-41.3,174.3,80.0,null,"grazer","herbivore"],
+     [105,-40.9,173.8,15.0,25.0,"carnivore","predator"],
+     [106,-41.6,174.7,60.0,45.0,"unknown",null],
+     [107,-41.15,174.05,null,null,"suspension","filter"],
+     [108,-42.5,175.5,-5.0,30.0,"suspension","filter"],
+     [109,-41.1,174.0,45.0,50.0,"migratory","migratory"]
+    ],
+    "at": [-41.12,174.02],
+    "options": {
+     "n": 2,
+     "suspension_only": true
+    }
+   },
+   "outputs": {
+    "refused": "Excluding migratory would leave fewer than 2 points with an uncertainty to weight, and a weighted mean of one point is just that point. Raise N, widen the search, or include them."
+   }
+  },
+  {
+   "name": "lookup/too-few-weighted",
+   "inputs": {
+    "points": [
+     [101,-41.1,174.0,30.0,40.0,"suspension","filter"],
+     [102,-41.2,174.1,-20.0,35.0,"suspension","suspension"],
+     [103,-41.05,173.9,250.0,60.0,"deposit","deposit"],
+     [104,-41.3,174.3,80.0,null,"grazer","herbivore"],
+     [105,-40.9,173.8,15.0,25.0,"carnivore","predator"],
+     [106,-41.6,174.7,60.0,45.0,"unknown",null],
+     [107,-41.15,174.05,null,null,"suspension","filter"],
+     [108,-42.5,175.5,-5.0,30.0,"suspension","filter"],
+     [109,-41.1,174.0,45.0,50.0,"migratory","migratory"]
+    ],
+    "at": [-41.12,174.02],
+    "options": {
+     "n": 10,
+     "exclude_map_nos": [101,102,103,105,106,108,109]
+    }
+   },
+   "outputs": {
+    "refused": "Only 0 of the 1 nearest points carry an uncertainty, and a weighted mean needs at least 2. Raise N or widen the search."
+   }
   }
  ]
 }

@@ -25,23 +25,8 @@ fn removed(method: &str, path: &str) -> bool {
 }
 
 /// Routes not ported yet, each with what stands in their way.
-const NOT_YET: &[(&str, &str, &str)] = &[
-    ("GET", "/api/results/{analysis_id}/pdf", "the PDF report"),
-    ("GET", "/api/reservoir/snapshots", RESERVOIR),
-    ("POST", "/api/reservoir/snapshots", RESERVOIR),
-    ("GET", "/api/reservoir/snapshots/{snapshot_id}", RESERVOIR),
-    (
-        "DELETE",
-        "/api/reservoir/snapshots/{snapshot_id}",
-        RESERVOIR,
-    ),
-    ("GET", "/api/reservoir/freshness", RESERVOIR),
-    ("POST", "/api/reservoir/lookup", RESERVOIR),
-];
-
-/// The marine reservoir routes wait on the ΔR lookup in radical-core and an
-/// HTTP client for the calib.org ingest.
-const RESERVOIR: &str = "the ΔR lookup and the calib.org ingest";
+const NOT_YET: &[(&str, &str, &str)] =
+    &[("GET", "/api/results/{analysis_id}/pdf", "the PDF report")];
 
 #[tokio::test(flavor = "multi_thread")]
 async fn every_backend_route_is_served() {

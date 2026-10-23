@@ -18,6 +18,7 @@ use radical_store::Store;
 use serde_json::{Value, json};
 
 pub mod blocks;
+pub mod calib;
 pub mod curves;
 pub mod form;
 pub mod history;
