@@ -22,6 +22,8 @@ pub mod calib;
 pub mod curves;
 pub mod form;
 pub mod history;
+pub mod pdf;
+pub mod report;
 pub mod routes;
 pub mod schemas;
 pub mod solve;

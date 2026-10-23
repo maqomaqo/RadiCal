@@ -58,6 +58,8 @@ const PORTED: &[&str] = &[
     "GET /api/results/{analysis_id}/p-before",
     "GET /api/results/{analysis_id}/export/oxcal",
     "GET /api/results/{analysis_id}/graphs",
+    "GET /api/results/{analysis_id}/pdf",
+    "POST /api/results/{analysis_id}/export",
     "GET /api/curves",
     "POST /api/curves",
     "GET /api/curves/compare",
@@ -701,8 +703,10 @@ fn lines_differ(label: &str, got: &str, want: &str, ids: &mut Ids) -> Option<Str
 }
 
 /// What a test writes to the database itself before its first request,
-/// done here too, so the tests after it see the same rows.
-fn behind_the_api(state: &radical_server::State, test: &str) {
+/// done here too, so the tests after it see the same rows. Answers the id of
+/// the row made, for the first id the test's requests name that no answer
+/// has produced.
+fn behind_the_api(state: &radical_server::State, test: &str) -> Option<String> {
     if test.ends_with(
         "test_pdf_report.py::TestReportContent::test_a_pending_analysis_still_produces_a_report",
     ) {
@@ -720,7 +724,9 @@ fn behind_the_api(state: &radical_server::State, test: &str) {
             .store
             .write(|tx| radical_store::rows::insert(tx, &analysis))
             .unwrap();
+        return Some(analysis.id);
     }
+    None
 }
 
 fn stored_curve_ids(state: &radical_server::State) -> Vec<String> {
@@ -760,6 +766,7 @@ async fn the_backend_suite_replayed() {
     // The test whose exchanges these are, and the curves stored before it
     // began when it is one that removes what it stored.
     let mut current: Option<(String, Option<Vec<String>>)> = None;
+    let mut made: Option<String> = None;
     let mut ids = Ids::default();
     let mut tally: BTreeMap<String, Tally> = BTreeMap::new();
     let routes = routes(&family.cases);
@@ -786,7 +793,15 @@ async fn the_backend_suite_replayed() {
                 .as_array()
                 .is_some_and(|c| c.iter().any(|f| f == "remove_stored_curves"));
             current = Some((test_name.clone(), cleans.then(|| stored_curve_ids(&state))));
-            behind_the_api(&state, &test_name);
+            made = behind_the_api(&state, &test_name);
+        }
+        if let Some(id) = &made
+            && let Some(c) = PLACEHOLDER
+                .captures_iter(i["url"].as_str().unwrap_or(""))
+                .find(|c| !ids.forward.contains_key(&c[1]))
+        {
+            ids.bind(&c[1], id);
+            made = None;
         }
         let (method, url) = (i["method"].as_str().unwrap(), i["url"].as_str().unwrap());
         // The suite's own account, or nobody for the routes open to all.
@@ -878,7 +893,12 @@ async fn the_backend_suite_replayed() {
             None => entry.matched += 1,
             // Behind a route not ported yet: in its own test, or through an
             // id only such a route could have made.
-            Some(_) if blocked_tests.contains(&test) || invented => entry.blocked += 1,
+            Some(p) if blocked_tests.contains(&test) || invented => {
+                if std::env::var("REPLAY_SHOW").is_ok_and(|s| route.contains(&s)) {
+                    eprintln!("BLOCKED {route} {} ({}): {p}", case.name, test);
+                }
+                entry.blocked += 1;
+            }
             Some(p) if KNOWN.iter().any(|(t, _)| test.contains(t)) => {
                 if std::env::var("REPLAY_SHOW").is_ok_and(|s| route.contains(&s)) {
                     eprintln!("EXCUSED {route} {} ({}): {p}", case.name, test);

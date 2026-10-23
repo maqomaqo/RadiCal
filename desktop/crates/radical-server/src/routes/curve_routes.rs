@@ -191,7 +191,7 @@ fn row_json(state: &State, r: &CurveRow) -> Result<Value, radical_core::Error> {
 }
 
 /// `curve_registry.get_spec`.
-fn spec(state: &State, curve_id: &str) -> ApiResult<Result<Value, String>> {
+pub(crate) fn spec(state: &State, curve_id: &str) -> ApiResult<Result<Value, String>> {
     if let Some(b) = builtin(curve_id) {
         return Ok(builtin_json(state, b).map_err(|e| e.to_string()));
     }

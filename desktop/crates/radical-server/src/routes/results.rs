@@ -24,7 +24,7 @@ use radical_io::library::{Library, StoredCurve};
 use radical_io::oxcal_export::{self, Config};
 use radical_store::rows::{
     self, Analysis, AnalysisResult, CalibrationCurve as CurveRow, ModelElement, Project,
-    RadiocarbonSample,
+    RadiocarbonSample, SampleGroup,
 };
 use radical_store::rusqlite::Connection;
 use serde_json::{Map, Value, json};
@@ -160,15 +160,15 @@ fn unmodelled_ranges(
     }
 }
 
-struct Gathered {
-    analysis: Analysis,
-    rows: Vec<Value>,
-    samples: Vec<RadiocarbonSample>,
-    precision: String,
+pub(crate) struct Gathered {
+    pub(crate) analysis: Analysis,
+    pub(crate) rows: Vec<Value>,
+    pub(crate) samples: Vec<RadiocarbonSample>,
+    pub(crate) precision: String,
 }
 
 /// `_gather_export_rows`: each result joined to the date it is of.
-fn gather(state: &State, analysis_id: &str) -> ApiResult<Gathered> {
+pub(crate) fn gather(state: &State, analysis_id: &str) -> ApiResult<Gathered> {
     let (analysis, results, samples, project) = state.store.read(|c| {
         let analysis: Option<Analysis> = rows::get(c, analysis_id)?;
         let results: Vec<AnalysisResult> =
@@ -228,17 +228,17 @@ fn gather(state: &State, analysis_id: &str) -> ApiResult<Gathered> {
 
 /// One row of the model in reading order, with its date's export row or its
 /// element's posterior.
-struct StructureRow {
-    kind: String,
-    element_id: Option<String>,
-    name: String,
-    depth: usize,
-    path: String,
-    tpq_age_bp: Option<f64>,
-    taq_age_bp: Option<f64>,
-    sample_id: Option<String>,
-    posterior: Option<Value>,
-    result: Option<Value>,
+pub(crate) struct StructureRow {
+    pub(crate) kind: String,
+    pub(crate) element_id: Option<String>,
+    pub(crate) name: String,
+    pub(crate) depth: usize,
+    pub(crate) path: String,
+    pub(crate) tpq_age_bp: Option<f64>,
+    pub(crate) taq_age_bp: Option<f64>,
+    pub(crate) sample_id: Option<String>,
+    pub(crate) posterior: Option<Value>,
+    pub(crate) result: Option<Value>,
 }
 
 fn tree_of(conn: &Connection, analysis_id: &str) -> radical_store::Result<Option<Value>> {
@@ -249,7 +249,7 @@ fn tree_of(conn: &Connection, analysis_id: &str) -> radical_store::Result<Option
 
 /// `_structure_rows`: the stored tree flattened, never migrated -- an
 /// export does not write.
-fn structure(state: &State, g: &Gathered) -> ApiResult<Vec<StructureRow>> {
+pub(crate) fn structure(state: &State, g: &Gathered) -> ApiResult<Vec<StructureRow>> {
     let Some(tree) = state.store.read(|c| tree_of(c, &g.analysis.id))? else {
         return Ok(Vec::new());
     };
@@ -1165,7 +1165,7 @@ fn build_csv(
 // --------------------------------------------------------------------------
 
 /// The 404 every route answers for an analysis that is not there.
-fn owned(state: &State, analysis_id: &str) -> ApiResult<Analysis> {
+pub(crate) fn owned(state: &State, analysis_id: &str) -> ApiResult<Analysis> {
     state
         .store
         .read(|c| rows::get(c, analysis_id))?
@@ -1499,7 +1499,111 @@ async fn get_graphs(Extract(state): Extract<State>, Path(analysis_id): Path<Stri
     })))
 }
 
-/// The CSV or the JSON, chosen in the body.
+/// Each context's modelled start and end, for a model with no Boundary to
+/// report them instead (`_context_spans`).
+fn context_spans(state: &State, analysis_id: &str) -> ApiResult<Vec<(String, Value, Value)>> {
+    let groups: Vec<SampleGroup> = state
+        .store
+        .read(|c| rows::select_where(c, "analysis_id = ?", [analysis_id], "rowid"))?;
+    let present = |v: &Option<Value>| match v {
+        Some(Value::Object(o)) => !o.is_empty(),
+        Some(Value::Array(a)) => !a.is_empty(),
+        Some(Value::Null) | None => false,
+        Some(_) => true,
+    };
+    Ok(groups
+        .into_iter()
+        .filter(|g| present(&g.modeled_start) && present(&g.modeled_end))
+        .map(|g| {
+            (
+                g.name,
+                without_samples(g.modeled_start.as_ref().unwrap_or(&Value::Null)),
+                without_samples(g.modeled_end.as_ref().unwrap_or(&Value::Null)),
+            )
+        })
+        .collect())
+}
+
+/// The analysis as a printable report (`export_pdf`), built from the same
+/// assembly the CSV and the JSON use.
+fn pdf_response(
+    state: &State,
+    analysis_id: &str,
+    date_format: Option<&str>,
+    p_before_bp: Option<f64>,
+) -> ApiResult<Response> {
+    owned(state, analysis_id)?;
+    let t = threshold(p_before_bp)?;
+    let g = gather(state, analysis_id)?;
+    let structure = structure(state, &g)?;
+    let (results, project) = state.store.read(|c| {
+        let results: Vec<AnalysisResult> =
+            rows::select_where(c, "analysis_id = ?", [analysis_id], "rowid")?;
+        let project: Option<Project> = match &g.analysis.project_id {
+            Some(p) => rows::get(c, p)?,
+            None => None,
+        };
+        Ok((results, project))
+    })?;
+    let distributions: Vec<(String, Value)> = results
+        .into_iter()
+        .filter_map(|r| {
+            Some((
+                r.sample_id?,
+                r.probability_distribution.unwrap_or(Value::Null),
+            ))
+        })
+        .collect();
+    let p_before = match t {
+        Some(t) => Some(p_before_all(state, analysis_id, t)?),
+        None => None,
+    };
+    let same_event = same_event_for_samples(state, &g.analysis.analysis_type, &g.samples);
+    let spans = context_spans(state, analysis_id)?;
+    let bytes = crate::report::render(
+        state,
+        &crate::report::Inputs {
+            analysis: &g.analysis,
+            structure: &structure,
+            rows: &g.rows,
+            samples: &g.samples,
+            distributions: &distributions,
+            context_spans: &spans,
+            same_event: &same_event,
+            p_before: p_before.as_ref(),
+            project_name: project.map(|p| p.name),
+            date_format,
+            coordinate_precision: &g.precision,
+        },
+    );
+    Ok((
+        [
+            (header::CONTENT_TYPE, "application/pdf".to_owned()),
+            (
+                header::CONTENT_DISPOSITION,
+                format!("attachment; filename=analysis-{analysis_id}-report.pdf"),
+            ),
+        ],
+        bytes,
+    )
+        .into_response())
+}
+
+async fn export_pdf(
+    Extract(state): Extract<State>,
+    Path(analysis_id): Path<String>,
+    Query(q): Query<HashMap<String, String>>,
+) -> ApiResult<Response> {
+    let p = query_float(&q, "p_before_bp")?;
+    pdf_response(
+        &state,
+        &analysis_id,
+        q.get("date_format").map(String::as_str),
+        p,
+    )
+}
+
+/// The CSV, the JSON or the PDF, chosen in the body.
 async fn export_results(
     Extract(state): Extract<State>,
     Path(analysis_id): Path<String>,
@@ -1521,8 +1625,7 @@ async fn export_results(
     match format.as_str() {
         "csv" => csv_response(&state, &analysis_id, date_format, p, "results"),
         "json" => Ok(ok(json_payload(&state, &analysis_id, p)?).into_response()),
-        // The PDF report is not ported yet: answered as the route it will be.
-        "pdf" => Err(ApiError::not_found("Not Found")),
+        "pdf" => pdf_response(&state, &analysis_id, date_format, p),
         other => Err(ApiError::bad_request(format!(
             "Unsupported format: {other}"
         ))),
@@ -1544,6 +1647,7 @@ pub fn router() -> Router<State> {
         .route("/api/results/{analysis_id}/export/json", get(export_json))
         .route("/api/results/{analysis_id}/p-before", get(get_p_before))
         .route("/api/results/{analysis_id}/export/oxcal", get(export_oxcal))
+        .route("/api/results/{analysis_id}/pdf", get(export_pdf))
         .route("/api/results/{analysis_id}/graphs", get(get_graphs))
         .route("/api/results/{analysis_id}/export", post(export_results))
 }

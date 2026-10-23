@@ -25,8 +25,7 @@ fn removed(method: &str, path: &str) -> bool {
 }
 
 /// Routes not ported yet, each with what stands in their way.
-const NOT_YET: &[(&str, &str, &str)] =
-    &[("GET", "/api/results/{analysis_id}/pdf", "the PDF report")];
+const NOT_YET: &[(&str, &str, &str)] = &[];
 
 #[tokio::test(flavor = "multi_thread")]
 async fn every_backend_route_is_served() {
