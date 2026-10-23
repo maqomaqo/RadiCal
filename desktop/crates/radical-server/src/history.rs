@@ -180,6 +180,45 @@ fn write_py(value: &Value, out: &mut String) {
     }
 }
 
+/// Python's `json.dumps(value, indent=indent)`: one item a line, `": "`
+/// between key and value, non-ASCII escaped. Keys in serde_json's order.
+pub fn py_json_indented(value: &Value, indent: usize) -> String {
+    let mut out = String::new();
+    write_indented(value, indent, 0, &mut out);
+    out
+}
+
+fn write_indented(value: &Value, indent: usize, depth: usize, out: &mut String) {
+    let pad = |d: usize| " ".repeat(indent * d);
+    match value {
+        Value::Array(a) if !a.is_empty() => {
+            out.push('[');
+            for (i, v) in a.iter().enumerate() {
+                out.push_str(if i > 0 { ",\n" } else { "\n" });
+                out.push_str(&pad(depth + 1));
+                write_indented(v, indent, depth + 1, out);
+            }
+            out.push('\n');
+            out.push_str(&pad(depth));
+            out.push(']');
+        }
+        Value::Object(o) if !o.is_empty() => {
+            out.push('{');
+            for (i, (k, v)) in o.iter().enumerate() {
+                out.push_str(if i > 0 { ",\n" } else { "\n" });
+                out.push_str(&pad(depth + 1));
+                write_py(&Value::String(k.clone()), out);
+                out.push_str(": ");
+                write_indented(v, indent, depth + 1, out);
+            }
+            out.push('\n');
+            out.push_str(&pad(depth));
+            out.push('}');
+        }
+        other => write_py(other, out),
+    }
+}
+
 /// A fingerprint of what a run was computed from, and not of the
 /// analysis's name, which changes nothing.
 pub fn inputs_hash(

@@ -19,11 +19,13 @@ use serde_json::{Value, json};
 
 pub mod blocks;
 pub mod curves;
+pub mod form;
 pub mod history;
 pub mod routes;
 pub mod schemas;
 pub mod solve;
 pub mod validate;
+pub mod zip;
 
 /// What every handler can reach.
 #[derive(Clone)]

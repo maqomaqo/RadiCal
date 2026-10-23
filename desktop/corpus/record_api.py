@@ -19,15 +19,37 @@ import json
 import os
 
 EXCHANGES = []
-CURRENT = {'test': None}
+CURRENT = {'test': None, 'cleanup': []}
+
+# Fixtures that undo, behind the API, what their test stored -- which the
+# replay has to undo too, or the next test sees rows the backend's did not.
+CLEANUP_FIXTURES = ('remove_stored_curves',)
 
 
 def pytest_runtest_setup(item):
     CURRENT['test'] = item.nodeid
+    CURRENT['cleanup'] = [f for f in CLEANUP_FIXTURES if f in item.fixturenames]
+
+
+def _zip_members(raw):
+    """A zip's members by name: text as text, anything else as its hash."""
+    import io
+    import zipfile
+    members = {}
+    with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+        for name in archive.namelist():
+            data = archive.read(name)
+            try:
+                members[name] = data.decode('utf-8')
+            except UnicodeDecodeError:
+                members[name] = {'sha256': hashlib.sha256(data).hexdigest()}
+    return members
 
 
 def _response_body(response):
     ctype = response.headers.get('content-type', '')
+    if 'zip' in ctype:
+        return {'response_zip': _zip_members(response.content)}
     if 'json' in ctype:
         try:
             return {'response_json': response.json()}
@@ -37,6 +59,19 @@ def _response_body(response):
     if ctype.startswith('text/') or 'csv' in ctype:
         return {'response_text': raw.decode('utf-8', 'replace')}
     return {'response_sha256': hashlib.sha256(raw).hexdigest(), 'response_len': len(raw)}
+
+
+def _readable(files):
+    out = {}
+    for key, value in (files.items() if isinstance(files, dict) else files):
+        if isinstance(value, (tuple, list)):
+            content = value[1]
+            if hasattr(content, 'read'):
+                content = content.read()
+            out[key] = (value[0], content, *value[2:])
+        else:
+            out[key] = value.read() if hasattr(value, 'read') else value
+    return out
 
 
 def _files(files):
@@ -61,12 +96,28 @@ def pytest_configure(config):
         # Copied before sending: a test that edits its body and posts it
         # again would otherwise rewrite the earlier exchange's request too.
         sent = copy.deepcopy({k: kwargs.get(k) for k in ('json', 'params')})
+        # A file object is read by the request, so it is read here first and
+        # sent as the bytes it held: recorded afterwards, it would be empty.
+        if kwargs.get('files'):
+            kwargs['files'] = _readable(kwargs['files'])
+        # RECORD_DUMP_AT=N writes the analyses filed under no project, as the
+        # database holds them just before exchange N: for finding where a
+        # replay's count parts from the backend's.
+        if os.environ.get('RECORD_DUMP_AT') == str(len(EXCHANGES)):
+            from app.database import SessionLocal
+            from app.models import Analysis
+            with SessionLocal() as db:
+                rows = db.query(Analysis).filter(Analysis.project_id.is_(None)).all()
+                with open(os.environ['RECORD_OUT'] + '.dump', 'w') as fh:
+                    for a in rows:
+                        fh.write(f'{a.id} {a.owner_id} {a.status} {a.name}\n')
         response = original(self, method, url, **kwargs)
         auth = (kwargs.get('headers') or {}).get('Authorization') or self.headers.get('Authorization')
         data = kwargs.get('data')
         content = kwargs.get('content')
         EXCHANGES.append({
             'test': CURRENT['test'],
+            'cleanup': CURRENT['cleanup'],
             'auth': hashlib.sha256(auth.encode()).hexdigest()[:8] if auth else None,
             'method': method.upper(),
             'url': str(url).replace('http://testserver', ''),

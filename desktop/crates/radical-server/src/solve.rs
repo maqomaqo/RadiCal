@@ -21,7 +21,7 @@ use radical_core::intervals::Draws;
 use radical_core::kde;
 use radical_core::measurement::{Calibrator, Measurement};
 use radical_core::model_tree::{
-    Element, Param, Params, elements_of_type, plan_model, standalone_wiggle_match,
+    Element, Param, Params, element_label, elements_of_type, plan_model, standalone_wiggle_match,
     validate_ordinates,
 };
 use radical_core::wiggle_match;
@@ -53,6 +53,38 @@ fn param(v: &Value) -> Param {
 
 fn opt_str(v: &Value) -> Option<String> {
     v.as_str().map(str::to_owned)
+}
+
+/// A date as a request or a draft sends it, as the solvers take it.
+pub fn json_measurement(v: &Value) -> Measurement {
+    let text = |k: &str| v[k].as_str().map(str::to_owned);
+    let num = |k: &str| v[k].as_f64();
+    Measurement {
+        id: match &v["id"] {
+            Value::String(s) => s.clone(),
+            Value::Null => String::new(),
+            other => other.to_string(),
+        },
+        sample_name: text("sample_name"),
+        age_bp: num("age_bp").unwrap_or(0.0),
+        error_1sigma: num("error_1sigma").unwrap_or(0.0),
+        curve_id: text("curve_id"),
+        delta_r: num("delta_r"),
+        delta_r_error: num("delta_r_error"),
+        tpq_age_bp: num("tpq_age_bp"),
+        taq_age_bp: num("taq_age_bp"),
+        element_id: text("element_id"),
+        group_id: text("group_id"),
+        outlier_prior: num("outlier_prior"),
+        outlier_model: text("outlier_model"),
+        inbuilt_years: num("inbuilt_years"),
+        inbuilt_shape: text("inbuilt_shape"),
+        ring_offset: num("ring_offset"),
+        ring_offset_error: num("ring_offset_error"),
+        depth_cm: num("depth_cm"),
+        latitude: num("latitude"),
+        longitude: num("longitude"),
+    }
 }
 
 /// The part of a stored or requested tree the solvers read.
@@ -313,6 +345,8 @@ pub struct Solved {
     /// Each element's posterior -- Boundaries, a wiggle match's reference
     /// age, an undated level's age -- by element id.
     pub elements: Vec<(String, Posterior)>,
+    /// Each of those elements' names, as the solver reported them.
+    pub names: HashMap<String, String>,
     pub solver: Value,
     pub intervals: Option<Value>,
     pub summaries: Option<Value>,
@@ -558,6 +592,11 @@ fn solve_bayesian(
                 .iter()
                 .map(|(id, b)| (id.clone(), b.posterior.clone()))
                 .collect(),
+            names: solution
+                .boundaries
+                .iter()
+                .map(|(id, b)| (id.clone(), b.name.clone()))
+                .collect(),
             solver,
             intervals: solution.intervals.as_ref().map(blocks::block),
             summaries,
@@ -653,6 +692,11 @@ fn solve_bayesian(
             .iter()
             .map(|(id, _, p)| (id.clone(), p.clone()))
             .collect(),
+        names: sampled
+            .boundaries
+            .iter()
+            .map(|(id, name, _)| (id.clone(), name.clone()))
+            .collect(),
         solver,
         intervals: sampled.intervals.as_ref().map(blocks::block),
         summaries,
@@ -733,6 +777,7 @@ fn wiggle(
         results: solved.measurements,
         agreement: true,
         elements: vec![(element.id.clone(), solved.reference)],
+        names: HashMap::from([(element.id.clone(), element_label(element))]),
         solver,
         intervals: None,
         summaries: None,

@@ -194,7 +194,8 @@ async fn duplicate(
     }
     let copy = state
         .store
-        .write(|tx| copy_inputs(tx, &source, &name, config.clone()))?;
+        .write(|tx| copy_inputs(tx, &source, &name, config.clone()))?
+        .0;
     Ok(ok(json!({
         "id": copy.id,
         "name": copy.name,
@@ -205,6 +206,9 @@ async fn duplicate(
     })))
 }
 
+/// The copy, and its dates' and elements' ids by the source's.
+pub type Copied = (Analysis, HashMap<String, String>, HashMap<String, String>);
+
 /// `_copy_inputs`: the copy, with its own contexts, dates, relationships
 /// and tree, ids remapped and no results.
 pub fn copy_inputs(
@@ -212,7 +216,7 @@ pub fn copy_inputs(
     source: &Analysis,
     name: &str,
     config: Option<Value>,
-) -> radical_store::Result<Analysis> {
+) -> radical_store::Result<Copied> {
     let now = Some(Timestamp::now());
     let copy = Analysis {
         id: radical_store::new_id(),
@@ -306,8 +310,8 @@ pub fn copy_inputs(
 
     let elements: Vec<ModelElement> =
         rows::select_where(tx, "analysis_id = ?", [&source.id], "rowid")?;
+    let mut element_map = groups_map.clone();
     if let Some(mut tree) = rows_to_tree(&elements) {
-        let mut element_map = groups_map.clone();
         let mut all = Vec::new();
         walk_tree(&tree, &mut all);
         for e in all {
@@ -334,7 +338,7 @@ pub fn copy_inputs(
             }
         }
     }
-    Ok(copy)
+    Ok((copy, samples_map, element_map))
 }
 
 fn clear_posteriors(e: &mut Value) {

@@ -52,15 +52,55 @@ const PORTED: &[&str] = &[
     "POST /api/analysis/{analysis_id}/duplicate",
     "PUT /api/analysis/{analysis_id}/inputs",
     "GET /api/jobs/{job_id}",
+    "GET /api/results/{analysis_id}/table",
+    "GET /api/results/{analysis_id}/export/csv",
+    "GET /api/results/{analysis_id}/export/json",
+    "GET /api/results/{analysis_id}/p-before",
+    "GET /api/results/{analysis_id}/export/oxcal",
+    "GET /api/results/{analysis_id}/graphs",
+    "GET /api/curves",
+    "POST /api/curves",
+    "GET /api/curves/compare",
+    "POST /api/curves/import/preview",
+    "POST /api/curves/mixed",
+    "GET /api/curves/type/{curve_type}",
+    "GET /api/curves/{curve_id}",
+    "PATCH /api/curves/{curve_id}",
+    "DELETE /api/curves/{curve_id}",
+    "GET /api/curves/{curve_id}/points",
+    "GET /api/curves/{curve_id}/points.csv",
+    "POST /api/curves/{curve_id}/simulate",
+    "GET /api/curves/{curve_id}/resolution",
+    "GET /api/curves/{curve_id}/resolution.csv",
+    "GET /api/curves/{curve_id}/usage",
+    "POST /api/curves/{curve_id}/restore",
+    "GET /api/curves/{curve_id}/export",
+    "POST /api/import/dates",
+    "GET /api/import/csv-template",
+    "GET /api/import/csv-columns",
+    "GET /api/projects/{project_id}/export",
+    "GET /api/projects/{project_id}/samples/export",
+    "POST /api/import/project/preview",
+    "POST /api/import/project",
+    "GET /api/model-templates",
+    "POST /api/model-templates",
+    "PATCH /api/model-templates/{template_id}",
+    "DELETE /api/model-templates/{template_id}",
+    "GET /api/model-templates/export",
+    "POST /api/import/model-templates/preview",
+    "POST /api/import/model-templates",
+    "GET /api/analysis/{analysis_id}/runs",
+    "GET /api/analysis/{analysis_id}/runs/{run_id}",
+    "GET /api/projects/{project_id}/run-diff",
+    "POST /api/analysis/{analysis_id}/influence",
+    "GET /api/analysis/{analysis_id}/influence",
+    "POST /api/analysis/{analysis_id}/influence/open",
+    "POST /api/dispersal/propose-sequence",
 ];
 
 /// Tests whose exchanges cannot match, and why. Each is excused whole, so
 /// keep the reasons narrow.
 const KNOWN: &[(&str, &str)] = &[
-    (
-        "test_project_import.py::",
-        "counts projects the import routes made, which are not ported yet",
-    ),
     (
         "test_run_control.py::TestDuplicateWithNewSeed::test_the_copy_takes_a_fresh_seed_and_says_so",
         "the copy's seed is random by design",
@@ -72,6 +112,34 @@ const KNOWN: &[(&str, &str)] = &[
     (
         "test_jobs.py::TestFailure::test_a_job_for_a_deleted_analysis_fails_rather_than_crashing",
         "the job races the deletion, and where it is when the analysis goes decides the message",
+    ),
+    (
+        "test_run_history.py::TestRecording::test_a_failure_to_record_never_fails_the_run",
+        "the test breaks the recording with a monkeypatch",
+    ),
+    (
+        "test_run_history.py::TestProjectDiff::test_a_changed_date_is_listed_with_what_moved",
+        "the test changes a date in the database, behind the API",
+    ),
+    (
+        "test_influence.py::TestTheReport::test_editing_the_analysis_marks_the_report_stale",
+        "the test changes a date in the database, behind the API",
+    ),
+    (
+        "test_oxcal_export.py::TestThroughTheApi::test_the_endpoint_writes_the_analysis_and_counts_what_it_left_out",
+        "the file names the commit the backend ran from",
+    ),
+    // A Boundary on a 10-year grid reported at 5 years: each grid cell is
+    // two reporting bins of exactly equal mass, so which of a pair the
+    // 68.3% region takes is decided by the last bit, and the two solvers'
+    // densities agree to 6e-15, not to the bit.
+    (
+        "test_agreement.py::TestWhatItCanAndCannotSee::test_does_not_flag_an_outlier_a_lone_phase_can_simply_absorb",
+        "a tie between two reporting bins",
+    ),
+    (
+        "test_rerun.py::TestEditingKeepsTheOutlierSetting::test_replacing_inputs_keeps_it",
+        "a tie between two reporting bins",
     ),
     (
         "test_project_samples.py::TestDeployingAsCalibration::test_an_analysis_already_stored_as_multi_date_calibration_is_repaired",
@@ -235,6 +303,14 @@ const VOLATILE: &[&str] = &[
     "wall_seconds",
     "last_run_at",
     "seconds",
+    // Which build ran, and when a package was made: the machine's, not the
+    // answer's.
+    "app_commit",
+    "exported_at",
+    "commits",
+    // A fingerprint over inputs that include random ids. Whether two agree
+    // is still held, as `stale` and `same_inputs`.
+    "inputs_hash",
 ];
 
 fn has_placeholder(v: &Value) -> bool {
@@ -295,7 +371,9 @@ fn differs(path: &str, got: &Value, want: &Value, ids: &mut Ids) -> Option<Strin
             // A list ordered by its ids (sorted, or as SQLite's index on them
             // returns it) comes out in another order when the ids are other
             // random ones: the same items in any order is the same answer.
-            if !w.iter().any(has_placeholder) {
+            // So does a package's collection: dates added in one request
+            // share a created_at, and their random ids break the tie.
+            if !w.iter().any(has_placeholder) && path != "samples.json" {
                 return in_order;
             }
             let mut used = vec![false; g.len()];
@@ -324,27 +402,108 @@ fn differs(path: &str, got: &Value, want: &Value, ids: &mut Ids) -> Option<Strin
                 .keys()
                 .filter(|k| !VOLATILE.contains(&k.as_str()))
                 .collect();
-            let mut wk: Vec<&String> = w.keys().collect();
+            let mut wk: Vec<&String> = w
+                .keys()
+                .filter(|k| !VOLATILE.contains(&k.as_str()))
+                .collect();
             gk.sort();
             wk.sort();
-            if gk != wk {
-                return Some(format!("{path}: keys {gk:?} vs {wk:?}"));
+            let whole_id = |k: &str| {
+                PLACEHOLDER
+                    .captures(k)
+                    .filter(|c| c[0].len() == k.len())
+                    .map(|c| c[1].to_owned())
+            };
+            if !wk.iter().any(|k| whole_id(k).is_some()) {
+                if gk != wk {
+                    return Some(format!("{path}: keys {gk:?} vs {wk:?}"));
+                }
+                return w
+                    .iter()
+                    .filter(|(k, _)| !VOLATILE.contains(&k.as_str()))
+                    .find_map(|(k, wv)| differs(&format!("{path}.{k}"), &g[k], wv, ids));
             }
-            w.iter()
-                .find_map(|(k, wv)| differs(&format!("{path}.{k}"), &g[k], wv, ids))
+            // Keyed by id: a bound id names its own key, and an unbound one
+            // takes the first free key whose value matches.
+            if gk.len() != wk.len() {
+                return Some(format!("{path}: {} keys vs {}", gk.len(), wk.len()));
+            }
+            let mut used: std::collections::HashSet<String> = std::collections::HashSet::new();
+            for (k, wv) in w {
+                let key = match whole_id(k) {
+                    None => k.clone(),
+                    Some(n) => match ids.forward.get(&n) {
+                        Some(bound) => bound.clone(),
+                        None => {
+                            // Bound only when one key alone matches: values
+                            // such as probabilities often tie.
+                            // Held against every key, taken or not: a key an
+                            // ambiguous one took may be this one's own.
+                            let matching: Vec<&&String> = gk
+                                .iter()
+                                .filter(|candidate| {
+                                    let mut trial = ids.clone();
+                                    trial.bind(&n, candidate)
+                                        && differs("", &g[candidate.as_str()], wv, &mut trial)
+                                            .is_none()
+                                })
+                                .collect();
+                            let Some(free) = matching.iter().find(|c| !used.contains(c.as_str()))
+                            else {
+                                return Some(format!("{path}: nothing matches {k}"));
+                            };
+                            if matching.len() == 1 {
+                                ids.bind(&n, free);
+                            }
+                            (**free).clone()
+                        }
+                    },
+                };
+                let Some(gv) = g.get(&key) else {
+                    return Some(format!("{path}: no {k}"));
+                };
+                used.insert(key.clone());
+                if let Some(d) = differs(&format!("{path}.{k}"), gv, wv, ids) {
+                    return Some(d);
+                }
+            }
+            None
         }
         _ => (got != want).then(|| format!("{path}: {got} vs {want}")),
     }
 }
 
-fn multipart(files: &Value, ids: &mut Ids) -> (String, Vec<u8>) {
+fn multipart(files: &Value, data: &Value, ids: &mut Ids) -> (String, Vec<u8>) {
     use base64::Engine;
     let boundary = "radical-replay-boundary";
     let mut body = Vec::new();
+    for (field, value) in data.as_object().into_iter().flatten() {
+        let text = ids.fill(
+            &value
+                .as_str()
+                .map_or_else(|| value.to_string(), str::to_owned),
+        );
+        body.extend(
+            format!(
+                "--{boundary}\r\nContent-Disposition: form-data; name=\"{field}\"\r\n\r\n{text}\r\n"
+            )
+            .as_bytes(),
+        );
+    }
     for (field, file) in files.as_object().unwrap() {
-        let content = base64::engine::general_purpose::STANDARD
-            .decode(file["b64"].as_str().unwrap())
-            .unwrap();
+        // A zip is kept as its members' text, and built again here.
+        let content = match file["zip"].as_object() {
+            Some(members) => {
+                let mut zip = radical_server::zip::Writer::default();
+                for (name, text) in members {
+                    zip.add(name, ids.fill(text.as_str().unwrap_or_default()).as_bytes());
+                }
+                zip.finish()
+            }
+            None => base64::engine::general_purpose::STANDARD
+                .decode(file["b64"].as_str().unwrap())
+                .unwrap(),
+        };
         let name = ids.fill(file["filename"].as_str().unwrap_or("upload"));
         body.extend(format!(
             "--{boundary}\r\nContent-Disposition: form-data; name=\"{field}\"; filename=\"{name}\"\r\nContent-Type: application/octet-stream\r\n\r\n"
@@ -387,7 +546,7 @@ async fn send(
                 ids.fill_json(&inputs["request_json"]).to_string(),
             ))
     } else if inputs["files"].is_object() {
-        let (ctype, body) = multipart(&inputs["files"], ids);
+        let (ctype, body) = multipart(&inputs["files"], &inputs["request_data"], ids);
         builder.header("content-type", ctype).body(Body::from(body))
     } else if let Some(text) = inputs["request_content"].as_str() {
         builder.body(Body::from(ids.fill(text)))
@@ -404,7 +563,11 @@ async fn send(
         .unwrap_or("")
         .to_owned();
     let bytes = response.into_body().collect().await.unwrap().to_bytes();
-    if ctype.contains("json") {
+    if ctype.contains("zip") {
+        use base64::Engine;
+        let encoded = base64::engine::general_purpose::STANDARD.encode(&bytes);
+        (status, None, Some(encoded))
+    } else if ctype.contains("json") {
         (status, serde_json::from_slice(&bytes).ok(), None)
     } else {
         (
@@ -428,12 +591,175 @@ struct Tally {
     first: Option<String>,
 }
 
+/// The eight characters of an id a package's file names carry, which the
+/// recording could not placeholder.
+static ID_PREFIX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"-[0-9a-f]{8}\.json").unwrap());
+
+/// A JSON value with the VOLATILE keys taken out.
+fn without_volatile(v: &Value) -> Value {
+    match v {
+        Value::Object(o) => Value::Object(
+            o.iter()
+                .filter(|(k, _)| !VOLATILE.contains(&k.as_str()))
+                .map(|(k, v)| (k.clone(), without_volatile(v)))
+                .collect(),
+        ),
+        Value::Array(a) => Value::Array(a.iter().map(without_volatile).collect()),
+        other => other.clone(),
+    }
+}
+
+/// A zip held to the recorded one member by member, in order: JSON as
+/// JSON, text line by line.
+fn zip_differs(encoded: &str, want: &Value, ids: &mut Ids) -> Option<String> {
+    use base64::Engine;
+    let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(encoded) else {
+        return Some("not a zip".to_owned());
+    };
+    let got = match radical_server::zip::read(&bytes) {
+        Ok(m) => m,
+        Err(e) => return Some(e),
+    };
+    let want = want.as_object().unwrap();
+    if got.len() != want.len() {
+        let names: Vec<&String> = got.iter().map(|(n, _)| n).collect();
+        return Some(format!(
+            "{} members vs {}: {names:?}",
+            got.len(),
+            want.len()
+        ));
+    }
+    let norm = |t: &str| ID_PREFIX.replace_all(t, "-HEX.json").into_owned();
+    // The recording keeps members by name, so they are held to it by name.
+    let mut got = got;
+    got.sort_by_key(|(n, _)| norm(n));
+    let mut want: Vec<(&String, &Value)> = want.iter().collect();
+    want.sort_by_key(|(n, _)| norm(n));
+    for ((name, data), (want_name, want_member)) in got.iter().zip(want) {
+        if norm(name) != norm(want_name) {
+            return Some(format!("member {name} vs {want_name}"));
+        }
+        let text = norm(&String::from_utf8_lossy(data));
+        let Some(want_text) = want_member.as_str().map(norm) else {
+            continue;
+        };
+        if name.ends_with(".json") {
+            let (Ok(g), Ok(w)) = (
+                serde_json::from_str::<Value>(&text),
+                serde_json::from_str::<Value>(&want_text),
+            ) else {
+                return Some(format!("{name}: not JSON"));
+            };
+            if let Some(d) = differs(name, &g, &without_volatile(&w), ids) {
+                return Some(d);
+            }
+        } else if let Some(d) = lines_differ(name, &text, &want_text, ids) {
+            return Some(d);
+        }
+    }
+    None
+}
+
+/// Text held to the recording line by line, ids bound as they go; rows in
+/// another order are matched one for one, since a table ordered by random
+/// ids comes out in no order the replay can reproduce.
+fn lines_differ(label: &str, got: &str, want: &str, ids: &mut Ids) -> Option<String> {
+    let (g, w): (Vec<&str>, Vec<&str>) = (got.lines().collect(), want.lines().collect());
+    if g.len() != w.len() {
+        return Some(format!("{label}: {} lines vs {}", g.len(), w.len()));
+    }
+    let mut trial = ids.clone();
+    let in_order = g.iter().zip(&w).enumerate().find_map(|(k, (gl, wl))| {
+        differs(
+            &format!("{label}:{}", k + 1),
+            &Value::from(*gl),
+            &Value::from(*wl),
+            &mut trial,
+        )
+    });
+    let Some(first) = in_order else {
+        *ids = trial;
+        return None;
+    };
+    let mut used = vec![false; g.len()];
+    let mut trial = ids.clone();
+    for wl in &w {
+        let found = (0..g.len()).find(|&k| {
+            !used[k] && {
+                let mut t = trial.clone();
+                differs("", &Value::from(g[k]), &Value::from(*wl), &mut t).is_none()
+            }
+        });
+        let Some(k) = found else {
+            return Some(first);
+        };
+        differs("", &Value::from(g[k]), &Value::from(*wl), &mut trial);
+        used[k] = true;
+    }
+    *ids = trial;
+    None
+}
+
+/// What a test writes to the database itself before its first request,
+/// done here too, so the tests after it see the same rows.
+fn behind_the_api(state: &radical_server::State, test: &str) {
+    if test.ends_with(
+        "test_pdf_report.py::TestReportContent::test_a_pending_analysis_still_produces_a_report",
+    ) {
+        let now = Some(radical_store::Timestamp::now());
+        let analysis = radical_store::rows::Analysis {
+            id: radical_store::new_id(),
+            name: "Not run yet".to_owned(),
+            analysis_type: "calibration".to_owned(),
+            status: Some("pending".to_owned()),
+            created_at: now,
+            updated_at: now,
+            ..radical_store::rows::Analysis::default()
+        };
+        state
+            .store
+            .write(|tx| radical_store::rows::insert(tx, &analysis))
+            .unwrap();
+    }
+}
+
+fn stored_curve_ids(state: &radical_server::State) -> Vec<String> {
+    let rows: Vec<radical_store::rows::CalibrationCurve> = state
+        .store
+        .read(|c| radical_store::rows::select_where(c, "1 = 1", [], "rowid"))
+        .unwrap();
+    rows.into_iter().map(|r| r.id).collect()
+}
+
+/// The suite's `remove_stored_curves` fixture: every curve the test stored
+/// deleted once it has finished, behind the API.
+fn remove_stored_curves(state: &radical_server::State, before: &[String]) {
+    for id in stored_curve_ids(state) {
+        if !before.contains(&id) {
+            state
+                .store
+                .write(|tx| {
+                    radical_store::rows::delete_where::<radical_store::rows::CalibrationCurve>(
+                        tx,
+                        "id = ?",
+                        [&id],
+                    )
+                })
+                .unwrap();
+            radical_server::routes::curve_routes::forget(state, &id);
+        }
+    }
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn the_backend_suite_replayed() {
     let family = load_family("api/exchanges").unwrap();
     let dir = std::env::temp_dir().join(format!("radical-replay-{}", radical_store::new_id()));
     let state = radical_server::State::open(dir.join("radical.db"), 2).unwrap();
-    let app = radical_server::app(state);
+    let app = radical_server::app(state.clone());
+    // The test whose exchanges these are, and the curves stored before it
+    // began when it is one that removes what it stored.
+    let mut current: Option<(String, Option<Vec<String>>)> = None;
     let mut ids = Ids::default();
     let mut tally: BTreeMap<String, Tally> = BTreeMap::new();
     let routes = routes(&family.cases);
@@ -441,6 +767,27 @@ async fn the_backend_suite_replayed() {
     for case in &family.cases {
         let i = case.expanded_inputs();
         let want = case.expanded_outputs().unwrap();
+        let test_name = i["test"].as_str().unwrap_or("").to_owned();
+        if std::env::var("REPLAY_DUMP_AT").is_ok_and(|n| case.name.starts_with(&n)) {
+            let rows: Vec<radical_store::rows::Analysis> = state
+                .store
+                .read(|c| radical_store::rows::select_where(c, "project_id IS NULL", [], "rowid"))
+                .unwrap();
+            for a in rows {
+                let placeholder = ids.taken.get(&a.id).cloned().unwrap_or_default();
+                eprintln!("UNASSIGNED <id:{placeholder}> {} {:?}", a.name, a.status);
+            }
+        }
+        if current.as_ref().is_none_or(|(t, _)| *t != test_name) {
+            if let Some((_, Some(before))) = current.take() {
+                remove_stored_curves(&state, &before);
+            }
+            let cleans = i["cleanup"]
+                .as_array()
+                .is_some_and(|c| c.iter().any(|f| f == "remove_stored_curves"));
+            current = Some((test_name.clone(), cleans.then(|| stored_curve_ids(&state))));
+            behind_the_api(&state, &test_name);
+        }
         let (method, url) = (i["method"].as_str().unwrap(), i["url"].as_str().unwrap());
         // The suite's own account, or nobody for the routes open to all.
         let open = matches!(url, "/api/health");
@@ -515,8 +862,15 @@ async fn the_backend_suite_replayed() {
                 Some(b) => differs("", &moment(&summarise(b)), &moment(w), &mut ids),
                 None => Some("not JSON".to_owned()),
             }
+        } else if let Some(w) = want.get("response_zip") {
+            zip_differs(text.as_deref().unwrap_or(""), w, &mut ids)
         } else if let Some(w) = want.get("response_text") {
-            (text.as_deref() != w.as_str()).then(|| "text differs".to_owned())
+            lines_differ(
+                "text",
+                text.as_deref().unwrap_or(""),
+                w.as_str().unwrap_or(""),
+                &mut ids,
+            )
         } else {
             None
         };
@@ -525,7 +879,12 @@ async fn the_backend_suite_replayed() {
             // Behind a route not ported yet: in its own test, or through an
             // id only such a route could have made.
             Some(_) if blocked_tests.contains(&test) || invented => entry.blocked += 1,
-            Some(_) if KNOWN.iter().any(|(t, _)| test.contains(t)) => entry.excused += 1,
+            Some(p) if KNOWN.iter().any(|(t, _)| test.contains(t)) => {
+                if std::env::var("REPLAY_SHOW").is_ok_and(|s| route.contains(&s)) {
+                    eprintln!("EXCUSED {route} {} ({}): {p}", case.name, test);
+                }
+                entry.excused += 1;
+            }
             Some(p) => {
                 // REPLAY_SHOW=<part of a route> lists every difference there.
                 if std::env::var("REPLAY_SHOW").is_ok_and(|s| route.contains(&s)) {
@@ -546,7 +905,7 @@ async fn the_backend_suite_replayed() {
         n += t.not_ported;
         b += t.blocked;
         x += t.excused;
-        if t.matched + t.differed + t.blocked > 0 {
+        if t.matched + t.differed + t.blocked + t.not_ported + t.excused > 0 {
             eprintln!(
                 "{:5} {:5} {:5} {:5}  {route}{}",
                 t.matched,

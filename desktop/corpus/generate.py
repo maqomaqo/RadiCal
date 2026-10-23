@@ -63,6 +63,7 @@ two runs of this script on one commit write identical files.
 """
 from __future__ import annotations
 
+import base64
 import datetime
 from collections import Counter
 import hashlib
@@ -75,7 +76,8 @@ import re
 import subprocess
 import sys
 import tempfile
-from typing import Any, Callable, Dict, List
+import zipfile
+from typing import Any, Callable, Dict, List, Optional
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, '..', '..'))
@@ -2228,6 +2230,26 @@ def summarise_long_arrays(value: Any) -> Any:
     return value
 
 
+def _readable_uploads(files: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """An uploaded zip as its members' text, as a zip response is kept, rather
+    than as base64: the replay builds the zip again, and the text is what the
+    names check can read."""
+    if not files:
+        return files
+    out = {}
+    for field, upload in files.items():
+        raw = base64.b64decode(upload.get('b64') or '')
+        if raw[:4] != b'PK\x03\x04':
+            out[field] = upload
+            continue
+        members = {}
+        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+            for name in archive.namelist():
+                members[name] = archive.read(name).decode('utf-8')
+        out[field] = {'filename': upload.get('filename'), 'zip': members}
+    return out
+
+
 def api_exchanges(recording: str) -> List[Dict[str, Any]]:
     """The backend's own API tests as HTTP exchanges (corpus/record_api.py), in
     the order they ran, ids placeholdered across the whole run and the
@@ -2239,11 +2261,14 @@ def api_exchanges(recording: str) -> List[Dict[str, Any]]:
     cases = []
     for i, x in enumerate(raw):
         who = 'none' if x['auth'] is None else 'suite' if x['auth'] == suite else 'other'
-        inputs = {k: x[k] for k in ('test', 'method', 'url', 'params', 'request_json',
-                                    'request_data', 'request_content', 'files')}
+        inputs = {k: x.get(k) for k in ('test', 'cleanup', 'method', 'url', 'params',
+                                        'request_json', 'request_data', 'request_content',
+                                        'files')}
+        inputs['files'] = _readable_uploads(inputs['files'])
         inputs['auth'] = who
         outputs = {'status': x['status'], 'content_type': x['content_type']}
-        for k in ('response_json', 'response_text', 'response_sha256', 'response_len'):
+        for k in ('response_json', 'response_text', 'response_zip', 'response_sha256',
+                  'response_len'):
             if k in x:
                 outputs[k] = summarise_long_arrays(x[k]) if k == 'response_json' else x[k]
         case = stable({'name': f"{i:04d} {x['method']} {x['url'].split('?')[0]}",
@@ -2264,7 +2289,8 @@ ID = re.compile(r'(?<![0-9A-Za-z])(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f
 # Fields that differ between two identical runs.
 VOLATILE = {'created_at', 'updated_at', 'started_at', 'completed_at', 'finished_at',
             'queued_at', 'elapsed_seconds', 'duration_seconds', 'runtime_seconds',
-            'compute_seconds', 'wall_seconds', 'last_run_at', 'seconds'}
+            'compute_seconds', 'wall_seconds', 'last_run_at', 'seconds',
+            'app_commit', 'exported_at'}
 
 
 class Stable:

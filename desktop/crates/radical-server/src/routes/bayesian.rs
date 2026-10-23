@@ -592,61 +592,67 @@ async fn rerun_analysis(
         ));
     }
     set_status(&state, &analysis_id, "pending", None);
-    let (worker, target) = (state.clone(), analysis_id.clone());
     let job_id = state.jobs.submit(
         "analysis_run",
         Some(&analysis_id),
-        Box::new(move |handle| {
-            if worker
-                .store
-                .read(|c| rows::get::<Analysis>(c, &target))?
-                .is_none()
-            {
-                return Err(
-                    Failed::refused(format!("Analysis '{target}' no longer exists")).job_error(),
-                );
-            }
-            set_status(&worker, &target, "running", None);
-            match rerun(&worker, &target, handle) {
-                Ok(()) => {
-                    let solver = worker
-                        .store
-                        .read(|c| rows::get::<Analysis>(c, &target))?
-                        .and_then(|a| a.solver)
-                        .map_or(Value::Null, |s| s["method"].clone());
-                    Ok(Some(json!({"analysis_id": target, "solver": solver})))
-                }
-                Err(Failed::Cancelled) => {
-                    // Only a finished run writes, so the analysis keeps the
-                    // results it already had.
-                    let has_results = worker
-                        .store
-                        .read(|c| {
-                            rows::select_where::<AnalysisResult>(
-                                c,
-                                "analysis_id = ?",
-                                [&target],
-                                "rowid",
-                            )
-                        })
-                        .is_ok_and(|r| !r.is_empty());
-                    let status = if has_results { "completed" } else { "pending" };
-                    set_status(&worker, &target, status, None);
-                    Err(radical_jobs::JobError::Cancelled)
-                }
-                Err(failure) => {
-                    let error = failure.job_error();
-                    let message = radical_jobs::classify(&error).message;
-                    set_status(&worker, &target, "failed", Some(message));
-                    Err(error)
-                }
-            }
-        }),
+        analysis_run_work(&state, &analysis_id),
     )?;
     Ok(answer(
         StatusCode::ACCEPTED,
         json!({"id": analysis_id, "status": "queued", "job_id": job_id}),
     ))
+}
+
+/// An 'analysis_run' job's work (`_run_analysis_job`): solve a saved
+/// analysis from its own inputs, recording failure or cancellation on it.
+pub fn analysis_run_work(state: &State, analysis_id: &str) -> radical_jobs::Work {
+    let (worker, target) = (state.clone(), analysis_id.to_owned());
+    Box::new(move |handle| {
+        if worker
+            .store
+            .read(|c| rows::get::<Analysis>(c, &target))?
+            .is_none()
+        {
+            return Err(
+                Failed::refused(format!("Analysis '{target}' no longer exists")).job_error(),
+            );
+        }
+        set_status(&worker, &target, "running", None);
+        match rerun(&worker, &target, handle) {
+            Ok(()) => {
+                let solver = worker
+                    .store
+                    .read(|c| rows::get::<Analysis>(c, &target))?
+                    .and_then(|a| a.solver)
+                    .map_or(Value::Null, |s| s["method"].clone());
+                Ok(Some(json!({"analysis_id": target, "solver": solver})))
+            }
+            Err(Failed::Cancelled) => {
+                // Only a finished run writes, so the analysis keeps the
+                // results it already had.
+                let has_results = worker
+                    .store
+                    .read(|c| {
+                        rows::select_where::<AnalysisResult>(
+                            c,
+                            "analysis_id = ?",
+                            [&target],
+                            "rowid",
+                        )
+                    })
+                    .is_ok_and(|r| !r.is_empty());
+                let status = if has_results { "completed" } else { "pending" };
+                set_status(&worker, &target, status, None);
+                Err(radical_jobs::JobError::Cancelled)
+            }
+            Err(failure) => {
+                let error = failure.job_error();
+                let message = radical_jobs::classify(&error).message;
+                set_status(&worker, &target, "failed", Some(message));
+                Err(error)
+            }
+        }
+    })
 }
 
 /// Every analysis in a project, in turn: (rerun count, failures).

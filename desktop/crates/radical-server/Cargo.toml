@@ -9,6 +9,7 @@ license.workspace = true
 
 [dependencies]
 axum = "0.8.9"
+miniz_oxide = "0.8"
 radical-core = { path = "../radical-core" }
 radical-io = { path = "../radical-io" }
 radical-jobs = { path = "../radical-jobs" }

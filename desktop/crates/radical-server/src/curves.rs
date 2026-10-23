@@ -35,6 +35,15 @@ impl StoreCurves {
         }
     }
 
+    /// Drop a stored curve that was deleted, so an id used again is built
+    /// afresh. (The old curve stays leaked: whatever still borrows it may.)
+    pub fn forget(&self, curve_id: &str) {
+        self.built
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .remove(curve_id);
+    }
+
     fn row(&self, curve_id: &str) -> Option<CurveRow> {
         self.store.read(|c| rows::get(c, curve_id)).ok().flatten()
     }
