@@ -814,14 +814,16 @@ async fn the_backend_suite_replayed() {
         ids.invented = false;
         let mut answer = send(&app, method, url, &i, &mut ids).await;
         let invented = ids.invented;
-        // A poll the backend saw finished waits for the Rust job to finish;
+        // A poll the backend saw finished waits for the Rust job to finish,
+        // as long as the suite's own `_await_job` would (300 s: a slow
+        // runner takes far longer than a laptop over an influence report);
         // one it saw still running accepts whatever state this one is in.
         if route == "GET /api/jobs/{job_id}" {
             let state = want["response_json"]["data"]["state"]
                 .as_str()
                 .unwrap_or("");
             if !matches!(state, "queued" | "running") {
-                for _ in 0..600 {
+                for _ in 0..6000 {
                     let now = answer
                         .1
                         .as_ref()

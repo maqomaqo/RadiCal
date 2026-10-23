@@ -47,7 +47,7 @@ fn a_job_completes_with_its_summary() {
     assert_eq!(shown["job_id"], json!(id));
     assert_eq!(shown["target_id"], json!("a1"));
     jobs.shutdown();
-    std::fs::remove_dir_all(dir).unwrap();
+    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
@@ -96,7 +96,7 @@ fn a_failure_is_classified_and_a_panic_is_the_apps_fault() {
         "the panic text is for the log, not the screen"
     );
     jobs.shutdown();
-    std::fs::remove_dir_all(dir).unwrap();
+    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
@@ -136,7 +136,7 @@ fn a_cancel_stops_a_running_job_and_drops_a_queued_one() {
     assert!(!jobs.cancel(&running).unwrap());
     assert!(!jobs.cancel("no-such-job").unwrap());
     jobs.shutdown();
-    std::fs::remove_dir_all(dir).unwrap();
+    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
@@ -172,7 +172,7 @@ fn jobs_about_one_target_run_in_order_and_others_alongside() {
         "both ran at once"
     );
     jobs.shutdown();
-    std::fs::remove_dir_all(dir).unwrap();
+    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
@@ -215,7 +215,7 @@ fn progress_is_throttled_unless_forced() {
     null.update(Some(0.5), None, true);
     assert!(!null.cancelled() && null.check_cancelled().is_ok());
     jobs.shutdown();
-    std::fs::remove_dir_all(dir).unwrap();
+    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
@@ -261,7 +261,7 @@ fn a_restart_fails_whatever_was_mid_flight() {
     let analysis: Analysis = store.read(|c| rows::get(c, "an")).unwrap().unwrap();
     assert_eq!(analysis.status.as_deref(), Some("failed"));
     assert_eq!(latest_for(&store, "nothing").unwrap(), None);
-    std::fs::remove_dir_all(dir).unwrap();
+    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
