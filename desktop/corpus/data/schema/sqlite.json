@@ -1,0 +1,1829 @@
+{
+ "schema": 2,
+ "family": "schema/sqlite",
+ "cases": [
+  {
+   "name": "alembic_version",
+   "inputs": {},
+   "outputs": {
+    "columns": [
+     {
+      "name": "version_num",
+      "type": "VARCHAR(32)",
+      "notnull": true,
+      "default": null,
+      "pk": 1
+     }
+    ],
+    "foreign_keys": [],
+    "indexes": []
+   }
+  },
+  {
+   "name": "analyses",
+   "inputs": {},
+   "outputs": {
+    "columns": [
+     {
+      "name": "id",
+      "type": "VARCHAR",
+      "notnull": true,
+      "default": null,
+      "pk": 1
+     },
+     {
+      "name": "name",
+      "type": "VARCHAR",
+      "notnull": true,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "analysis_type",
+      "type": "VARCHAR",
+      "notnull": true,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "status",
+      "type": "VARCHAR",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "error_message",
+      "type": "VARCHAR",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "created_at",
+      "type": "DATETIME",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "updated_at",
+      "type": "DATETIME",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "project_id",
+      "type": "VARCHAR",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "bayesian_config",
+      "type": "JSON",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "solver",
+      "type": "JSON",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "intervals",
+      "type": "JSON",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "owner_id",
+      "type": "VARCHAR",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "summaries",
+      "type": "JSON",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "influence",
+      "type": "JSON",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     }
+    ],
+    "foreign_keys": [
+     {
+      "column": "project_id",
+      "references": "projects",
+      "to": "id",
+      "on_delete": "NO ACTION"
+     },
+     {
+      "column": "owner_id",
+      "references": "users",
+      "to": "id",
+      "on_delete": "NO ACTION"
+     }
+    ],
+    "indexes": [
+     {
+      "columns": ["owner_id"],
+      "unique": false
+     }
+    ]
+   }
+  },
+  {
+   "name": "analysis_results",
+   "inputs": {},
+   "outputs": {
+    "columns": [
+     {
+      "name": "id",
+      "type": "VARCHAR",
+      "notnull": true,
+      "default": null,
+      "pk": 1
+     },
+     {
+      "name": "analysis_id",
+      "type": "VARCHAR",
+      "notnull": true,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "sample_id",
+      "type": "VARCHAR",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "calibrated_age_bp",
+      "type": "FLOAT",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "posterior_mean",
+      "type": "FLOAT",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "posterior_median",
+      "type": "FLOAT",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "posterior_std",
+      "type": "FLOAT",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "hpd_68_min",
+      "type": "FLOAT",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "hpd_68_max",
+      "type": "FLOAT",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "hpd_95_min",
+      "type": "FLOAT",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "hpd_95_max",
+      "type": "FLOAT",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "agreement_index",
+      "type": "FLOAT",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "outlier_probability",
+      "type": "FLOAT",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "hpd_68_ranges",
+      "type": "JSON",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "hpd_95_ranges",
+      "type": "JSON",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "posterior_samples",
+      "type": "JSON",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "probability_distribution",
+      "type": "JSON",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "created_at",
+      "type": "DATETIME",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     }
+    ],
+    "foreign_keys": [
+     {
+      "column": "sample_id",
+      "references": "radiocarbon_samples",
+      "to": "id",
+      "on_delete": "NO ACTION"
+     },
+     {
+      "column": "analysis_id",
+      "references": "analyses",
+      "to": "id",
+      "on_delete": "NO ACTION"
+     }
+    ],
+    "indexes": []
+   }
+  },
+  {
+   "name": "analysis_runs",
+   "inputs": {},
+   "outputs": {
+    "columns": [
+     {
+      "name": "id",
+      "type": "VARCHAR",
+      "notnull": true,
+      "default": null,
+      "pk": 1
+     },
+     {
+      "name": "analysis_id",
+      "type": "VARCHAR",
+      "notnull": true,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "created_at",
+      "type": "DATETIME",
+      "notnull": true,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "app_commit",
+      "type": "VARCHAR",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "inputs_hash",
+      "type": "VARCHAR",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "payload",
+      "type": "JSON",
+      "notnull": true,
+      "default": null,
+      "pk": 0
+     }
+    ],
+    "foreign_keys": [
+     {
+      "column": "analysis_id",
+      "references": "analyses",
+      "to": "id",
+      "on_delete": "CASCADE"
+     }
+    ],
+    "indexes": [
+     {
+      "columns": ["analysis_id"],
+      "unique": false
+     }
+    ]
+   }
+  },
+  {
+   "name": "calibration_curves",
+   "inputs": {},
+   "outputs": {
+    "columns": [
+     {
+      "name": "id",
+      "type": "VARCHAR",
+      "notnull": true,
+      "default": null,
+      "pk": 1
+     },
+     {
+      "name": "kind",
+      "type": "VARCHAR",
+      "notnull": true,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "name",
+      "type": "VARCHAR",
+      "notnull": true,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "description",
+      "type": "VARCHAR",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "reference",
+      "type": "VARCHAR",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "doi",
+      "type": "VARCHAR",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "type",
+      "type": "VARCHAR",
+      "notnull": true,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "sample_type",
+      "type": "VARCHAR",
+      "notnull": true,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "source_text",
+      "type": "VARCHAR",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "source_filename",
+      "type": "VARCHAR",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "parse_options",
+      "type": "JSON",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "recipe",
+      "type": "JSON",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "content_sha256",
+      "type": "VARCHAR",
+      "notnull": true,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "aliases",
+      "type": "JSON",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "archived",
+      "type": "BOOLEAN",
+      "notnull": true,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "created_at",
+      "type": "DATETIME",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "updated_at",
+      "type": "DATETIME",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "created_by",
+      "type": "VARCHAR",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     }
+    ],
+    "foreign_keys": [
+     {
+      "column": "created_by",
+      "references": "users",
+      "to": "id",
+      "on_delete": "NO ACTION"
+     }
+    ],
+    "indexes": [
+     {
+      "columns": ["created_by"],
+      "unique": false
+     }
+    ]
+   }
+  },
+  {
+   "name": "jobs",
+   "inputs": {},
+   "outputs": {
+    "columns": [
+     {
+      "name": "id",
+      "type": "VARCHAR",
+      "notnull": true,
+      "default": null,
+      "pk": 1
+     },
+     {
+      "name": "kind",
+      "type": "VARCHAR",
+      "notnull": true,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "target_id",
+      "type": "VARCHAR",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "state",
+      "type": "VARCHAR",
+      "notnull": true,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "progress",
+      "type": "FLOAT",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "detail",
+      "type": "JSON",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "error_message",
+      "type": "VARCHAR",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "created_at",
+      "type": "DATETIME",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "started_at",
+      "type": "DATETIME",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "finished_at",
+      "type": "DATETIME",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "owner_id",
+      "type": "VARCHAR",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     }
+    ],
+    "foreign_keys": [
+     {
+      "column": "owner_id",
+      "references": "users",
+      "to": "id",
+      "on_delete": "NO ACTION"
+     }
+    ],
+    "indexes": [
+     {
+      "columns": ["owner_id"],
+      "unique": false
+     },
+     {
+      "columns": ["target_id"],
+      "unique": false
+     }
+    ]
+   }
+  },
+  {
+   "name": "marine_reservoir_points",
+   "inputs": {},
+   "outputs": {
+    "columns": [
+     {
+      "name": "snapshot_id",
+      "type": "VARCHAR",
+      "notnull": true,
+      "default": null,
+      "pk": 1
+     },
+     {
+      "name": "map_no",
+      "type": "INTEGER",
+      "notnull": true,
+      "default": null,
+      "pk": 2
+     },
+     {
+      "name": "latitude",
+      "type": "FLOAT",
+      "notnull": true,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "longitude",
+      "type": "FLOAT",
+      "notnull": true,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "delta_r",
+      "type": "FLOAT",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "delta_r_error",
+      "type": "FLOAT",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "reference",
+      "type": "VARCHAR",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "locality",
+      "type": "VARCHAR",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "subregion",
+      "type": "VARCHAR",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "notes",
+      "type": "VARCHAR",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "c14_age",
+      "type": "FLOAT",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "c14_error",
+      "type": "FLOAT",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "lab_id",
+      "type": "VARCHAR",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "collection_year",
+      "type": "INTEGER",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "reservoir_age",
+      "type": "FLOAT",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "genus",
+      "type": "VARCHAR",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "species",
+      "type": "VARCHAR",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "feeding",
+      "type": "VARCHAR",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "feeding_raw",
+      "type": "VARCHAR",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     }
+    ],
+    "foreign_keys": [
+     {
+      "column": "snapshot_id",
+      "references": "marine_reservoir_snapshots",
+      "to": "id",
+      "on_delete": "NO ACTION"
+     }
+    ],
+    "indexes": []
+   }
+  },
+  {
+   "name": "marine_reservoir_snapshots",
+   "inputs": {},
+   "outputs": {
+    "columns": [
+     {
+      "name": "id",
+      "type": "VARCHAR",
+      "notnull": true,
+      "default": null,
+      "pk": 1
+     },
+     {
+      "name": "source",
+      "type": "VARCHAR",
+      "notnull": true,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "fetched_at",
+      "type": "DATETIME",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "source_last_changed",
+      "type": "DATETIME",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "record_count",
+      "type": "INTEGER",
+      "notnull": true,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "content_sha256",
+      "type": "VARCHAR",
+      "notnull": true,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "citation",
+      "type": "VARCHAR",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "note",
+      "type": "VARCHAR",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "created_by",
+      "type": "VARCHAR",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "created_at",
+      "type": "DATETIME",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     }
+    ],
+    "foreign_keys": [
+     {
+      "column": "created_by",
+      "references": "users",
+      "to": "id",
+      "on_delete": "NO ACTION"
+     }
+    ],
+    "indexes": [
+     {
+      "columns": ["created_by"],
+      "unique": false
+     }
+    ]
+   }
+  },
+  {
+   "name": "model_elements",
+   "inputs": {},
+   "outputs": {
+    "columns": [
+     {
+      "name": "id",
+      "type": "VARCHAR",
+      "notnull": true,
+      "default": null,
+      "pk": 1
+     },
+     {
+      "name": "analysis_id",
+      "type": "VARCHAR",
+      "notnull": true,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "parent_id",
+      "type": "VARCHAR",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "position",
+      "type": "INTEGER",
+      "notnull": true,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "element_type",
+      "type": "VARCHAR",
+      "notnull": true,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "name",
+      "type": "VARCHAR",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "tpq_age_bp",
+      "type": "FLOAT",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "taq_age_bp",
+      "type": "FLOAT",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "posterior",
+      "type": "JSON",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "created_at",
+      "type": "DATETIME",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "params",
+      "type": "JSON",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     }
+    ],
+    "foreign_keys": [
+     {
+      "column": "analysis_id",
+      "references": "analyses",
+      "to": "id",
+      "on_delete": "NO ACTION"
+     }
+    ],
+    "indexes": []
+   }
+  },
+  {
+   "name": "model_templates",
+   "inputs": {},
+   "outputs": {
+    "columns": [
+     {
+      "name": "id",
+      "type": "VARCHAR",
+      "notnull": true,
+      "default": null,
+      "pk": 1
+     },
+     {
+      "name": "owner_id",
+      "type": "VARCHAR",
+      "notnull": true,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "name",
+      "type": "VARCHAR",
+      "notnull": true,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "description",
+      "type": "VARCHAR",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "model_tree",
+      "type": "JSON",
+      "notnull": true,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "bayesian_config",
+      "type": "JSON",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "created_at",
+      "type": "DATETIME",
+      "notnull": true,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "updated_at",
+      "type": "DATETIME",
+      "notnull": true,
+      "default": null,
+      "pk": 0
+     }
+    ],
+    "foreign_keys": [
+     {
+      "column": "owner_id",
+      "references": "users",
+      "to": "id",
+      "on_delete": "CASCADE"
+     }
+    ],
+    "indexes": [
+     {
+      "columns": ["owner_id"],
+      "unique": false
+     }
+    ]
+   }
+  },
+  {
+   "name": "personal_access_tokens",
+   "inputs": {},
+   "outputs": {
+    "columns": [
+     {
+      "name": "id",
+      "type": "VARCHAR",
+      "notnull": true,
+      "default": null,
+      "pk": 1
+     },
+     {
+      "name": "user_id",
+      "type": "VARCHAR",
+      "notnull": true,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "name",
+      "type": "VARCHAR",
+      "notnull": true,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "token_hash",
+      "type": "VARCHAR",
+      "notnull": true,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "prefix",
+      "type": "VARCHAR",
+      "notnull": true,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "scope",
+      "type": "VARCHAR",
+      "notnull": true,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "created_at",
+      "type": "DATETIME",
+      "notnull": true,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "expires_at",
+      "type": "DATETIME",
+      "notnull": true,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "last_used_at",
+      "type": "DATETIME",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     }
+    ],
+    "foreign_keys": [
+     {
+      "column": "user_id",
+      "references": "users",
+      "to": "id",
+      "on_delete": "CASCADE"
+     }
+    ],
+    "indexes": [
+     {
+      "columns": ["token_hash"],
+      "unique": true
+     },
+     {
+      "columns": ["user_id"],
+      "unique": false
+     }
+    ]
+   }
+  },
+  {
+   "name": "project_samples",
+   "inputs": {},
+   "outputs": {
+    "columns": [
+     {
+      "name": "id",
+      "type": "VARCHAR",
+      "notnull": true,
+      "default": null,
+      "pk": 1
+     },
+     {
+      "name": "project_id",
+      "type": "VARCHAR",
+      "notnull": true,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "sample_name",
+      "type": "VARCHAR",
+      "notnull": true,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "age_bp",
+      "type": "FLOAT",
+      "notnull": true,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "error_1sigma",
+      "type": "FLOAT",
+      "notnull": true,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "material_type",
+      "type": "VARCHAR",
+      "notnull": true,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "sample_type",
+      "type": "VARCHAR",
+      "notnull": true,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "curve_id",
+      "type": "VARCHAR",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "reservoir_age",
+      "type": "FLOAT",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "depth_cm",
+      "type": "FLOAT",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "location",
+      "type": "VARCHAR",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "notes",
+      "type": "VARCHAR",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "default_context_name",
+      "type": "VARCHAR",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "tpq_age_bp",
+      "type": "FLOAT",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "taq_age_bp",
+      "type": "FLOAT",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "created_at",
+      "type": "DATETIME",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "updated_at",
+      "type": "DATETIME",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "delta_r",
+      "type": "FLOAT",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "delta_r_error",
+      "type": "FLOAT",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "ring_offset",
+      "type": "FLOAT",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "ring_offset_error",
+      "type": "FLOAT",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "latitude",
+      "type": "FLOAT",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "longitude",
+      "type": "FLOAT",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "delta_r_source",
+      "type": "JSON",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "inbuilt_years",
+      "type": "FLOAT",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "inbuilt_shape",
+      "type": "VARCHAR",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     }
+    ],
+    "foreign_keys": [
+     {
+      "column": "project_id",
+      "references": "projects",
+      "to": "id",
+      "on_delete": "NO ACTION"
+     }
+    ],
+    "indexes": []
+   }
+  },
+  {
+   "name": "projects",
+   "inputs": {},
+   "outputs": {
+    "columns": [
+     {
+      "name": "id",
+      "type": "VARCHAR",
+      "notnull": true,
+      "default": null,
+      "pk": 1
+     },
+     {
+      "name": "name",
+      "type": "VARCHAR",
+      "notnull": true,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "description",
+      "type": "VARCHAR",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "created_at",
+      "type": "DATETIME",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "updated_at",
+      "type": "DATETIME",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "owner_id",
+      "type": "VARCHAR",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "coordinate_precision",
+      "type": "VARCHAR",
+      "notnull": true,
+      "default": "'full'",
+      "pk": 0
+     },
+     {
+      "name": "map_tiles_enabled",
+      "type": "BOOLEAN",
+      "notnull": true,
+      "default": "0",
+      "pk": 0
+     }
+    ],
+    "foreign_keys": [
+     {
+      "column": "owner_id",
+      "references": "users",
+      "to": "id",
+      "on_delete": "NO ACTION"
+     }
+    ],
+    "indexes": [
+     {
+      "columns": ["owner_id"],
+      "unique": false
+     }
+    ]
+   }
+  },
+  {
+   "name": "radiocarbon_samples",
+   "inputs": {},
+   "outputs": {
+    "columns": [
+     {
+      "name": "id",
+      "type": "VARCHAR",
+      "notnull": true,
+      "default": null,
+      "pk": 1
+     },
+     {
+      "name": "analysis_id",
+      "type": "VARCHAR",
+      "notnull": true,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "sample_name",
+      "type": "VARCHAR",
+      "notnull": true,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "age_bp",
+      "type": "FLOAT",
+      "notnull": true,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "error_1sigma",
+      "type": "FLOAT",
+      "notnull": true,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "material_type",
+      "type": "VARCHAR",
+      "notnull": true,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "sample_type",
+      "type": "VARCHAR",
+      "notnull": true,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "curve_id",
+      "type": "VARCHAR",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "delta_r",
+      "type": "FLOAT",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "delta_r_error",
+      "type": "FLOAT",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "outlier_prior",
+      "type": "FLOAT",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "outlier_model",
+      "type": "VARCHAR",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "reservoir_age",
+      "type": "FLOAT",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "depth_cm",
+      "type": "FLOAT",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "location",
+      "type": "VARCHAR",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "notes",
+      "type": "VARCHAR",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "created_at",
+      "type": "DATETIME",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "group_id",
+      "type": "VARCHAR",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "element_id",
+      "type": "VARCHAR",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "tpq_age_bp",
+      "type": "FLOAT",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "taq_age_bp",
+      "type": "FLOAT",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "sort_order",
+      "type": "INTEGER",
+      "notnull": true,
+      "default": "'0'",
+      "pk": 0
+     },
+     {
+      "name": "ring_offset",
+      "type": "FLOAT",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "ring_offset_error",
+      "type": "FLOAT",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "latitude",
+      "type": "FLOAT",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "longitude",
+      "type": "FLOAT",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "delta_r_source",
+      "type": "JSON",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "inbuilt_years",
+      "type": "FLOAT",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "inbuilt_shape",
+      "type": "VARCHAR",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     }
+    ],
+    "foreign_keys": [
+     {
+      "column": "group_id",
+      "references": "sample_groups",
+      "to": "id",
+      "on_delete": "NO ACTION"
+     },
+     {
+      "column": "analysis_id",
+      "references": "analyses",
+      "to": "id",
+      "on_delete": "NO ACTION"
+     }
+    ],
+    "indexes": []
+   }
+  },
+  {
+   "name": "sample_groups",
+   "inputs": {},
+   "outputs": {
+    "columns": [
+     {
+      "name": "id",
+      "type": "VARCHAR",
+      "notnull": true,
+      "default": null,
+      "pk": 1
+     },
+     {
+      "name": "analysis_id",
+      "type": "VARCHAR",
+      "notnull": true,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "name",
+      "type": "VARCHAR",
+      "notnull": true,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "tpq_age_bp",
+      "type": "FLOAT",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "taq_age_bp",
+      "type": "FLOAT",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "modeled_start",
+      "type": "JSON",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "modeled_end",
+      "type": "JSON",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "created_at",
+      "type": "DATETIME",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     }
+    ],
+    "foreign_keys": [
+     {
+      "column": "analysis_id",
+      "references": "analyses",
+      "to": "id",
+      "on_delete": "NO ACTION"
+     }
+    ],
+    "indexes": []
+   }
+  },
+  {
+   "name": "stratigraphic_relationships",
+   "inputs": {},
+   "outputs": {
+    "columns": [
+     {
+      "name": "id",
+      "type": "VARCHAR",
+      "notnull": true,
+      "default": null,
+      "pk": 1
+     },
+     {
+      "name": "analysis_id",
+      "type": "VARCHAR",
+      "notnull": true,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "from_sample_id",
+      "type": "VARCHAR",
+      "notnull": true,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "to_sample_id",
+      "type": "VARCHAR",
+      "notnull": true,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "from_type",
+      "type": "VARCHAR",
+      "notnull": true,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "to_type",
+      "type": "VARCHAR",
+      "notnull": true,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "relationship",
+      "type": "VARCHAR",
+      "notnull": true,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "created_at",
+      "type": "DATETIME",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     }
+    ],
+    "foreign_keys": [
+     {
+      "column": "analysis_id",
+      "references": "analyses",
+      "to": "id",
+      "on_delete": "NO ACTION"
+     }
+    ],
+    "indexes": []
+   }
+  },
+  {
+   "name": "users",
+   "inputs": {},
+   "outputs": {
+    "columns": [
+     {
+      "name": "id",
+      "type": "VARCHAR",
+      "notnull": true,
+      "default": null,
+      "pk": 1
+     },
+     {
+      "name": "email",
+      "type": "VARCHAR",
+      "notnull": true,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "password_hash",
+      "type": "VARCHAR",
+      "notnull": true,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "display_name",
+      "type": "VARCHAR",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "is_first_account",
+      "type": "BOOLEAN",
+      "notnull": true,
+      "default": "0",
+      "pk": 0
+     },
+     {
+      "name": "created_at",
+      "type": "DATETIME",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     },
+     {
+      "name": "last_login_at",
+      "type": "DATETIME",
+      "notnull": false,
+      "default": null,
+      "pk": 0
+     }
+    ],
+    "foreign_keys": [],
+    "indexes": [
+     {
+      "columns": ["email"],
+      "unique": true
+     }
+    ]
+   }
+  }
+ ]
+}

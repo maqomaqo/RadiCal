@@ -63,7 +63,9 @@ two runs of this script on one commit write identical files.
 """
 from __future__ import annotations
 
+import base64
 import datetime
+from collections import Counter
 import hashlib
 import io
 import json
@@ -74,7 +76,8 @@ import re
 import subprocess
 import sys
 import tempfile
-from typing import Any, Callable, Dict, List
+import zipfile
+from typing import Any, Callable, Dict, List, Optional
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, '..', '..'))
@@ -418,6 +421,47 @@ def units_reservoir():
                                            delta_r=dr, delta_r_error=e) for n, dr, e in rows]
         cases.append(capture(f'combine/{name}', {'points': [list(r) for r in rows]},
                              lambda p=points: reservoir.combine(p).as_dict()))
+
+    # A made-up coast: (map_no, lat, lon, delta_r, error, habit, raw habit).
+    coast = [
+        (101, -41.10, 174.00, 30.0, 40.0, 'suspension', 'filter'),
+        (102, -41.20, 174.10, -20.0, 35.0, 'suspension', 'suspension'),
+        (103, -41.05, 173.90, 250.0, 60.0, 'deposit', 'deposit'),
+        (104, -41.30, 174.30, 80.0, None, 'grazer', 'herbivore'),
+        (105, -40.90, 173.80, 15.0, 25.0, 'carnivore', 'predator'),
+        (106, -41.60, 174.70, 60.0, 45.0, 'unknown', None),
+        (107, -41.15, 174.05, None, None, 'suspension', 'filter'),
+        (108, -42.50, 175.50, -5.0, 30.0, 'suspension', 'filter'),
+        (109, -41.10, 174.00, 45.0, 50.0, 'migratory', 'migratory'),
+    ]
+    points = [reservoir.ReservoirPoint(map_no=m, latitude=la, longitude=lo, delta_r=dr,
+                                       delta_r_error=e, feeding=f, feeding_raw=raw,
+                                       locality=f'Point {m}', reference='Made up')
+              for m, la, lo, dr, e, f, raw in coast]
+    cases.append(capture('nearest', {'points': coast, 'at': [-41.12, 174.02], 'n': 4},
+                         lambda: [[p.map_no, p.distance_km]
+                                  for p in reservoir.nearest(-41.12, 174.02, points, 4)]))
+    for name, opts in {
+        'default': {'n': 6},
+        'all': {'n': 50},
+        'within': {'n': 10, 'max_km': 20.0},
+        'nothing-within': {'n': 10, 'max_km': 0.5},
+        'excluded': {'n': 6, 'exclude_map_nos': [101, 103]},
+        'suspension-only': {'n': 9, 'suspension_only': True},
+        'suspension-only-refused': {'n': 2, 'suspension_only': True},
+        'too-few-weighted': {'n': 10, 'exclude_map_nos': [101, 102, 103, 105, 106, 108, 109]},
+    }.items():
+        def run(opts=opts):
+            try:
+                result = reservoir.lookup(-41.12, 174.02, points, snapshot_id='snap-1', **opts)
+            except reservoir.LookupRefused as exc:
+                return {'refused': str(exc)}
+            source = reservoir.provenance(result, max_km=opts.get('max_km'),
+                                          suspension_only=opts.get('suspension_only', False))
+            source.pop('computed_at')
+            return {'lookup': result.as_dict(), 'provenance': source}
+        cases.append(capture(f'lookup/{name}', {'points': coast, 'at': [-41.12, 174.02],
+                                                'options': opts}, run))
     return cases
 
 
@@ -2170,6 +2214,110 @@ def units_dispersal():
     return cases
 
 
+def schema_sqlite():
+    """The schema the backend's migrations build on SQLite, table by table:
+    what radical-store's own schema is held to."""
+    from app.database import engine, init_db
+    init_db()
+    cases = []
+    with engine.connect() as conn:
+        raw = conn.connection.dbapi_connection
+        tables = [r[0] for r in raw.execute(
+            "select name from sqlite_master where type='table' and name not like 'sqlite_%' order by name")]
+        for table in tables:
+            columns = [{'name': c[1], 'type': c[2], 'notnull': bool(c[3]), 'default': c[4], 'pk': c[5]}
+                       for c in raw.execute(f'pragma table_info("{table}")')]
+            foreign = [{'column': f[3], 'references': f[2], 'to': f[4], 'on_delete': f[6]}
+                       for f in raw.execute(f'pragma foreign_key_list("{table}")')]
+            indexes = []
+            for ix in raw.execute(f'pragma index_list("{table}")'):
+                if ix[3] != 'c':          # only declared indexes, not the PK's own
+                    continue
+                cols = [c[2] for c in raw.execute(f'pragma index_info("{ix[1]}")')]
+                indexes.append({'columns': cols, 'unique': bool(ix[2])})
+            cases.append({'name': table, 'inputs': {},
+                          'outputs': {'columns': columns, 'foreign_keys': foreign, 'indexes': indexes}})
+    return cases
+
+
+# Numeric arrays longer than this are recorded as a summary in the exchange
+# corpus: the units families hold the numbers themselves to the bit, and the
+# exchanges are about routes, statuses, fields and shapes.
+EXCHANGE_ARRAY_LIMIT = 64
+
+
+def summarise_long_arrays(value: Any) -> Any:
+    """Every all-numeric (possibly nested) list with more than
+    EXCHANGE_ARRAY_LIMIT numbers in it, as {'$summary': len, count, min, max,
+    sum}. radical-server's replay test summarises its own answers the same way."""
+    def numbers(v, out):
+        if isinstance(v, bool):
+            return False
+        if isinstance(v, (int, float)):
+            out.append(float(v))
+            return True
+        if isinstance(v, list):
+            return all(numbers(x, out) for x in v)
+        return False
+
+    if isinstance(value, list):
+        flat: List[float] = []
+        if value and numbers(value, flat) and len(flat) > EXCHANGE_ARRAY_LIMIT:
+            return {'$summary': {'len': len(value), 'count': len(flat), 'min': min(flat),
+                                 'max': max(flat), 'sum': math.fsum(flat)}}
+        return [summarise_long_arrays(v) for v in value]
+    if isinstance(value, dict):
+        return {k: summarise_long_arrays(v) for k, v in value.items()}
+    return value
+
+
+def _readable_uploads(files: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """An uploaded zip as its members' text, as a zip response is kept, rather
+    than as base64: the replay builds the zip again, and the text is what the
+    names check can read."""
+    if not files:
+        return files
+    out = {}
+    for field, upload in files.items():
+        raw = base64.b64decode(upload.get('b64') or '')
+        if raw[:4] != b'PK\x03\x04':
+            out[field] = upload
+            continue
+        members = {}
+        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+            for name in archive.namelist():
+                members[name] = archive.read(name).decode('utf-8')
+        out[field] = {'filename': upload.get('filename'), 'zip': members}
+    return out
+
+
+def api_exchanges(recording: str) -> List[Dict[str, Any]]:
+    """The backend's own API tests as HTTP exchanges (corpus/record_api.py), in
+    the order they ran, ids placeholdered across the whole run and the
+    credentials reduced to whose they were."""
+    with open(recording, encoding='utf-8') as fh:
+        raw = json.load(fh)
+    suite = Counter(x['auth'] for x in raw if x['auth']).most_common(1)[0][0]
+    stable = Stable()
+    cases = []
+    for i, x in enumerate(raw):
+        who = 'none' if x['auth'] is None else 'suite' if x['auth'] == suite else 'other'
+        inputs = {k: x.get(k) for k in ('test', 'cleanup', 'method', 'url', 'params',
+                                        'request_json', 'request_data', 'request_content',
+                                        'files')}
+        inputs['files'] = _readable_uploads(inputs['files'])
+        inputs['auth'] = who
+        outputs = {'status': x['status'], 'content_type': x['content_type']}
+        for k in ('response_json', 'response_text', 'response_zip', 'response_sha256',
+                  'response_len'):
+            if k in x:
+                outputs[k] = summarise_long_arrays(x[k]) if k == 'response_json' else x[k]
+        case = stable({'name': f"{i:04d} {x['method']} {x['url'].split('?')[0]}",
+                       'inputs': inputs, 'outputs': outputs})
+        cases.append(case)
+    return cases
+
+
 # ---------------------------------------------------------------------------
 # api/ -- Phases 2, 3 and 5
 # ---------------------------------------------------------------------------
@@ -2182,7 +2330,8 @@ ID = re.compile(r'(?<![0-9A-Za-z])(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f
 # Fields that differ between two identical runs.
 VOLATILE = {'created_at', 'updated_at', 'started_at', 'completed_at', 'finished_at',
             'queued_at', 'elapsed_seconds', 'duration_seconds', 'runtime_seconds',
-            'compute_seconds', 'wall_seconds', 'last_run_at', 'seconds'}
+            'compute_seconds', 'wall_seconds', 'last_run_at', 'seconds',
+            'app_commit', 'exported_at'}
 
 
 class Stable:
@@ -2357,6 +2506,12 @@ def main() -> None:
         ('units/wiggle_match', units_wiggle_match),
     ]:
         write(family, build())
+
+    write('schema/sqlite', schema_sqlite())
+
+    if '--exchanges' in sys.argv:
+        # A recording made by corpus/record_api.py over the backend suite.
+        write('api/exchanges', api_exchanges(sys.argv[sys.argv.index('--exchanges') + 1]))
 
     if '--units-only' not in sys.argv:
         print('api/')

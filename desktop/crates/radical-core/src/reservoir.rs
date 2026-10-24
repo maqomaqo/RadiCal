@@ -1,8 +1,8 @@
 //! The arithmetic of a local marine reservoir offset taken from the reservoir
 //! database: the feeding classes its organisms are filed under, distances
-//! between points and the weighted mean of nearby Delta-R values. A port of
-//! `normalise_feeding`, `haversine_km` and `combine` from
-//! `backend/app/services/reservoir.py`. It needs no network: a mirror of the
+//! between points, the weighted mean of nearby Delta-R values, and the
+//! lookup that derives a site's Delta-R with what is needed to judge it. A
+//! port of `backend/app/services/reservoir.py`. It needs no network: a mirror of the
 //! database is what lets a site's Delta-R be derived without sending its
 //! coordinates to a third party on every lookup.
 
@@ -88,15 +88,32 @@ pub fn is_recognised_feeding(raw: Option<&str>) -> bool {
 /// -- which is what makes a derived value checkable against the source.
 pub const EARTH_RADIUS_KM: f64 = 6371.0088;
 
-/// One measurement, as a combination needs it.
-#[derive(Debug, Clone, PartialEq)]
+/// One measurement, as the lookup needs it.
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct ReservoirPoint {
     pub map_no: i64,
     pub latitude: f64,
     pub longitude: f64,
     pub delta_r: Option<f64>,
     pub delta_r_error: Option<f64>,
+    pub feeding: Option<String>,
+    pub feeding_raw: Option<String>,
+    pub locality: Option<String>,
+    pub reference: Option<String>,
+    /// From the position asked about, once [`nearest`] has measured it.
+    pub distance_km: Option<f64>,
 }
+
+/// The habit classes a "suspension-equivalent" counterfactual drops: the
+/// ones whose carbon is not the local water's.
+pub const BIASED_FEEDING_CLASSES: [&str; 3] = ["deposit", "migratory", "carnivore"];
+
+/// When the counterfactual's distance from the applied value is said plainly
+/// rather than in small type, in years.
+pub const FEEDING_SHIFT_WARN_YEARS: f64 = 35.0;
+
+/// Below this, a "weighted mean" is not one.
+pub const MIN_WEIGHTED_POINTS: usize = 2;
 
 /// A weighted mean and what went into it.
 #[derive(Debug, Clone, PartialEq)]
@@ -223,6 +240,212 @@ pub fn combine(points: &[ReservoirPoint]) -> Combination {
     }
 }
 
+/// The `n` points closest to a position, nearest first, each carrying its
+/// distance. A point with no Delta-R is not a candidate; one with a Delta-R
+/// but no uncertainty is, and [`combine`] names it. Map number breaks a tie,
+/// so a provenance record is reproducible.
+pub fn nearest(
+    latitude: f64,
+    longitude: f64,
+    points: &[ReservoirPoint],
+    n: usize,
+    max_km: Option<f64>,
+) -> Vec<ReservoirPoint> {
+    let mut with_distance: Vec<ReservoirPoint> = points
+        .iter()
+        .filter(|p| p.delta_r.is_some())
+        .filter_map(|p| {
+            let d = haversine_km(latitude, longitude, p.latitude, p.longitude);
+            if max_km.is_some_and(|m| d > m) {
+                return None;
+            }
+            Some(ReservoirPoint {
+                distance_km: Some(d),
+                ..p.clone()
+            })
+        })
+        .collect();
+    with_distance.sort_by(|a, b| {
+        a.distance_km
+            .unwrap_or(0.0)
+            .total_cmp(&b.distance_km.unwrap_or(0.0))
+            .then(a.map_no.cmp(&b.map_no))
+    });
+    with_distance.truncate(n);
+    with_distance
+}
+
+/// A derived Delta-R and everything needed to judge it before applying it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Lookup {
+    pub delta_r: Option<f64>,
+    pub delta_r_error: Option<f64>,
+    pub n: usize,
+    pub points: Vec<ReservoirPoint>,
+    pub included_all: Combination,
+    /// The same arithmetic with the biased habit classes dropped; None when
+    /// that leaves too few points to weight.
+    pub suspension_equivalent: Option<Combination>,
+    pub nearest_km: Option<f64>,
+    pub farthest_km: Option<f64>,
+    pub excluded_no_error: Vec<i64>,
+    pub excluded_by_user: Vec<i64>,
+    /// Habit class -> count, over the points the value came from, in the
+    /// order first met.
+    pub feeding_counts: Vec<(String, usize)>,
+    /// Map number -> what the source said, for those points.
+    pub feeding_raw: Vec<(i64, String)>,
+    pub snapshot_id: Option<String>,
+    pub centre: (f64, f64),
+}
+
+impl Lookup {
+    /// How far the counterfactual sits from the applied value, in years.
+    pub fn feeding_shift(&self) -> Option<f64> {
+        let s = self.suspension_equivalent.as_ref()?;
+        Some((self.included_all.delta_r? - s.delta_r?).abs())
+    }
+
+    /// Whether the panel must say so plainly.
+    pub fn feeding_shift_matters(&self) -> bool {
+        self.feeding_shift()
+            .is_some_and(|s| s >= FEEDING_SHIFT_WARN_YEARS)
+    }
+}
+
+fn habit(p: &ReservoirPoint) -> &str {
+    p.feeding
+        .as_deref()
+        .filter(|f| !f.is_empty())
+        .unwrap_or("unknown")
+}
+
+/// [`combine`] over the points whose habit is not biased, or None when that
+/// leaves too few to weight (`_combination_for`).
+fn without_biased(points: &[ReservoirPoint]) -> Option<Combination> {
+    let kept: Vec<ReservoirPoint> = points
+        .iter()
+        .filter(|p| !BIASED_FEEDING_CLASSES.contains(&habit(p)))
+        .cloned()
+        .collect();
+    let weighted = kept
+        .iter()
+        .filter(|p| p.delta_r.is_some() && has_error(p.delta_r_error))
+        .count();
+    (weighted >= MIN_WEIGHTED_POINTS).then(|| combine(&kept))
+}
+
+/// What a lookup asks for besides the position.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct LookupOptions {
+    pub n: usize,
+    pub snapshot_id: Option<String>,
+    pub max_km: Option<f64>,
+    pub exclude_map_nos: Vec<i64>,
+    /// Apply the counterfactual as the answer: a choice, never a default.
+    pub suspension_only: bool,
+}
+
+/// The Delta-R for a position, with everything needed to judge it; Err,
+/// saying what it would have taken, rather than a value from too little.
+pub fn lookup(
+    latitude: f64,
+    longitude: f64,
+    points: &[ReservoirPoint],
+    options: &LookupOptions,
+) -> Result<Lookup, String> {
+    let excluded_by_user = options.exclude_map_nos.clone();
+    let chosen: Vec<ReservoirPoint> =
+        nearest(latitude, longitude, points, options.n, options.max_km)
+            .into_iter()
+            .filter(|p| !excluded_by_user.contains(&p.map_no))
+            .collect();
+    if chosen.is_empty() {
+        let within = options
+            .max_km
+            .filter(|m| *m != 0.0)
+            .map(|m| format!(" within {} km", crate::pyfmt::g(m, 6)))
+            .unwrap_or_default();
+        return Err(format!(
+            "No reservoir measurements near this position{within}. Widen the search, or enter a ΔR by hand."
+        ));
+    }
+    let included_all = combine(&chosen);
+    let suspension_equivalent = without_biased(&chosen);
+    let applied = if options.suspension_only {
+        match &suspension_equivalent {
+            Some(s) => s.clone(),
+            None => {
+                let mut dropped: Vec<&str> = chosen
+                    .iter()
+                    .filter(|p| BIASED_FEEDING_CLASSES.contains(&habit(p)))
+                    .filter_map(|p| p.feeding.as_deref())
+                    .collect();
+                dropped.sort();
+                dropped.dedup();
+                let what = if dropped.is_empty() {
+                    "the biased habit classes".to_owned()
+                } else {
+                    dropped.join(", ")
+                };
+                return Err(format!(
+                    "Excluding {what} would leave fewer than {MIN_WEIGHTED_POINTS} points with an uncertainty to weight, and a weighted mean of one point is just that point. Raise N, widen the search, or include them."
+                ));
+            }
+        }
+    } else {
+        included_all.clone()
+    };
+    if applied.n < MIN_WEIGHTED_POINTS {
+        return Err(format!(
+            "Only {} of the {} nearest points carry an uncertainty, and a weighted mean needs at least {MIN_WEIGHTED_POINTS}. Raise N or widen the search.",
+            applied.n,
+            chosen.len()
+        ));
+    }
+    let used = &applied.map_nos;
+    let mut counts: Vec<(String, usize)> = Vec::new();
+    for p in chosen.iter().filter(|p| used.contains(&p.map_no)) {
+        let h = habit(p).to_owned();
+        match counts.iter_mut().find(|(k, _)| *k == h) {
+            Some((_, c)) => *c += 1,
+            None => counts.push((h, 1)),
+        }
+    }
+    let fold = |values: Vec<f64>, pick: fn(f64, f64) -> f64| values.into_iter().reduce(pick);
+    let distances: Vec<f64> = chosen.iter().filter_map(|p| p.distance_km).collect();
+    let used_distances: Vec<f64> = chosen
+        .iter()
+        .filter(|p| used.contains(&p.map_no))
+        .filter_map(|p| p.distance_km)
+        .collect();
+    Ok(Lookup {
+        delta_r: applied.delta_r,
+        delta_r_error: applied.delta_r_error,
+        n: applied.n,
+        nearest_km: fold(distances, |a, b| if b < a { b } else { a }),
+        farthest_km: fold(used_distances, |a, b| if b > a { b } else { a }),
+        excluded_no_error: applied.excluded_no_error.clone(),
+        excluded_by_user,
+        feeding_counts: counts,
+        feeding_raw: chosen
+            .iter()
+            .filter(|p| used.contains(&p.map_no))
+            .filter_map(|p| {
+                p.feeding_raw
+                    .clone()
+                    .filter(|r| !r.is_empty())
+                    .map(|r| (p.map_no, r))
+            })
+            .collect(),
+        points: chosen,
+        included_all,
+        suspension_equivalent,
+        snapshot_id: options.snapshot_id.clone(),
+        centre: (latitude, longitude),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -235,6 +458,7 @@ mod tests {
             longitude: 0.0,
             delta_r,
             delta_r_error,
+            ..ReservoirPoint::default()
         };
         let c = combine(&[
             p(1, Some(10.0), Some(0.0)),

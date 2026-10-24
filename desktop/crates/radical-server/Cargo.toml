@@ -1,0 +1,32 @@
+[package]
+name = "radical-server"
+description = "RadiCal's HTTP API, route for route the FastAPI backend's, over radical-store and radical-jobs."
+publish = false
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+axum = "0.8.9"
+miniz_oxide = "0.8"
+radical-core = { path = "../radical-core" }
+radical-io = { path = "../radical-io" }
+radical-jobs = { path = "../radical-jobs" }
+radical-store = { path = "../radical-store" }
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+sha2.workspace = true
+tokio = { version = "1.54.0", features = ["rt-multi-thread", "macros", "net", "signal", "time"] }
+ureq = { version = "2", default-features = false }
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+base64 = "0.23.1"
+http-body-util = "0.1.5"
+radical-corpus = { path = "../radical-corpus" }
+regex = "1.13.1"
+tokio = { version = "1.54.0", features = ["rt-multi-thread", "macros", "time"] }
+tower = { version = "0.5.3", features = ["util"] }

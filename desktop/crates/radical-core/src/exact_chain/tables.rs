@@ -320,10 +320,10 @@ fn weighted_kernel(step: f64, half_width: f64, model: &str, weights: &[f64]) -> 
 /// normalisation, so mass the kernel throws off the grid stays thrown off; see
 /// [`with_outlier_component`] for why that is the point.
 ///
-/// Python convolves by FFT (`scipy.signal.fftconvolve`) and clips the
-/// rounding noise that leaves below zero. This is the direct sum the FFT
-/// approximates: equal to it within that noise, about 10^-16 of the largest
-/// value, and exact in the tails where the FFT's answer is noise.
+/// A direct sum, as Python's `np.convolve` is, rather than an FFT: an FFT's
+/// rounding is about 10^-16 of the LARGEST output in every cell, which in the
+/// far tail of a one-sided kernel is the whole of the answer. The two sum in
+/// their own orders, so they agree to rounding rather than to the bit.
 pub fn convolve_on_grid(values: &[f64], kernel: &[f64]) -> Vec<f64> {
     let n = values.len();
     if n == 0 {

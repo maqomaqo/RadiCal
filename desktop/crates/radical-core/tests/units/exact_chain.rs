@@ -166,10 +166,15 @@ fn exact_chain() {
                 check_peaked(&mut c, &name, &got, &nums(&want["kernel"]), REL);
             }
             "convolve_on_grid" => {
-                // SciPy convolves by FFT, whose rounding is about 1e-16 of the
-                // peak in every cell, where the port sums directly.
+                // Both sum directly, each in its own order, and every term is
+                // non-negative: each value agrees to rounding of itself, far
+                // out in a tail as at the peak.
                 let got = convolve_on_grid(&nums(&i["values"]), &nums(&i["kernel"]));
-                check_peaked(&mut c, &name, &got, &nums(&want["convolved"]), REL);
+                let want = nums(&want["convolved"]);
+                assert_eq!(got.len(), want.len(), "{name}: lengths differ");
+                for (k, (g, w)) in got.iter().zip(&want).enumerate() {
+                    c.check(&format!("{name}[{k}]"), *g, *w, REL);
+                }
             }
             "reporting_aligned_step" => {
                 same(

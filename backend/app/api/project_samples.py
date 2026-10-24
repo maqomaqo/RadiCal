@@ -246,10 +246,12 @@ def update_project_sample(
     # longitude is correcting one half of a position that is already there,
     # which is legitimate, so what has to hold is the MERGED row.
     if (sample.latitude is None) != (sample.longitude is None):
-        db.rollback()
+        # Named BEFORE the rollback, which reloads the stored row and would
+        # otherwise describe the date as it was rather than as the edit left it.
         present, missing = (
             ('latitude', 'longitude') if sample.longitude is None
             else ('longitude', 'latitude'))
+        db.rollback()
         raise HTTPException(
             status_code=422,
             detail=(

@@ -95,7 +95,6 @@ import json
 from typing import Dict, List, Optional, Sequence, Set, Tuple
 
 import numpy as np
-from scipy.signal import fftconvolve
 from scipy.special import gammaln
 
 from app.services import intervals
@@ -927,14 +926,21 @@ def convolve_on_grid(values: np.ndarray, kernel: np.ndarray) -> np.ndarray:
     Trimming happens AFTER normalisation, so mass the kernel throws off the
     grid stays thrown off; see _with_outlier_component for why that is the
     point.
+
+    Summed directly, not by FFT. An FFT's rounding is about 1e-16 of the
+    LARGEST output in every cell, so where the answer is many orders below its
+    peak -- the far side of the charcoal model's one-sided kernel, where it is
+    exactly zero past ten scale lengths -- the FFT's answer is noise. The
+    agreement index reads a ratio of two such values (agreement._Normalised.at),
+    and on a residual date that noise over a near-zero mixture scored 1.5e76.
+    The direct sum is exact there, and at these sizes costs milliseconds.
     """
     centre = (len(kernel) - 1) // 2
     reach = len(values) - 1
     trimmed = kernel[max(0, centre - reach):centre + reach + 1]
     offset = min(centre, reach)
-    full = fftconvolve(values, trimmed)
-    # FFT convolution leaves tiny negative values where the true answer is zero.
-    return np.maximum(full[offset:offset + len(values)], 0.0)
+    full = np.convolve(values, trimmed)
+    return full[offset:offset + len(values)]
 
 
 @functools.lru_cache(maxsize=4)

@@ -47,15 +47,6 @@ fn nums(v: &Value) -> Vec<f64> {
 /// REL_LIKELIHOOD).
 const REL: f64 = 1e-10;
 
-/// A date under an outlier model is scored against a table of its likelihood
-/// smeared by the offset kernel. Python forms that smear with SciPy's FFT
-/// convolution, whose rounding is about 1e-16 of the table's peak in every
-/// cell; the port sums the convolution directly. Where a posterior point sits
-/// in the smear's tail, a value 10^-8 of the peak, the FFT's rounding is 10^-8
-/// of the value, and the index carries it: 1.8e-9 on the charcoal fixture,
-/// 5e-11 on the outlier one.
-const REL_OUTLIER_AGREEMENT: f64 = 1e-8;
-
 /// A tabulated density is compared value by value relative to its own peak:
 /// out in a tail, a value far below the peak is a sum of terms far larger than
 /// itself, so relative to its own size the rounding of those sums is
@@ -546,12 +537,11 @@ fn check_case(case: &Case) -> Option<Closeness> {
                     .1;
                 let label = format!("{name}/{sample}");
                 posterior(&mut c, &label, got, want);
-                let flagged = want["outlier_probability"].is_number();
                 c.opt(
                     &format!("{label}.agreement"),
                     got.agreement_index,
                     &want["agreement_index"],
-                    if flagged { REL_OUTLIER_AGREEMENT } else { REL },
+                    REL,
                 );
                 c.opt(
                     &format!("{label}.outlier_probability"),
@@ -566,23 +556,17 @@ fn check_case(case: &Case) -> Option<Closeness> {
                     .unwrap_or_else(|| panic!("{name}: no stored posterior for {bid}"));
                 posterior(&mut c, &format!("{name}/boundary {bid}"), got, want);
             }
-            // Both combine the flagged dates' indices, where there are any.
-            let rel = if outlier_scale.is_some() {
-                REL_OUTLIER_AGREEMENT
-            } else {
-                REL
-            };
             c.opt(
                 &format!("{name}/model_agreement"),
                 model_agreement,
                 &solver["model_agreement"],
-                rel,
+                REL,
             );
             c.opt(
                 &format!("{name}/overall_agreement"),
                 overall_agreement,
                 &solver["overall_agreement"],
-                rel,
+                REL,
             );
             match (&outlier_scale, solver.get("outlier_scale")) {
                 (None, None) => {}

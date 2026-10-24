@@ -185,3 +185,30 @@ describe('storage that will not cooperate', () => {
     })
   })
 })
+
+describe('the desktop app, which has no accounts', () => {
+  const answer = (single: boolean | undefined) => async (input: RequestInfo | URL) => {
+    const url = String(input)
+    if (url.endsWith('/api/auth/options')) {
+      return new Response(JSON.stringify({ success: true, data: { password_reset_email: false, single_user: single } }))
+    }
+    if (url.endsWith('/api/auth/me')) {
+      return new Response(JSON.stringify({ success: true, data: { ...USER, id: 'local' } }))
+    }
+    return new Response('{}')
+  }
+
+  it('goes straight in when the server says it serves one person', async () => {
+    underlying.mockImplementation(answer(true))
+    const user = await client.fetchCurrentUser()
+    expect(user?.id).toBe('local')
+    expect(client.isSingleUser()).toBe(true)
+  })
+
+  it('still asks a web server for a sign-in', async () => {
+    underlying.mockImplementation(answer(undefined))
+    expect(await client.fetchCurrentUser()).toBeNull()
+    expect(client.isSingleUser()).toBe(false)
+    expect(underlying.mock.calls.some(([u]) => String(u).endsWith('/api/auth/me'))).toBe(false)
+  })
+})
