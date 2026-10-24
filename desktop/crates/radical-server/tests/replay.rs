@@ -464,9 +464,29 @@ fn differs(path: &str, got: &Value, want: &Value, ids: &mut Ids) -> Option<Strin
                                             .is_none()
                                 })
                                 .collect();
-                            let Some(free) = matching.iter().find(|c| !used.contains(c.as_str()))
+                            // Of the free keys that match, the closest: with
+                            // a tolerance, a probability near 0 or 1 can match
+                            // its neighbour's key too, and taking whichever
+                            // comes first -- an order set by this run's random
+                            // ids -- can leave that neighbour nothing.
+                            let distance =
+                                |c: &&&String| match (g[c.as_str()].as_f64(), wv.as_f64()) {
+                                    (Some(a), Some(b)) => (a - b).abs(),
+                                    _ => 0.0,
+                                };
+                            let Some(free) = matching
+                                .iter()
+                                .filter(|c| !used.contains(c.as_str()))
+                                .min_by(|a, b| distance(a).total_cmp(&distance(b)))
                             else {
-                                return Some(format!("{path}: nothing matches {k}"));
+                                // What was wanted and what was there, so a
+                                // run that cannot be repeated says enough.
+                                let there: Vec<String> =
+                                    g.values().take(8).map(Value::to_string).collect();
+                                return Some(format!(
+                                    "{path}: nothing matches {k} = {wv}; here: {}",
+                                    there.join(", ")
+                                ));
                             };
                             if matching.len() == 1 {
                                 ids.bind(&n, free);
