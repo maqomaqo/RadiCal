@@ -25,7 +25,9 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-    timeout-minutes: 30
+    # Windows takes the longest: about 27 minutes before the desktop app's
+    # webview crates joined the build, over 30 since.
+    timeout-minutes: 45
     defaults:
       run:
         working-directory: desktop
