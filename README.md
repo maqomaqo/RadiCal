@@ -69,8 +69,12 @@ RadiCal/
 
 ## Installation
 
-RadiCal runs in Docker, on macOS, Windows or Linux; Docker is the only thing to install. In short,
-from an empty folder:
+**RadiCal Desktop**, for your own computer, is an app: download the installer for macOS, Windows or
+Linux from the [latest release](https://github.com/maqomaqo/RadiCal/releases/latest) and open it.
+There is no account to make, and your work stays on your computer.
+
+**RadiCal on a server**, for a group sharing one installation, runs in Docker on macOS, Windows or
+Linux; Docker is the only thing to install. In short, from an empty folder:
 
 ```bash
 curl -fLo docker-compose.yml https://raw.githubusercontent.com/maqomaqo/RadiCal/main/docker-compose.prod.yml
@@ -150,7 +154,7 @@ The main groups:
 
 ## Documentation
 
-- [`docs/INSTALLATION.md`](docs/INSTALLATION.md) — installing on macOS and Windows, and troubleshooting.
+- [`docs/INSTALLATION.md`](docs/INSTALLATION.md) — installing RadiCal Desktop, or RadiCal on a server with Docker, and troubleshooting.
 - [`frontend/src/content/USER_MANUAL.md`](frontend/src/content/USER_MANUAL.md) — using the app. It
   lives inside the frontend because the app ships it: the Help page (the question mark in the top
   bar, `/help`) renders this exact file, so there is no second copy to keep in step. Edit it as

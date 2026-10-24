@@ -1,5 +1,54 @@
 # Installing RadiCal
 
+RadiCal comes two ways:
+
+- **RadiCal Desktop**, an app for your own computer. Nothing else to install, no account to make,
+  and your work stays in one file on your computer. Start here unless you need the server.
+- **RadiCal on a server**, in [Docker](https://docs.docker.com/get-started/), for a group who share
+  one installation and sign in to it. See [RadiCal on a server](#radical-on-a-server) below.
+
+# RadiCal Desktop
+
+Download the installer for your computer from the
+[latest release](https://github.com/maqomaqo/RadiCal/releases/latest), and open it.
+
+| Computer | Download | Then |
+|---|---|---|
+| Mac (macOS 11 or later, Apple silicon or Intel) | `RadiCal_…_universal.dmg` | Drag RadiCal into Applications. |
+| Windows 10 or 11 | `RadiCal_…_x64-setup.exe` | Run it. (The `.msi` is the same app, for installing across an organisation.) |
+| Linux | `RadiCal_…_amd64.AppImage`, or the `.deb` for Debian and Ubuntu | Make the AppImage executable and run it, or install the `.deb`. |
+
+Open RadiCal and it starts on the Dashboard: there is no account to create.
+
+**If your computer warns about the app.** Until the installers are signed, your computer cannot
+check who made them, and asks before opening them the first time:
+
+- **macOS** says RadiCal "cannot be opened" or "is not from an identified developer". Open
+  **System Settings → Privacy & Security**, scroll down to the message about RadiCal, and choose
+  **Open Anyway**.
+- **Windows** says "Windows protected your PC". Choose **More info**, then **Run anyway**.
+
+You are asked once; after that RadiCal opens like any other app.
+
+### Using RadiCal Desktop
+
+- **Your work** is kept in one file, `radical.db`, in RadiCal's folder:
+  `~/Library/Application Support/RadiCal` on a Mac, `%APPDATA%\RadiCal` on Windows, and
+  `~/.local/share/radical` on Linux. To back it up, quit RadiCal and copy that file.
+- **Opening files.** Double-click an OxCal model (`.oxcal`) to open it in RadiCal's import, or use
+  **File → Import Dates…**. **File → Import Project…** opens a project exported from either kind of
+  RadiCal.
+- **Moving from RadiCal on a server.** On the server, open each project and choose **Export**; then
+  in RadiCal Desktop choose **File → Import Project…** and pick the file.
+- **Updating.** RadiCal looks for a new version when it opens, and asks before installing one;
+  **Help → Check for Updates…** looks straight away. Your work is kept: the file is brought up to
+  date when the new version first opens. If you installed the `.deb`, update by installing the new
+  version's `.deb` instead.
+- **Removing it.** Delete the app as you would any other, and delete RadiCal's folder (above) to
+  remove your work as well.
+
+# RadiCal on a server
+
 RadiCal runs in [Docker](https://docs.docker.com/get-started/): one container for the app and one for its
 database. Docker is the only thing to install — no Python, Node.js or PostgreSQL.
 

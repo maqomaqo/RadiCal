@@ -18,6 +18,7 @@ use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 mod files;
 mod menu;
 mod opened;
+mod updates;
 
 /// The port the server asks for first. The frontend keeps its preferences
 /// (date format, columns, basemap) in localStorage, which belongs to an
@@ -98,6 +99,7 @@ fn main() {
         }))
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(opened::Queue::default())
         .invoke_handler(tauri::generate_handler![
             files::save_file,
@@ -132,6 +134,10 @@ fn main() {
                 .on_navigation(move |url| url.origin().ascii_serialization() == origin)
                 .build()?;
             opened::open(app.handle(), std::env::args_os().skip(1));
+            // A build from the source tree has no release to compare with.
+            if !cfg!(debug_assertions) {
+                tauri::async_runtime::spawn(updates::check(app.handle().clone(), false));
+            }
             Ok(())
         })
         .build(tauri::generate_context!())

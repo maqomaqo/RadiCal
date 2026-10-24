@@ -13,6 +13,9 @@ pub const EVENT: &str = "radical://menu";
 /// The ids the frontend answers to.
 const OWN: &[&str] = &["new-analysis", "import-dates", "import-project", "help"];
 
+/// Handled here rather than by the frontend.
+const CHECK_FOR_UPDATES: &str = "check-for-updates";
+
 pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
     let item = |id: &str, text: &str, keys: Option<&str>| {
         let builder = MenuItemBuilder::with_id(id, text);
@@ -49,6 +52,8 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         .build()?;
     let help = SubmenuBuilder::new(app, "Help")
         .item(&item("help", "RadiCal Help", None)?)
+        .separator()
+        .item(&item(CHECK_FOR_UPDATES, "Check for Updates…", None)?)
         .build()?;
     let menu = Menu::new(app)?;
     // macOS puts the first submenu under the app's name, whatever it is
@@ -80,5 +85,7 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
 pub fn chosen<R: Runtime>(app: &AppHandle<R>, id: &str) {
     if OWN.contains(&id) {
         let _ = app.emit_to("main", EVENT, id);
+    } else if id == CHECK_FOR_UPDATES {
+        tauri::async_runtime::spawn(crate::updates::check(app.clone(), true));
     }
 }
