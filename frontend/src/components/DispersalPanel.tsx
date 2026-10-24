@@ -56,6 +56,7 @@ import {
   speedText,
   waveIsochrons,
 } from '@/utils/dispersalFigure'
+import { saveBlob } from '@/utils/saveFile'
 import type {
   DispersalFit,
   DispersalSection,
@@ -357,12 +358,7 @@ function ResidualTable({ fit, onHighlight }: {
       [quote(r.name), r.distance_km.toFixed(1), r.residual_years.toFixed(1), r.residual_sd.toFixed(1), r.reading].join(',')
     )
     const blob = new Blob([[header, ...body].join('\n')], { type: 'text/csv' })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = 'wave-of-advance-residuals.csv'
-    link.click()
-    URL.revokeObjectURL(url)
+    void saveBlob(blob, 'wave-of-advance-residuals.csv')
   }
 
   return (

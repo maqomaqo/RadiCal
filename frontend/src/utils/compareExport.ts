@@ -9,6 +9,7 @@
 import { formatHPDRanges, type DateFormat } from '@/utils/dateFormat'
 import { posteriorRanges, type RangeReporting } from '@/utils/hpd'
 import type { ComparedRow, UnmatchedRow } from '@/utils/comparePairing'
+import { saveBlob } from '@/utils/saveFile'
 import { SHARED_BOUNDARY_TEXT } from '@/utils/sharedBoundary'
 import {
   DERIVED_KIND_LABELS,
@@ -244,15 +245,7 @@ export function compareCsv(
   return lines.join('\n')
 }
 
-/** Offer a built CSV to the browser as a download. */
+/** Offer a built CSV as a download. */
 export function downloadCsv(filename: string, contents: string): void {
-  const blob = new Blob([contents], { type: 'text/csv;charset=utf-8;' })
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.href = url
-  link.download = filename
-  document.body.appendChild(link)
-  link.click()
-  document.body.removeChild(link)
-  URL.revokeObjectURL(url)
+  void saveBlob(new Blob([contents], { type: 'text/csv;charset=utf-8;' }), filename)
 }

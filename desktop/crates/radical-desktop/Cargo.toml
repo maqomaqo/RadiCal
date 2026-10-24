@@ -15,11 +15,16 @@ path = "src/main.rs"
 tauri-build = { version = "2.7.4", features = [] }
 
 [dependencies]
+percent-encoding = "2.3.2"
 radical-jobs = { path = "../radical-jobs" }
 radical-server = { path = "../radical-server" }
 radical-store = { path = "../radical-store" }
+serde.workspace = true
 serde_json.workspace = true
 tauri = { version = "2.12.5", features = [] }
+tauri-plugin-dialog = "2.8.3"
+tauri-plugin-single-instance = "2.5.4"
+tauri-plugin-window-state = "2.5.0"
 tokio = { version = "1.54.0", features = ["rt-multi-thread", "net"] }
 
 [lints]

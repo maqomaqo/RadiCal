@@ -15,6 +15,10 @@ use std::path::PathBuf;
 use radical_server::launch::{self, Launch};
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 
+mod files;
+mod menu;
+mod opened;
+
 /// The port the server asks for first. The frontend keeps its preferences
 /// (date format, columns, basemap) in localStorage, which belongs to an
 /// origin, port included: a new port each launch would forget them all. A
@@ -79,7 +83,28 @@ fn start_server(
 }
 
 fn main() {
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
+        // First, so a second launch hands over to the first before it opens
+        // a database the first already has open. What it was asked to open
+        // comes along: on Windows and Linux, a double-clicked file is a
+        // command-line argument.
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.unminimize();
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+            opened::open(app, args.iter().skip(1));
+        }))
+        .plugin(tauri_plugin_window_state::Builder::default().build())
+        .plugin(tauri_plugin_dialog::init())
+        .manage(opened::Queue::default())
+        .invoke_handler(tauri::generate_handler![
+            files::save_file,
+            opened::take_opened_files
+        ])
+        .menu(menu::build)
+        .on_menu_event(|app, event| menu::chosen(app, event.id().as_ref()))
         .setup(|app| {
             let frontend = frontend_dir(app).ok_or(
                 "the frontend is not built: run `npm run build` in frontend/, \
@@ -100,11 +125,23 @@ fn main() {
                 .inner_size(1280.0, 840.0)
                 .min_inner_size(900.0, 600.0)
                 .initialization_script(&script)
+                // The import dialogs take a dropped file themselves; left on,
+                // the window would swallow the drop before the page saw it.
+                .disable_drag_drop_handler()
                 // The window shows RadiCal and nothing else.
                 .on_navigation(move |url| url.origin().ascii_serialization() == origin)
                 .build()?;
+            opened::open(app.handle(), std::env::args_os().skip(1));
             Ok(())
         })
-        .run(tauri::generate_context!())
+        .build(tauri::generate_context!())
         .expect("RadiCal Desktop failed to start");
+    app.run(|_app, _event| {
+        // macOS hands a double-clicked file to the running app as an event,
+        // not an argument.
+        #[cfg(target_os = "macos")]
+        if let tauri::RunEvent::Opened { urls } = _event {
+            opened::open(_app, urls.iter().filter_map(|u| u.to_file_path().ok()));
+        }
+    });
 }
