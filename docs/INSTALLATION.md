@@ -40,8 +40,10 @@ You are asked once; after that RadiCal opens like any other app.
   RadiCal.
 - **Moving from RadiCal on a server.** On the server, open each project and choose **Export**; then
   in RadiCal Desktop choose **File → Import Project…** and pick the file.
-- **Updating.** Download the new installer and install it over the old one. Your work is kept: the
-  file is brought up to date when the new version first opens.
+- **Updating.** RadiCal looks for a new version when it opens, and asks before installing one;
+  **Help → Check for Updates…** looks straight away. Your work is kept: the file is brought up to
+  date when the new version first opens. If you installed the `.deb`, update by installing the new
+  version's `.deb` instead.
 - **Removing it.** Delete the app as you would any other, and delete RadiCal's folder (above) to
   remove your work as well.
 

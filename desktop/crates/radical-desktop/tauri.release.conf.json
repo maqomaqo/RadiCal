@@ -6,6 +6,7 @@
     },
     "macOS": {
       "signingIdentity": "-"
-    }
+    },
+    "createUpdaterArtifacts": true
   }
 }

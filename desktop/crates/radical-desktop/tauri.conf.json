@@ -42,5 +42,16 @@
     "macOS": {
       "minimumSystemVersion": "11.0"
     }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEM1OTBFNEI3MTBCREY0QTEKUldTaDlMMFF0K1NReFVHS3BhRVRaVTdoSTZ3QUFwME0vMkhqWDZwS3BsUXlXUEZlTnJ4VEJIWEIK",
+      "endpoints": [
+        "https://github.com/maqomaqo/RadiCal/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }
