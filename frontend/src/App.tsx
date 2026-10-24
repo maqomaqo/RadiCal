@@ -7,6 +7,7 @@ import { CANVAS, MUTED, PAPER } from '@/theme/surfaces'
 import { NotificationProvider } from '@/contexts/NotificationContext'
 import { AuthProvider, useAuth } from '@/contexts/AuthContext'
 import Navigation from '@/components/Navigation'
+import DesktopBridge from '@/desktop/DesktopBridge'
 import ErrorBoundary from '@/components/ErrorBoundary'
 import Dashboard from '@/pages/Dashboard'
 import SignIn, { isResetLink } from '@/pages/SignIn'
@@ -321,6 +322,7 @@ function AppShell() {
   if (!user || isResetLink()) return <SignIn />
   return (
     <Router>
+      <DesktopBridge />
       <Navigation />
       <RoutedPages />
     </Router>

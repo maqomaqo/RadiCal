@@ -1,6 +1,7 @@
-//! RadiCal's API on this machine: `radical-server [--port N] [--db PATH]`.
-//! Listens on 127.0.0.1 only -- the data is one person's, on their own
-//! computer.
+//! RadiCal's API on this machine:
+//! `radical-server [--port N] [--db PATH] [--frontend DIR]`. Listens on
+//! 127.0.0.1 only -- the data is one person's, on their own computer. With
+//! `--frontend` it also serves the built frontend, as the desktop app does.
 
 use std::net::SocketAddr;
 
@@ -8,6 +9,7 @@ fn main() {
     let mut args = std::env::args().skip(1);
     let mut port: u16 = 8000;
     let mut db = None;
+    let mut frontend = None;
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--port" => {
@@ -17,7 +19,10 @@ fn main() {
                     .expect("--port takes a number")
             }
             "--db" => db = args.next(),
-            other => panic!("unknown argument {other}; use --port N and --db PATH"),
+            "--frontend" => frontend = args.next().map(std::path::PathBuf::from),
+            other => {
+                panic!("unknown argument {other}; use --port N, --db PATH and --frontend DIR")
+            }
         }
     }
     let db = db.map(std::path::PathBuf::from).unwrap_or_else(|| {
@@ -37,7 +42,11 @@ fn main() {
             "RadiCal API on http://{address} (database {})",
             db.display()
         );
-        axum::serve(listener, radical_server::app(state))
+        let launch = radical_server::launch::Launch {
+            token: None,
+            frontend,
+        };
+        radical_server::launch::serve(listener, state, launch)
             .await
             .expect("the server runs");
     });

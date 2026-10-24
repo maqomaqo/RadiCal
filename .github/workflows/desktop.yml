@@ -25,7 +25,9 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-    timeout-minutes: 30
+    # Windows takes the longest: about 27 minutes before the desktop app's
+    # webview crates joined the build, over 30 since.
+    timeout-minutes: 45
     defaults:
       run:
         working-directory: desktop
@@ -34,6 +36,12 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: desktop
+      # radical-desktop builds on the system webview; Linux has to be given
+      # WebKitGTK's headers (macOS and Windows ship theirs).
+      - if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libxdo-dev libssl-dev
       - run: cargo fmt --all --check
       - run: cargo clippy --all-targets --locked -- -D warnings
       - run: cargo test --all-targets --locked

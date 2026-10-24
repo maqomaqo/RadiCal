@@ -1,0 +1,10 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "The main window, which loads the app from radical-server on loopback. It may call the app's own two commands and listen for its events, and nothing of any plugin's.",
+  "windows": ["main"],
+  "remote": {
+    "urls": ["http://127.0.0.1:*"]
+  },
+  "permissions": ["core:default", "allow-save-file", "allow-take-opened-files"]
+}

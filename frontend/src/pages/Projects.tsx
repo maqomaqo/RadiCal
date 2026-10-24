@@ -17,7 +17,7 @@ import {
   IconButton,
   Tooltip,
 } from '@mui/material'
-import { Link as RouterLink, useNavigate, useSearchParams } from 'react-router-dom'
+import { Link as RouterLink, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import AddIcon from '@mui/icons-material/Add'
 import InboxIcon from '@mui/icons-material/Inbox'
 import DeleteIcon from '@mui/icons-material/Delete'
@@ -216,7 +216,17 @@ function ProjectCard({
 export default function Projects() {
   const notify = useNotify()
   const navigate = useNavigate()
+  const location = useLocation()
   const [importOpen, setImportOpen] = useState(false)
+  // The desktop app's File > Import Project, which may be chosen while this
+  // page is already showing: keyed on the history entry, not on mounting.
+  useEffect(() => {
+    if ((location.state as { openImport?: boolean } | null)?.openImport) {
+      setImportOpen(true)
+      navigate(`${location.pathname}${location.search}`, { replace: true, state: null })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.key])
   const [projects, setProjects] = useState<ProjectSummary[]>([])
   const [unassignedCount, setUnassignedCount] = useState(0)
   const [loading, setLoading] = useState(true)

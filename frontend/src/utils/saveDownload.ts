@@ -1,4 +1,5 @@
 import { formatApiError } from '@/utils/apiError'
+import { saveBlob } from '@/utils/saveFile'
 
 /**
  * Fetch an export and save it under `filename`. The status is checked before
@@ -15,14 +16,6 @@ export async function saveDownload(url: string, filename: string): Promise<Heade
   if (!response.ok) {
     throw new Error(formatApiError(await response.json().catch(() => null)))
   }
-  const blob = await response.blob()
-  const href = window.URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = href
-  a.download = filename
-  document.body.appendChild(a)
-  a.click()
-  window.URL.revokeObjectURL(href)
-  document.body.removeChild(a)
+  await saveBlob(await response.blob(), filename)
   return response.headers
 }

@@ -1,5 +1,8 @@
+import { isTauri } from '@tauri-apps/api/core'
 import Plotly from 'plotly.js-dist-min'
 import type { DownloadImgopts, ToImgopts } from 'plotly.js-dist-min'
+
+import { saveBlob } from './saveFile'
 
 import { PNG_EXPORT_SCALE, exportFilename } from './plotExport'
 
@@ -41,6 +44,16 @@ export function downloadPlotPng(
     height: null,
     scale: PNG_EXPORT_SCALE,
     filename: exportFilename(filename),
+  }
+  if (isTauri()) {
+    // Plotly's own download is a blob URL clicked with `download` set, which
+    // the desktop app's webview ignores: render the image, then save it the
+    // way every other download in the app is saved.
+    void Plotly.toImage(graph, { ...options, format: 'png' })
+      .then((dataUrl) => fetch(dataUrl))
+      .then((response) => response.blob())
+      .then((blob) => saveBlob(blob, `${options.filename}.png`))
+    return
   }
   void Plotly.downloadImage(graph, options)
 }

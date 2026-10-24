@@ -26,14 +26,6 @@ pub mod runs;
 pub fn router() -> Router<State> {
     Router::new()
         .route(
-            "/",
-            axum::routing::get(|| async {
-                axum::Json(serde_json::json!({
-                    "message": "RadiCal API", "docs": "/api/docs", "health": "/api/health",
-                }))
-            }),
-        )
-        .route(
             "/api/health",
             axum::routing::get(|| async {
                 axum::Json(serde_json::json!({"status": "ok", "version": crate::VERSION}))

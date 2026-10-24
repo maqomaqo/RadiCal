@@ -145,6 +145,11 @@ interface Props {
   collection?: DateValues[]
   onConfirm: (preview: ImportPreview, options: ImportOptions) => void | Promise<void>
   confirming?: boolean
+  /**
+   * A file to read as soon as the dialog opens, as if it had been chosen in
+   * it: one the desktop app was asked to open (a double-clicked .oxcal).
+   */
+  file?: File | null
 }
 
 export interface ImportOptions {
@@ -183,6 +188,7 @@ export default function ImportDatesDialog({
   collection,
   onConfirm,
   confirming = false,
+  file = null,
 }: Props) {
   const notify = useNotify()
   const inputRef = useRef<HTMLInputElement>(null)
@@ -240,6 +246,12 @@ export default function ImportDatesDialog({
       setUploading(false)
     }
   }
+
+  useEffect(() => {
+    if (open && file) upload(file)
+    // Once per file handed in, not again on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, file])
 
   const handleFiles = (files: FileList | null) => {
     const file = files?.[0]

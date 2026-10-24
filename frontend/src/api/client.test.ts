@@ -14,7 +14,7 @@
 // once, rather than turning into a page full of silent failures -- but a 401
 // from the login endpoint is an answer, not an expiry, and must not sign
 // somebody out as they try to sign in.
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 type Client = typeof import('./client')
 
@@ -210,5 +210,27 @@ describe('the desktop app, which has no accounts', () => {
     expect(await client.fetchCurrentUser()).toBeNull()
     expect(client.isSingleUser()).toBe(false)
     expect(underlying.mock.calls.some(([u]) => String(u).endsWith('/api/auth/me'))).toBe(false)
+  })
+
+  describe('with the launch token its window puts on the page', () => {
+    beforeEach(() => {
+      ;(globalThis as any).__RADICAL_LAUNCH_TOKEN__ = 'launch-token'
+    })
+    afterEach(() => {
+      delete (globalThis as any).__RADICAL_LAUNCH_TOKEN__
+    })
+
+    it('sends it to our API, and only there', async () => {
+      await fetch('/api/projects')
+      expect(lastHeaders().get('Authorization')).toBe('Bearer launch-token')
+      await fetch('https://elsewhere.example.com/api/projects')
+      expect(lastHeaders().has('Authorization')).toBe(false)
+    })
+
+    it('still learns that the server serves one person', async () => {
+      underlying.mockImplementation(answer(true))
+      expect((await client.fetchCurrentUser())?.id).toBe('local')
+      expect(client.isSingleUser()).toBe(true)
+    })
   })
 })

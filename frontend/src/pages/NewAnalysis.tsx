@@ -240,6 +240,8 @@ export default function NewAnalysis() {
       deltaRErrorMissing(editing.draft))
 
   const [importOpen, setImportOpen] = useState(false)
+  // A file the desktop app was asked to open, read into the import dialog.
+  const [openedFile, setOpenedFile] = useState<File | null>(null)
   // A write to the project rather than to this draft, so it gets its own busy
   // flag -- the import and the Run button must not look like they are waiting
   // on it.
@@ -333,11 +335,20 @@ export default function NewAnalysis() {
   // change removes.
   useEffect(() => {
     if (editRouteId) return
-    const fresh = (location.state as { fresh?: boolean } | null)?.fresh
+    const state = location.state as
+      | { fresh?: boolean; openImport?: boolean; importFile?: File }
+      | null
+    const fresh = state?.fresh
     if (fresh || editingAnalysisId) resetDraft()
     const fromQuery = searchParams.get('project')
     if (fromQuery) setProjectId(fromQuery)
-    if (fresh) {
+    // From the desktop app's menu, or a file it was asked to open. Not a
+    // reset: an import replaces the draft's dates only once confirmed.
+    if (state?.openImport || state?.importFile) {
+      setOpenedFile(state.importFile ?? null)
+      setImportOpen(true)
+    }
+    if (fresh || state?.openImport || state?.importFile) {
       navigate(`${location.pathname}${location.search}`, { replace: true, state: null })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -856,6 +867,7 @@ export default function NewAnalysis() {
     if (!analysisName && preview.analysis_name) setAnalysisName(preview.analysis_name)
     if (preview.resolution) setMcmc({ resolution: preview.resolution })
     setImportOpen(false)
+    setOpenedFile(null)
 
     // After the draft is populated, so a failure to reach the collection
     // leaves the dates loaded rather than losing the import with it.
@@ -1819,7 +1831,11 @@ export default function NewAnalysis() {
 
       <ImportDatesDialog
         open={importOpen}
-        onClose={() => setImportOpen(false)}
+        onClose={() => {
+          setImportOpen(false)
+          setOpenedFile(null)
+        }}
+        file={openedFile}
         target="analysis"
         collectionProjectName={
           projectId ? projects.find((p) => p.id === projectId)?.name ?? 'this project' : null
