@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "The main window. It loads the app from radical-server and needs no IPC yet.",
+  "windows": ["main"],
+  "permissions": []
+}

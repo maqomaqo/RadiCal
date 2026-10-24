@@ -89,6 +89,17 @@ export function clearSession() {
   memoryToken = null
 }
 
+/**
+ * The desktop app's token for this launch, which its window puts on the page
+ * before the app loads. Its server asks for it on every request, as the
+ * backend asks for a session token, so it travels the same way. Never stored:
+ * the next launch has a new one.
+ */
+export function launchToken(): string | null {
+  const token = (window as { __RADICAL_LAUNCH_TOKEN__?: unknown }).__RADICAL_LAUNCH_TOKEN__
+  return typeof token === 'string' && token ? token : null
+}
+
 // Read on every request, so a storage failure or a cleared store does not
 // silently sign the user out mid-session.
 let memoryToken: string | null = storedToken()
@@ -165,7 +176,7 @@ export function installAuthenticatedFetch() {
   window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     if (!isOurApi(input)) return original(input, init)
 
-    const token = memoryToken ?? storedToken()
+    const token = launchToken() ?? memoryToken ?? storedToken()
     let request = init
     if (token) {
       const headers = new Headers(init?.headers || {})
@@ -289,12 +300,14 @@ export async function signOut() {
  * first page failed at once.
  */
 export async function fetchCurrentUser(): Promise<AuthUser | null> {
-  if (!memoryToken && !storedToken()) {
+  const desktop = launchToken() !== null
+  if (desktop || (!memoryToken && !storedToken())) {
     // No session -- unless the server is the desktop app's, which serves one
     // person on their own computer and has no accounts to sign in to. It says
-    // so in /auth/options, and then /auth/me answers without a token.
-    if (!(await serverIsSingleUser())) return null
-    singleUser = true
+    // so in /auth/options, and then /auth/me answers without a session. Its
+    // window carries a launch token, which is not a session, so it asks too.
+    if (await serverIsSingleUser()) singleUser = true
+    else if (!desktop) return null
   }
   try {
     const response = await fetch('/api/auth/me')

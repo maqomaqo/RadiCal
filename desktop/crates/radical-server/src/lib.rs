@@ -22,6 +22,7 @@ pub mod calib;
 pub mod curves;
 pub mod form;
 pub mod history;
+pub mod launch;
 pub mod pdf;
 pub mod report;
 pub mod routes;
@@ -130,7 +131,5 @@ pub use validate::problem;
 
 /// The whole API.
 pub fn app(state: State) -> axum::Router {
-    routes::router()
-        .fallback(|| async { ApiError::new(StatusCode::NOT_FOUND, "Not Found") })
-        .with_state(state)
+    launch::app(state, launch::Launch::default())
 }

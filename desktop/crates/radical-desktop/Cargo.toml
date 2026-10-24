@@ -1,0 +1,26 @@
+[package]
+name = "radical-desktop"
+description = "RadiCal Desktop: a window on radical-server, which it starts in-process."
+publish = false
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "radical"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2.7.4", features = [] }
+
+[dependencies]
+radical-jobs = { path = "../radical-jobs" }
+radical-server = { path = "../radical-server" }
+radical-store = { path = "../radical-store" }
+serde_json.workspace = true
+tauri = { version = "2.12.5", features = [] }
+tokio = { version = "1.54.0", features = ["rt-multi-thread", "net"] }
+
+[lints]
+workspace = true
