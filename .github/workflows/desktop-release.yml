@@ -152,6 +152,10 @@ jobs:
         with:
           path: installers
           merge-multiple: true
+      # Each artifact keeps the folders its files were built in (dmg/,
+      # macos/, nsis/, ...); the release wants them side by side.
+      - name: Gather the installers in one folder
+        run: find installers -mindepth 2 -type f -exec mv -t installers {} +
       # What installed copies read to learn of this version: each platform's
       # update, by its address on this release, with its signature.
       - name: Write latest.json
