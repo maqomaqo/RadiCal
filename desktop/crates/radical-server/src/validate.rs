@@ -13,16 +13,14 @@ use serde_json::{Map, Value, json};
 
 use crate::ApiError;
 
-/// The Pydantic release the backend's error URLs name.
-const PYDANTIC: &str = "2.13";
-
-/// One problem, as Pydantic's `errors()` lists it and FastAPI sends it.
+/// One problem, as Pydantic's `errors()` lists it and FastAPI sends it:
+/// without Pydantic's documentation `url`, which FastAPI (0.141, the
+/// backend's pin) leaves out of a 422.
 pub fn problem(kind: &str, loc: &[Value], msg: &str, input: Value, ctx: Option<Value>) -> Value {
     let mut out = json!({"type": kind, "loc": loc, "msg": msg, "input": input});
     if let Some(ctx) = ctx {
         out["ctx"] = ctx;
     }
-    out["url"] = Value::from(format!("https://errors.pydantic.dev/{PYDANTIC}/v/{kind}"));
     out
 }
 
@@ -427,6 +425,25 @@ impl<'a, 'p> Fields<'a, 'p> {
             None => Some(default.to_owned()),
             Some(v) => self.text(name, v, max, None),
         }
+    }
+
+    /// A required `EmailStr`: a string, then an address as email-validator
+    /// judges one. Its refusal is Pydantic's own value_error, with the
+    /// validator's reason.
+    pub fn email(&mut self, name: &str) -> Option<String> {
+        let s = self.string(name, None, None)?;
+        let Some(reason) = crate::accounts::email_problem(&s) else {
+            return Some(s);
+        };
+        let loc = self.at(name);
+        self.problems.0.push(json!({
+            "type": "value_error",
+            "loc": loc,
+            "msg": format!("value is not a valid email address: {reason}"),
+            "input": s,
+            "ctx": {"reason": reason},
+        }));
+        None
     }
 
     /// A required `str`, with optional length limits.

@@ -152,7 +152,12 @@ pub fn app(state: State, launch: Launch) -> axum::Router {
             )
             .fallback(|| async { ApiError::new(StatusCode::NOT_FOUND, "Not Found") }),
     };
-    let router = router.with_state(state);
+    let router = router
+        .route_layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            crate::accounts::require_caller,
+        ))
+        .with_state(state);
     match launch.token {
         Some(token) => router.layer(axum::middleware::from_fn_with_state(token, require_token)),
         None => router,

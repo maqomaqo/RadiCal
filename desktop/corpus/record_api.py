@@ -8,9 +8,9 @@ make, in the order they make them, for radical-server's replay test.
 
 The suite shares one database across its tests, so the replay runs every
 exchange in order against one Rust database too. Each exchange keeps which
-credentials it was sent with (a short hash), so the replay can skip the
-ones a second account or an anonymous client made: the desktop app has one
-user and no sign-in.
+credentials it was sent with -- a short hash, and what kind of token it was
+-- so the replay can send each request as the account that made it, or, in
+single-user mode, skip the ones a second account or nobody made.
 """
 import base64
 import copy
@@ -29,6 +29,16 @@ CLEANUP_FIXTURES = ('remove_stored_curves',)
 def pytest_runtest_setup(item):
     CURRENT['test'] = item.nodeid
     CURRENT['cleanup'] = [f for f in CLEANUP_FIXTURES if f in item.fixturenames]
+
+
+def _auth_kind(header):
+    """As api/auth.current_user reads the header."""
+    if not header:
+        return None
+    scheme, _, token = header.partition(' ')
+    if scheme.lower() != 'bearer' or not token.strip():
+        return 'other'
+    return 'rct' if token.strip().startswith('rct_') else 'jwt'
 
 
 def _zip_members(raw):
@@ -119,6 +129,11 @@ def pytest_configure(config):
             'test': CURRENT['test'],
             'cleanup': CURRENT['cleanup'],
             'auth': hashlib.sha256(auth.encode()).hexdigest()[:8] if auth else None,
+            # What the backend takes the header for -- a personal access
+            # token, a sign-in token, or no bearer token at all -- so a
+            # replay can send a bad one of the same kind in place of a token
+            # no response here issued.
+            'auth_kind': _auth_kind(auth),
             'method': method.upper(),
             'url': str(url).replace('http://testserver', ''),
             'params': sent['params'],

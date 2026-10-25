@@ -147,6 +147,28 @@ const KNOWN: &[(&str, &str)] = &[
         "test_project_samples.py::TestDeployingAsCalibration::test_an_analysis_already_stored_as_multi_date_calibration_is_repaired",
         "the test retypes the analysis in the database, behind the API",
     ),
+    // Accounts mode: links the test signs itself with the backend's token
+    // code, or reads out of an email it intercepted.
+    (
+        "test_auth.py::TestResettingAForgottenPassword::test_a_link_sets_the_password_and_signs_in",
+        "the test signs the reset link itself, behind the API",
+    ),
+    (
+        "test_auth.py::TestResettingAForgottenPassword::test_a_link_works_once",
+        "the test signs the reset link itself, behind the API",
+    ),
+    (
+        "test_auth.py::TestResettingAForgottenPassword::test_an_email_carries_a_working_link",
+        "the test sets up email in its environment, and reads the link out of what it sent",
+    ),
+    (
+        "test_auth.py::TestResettingAForgottenPassword::test_asking_says_nothing_about_who_has_an_account",
+        "the test sets up email in its environment, behind the API",
+    ),
+    (
+        "test_auth.py::TestResettingAForgottenPassword::test_asking_again_at_once_sends_nothing_more",
+        "the test sets up email in its environment, behind the API",
+    ),
 ];
 
 /// Tests excused on Windows only: its C runtime's exp and log differ from
@@ -327,6 +349,11 @@ const VOLATILE: &[&str] = &[
     // A fingerprint over inputs that include random ids. Whether two agree
     // is still held, as `stale` and `same_inputs`.
     "inputs_hash",
+    // A token's secret, and its dates: new on every run.
+    "token",
+    "prefix",
+    "expires_at",
+    "last_used_at",
 ];
 
 fn has_placeholder(v: &Value) -> bool {
@@ -557,6 +584,7 @@ async fn send(
     url: &str,
     inputs: &Value,
     ids: &mut Ids,
+    auth: Option<&str>,
 ) -> (u16, Option<Value>, Option<String>) {
     let mut uri = ids.fill(url);
     if let Some(params) = inputs["params"].as_object() {
@@ -572,9 +600,12 @@ async fn send(
         uri.push(if uri.contains('?') { '&' } else { '?' });
         uri.push_str(&query.join("&"));
     }
-    let builder = Request::builder()
+    let mut builder = Request::builder()
         .method(Method::from_bytes(method.as_bytes()).unwrap())
         .uri(uri);
+    if let Some(auth) = auth {
+        builder = builder.header("authorization", auth);
+    }
     let request = if !inputs["request_json"].is_null() {
         builder
             .header("content-type", "application/json")
@@ -740,7 +771,11 @@ fn lines_differ(label: &str, got: &str, want: &str, ids: &mut Ids) -> Option<Str
 /// done here too, so the tests after it see the same rows. Answers the id of
 /// the row made, for the first id the test's requests name that no answer
 /// has produced.
-fn behind_the_api(state: &radical_server::State, test: &str) -> Option<String> {
+fn behind_the_api(
+    state: &radical_server::State,
+    test: &str,
+    suite_user: Option<&str>,
+) -> Option<String> {
     if test.ends_with(
         "test_pdf_report.py::TestReportContent::test_a_pending_analysis_still_produces_a_report",
     ) {
@@ -752,6 +787,9 @@ fn behind_the_api(state: &radical_server::State, test: &str) -> Option<String> {
             status: Some("pending".to_owned()),
             created_at: now,
             updated_at: now,
+            // Given to the suite's account, as the test gives it: an analysis
+            // with no owner is visible to nobody.
+            owner_id: suite_user.map(str::to_owned),
             ..radical_store::rows::Analysis::default()
         };
         state
@@ -761,6 +799,42 @@ fn behind_the_api(state: &radical_server::State, test: &str) -> Option<String> {
         return Some(analysis.id);
     }
     None
+}
+
+/// What a test does behind the API in the middle of itself, just before the
+/// exchange that depends on it.
+fn behind_the_api_before(state: &radical_server::State, test: &str, method: &str, url: &str) {
+    // reset_password.reset('CLI@radical.example.com', 'the new password')
+    if test.ends_with("TestTheServerResetCommand::test_it_sets_the_password")
+        && url == "/api/auth/login"
+    {
+        radical_server::accounts::reset_password(
+            &state.store,
+            "CLI@radical.example.com",
+            "the new password",
+        )
+        .unwrap();
+    }
+    // The token just made is given an expiry a second ago.
+    if test.ends_with("TestAccessTokens::test_an_expired_token_is_refused")
+        && method == "GET"
+        && url == "/api/auth/me"
+    {
+        state
+            .store
+            .write(|tx| {
+                let past = radical_store::Timestamp {
+                    micros: radical_store::Timestamp::now().micros - 1_000_000,
+                };
+                tx.execute(
+                    "UPDATE personal_access_tokens SET expires_at = ? WHERE id = \
+                     (SELECT id FROM personal_access_tokens ORDER BY created_at DESC LIMIT 1)",
+                    [past],
+                )?;
+                Ok(())
+            })
+            .unwrap();
+    }
 }
 
 fn stored_curve_ids(state: &radical_server::State) -> Vec<String> {
@@ -791,12 +865,62 @@ fn remove_stored_curves(state: &radical_server::State, before: &[String]) {
     }
 }
 
+/// RadiCal Desktop's server: one person, so only the suite's own account's
+/// exchanges, and none of the sign-in routes.
 #[tokio::test(flavor = "multi_thread")]
 async fn the_backend_suite_replayed() {
+    replay(false).await;
+}
+
+/// RadiCal on a server: every exchange, each sent as the account that made
+/// it, the sign-in routes included.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_backend_suite_replayed_with_accounts() {
+    replay(true).await;
+}
+
+/// The routes accounts mode adds, held in its replay.
+const ACCOUNT_ROUTES: &[&str] = &[
+    "POST /api/auth/register",
+    "POST /api/auth/login",
+    "GET /api/auth/me",
+    "POST /api/auth/password",
+    "GET /api/auth/options",
+    "POST /api/auth/forgot-password",
+    "POST /api/auth/reset-password",
+    "GET /api/auth/tokens",
+    "POST /api/auth/tokens",
+    "DELETE /api/auth/tokens/{token_id}",
+];
+
+/// The suite's own account, as conftest's suite_user makes it.
+const SUITE_EMAIL: &str = "suite@radical.example.com";
+
+/// What a request carries in place of a token no answer here gave: one of
+/// the same kind that cannot be good, as an expired or forged one was.
+fn bad_token(kind: &str) -> &'static str {
+    match kind {
+        "rct" => "Bearer rct_not-a-token-this-server-made",
+        "jwt" => "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.e30.not-signed-here",
+        _ => "Basic not-a-bearer-token",
+    }
+}
+
+async fn replay(accounts: bool) {
     let family = load_family("api/exchanges").unwrap();
     let dir = std::env::temp_dir().join(format!("radical-replay-{}", radical_store::new_id()));
-    let state = radical_server::State::open(dir.join("radical.db"), 2).unwrap();
+    let mut state = radical_server::State::open(dir.join("radical.db"), 2).unwrap();
+    if accounts {
+        state = state.with_accounts(radical_server::accounts::Accounts {
+            secret: "radical-replay-secret".to_owned(),
+        });
+    }
     let app = radical_server::app(state.clone());
+    // Each token an answer gave, by the exchange that gave it, and the
+    // suite's own account's.
+    let mut issued: HashMap<String, String> = HashMap::new();
+    let mut suite_token: Option<String> = None;
+    let mut suite_user: Option<String> = None;
     // The test whose exchanges these are, and the curves stored before it
     // began when it is one that removes what it stored.
     let mut current: Option<(String, Option<Vec<String>>)> = None;
@@ -827,7 +951,7 @@ async fn the_backend_suite_replayed() {
                 .as_array()
                 .is_some_and(|c| c.iter().any(|f| f == "remove_stored_curves"));
             current = Some((test_name.clone(), cleans.then(|| stored_curve_ids(&state))));
-            made = behind_the_api(&state, &test_name);
+            made = behind_the_api(&state, &test_name, suite_user.as_deref());
         }
         if let Some(id) = &made
             && let Some(c) = PLACEHOLDER
@@ -838,15 +962,53 @@ async fn the_backend_suite_replayed() {
             made = None;
         }
         let (method, url) = (i["method"].as_str().unwrap(), i["url"].as_str().unwrap());
-        // The suite's own account, or nobody for the routes open to all.
-        let open = matches!(url, "/api/health");
-        if !(i["auth"] == "suite" || (open && i["auth"] == "none")) || url.starts_with("/api/auth/")
-        {
-            continue;
+        let who = i["auth"].as_str().unwrap_or("none");
+        let auth: Option<String> = if accounts {
+            match who {
+                "none" => None,
+                "suite" => suite_token.as_ref().map(|t| format!("Bearer {t}")),
+                w if w.starts_with("token:") => issued.get(&w[6..]).map(|t| format!("Bearer {t}")),
+                w => Some(bad_token(w.trim_start_matches("bad:")).to_owned()),
+            }
+        } else {
+            // The suite's own account, or nobody for the routes open to all.
+            let open = matches!(url, "/api/health");
+            if !(who == "suite" || (open && who == "none")) || url.starts_with("/api/auth/") {
+                continue;
+            }
+            None
+        };
+        if accounts {
+            behind_the_api_before(&state, &test_name, method, url);
         }
         let route = template(&routes, method, url);
         ids.invented = false;
-        let mut answer = send(&app, method, url, &i, &mut ids).await;
+        let mut answer = send(&app, method, url, &i, &mut ids, auth.as_deref()).await;
+        // A token this answer gave, for the requests that later carry it.
+        if let Some(token) = answer.1.as_ref().and_then(|b| b["data"]["token"].as_str()) {
+            let index = case
+                .name
+                .split(' ')
+                .next()
+                .unwrap_or("")
+                .trim_start_matches('0');
+            issued.insert(
+                if index.is_empty() {
+                    "0".to_owned()
+                } else {
+                    index.to_owned()
+                },
+                token.to_owned(),
+            );
+            if i["request_json"]["email"] == SUITE_EMAIL && url == "/api/auth/register" {
+                suite_token = Some(token.to_owned());
+                suite_user = answer
+                    .1
+                    .as_ref()
+                    .and_then(|b| b["data"]["user"]["id"].as_str())
+                    .map(str::to_owned);
+            }
+        }
         let invented = ids.invented;
         // A poll the backend saw finished waits for the Rust job to finish,
         // as long as the suite's own `_await_job` would (300 s: a slow
@@ -867,7 +1029,7 @@ async fn the_backend_suite_replayed() {
                         break;
                     }
                     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-                    answer = send(&app, method, url, &i, &mut ids).await;
+                    answer = send(&app, method, url, &i, &mut ids, auth.as_deref()).await;
                 }
             }
         }
@@ -983,7 +1145,11 @@ async fn the_backend_suite_replayed() {
         tally.len()
     );
     let _ = std::fs::remove_dir_all(dir);
-    for route in PORTED {
+    // Accounts mode holds the sign-in routes; the rest, which it does not
+    // yet scope to their owner, the single-user replay holds (server plan S3
+    // brings them in here).
+    let held: &[&str] = if accounts { ACCOUNT_ROUTES } else { PORTED };
+    for route in held {
         let t = tally
             .get(*route)
             .unwrap_or_else(|| panic!("{route} is not in the recording"));

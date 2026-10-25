@@ -15,7 +15,7 @@
  },
  "files": {
   "data/api/calibrate.json": "d8c3ffec90c632e4083f33ef9cc5f0fc027e75b9f2733387c5d515e12156a428",
-  "data/api/exchanges.json": "22b6f7862184381dd1daa04283da798a4b73cd8b97b3ba9f979252b847518044",
+  "data/api/exchanges.json": "009c944fb6e159ef2eed8fe65824c3829e28ae195c36ecc6cba8f3ab54fb692a",
   "data/api/models.json": "ec1131489d2aa9dd0d8b52950b74eef0ec88e98b2322c43a2e7fdf62e6d1dca7",
   "data/schema/sqlite.json": "e988635662941744e4cdf7e4b32597ac9e97074a44e07e7d4baecf6ffafb696a",
   "data/units/agreement.json": "43748019453979c4f3050d0e412d331e22d4c7ae7ee390eb974ba8a9cc14eea7",

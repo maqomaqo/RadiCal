@@ -17,6 +17,7 @@ use radical_jobs::Jobs;
 use radical_store::Store;
 use serde_json::{Value, json};
 
+pub mod accounts;
 pub mod blocks;
 pub mod calib;
 pub mod curves;
@@ -37,6 +38,8 @@ pub struct State {
     pub store: Arc<Store>,
     pub jobs: Arc<Jobs>,
     pub curves: Arc<curves::StoreCurves>,
+    /// Accounts mode, for RadiCal on a server: None on the desktop.
+    pub accounts: Option<accounts::Accounts>,
 }
 
 impl State {
@@ -54,7 +57,17 @@ impl State {
             store,
             jobs,
             curves,
+            accounts: None,
         })
+    }
+
+    /// The same server with accounts: every request but the few before
+    /// signing in must say whose it is.
+    pub fn with_accounts(self, accounts: accounts::Accounts) -> Self {
+        Self {
+            accounts: Some(accounts),
+            ..self
+        }
     }
 }
 
