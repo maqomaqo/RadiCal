@@ -29,6 +29,7 @@ use radical_store::rows::{
 use radical_store::rusqlite::Connection;
 use serde_json::{Map, Value, json};
 
+use crate::accounts::Caller;
 use crate::routes::analysis::{
     iso, measurements, migrated_tree, ranges_json, rows_to_tree, same_event_for_samples, walk_tree,
 };
@@ -1164,12 +1165,13 @@ fn build_csv(
 // Routes
 // --------------------------------------------------------------------------
 
-/// The 404 every route answers for an analysis that is not there.
-pub(crate) fn owned(state: &State, analysis_id: &str) -> ApiResult<Analysis> {
-    state
+/// The analysis, if it is the caller's: the 404 every route answers for one
+/// that is not there, and for someone else's (`_owned_analysis`).
+pub(crate) fn owned(state: &State, caller: &Caller, analysis_id: &str) -> ApiResult<Analysis> {
+    let row = state
         .store
-        .read(|c| rows::get(c, analysis_id))?
-        .ok_or_else(|| ApiError::not_found("That analysis was not found."))
+        .read(|c| rows::get::<Analysis>(c, analysis_id))?;
+    crate::owner::check(caller, row, |a| a.owner_id.as_deref(), "That analysis")
 }
 
 /// A float query parameter, as FastAPI reads one.
@@ -1202,12 +1204,13 @@ fn download(content_type: &str, filename: String, body: String) -> Response {
 
 fn csv_response(
     state: &State,
+    caller: &Caller,
     analysis_id: &str,
     date_format: Option<&str>,
     p: Option<f64>,
     suffix: &str,
 ) -> ApiResult<Response> {
-    owned(state, analysis_id)?;
+    owned(state, caller, analysis_id)?;
     let text = build_csv(state, analysis_id, date_format, p)?;
     Ok(download(
         "text/csv; charset=utf-8",
@@ -1218,12 +1221,14 @@ fn csv_response(
 
 async fn export_table(
     Extract(state): Extract<State>,
+    caller: Caller,
     Path(analysis_id): Path<String>,
     Query(q): Query<HashMap<String, String>>,
 ) -> ApiResult<Response> {
     let p = query_float(&q, "p_before_bp")?;
     csv_response(
         &state,
+        &caller,
         &analysis_id,
         q.get("date_format").map(String::as_str),
         p,
@@ -1233,12 +1238,14 @@ async fn export_table(
 
 async fn export_csv(
     Extract(state): Extract<State>,
+    caller: Caller,
     Path(analysis_id): Path<String>,
     Query(q): Query<HashMap<String, String>>,
 ) -> ApiResult<Response> {
     let p = query_float(&q, "p_before_bp")?;
     csv_response(
         &state,
+        &caller,
         &analysis_id,
         q.get("date_format").map(String::as_str),
         p,
@@ -1256,10 +1263,11 @@ fn without_samples(p: &Value) -> Value {
 
 pub fn json_payload(
     state: &State,
+    caller: &Caller,
     analysis_id: &str,
     p_before_bp: Option<f64>,
 ) -> ApiResult<Value> {
-    owned(state, analysis_id)?;
+    owned(state, caller, analysis_id)?;
     let t = threshold(p_before_bp)?;
     let g = gather(state, analysis_id)?;
     let structure = structure(state, &g)?;
@@ -1304,15 +1312,17 @@ pub fn json_payload(
 
 async fn export_json(
     Extract(state): Extract<State>,
+    caller: Caller,
     Path(analysis_id): Path<String>,
     Query(q): Query<HashMap<String, String>>,
 ) -> ApiResult {
     let p = query_float(&q, "p_before_bp")?;
-    Ok(ok(json_payload(&state, &analysis_id, p)?))
+    Ok(ok(json_payload(&state, &caller, &analysis_id, p)?))
 }
 
 async fn get_p_before(
     Extract(state): Extract<State>,
+    caller: Caller,
     Path(analysis_id): Path<String>,
     Query(q): Query<HashMap<String, String>>,
 ) -> ApiResult {
@@ -1326,17 +1336,22 @@ async fn get_p_before(
             None,
         )]));
     };
-    owned(&state, &analysis_id)?;
+    owned(&state, &caller, &analysis_id)?;
     let t = threshold(Some(cal_bp))?.expect("given");
     Ok(ok(p_before_all(&state, &analysis_id, t)?))
 }
 
 /// The library of curves a file may name: the built-ins and every stored
 /// curve, oldest first.
-pub fn library(state: &State) -> radical_store::Result<Library<'_>> {
+/// The curves names may be resolved against: the caller's own when choosing
+/// one (an importer), every one when naming one a date already uses.
+pub fn library<'a>(
+    state: &'a State,
+    scope: &crate::owner::Scope,
+) -> radical_store::Result<Library<'a>> {
     let rows: Vec<CurveRow> = state
         .store
-        .read(|c| rows::select_where(c, "1 = 1", [], "created_at, rowid"))?;
+        .read(|c| rows::select_where(c, &scope.sql("created_by"), [], "created_at, rowid"))?;
     let stored = rows
         .into_iter()
         .map(|r| StoredCurve {
@@ -1381,9 +1396,10 @@ fn today() -> String {
 
 async fn export_oxcal(
     Extract(state): Extract<State>,
+    caller: Caller,
     Path(analysis_id): Path<String>,
 ) -> ApiResult<Response> {
-    let analysis = owned(&state, &analysis_id)?;
+    let analysis = owned(&state, &caller, &analysis_id)?;
     let (samples, tree, migrated) = state.store.read(|c| {
         let samples = measurements(c, &analysis_id)?;
         let tree = tree_of(c, &analysis_id)?;
@@ -1430,7 +1446,8 @@ async fn export_oxcal(
         resolution: config["resolution"].as_f64(),
         uniform_span_prior: config["uniform_span_prior"].as_bool(),
     };
-    let library = library(&state)?;
+    // Naming the curves the dates already use, whoever's they are.
+    let library = library(&state, &crate::owner::Scope::of(&Caller::Local))?;
     let root = tree.as_ref().map(element);
     let (text, omitted) = oxcal_export::write_oxcal(
         &analysis.name,
@@ -1486,8 +1503,12 @@ fn filename_stem(name: &str) -> String {
     }
 }
 
-async fn get_graphs(Extract(state): Extract<State>, Path(analysis_id): Path<String>) -> ApiResult {
-    owned(&state, &analysis_id)?;
+async fn get_graphs(
+    Extract(state): Extract<State>,
+    caller: Caller,
+    Path(analysis_id): Path<String>,
+) -> ApiResult {
+    owned(&state, &caller, &analysis_id)?;
     let results: Vec<AnalysisResult> = state
         .store
         .read(|c| rows::select_where(c, "analysis_id = ?", [&analysis_id], "rowid"))?;
@@ -1528,11 +1549,12 @@ fn context_spans(state: &State, analysis_id: &str) -> ApiResult<Vec<(String, Val
 /// assembly the CSV and the JSON use.
 fn pdf_response(
     state: &State,
+    caller: &Caller,
     analysis_id: &str,
     date_format: Option<&str>,
     p_before_bp: Option<f64>,
 ) -> ApiResult<Response> {
-    owned(state, analysis_id)?;
+    owned(state, caller, analysis_id)?;
     let t = threshold(p_before_bp)?;
     let g = gather(state, analysis_id)?;
     let structure = structure(state, &g)?;
@@ -1591,12 +1613,14 @@ fn pdf_response(
 
 async fn export_pdf(
     Extract(state): Extract<State>,
+    caller: Caller,
     Path(analysis_id): Path<String>,
     Query(q): Query<HashMap<String, String>>,
 ) -> ApiResult<Response> {
     let p = query_float(&q, "p_before_bp")?;
     pdf_response(
         &state,
+        &caller,
         &analysis_id,
         q.get("date_format").map(String::as_str),
         p,
@@ -1606,6 +1630,7 @@ async fn export_pdf(
 /// The CSV, the JSON or the PDF, chosen in the body.
 async fn export_results(
     Extract(state): Extract<State>,
+    caller: Caller,
     Path(analysis_id): Path<String>,
     body: Bytes,
 ) -> ApiResult<Response> {
@@ -1623,9 +1648,9 @@ async fn export_results(
     let p = options.get("p_before_bp").and_then(Value::as_f64);
     let date_format = options.get("date_format").and_then(Value::as_str);
     match format.as_str() {
-        "csv" => csv_response(&state, &analysis_id, date_format, p, "results"),
-        "json" => Ok(ok(json_payload(&state, &analysis_id, p)?).into_response()),
-        "pdf" => pdf_response(&state, &analysis_id, date_format, p),
+        "csv" => csv_response(&state, &caller, &analysis_id, date_format, p, "results"),
+        "json" => Ok(ok(json_payload(&state, &caller, &analysis_id, p)?).into_response()),
+        "pdf" => pdf_response(&state, &caller, &analysis_id, date_format, p),
         other => Err(ApiError::bad_request(format!(
             "Unsupported format: {other}"
         ))),

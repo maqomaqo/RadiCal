@@ -30,6 +30,7 @@ use radical_store::rows::{
 use radical_store::rusqlite::Connection;
 use serde_json::{Map, Value, json};
 
+use crate::accounts::Caller;
 use crate::form::{self, Form};
 use crate::history::inputs_hash;
 use crate::routes::analysis::{persist_tree, walk_tree};
@@ -77,9 +78,22 @@ struct Plan {
     curves: Vec<(String, PlanCurve)>,
     analyses: Vec<PlanAnalysis>,
     samples: Vec<(Measurement, Option<String>, String)>,
+    /// Whose import this is: whose curves it may reuse and name, and whose
+    /// the project, analyses and curves it makes are. None on the desktop.
+    owner: Option<String>,
 }
 
 impl Plan {
+    fn scope(&self) -> crate::owner::Scope {
+        crate::owner::Scope::of(&match &self.owner {
+            Some(id) => Caller::User {
+                id: id.clone(),
+                access_token: None,
+            },
+            None => Caller::Local,
+        })
+    }
+
     fn curve(&self, id: &str) -> Option<&PlanCurve> {
         self.curves.iter().find(|(c, _)| c == id).map(|(_, p)| p)
     }
@@ -287,10 +301,12 @@ fn is_builtin(id: &str) -> bool {
     BUILTINS.iter().any(|b| b.id == id)
 }
 
-fn stored_curves(state: &State) -> radical_store::Result<Vec<CurveRow>> {
+/// The importing account's stored curves.
+fn stored_curves(state: &State, plan: &Plan) -> radical_store::Result<Vec<CurveRow>> {
+    let mine = plan.scope().sql("created_by");
     state
         .store
-        .read(|c| rows::select_where(c, "1 = 1", [], "created_at, rowid"))
+        .read(|c| rows::select_where(c, &mine, [], "created_at, rowid"))
 }
 
 fn plan_curves(
@@ -353,7 +369,7 @@ fn plan_curves(
             records.push(r);
         }
     }
-    let by_hash: HashMap<String, String> = stored_curves(state)?
+    let by_hash: HashMap<String, String> = stored_curves(state, plan)?
         .into_iter()
         .map(|r| (r.content_sha256, r.id))
         .collect();
@@ -458,7 +474,13 @@ fn curve_for(state: &State, curve_id: &str, plan: &mut Plan, at: &str) -> Option
                     curve: None,
                 },
             );
-        } else if schemas::curve_exists(&state.store, curve_id) {
+        } else if state
+            .store
+            .read(|c| rows::get::<CurveRow>(c, curve_id))
+            .ok()
+            .flatten()
+            .is_some_and(|r| plan.owner.is_none() || r.created_by == plan.owner)
+        {
             plan.set_curve(
                 curve_id,
                 PlanCurve {
@@ -519,7 +541,7 @@ fn plan_samples(state: &State, files: &HashMap<String, Vec<u8>>, plan: &mut Plan
             .and_then(|v| v.as_array().cloned())
             .unwrap_or_default()
     } else if let Some(csv) = files.get("samples.csv") {
-        let library = library(state)?;
+        let library = library(state, &plan.scope())?;
         let parsed = parse_upload("samples.csv", csv, &library, &mut RandomIds::default());
         if !parsed.errors.is_empty() {
             plan.errors.extend(
@@ -736,8 +758,11 @@ fn plan_analysis(state: &State, stem: &str, inputs: &Value, run: Option<Value>, 
 
 /// Read a package and decide everything importing it would do, storing
 /// nothing (`plan_import`).
-fn plan_import(state: &State, content: &[u8]) -> ApiResult<Plan> {
-    let mut plan = Plan::default();
+fn plan_import(state: &State, caller: &Caller, content: &[u8]) -> ApiResult<Plan> {
+    let mut plan = Plan {
+        owner: caller.owner().map(str::to_owned),
+        ..Plan::default()
+    };
     let Some(files) = open(content, &mut plan) else {
         return Ok(plan);
     };
@@ -946,7 +971,7 @@ fn store_curves(
         rows::insert(
             tx,
             &CurveRow {
-                created_by: None,
+                created_by: plan.owner.clone(),
                 id: local_id.clone(),
                 kind: text("kind")
                     .filter(|k| !k.is_empty())
@@ -1013,6 +1038,7 @@ fn store_analysis(
         updated_at: now,
         project_id: Some(project.id.clone()),
         bayesian_config: Some(item.config.clone()),
+        owner_id: plan.owner.clone(),
         ..Analysis::default()
     };
     rows::insert(tx, &analysis)?;
@@ -1083,7 +1109,7 @@ fn commit_import(state: &State, plan: &mut Plan, name: &str) -> radical_store::R
         .to_owned();
     let now = Some(Timestamp::now());
     let project = Project {
-        owner_id: None,
+        owner_id: plan.owner.clone(),
         id: radical_store::new_id(),
         name: name.to_owned(),
         description: plan.manifest["project"]["description"]
@@ -1094,7 +1120,7 @@ fn commit_import(state: &State, plan: &mut Plan, name: &str) -> radical_store::R
         coordinate_precision: precision,
         map_tiles_enabled: false,
     };
-    let names: Vec<StoredNames> = stored_curves(state)?
+    let names: Vec<StoredNames> = stored_curves(state, plan)?
         .iter()
         .map(|r| StoredNames {
             id: r.id.clone(),
@@ -1199,9 +1225,14 @@ fn package(headers: &HeaderMap, body: &Bytes) -> ApiResult<(Form, Vec<u8>, Strin
 
 /// What a project package holds and what importing it would do; 200 for a
 /// package with problems, its answer being `data.errors`.
-async fn preview(Extract(state): Extract<State>, headers: HeaderMap, body: Bytes) -> ApiResult {
+async fn preview(
+    Extract(state): Extract<State>,
+    caller: Caller,
+    headers: HeaderMap,
+    body: Bytes,
+) -> ApiResult {
     let (_, content, filename) = package(&headers, &body)?;
-    let plan = tokio::task::spawn_blocking(move || plan_import(&state, &content))
+    let plan = tokio::task::spawn_blocking(move || plan_import(&state, &caller, &content))
         .await
         .map_err(ApiError::internal)??;
     let mut data = plan.summary();
@@ -1213,13 +1244,14 @@ async fn preview(Extract(state): Extract<State>, headers: HeaderMap, body: Bytes
 /// it is wrong. Every analysis arrives pending.
 async fn import_project(
     Extract(state): Extract<State>,
+    caller: Caller,
     headers: HeaderMap,
     body: Bytes,
 ) -> ApiResult {
     let (form, content, _) = package(&headers, &body)?;
     let name = form.text("name");
     let result = tokio::task::spawn_blocking(move || -> ApiResult<serde_json::Value> {
-        let mut plan = plan_import(&state, &content)?;
+        let mut plan = plan_import(&state, &caller, &content)?;
         if !plan.errors.is_empty() {
             return Err(ApiError {
                 status: StatusCode::UNPROCESSABLE_ENTITY,

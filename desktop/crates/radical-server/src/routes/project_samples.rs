@@ -13,6 +13,8 @@ use radical_store::rows::{
 use radical_store::{Timestamp, rusqlite};
 use serde_json::{Map, Value, json};
 
+use crate::accounts::Caller;
+use crate::routes::curve_routes::authorise_curve_ids;
 use crate::routes::projects::require;
 use crate::schemas::{self, curve_exists, unknown_curve};
 use crate::validate::{self, Problems};
@@ -72,8 +74,12 @@ fn curve_sample_type(state: &State, curve_id: &str) -> Option<String> {
 }
 
 /// Every date in the collection, oldest entry first.
-async fn list(Extract(state): Extract<State>, Path(project_id): Path<String>) -> ApiResult {
-    require(&state, &project_id)?;
+async fn list(
+    Extract(state): Extract<State>,
+    caller: Caller,
+    Path(project_id): Path<String>,
+) -> ApiResult {
+    require(&state, &caller, &project_id)?;
     let samples: Vec<ProjectSample> = state.store.read(|c| {
         rows::select_where(c, "project_id = ?", [&project_id], "created_at ASC, rowid")
     })?;
@@ -85,6 +91,7 @@ async fn list(Extract(state): Extract<State>, Path(project_id): Path<String>) ->
 /// Add dates to the collection: a list, so a bulk paste is one request.
 async fn create(
     Extract(state): Extract<State>,
+    caller: Caller,
     Path(project_id): Path<String>,
     body: Bytes,
 ) -> ApiResult {
@@ -99,10 +106,15 @@ async fn create(
         |item| schemas::project_sample_input(item, &state.store),
     );
     problems.finish()?;
-    require(&state, &project_id)?;
+    require(&state, &caller, &project_id)?;
+    let items = items.unwrap_or_default();
+    authorise_curve_ids(
+        &state,
+        &caller,
+        items.iter().map(|(m, _)| m.curve_id.as_str()),
+    )?;
     let now = Some(Timestamp::now());
     let created: Vec<ProjectSample> = items
-        .unwrap_or_default()
         .into_iter()
         .map(|(m, context)| ProjectSample {
             id: radical_store::new_id(),
@@ -174,6 +186,7 @@ fn find(state: &State, project_id: &str, sample_id: &str) -> ApiResult<ProjectSa
 /// Edit one date. Analyses deployed from it keep their own copies.
 async fn update(
     Extract(state): Extract<State>,
+    caller: Caller,
     Path((project_id, sample_id)): Path<(String, String)>,
     body: Bytes,
 ) -> ApiResult {
@@ -241,7 +254,7 @@ async fn update(
     .filter(|k| f.sent(k))
     .collect();
     problems.finish()?;
-    require(&state, &project_id)?;
+    require(&state, &caller, &project_id)?;
     let mut s = find(&state, &project_id, &sample_id)?;
     let before = s.clone();
     for field in &sent {
@@ -308,9 +321,10 @@ async fn update(
 /// Remove one date. Analyses deployed from it keep their copies.
 async fn delete_one(
     Extract(state): Extract<State>,
+    caller: Caller,
     Path((project_id, sample_id)): Path<(String, String)>,
 ) -> ApiResult {
-    require(&state, &project_id)?;
+    require(&state, &caller, &project_id)?;
     find(&state, &project_id, &sample_id)?;
     state
         .store
@@ -350,6 +364,7 @@ fn selection(state: &State, project_id: &str, ids: &[String]) -> ApiResult<Vec<P
 /// implies), a Delta-R (marine dates only), or a shared position.
 async fn bulk_update(
     Extract(state): Extract<State>,
+    caller: Caller,
     Path(project_id): Path<String>,
     body: Bytes,
 ) -> ApiResult {
@@ -410,7 +425,10 @@ async fn bulk_update(
         }
     }
     problems.finish()?;
-    require(&state, &project_id)?;
+    require(&state, &caller, &project_id)?;
+    if s_curve {
+        authorise_curve_ids(&state, &caller, curve.as_deref())?;
+    }
     let mut samples = selection(&state, &project_id, &ids.unwrap_or_default())?;
     let mut changed = std::collections::HashSet::new();
     let mut skipped: Vec<String> = Vec::new();
@@ -484,6 +502,7 @@ async fn bulk_update(
 /// Remove several dates at once, all or nothing on the ids.
 async fn bulk_delete(
     Extract(state): Extract<State>,
+    caller: Caller,
     Path(project_id): Path<String>,
     body: Bytes,
 ) -> ApiResult {
@@ -492,7 +511,7 @@ async fn bulk_delete(
     let mut f = validate::body(&input, "ProjectSampleBulkDelete", &mut problems);
     let ids = schemas::unique_ids(&mut f, "sample_ids", Some(1), Some(500));
     problems.finish()?;
-    require(&state, &project_id)?;
+    require(&state, &caller, &project_id)?;
     let samples = selection(&state, &project_id, &ids.unwrap_or_default())?;
     let mut found: Vec<String> = samples.iter().map(|s| s.id.clone()).collect();
     found.sort();
@@ -511,6 +530,7 @@ async fn bulk_delete(
 /// grouped into contexts by their default context names.
 async fn deploy(
     Extract(state): Extract<State>,
+    caller: Caller,
     Path(project_id): Path<String>,
     body: Bytes,
 ) -> ApiResult {
@@ -528,7 +548,7 @@ async fn deploy(
     let ids = schemas::unique_ids(&mut f, "sample_ids", Some(1), None);
     let kind = f.literal_or("analysis_type", &["bayesian", "calibration"], "bayesian");
     problems.finish()?;
-    require(&state, &project_id)?;
+    require(&state, &caller, &project_id)?;
     let ids = ids.unwrap_or_default();
     let found = selection(&state, &project_id, &ids)?;
     let ordered: Vec<&ProjectSample> = ids
@@ -549,6 +569,7 @@ async fn deploy(
         updated_at: now,
         project_id: Some(project_id.clone()),
         bayesian_config: Some(json!({})),
+        owner_id: caller.owner().map(str::to_owned),
         ..Analysis::default()
     };
     let mut groups: Vec<(String, String)> = Vec::new();

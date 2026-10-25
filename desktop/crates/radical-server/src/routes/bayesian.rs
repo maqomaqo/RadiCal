@@ -29,10 +29,12 @@ use radical_store::rows::{
 };
 use serde_json::{Value, json};
 
+use crate::accounts::Caller;
 use crate::routes::analysis::{
     measurements, migrated_json, persist_tree, query_bool, require, tree_or_migrate,
     validate_project_id,
 };
+use crate::routes::curve_routes::authorise_curve_ids;
 use crate::routes::runs::{calibration_result_row, calibration_stats, sample_row};
 use crate::schemas::{self, BayesianRequest};
 use crate::solve::{self, Failed, Solved, job_progress, posterior_json, result_row};
@@ -249,6 +251,7 @@ fn set_posteriors(e: &mut Value, solved: &Solved) {
 /// poll) unless asked to wait or not saved, when the answer is the run.
 async fn bayesian(
     Extract(state): Extract<State>,
+    caller: Caller,
     Query(q): Query<HashMap<String, String>>,
     body: Bytes,
 ) -> Answer {
@@ -262,10 +265,15 @@ async fn bayesian(
     let project_id = if r.save {
         state
             .store
-            .read(|c| Ok(validate_project_id(c, r.project_id.as_deref())))??
+            .read(|c| Ok(validate_project_id(c, &caller, r.project_id.as_deref())))??
     } else {
         None
     };
+    authorise_curve_ids(
+        &state,
+        &caller,
+        r.measurements.iter().map(|d| d.m.curve_id.as_str()),
+    )?;
 
     let mut saved = Saved::default();
     if r.save {
@@ -279,6 +287,7 @@ async fn bayesian(
             updated_at: now,
             project_id: project_id.clone(),
             bayesian_config: Some(r.bayesian_config.clone()),
+            owner_id: caller.owner().map(str::to_owned),
             ..Analysis::default()
         };
         state.store.write(|tx| {
@@ -340,6 +349,7 @@ async fn bayesian(
         let job_id = state.jobs.submit(
             "analysis_run",
             Some(&analysis_id),
+            caller.owner(),
             Box::new(move |handle| {
                 set_status(&worker, &target, "running", None);
                 match solve_and_store(&worker, &request, &ids, handle) {
@@ -570,11 +580,14 @@ fn record_failure(state: &State, analysis_id: &str, failure: Failed) -> String {
 /// `wait=true`.
 async fn rerun_analysis(
     Extract(state): Extract<State>,
+    caller: Caller,
     Path(analysis_id): Path<String>,
     Query(q): Query<HashMap<String, String>>,
 ) -> Answer {
     let wait = wait_flag(&q)?;
-    state.store.read(|c| Ok(require(c, &analysis_id)))??;
+    state
+        .store
+        .read(|c| Ok(require(c, &caller, &analysis_id)))??;
     if wait {
         let (worker, id) = (state.clone(), analysis_id.clone());
         let outcome = blocking(move || rerun(&worker, &id, &Handle::null())).await;
@@ -595,6 +608,7 @@ async fn rerun_analysis(
     let job_id = state.jobs.submit(
         "analysis_run",
         Some(&analysis_id),
+        caller.owner(),
         analysis_run_work(&state, &analysis_id),
     )?;
     Ok(answer(
@@ -658,12 +672,19 @@ pub fn analysis_run_work(state: &State, analysis_id: &str) -> radical_jobs::Work
 /// Every analysis in a project, in turn: (rerun count, failures).
 fn rerun_all(
     state: &State,
+    caller: &Caller,
     project_id: &str,
     handle: &Handle,
 ) -> Result<(usize, Vec<Value>, usize), radical_jobs::JobError> {
-    let analyses: Vec<Analysis> = state
-        .store
-        .read(|c| rows::select_where(c, "project_id = ?", [project_id], "rowid"))?;
+    let mine = crate::owner::Scope::of(caller).sql("owner_id");
+    let analyses: Vec<Analysis> = state.store.read(|c| {
+        rows::select_where(
+            c,
+            &format!("project_id = ? AND {mine}"),
+            [project_id],
+            "rowid",
+        )
+    })?;
     let total = analyses.len();
     let mut rerun_count = 0;
     let mut failed: Vec<Value> = Vec::new();
@@ -699,14 +720,15 @@ fn rerun_all(
 /// `wait=true`. One failure does not stop the rest.
 async fn rerun_project(
     Extract(state): Extract<State>,
+    caller: Caller,
     Path(project_id): Path<String>,
     Query(q): Query<HashMap<String, String>>,
 ) -> Answer {
     let wait = wait_flag(&q)?;
-    crate::routes::projects::require(&state, &project_id)?;
+    crate::routes::projects::require(&state, &caller, &project_id)?;
     if wait {
-        let (worker, id) = (state.clone(), project_id.clone());
-        let outcome = blocking(move || rerun_all(&worker, &id, &Handle::null())).await;
+        let (worker, id, who) = (state.clone(), project_id.clone(), caller.clone());
+        let outcome = blocking(move || rerun_all(&worker, &who, &id, &Handle::null())).await;
         let (rerun_count, failed, _) =
             outcome.map_err(|e| ApiError::internal(radical_jobs::classify(&e).message))?;
         return Ok(answer(
@@ -714,12 +736,13 @@ async fn rerun_project(
             json!({"rerun_count": rerun_count, "failed": failed}),
         ));
     }
-    let (worker, target) = (state.clone(), project_id.clone());
+    let (worker, target, who) = (state.clone(), project_id.clone(), caller.clone());
     let job_id = state.jobs.submit(
         "project_rerun",
         Some(&project_id),
+        caller.owner(),
         Box::new(move |handle| {
-            let (rerun_count, failed, total) = rerun_all(&worker, &target, handle)?;
+            let (rerun_count, failed, total) = rerun_all(&worker, &who, &target, handle)?;
             Ok(Some(json!({
                 "rerun_count": rerun_count,
                 "total": total,

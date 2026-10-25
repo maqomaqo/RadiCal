@@ -169,6 +169,38 @@ const KNOWN: &[(&str, &str)] = &[
         "test_auth.py::TestResettingAForgottenPassword::test_asking_again_at_once_sends_nothing_more",
         "the test sets up email in its environment, behind the API",
     ),
+    // Accounts mode only (they run as their own accounts): each stores its
+    // snapshots straight into the database, or stands in for calib.org with
+    // a monkeypatch. tests/reservoir.rs plants snapshots through the store
+    // and holds the same routes, ownership included.
+    (
+        "test_reservoir_registry.py::TestVerification",
+        "the test stores its snapshots behind the API",
+    ),
+    (
+        "test_reservoir_registry.py::TestOwnership",
+        "the test stores its snapshots behind the API",
+    ),
+    (
+        "test_reservoir_registry.py::TestDeletion",
+        "the test stores its snapshots behind the API",
+    ),
+    (
+        "test_reservoir_registry.py::TestTheLookupEndpoint",
+        "the test stores its snapshots behind the API",
+    ),
+    (
+        "test_reservoir_registry.py::TestTheBundledSnapshot",
+        "the test stores its snapshots behind the API",
+    ),
+    (
+        "test_reservoir_registry.py::TestTheIngestRouteDoesNotReachTheNetworkInTests",
+        "the test stands in for calib.org with a monkeypatch",
+    ),
+    (
+        "test_reservoir_registry.py::TestTheFreshnessEndpoint",
+        "the test stands in for calib.org with a monkeypatch",
+    ),
 ];
 
 /// Tests excused on Windows only: its C runtime's exp and log differ from
@@ -1014,16 +1046,21 @@ async fn replay(accounts: bool) {
         // as long as the suite's own `_await_job` would (300 s: a slow
         // runner takes far longer than a laptop over an influence report);
         // one it saw still running accepts whatever state this one is in.
-        if route == "GET /api/jobs/{job_id}" {
-            let state = want["response_json"]["data"]["state"]
-                .as_str()
-                .unwrap_or("");
+        // Reading an analysis waits the same way for its run, which the
+        // backend's had finished by then.
+        let progress = match route.as_str() {
+            "GET /api/jobs/{job_id}" => Some("state"),
+            "GET /api/analysis/{analysis_id}" => Some("status"),
+            _ => None,
+        };
+        if let Some(key) = progress {
+            let state = want["response_json"]["data"][key].as_str().unwrap_or("");
             if !matches!(state, "queued" | "running") {
                 for _ in 0..6000 {
                     let now = answer
                         .1
                         .as_ref()
-                        .and_then(|b| b["data"]["state"].as_str())
+                        .and_then(|b| b["data"][key].as_str())
                         .unwrap_or("");
                     if !matches!(now, "queued" | "running") {
                         break;
@@ -1145,11 +1182,14 @@ async fn replay(accounts: bool) {
         tally.len()
     );
     let _ = std::fs::remove_dir_all(dir);
-    // Accounts mode holds the sign-in routes; the rest, which it does not
-    // yet scope to their owner, the single-user replay holds (server plan S3
-    // brings them in here).
-    let held: &[&str] = if accounts { ACCOUNT_ROUTES } else { PORTED };
-    for route in held {
+    // Accounts mode holds every route, each scoped to its caller, and the
+    // sign-in routes besides.
+    let held: Vec<&str> = if accounts {
+        PORTED.iter().chain(ACCOUNT_ROUTES).copied().collect()
+    } else {
+        PORTED.to_vec()
+    };
+    for route in &held {
         let t = tally
             .get(*route)
             .unwrap_or_else(|| panic!("{route} is not in the recording"));

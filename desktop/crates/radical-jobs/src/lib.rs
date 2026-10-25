@@ -331,6 +331,7 @@ impl Jobs {
         &self,
         kind: &str,
         target_id: Option<&str>,
+        owner_id: Option<&str>,
         work: Work,
     ) -> radical_store::Result<String> {
         let row = Job {
@@ -339,6 +340,8 @@ impl Jobs {
             target_id: target_id.map(str::to_owned),
             state: "queued".to_owned(),
             created_at: Some(Timestamp::now()),
+            // Whose it is, on a server: another account's job is a 404.
+            owner_id: owner_id.map(str::to_owned),
             ..Job::default()
         };
         self.store.write(|tx| rows::insert(tx, &row))?;

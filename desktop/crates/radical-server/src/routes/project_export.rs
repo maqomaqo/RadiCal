@@ -16,6 +16,7 @@ use radical_store::rows::{
 use radical_store::rusqlite::Connection;
 use serde_json::{Map, Value, json};
 
+use crate::accounts::Caller;
 use crate::history::{
     self, analysis_inputs, inputs_hash, py_json, py_json_indented, strip_results,
 };
@@ -568,7 +569,9 @@ pub fn build_zip(
     for (index, analysis) in analyses.iter().enumerate() {
         let id8: String = analysis.id.chars().take(8).collect();
         let stem = format!("{:03}-{}-{id8}.json", index + 1, slug(&analysis.name, 60));
-        let exported = json!({"success": true, "data": json_payload(state, &analysis.id, t)?});
+        // Chosen by owner already (export_project): no second check.
+        let exported =
+            json!({"success": true, "data": json_payload(state, &Caller::Local, &analysis.id, t)?});
         zip.add(
             &format!("analyses/{stem}"),
             py_json_indented(&exported, 1).as_bytes(),
@@ -675,6 +678,7 @@ fn query_float(q: &[(String, String)], name: &str) -> ApiResult<Option<f64>> {
 /// one zip; `unassigned` for the analyses filed under no project.
 pub async fn export_project(
     Extract(state): Extract<State>,
+    caller: Caller,
     Path(project_id): Path<String>,
     Query(q): Query<Vec<(String, String)>>,
 ) -> ApiResult<Response> {
@@ -697,13 +701,28 @@ pub async fn export_project(
         }
         None
     } else {
-        Some(crate::routes::projects::require(&state, &project_id)?)
+        Some(crate::routes::projects::require(
+            &state,
+            &caller,
+            &project_id,
+        )?)
     };
+    let mine = crate::owner::Scope::of(&caller).sql("owner_id");
     let analyses: Vec<Analysis> = state.store.read(|c| {
         if unassigned {
-            rows::select_where(c, "project_id IS NULL", [], "created_at, id")
+            rows::select_where(
+                c,
+                &format!("project_id IS NULL AND {mine}"),
+                [],
+                "created_at, id",
+            )
         } else {
-            rows::select_where(c, "project_id = ?", [&project_id], "created_at, id")
+            rows::select_where(
+                c,
+                &format!("project_id = ? AND {mine}"),
+                [&project_id],
+                "created_at, id",
+            )
         }
     })?;
     let analyses: Vec<Analysis> = if chosen.is_empty() {
@@ -790,10 +809,11 @@ pub async fn export_project(
 /// of it, as a CSV the importer reads back.
 pub async fn export_samples(
     Extract(state): Extract<State>,
+    caller: Caller,
     Path(project_id): Path<String>,
     Query(q): Query<Vec<(String, String)>>,
 ) -> ApiResult<Response> {
-    let project = crate::routes::projects::require(&state, &project_id)?;
+    let project = crate::routes::projects::require(&state, &caller, &project_id)?;
     let chosen: Vec<&str> = query_list(&q, "sample");
     let samples: Vec<ProjectSample> = state
         .store

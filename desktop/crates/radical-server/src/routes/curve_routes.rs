@@ -33,7 +33,9 @@ use radical_store::Timestamp;
 use radical_store::rows::{self, CalibrationCurve as CurveRow, ProjectSample, RadiocarbonSample};
 use serde_json::{Map, Value, json};
 
+use crate::accounts::Caller;
 use crate::form::{self, Form};
+use crate::owner::Scope;
 use crate::routes::analysis::ranges_json;
 use crate::validate::{self, Bounds, Fields, Problems};
 use crate::{ApiError, ApiResult, State, ok};
@@ -59,14 +61,27 @@ fn created(data: Value) -> Response {
 // The registry
 // --------------------------------------------------------------------------
 
-/// Every stored curve, oldest first, archived included.
-fn stored_rows(state: &State) -> radical_store::Result<Vec<CurveRow>> {
+/// Every stored curve the caller may see, oldest first, archived included
+/// (`curve_registry._stored_rows`).
+fn stored_rows(state: &State, scope: &Scope) -> radical_store::Result<Vec<CurveRow>> {
     state
         .store
-        .read(|c| rows::select_where(c, "1 = 1", [], "created_at, rowid"))
+        .read(|c| rows::select_where(c, &scope.sql("created_by"), [], "created_at, rowid"))
 }
 
-fn stored_row(state: &State, curve_id: &str) -> radical_store::Result<Option<CurveRow>> {
+/// A stored curve, if the caller may see it.
+fn stored_row(
+    state: &State,
+    scope: &Scope,
+    curve_id: &str,
+) -> radical_store::Result<Option<CurveRow>> {
+    Ok(stored_row_any(state, curve_id)?
+        .filter(|r| scope.owner().is_none() || r.created_by == scope.owner()))
+}
+
+/// A stored curve, whoever's it is: for loading one a stored analysis was
+/// already calibrated against, where nobody is choosing.
+fn stored_row_any(state: &State, curve_id: &str) -> radical_store::Result<Option<CurveRow>> {
     state.store.read(|c| rows::get(c, curve_id))
 }
 
@@ -92,9 +107,9 @@ fn names(rows: &[CurveRow]) -> Vec<StoredNames> {
         .collect()
 }
 
-/// `curve_registry.resolve_alias` over every stored curve.
-fn alias(state: &State, name: &str) -> radical_store::Result<Option<String>> {
-    Ok(resolve_alias(name, &names(&stored_rows(state)?)))
+/// `curve_registry.resolve_alias` over the caller's stored curves.
+fn alias(state: &State, scope: &Scope, name: &str) -> radical_store::Result<Option<String>> {
+    Ok(resolve_alias(name, &names(&stored_rows(state, scope)?)))
 }
 
 fn builtin(curve_id: &str) -> Option<&'static Builtin> {
@@ -103,8 +118,8 @@ fn builtin(curve_id: &str) -> Option<&'static Builtin> {
 
 /// Whether a curve id names any curve, archived included
 /// (`curve_registry.exists`).
-fn exists(state: &State, curve_id: &str) -> radical_store::Result<bool> {
-    Ok(builtin(curve_id).is_some() || stored_row(state, curve_id)?.is_some())
+fn exists(state: &State, scope: &Scope, curve_id: &str) -> radical_store::Result<bool> {
+    Ok(builtin(curve_id).is_some() || stored_row(state, scope, curve_id)?.is_some())
 }
 
 /// Each curve's measured half, measured once: a stored curve's numbers
@@ -195,7 +210,7 @@ pub(crate) fn spec(state: &State, curve_id: &str) -> ApiResult<Result<Value, Str
     if let Some(b) = builtin(curve_id) {
         return Ok(builtin_json(state, b).map_err(|e| e.to_string()));
     }
-    match stored_row(state, curve_id)? {
+    match stored_row_any(state, curve_id)? {
         Some(r) => Ok(row_json(state, &r).map_err(|e| e.to_string())),
         None => Ok(Err(format!("Unknown calibration curve '{curve_id}'."))),
     }
@@ -203,12 +218,12 @@ pub(crate) fn spec(state: &State, curve_id: &str) -> ApiResult<Result<Value, Str
 
 /// `curve_registry.list_specs`: the builtins, then the stored curves in the
 /// order they were added; any that cannot be loaded left out.
-fn list_specs(state: &State, include_archived: bool) -> ApiResult<Vec<Value>> {
+fn list_specs(state: &State, scope: &Scope, include_archived: bool) -> ApiResult<Vec<Value>> {
     let mut out: Vec<Value> = BUILTINS
         .iter()
         .filter_map(|b| builtin_json(state, b).ok())
         .collect();
-    for r in stored_rows(state)? {
+    for r in stored_rows(state, scope)? {
         if r.archived && !include_archived {
             continue;
         }
@@ -219,14 +234,56 @@ fn list_specs(state: &State, include_archived: bool) -> ApiResult<Vec<Value>> {
     Ok(out)
 }
 
-fn visible_or_404(state: &State, curve_id: &str) -> ApiResult<()> {
-    if exists(state, curve_id)? {
+/// Refuse unless the caller may see this curve: the same 404 for a typo and
+/// for someone else's curve, deliberately.
+fn visible_or_404(state: &State, scope: &Scope, curve_id: &str) -> ApiResult<()> {
+    if exists(state, scope, curve_id)? {
         Ok(())
     } else {
         Err(ApiError::not_found(format!(
             "No calibration curve '{curve_id}'."
         )))
     }
+}
+
+/// Refuse the request unless the caller may name every one of these curves
+/// (`authorise_curve_ids`). Validation has already refused ids that name no
+/// curve at all; this catches one that names somebody else's, with a 422 that
+/// lists what the caller can use and does not say the curve exists.
+pub(crate) fn authorise_curve_ids<'a>(
+    state: &State,
+    caller: &Caller,
+    curve_ids: impl IntoIterator<Item = &'a str>,
+) -> ApiResult<()> {
+    if caller.owner().is_none() {
+        return Ok(());
+    }
+    let scope = Scope::of(caller);
+    let mut unusable: Vec<&str> = Vec::new();
+    for id in curve_ids.into_iter().filter(|c| !c.is_empty()) {
+        if !exists(state, &scope, id)? && !unusable.contains(&id) {
+            unusable.push(id);
+        }
+    }
+    if unusable.is_empty() {
+        return Ok(());
+    }
+    unusable.sort_unstable();
+    let available: Vec<String> = list_specs(state, &scope, false)?
+        .iter()
+        .filter_map(|s| s["id"].as_str().map(str::to_owned))
+        .collect();
+    let named: Vec<String> = unusable.iter().map(|c| format!("'{c}'")).collect();
+    Err(ApiError::new(
+        StatusCode::UNPROCESSABLE_ENTITY,
+        format!(
+            "No calibration curve {} is available to you. You can calibrate against: {}. \
+             Import the curve to add it to that list -- a curve this app does not have for \
+             you cannot be substituted for one it does.",
+            named.join(", "),
+            available.join(", ")
+        ),
+    ))
 }
 
 /// The curve's numbers, or the 404 the registry's refusal is.
@@ -238,7 +295,10 @@ fn resolve<'a>(state: &'a State, curve_id: &str) -> ApiResult<&'a CalibrationCur
 }
 
 /// `curve_registry.usage`: what is calibrated against this curve.
-fn usage(state: &State, curve_id: &str) -> ApiResult<Value> {
+/// The counts are every account's: whether a curve may be deleted is a
+/// question about everyone's results. The ids come back the caller's only,
+/// with everyone else's use reduced to `others_count`.
+fn usage(state: &State, caller: &Caller, curve_id: &str) -> ApiResult<Value> {
     let (samples, project_samples, curves) = state.store.read(|c| {
         let s: Vec<RadiocarbonSample> = rows::select_where(c, "curve_id = ?", [curve_id], "rowid")?;
         let p: Vec<ProjectSample> = rows::select_where(c, "curve_id = ?", [curve_id], "rowid")?;
@@ -266,19 +326,47 @@ fn usage(state: &State, curve_id: &str) -> ApiResult<Value> {
         .map(|r| r.id)
         .collect();
     let in_use = !(analysis_ids.is_empty() && project_ids.is_empty() && mixed.is_empty());
+    let mut others = 0;
+    if let Some(me) = caller.owner() {
+        let (mine, my_projects): (Vec<String>, Vec<String>) = state.store.read(|c| {
+            let own = |table: &str, ids: &[String]| -> radical_store::Result<Vec<String>> {
+                let mut out = Vec::new();
+                for id in ids {
+                    let owner: Option<Option<String>> = c
+                        .query_row(
+                            &format!("SELECT owner_id FROM {table} WHERE id = ?"),
+                            [id],
+                            |r| r.get(0),
+                        )
+                        .ok();
+                    if owner.flatten().as_deref() == Some(me) {
+                        out.push(id.clone());
+                    }
+                }
+                Ok(out)
+            };
+            Ok((
+                own("analyses", &analysis_ids)?,
+                own("projects", &project_ids)?,
+            ))
+        })?;
+        others = (analysis_ids.len() - mine.len()) + (project_ids.len() - my_projects.len());
+        analysis_ids = mine;
+        project_ids = my_projects;
+    }
     Ok(json!({
         "analysis_ids": analysis_ids,
         "project_ids": project_ids,
         "mixed_curve_ids": mixed,
-        "others_count": 0,
+        "others_count": others,
         "in_use": in_use,
     }))
 }
 
 /// `_stored_or_404`: a stored curve, for the routes that change one; a
 /// builtin's 403 says why it cannot be.
-fn stored_or_404(state: &State, curve_id: &str) -> ApiResult<CurveRow> {
-    match stored_row(state, curve_id)? {
+fn stored_or_404(state: &State, scope: &Scope, curve_id: &str) -> ApiResult<CurveRow> {
+    match stored_row(state, scope, curve_id)? {
         Some(r) => Ok(r),
         None if builtin(curve_id).is_some() => Err(ApiError::new(
             StatusCode::FORBIDDEN,
@@ -315,6 +403,7 @@ fn query<T>(q: &HashMap<String, String>, read: impl FnOnce(&mut Fields) -> T) ->
 
 async fn list_curves(
     Extract(state): Extract<State>,
+    caller: Caller,
     Query(q): Query<HashMap<String, String>>,
 ) -> ApiResult {
     let (limit, archived) = query(&q, |f| {
@@ -324,7 +413,7 @@ async fn list_curves(
         )
     })?;
     let (limit, archived) = (limit.unwrap_or(100), archived.unwrap_or(false));
-    let specs = list_specs(&state, archived)?;
+    let specs = list_specs(&state, &Scope::of(&caller), archived)?;
     let items: Vec<&Value> = specs
         .iter()
         .take(usize::try_from(limit).unwrap_or(0))
@@ -348,6 +437,7 @@ fn max_points(f: &mut Fields, default: usize) -> Option<i64> {
 
 async fn compare_curves(
     Extract(state): Extract<State>,
+    caller: Caller,
     Query(q): Query<HashMap<String, String>>,
 ) -> ApiResult {
     let (a, b, from, to, points) = query(&q, |f| {
@@ -360,8 +450,8 @@ async fn compare_curves(
         )
     })?;
     let (a, b) = (a.unwrap_or_default(), b.unwrap_or_default());
-    visible_or_404(&state, &a)?;
-    visible_or_404(&state, &b)?;
+    visible_or_404(&state, &Scope::of(&caller), &a)?;
+    visible_or_404(&state, &Scope::of(&caller), &b)?;
     let (curve_a, curve_b) = (resolve(&state, &a)?, resolve(&state, &b)?);
     let c = curve_view::compare(curve_a, curve_b, from, to, points.unwrap_or(800) as usize)
         .map_err(|e| ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, e.to_string()))?;
@@ -379,14 +469,22 @@ async fn compare_curves(
     })))
 }
 
-async fn get_curve(Extract(state): Extract<State>, Path(curve_id): Path<String>) -> ApiResult {
-    visible_or_404(&state, &curve_id)?;
+async fn get_curve(
+    Extract(state): Extract<State>,
+    caller: Caller,
+    Path(curve_id): Path<String>,
+) -> ApiResult {
+    visible_or_404(&state, &Scope::of(&caller), &curve_id)?;
     let s = spec(&state, &curve_id)?.map_err(ApiError::not_found)?;
     Ok(ok(s))
 }
 
-async fn by_type(Extract(state): Extract<State>, Path(curve_type): Path<String>) -> ApiResult {
-    let specs: Vec<Value> = list_specs(&state, false)?
+async fn by_type(
+    Extract(state): Extract<State>,
+    caller: Caller,
+    Path(curve_type): Path<String>,
+) -> ApiResult {
+    let specs: Vec<Value> = list_specs(&state, &Scope::of(&caller), false)?
         .into_iter()
         .filter(|s| s["type"] == curve_type.as_str())
         .collect();
@@ -408,6 +506,7 @@ fn window_json(w: &curve_view::Window) -> Value {
 
 async fn points(
     Extract(state): Extract<State>,
+    caller: Caller,
     Path(curve_id): Path<String>,
     Query(q): Query<HashMap<String, String>>,
 ) -> ApiResult {
@@ -418,7 +517,7 @@ async fn points(
             max_points(f, DEFAULT_MAX_POINTS),
         )
     })?;
-    visible_or_404(&state, &curve_id)?;
+    visible_or_404(&state, &Scope::of(&caller), &curve_id)?;
     let curve = resolve(&state, &curve_id)?;
     let w = curve_view::window(curve, from, to, n.unwrap_or(800) as usize)
         .map_err(ApiError::internal)?;
@@ -429,6 +528,7 @@ async fn points(
 
 async fn points_csv(
     Extract(state): Extract<State>,
+    caller: Caller,
     Path(curve_id): Path<String>,
     Query(q): Query<HashMap<String, String>>,
 ) -> Answer {
@@ -439,7 +539,7 @@ async fn points_csv(
             max_points(f, MAX_MAX_POINTS),
         )
     })?;
-    visible_or_404(&state, &curve_id)?;
+    visible_or_404(&state, &Scope::of(&caller), &curve_id)?;
     let curve = resolve(&state, &curve_id)?;
     let s = spec(&state, &curve_id)?.map_err(ApiError::not_found)?;
     let w = curve_view::window(curve, from, to, n.unwrap_or(5000) as usize)
@@ -470,6 +570,7 @@ fn attachment(content_type: &str, filename: &str, body: String) -> Response {
 /// calibrated back with the stated error.
 async fn simulate(
     Extract(state): Extract<State>,
+    caller: Caller,
     Path(curve_id): Path<String>,
     body: Bytes,
 ) -> ApiResult {
@@ -482,7 +583,7 @@ async fn simulate(
     let delta_r_error = f.opt_float("delta_r_error", Bounds::range(0.0, 5000.0));
     problems.finish()?;
     let (cal_age, error) = (cal_age.unwrap_or_default(), error.unwrap_or(25.0));
-    visible_or_404(&state, &curve_id)?;
+    visible_or_404(&state, &Scope::of(&caller), &curve_id)?;
     let curve = resolve(&state, &curve_id)?;
     let cal = curve.cal_ages();
     let lo = cal.iter().copied().fold(f64::INFINITY, f64::min);
@@ -615,6 +716,7 @@ fn u0_and_stride(f: &mut Fields) -> (Option<f64>, Option<i64>) {
 
 async fn curve_resolution(
     Extract(state): Extract<State>,
+    caller: Caller,
     Path(curve_id): Path<String>,
     Query(q): Query<HashMap<String, String>>,
 ) -> ApiResult {
@@ -626,7 +728,7 @@ async fn curve_resolution(
         )
     })?;
     let (u0, stride) = (u0.unwrap_or(DEFAULT_U0), stride.unwrap_or(5) as usize);
-    visible_or_404(&state, &curve_id)?;
+    visible_or_404(&state, &Scope::of(&caller), &curve_id)?;
     let curve = resolve(&state, &curve_id)?;
     let s = spec(&state, &curve_id)?.map_err(ApiError::not_found)?;
     let (cal_min, cal_max) = (
@@ -654,12 +756,13 @@ async fn curve_resolution(
 
 async fn curve_resolution_csv(
     Extract(state): Extract<State>,
+    caller: Caller,
     Path(curve_id): Path<String>,
     Query(q): Query<HashMap<String, String>>,
 ) -> Answer {
     let (u0, stride) = query(&q, u0_and_stride)?;
     let (u0, stride) = (u0.unwrap_or(DEFAULT_U0), stride.unwrap_or(5) as usize);
-    visible_or_404(&state, &curve_id)?;
+    visible_or_404(&state, &Scope::of(&caller), &curve_id)?;
     let curve = resolve(&state, &curve_id)?;
     let s = spec(&state, &curve_id)?.map_err(ApiError::not_found)?;
     let p = full_profile(
@@ -733,7 +836,8 @@ fn strip_lower(s: &str) -> String {
 
 /// `_free_slug`: the slug, or the first free `slug-2`, `slug-3`...
 fn free_slug(state: &State, slug: &str) -> ApiResult<String> {
-    let taken: Vec<String> = stored_rows(state)?
+    // Ids are one global key, so every account's are taken (`_free_slug`).
+    let taken: Vec<String> = stored_rows(state, &Scope::of(&Caller::Local))?
         .into_iter()
         .map(|r| r.id)
         .chain(BUILTINS.iter().map(|b| b.id.to_owned()))
@@ -786,7 +890,12 @@ fn form_of(headers: &HeaderMap, body: &Bytes) -> Form {
 }
 
 /// Read an uploaded curve file and say what it holds, storing nothing.
-async fn preview(Extract(_state): Extract<State>, headers: HeaderMap, body: Bytes) -> ApiResult {
+async fn preview(
+    Extract(_state): Extract<State>,
+    _caller: Caller,
+    headers: HeaderMap,
+    body: Bytes,
+) -> ApiResult {
     let form = form_of(&headers, &body);
     let Some(file) = form.file("file") else {
         return Err(form::missing(&["file"]));
@@ -828,7 +937,12 @@ fn str_list_clean(f: &mut Fields, name: &str) -> Option<Vec<String>> {
 const CURVE_TYPES: [&str; 4] = ["terrestrial", "marine", "southern_hemisphere", "mixed"];
 
 /// Store a previewed curve, parsed again from the same file.
-async fn create_curve(Extract(state): Extract<State>, headers: HeaderMap, body: Bytes) -> Answer {
+async fn create_curve(
+    Extract(state): Extract<State>,
+    caller: Caller,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Answer {
     let form = form_of(&headers, &body);
     let (file, metadata) = (form.file("file"), form.text("metadata"));
     let missing: Vec<&str> = [("file", file.is_none()), ("metadata", metadata.is_none())]
@@ -872,14 +986,14 @@ async fn create_curve(Extract(state): Extract<State>, headers: HeaderMap, body: 
     if !usable_slug(&slug) {
         return Err(unusable(&slug));
     }
-    if alias(&state, &slug)?.is_some() {
+    if alias(&state, &Scope::of(&caller), &slug)?.is_some() {
         return Err(ApiError::conflict(format!(
             "You already have a calibration curve '{slug}'. Curve data is immutable, so a correction is imported as a new curve under a new id rather than replacing this one."
         )));
     }
     let slug = free_slug(&state, &slug)?;
     for a in &aliases {
-        if let Some(clash) = alias(&state, a)? {
+        if let Some(clash) = alias(&state, &Scope::of(&caller), a)? {
             return Err(ApiError::conflict(format!(
                 "The alias '{a}' already refers to the curve '{clash}'. An alias that names two curves would make an imported file's curve column ambiguous."
             )));
@@ -891,7 +1005,7 @@ async fn create_curve(Extract(state): Extract<State>, headers: HeaderMap, body: 
     let curve = CalibrationCurve::new(&name, cal_ages, c14, err);
     let now = Some(Timestamp::now());
     let row = CurveRow {
-        created_by: None,
+        created_by: caller.owner().map(str::to_owned),
         id: slug.clone(),
         kind: "imported".to_owned(),
         name,
@@ -939,7 +1053,7 @@ fn describe(a: &str, b: &str, percent_a: f64, error: f64) -> String {
 
 /// A curve defined as a proportional mixture of two others, stored as its
 /// recipe.
-async fn create_mixed(Extract(state): Extract<State>, body: Bytes) -> Answer {
+async fn create_mixed(Extract(state): Extract<State>, caller: Caller, body: Bytes) -> Answer {
     let input = validate::json_body(&body)?;
     let mut problems = Problems::default();
     let mut f = validate::body(&input, "MixedCurveRequest", &mut problems);
@@ -959,7 +1073,7 @@ async fn create_mixed(Extract(state): Extract<State>, body: Bytes) -> Answer {
         percent_a_error.unwrap_or(0.0),
     );
     for id in [&a, &b] {
-        if !exists(&state, id)? {
+        if !exists(&state, &Scope::of(&caller), id)? {
             return Err(ApiError::new(
                 StatusCode::UNPROCESSABLE_ENTITY,
                 format!("There is no calibration curve '{id}' to mix."),
@@ -989,13 +1103,13 @@ async fn create_mixed(Extract(state): Extract<State>, body: Bytes) -> Answer {
     if !usable_slug(&slug) {
         return Err(unusable(&slug));
     }
-    if alias(&state, &slug)?.is_some() {
+    if alias(&state, &Scope::of(&caller), &slug)?.is_some() {
         return Err(ApiError::conflict(format!(
             "You already have a calibration curve '{slug}'."
         )));
     }
     let slug = free_slug(&state, &slug)?;
-    let recipes: Vec<MixRecipe> = stored_rows(&state)?
+    let recipes: Vec<MixRecipe> = stored_rows(&state, &Scope::of(&caller))?
         .into_iter()
         .filter(|r| r.kind == "mixed")
         .map(|r| {
@@ -1025,7 +1139,7 @@ async fn create_mixed(Extract(state): Extract<State>, body: Bytes) -> Answer {
     let marine = spec_a["sample_type"] == "marine" || spec_b["sample_type"] == "marine";
     let now = Some(Timestamp::now());
     let row = CurveRow {
-        created_by: None,
+        created_by: caller.owner().map(str::to_owned),
         id: slug.clone(),
         kind: "mixed".to_owned(),
         description: Some(
@@ -1063,6 +1177,7 @@ async fn create_mixed(Extract(state): Extract<State>, body: Bytes) -> Answer {
 /// numbers.
 async fn update_curve(
     Extract(state): Extract<State>,
+    caller: Caller,
     Path(curve_id): Path<String>,
     body: Bytes,
 ) -> ApiResult {
@@ -1090,9 +1205,9 @@ async fn update_curve(
         .map(|o| o.keys().cloned().collect())
         .unwrap_or_default();
     problems.finish()?;
-    let mut row = stored_or_404(&state, &curve_id)?;
+    let mut row = stored_or_404(&state, &Scope::of(&caller), &curve_id)?;
     for a in aliases.iter().flatten() {
-        if let Some(clash) = alias(&state, a)?
+        if let Some(clash) = alias(&state, &Scope::of(&caller), a)?
             && clash != curve_id
         {
             return Err(ApiError::conflict(format!(
@@ -1133,31 +1248,36 @@ async fn update_curve(
     Ok(ok(spec(&state, &curve_id)?.map_err(ApiError::internal)?))
 }
 
-async fn curve_usage(Extract(state): Extract<State>, Path(curve_id): Path<String>) -> ApiResult {
-    if !exists(&state, &curve_id)? {
+async fn curve_usage(
+    Extract(state): Extract<State>,
+    caller: Caller,
+    Path(curve_id): Path<String>,
+) -> ApiResult {
+    if !exists(&state, &Scope::of(&caller), &curve_id)? {
         return Err(ApiError::not_found(format!(
             "Unknown calibration curve '{curve_id}'."
         )));
     }
-    Ok(ok(usage(&state, &curve_id)?))
+    Ok(ok(usage(&state, &caller, &curve_id)?))
 }
 
 /// Remove a stored curve -- refused while anything uses it -- or archive
 /// it.
 async fn delete_curve(
     Extract(state): Extract<State>,
+    caller: Caller,
     Path(curve_id): Path<String>,
     Query(q): Query<HashMap<String, String>>,
 ) -> ApiResult {
     let archive = query(&q, |f| f.bool_or("archive", false))?.unwrap_or(false);
-    let mut row = stored_or_404(&state, &curve_id)?;
+    let mut row = stored_or_404(&state, &Scope::of(&caller), &curve_id)?;
     if archive {
         row.archived = true;
         row.updated_at = Some(Timestamp::now());
         state.store.write(|tx| rows::update(tx, &row))?;
         return Ok(ok(json!({"id": curve_id, "archived": true})));
     }
-    let in_use = usage(&state, &curve_id)?;
+    let in_use = usage(&state, &caller, &curve_id)?;
     if in_use["in_use"] == true {
         return Err(status(
             StatusCode::CONFLICT,
@@ -1176,8 +1296,12 @@ async fn delete_curve(
     Ok(ok(json!({"id": curve_id, "deleted": true})))
 }
 
-async fn restore_curve(Extract(state): Extract<State>, Path(curve_id): Path<String>) -> ApiResult {
-    let mut row = stored_or_404(&state, &curve_id)?;
+async fn restore_curve(
+    Extract(state): Extract<State>,
+    caller: Caller,
+    Path(curve_id): Path<String>,
+) -> ApiResult {
+    let mut row = stored_or_404(&state, &Scope::of(&caller), &curve_id)?;
     row.archived = false;
     row.updated_at = Some(Timestamp::now());
     state.store.write(|tx| rows::update(tx, &row))?;
@@ -1186,13 +1310,17 @@ async fn restore_curve(Extract(state): Extract<State>, Path(curve_id): Path<Stri
 
 /// The curve as a .14c file: an imported one byte for byte as uploaded,
 /// anything else written from its points.
-async fn export_curve(Extract(state): Extract<State>, Path(curve_id): Path<String>) -> Answer {
-    visible_or_404(&state, &curve_id)?;
+async fn export_curve(
+    Extract(state): Extract<State>,
+    caller: Caller,
+    Path(curve_id): Path<String>,
+) -> Answer {
+    visible_or_404(&state, &Scope::of(&caller), &curve_id)?;
     let s = spec(&state, &curve_id)?.map_err(ApiError::not_found)?;
     let row = if s["kind"] == "builtin" {
         None
     } else {
-        stored_row(&state, &curve_id)?
+        stored_row(&state, &Scope::of(&caller), &curve_id)?
     };
     let (text, filename) =
         match row.filter(|r| r.source_text.as_deref().is_some_and(|t| !t.is_empty())) {

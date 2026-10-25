@@ -19,9 +19,11 @@ use radical_store::rows::{
 };
 use serde_json::{Value, json};
 
+use crate::accounts::Caller;
 use crate::routes::analysis::{
     measurements, persist_tree, query_bool, require, rows_to_tree, tree_for_client, walk_tree,
 };
+use crate::routes::curve_routes::authorise_curve_ids;
 use crate::routes::runs::sample_row;
 use crate::schemas;
 use crate::solve::{element, relabel_tree};
@@ -36,6 +38,7 @@ fn unprocessable(detail: impl Into<String>) -> ApiError {
 /// is in. Validated before anything is written; the old results go.
 async fn replace_model_tree(
     Extract(state): Extract<State>,
+    caller: Caller,
     Path(analysis_id): Path<String>,
     body: Bytes,
 ) -> ApiResult {
@@ -49,7 +52,9 @@ async fn replace_model_tree(
             None,
         )]));
     };
-    let mut analysis = state.store.read(|c| Ok(require(c, &analysis_id)))??;
+    let mut analysis = state
+        .store
+        .read(|c| Ok(require(c, &caller, &analysis_id)))??;
     let root = payload.get("model_tree").cloned().unwrap_or(Value::Null);
     if !truthy(&root) {
         return Err(unprocessable("model_tree is required"));
@@ -147,6 +152,7 @@ fn fresh_seed() -> i64 {
 /// allowances switched.
 async fn duplicate(
     Extract(state): Extract<State>,
+    caller: Caller,
     Path(analysis_id): Path<String>,
     Query(q): Query<HashMap<String, String>>,
 ) -> ApiResult {
@@ -156,7 +162,9 @@ async fn duplicate(
         .contains_key("apply_inbuilt")
         .then(|| query_bool(&q, "apply_inbuilt", &mut problems));
     problems.finish()?;
-    let source = state.store.read(|c| Ok(require(c, &analysis_id)))??;
+    let source = state
+        .store
+        .read(|c| Ok(require(c, &caller, &analysis_id)))??;
     let mut name = format!("{} (copy)", source.name);
     let mut config = source.bayesian_config.clone();
     let as_object = |c: &Option<Value>| {
@@ -227,6 +235,8 @@ pub fn copy_inputs(
         updated_at: now,
         project_id: source.project_id.clone(),
         bayesian_config: config,
+        // The caller's, since the source had to be theirs to copy.
+        owner_id: source.owner_id.clone(),
         ..Analysis::default()
     };
     rows::insert(tx, &copy)?;
@@ -354,6 +364,7 @@ fn clear_posteriors(e: &mut Value) {
 /// analysis is; `analysis_type` converts it.
 async fn replace_inputs(
     Extract(state): Extract<State>,
+    caller: Caller,
     Path(analysis_id): Path<String>,
     body: Bytes,
 ) -> ApiResult {
@@ -363,7 +374,16 @@ async fn replace_inputs(
     let parsed = schemas::bayesian_request(&mut f, &state.store);
     problems.finish()?;
     let r = parsed.expect("validated");
-    let mut analysis = state.store.read(|c| Ok(require(c, &analysis_id)))??;
+    let mut analysis = state
+        .store
+        .read(|c| Ok(require(c, &caller, &analysis_id)))??;
+    // Before anything is deleted: an edit naming a curve the caller cannot
+    // use must leave the analysis as it was, not wipe its results and refuse.
+    authorise_curve_ids(
+        &state,
+        &caller,
+        r.measurements.iter().map(|d| d.m.curve_id.as_str()),
+    )?;
     state.store.write(|tx| {
         rows::delete_where::<AnalysisResult>(tx, "analysis_id = ?", [&analysis_id])?;
         rows::delete_where::<StratigraphicRelationship>(tx, "analysis_id = ?", [&analysis_id])?;

@@ -22,6 +22,7 @@ use radical_store::rows::{
 use radical_store::{Timestamp, rusqlite};
 use serde_json::{Map, Value, json};
 
+use crate::accounts::Caller;
 use crate::schemas;
 use crate::validate::{self, Problems};
 use crate::{ApiError, ApiResult, State, ok};
@@ -30,11 +31,14 @@ pub fn iso(t: Option<Timestamp>) -> Value {
     t.map_or(Value::Null, |t| Value::from(t.isoformat()))
 }
 
-/// The analysis, or the 404 a missing one is.
-pub fn require(conn: &rusqlite::Connection, analysis_id: &str) -> ApiResult<Analysis> {
-    rows::get(conn, analysis_id)
-        .map_err(ApiError::from)?
-        .ok_or_else(|| ApiError::not_found("That analysis was not found."))
+/// The analysis, if it is the caller's; the 404 a missing one is otherwise.
+pub fn require(
+    conn: &rusqlite::Connection,
+    caller: &Caller,
+    analysis_id: &str,
+) -> ApiResult<Analysis> {
+    let row = rows::get::<Analysis>(conn, analysis_id).map_err(ApiError::from)?;
+    crate::owner::check(caller, row, |a| a.owner_id.as_deref(), "That analysis")
 }
 
 /// An analysis's dates, in its reading order (`Analysis.measurements`).
@@ -52,15 +56,18 @@ pub fn measurements(
 
 /// A project id from a request, unchanged if absent or real: a 404 rather
 /// than an analysis silently left unassigned.
+/// Someone else's project is "not found" too: an id must not be a way to file
+/// an analysis where the caller cannot see, nor to learn a project exists.
 pub fn validate_project_id(
     conn: &rusqlite::Connection,
+    caller: &Caller,
     project_id: Option<&str>,
 ) -> ApiResult<Option<String>> {
     let Some(id) = project_id.filter(|p| !p.is_empty()) else {
         return Ok(None);
     };
     let found: Option<Project> = rows::get(conn, id)?;
-    if found.is_none() {
+    if !found.is_some_and(|p| crate::owner::may(caller, p.owner_id.as_deref())) {
         return Err(ApiError::not_found(format!("Project '{id}' not found")));
     }
     Ok(Some(id.to_owned()))
@@ -438,7 +445,10 @@ pub fn measurement_json(s: &RadiocarbonSample) -> Value {
 /// Everything the Results page draws for one analysis (`get_analysis`):
 /// also what a run records as its history.
 pub fn analysis_payload(state: &State, analysis_id: &str) -> ApiResult<Value> {
-    let analysis = state.store.read(|c| Ok(require(c, analysis_id)))??;
+    let analysis = state
+        .store
+        .read(|c| rows::get::<Analysis>(c, analysis_id))?
+        .ok_or_else(|| ApiError::not_found("That analysis was not found."))?;
     let (samples, results, relationships, groups, project) = state.store.read(|c| {
         Ok((
             measurements(c, analysis_id)?,
@@ -563,7 +573,14 @@ pub fn analysis_payload(state: &State, analysis_id: &str) -> ApiResult<Value> {
     }))
 }
 
-async fn read(Extract(state): Extract<State>, Path(analysis_id): Path<String>) -> ApiResult {
+async fn read(
+    Extract(state): Extract<State>,
+    caller: Caller,
+    Path(analysis_id): Path<String>,
+) -> ApiResult {
+    state
+        .store
+        .read(|c| Ok(require(c, &caller, &analysis_id)))??;
     Ok(ok(analysis_payload(&state, &analysis_id)?))
 }
 
@@ -630,6 +647,7 @@ pub fn query_bool(q: &HashMap<String, String>, name: &str, problems: &mut Proble
 /// Analyses, most recent first; one project's, or those filed under none.
 async fn list(
     Extract(state): Extract<State>,
+    caller: Caller,
     Query(q): Query<HashMap<String, String>>,
 ) -> ApiResult {
     let mut problems = Problems::default();
@@ -638,14 +656,16 @@ async fn list(
     let unassigned = query_bool(&q, "unassigned", &mut problems);
     problems.finish()?;
     let project_id = q.get("project_id").filter(|p| !p.is_empty()).cloned();
+    let mine = crate::owner::Scope::of(&caller).sql("owner_id");
     let data = state.store.read(|c| {
-        let (condition, params): (&str, Vec<String>) = if unassigned {
-            ("project_id IS NULL", vec![])
+        let (condition, params): (String, Vec<String>) = if unassigned {
+            (format!("project_id IS NULL AND {mine}"), vec![])
         } else if let Some(p) = &project_id {
-            ("project_id = ?", vec![p.clone()])
+            (format!("project_id = ? AND {mine}"), vec![p.clone()])
         } else {
-            ("1", vec![])
+            (mine.clone(), vec![])
         };
+        let condition = condition.as_str();
         let total: i64 = c.query_row(
             &format!("SELECT count(*) FROM analyses WHERE {condition}"),
             rusqlite::params_from_iter(params.iter()),
@@ -724,8 +744,14 @@ pub fn delete_analyses(tx: &rusqlite::Connection, ids: &[String]) -> radical_sto
     Ok(())
 }
 
-async fn delete_one(Extract(state): Extract<State>, Path(analysis_id): Path<String>) -> ApiResult {
-    state.store.read(|c| Ok(require(c, &analysis_id)))??;
+async fn delete_one(
+    Extract(state): Extract<State>,
+    caller: Caller,
+    Path(analysis_id): Path<String>,
+) -> ApiResult {
+    state
+        .store
+        .read(|c| Ok(require(c, &caller, &analysis_id)))??;
     state
         .store
         .write(|tx| delete_analyses(tx, std::slice::from_ref(&analysis_id)))?;
@@ -733,7 +759,7 @@ async fn delete_one(Extract(state): Extract<State>, Path(analysis_id): Path<Stri
 }
 
 /// Several analyses at once, all or nothing on the ids.
-async fn delete_many(Extract(state): Extract<State>, body: Bytes) -> ApiResult {
+async fn delete_many(Extract(state): Extract<State>, caller: Caller, body: Bytes) -> ApiResult {
     let input = validate::json_body(&body)?;
     let mut problems = Problems::default();
     let mut f = validate::body(&input, "AnalysisBulkDelete", &mut problems);
@@ -742,8 +768,11 @@ async fn delete_many(Extract(state): Extract<State>, body: Bytes) -> ApiResult {
     let ids = ids.unwrap_or_default();
     let missing: Vec<String> = state.store.read(|c| {
         let mut out = Vec::new();
+        // Someone else's is "not found", as one that does not exist is.
         for id in &ids {
-            if rows::get::<Analysis>(c, id)?.is_none() {
+            if !rows::get::<Analysis>(c, id)?
+                .is_some_and(|a| crate::owner::may(&caller, a.owner_id.as_deref()))
+            {
                 out.push(id.clone());
             }
         }
@@ -766,6 +795,7 @@ async fn delete_many(Extract(state): Extract<State>, body: Bytes) -> ApiResult {
 /// Refile an analysis under a project (or none), or rename it.
 async fn update(
     Extract(state): Extract<State>,
+    caller: Caller,
     Path(analysis_id): Path<String>,
     body: Bytes,
 ) -> ApiResult {
@@ -779,10 +809,14 @@ async fn update(
             None,
         )]));
     };
-    let mut analysis = state.store.read(|c| Ok(require(c, &analysis_id)))??;
+    let mut analysis = state
+        .store
+        .read(|c| Ok(require(c, &caller, &analysis_id)))??;
     if updates.contains_key("project_id") {
         let wanted = updates["project_id"].as_str();
-        analysis.project_id = state.store.read(|c| Ok(validate_project_id(c, wanted)))??;
+        analysis.project_id = state
+            .store
+            .read(|c| Ok(validate_project_id(c, &caller, wanted)))??;
     }
     if let Some(name) = updates
         .get("name")
