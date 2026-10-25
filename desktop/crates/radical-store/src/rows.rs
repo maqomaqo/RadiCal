@@ -78,6 +78,8 @@ table! {
         intervals: Json,
         summaries: Json,
         influence: Json,
+        /// The account that owns it, on a server; empty on the desktop.
+        owner_id: Option<String>,
     }
 }
 
@@ -138,6 +140,8 @@ table! {
         archived: bool,
         created_at: When,
         updated_at: When,
+        /// The account that added it, on a server; empty on the desktop.
+        created_by: Option<String>,
     }
 }
 
@@ -155,6 +159,8 @@ table! {
         created_at: When,
         started_at: When,
         finished_at: When,
+        /// The account that owns it, on a server; empty on the desktop.
+        owner_id: Option<String>,
     }
 }
 
@@ -195,6 +201,8 @@ table! {
         citation: Option<String>,
         note: Option<String>,
         created_at: When,
+        /// The account that added it, on a server; empty on the desktop.
+        created_by: Option<String>,
     }
 }
 
@@ -225,6 +233,8 @@ table! {
         bayesian_config: Json,
         created_at: Timestamp,
         updated_at: Timestamp,
+        /// The account that owns it, on a server; empty on the desktop.
+        owner_id: Option<String>,
     }
 }
 
@@ -271,6 +281,8 @@ table! {
         /// 'full' or a coarsening the exports apply.
         coordinate_precision: String,
         map_tiles_enabled: bool,
+        /// The account that owns it, on a server; empty on the desktop.
+        owner_id: Option<String>,
     }
 }
 
@@ -339,8 +351,43 @@ table! {
     }
 }
 
+table! {
+    /// An account, on a server. The desktop has none.
+    User = "users" {
+        id: String,
+        /// Lowercased, and unique.
+        email: String,
+        /// bcrypt. Never the password.
+        password_hash: String,
+        display_name: Option<String>,
+        /// The first account made adopts the work from before there were
+        /// accounts.
+        is_first_account: bool,
+        created_at: When,
+        last_login_at: When,
+    }
+}
+
+table! {
+    /// A long-lived credential for scripts (`Authorization: Bearer rct_...`),
+    /// of which only a SHA-256 of the secret is kept.
+    PersonalAccessToken = "personal_access_tokens" {
+        id: String,
+        user_id: String,
+        name: String,
+        token_hash: String,
+        /// The secret's first characters, to tell tokens apart in a list.
+        prefix: String,
+        /// 'read' or 'write'.
+        scope: String,
+        created_at: Timestamp,
+        expires_at: Timestamp,
+        last_used_at: When,
+    }
+}
+
 /// Every row type, for the tests that check them against the schema.
-pub const TABLES: [(&str, &[&str]); 14] = [
+pub const TABLES: [(&str, &[&str]); 16] = [
     (Analysis::NAME, Analysis::COLUMNS),
     (AnalysisResult::NAME, AnalysisResult::COLUMNS),
     (AnalysisRun::NAME, AnalysisRun::COLUMNS),
@@ -354,6 +401,7 @@ pub const TABLES: [(&str, &[&str]); 14] = [
     (ModelElement::NAME, ModelElement::COLUMNS),
     (ModelTemplate::NAME, ModelTemplate::COLUMNS),
     (ProjectSample::NAME, ProjectSample::COLUMNS),
+    (PersonalAccessToken::NAME, PersonalAccessToken::COLUMNS),
     (Project::NAME, Project::COLUMNS),
     (RadiocarbonSample::NAME, RadiocarbonSample::COLUMNS),
     (SampleGroup::NAME, SampleGroup::COLUMNS),
@@ -361,6 +409,7 @@ pub const TABLES: [(&str, &[&str]); 14] = [
         StratigraphicRelationship::NAME,
         StratigraphicRelationship::COLUMNS,
     ),
+    (User::NAME, User::COLUMNS),
 ];
 
 // --------------------------------------------------------------------------

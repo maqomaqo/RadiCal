@@ -61,6 +61,7 @@ fn plant(state: &radical_server::State, id: &str, tamper: bool) -> Vec<Reservoir
     ];
     let now = Some(Timestamp::now());
     let snapshot = MarineReservoirSnapshot {
+        created_by: None,
         id: id.to_owned(),
         source: "test".to_owned(),
         fetched_at: now,

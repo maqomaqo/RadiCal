@@ -275,6 +275,7 @@ async fn create_template(Extract(state): Extract<State>, body: Bytes) -> ApiResu
         .map_err(|m| ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, m.join("; ")))?;
     let now = Timestamp::now();
     let t = ModelTemplate {
+        owner_id: None,
         id: radical_store::new_id(),
         name,
         description,
@@ -561,6 +562,7 @@ async fn import_templates(
             rows::insert(
                 tx,
                 &ModelTemplate {
+                    owner_id: None,
                     id: radical_store::new_id(),
                     name: item["saved_as"].as_str().unwrap_or_default().to_owned(),
                     description: item["description"].as_str().map(str::to_owned),

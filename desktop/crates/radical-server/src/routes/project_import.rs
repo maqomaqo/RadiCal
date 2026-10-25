@@ -946,6 +946,7 @@ fn store_curves(
         rows::insert(
             tx,
             &CurveRow {
+                created_by: None,
                 id: local_id.clone(),
                 kind: text("kind")
                     .filter(|k| !k.is_empty())
@@ -1082,6 +1083,7 @@ fn commit_import(state: &State, plan: &mut Plan, name: &str) -> radical_store::R
         .to_owned();
     let now = Some(Timestamp::now());
     let project = Project {
+        owner_id: None,
         id: radical_store::new_id(),
         name: name.to_owned(),
         description: plan.manifest["project"]["description"]

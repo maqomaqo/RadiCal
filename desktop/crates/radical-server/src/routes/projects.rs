@@ -63,6 +63,7 @@ async fn create(Extract(state): Extract<State>, body: Bytes) -> ApiResult {
     }
     let now = Some(Timestamp::now());
     let project = Project {
+        owner_id: None,
         id: radical_store::new_id(),
         name: name.trim().to_owned(),
         description,

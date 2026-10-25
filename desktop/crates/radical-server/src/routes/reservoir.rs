@@ -216,6 +216,7 @@ fn store(
     report.content_sha256 = content_hash(rows_in);
     let now = Some(Timestamp::now());
     let row = MarineReservoirSnapshot {
+        created_by: None,
         id: id.clone(),
         source: SOURCE.to_owned(),
         fetched_at: now,

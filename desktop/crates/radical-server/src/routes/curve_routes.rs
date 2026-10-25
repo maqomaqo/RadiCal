@@ -891,6 +891,7 @@ async fn create_curve(Extract(state): Extract<State>, headers: HeaderMap, body: 
     let curve = CalibrationCurve::new(&name, cal_ages, c14, err);
     let now = Some(Timestamp::now());
     let row = CurveRow {
+        created_by: None,
         id: slug.clone(),
         kind: "imported".to_owned(),
         name,
@@ -1024,6 +1025,7 @@ async fn create_mixed(Extract(state): Extract<State>, body: Bytes) -> Answer {
     let marine = spec_a["sample_type"] == "marine" || spec_b["sample_type"] == "marine";
     let now = Some(Timestamp::now());
     let row = CurveRow {
+        created_by: None,
         id: slug.clone(),
         kind: "mixed".to_owned(),
         description: Some(

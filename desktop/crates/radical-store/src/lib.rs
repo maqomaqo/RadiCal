@@ -27,7 +27,10 @@ pub mod rows;
 
 /// Every migration, in order; the database's `user_version` is how many have
 /// been applied.
-const MIGRATIONS: &[&str] = &[include_str!("../migrations/0001_initial.sql")];
+const MIGRATIONS: &[&str] = &[
+    include_str!("../migrations/0001_initial.sql"),
+    include_str!("../migrations/0002_accounts.sql"),
+];
 
 /// The schema version this build writes.
 pub const SCHEMA_VERSION: usize = MIGRATIONS.len();
