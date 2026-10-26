@@ -1,5 +1,101 @@
+# The development stack: RadiCal's server (radical-server, built from
+# desktop/) on :8000, and the frontend's dev server on :5173, which
+# hot-reloads and forwards /api to the server. Open http://localhost:5173.
+#
+#   docker compose up -d                    start it
+#   docker compose up -d --build server     after a change to the Rust code
+#
+# The server keeps its data in one SQLite file on the `data` volume, as the
+# published image does (docker-compose.prod.yml), but with RADICAL_ENV
+# defaulting to development.
+#
+# The earlier Python backend and its PostgreSQL stay for one release, behind
+# the `python` profile (docs/RUST_SERVER_PLAN.md, S6): for recording the
+# corpus, and for bringing a PostgreSQL database's data across once with
+#
+#   docker compose --profile python up -d --wait postgres
+#   docker compose run --rm server import-postgres
+
 services:
+  server:
+    build:
+      context: .
+      target: runtime
+    container_name: radical_server
+    ports:
+      - "8000:8000"
+    environment:
+      # Passed through rather than defaulted. An empty RADICAL_SECRET_KEY is
+      # what makes the server fall back to its development key and say so;
+      # giving it a default here would put a real-looking key in version
+      # control, which is the one thing a signing key must never be.
+      RADICAL_ENV: ${RADICAL_ENV:-development}
+      RADICAL_SECRET_KEY: ${RADICAL_SECRET_KEY:-}
+      # Optional password-reset emails; see .env.example.
+      RADICAL_PUBLIC_URL: ${RADICAL_PUBLIC_URL:-}
+      RADICAL_SMTP_HOST: ${RADICAL_SMTP_HOST:-}
+      RADICAL_SMTP_PORT: ${RADICAL_SMTP_PORT:-}
+      RADICAL_SMTP_SECURITY: ${RADICAL_SMTP_SECURITY:-}
+      RADICAL_SMTP_USER: ${RADICAL_SMTP_USER:-}
+      RADICAL_SMTP_PASSWORD: ${RADICAL_SMTP_PASSWORD:-}
+      RADICAL_SMTP_FROM: ${RADICAL_SMTP_FROM:-}
+      # Read only by `import-postgres`.
+      RADICAL_IMPORT_FROM: postgresql://${POSTGRES_USER:-radiocarbon}:${POSTGRES_PASSWORD:-password}@postgres:5432/${POSTGRES_DB:-radiocarbon_db}
+    volumes:
+      - data:/data
+    command: ["--accounts", "--host", "0.0.0.0", "--port", "8000"]
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: radiocarbon_frontend
+    ports:
+      - "5173:5173"
+    environment:
+      # Where the dev server forwards /api: the server service, by name.
+      API_PROXY_TARGET: http://server:8000
+      # Set to true in .env when the checkout is on a Windows drive: Docker
+      # Desktop passes no file-change events from it into the container, and
+      # without polling the dev server never sees an edit.
+      CHOKIDAR_USEPOLLING: ${CHOKIDAR_USEPOLLING:-false}
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    command: npm run dev -- --host
+
+  # The earlier Python backend, on :8001 so it can run beside the server.
+  # It bind-mounts the source and runs --reload, and
+  # `docker exec radiocarbon_backend pytest` works in it.
+  backend:
+    profiles: ["python"]
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      args:
+        INSTALL_DEV: "true"
+    container_name: radiocarbon_backend
+    ports:
+      - "8001:8000"
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-radiocarbon}:${POSTGRES_PASSWORD:-password}@postgres:5432/${POSTGRES_DB:-radiocarbon_db}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
+      RADICAL_ENV: ${RADICAL_ENV:-development}
+      RADICAL_SECRET_KEY: ${RADICAL_SECRET_KEY:-}
+      INTCAL_CURVE_PATH: ${INTCAL_CURVE_PATH:-/app/data/intcal20.14c}
+      MARINE_CURVE_PATH: ${MARINE_CURVE_PATH:-/app/data/marine20.14c}
+      SHCAL_CURVE_PATH: ${SHCAL_CURVE_PATH:-/app/data/shcal20.14c}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+      - ./calibration_data:/app/data
+      - ./uploads:/app/uploads
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
   postgres:
+    profiles: ["python"]
     image: postgres:15-alpine
     container_name: radiocarbon_db
     environment:
@@ -16,67 +112,8 @@ services:
       timeout: 5s
       retries: 5
 
-  backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-      args:
-        # This stack bind-mounts the source and runs --reload: it is the
-        # development backend, and `docker exec radiocarbon_backend pytest`
-        # should just work in it.
-        INSTALL_DEV: "true"
-    container_name: radiocarbon_backend
-    ports:
-      - "8000:8000"
-    environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-radiocarbon}:${POSTGRES_PASSWORD:-password}@postgres:5432/${POSTGRES_DB:-radiocarbon_db}
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
-      # Passed through rather than defaulted. An empty RADICAL_SECRET_KEY is
-      # what makes the app fall back to its development key and say so; giving
-      # it a default here would put a real-looking key in version control,
-      # which is the one thing a signing key must never be.
-      RADICAL_ENV: ${RADICAL_ENV:-development}
-      RADICAL_SECRET_KEY: ${RADICAL_SECRET_KEY:-}
-      # Optional password-reset emails; see .env.example.
-      RADICAL_PUBLIC_URL: ${RADICAL_PUBLIC_URL:-}
-      RADICAL_SMTP_HOST: ${RADICAL_SMTP_HOST:-}
-      RADICAL_SMTP_PORT: ${RADICAL_SMTP_PORT:-}
-      RADICAL_SMTP_SECURITY: ${RADICAL_SMTP_SECURITY:-}
-      RADICAL_SMTP_USER: ${RADICAL_SMTP_USER:-}
-      RADICAL_SMTP_PASSWORD: ${RADICAL_SMTP_PASSWORD:-}
-      RADICAL_SMTP_FROM: ${RADICAL_SMTP_FROM:-}
-      INTCAL_CURVE_PATH: ${INTCAL_CURVE_PATH:-/app/data/intcal20.14c}
-      MARINE_CURVE_PATH: ${MARINE_CURVE_PATH:-/app/data/marine20.14c}
-      SHCAL_CURVE_PATH: ${SHCAL_CURVE_PATH:-/app/data/shcal20.14c}
-    depends_on:
-      postgres:
-        condition: service_healthy
-    volumes:
-      - ./backend:/app
-      - ./calibration_data:/app/data
-      - ./uploads:/app/uploads
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    container_name: radiocarbon_frontend
-    ports:
-      - "5173:5173"
-    environment:
-      # Where the dev server forwards /api: the backend service, by name.
-      API_PROXY_TARGET: http://backend:8000
-      # Set to true in .env when the checkout is on a Windows drive: Docker
-      # Desktop passes no file-change events from it into the container, and
-      # without polling the dev server never sees an edit.
-      CHOKIDAR_USEPOLLING: ${CHOKIDAR_USEPOLLING:-false}
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
-    command: npm run dev -- --host
-
 volumes:
+  data:
   postgres_data:
 
 networks:
