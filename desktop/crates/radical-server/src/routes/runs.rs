@@ -15,7 +15,9 @@ use radical_store::Timestamp;
 use radical_store::rows::{self, Analysis, AnalysisResult, RadiocarbonSample};
 use serde_json::{Value, json};
 
+use crate::accounts::Caller;
 use crate::routes::analysis::{ranges_json, same_event_json, validate_project_id};
+use crate::routes::curve_routes::authorise_curve_ids;
 use crate::schemas::{self, BayesianMeasurement, Measurement};
 use crate::validate::{self, Problems};
 use crate::{ApiError, ApiResult, State, history, ok};
@@ -155,7 +157,7 @@ fn refused(e: impl std::fmt::Display) -> ApiError {
 
 /// Calibrate one measurement, and save it as an analysis unless asked not
 /// to.
-async fn calibrate(Extract(state): Extract<State>, body: Bytes) -> ApiResult {
+async fn calibrate(Extract(state): Extract<State>, caller: Caller, body: Bytes) -> ApiResult {
     let input = validate::json_body(&body)?;
     let mut problems = Problems::default();
     let mut f = validate::body(&input, "CalibrateRequest", &mut problems);
@@ -165,10 +167,13 @@ async fn calibrate(Extract(state): Extract<State>, body: Bytes) -> ApiResult {
     let project_id = if save {
         state
             .store
-            .read(|c| Ok(validate_project_id(c, project_id.as_deref())))??
+            .read(|c| Ok(validate_project_id(c, &caller, project_id.as_deref())))??
     } else {
         None
     };
+    // The schema checked the id names a real curve; this checks it is one
+    // the caller may use.
+    authorise_curve_ids(&state, &caller, [m.curve_id.as_str()])?;
     let curve = state.curves.curve(&m.curve_id).map_err(refused)?;
     let stats = calibration_stats(curve, m.age_bp, m.error_1sigma, m.delta_r, m.delta_r_error)
         .map_err(refused)?;
@@ -204,6 +209,7 @@ async fn calibrate(Extract(state): Extract<State>, body: Bytes) -> ApiResult {
         updated_at: now,
         project_id: project_id.clone(),
         bayesian_config: Some(json!({})),
+        owner_id: caller.owner().map(str::to_owned),
         ..Analysis::default()
     };
     // Only what a single calibration stores of its date.
@@ -244,7 +250,7 @@ async fn calibrate(Extract(state): Extract<State>, body: Bytes) -> ApiResult {
 
 /// Several measurements calibrated independently and saved as one
 /// analysis, on one timeline, with no relationship asserted.
-async fn calibrate_group(Extract(state): Extract<State>, body: Bytes) -> ApiResult {
+async fn calibrate_group(Extract(state): Extract<State>, caller: Caller, body: Bytes) -> ApiResult {
     let input = validate::json_body(&body)?;
     let mut problems = Problems::default();
     let mut f = validate::body(&input, "GroupCalibrationRequest", &mut problems);
@@ -277,7 +283,8 @@ async fn calibrate_group(Extract(state): Extract<State>, body: Bytes) -> ApiResu
     let dates = dates.unwrap_or_default();
     let project_id = state
         .store
-        .read(|c| Ok(validate_project_id(c, project_id.as_deref())))??;
+        .read(|c| Ok(validate_project_id(c, &caller, project_id.as_deref())))??;
+    authorise_curve_ids(&state, &caller, dates.iter().map(|d| d.m.curve_id.as_str()))?;
     let now = Some(Timestamp::now());
     let mut analysis = Analysis {
         id: radical_store::new_id(),
@@ -288,6 +295,7 @@ async fn calibrate_group(Extract(state): Extract<State>, body: Bytes) -> ApiResu
         updated_at: now,
         project_id: project_id.clone(),
         bayesian_config: Some(json!({"estimate_durations": durations, "estimate_kde": kde})),
+        owner_id: caller.owner().map(str::to_owned),
         ..Analysis::default()
     };
     let mut samples = Vec::new();
@@ -335,7 +343,7 @@ async fn calibrate_group(Extract(state): Extract<State>, body: Bytes) -> ApiResu
 }
 
 /// Whether these measurements could all date one event; nothing is saved.
-async fn same_event(Extract(state): Extract<State>, body: Bytes) -> ApiResult {
+async fn same_event(Extract(state): Extract<State>, caller: Caller, body: Bytes) -> ApiResult {
     let input = validate::json_body(&body)?;
     let mut problems = Problems::default();
     let mut f = validate::body(&input, "SameEventRequest", &mut problems);
@@ -345,8 +353,9 @@ async fn same_event(Extract(state): Extract<State>, body: Bytes) -> ApiResult {
         item.clean().then_some(m)
     });
     problems.finish()?;
+    let dates = dates.unwrap_or_default();
+    authorise_curve_ids(&state, &caller, dates.iter().map(|m| m.curve_id.as_str()))?;
     let dates: Vec<statistics::Date> = dates
-        .unwrap_or_default()
         .iter()
         .map(|m| statistics::Date {
             age_bp: m.age_bp,

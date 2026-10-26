@@ -20,6 +20,7 @@ use radical_store::Timestamp;
 use radical_store::rows::{self, ModelTemplate};
 use serde_json::{Map, Value, json};
 
+use crate::accounts::Caller;
 use crate::form::{self, Form};
 use crate::history::py_json_indented;
 use crate::routes::analysis::walk_tree;
@@ -236,27 +237,28 @@ fn serialize(t: &ModelTemplate) -> Value {
     })
 }
 
-fn all(state: &State) -> radical_store::Result<Vec<ModelTemplate>> {
+/// The caller's templates.
+fn all(state: &State, caller: &Caller) -> radical_store::Result<Vec<ModelTemplate>> {
+    let mine = crate::owner::Scope::of(caller).sql("owner_id");
     state
         .store
-        .read(|c| rows::select_where(c, "1 = 1", [], "name, created_at"))
+        .read(|c| rows::select_where(c, &mine, [], "name, created_at"))
 }
 
-fn owned(state: &State, id: &str) -> ApiResult<ModelTemplate> {
-    state
-        .store
-        .read(|c| rows::get(c, id))?
-        .ok_or_else(|| ApiError::not_found("That template was not found."))
+/// The template, if it is the caller's.
+fn owned(state: &State, caller: &Caller, id: &str) -> ApiResult<ModelTemplate> {
+    let row = state.store.read(|c| rows::get::<ModelTemplate>(c, id))?;
+    crate::owner::check(caller, row, |t| t.owner_id.as_deref(), "That template")
 }
 
-async fn list_templates(Extract(state): Extract<State>) -> ApiResult {
+async fn list_templates(Extract(state): Extract<State>, caller: Caller) -> ApiResult {
     Ok(ok(
-        json!({"items": all(&state)?.iter().map(serialize).collect::<Vec<_>>()}),
+        json!({"items": all(&state, &caller)?.iter().map(serialize).collect::<Vec<_>>()}),
     ))
 }
 
 /// Save a model's structure and settings as a template.
-async fn create_template(Extract(state): Extract<State>, body: Bytes) -> ApiResult {
+async fn create_template(Extract(state): Extract<State>, caller: Caller, body: Bytes) -> ApiResult {
     let input = validate::json_body(&body)?;
     let mut problems = Problems::default();
     let mut f = validate::body(&input, "TemplateInput", &mut problems);
@@ -275,6 +277,7 @@ async fn create_template(Extract(state): Extract<State>, body: Bytes) -> ApiResu
         .map_err(|m| ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, m.join("; ")))?;
     let now = Timestamp::now();
     let t = ModelTemplate {
+        owner_id: caller.owner().map(str::to_owned),
         id: radical_store::new_id(),
         name,
         description,
@@ -290,6 +293,7 @@ async fn create_template(Extract(state): Extract<State>, body: Bytes) -> ApiResu
 /// Rename a template or change its description; never its structure.
 async fn update_template(
     Extract(state): Extract<State>,
+    caller: Caller,
     Path(id): Path<String>,
     body: Bytes,
 ) -> ApiResult {
@@ -303,7 +307,7 @@ async fn update_template(
     let description = f.opt_str("description", Some(2000));
     let description_sent = f.sent("description");
     problems.finish()?;
-    let mut t = owned(&state, &id)?;
+    let mut t = owned(&state, &caller, &id)?;
     if let Some(n) = name {
         if n.trim().is_empty() {
             return Err(ApiError::new(
@@ -323,8 +327,12 @@ async fn update_template(
     Ok(ok(serialize(&t)))
 }
 
-async fn delete_template(Extract(state): Extract<State>, Path(id): Path<String>) -> ApiResult {
-    owned(&state, &id)?;
+async fn delete_template(
+    Extract(state): Extract<State>,
+    caller: Caller,
+    Path(id): Path<String>,
+) -> ApiResult {
+    owned(&state, &caller, &id)?;
     state
         .store
         .write(|tx| rows::delete_where::<ModelTemplate>(tx, "id = ?", [&id]))?;
@@ -334,6 +342,7 @@ async fn delete_template(Extract(state): Extract<State>, Path(id): Path<String>)
 /// Templates as one JSON file; `template` (repeatable) chooses which.
 async fn export_templates(
     Extract(state): Extract<State>,
+    caller: Caller,
     Query(q): Query<Vec<(String, String)>>,
 ) -> ApiResult<Response> {
     let chosen: HashSet<&str> = q
@@ -341,7 +350,7 @@ async fn export_templates(
         .filter(|(k, _)| k == "template")
         .map(|(_, v)| v.as_str())
         .collect();
-    let templates: Vec<ModelTemplate> = all(&state)?
+    let templates: Vec<ModelTemplate> = all(&state, &caller)?
         .into_iter()
         .filter(|t| chosen.is_empty() || chosen.contains(t.id.as_str()))
         .collect();
@@ -401,7 +410,7 @@ fn shape(tree: &Value) -> Value {
 
 /// What a templates file holds and what importing it would do, storing
 /// nothing (`plan_template_import`).
-fn plan_import(state: &State, content: &[u8]) -> ApiResult<Value> {
+fn plan_import(state: &State, caller: &Caller, content: &[u8]) -> ApiResult<Value> {
     let refuse = |m: &str| Ok(json!({"ok": false, "errors": [m], "templates": []}));
     let data: Value = match std::str::from_utf8(content)
         .ok()
@@ -434,7 +443,7 @@ fn plan_import(state: &State, content: &[u8]) -> ApiResult<Value> {
             "A file holds at most {MAX_TEMPLATES_PER_FILE} templates."
         ));
     }
-    let existing = all(state)?;
+    let existing = all(state, caller)?;
     let mut taken: HashSet<String> = existing.iter().map(|t| t.name.to_lowercase()).collect();
     let mut same: Vec<(String, Value, Value)> = existing
         .iter()
@@ -520,11 +529,12 @@ fn file_of(headers: &HeaderMap, body: &Bytes) -> ApiResult<Vec<u8>> {
 
 async fn preview_import(
     Extract(state): Extract<State>,
+    caller: Caller,
     headers: HeaderMap,
     body: Bytes,
 ) -> ApiResult {
     let content = file_of(&headers, &body)?;
-    let mut plan = plan_import(&state, &content)?;
+    let mut plan = plan_import(&state, &caller, &content)?;
     if let Some(items) = plan["templates"].as_array_mut() {
         for t in items {
             let o = t.as_object_mut().unwrap();
@@ -539,11 +549,12 @@ async fn preview_import(
 /// Add a templates file's templates, all or none.
 async fn import_templates(
     Extract(state): Extract<State>,
+    caller: Caller,
     headers: HeaderMap,
     body: Bytes,
 ) -> ApiResult {
     let content = file_of(&headers, &body)?;
-    let plan = plan_import(&state, &content)?;
+    let plan = plan_import(&state, &caller, &content)?;
     if plan["ok"] != true {
         return Err(ApiError {
             status: StatusCode::UNPROCESSABLE_ENTITY,
@@ -561,6 +572,7 @@ async fn import_templates(
             rows::insert(
                 tx,
                 &ModelTemplate {
+                    owner_id: caller.owner().map(str::to_owned),
                     id: radical_store::new_id(),
                     name: item["saved_as"].as_str().unwrap_or_default().to_owned(),
                     description: item["description"].as_str().map(str::to_owned),

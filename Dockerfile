@@ -1,15 +1,18 @@
 # The published RadiCal image: ghcr.io/maqomaqo/radical
 #
-# One container serving both halves of the app. The frontend is built to
-# static files and served by the backend from /app/static (see the tail of
-# app/main.py), so the same-origin `fetch('/api/...')` calls the frontend
-# makes work without a proxy in front, and the calibration curves are baked
-# in at /app/data where the backend looks for them by default. The only thing
-# it needs from outside is a PostgreSQL database, via DATABASE_URL.
+# RadiCal on a server: radical-server (desktop/crates/radical-server) in
+# accounts mode, serving the built frontend from /app/static, so the
+# frontend's same-origin `fetch('/api/...')` calls need no proxy in front.
+# Its data is one SQLite file on the /data volume, and the calibration curves
+# are compiled into the binary. Nothing else is needed: no database server.
+# See docs/RUST_SERVER_PLAN.md.
 #
-# The per-service Dockerfiles under frontend/ and backend/ remain the
-# development stack: docker-compose.yml bind-mounts source into those and
-# hot-reloads. This one is built by .github/workflows/publish-image.yml.
+# Built for the platform of the machine building it. The publishing workflow
+# (.github/workflows/publish-image.yml) builds amd64 and arm64 on runners of
+# each kind and joins them, because a Rust build under emulation takes hours.
+#
+# The Dockerfiles under frontend/ and backend/ remain the development stack
+# (docker-compose.yml), which bind-mounts the source and hot-reloads.
 
 # ---- Frontend build -------------------------------------------------------
 # Pinned to the build host's platform: the output is plain JS/CSS, identical
@@ -26,34 +29,40 @@ COPY frontend/ ./
 ENV NODE_OPTIONS=--max-old-space-size=4096
 RUN npm run build
 
-# ---- Backend dependencies -------------------------------------------------
-# Every pin in requirements.txt ships a wheel for both amd64 and arm64, so the
-# toolchain is insurance against a future pin that does not; keeping it in a
-# separate stage means the runtime image never carries it either way.
-FROM python:3.13-slim AS backend-deps
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc g++ gfortran libopenblas-dev liblapack-dev \
-    && rm -rf /var/lib/apt/lists/*
-COPY backend/requirements.txt /tmp/requirements.txt
-RUN pip install --no-cache-dir --prefix=/install -r /tmp/requirements.txt
+# ---- Server ---------------------------------------------------------------
+# desktop/rust-toolchain.toml pins the compiler; rustup installs that one.
+FROM rust:1-bookworm AS server
+WORKDIR /build
+COPY calibration_data/ calibration_data/
+COPY desktop/ desktop/
+WORKDIR /build/desktop
+RUN cargo build --release --locked -p radical-server \
+    && cp target/release/radical-server /radical-server
 
 # ---- Runtime --------------------------------------------------------------
-FROM python:3.13-slim
-WORKDIR /app
+FROM debian:bookworm-slim
+# Certificates for the two things it reaches out to: the mail server for
+# password-reset emails, and calib.org for ΔR snapshots.
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --system --uid 10001 --home-dir /data radical \
+    && mkdir -p /data && chown radical /data
 
-COPY --from=backend-deps /install /usr/local
-COPY backend/ ./
-COPY calibration_data/ ./data/
-COPY --from=frontend /build/dist ./static/
+COPY --from=server /radical-server /usr/local/bin/radical-server
+COPY --from=frontend /build/dist /app/static
 
-# Nothing here is written except uploads; mount a volume there to keep them.
-VOLUME ["/app/uploads"]
+# Everything RadiCal keeps is in /data/radical.db: mount a volume here.
+VOLUME ["/data"]
+USER radical
 
-ENV PYTHONUNBUFFERED=1 \
+ENV RADICAL_DB=/data/radical.db \
     RADICAL_ENV=production
 
 EXPOSE 8000
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s \
-    CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/api/health', timeout=3).status == 200 else 1)"
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
+    CMD ["radical-server", "health"]
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# `docker compose run --rm radical reset-password EMAIL` and
+# `... import-postgres` replace the arguments below.
+ENTRYPOINT ["radical-server"]
+CMD ["--accounts", "--host", "0.0.0.0", "--port", "8000", "--frontend", "/app/static"]

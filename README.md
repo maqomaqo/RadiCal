@@ -32,14 +32,15 @@ A web-based tool for radiocarbon dating analysis: calibration, Bayesian chronolo
 - **React Flow** for the matrix / model tree diagram
 - **Zustand** for the shared New Analysis / Model Structure draft state
 
-### Backend
-- **Python 3.12+** with **FastAPI**
-- **NumPy/SciPy** for the calibration math and both Bayesian solvers (exact integration for
-  chain-shaped models, MH/Gibbs otherwise — no PyMC, no MCMC sampler dependency)
-- **SQLAlchemy** ORM over **PostgreSQL**, with **Alembic** migrations applied on startup
-- **ReportLab** and **Matplotlib** for the PDF report — the figures are drawn through matplotlib's
-  object API rather than pyplot, whose global figure registry is a leak waiting to happen in a
-  long-lived server process
+### Server
+- **Rust**, one binary (`radical-server`) that serves the API and the built frontend, both in
+  RadiCal Desktop and in the Docker image
+- **axum** for the HTTP API; calibration, both Bayesian solvers (exact integration for
+  chain-shaped models, MH/Gibbs otherwise) and the PDF report in RadiCal's own crates
+- **SQLite** for storage, one file per installation, with migrations applied on startup
+- The earlier **Python/FastAPI** server (`backend/`) stays for one release as the reference the
+  Rust server was checked against, then goes; its recorded answers (`desktop/corpus`) remain the
+  contract
 
 ## Project Structure
 
@@ -53,14 +54,16 @@ RadiCal/
 │       ├── theme/            # MUI theme customization
 │       ├── types/            # Shared TypeScript types
 │       └── utils/            # Date formatting, HPD/stratigraphy helpers
-├── backend/                  # FastAPI application
-│   └── app/
-│       ├── api/               # Route handlers
-│       ├── services/          # Calibration math, the three solvers, model tree, agreement
-│       ├── schemas/            # Pydantic request/response schemas
-│       ├── models.py           # SQLAlchemy ORM models
-│       └── main.py
-├── backend/tests/            # pytest suite, plus fixtures from real OxCal 4.4 runs
+├── desktop/                  # The Rust workspace
+│   ├── crates/
+│   │   ├── radical-core/     # Calibration math, the solvers, model tree, agreement
+│   │   ├── radical-io/       # File formats: date tables, curves, OxCal models
+│   │   ├── radical-store/    # The SQLite store and its migrations
+│   │   ├── radical-jobs/     # The background job queue
+│   │   ├── radical-server/   # The HTTP API, accounts, the PDF report, the binary
+│   │   └── radical-desktop/  # RadiCal Desktop's app shell
+│   └── corpus/               # Recorded answers from the Python server, replayed as tests
+├── backend/                  # The earlier Python/FastAPI server (to be removed)
 ├── calibration_data/         # Full IntCal20/Marine20/SHCal20 curve files
 ├── docs/                     # Installation guide and user manual
 ├── docker-compose.yml
@@ -78,18 +81,17 @@ Linux; Docker is the only thing to install. In short, from an empty folder:
 
 ```bash
 curl -fLo docker-compose.yml https://raw.githubusercontent.com/maqomaqo/RadiCal/main/docker-compose.prod.yml
-docker run --rm ghcr.io/maqomaqo/radical python -c "import secrets; print('RADICAL_SECRET_KEY=' + secrets.token_urlsafe(48))" >> .env
+docker run --rm ghcr.io/maqomaqo/radical new-secret >> .env
 docker compose up -d
 ```
 
 then open http://localhost:8000 and create an account. 
 On Windows, two of those lines differ in PowerShell - read the following installation guide for details.
 [`docs/INSTALLATION.md`](docs/INSTALLATION.md) walks through each step on macOS and Windows,
-with everyday use, updating, and troubleshooting.
+with everyday use, updating, backups, upgrading an earlier installation, and troubleshooting.
 
 The image, `ghcr.io/maqomaqo/radical`, holds the app, its web interface and the calibration curves
-in one container, for both Intel/AMD and ARM machines; the only other container is its PostgreSQL
-database.
+in one container, for both Intel/AMD and ARM machines, and keeps everything in one SQLite file.
 
 ## Accounts
 
@@ -105,7 +107,7 @@ to start without one.
 
 ## API Overview
 
-Full interactive documentation (generated from the actual FastAPI routes) is at
+Full interactive documentation is at
 `http://localhost:8000/api/docs` on a running installation, and the OpenAPI schema at
 `/api/openapi.json`. The old `/docs` and `/openapi.json` redirect there.
 

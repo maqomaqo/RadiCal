@@ -6,23 +6,28 @@ use axum::routing::get;
 use radical_store::rows::{self, Job};
 use serde_json::{Value, json};
 
+use crate::accounts::Caller;
 use crate::{ApiError, ApiResult, State, ok, problem};
 
-fn find(state: &State, job_id: &str) -> ApiResult<Job> {
-    state
-        .store
-        .read(|c| rows::get(c, job_id))?
-        .ok_or_else(|| ApiError::not_found("That job was not found."))
+/// The job, if it is the caller's; someone else's is not found.
+fn find(state: &State, caller: &Caller, job_id: &str) -> ApiResult<Job> {
+    let row = state.store.read(|c| rows::get::<Job>(c, job_id))?;
+    crate::owner::check(caller, row, |j| j.owner_id.as_deref(), "That job")
 }
 
 /// One job's state, progress and detail.
-async fn get_job(Extract(state): Extract<State>, Path(job_id): Path<String>) -> ApiResult {
-    Ok(ok(radical_jobs::as_json(&find(&state, &job_id)?)))
+async fn get_job(
+    Extract(state): Extract<State>,
+    caller: Caller,
+    Path(job_id): Path<String>,
+) -> ApiResult {
+    Ok(ok(radical_jobs::as_json(&find(&state, &caller, &job_id)?)))
 }
 
 /// Recent jobs, newest first, optionally about one analysis or project.
 async fn list_jobs(
     Extract(state): Extract<State>,
+    caller: Caller,
     Query(query): Query<std::collections::HashMap<String, String>>,
 ) -> ApiResult {
     let limit = match query.get("limit") {
@@ -59,14 +64,20 @@ async fn list_jobs(
         }
     };
     let target = query.get("target_id").filter(|t| !t.is_empty()).cloned();
+    let mine = crate::owner::Scope::of(&caller).sql("owner_id");
     let rows: Vec<Job> = state.store.read(|c| match &target {
         Some(t) => rows::select_where(
             c,
-            "target_id = ?1 ORDER BY created_at DESC LIMIT ?2",
+            &format!("target_id = ?1 AND {mine} ORDER BY created_at DESC LIMIT ?2"),
             (t, limit),
             "",
         ),
-        None => rows::select_where(c, "1 ORDER BY created_at DESC LIMIT ?1", [limit], ""),
+        None => rows::select_where(
+            c,
+            &format!("{mine} ORDER BY created_at DESC LIMIT ?1"),
+            [limit],
+            "",
+        ),
     })?;
     Ok(ok(
         json!({"jobs": rows.iter().map(radical_jobs::as_json).collect::<Vec<_>>()}),
@@ -74,8 +85,12 @@ async fn list_jobs(
 }
 
 /// Ask a job to stop: accepted, not done -- poll for 'cancelled'.
-async fn cancel_job(Extract(state): Extract<State>, Path(job_id): Path<String>) -> ApiResult {
-    let row = find(&state, &job_id)?;
+async fn cancel_job(
+    Extract(state): Extract<State>,
+    caller: Caller,
+    Path(job_id): Path<String>,
+) -> ApiResult {
+    let row = find(&state, &caller, &job_id)?;
     if row.state != "queued" && row.state != "running" {
         return Err(ApiError::conflict(format!(
             "This job has already {}; there is nothing to cancel.",

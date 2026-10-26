@@ -61,6 +61,7 @@ fn plant(state: &radical_server::State, id: &str, tamper: bool) -> Vec<Reservoir
     ];
     let now = Some(Timestamp::now());
     let snapshot = MarineReservoirSnapshot {
+        created_by: None,
         id: id.to_owned(),
         source: "test".to_owned(),
         fetched_at: now,
@@ -265,5 +266,91 @@ async fn snapshots_are_listed_verified_looked_up_and_guarded() {
         })
         .unwrap();
     assert!(points.is_empty(), "a deleted snapshot's points go with it");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// On a server, a snapshot is its ingester's: another account neither sees
+/// nor deletes it, and gets the same 404 as for one that is not there
+/// (`test_reservoir_registry.py::TestOwnership`, which stores its snapshots
+/// behind the API and so cannot be replayed).
+#[tokio::test(flavor = "multi_thread")]
+async fn another_account_cannot_see_or_delete_a_snapshot() {
+    let dir = std::env::temp_dir().join(format!("radical-reservoir-{}", radical_store::new_id()));
+    let state = radical_server::State::open(dir.join("radical.db"), 1)
+        .unwrap()
+        .with_accounts(radical_server::accounts::Accounts {
+            secret: "reservoir-test".to_owned(),
+        });
+    let app = radical_server::app(state.clone());
+    let register = |email: &'static str| {
+        let app = app.clone();
+        async move {
+            let request = Request::builder()
+                .method("POST")
+                .uri("/api/auth/register")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({"email": email, "password": "a good enough password"}).to_string(),
+                ))
+                .unwrap();
+            let response = app.oneshot(request).await.unwrap();
+            let bytes = response.into_body().collect().await.unwrap().to_bytes();
+            let v: Value = serde_json::from_slice(&bytes).unwrap();
+            (
+                v["data"]["token"].as_str().unwrap().to_owned(),
+                v["data"]["user"]["id"].as_str().unwrap().to_owned(),
+            )
+        }
+    };
+    let (ada, ada_id) = register("ada@radical.example.com").await;
+    let (bob, _) = register("bob@radical.example.com").await;
+    plant(&state, "test-adas", false);
+    state
+        .store
+        .write(|tx| {
+            tx.execute(
+                "UPDATE marine_reservoir_snapshots SET created_by = ? WHERE id = 'test-adas'",
+                [&ada_id],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+    let as_user = |token: &str, method: &str, uri: &str| {
+        let request = Request::builder()
+            .method(method)
+            .uri(uri)
+            .header("authorization", format!("Bearer {token}"))
+            .body(Body::empty())
+            .unwrap();
+        let app = app.clone();
+        async move {
+            let response = app.oneshot(request).await.unwrap();
+            let status = response.status().as_u16();
+            let bytes = response.into_body().collect().await.unwrap().to_bytes();
+            (
+                status,
+                serde_json::from_slice::<Value>(&bytes).unwrap_or(Value::Null),
+            )
+        }
+    };
+    let (status, list) = as_user(&bob, "GET", "/api/reservoir/snapshots").await;
+    assert_eq!(
+        (status, list["data"]["items"].as_array().unwrap().len()),
+        (200, 0)
+    );
+    let (status, _) = as_user(&bob, "GET", "/api/reservoir/snapshots/test-adas").await;
+    assert_eq!(status, 404);
+    let (status, refused) = as_user(&bob, "DELETE", "/api/reservoir/snapshots/test-adas").await;
+    assert_eq!(
+        (status, &refused["detail"]),
+        (404, &json!("That snapshot was not found"))
+    );
+    let (status, own) = as_user(&ada, "GET", "/api/reservoir/snapshots/test-adas").await;
+    assert_eq!((status, &own["data"]["created_by"]), (200, &json!(ada_id)));
+    let (status, list) = as_user(&ada, "GET", "/api/reservoir/snapshots").await;
+    assert_eq!(
+        (status, list["data"]["items"].as_array().unwrap().len()),
+        (200, 1)
+    );
     let _ = std::fs::remove_dir_all(dir);
 }

@@ -21,6 +21,7 @@ use radical_store::rows::{
 };
 use serde_json::{Map, Value, json};
 
+use crate::accounts::Caller;
 use crate::calib::{self, FetchError};
 use crate::validate::{self, Bounds, Problems};
 use crate::{ApiError, ApiResult, State, ok};
@@ -44,18 +45,32 @@ fn spec(s: &MarineReservoirSnapshot) -> Value {
         "note": s.note,
         "fetched_at": s.fetched_at.map(|t| t.isoformat()),
         "source_last_changed": s.source_last_changed.map(|t| t.isoformat()),
-        "created_by": null,
+        "created_by": s.created_by,
     })
 }
 
-fn snapshots(state: &State) -> radical_store::Result<Vec<MarineReservoirSnapshot>> {
+/// The snapshots the caller may pick: their own (there are no bundled ones
+/// yet, which would be everyone's).
+fn snapshots(
+    state: &State,
+    caller: &Caller,
+) -> radical_store::Result<Vec<MarineReservoirSnapshot>> {
+    let mine = crate::owner::Scope::of(caller).sql("created_by");
     state
         .store
-        .read(|c| rows::select_where(c, "1 = 1", [], "created_at DESC"))
+        .read(|c| rows::select_where(c, &mine, [], "created_at DESC"))
 }
 
-fn snapshot(state: &State, id: &str) -> radical_store::Result<Option<MarineReservoirSnapshot>> {
-    state.store.read(|c| rows::get(c, id))
+/// A snapshot, if the caller may see it.
+fn snapshot(
+    state: &State,
+    caller: &Caller,
+    id: &str,
+) -> radical_store::Result<Option<MarineReservoirSnapshot>> {
+    Ok(state
+        .store
+        .read(|c| rows::get::<MarineReservoirSnapshot>(c, id))?
+        .filter(|s| crate::owner::may(caller, s.created_by.as_deref())))
 }
 
 /// A snapshot's points, verified against the hash it was stored with
@@ -115,16 +130,20 @@ fn in_use(state: &State, id: &str) -> radical_store::Result<usize> {
 }
 
 /// Every snapshot this installation has.
-async fn list_snapshots(Extract(state): Extract<State>) -> ApiResult {
+async fn list_snapshots(Extract(state): Extract<State>, caller: Caller) -> ApiResult {
     Ok(ok(json!({
-        "items": snapshots(&state)?.iter().map(spec).collect::<Vec<_>>(),
+        "items": snapshots(&state, &caller)?.iter().map(spec).collect::<Vec<_>>(),
         "has_bundled": false,
     })))
 }
 
 /// One snapshot, and whether it still verifies.
-async fn get_snapshot(Extract(state): Extract<State>, Path(id): Path<String>) -> ApiResult {
-    let s = snapshot(&state, &id)?.ok_or_else(not_found)?;
+async fn get_snapshot(
+    Extract(state): Extract<State>,
+    caller: Caller,
+    Path(id): Path<String>,
+) -> ApiResult {
+    let s = snapshot(&state, &caller, &id)?.ok_or_else(not_found)?;
     let mut payload = spec(&s);
     match resolve(&state, &s)? {
         Ok(rows) => {
@@ -149,8 +168,8 @@ fn fetch_failed(e: FetchError) -> ApiError {
 
 /// What calib.org holds now, beside what this installation holds: an
 /// invitation to re-ingest, never an act of one.
-async fn check_freshness(Extract(state): Extract<State>) -> ApiResult {
-    let current = snapshots(&state)?
+async fn check_freshness(Extract(state): Extract<State>, caller: Caller) -> ApiResult {
+    let current = snapshots(&state, &caller)?
         .into_iter()
         .filter(|s| s.source_last_changed.is_some())
         .max_by_key(|s| s.source_last_changed.map(|t| t.micros));
@@ -192,6 +211,7 @@ fn stamp(t: &reservoir_ingest::Timestamp) -> Timestamp {
 /// Write one snapshot and its points, or nothing (`reservoir_ingest.store`).
 fn store(
     state: &State,
+    caller: &Caller,
     rows_in: &[ReservoirRow],
     report: &mut IngestReport,
 ) -> ApiResult<MarineReservoirSnapshot> {
@@ -208,7 +228,8 @@ fn store(
         }
     });
     let id = snapshot_id(SOURCE_SLUG, &changed);
-    if snapshot(state, &id)?.is_some() {
+    // Any account's: a snapshot's id is one global key, as the backend's is.
+    if snapshot(state, &Caller::Local, &id)?.is_some() {
         return Err(ApiError::conflict(format!(
             "Snapshot '{id}' is already stored. A snapshot's numbers never change, so re-fetching an unchanged database has nothing to add."
         )));
@@ -216,6 +237,7 @@ fn store(
     report.content_sha256 = content_hash(rows_in);
     let now = Some(Timestamp::now());
     let row = MarineReservoirSnapshot {
+        created_by: caller.owner().map(str::to_owned),
         id: id.clone(),
         source: SOURCE.to_owned(),
         fetched_at: now,
@@ -261,7 +283,10 @@ fn store(
 
 /// Fetch the reservoir database and store what comes back, all or nothing;
 /// the report is the answer either way.
-async fn create_snapshot(Extract(state): Extract<State>) -> ApiResult<axum::Json<Value>> {
+async fn create_snapshot(
+    Extract(state): Extract<State>,
+    caller: Caller,
+) -> ApiResult<axum::Json<Value>> {
     let (records, declared) = tokio::task::spawn_blocking(calib::fetch_records)
         .await
         .map_err(ApiError::internal)?
@@ -272,15 +297,19 @@ async fn create_snapshot(Extract(state): Extract<State>) -> ApiResult<axum::Json
             json!({"success": false, "data": report.to_json()}),
         ));
     }
-    let s = store(&state, &rows_in, &mut report)?;
+    let s = store(&state, &caller, &rows_in, &mut report)?;
     Ok(ok(
         json!({"snapshot": spec(&s), "report": report.to_json()}),
     ))
 }
 
 /// Remove a snapshot, if nothing cites it.
-async fn delete_snapshot(Extract(state): Extract<State>, Path(id): Path<String>) -> ApiResult {
-    snapshot(&state, &id)?.ok_or_else(not_found)?;
+async fn delete_snapshot(
+    Extract(state): Extract<State>,
+    caller: Caller,
+    Path(id): Path<String>,
+) -> ApiResult {
+    snapshot(&state, &caller, &id)?.ok_or_else(not_found)?;
     let citing = in_use(&state, &id)?;
     if citing > 0 {
         let (s, verb) = if citing != 1 { ("s", "") } else { ("", "s") };
@@ -383,7 +412,7 @@ fn provenance(l: &Lookup, max_km: Option<f64>, suspension_only: bool) -> Value {
 
 /// Derive a ΔR for a position from a snapshot, without telling anybody
 /// where it is. Writes nothing.
-async fn lookup_delta_r(Extract(state): Extract<State>, body: Bytes) -> ApiResult {
+async fn lookup_delta_r(Extract(state): Extract<State>, caller: Caller, body: Bytes) -> ApiResult {
     let input = validate::json_body(&body)?;
     let mut problems = Problems::default();
     let mut f = validate::body(&input, "LookupRequest", &mut problems);
@@ -409,7 +438,7 @@ async fn lookup_delta_r(Extract(state): Extract<State>, body: Bytes) -> ApiResul
     let suspension_only = f.bool_or("suspension_only", false);
     problems.finish()?;
     let snapshot_id = snapshot_id.unwrap_or_default();
-    let s = snapshot(&state, &snapshot_id)?.ok_or_else(not_found)?;
+    let s = snapshot(&state, &caller, &snapshot_id)?.ok_or_else(not_found)?;
     let rows_in = resolve(&state, &s)?.map_err(ApiError::conflict)?;
     let points: Vec<ReservoirPoint> = rows_in
         .into_iter()

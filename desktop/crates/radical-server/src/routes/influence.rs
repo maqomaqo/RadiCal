@@ -21,6 +21,7 @@ use radical_store::Timestamp;
 use radical_store::rows::{self, Analysis, RadiocarbonSample, StratigraphicRelationship};
 use serde_json::{Map, Value, json};
 
+use crate::accounts::Caller;
 use crate::blocks::proposal_json;
 use crate::history::inputs_hash;
 use crate::routes::analysis::{measurements, require, tree_or_migrate};
@@ -229,6 +230,7 @@ fn accepted(data: Value) -> Response {
 /// Queue an influence run over the variants `kinds` asks for.
 async fn run_influence(
     Extract(state): Extract<State>,
+    caller: Caller,
     Path(analysis_id): Path<String>,
     body: Bytes,
 ) -> ApiResult<Response> {
@@ -252,7 +254,9 @@ async fn run_influence(
     }
     problems.finish()?;
     let wanted = kinds.unwrap_or_default();
-    let analysis = state.store.read(|c| Ok(require(c, &analysis_id)))??;
+    let analysis = state
+        .store
+        .read(|c| Ok(require(c, &caller, &analysis_id)))??;
     if analysis.analysis_type != "bayesian" {
         return Err(ApiError::bad_request(
             "Influence is tested on a Bayesian model.",
@@ -283,6 +287,7 @@ async fn run_influence(
     let job_id = state.jobs.submit(
         "influence",
         Some(&job_target(&analysis_id)),
+        caller.owner(),
         influence_work(&state, &analysis_id, kinds),
     )?;
     Ok(accepted(json!({
@@ -294,9 +299,12 @@ async fn run_influence(
 /// since it was made.
 async fn get_influence(
     Extract(state): Extract<State>,
+    caller: Caller,
     Path(analysis_id): Path<String>,
 ) -> ApiResult<axum::Json<Value>> {
-    let analysis = state.store.read(|c| Ok(require(c, &analysis_id)))??;
+    let analysis = state
+        .store
+        .read(|c| Ok(require(c, &caller, &analysis_id)))??;
     let report = analysis.influence.clone().unwrap_or(Value::Null);
     let stale = match report.as_object() {
         Some(r) if !r.is_empty() => {
@@ -319,6 +327,7 @@ async fn get_influence(
 /// project, and queue its run.
 async fn open_variant(
     Extract(state): Extract<State>,
+    caller: Caller,
     Path(analysis_id): Path<String>,
     body: Bytes,
 ) -> ApiResult<Response> {
@@ -328,7 +337,9 @@ async fn open_variant(
     let variant_id = f.string("variant_id", None, None);
     problems.finish()?;
     let variant_id = variant_id.unwrap_or_default();
-    let source = state.store.read(|c| Ok(require(c, &analysis_id)))??;
+    let source = state
+        .store
+        .read(|c| Ok(require(c, &caller, &analysis_id)))??;
     let report = source.influence.clone().unwrap_or(Value::Null);
     let Some(variant) = report["variants"]
         .as_array()
@@ -401,6 +412,7 @@ async fn open_variant(
     let job_id = state.jobs.submit(
         "analysis_run",
         Some(&opened.id),
+        caller.owner(),
         analysis_run_work(&state, &opened.id),
     )?;
     Ok(accepted(
@@ -410,7 +422,7 @@ async fn open_variant(
 
 /// An order for a draft model's sites, read off a minimum spanning tree: a
 /// proposal, never applied.
-async fn propose(Extract(_state): Extract<State>, body: Bytes) -> ApiResult {
+async fn propose(Extract(_state): Extract<State>, _caller: Caller, body: Bytes) -> ApiResult {
     let input = validate::json_body(&body)?;
     let mut problems = Problems::default();
     let mut f = validate::body(&input, "ProposeSequenceRequest", &mut problems);

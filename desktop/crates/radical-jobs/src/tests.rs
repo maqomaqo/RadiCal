@@ -35,6 +35,7 @@ fn a_job_completes_with_its_summary() {
         .submit(
             "bayesian",
             Some("a1"),
+            None,
             Box::new(|_| Ok(Some(json!({"dates": 3})))),
         )
         .unwrap();
@@ -58,6 +59,7 @@ fn a_failure_is_classified_and_a_panic_is_the_apps_fault() {
         .submit(
             "bayesian",
             None,
+            None,
             Box::new(|_| {
                 Err(radical_core::Error::Model("Phase \"A\" has no dates.".into()).into())
             }),
@@ -67,12 +69,14 @@ fn a_failure_is_classified_and_a_panic_is_the_apps_fault() {
         .submit(
             "calibrate",
             None,
+            None,
             Box::new(|_| Err(radical_core::Error::UnknownCurve("x".into()).into())),
         )
         .unwrap();
     let panicked = jobs
         .submit(
             "bayesian",
+            None,
             None,
             Box::new(|_| panic!("index out of bounds")),
         )
@@ -108,6 +112,7 @@ fn a_cancel_stops_a_running_job_and_drops_a_queued_one() {
         .submit(
             "bayesian",
             None,
+            None,
             Box::new(move |handle| {
                 started_tx.send(()).unwrap();
                 loop {
@@ -118,7 +123,7 @@ fn a_cancel_stops_a_running_job_and_drops_a_queued_one() {
         )
         .unwrap();
     let queued = jobs
-        .submit("bayesian", None, Box::new(|_| Ok(None)))
+        .submit("bayesian", None, None, Box::new(|_| Ok(None)))
         .unwrap();
     started_rx.recv().unwrap();
     assert!(jobs.cancel(&queued).unwrap());
@@ -150,6 +155,7 @@ fn jobs_about_one_target_run_in_order_and_others_alongside() {
         .submit(
             "bayesian",
             Some("a"),
+            None,
             Box::new(move |_| {
                 gate.lock().unwrap().recv().unwrap();
                 Ok(None)
@@ -157,10 +163,10 @@ fn jobs_about_one_target_run_in_order_and_others_alongside() {
         )
         .unwrap();
     let second = jobs
-        .submit("bayesian", Some("a"), Box::new(|_| Ok(None)))
+        .submit("bayesian", Some("a"), None, Box::new(|_| Ok(None)))
         .unwrap();
     let elsewhere = jobs
-        .submit("bayesian", Some("b"), Box::new(|_| Ok(None)))
+        .submit("bayesian", Some("b"), None, Box::new(|_| Ok(None)))
         .unwrap();
     // Another target's job finishes while the first is still held.
     assert_eq!(await_job(&store, &elsewhere).state, "completed");
@@ -184,6 +190,7 @@ fn progress_is_throttled_unless_forced() {
     let id = jobs
         .submit(
             "bayesian",
+            None,
             None,
             Box::new(move |handle| {
                 let id = handle.job_id().unwrap().to_owned();

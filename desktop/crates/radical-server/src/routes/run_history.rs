@@ -11,6 +11,7 @@ use radical_io::python::repr_opt;
 use radical_store::rows::{self, Analysis, AnalysisRun};
 use serde_json::{Value, json};
 
+use crate::accounts::Caller;
 use crate::history::RUNS_KEPT;
 use crate::routes::analysis::{require, walk_tree};
 use crate::validate::{Bounds, Fields, Problems};
@@ -44,8 +45,14 @@ fn runs_of(state: &State, analysis_id: &str) -> radical_store::Result<Vec<Analys
     })
 }
 
-async fn list_runs(Extract(state): Extract<State>, Path(analysis_id): Path<String>) -> ApiResult {
-    state.store.read(|c| Ok(require(c, &analysis_id)))??;
+async fn list_runs(
+    Extract(state): Extract<State>,
+    caller: Caller,
+    Path(analysis_id): Path<String>,
+) -> ApiResult {
+    state
+        .store
+        .read(|c| Ok(require(c, &caller, &analysis_id)))??;
     let runs = runs_of(&state, &analysis_id)?;
     let current = runs.first().map(|r| r.id.clone());
     Ok(ok(json!({
@@ -57,9 +64,12 @@ async fn list_runs(Extract(state): Extract<State>, Path(analysis_id): Path<Strin
 /// One kept run in GET /analysis/{id}'s shape, its id `analysis@run`.
 async fn get_run(
     Extract(state): Extract<State>,
+    caller: Caller,
     Path((analysis_id, run_id)): Path<(String, String)>,
 ) -> ApiResult {
-    state.store.read(|c| Ok(require(c, &analysis_id)))??;
+    state
+        .store
+        .read(|c| Ok(require(c, &caller, &analysis_id)))??;
     let run = runs_of(&state, &analysis_id)?
         .into_iter()
         .find(|r| r.id == run_id)
@@ -186,6 +196,7 @@ fn diff_runs(newer: &Value, older: &Value, shift_years: f64) -> Value {
 /// the latest and the one before it.
 async fn project_run_diff(
     Extract(state): Extract<State>,
+    caller: Caller,
     Path(project_id): Path<String>,
     Query(q): Query<HashMap<String, String>>,
 ) -> ApiResult {
@@ -195,10 +206,16 @@ async fn project_run_diff(
     let shift = f.float_or("shift_years", DEFAULT_SHIFT_YEARS, Bounds::NONE);
     problems.finish()?;
     let shift = shift.unwrap_or(DEFAULT_SHIFT_YEARS);
-    crate::routes::projects::require(&state, &project_id)?;
-    let analyses: Vec<Analysis> = state
-        .store
-        .read(|c| rows::select_where(c, "project_id = ?", [&project_id], "created_at, id"))?;
+    crate::routes::projects::require(&state, &caller, &project_id)?;
+    let mine = crate::owner::Scope::of(&caller).sql("owner_id");
+    let analyses: Vec<Analysis> = state.store.read(|c| {
+        rows::select_where(
+            c,
+            &format!("project_id = ? AND {mine}"),
+            [&project_id],
+            "created_at, id",
+        )
+    })?;
     let (mut changed, mut compared) = (Vec::new(), 0);
     for a in analyses {
         let runs = runs_of(&state, &a.id)?;

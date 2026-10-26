@@ -18,6 +18,7 @@ use radical_io::date_import::{
 use radical_io::ids::RandomIds;
 use serde_json::json;
 
+use crate::accounts::Caller;
 use crate::form::{self, Form};
 use crate::routes::results::library;
 use crate::{ApiError, ApiResult, State, ok};
@@ -25,6 +26,7 @@ use crate::{ApiError, ApiResult, State, ok};
 /// Parse an uploaded file of dates and say what it held, saving none of it.
 async fn import_dates(
     Extract(state): Extract<State>,
+    caller: Caller,
     headers: HeaderMap,
     body: Bytes,
 ) -> ApiResult {
@@ -51,7 +53,7 @@ async fn import_dates(
         ));
     }
     let filename = file.filename.clone().unwrap_or_default();
-    let library = library(&state)?;
+    let library = library(&state, &crate::owner::Scope::of(&caller))?;
     let result = parse_upload(&filename, &file.data, &library, &mut RandomIds::default());
     let mut payload = result.to_json();
     payload["filename"] = json!(filename);

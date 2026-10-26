@@ -49,11 +49,12 @@ You are asked once; after that RadiCal opens like any other app.
 
 # RadiCal on a server
 
-RadiCal runs in [Docker](https://docs.docker.com/get-started/): one container for the app and one for its
-database. Docker is the only thing to install — no Python, Node.js or PostgreSQL.
+RadiCal runs in [Docker](https://docs.docker.com/get-started/), as one container that keeps
+everything in a single file. Docker is the only thing to install.
 
-The steps are the same on macOS and Windows. Type the commands into **Terminal** on macOS, or
-**PowerShell** on Windows; where the two differ, both are given.
+The steps are the same on macOS, Windows and Linux. Type the commands into **Terminal** on macOS,
+or **PowerShell** on Windows; where the two differ, both are given. Already running an earlier
+version? See [Upgrading from an earlier version](#upgrading-from-an-earlier-version).
 
 ## 1. Install Docker Desktop
 
@@ -65,7 +66,8 @@ Download [Docker Desktop](https://www.docker.com/products/docker-desktop/) and i
   if it asks you to.
 
 Open Docker Desktop and wait until it reports that Docker is running. It needs to be running
-whenever you use RadiCal.
+whenever you use RadiCal. (On a Linux server, [Docker Engine](https://docs.docker.com/engine/install/)
+does the same job.)
 
 ## 2. Download RadiCal's setup file
 
@@ -84,19 +86,19 @@ different command.
 ## 3. Create a signing key
 
 RadiCal signs everyone's sign-in with a secret key of your own, kept in a file called `.env` in the
-same folder. This command makes one; it also downloads RadiCal itself, a few hundred megabytes, so
-the first run takes a while.
+same folder. This command makes one; it also downloads RadiCal itself, so the first run takes a
+little while.
 
-macOS:
+macOS and Linux:
 
 ```bash
-docker run --rm ghcr.io/maqomaqo/radical python -c "import secrets; print('RADICAL_SECRET_KEY=' + secrets.token_urlsafe(48))" >> .env
+docker run --rm ghcr.io/maqomaqo/radical new-secret >> .env
 ```
 
 Windows (PowerShell):
 
 ```powershell
-docker run --rm ghcr.io/maqomaqo/radical python -c "import secrets; print('RADICAL_SECRET_KEY=' + secrets.token_urlsafe(48))" | Add-Content .env
+docker run --rm ghcr.io/maqomaqo/radical new-secret | Add-Content .env
 ```
 
 Do this once. Keep `.env` and don't share it: anyone with the key could sign in as any account, and
@@ -108,7 +110,7 @@ replacing it signs everyone out.
 docker compose up -d
 ```
 
-After a minute, open **http://localhost:8000** in your browser and create an account.
+Open **http://localhost:8000** in your browser and create an account.
 
 ## Everyday use
 
@@ -120,12 +122,35 @@ Run these from the RadiCal folder.
 | Start it again | `docker compose up -d` |
 | Update to the latest version | `docker compose pull` then `docker compose up -d` |
 
-Your analyses are kept through all of these, and through updates: RadiCal brings its database up to
+Your analyses are kept through all of these, and through updates: RadiCal brings its data up to
 date by itself when a new version starts. If Docker Desktop is set to start when you sign in
 (Docker Desktop → Settings → General), RadiCal comes back by itself after the computer restarts.
 
 To **remove RadiCal and everything in it**, run `docker compose down -v` and delete the folder. This
 deletes every analysis and project permanently.
+
+## Backing up
+
+Everything — accounts, projects and analyses — is in RadiCal's `data` folder inside Docker. To copy
+it out, stop RadiCal for a moment:
+
+```bash
+docker compose stop
+docker compose cp radical:/data ./backup
+docker compose up -d
+```
+
+This leaves a `backup` folder beside `docker-compose.yml`; give each backup its own name, or move
+it somewhere safe. To restore one, putting RadiCal back as it was when the backup was made:
+
+```bash
+docker compose stop
+docker compose cp ./backup/. radical:/data
+docker compose run --rm --user root --entrypoint chown radical -R radical: /data
+docker compose up -d
+```
+
+The third line hands the copied files back to RadiCal, which cannot save anything without it.
 
 ## Who can reach it
 
@@ -140,7 +165,7 @@ To set a new password for an account, run this in the RadiCal folder with its em
 type the new password twice when asked:
 
 ```bash
-docker compose exec radical python -m app.reset_password someone@example.org
+docker compose exec radical radical-server reset-password someone@example.org
 ```
 
 ### Password-reset emails
@@ -167,22 +192,75 @@ For a server on port 465, add `RADICAL_SMTP_SECURITY=ssl`. If an email does not 
 If something else already uses port 8000, change the *first* number in that same `ports:` line —
 for example `"8080:8000"` — run `docker compose up -d`, and open http://localhost:8080 instead.
 
-## Using your own PostgreSQL server
+## Upgrading from an earlier version
 
-To keep RadiCal's data in a PostgreSQL server you already run (version 15 or later), run the app
-container on its own and point it there:
+Earlier versions of RadiCal on a server kept their data in a separate PostgreSQL database
+container. This version keeps it in one file, so updating means bringing the data across once.
+Everything comes with it: accounts and passwords, projects, analyses and results, and the links to
+them. People stay signed in, and access tokens keep working, as long as `.env` keeps its key.
+
+If you update without doing this, RadiCal refuses to start and says so; nothing is lost.
+
+Run these from the RadiCal folder, with your existing `.env` left in place:
+
+1. Stop the old version:
+
+   ```bash
+   docker compose down
+   ```
+
+2. Download the new setup file over the old one (on Windows, `curl.exe`):
+
+   ```bash
+   curl -fLo docker-compose.yml https://raw.githubusercontent.com/maqomaqo/RadiCal/main/docker-compose.prod.yml
+   docker compose pull
+   ```
+
+3. Start the old database on its own, and bring its data across:
+
+   ```bash
+   docker compose --profile upgrade up -d --wait postgres
+   docker compose run --rm radical import-postgres
+   ```
+
+   This lists how many rows of each kind came across, and ends with `Imported into
+   /data/radical.db.` If it says anything else, nothing was imported: the old data is untouched,
+   and you can run it again.
+
+4. Stop the old database and start RadiCal:
+
+   ```bash
+   docker compose --profile upgrade stop postgres
+   docker compose up -d
+   ```
+
+Sign in and check your projects are there. The old database stays where it was until you remove
+it; once you are happy, `docker volume rm radical-app_postgres_data radical-app_uploads` frees its
+space.
+
+**If you ran RadiCal against your own PostgreSQL server**, start the new version once with an empty
+data volume and pass that server's address to the import instead:
 
 ```bash
-docker run -d --name radical -p 8000:8000 --restart unless-stopped \
-  -e DATABASE_URL=postgresql://USER:PASSWORD@DB-HOST:5432/DATABASE \
-  -e RADICAL_SECRET_KEY=YOUR-KEY \
-  -v radical_uploads:/app/uploads \
-  ghcr.io/maqomaqo/radical
+docker run --rm -v radical_data:/data ghcr.io/maqomaqo/radical import-postgres postgresql://USER:PASSWORD@DB-HOST:5432/DATABASE
 ```
 
-(In PowerShell, end each continued line with a backtick `` ` `` instead of `\`.) The database must
-be empty and **owned** by the user in `DATABASE_URL` — `createdb -O USER DATABASE` — because
-RadiCal creates its own tables on first start.
+then run the new version with `-v radical_data:/data` in place of `DATABASE_URL` and the uploads
+volume.
+
+### Going back
+
+Bringing the data across copies it and leaves the old database as it was, so until you remove the
+old database you can return to the earlier version. Anything done since the upgrade stays behind
+in the new version.
+
+```bash
+docker compose down
+curl -fLo docker-compose.yml https://raw.githubusercontent.com/maqomaqo/RadiCal/v1.0.0/docker-compose.prod.yml
+```
+
+In the downloaded `docker-compose.yml`, change `ghcr.io/maqomaqo/radical:latest` to
+`ghcr.io/maqomaqo/radical:1`, then run `docker compose up -d`.
 
 ## Troubleshooting
 
@@ -198,8 +276,11 @@ running. Start it and wait until it says so.
 **`port is already allocated`** — another program uses port 8000. See
 [Using a different port](#using-a-different-port).
 
-**The page does not load** — give it a minute after starting. `docker compose ps` should show both
-containers, the app as `healthy`; if not, `docker compose logs radical` shows why.
+**RadiCal stops at once, saying it still points at its old PostgreSQL database** — this is an
+earlier installation. See [Upgrading from an earlier version](#upgrading-from-an-earlier-version).
+
+**The page does not load** — `docker compose ps` should show the container as `healthy`; if not,
+`docker compose logs radical` shows why.
 
 **Windows: Docker Desktop reports a WSL problem** — run `wsl --update` in PowerShell, restart the
 computer, and start Docker Desktop again.

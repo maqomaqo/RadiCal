@@ -12,6 +12,8 @@ use radical_store::rows::{self, Analysis, Project};
 use radical_store::{Timestamp, rusqlite};
 use serde_json::{Value, json};
 
+use crate::accounts::Caller;
+use crate::owner::{self, Scope};
 use crate::validate::{self, Problems};
 use crate::{ApiError, ApiResult, State, ok};
 
@@ -33,12 +35,10 @@ fn with_settings(mut payload: Value, p: &Project) -> Value {
     payload
 }
 
-/// The project, or the 404 a missing one is.
-pub fn require(state: &State, project_id: &str) -> ApiResult<Project> {
-    state
-        .store
-        .read(|c| rows::get(c, project_id))?
-        .ok_or_else(|| ApiError::not_found("That project was not found."))
+/// The project, if it is the caller's; the 404 a missing one is otherwise.
+pub fn require(state: &State, caller: &Caller, project_id: &str) -> ApiResult<Project> {
+    let row = state.store.read(|c| rows::get::<Project>(c, project_id))?;
+    owner::check(caller, row, |p| p.owner_id.as_deref(), "That project")
 }
 
 /// The later of two optional instants.
@@ -50,7 +50,7 @@ fn latest(a: Option<Timestamp>, b: Option<Timestamp>) -> Option<Timestamp> {
 }
 
 /// Create a new project to group analyses under.
-async fn create(Extract(state): Extract<State>, body: Bytes) -> ApiResult {
+async fn create(Extract(state): Extract<State>, caller: Caller, body: Bytes) -> ApiResult {
     let input = validate::json_body(&body)?;
     let mut problems = Problems::default();
     let mut f = validate::body(&input, "ProjectCreate", &mut problems);
@@ -63,6 +63,7 @@ async fn create(Extract(state): Extract<State>, body: Bytes) -> ApiResult {
     }
     let now = Some(Timestamp::now());
     let project = Project {
+        owner_id: caller.owner().map(str::to_owned),
         id: radical_store::new_id(),
         name: name.trim().to_owned(),
         description,
@@ -90,23 +91,38 @@ async fn create(Extract(state): Extract<State>, body: Bytes) -> ApiResult {
 
 /// Every project, with the numbers the project grid ranks and draws with,
 /// and how many analyses are filed under none.
-async fn list(Extract(state): Extract<State>) -> ApiResult {
+async fn list(Extract(state): Extract<State>, caller: Caller) -> ApiResult {
+    let scope = Scope::of(&caller);
     let data = state.store.read(|c| {
-        let projects: Vec<Project> = rows::select_where(c, "1", [], "created_at DESC")?;
+        let projects: Vec<Project> =
+            rows::select_where(c, &scope.sql("owner_id"), [], "created_at DESC")?;
         let mut by_status: HashMap<Option<String>, HashMap<String, i64>> = HashMap::new();
-        let mut stmt = c.prepare("SELECT project_id, status, count(id) FROM analyses GROUP BY project_id, status")?;
+        let mut stmt = c.prepare(&format!(
+            "SELECT project_id, status, count(id) FROM analyses WHERE {} \
+             GROUP BY project_id, status",
+            scope.sql("owner_id")
+        ))?;
         for row in stmt.query_map([], |r| Ok((r.get::<_, Option<String>>(0)?, r.get::<_, Option<String>>(1)?, r.get::<_, i64>(2)?)))? {
             let (project, status, n) = row?;
             *by_status.entry(project).or_default().entry(status.unwrap_or_else(|| "pending".to_owned())).or_default() += n;
         }
         let mut last: HashMap<Option<String>, Option<Timestamp>> = HashMap::new();
-        let mut stmt = c.prepare("SELECT project_id, max(updated_at) FROM analyses GROUP BY project_id")?;
+        let mut stmt = c.prepare(&format!(
+            "SELECT project_id, max(updated_at) FROM analyses WHERE {} GROUP BY project_id",
+            scope.sql("owner_id")
+        ))?;
         for row in stmt.query_map([], |r| Ok((r.get::<_, Option<String>>(0)?, r.get::<_, Option<Timestamp>>(1)?)))? {
             let (project, when) = row?;
             last.insert(project, when);
         }
         let samples: HashMap<String, i64> = c
-            .prepare("SELECT project_id, count(id) FROM project_samples GROUP BY project_id")?
+            // A collected date has no owner of its own: scoped through its
+            // project.
+            .prepare(&format!(
+                "SELECT s.project_id, count(s.id) FROM project_samples s \
+                 JOIN projects p ON p.id = s.project_id WHERE {} GROUP BY s.project_id",
+                scope.sql("p.owner_id")
+            ))?
             .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
             .collect::<rusqlite::Result<_>>()?;
         let empty = HashMap::new();
@@ -136,11 +152,20 @@ async fn list(Extract(state): Extract<State>) -> ApiResult {
 }
 
 /// A project and the analyses filed under it.
-async fn read(Extract(state): Extract<State>, Path(project_id): Path<String>) -> ApiResult {
-    let project = require(&state, &project_id)?;
+async fn read(
+    Extract(state): Extract<State>,
+    caller: Caller,
+    Path(project_id): Path<String>,
+) -> ApiResult {
+    let project = require(&state, &caller, &project_id)?;
+    let scope = Scope::of(&caller);
     let data = state.store.read(|c| {
-        let analyses: Vec<Analysis> =
-            rows::select_where(c, "project_id = ?", [&project_id], "created_at DESC")?;
+        let analyses: Vec<Analysis> = rows::select_where(
+            c,
+            &format!("project_id = ? AND {}", scope.sql("owner_id")),
+            [&project_id],
+            "created_at DESC",
+        )?;
         let counts: HashMap<String, i64> = c
             .prepare(
                 "SELECT analysis_id, count(id) FROM radiocarbon_samples WHERE analysis_id IN \
@@ -180,6 +205,7 @@ async fn read(Extract(state): Extract<State>, Path(project_id): Path<String>) ->
 /// coordinate settings.
 async fn update(
     Extract(state): Extract<State>,
+    caller: Caller,
     Path(project_id): Path<String>,
     body: Bytes,
 ) -> ApiResult {
@@ -191,7 +217,7 @@ async fn update(
     let precision = f.opt_literal("coordinate_precision", &COORDINATE_PRECISIONS);
     let tiles = f.opt_bool("map_tiles_enabled");
     problems.finish()?;
-    let mut project = require(&state, &project_id)?;
+    let mut project = require(&state, &caller, &project_id)?;
     let before = project.clone();
     if let Some(name) = name {
         if name.trim().is_empty() {
@@ -227,11 +253,19 @@ async fn update(
 
 /// Delete a project. Its analyses are unassigned, not deleted; its date
 /// collection goes with it.
-async fn delete(Extract(state): Extract<State>, Path(project_id): Path<String>) -> ApiResult {
-    require(&state, &project_id)?;
+async fn delete(
+    Extract(state): Extract<State>,
+    caller: Caller,
+    Path(project_id): Path<String>,
+) -> ApiResult {
+    require(&state, &caller, &project_id)?;
+    let scope = Scope::of(&caller);
     let reassigned = state.store.write(|tx| {
         let moved = tx.execute(
-            "UPDATE analyses SET project_id = NULL WHERE project_id = ?",
+            &format!(
+                "UPDATE analyses SET project_id = NULL WHERE project_id = ? AND {}",
+                scope.sql("owner_id")
+            ),
             [&project_id],
         )?;
         tx.execute(

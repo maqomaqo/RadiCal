@@ -1,16 +1,19 @@
 //! The store's schema held to the backend's, as its migrations leave it on
 //! SQLite (corpus `schema/sqlite`): every table, column (name, declared
 //! type, NOT NULL, default, primary-key position), foreign key and declared
-//! index, less what single-user leaves out.
+//! index, the accounts included.
 
 use radical_corpus::load_family;
 use radical_store::Store;
 use radical_store::rusqlite::Connection;
 use serde_json::{Value, json};
 
-/// The backend's tables that have no place in a one-person database.
-const NOT_HERE: [&str; 3] = ["alembic_version", "users", "personal_access_tokens"];
-/// The columns that said which account owned a row.
+/// The backend's tables that have no place here: Alembic's bookkeeping.
+const NOT_HERE: [&str; 1] = ["alembic_version"];
+/// The columns that say which account owns a row. Migration 2 adds them to
+/// existing tables, so they come last (SQLite's ADD COLUMN), not part-way
+/// along as in the backend; and all are nullable, since the desktop's rows
+/// have no owner (`model_templates.owner_id` is NOT NULL in the backend).
 const OWNERSHIP: [&str; 2] = ["owner_id", "created_by"];
 
 fn describe(conn: &Connection, table: &str) -> Value {
@@ -65,28 +68,34 @@ fn describe(conn: &Connection, table: &str) -> Value {
     json!({"columns": columns, "foreign_keys": foreign_keys, "indexes": indexes})
 }
 
-/// The backend's description of a table, less ownership.
-fn without_ownership(want: &Value) -> Value {
-    let owned = |v: &Value, key: &str| OWNERSHIP.contains(&v[key].as_str().unwrap_or(""));
-    let keep = |key: &str, f: &dyn Fn(&Value) -> bool| -> Vec<Value> {
-        want[key]
-            .as_array()
-            .unwrap()
-            .iter()
-            .filter(|v| f(v))
-            .cloned()
-            .collect()
-    };
+/// The backend's description of a table as this store lays it out: the
+/// ownership columns moved to the end and made nullable, and the foreign keys
+/// and indexes in a fixed order, since adding a column adds its key and index
+/// after the rest.
+fn as_laid_out_here(want: &Value) -> Value {
+    let owned = |c: &Value| OWNERSHIP.contains(&c["name"].as_str().unwrap_or(""));
+    let columns = want["columns"].as_array().unwrap();
+    let mut laid: Vec<Value> = columns.iter().filter(|c| !owned(c)).cloned().collect();
+    for c in columns.iter().filter(|c| owned(c)) {
+        let mut c = c.clone();
+        c["notnull"] = json!(false);
+        laid.push(c);
+    }
     json!({
-        "columns": keep("columns", &|c| !owned(c, "name")),
-        "foreign_keys": keep("foreign_keys", &|f| f["references"] != "users"),
-        "indexes": keep("indexes", &|i| !i["columns"].as_array().unwrap().iter()
-            .any(|c| OWNERSHIP.contains(&c.as_str().unwrap()))),
+        "columns": laid,
+        "foreign_keys": sorted(&want["foreign_keys"]),
+        "indexes": sorted(&want["indexes"]),
     })
 }
 
+fn sorted(v: &Value) -> Value {
+    let mut items: Vec<Value> = v.as_array().unwrap().clone();
+    items.sort_by_key(Value::to_string);
+    Value::Array(items)
+}
+
 #[test]
-fn the_schema_is_the_backends_less_the_accounts() {
+fn the_schema_is_the_backends() {
     let dir = std::env::temp_dir().join(format!("radical-schema-{}", radical_store::new_id()));
     let store = Store::open(dir.join("radical.db")).unwrap();
     let conn = store.reader();
@@ -104,8 +113,12 @@ fn the_schema_is_the_backends_less_the_accounts() {
             continue;
         }
         theirs.push(case.name.clone());
-        let want = without_ownership(case.outputs.as_ref().unwrap());
-        assert_eq!(describe(&conn, &case.name), want, "table {}", case.name);
+        let want = as_laid_out_here(case.outputs.as_ref().unwrap());
+        let mut ours = describe(&conn, &case.name);
+        for key in ["foreign_keys", "indexes"] {
+            ours[key] = sorted(&ours[key]);
+        }
+        assert_eq!(ours, want, "table {}", case.name);
     }
     ours.sort();
     theirs.sort();
@@ -171,6 +184,44 @@ fn the_row_types_are_the_tables() {
         ..Default::default()
     };
     assert!(store.write(|tx| rows::insert(tx, &orphan)).is_err());
+    drop(store);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// A desktop database from before the accounts (version 1), with work in it,
+/// opens under version 2 with that work intact and owned by nobody.
+#[test]
+fn a_desktop_database_gains_the_accounts_in_place() {
+    use radical_store::rows::{self, ModelTemplate, Project, User};
+    let dir = std::env::temp_dir().join(format!("radical-upgrade-{}", radical_store::new_id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("radical.db");
+    {
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch(include_str!("../migrations/0001_initial.sql"))
+            .unwrap();
+        conn.execute_batch(
+            "INSERT INTO projects (id, name, coordinate_precision, map_tiles_enabled)
+                 VALUES ('p1', 'Before', 'full', 1);
+             INSERT INTO model_templates (id, name, model_tree, created_at, updated_at)
+                 VALUES ('t1', 'Kept', '{}', '2026-01-01 00:00:00', '2026-01-01 00:00:00');
+             PRAGMA user_version = 1;",
+        )
+        .unwrap();
+    }
+    let store = Store::open(&path).unwrap();
+    let version: i64 = store
+        .read(|c| Ok(c.pragma_query_value(None, "user_version", |r| r.get(0))?))
+        .unwrap();
+    assert_eq!(version as usize, radical_store::SCHEMA_VERSION);
+    let project: Project = store.read(|c| rows::get(c, "p1")).unwrap().unwrap();
+    assert_eq!((project.name.as_str(), project.owner_id), ("Before", None));
+    let template: ModelTemplate = store.read(|c| rows::get(c, "t1")).unwrap().unwrap();
+    assert_eq!((template.name.as_str(), template.owner_id), ("Kept", None));
+    let users: Vec<User> = store
+        .read(|c| rows::select_where(c, "1 = 1", [], ""))
+        .unwrap();
+    assert!(users.is_empty());
     drop(store);
     std::fs::remove_dir_all(dir).unwrap();
 }

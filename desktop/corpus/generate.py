@@ -2298,10 +2298,29 @@ def api_exchanges(recording: str) -> List[Dict[str, Any]]:
     with open(recording, encoding='utf-8') as fh:
         raw = json.load(fh)
     suite = Counter(x['auth'] for x in raw if x['auth']).most_common(1)[0][0]
+    # Each token a response handed out (signing in, registering, a reset, a
+    # personal access token), by the hash its requests carry, and which
+    # exchange handed it out: the replay sends the token its own server gave
+    # at that exchange.
+    issued = {}
+    for i, x in enumerate(raw):
+        token = ((x.get('response_json') or {}).get('data') or {})
+        token = token.get('token') if isinstance(token, dict) else None
+        if isinstance(token, str):
+            issued.setdefault(hashlib.sha256(f'Bearer {token}'.encode()).hexdigest()[:8], i)
     stable = Stable()
     cases = []
     for i, x in enumerate(raw):
-        who = 'none' if x['auth'] is None else 'suite' if x['auth'] == suite else 'other'
+        if x['auth'] is None:
+            who = 'none'
+        elif x['auth'] == suite:
+            who = 'suite'
+        elif x['auth'] in issued:
+            who = f"token:{issued[x['auth']]}"
+        else:
+            # Made behind the API (expired, forged) or not a token at all:
+            # the replay sends a bad one of the same kind.
+            who = f"bad:{x.get('auth_kind') or 'other'}"
         inputs = {k: x.get(k) for k in ('test', 'cleanup', 'method', 'url', 'params',
                                         'request_json', 'request_data', 'request_content',
                                         'files')}
