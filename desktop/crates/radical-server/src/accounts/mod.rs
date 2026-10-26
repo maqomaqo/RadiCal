@@ -136,6 +136,9 @@ const OPEN: &[&str] = &[
     "/api/auth/options",
     "/api/auth/forgot-password",
     "/api/auth/reset-password",
+    "/api/openapi.json",
+    "/api/docs",
+    "/api/redoc",
 ];
 
 const SIGN_IN: &str = "Sign in to use this.";

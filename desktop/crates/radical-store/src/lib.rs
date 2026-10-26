@@ -1,9 +1,10 @@
-//! RadiCal's database: the backend's tables in one SQLite file, in the OS
-//! app-data folder, for one person.
+//! RadiCal's database: the backend's tables in one SQLite file -- in the OS
+//! app-data folder for RadiCal Desktop, or on the container's volume for
+//! RadiCal on a server.
 //!
-//! The schema is the backend's as its migrations leave it on SQLite, less the
-//! accounts and the columns recording which account owned a row
-//! (`migrations/`, held to the backend's by `tests/schema.rs`). Timestamps
+//! The schema is the backend's as its migrations leave it on SQLite,
+//! accounts and owners included (`migrations/`, held to the backend's by
+//! `tests/schema.rs`); RadiCal Desktop simply leaves them empty. Timestamps
 //! and booleans are stored as SQLAlchemy stores them, so a row reads back as
 //! the backend would have read it.
 //!

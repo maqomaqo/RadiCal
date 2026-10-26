@@ -248,6 +248,20 @@ docker run --rm -v radical_data:/data ghcr.io/maqomaqo/radical import-postgres p
 then run the new version with `-v radical_data:/data` in place of `DATABASE_URL` and the uploads
 volume.
 
+### Going back
+
+Bringing the data across copies it and leaves the old database as it was, so until you remove the
+old database you can return to the earlier version. Anything done since the upgrade stays behind
+in the new version.
+
+```bash
+docker compose down
+curl -fLo docker-compose.yml https://raw.githubusercontent.com/maqomaqo/RadiCal/v1.0.0/docker-compose.prod.yml
+```
+
+In the downloaded `docker-compose.yml`, change `ghcr.io/maqomaqo/radical:latest` to
+`ghcr.io/maqomaqo/radical:1`, then run `docker compose up -d`.
+
 ## Troubleshooting
 
 **`no configuration file provided`** — the command was run outside the RadiCal folder. `cd` into

@@ -164,11 +164,12 @@ readers (WAL).
 
 1. **SQLite or PostgreSQL** for the server (S4). **Decided: SQLite**, with
    `import-postgres` for existing installations.
-2. **`/api/docs`.** FastAPI serves an interactive API page; the Rust server serves none. The
-   recommendation is to serve the recorded OpenAPI document and a static Swagger page, for
-   scripts that use personal access tokens.
-3. **How long the Python image stays available** for going back (S6). The recommendation is
-   one release.
+2. **`/api/docs`.** FastAPI serves an interactive API page. **Decided:** the Rust server serves
+   the recorded OpenAPI document (`radical-server/api/openapi.json`, held to the corpus by a
+   test) with the same Swagger and ReDoc pages.
+3. **How long the Python image stays available** for going back (S6). **Decided:** one
+   release. The last Python image is `v1.0.0` (also `1.0` and `1`); the Rust server is
+   released as `v2.0.0`.
 
 ## Afterwards
 

@@ -9,6 +9,7 @@ pub mod analysis;
 pub mod auth;
 pub mod bayesian;
 pub mod curve_routes;
+pub mod docs;
 pub mod imports;
 pub mod influence;
 pub mod inputs;
@@ -31,6 +32,7 @@ pub fn router() -> Router<State> {
                 axum::Json(serde_json::json!({"status": "ok", "version": crate::VERSION}))
             }),
         )
+        .merge(docs::router())
         .merge(auth::router())
         .merge(jobs::router())
         .merge(analysis::router())

@@ -68,3 +68,31 @@ async fn every_backend_route_is_served() {
     eprintln!("{served} routes served, {} not yet", NOT_YET.len());
     assert!(missing.is_empty(), "not served: {missing:#?}");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_api_documents_itself_without_signing_in() {
+    let dir = std::env::temp_dir().join(format!("radical-docs-{}", radical_store::new_id()));
+    let state = radical_server::State::open(dir.join("radical.db"), 1)
+        .unwrap()
+        .with_accounts(radical_server::accounts::Accounts {
+            secret: "radical-routes-secret".to_owned(),
+        });
+    let app = radical_server::app(state);
+    for (path, status, starts) in [
+        ("/api/openapi.json", 200, "{"),
+        ("/api/docs", 200, "<!DOCTYPE html>"),
+        ("/api/redoc", 200, "<!DOCTYPE html>"),
+        ("/docs", 308, ""),
+        ("/openapi.json", 308, ""),
+    ] {
+        let request = Request::builder().uri(path).body(Body::empty()).unwrap();
+        let response = app.clone().oneshot(request).await.unwrap();
+        assert_eq!(response.status().as_u16(), status, "{path}");
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        assert!(
+            String::from_utf8_lossy(&bytes).starts_with(starts),
+            "{path}"
+        );
+    }
+    let _ = std::fs::remove_dir_all(dir);
+}
