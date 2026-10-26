@@ -11,8 +11,8 @@
 # (.github/workflows/publish-image.yml) builds amd64 and arm64 on runners of
 # each kind and joins them, because a Rust build under emulation takes hours.
 #
-# The Dockerfiles under frontend/ and backend/ remain the development stack
-# (docker-compose.yml), which bind-mounts the source and hot-reloads.
+# The development stack (docker-compose.yml) runs this image's server without
+# its built frontend, beside frontend/'s hot-reloading dev server.
 
 # ---- Frontend build -------------------------------------------------------
 # Pinned to the build host's platform: the output is plain JS/CSS, identical
@@ -40,7 +40,7 @@ RUN cargo build --release --locked -p radical-server \
     && cp target/release/radical-server /radical-server
 
 # ---- Runtime --------------------------------------------------------------
-FROM debian:bookworm-slim
+FROM debian:bookworm-slim AS runtime
 # Certificates for the two things it reaches out to: the mail server for
 # password-reset emails, and calib.org for ΔR snapshots.
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
