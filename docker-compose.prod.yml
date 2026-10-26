@@ -1,55 +1,32 @@
-# RadiCal from the published image, with its database. This is the file
-# docs/INSTALLATION.md has people download, saved as docker-compose.yml in a
-# folder of its own beside a .env holding RADICAL_SECRET_KEY; then
+# RadiCal from the published image. This is the file docs/INSTALLATION.md has
+# people download, saved as docker-compose.yml in a folder of its own beside a
+# .env holding RADICAL_SECRET_KEY; then
 #
 #   docker compose up -d
 #
 # and open http://localhost:8000. Nothing is built here: the image on
-# ghcr.io already contains the backend, the built frontend and the
-# calibration curves. Contrast the repository's docker-compose.yml, which
-# builds from source and bind-mounts it for development.
+# ghcr.io already contains the server, the built frontend and the calibration
+# curves, and keeps everything in one SQLite file on the `data` volume.
+# Contrast the repository's docker-compose.yml, which builds from source and
+# bind-mounts it for development.
 #
-# The image runs with RADICAL_ENV=production, and the backend refuses to
-# start in that mode without a real signing key.
+# The image runs with RADICAL_ENV=production, and the server refuses to start
+# in that mode without a real signing key.
 
 # Fixed rather than taken from the folder, which the guide calls RadiCal: that
 # would make the project "radical", the development stack's own name, and on
-# a machine with both, this file would take over its database.
+# a machine with both, this file would take over its volumes.
 name: radical-app
 
 services:
-  postgres:
-    image: postgres:15-alpine
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-radiocarbon}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
-      POSTGRES_DB: ${POSTGRES_DB:-radiocarbon_db}
-      # A subdirectory, not the mount point itself: Apple's container runtime
-      # (Davit) mounts a named volume as an ext4 image, which carries a
-      # lost+found directory, and initdb refuses a data directory that is
-      # not empty. Docker does not mind either way.
-      PGDATA: /var/lib/postgresql/data/pgdata
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    # Like the app below: after a reboot or a Docker Desktop restart, the app
-    # would otherwise come back to a database that did not.
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-radiocarbon} -d ${POSTGRES_DB:-radiocarbon_db}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
   radical:
     image: ghcr.io/maqomaqo/radical:latest
     ports:
       - "8000:8000"
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-radiocarbon}:${POSTGRES_PASSWORD:-password}@postgres:5432/${POSTGRES_DB:-radiocarbon_db}
       RADICAL_ENV: ${RADICAL_ENV:-production}
       RADICAL_SECRET_KEY: ${RADICAL_SECRET_KEY:?set RADICAL_SECRET_KEY in .env or the environment}
-      # Optional: password-reset emails (docs/INSTALLATION.md). Unset, the
-      # sign-in page sends people to whoever runs the server instead.
+      # Password-reset emails, when all of these are set (docs/INSTALLATION.md).
       RADICAL_PUBLIC_URL: ${RADICAL_PUBLIC_URL:-}
       RADICAL_SMTP_HOST: ${RADICAL_SMTP_HOST:-}
       RADICAL_SMTP_PORT: ${RADICAL_SMTP_PORT:-}
@@ -57,13 +34,32 @@ services:
       RADICAL_SMTP_USER: ${RADICAL_SMTP_USER:-}
       RADICAL_SMTP_PASSWORD: ${RADICAL_SMTP_PASSWORD:-}
       RADICAL_SMTP_FROM: ${RADICAL_SMTP_FROM:-}
+      # Read only by `docker compose run --rm radical import-postgres`, which
+      # brings an earlier version's data across from its database below.
+      RADICAL_IMPORT_FROM: postgresql://${POSTGRES_USER:-radiocarbon}:${POSTGRES_PASSWORD:-password}@postgres:5432/${POSTGRES_DB:-radiocarbon_db}
     volumes:
-      - uploads:/app/uploads
-    depends_on:
-      postgres:
-        condition: service_healthy
+      - data:/data
     restart: unless-stopped
 
+  # An earlier version's database, kept only for bringing its data across:
+  # it starts only with `--profile upgrade` (docs/INSTALLATION.md, "Upgrading
+  # from an earlier version"). Same volume as before, so its data is found.
+  postgres:
+    image: postgres:15-alpine
+    profiles: ["upgrade"]
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-radiocarbon}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
+      POSTGRES_DB: ${POSTGRES_DB:-radiocarbon_db}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-radiocarbon} -d ${POSTGRES_DB:-radiocarbon_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
 volumes:
+  data:
   postgres_data:
-  uploads:

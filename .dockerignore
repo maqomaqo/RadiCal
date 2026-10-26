@@ -16,6 +16,10 @@ uploads
 backend/uploads
 postgres_data
 docs
+# The Rust workspace's build output and its golden corpus, neither of which
+# the image is built from.
+desktop/target
+desktop/corpus
 # The pytest suite and its reference-run fixtures are development material;
 # the dev compose stack builds backend/ on its own and bind-mounts the source.
 backend/tests

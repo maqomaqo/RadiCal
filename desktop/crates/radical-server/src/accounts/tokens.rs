@@ -237,6 +237,14 @@ pub fn new_access_token() -> String {
     format!("{ACCESS_TOKEN_PREFIX}{}", URL_SAFE_NO_PAD.encode(bytes))
 }
 
+/// A signing key for `RADICAL_SECRET_KEY`: 384 random bits, as
+/// `secrets.token_urlsafe(48)`.
+pub fn new_secret_key() -> String {
+    let mut bytes = [0u8; 48];
+    getrandom::fill(&mut bytes).expect("the system's random source");
+    URL_SAFE_NO_PAD.encode(bytes)
+}
+
 pub fn is_access_token(token: &str) -> bool {
     token.starts_with(ACCESS_TOKEN_PREFIX)
 }

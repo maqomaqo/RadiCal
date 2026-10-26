@@ -78,18 +78,17 @@ Linux; Docker is the only thing to install. In short, from an empty folder:
 
 ```bash
 curl -fLo docker-compose.yml https://raw.githubusercontent.com/maqomaqo/RadiCal/main/docker-compose.prod.yml
-docker run --rm ghcr.io/maqomaqo/radical python -c "import secrets; print('RADICAL_SECRET_KEY=' + secrets.token_urlsafe(48))" >> .env
+docker run --rm ghcr.io/maqomaqo/radical new-secret >> .env
 docker compose up -d
 ```
 
 then open http://localhost:8000 and create an account. 
 On Windows, two of those lines differ in PowerShell - read the following installation guide for details.
 [`docs/INSTALLATION.md`](docs/INSTALLATION.md) walks through each step on macOS and Windows,
-with everyday use, updating, and troubleshooting.
+with everyday use, updating, backups, upgrading an earlier installation, and troubleshooting.
 
 The image, `ghcr.io/maqomaqo/radical`, holds the app, its web interface and the calibration curves
-in one container, for both Intel/AMD and ARM machines; the only other container is its PostgreSQL
-database.
+in one container, for both Intel/AMD and ARM machines, and keeps everything in one SQLite file.
 
 ## Accounts
 
