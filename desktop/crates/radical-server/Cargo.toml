@@ -15,6 +15,7 @@ getrandom = "0.3.4"
 hmac = "0.12.1"
 lettre = { version = "0.11.23", default-features = false, features = ["builder", "hostname", "smtp-transport", "rustls", "ring", "rustls-native-certs"] }
 miniz_oxide = "0.8"
+postgres = "0.19.14"
 radical-core = { path = "../radical-core" }
 radical-io = { path = "../radical-io" }
 radical-jobs = { path = "../radical-jobs" }

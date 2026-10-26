@@ -3,6 +3,7 @@
 //! ```text
 //! radical-server [--host ADDR] [--port N] [--db PATH] [--frontend DIR] [--accounts]
 //! radical-server reset-password EMAIL [--db PATH]
+//! radical-server import-postgres DATABASE_URL [--db PATH]
 //! ```
 //!
 //! On its own, or inside RadiCal Desktop, it listens on 127.0.0.1 for one
@@ -68,11 +69,55 @@ fn reset_password(mut args: impl Iterator<Item = String>) -> i32 {
     }
 }
 
+/// `import-postgres DATABASE_URL [--db PATH]`: an installation's data, from
+/// the backend's PostgreSQL into a new SQLite database.
+fn import_postgres(mut args: impl Iterator<Item = String>) -> i32 {
+    let mut url = None;
+    let mut db = None;
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--db" => db = args.next().map(PathBuf::from),
+            other if url.is_none() && !other.starts_with("--") => url = Some(other.to_owned()),
+            other => {
+                eprintln!("unknown argument {other}; use import-postgres DATABASE_URL [--db PATH]");
+                return 2;
+            }
+        }
+    }
+    let Some(url) = url else {
+        eprintln!(
+            "From where? radical-server import-postgres postgresql://USER:PASSWORD@HOST/DATABASE"
+        );
+        return 2;
+    };
+    let db = db.unwrap_or_else(default_db);
+    match radical_server::import_postgres::import(&url, &db) {
+        Ok(report) => {
+            for (table, n) in &report {
+                println!("{n:>8}  {table}");
+            }
+            println!("Imported into {}.", db.display());
+            0
+        }
+        Err(e) => {
+            eprintln!("{e}");
+            1
+        }
+    }
+}
+
 fn main() {
     let mut args = std::env::args().skip(1).peekable();
-    if args.peek().map(String::as_str) == Some("reset-password") {
-        args.next();
-        std::process::exit(reset_password(args));
+    match args.peek().map(String::as_str) {
+        Some("reset-password") => {
+            args.next();
+            std::process::exit(reset_password(args));
+        }
+        Some("import-postgres") => {
+            args.next();
+            std::process::exit(import_postgres(args));
+        }
+        _ => {}
     }
     let mut host: IpAddr = [127, 0, 0, 1].into();
     let mut port: u16 = 8000;

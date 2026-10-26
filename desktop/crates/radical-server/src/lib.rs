@@ -23,6 +23,7 @@ pub mod calib;
 pub mod curves;
 pub mod form;
 pub mod history;
+pub mod import_postgres;
 pub mod launch;
 pub mod owner;
 pub mod pdf;
