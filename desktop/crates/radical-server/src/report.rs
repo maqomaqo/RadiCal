@@ -776,7 +776,7 @@ pub(crate) fn render(state: &State, i: &Inputs) -> Vec<u8> {
         story.push(para("Durations and Differences", s.heading));
         story.push(para(
             &format!(
-                "Lengths of time, in years, rather than calendar dates -- so these are not converted to the reporting era. A phase's duration is the interval its Boundaries enclose and is longer than the span of its dated events, since those events are a sample of the phase rather than the whole of it. Estimated from {} joint draws, so unlike every other figure in this report they carry a Monte Carlo error.",
+                "Lengths of time, in years. A phase's duration is defined by its Boundaries. It is longer than the span of its dated events, since those events are a sample of the phase. Estimated from {} joint draws, so they carry a Monte Carlo error.",
                 thousands(intervals["draws"].as_i64().unwrap_or(0))
             ),
             s.note,
@@ -912,7 +912,7 @@ pub(crate) fn render(state: &State, i: &Inputs) -> Vec<u8> {
             s.heading,
         ));
         story.push(para(
-            "Age against depth, and how fast the deposit accumulated between one level and the next. The bands are quantiles rather than HPD regions, so they nest; the rates are read off the same joint draws as the ages above them, since a rate is a function of two ages at once and pairing their separate posteriors would give an answer wrong in shape.",
+            "Age against depth, and how fast the deposit accumulated between one level and the next. The bands are quantiles rather than HPD regions, so they nest; the rates are read off the same joint draws as the ages above them, since a rate is a function of two ages at once.",
             s.note,
         ));
         let units = record["depth_units"]
