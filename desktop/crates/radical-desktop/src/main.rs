@@ -5,7 +5,7 @@
 //! radical-server on loopback with a token made for this launch, and opens a
 //! window on it. The frontend is the same build the Docker image serves; it
 //! talks HTTP to the server exactly as it does there, and the window hands it
-//! the token before any of its code runs (docs/RUST_DESKTOP_PLAN.md §2.2).
+//! the token before any of its code runs.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 

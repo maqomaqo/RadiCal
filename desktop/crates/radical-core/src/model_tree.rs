@@ -41,7 +41,7 @@
 //!
 //! Two more element types order their members by a distance measured on an axis
 //! OUTSIDE the model rather than by stratigraphy alone. They are the same idea
-//! with two solvers behind them (docs/AGE_DEPTH_AND_WIGGLE_MATCH_PLAN.md):
+//! with two solvers behind them:
 //!
 //! ```text
 //! wiggle_sequence      OxCal's D_Sequence / V_Sequence. Its members are

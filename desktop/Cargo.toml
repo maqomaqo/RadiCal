@@ -1,5 +1,5 @@
-# RadiCal Desktop. See docs/RUST_DESKTOP_PLAN.md for what goes where; crates
-# are added here as the phase that needs them starts, not ahead of it.
+# RadiCal Desktop and radical-server. See desktop/README.md for what each
+# crate holds.
 [workspace]
 resolver = "3"
 members = ["crates/*"]

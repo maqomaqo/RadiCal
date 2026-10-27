@@ -30,9 +30,13 @@ does allow `Outlier()` inside a `D_Sequence`. Implementing it means
 marginalising an offset scale per member, which is `exact_chain`'s
 approximation, not OxCal's shared scale. Get a real OxCal fixture first.
 
-### 4. Wiggle-match decisions left open
-From [`docs/AGE_DEPTH_AND_WIGGLE_MATCH_PLAN.md`](docs/AGE_DEPTH_AND_WIGGLE_MATCH_PLAN.md):
-- **§12.3:** a sapwood allowance is not modelled.
+### 4. Sapwood allowance on a wiggle match
+A wiggle match dates its reference member, not the felling of the tree. A
+sapwood allowance, an estimated number of missing outer rings, is not modelled,
+so the user has to account for it by hand. Modelling it is one more gap with an
+error, which the `V_Sequence` machinery already covers, and the reference
+member is already explicit in the data model, so it needs no migration. It
+matters most once a wiggle match can sit inside a Phase (item 2).
 
 ---
 
@@ -46,42 +50,54 @@ nullable `source_project_sample_id` (one Alembic migration) would enable that
 without weakening the snapshot.
 
 ### 6. Bundled ΔR snapshot
-From [`docs/SPATIAL_METADATA_AND_DISPERSAL_PLAN.md`](docs/SPATIAL_METADATA_AND_DISPERSAL_PLAN.md) §14:
-- **Op 0 (a person has to do this):** email p.j.reimer@qub.ac.uk asking to
-  redistribute the Marine20 reservoir compilation as a bundled snapshot, citing
-  Reimer & Reimer 2001 and naming the app.
-- **Op 3d (blocked on op 0):** commit
+- **Permission (a person has to do this):** email p.j.reimer@qub.ac.uk asking
+  to redistribute the Marine20 reservoir compilation as a bundled snapshot,
+  citing Reimer & Reimer 2001 and naming the app.
+- **The snapshot (blocked on permission):** commit
   `calibration_data/marine_reservoir_<date>.csv`, produced by the ingest's
-  parser, with its hash in the registry. If permission is refused, drop 3d; the
-  ingest stays the only source.
+  parser, with its hash in the registry. If permission is refused, drop this;
+  the ingest stays the only source.
 
 Until then, a fresh install has no ΔR lookup until someone runs the ingest from
 the card on the Curves page.
 
-### 7. Per-species habit correction (plan §13.6)
+### 7. Per-species habit correction
 The reservoir bias is measured per feeding class only. A per-species correction
 needs a published source, and the reservoir database doesn't contain one.
 
-Regional kriging (plan §5.7) and over-water distance (§9) are also unbuilt.
-They are deferred until there is a concrete need.
+Two ΔR lookup methods are also unbuilt, and deferred until there is a concrete
+need:
+- **Regional kriging**, as a second method beside the nearest-N weighted mean.
+  It must be fitted inside a bounding box the user chooses, show the fitted
+  variogram (nugget included) before a value is accepted, refuse to
+  extrapolate outside the fitted points' hull or range, and report measurement
+  plus interpolation error.
+- **Over-water distance.** Every distance is great-circle, so a lookup can
+  draw on points across a peninsula. Kriging would need this, or a stated
+  caveat, to be honest.
 
 ---
 
 ## Deployment and performance
 
-### 8. One solver thread, shared by every account
-`services/jobs.py` runs an in-process `ThreadPoolExecutor(max_workers=1)`, and
-registration is open. Any account can occupy the only solver thread, and a
-restart fails whatever was mid-flight (`jobs.reconcile_orphans`). This is fine
-behind a VPN or institutional proxy. Revisit it before the app is reachable
-publicly: add workers, or put a broker such as RQ or Celery behind the same
-`submit` seam. Resize the Postgres pool in `database.py` (currently 10 + 20
-overflow) alongside it.
+### 8. Solver workers shared by every account, lost on restart
+`radical-jobs` runs one in-process queue with the machine's cores less one as
+workers, and registration on a server is open. Any account can fill every
+worker, there is no per-account limit, and a restart fails whatever was
+mid-flight (`reconcile_orphans`). This is fine behind a VPN or institutional
+proxy. Revisit it before a server is reachable publicly: a per-account cap on
+queued work, and a queue that survives a restart.
 
-### 9. PDF rendering runs inside the request
-`GET /results/{id}/pdf` draws one matplotlib figure per modelled parameter,
-synchronously. That is about four seconds for a 45-parameter model. Move it
-onto the job queue if models grow.
+### 9. Unsigned desktop installers
+RadiCal Desktop's installers are not code-signed, so macOS and Windows warn
+before the first open (`docs/INSTALLATION.md` tells users how to get past it).
+- **macOS:** an Apple Developer ID certificate and notarisation. The release
+  workflow already uses them once the `APPLE_*` secrets are set.
+- **Windows:** Azure Trusted Signing or an OV certificate, which the release
+  workflow does not handle yet.
+
+Both take weeks of paperwork before any code changes. Once they're done, drop
+the warning section from `docs/INSTALLATION.md`.
 
 ---
 
@@ -91,6 +107,12 @@ onto the job queue if models grow.
 Flows are verified by hand against the running stack. The obvious first
 scenarios, for example Playwright against `docker-compose.yml`: sign in → new
 analysis → run → results; deploy from a collection; compare two analyses.
+
+RadiCal Desktop runs the same frontend in three different webviews (WebKit on
+macOS, WebView2 on Windows, WebKitGTK on Linux), with Plotly and React Flow the
+most exposed. Smoke tests of the Results, Stratigraphy and Curve Browser pages
+on all three, in CI with `tauri-driver`, would catch a webview difference
+before users do.
 
 ### 11. Frontend unit gaps
 - `utils/stratigraphy.ts` (`flattenStructure`, `expandRelationships`,

@@ -1,7 +1,7 @@
 # RadiCal on a server, in Rust
 
 The Docker version moves from the FastAPI backend to `radical-server`, the Rust server RadiCal
-Desktop already runs ([RUST_DESKTOP_PLAN.md](RUST_DESKTOP_PLAN.md)). Accounts come back, for the
+Desktop already runs ([`desktop/`](../desktop/README.md)). Accounts come back, for the
 server only: RadiCal Desktop stays one person on one computer, with no sign-in.
 
 ## Why
@@ -177,4 +177,5 @@ readers (WAL).
   matrix products to Apple Accelerate or OpenBLAS. Calling a BLAS from `radical-core`'s
   `matmul` would close the gap. It is optional and independent of the move.
 - **Two queues.** Solves now run one per core, less one, so a busy server queues less.
-  `REMAINING_WORK.md` §8, "one solver thread", closes with S5.
+  What is left of it, a per-account limit and a queue that survives a restart, is
+  `REMAINING_WORK.md` §8.
