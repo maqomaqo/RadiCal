@@ -1,4 +1,4 @@
-import { lazy, Suspense } from 'react'
+import { lazy, Suspense, type ReactNode } from 'react'
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { Box, CircularProgress, CssBaseline, ThemeProvider } from '@mui/material'
 import { alpha, createTheme } from '@mui/material/styles'
@@ -8,6 +8,7 @@ import { NotificationProvider } from '@/contexts/NotificationContext'
 import { AuthProvider, useAuth } from '@/contexts/AuthContext'
 import Navigation from '@/components/Navigation'
 import DesktopBridge from '@/desktop/DesktopBridge'
+import { DESKTOP } from '@/desktop/shell'
 import ErrorBoundary from '@/components/ErrorBoundary'
 import Dashboard from '@/pages/Dashboard'
 import SignIn, { isResetLink } from '@/pages/SignIn'
@@ -323,10 +324,31 @@ function AppShell() {
   return (
     <Router>
       <DesktopBridge />
-      <Navigation />
-      <RoutedPages />
+      <Box
+        sx={
+          DESKTOP
+            ? { height: '100vh', display: 'flex', flexDirection: 'column' }
+            : undefined
+        }
+      >
+        <Navigation />
+        <PageScroller>
+          <RoutedPages />
+        </PageScroller>
+      </Box>
     </Router>
   )
+}
+
+/**
+ * In the desktop app, the region the pages scroll in: the window's height
+ * less the app bar's, so the scrollbar starts below the bar rather than
+ * running up beside it. In a browser, nothing -- the document scrolls, as a
+ * web page's should. See `DESKTOP` in desktop/shell.ts.
+ */
+function PageScroller({ children }: { children: ReactNode }) {
+  if (!DESKTOP) return <>{children}</>
+  return <Box sx={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>{children}</Box>
 }
 
 function App() {

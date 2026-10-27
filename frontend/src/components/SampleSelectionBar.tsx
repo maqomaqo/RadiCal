@@ -58,6 +58,7 @@ import {
   selectedLocations,
 } from '@/utils/sampleSelection'
 import { SITE_RADIUS_KM } from '@/utils/siteGrouping'
+import { STICKY_TOP } from '@/desktop/shell'
 
 export interface DeltaRValue {
   delta_r: number | null
@@ -273,7 +274,7 @@ export default function SampleSelectionBar({
         // well over a screen, so ticking a row near the bottom used to put
         // every control that acts on it -- Deploy included -- off screen.
         position: 'sticky',
-        top: { xs: 56, sm: 64 },
+        top: STICKY_TOP,
         zIndex: theme.zIndex.appBar - 1,
         // The primary tint the table paints a selected row with, so the band
         // reads as an extension of the rows rather than a new surface.

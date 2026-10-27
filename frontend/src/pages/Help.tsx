@@ -7,6 +7,7 @@ import { Link as RouterLink, useLocation } from 'react-router-dom'
 import manualSource from '@/content/USER_MANUAL.md?raw'
 import Markdown from '@/components/Markdown'
 import { dropSection, parseMarkdown, tableOfContents, type Block } from '@/utils/markdown'
+import { DESKTOP, onPageScroll } from '@/desktop/shell'
 
 /**
  * The user manual, in the app.
@@ -112,11 +113,11 @@ export default function Help() {
     }
 
     update()
-    window.addEventListener('scroll', onScroll, { passive: true })
+    const stopScroll = onPageScroll(onScroll)
     window.addEventListener('resize', onScroll)
     return () => {
       if (frame !== 0) cancelAnimationFrame(frame)
-      window.removeEventListener('scroll', onScroll)
+      stopScroll()
       window.removeEventListener('resize', onScroll)
     }
   }, [toc, wide])
@@ -180,7 +181,7 @@ export default function Help() {
             // Long enough that scrolling back to the top to move between
             // sections would be its own chore.
             position: { md: 'sticky' },
-            top: { md: 88 },
+            top: { md: DESKTOP ? 24 : 88 },
             maxHeight: { md: 'calc(100vh - 112px)' },
             overflowY: { md: 'auto' },
           }}

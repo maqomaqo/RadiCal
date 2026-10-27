@@ -122,7 +122,7 @@ fn main() {
                 token = serde_json::to_string(&token)?,
             );
             let home: tauri::Url = format!("{origin}/").parse()?;
-            WebviewWindowBuilder::new(app, "main", WebviewUrl::External(home))
+            let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::External(home))
                 .title("RadiCal")
                 .inner_size(1280.0, 840.0)
                 .min_inner_size(900.0, 600.0)
@@ -131,8 +131,18 @@ fn main() {
                 // the window would swallow the drop before the page saw it.
                 .disable_drag_drop_handler()
                 // The window shows RadiCal and nothing else.
-                .on_navigation(move |url| url.origin().ascii_serialization() == origin)
-                .build()?;
+                .on_navigation(move |url| url.origin().ascii_serialization() == origin);
+            // On macOS the app's own bar is the title bar: the page runs to
+            // the window's top edge and the window's buttons sit inside the
+            // bar, centred on its 64px height. The frontend leaves room for
+            // them and makes the bar draggable (MAC_TITLE_BAR in
+            // frontend/src/desktop/shell.ts).
+            #[cfg(target_os = "macos")]
+            let window = window
+                .title_bar_style(tauri::TitleBarStyle::Overlay)
+                .hidden_title(true)
+                .traffic_light_position(tauri::LogicalPosition::new(20.0, 33.0));
+            window.build()?;
             opened::open(app.handle(), std::env::args_os().skip(1));
             // A build from the source tree has no release to compare with.
             if !cfg!(debug_assertions) {

@@ -10,6 +10,7 @@ import {
   Typography,
 } from '@mui/material'
 import type { Block, Inline } from '@/utils/markdown'
+import { DESKTOP } from '@/desktop/shell'
 
 /**
  * The rendering half of utils/markdown.ts: parsed blocks in, MUI out.
@@ -96,7 +97,7 @@ function renderBlock(block: Block, key: string): React.ReactNode {
             ...(HEADING_SX[block.level] ?? HEADING_SX[4]),
             mb: 1,
             // Clears the sticky AppBar when a link jumps to this heading.
-            scrollMarginTop: 88,
+            scrollMarginTop: DESKTOP ? 24 : 88,
           }}
         >
           {renderInline(block.children, `${key}-`)}
