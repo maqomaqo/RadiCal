@@ -161,8 +161,9 @@ pub fn classify(error: &JobError) -> Failure {
 
 type CancelSet = Arc<Mutex<HashSet<String>>>;
 
-/// A queued job: its id, what it is about, and its work.
-type Queued = (String, Option<String>, Work);
+/// A queued job: its id, what it is about, its work, and what undoes the
+/// submitter's own setup if it is dropped before it starts.
+type Queued = (String, Option<String>, Work, Option<Dropped>);
 
 /// Targets with a job running, each with the jobs about it waiting their
 /// turn.
@@ -251,6 +252,12 @@ impl Handle {
 /// `detail`, or why it did not finish.
 pub type Work = Box<dyn FnOnce(&Handle) -> Result<Option<Value>, JobError> + Send + 'static>;
 
+/// What runs instead of a job's work when it is cancelled before it starts.
+/// Work that is cancelled while running cleans up after itself; work that
+/// never starts cannot, so whatever the submitter set up for it (an
+/// analysis marked 'pending', say) is put back by this.
+pub type Dropped = Box<dyn FnOnce() + Send + 'static>;
+
 /// The queue and its workers.
 pub struct Jobs {
     store: Arc<Store>,
@@ -282,11 +289,11 @@ impl Jobs {
                     .spawn(move || {
                         loop {
                             let next = receiver.lock().unwrap_or_else(|p| p.into_inner()).recv();
-                            let Ok((job_id, target, work)) = next else {
+                            let Ok((job_id, target, work, dropped)) = next else {
                                 return;
                             };
                             let Some(target) = target else {
-                                run(&store, &cancelled, &job_id, work);
+                                run(&store, &cancelled, &job_id, work, dropped);
                                 continue;
                             };
                             {
@@ -295,17 +302,17 @@ impl Jobs {
                                     // Its target is in use: it runs after the
                                     // jobs ahead of it, on the worker running
                                     // them.
-                                    waiting.push_back((job_id, Some(target), work));
+                                    waiting.push_back((job_id, Some(target), work, dropped));
                                     continue;
                                 }
                                 busy.insert(target.clone(), VecDeque::new());
                             }
-                            let mut current = (job_id, work);
+                            let mut current = (job_id, work, dropped);
                             loop {
-                                run(&store, &cancelled, &current.0, current.1);
+                                run(&store, &cancelled, &current.0, current.1, current.2);
                                 let mut busy = busy.lock().unwrap_or_else(|p| p.into_inner());
                                 match busy.get_mut(&target).and_then(VecDeque::pop_front) {
-                                    Some((id, _, work)) => current = (id, work),
+                                    Some((id, _, work, dropped)) => current = (id, work, dropped),
                                     None => {
                                         busy.remove(&target);
                                         break;
@@ -335,6 +342,19 @@ impl Jobs {
         owner_id: Option<&str>,
         work: Work,
     ) -> radical_store::Result<String> {
+        self.submit_undoable(kind, target_id, owner_id, work, None)
+    }
+
+    /// [`submit`](Self::submit), with `dropped` run in place of `work` if
+    /// the job is cancelled before it starts.
+    pub fn submit_undoable(
+        &self,
+        kind: &str,
+        target_id: Option<&str>,
+        owner_id: Option<&str>,
+        work: Work,
+        dropped: Option<Dropped>,
+    ) -> radical_store::Result<String> {
         let row = Job {
             id: radical_store::new_id(),
             kind: kind.to_owned(),
@@ -350,7 +370,7 @@ impl Jobs {
             // The workers outlive every sender but this one, so this only
             // fails during shutdown, when the job stays queued and the next
             // start reconciles it.
-            let _ = sender.send((row.id.clone(), row.target_id.clone(), work));
+            let _ = sender.send((row.id.clone(), row.target_id.clone(), work, dropped));
         }
         Ok(row.id)
     }
@@ -380,7 +400,13 @@ impl Jobs {
 
 /// A worker's handling of one job. Never panics out: a job records its own
 /// failure.
-fn run(store: &Arc<Store>, cancelled: &CancelSet, job_id: &str, work: Work) {
+fn run(
+    store: &Arc<Store>,
+    cancelled: &CancelSet,
+    job_id: &str,
+    work: Work,
+    dropped: Option<Dropped>,
+) {
     let forget = || {
         cancelled
             .lock()
@@ -413,7 +439,11 @@ fn run(store: &Arc<Store>, cancelled: &CancelSet, job_id: &str, work: Work) {
         .contains(job_id);
     if already {
         // Cancelled while queued: it never starts, and started_at stays null
-        // to say so.
+        // to say so. The undo goes first, so that by the time a poll sees
+        // 'cancelled' the submitter's setup is already put back.
+        if let Some(undo) = dropped {
+            let _ = catch_unwind(AssertUnwindSafe(undo));
+        }
         finish("cancelled", None, None);
         forget();
         return;

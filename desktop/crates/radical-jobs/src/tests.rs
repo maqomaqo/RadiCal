@@ -145,6 +145,51 @@ fn a_cancel_stops_a_running_job_and_drops_a_queued_one() {
 }
 
 #[test]
+fn a_job_dropped_before_it_starts_runs_its_undo_and_no_other_does() {
+    let (store, dir) = temp_store();
+    let jobs = Jobs::start(Arc::clone(&store), 1);
+    let (started_tx, started_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel::<()>();
+    let undone = Arc::new(Mutex::new(Vec::new()));
+    let undo = |name: &'static str| -> Option<Dropped> {
+        let undone = Arc::clone(&undone);
+        Some(Box::new(move || undone.lock().unwrap().push(name)))
+    };
+    // The only worker is busy, so the second job waits in the queue.
+    let ran = jobs
+        .submit_undoable(
+            "analysis_run",
+            None,
+            None,
+            Box::new(move |_| {
+                started_tx.send(()).unwrap();
+                release_rx.recv().unwrap();
+                Ok(None)
+            }),
+            undo("ran"),
+        )
+        .unwrap();
+    let dropped = jobs
+        .submit_undoable(
+            "analysis_run",
+            None,
+            None,
+            Box::new(|_| panic!("a dropped job's work never runs")),
+            undo("dropped"),
+        )
+        .unwrap();
+    started_rx.recv().unwrap();
+    assert!(jobs.cancel(&dropped).unwrap());
+    release_tx.send(()).unwrap();
+    assert_eq!(await_job(&store, &ran).state, "completed");
+    assert_eq!(await_job(&store, &dropped).state, "cancelled");
+    // By the time the poll sees 'cancelled', the undo has run.
+    assert_eq!(*undone.lock().unwrap(), vec!["dropped"]);
+    jobs.shutdown();
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
 fn jobs_about_one_target_run_in_order_and_others_alongside() {
     let (store, dir) = temp_store();
     let jobs = Jobs::start(Arc::clone(&store), 3);
