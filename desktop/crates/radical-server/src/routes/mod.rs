@@ -2,6 +2,7 @@
 //! mounts them.
 
 use axum::Router;
+use axum::extract::DefaultBodyLimit;
 
 use crate::State;
 
@@ -23,6 +24,12 @@ pub mod reservoir;
 pub mod results;
 pub mod run_history;
 pub mod runs;
+
+/// Axum caps a request body at 2 MB unless told otherwise, refusing a larger
+/// one in plain text before any route reads it. The largest upload is a
+/// project package, whose route checks its size itself; this leaves room for
+/// that file and the form around it.
+const MAX_BODY_BYTES: usize = project_import::MAX_PACKAGE_BYTES + 1024 * 1024;
 
 pub fn router() -> Router<State> {
     Router::new()
@@ -50,4 +57,5 @@ pub fn router() -> Router<State> {
         .merge(reservoir::router())
         .merge(projects::router())
         .merge(project_samples::router())
+        .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
 }
