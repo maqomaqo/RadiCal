@@ -12,7 +12,7 @@
 //   reference's PLUS its offset.
 //
 // Same sentence as services/wiggle_match.py's module docstring and the OxCal
-// importer's. See docs/AGE_DEPTH_AND_WIGGLE_MATCH_PLAN.md §4.4.
+// importer's.
 
 /** A date and the ring number it was cut from, as the entry table has them. */
 export interface RingNumbered {

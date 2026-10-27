@@ -1,6 +1,6 @@
 # RadiCal
 
-A web-based tool for radiocarbon dating analysis: calibration, Bayesian chronological modelling with constraints, and interactive posterior visualization.
+A tool for radiocarbon dating analysis: calibration, Bayesian chronological modelling with constraints, and interactive posterior visualization. It runs as a desktop app (RadiCal Desktop, for macOS, Windows and Linux) or on a server that a group shares in the browser.
 
 ## Features
 
@@ -49,6 +49,7 @@ RadiCal/
 ├── frontend/                 # React TypeScript application
 │   └── src/
 │       ├── components/       # Reusable UI (plots, Harris matrix, dialogs, forms)
+│       ├── content/          # The user manual, shown on the Help page
 │       ├── pages/            # Route-level pages (Dashboard, NewAnalysis, Results, ...)
 │       ├── stores/           # Shared draft state (Zustand)
 │       ├── theme/            # MUI theme customization
@@ -65,7 +66,7 @@ RadiCal/
 │   └── corpus/               # Recorded answers from the Python server, replayed as tests
 ├── backend/                  # The earlier Python/FastAPI server (to be removed)
 ├── calibration_data/         # Full IntCal20/Marine20/SHCal20 curve files
-├── docs/                     # Installation guide and user manual
+├── docs/                     # Installation and desktop release guides
 ├── docker-compose.yml
 └── .env.example
 ```
@@ -95,8 +96,9 @@ in one container, for both Intel/AMD and ARM machines, and keeps everything in o
 
 ## Accounts
 
-Every project and analysis belongs to a user account. There is no
-sharing and no administrator who can see everything.
+On a server, every project and analysis belongs to a user account. There is no
+sharing and no administrator who can see everything. RadiCal Desktop has no accounts: it is one
+person's, and everything in it is theirs.
 
 Registration is **open** — anyone who can reach the app can create an account. The gate is
 expected to be whatever fronts the deployment (a VPN, an institutional SSO proxy, a private
@@ -106,6 +108,9 @@ Sign-ins are signed with `RADICAL_SECRET_KEY`, the key made during installation;
 to start without one.
 
 ## API Overview
+
+This is RadiCal on a server's API. RadiCal Desktop runs the same API inside the app, but answers
+only its own window (with a token made each launch), so scripts cannot reach it.
 
 Full interactive documentation is at
 `http://localhost:8000/api/docs` on a running installation, and the OpenAPI schema at

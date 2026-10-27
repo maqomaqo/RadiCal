@@ -789,7 +789,8 @@ fn plan_import(state: &State, caller: &Caller, content: &[u8]) -> ApiResult<Plan
         .unwrap_or(json!(0));
     let Some(version) = version.as_i64().filter(|v| *v <= PACKAGE_VERSION) else {
         plan.errors.push(
-            "This package was made by a newer version of RadiCal. Update this installation to import it.".to_owned(),
+            "This package was made by a newer version of RadiCal. Update RadiCal to import it."
+                .to_owned(),
         );
         return Ok(plan);
     };

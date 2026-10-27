@@ -1,5 +1,5 @@
-# The Rust workspace for RadiCal Desktop (docs/RUST_DESKTOP_PLAN.md), on the
-# three platforms it will ship for. The toolchain comes from
+# The Rust workspace for RadiCal Desktop (desktop/README.md), on the three
+# platforms it ships for. The toolchain comes from
 # desktop/rust-toolchain.toml, which rustup on the runner installs.
 name: Desktop
 

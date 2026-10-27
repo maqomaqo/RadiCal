@@ -1,4 +1,4 @@
-# Builds RadiCal Desktop's installers (docs/RUST_DESKTOP_PLAN.md, Phase 8):
+# Builds RadiCal Desktop's installers (docs/RELEASING_DESKTOP.md has the steps):
 # a universal .dmg for macOS, .msi and setup .exe for Windows, and .AppImage
 # and .deb for Linux. A tag desktop-v1.2.3 also puts them on a draft GitHub
 # release for that version, to be checked and published by hand; a manual

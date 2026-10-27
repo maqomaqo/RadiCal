@@ -1,15 +1,20 @@
 # RadiCal Desktop
 
-The standalone Rust build of RadiCal. [`docs/RUST_DESKTOP_PLAN.md`](../docs/RUST_DESKTOP_PLAN.md)
-describes what it will be and the order it is built in. This folder holds the work so far.
+The Rust build of RadiCal: RadiCal Desktop, and `radical-server`, which RadiCal on a server runs
+too. How to release the desktop app is in [`docs/RELEASING_DESKTOP.md`](../docs/RELEASING_DESKTOP.md).
 
 ```
 desktop/
-  Cargo.toml            the workspace; crates are added as the phase that needs them starts
+  Cargo.toml            the workspace
   rust-toolchain.toml   the pinned compiler
   crates/
     radical-core/       the calibration maths, the exact solvers and the sampler,
-                        ported from backend/app/services (Phases 1-3)
+                        ported from backend/app/services
+    radical-io/         file formats: date tables, curve files, OxCal models
+    radical-store/      the database, one SQLite file
+    radical-jobs/       runs that happen outside the request that asked for them
+    radical-server/     the HTTP API the frontend talks to
+    radical-desktop/    the desktop app: the server and the frontend in one window
     radical-corpus/     reads the golden corpus and checks it is intact
   bench/
     sampler_bench.py    times the Python sampler and writes models.json for the Rust example
@@ -17,7 +22,7 @@ desktop/
     generate.py         writes the corpus from the Python implementation
     ziggurat_tables.py  writes NumPy's normal-draw tables as Rust source
     manifest.json       every corpus file's SHA-256, and the curves it was made against
-    data/units/         one service function per case: the Phase 1 and 2 targets
+    data/units/         one service function per case
     data/api/           whole API requests and responses: solver and server targets
 ```
 

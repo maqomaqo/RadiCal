@@ -11,8 +11,7 @@ contains the `scattergeo` *renderer* but none of the geometry: left to itself
 it fetches `https://cdn.plot.ly/world_50m.json` at render time, and when that
 request cannot be made — an air-gapped install, a firewalled network — the
 plot does not degrade, it rejects, and no map appears at all. Both of those
-are unacceptable here for the reason in
-`docs/SPATIAL_METADATA_AND_DISPERSAL_PLAN.md` §4.5: the offline map is the
+are unacceptable here: the offline map is the
 DEFAULT precisely so that looking at a site discloses nothing, and a default
 that silently phones a CDN is not that.
 

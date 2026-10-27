@@ -70,7 +70,7 @@ export default class ErrorBoundary extends Component<Props, State> {
             <AlertTitle>This page stopped rather than showing something wrong</AlertTitle>
             Nothing you have saved is affected — this is a fault in displaying the
             page, not in the analysis behind it. Your projects, analyses and results
-            are unchanged on the server.
+            are saved and unchanged.
           </Alert>
 
           <Typography variant="body2" color="text.secondary" gutterBottom>

@@ -4,7 +4,7 @@
  * A Bayesian model takes tens of seconds and can take minutes, so the
  * endpoints that start one answer 202 with a job id rather than holding the
  * connection open until it finishes. This is how the pages find out what
- * happened to it. See docs/ASYNC_JOBS_PLAN.md.
+ * happened to it.
  */
 
 export type JobState = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'

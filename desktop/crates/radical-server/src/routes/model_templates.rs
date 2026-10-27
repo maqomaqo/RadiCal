@@ -431,7 +431,7 @@ fn plan_import(state: &State, caller: &Caller, content: &[u8]) -> ApiResult<Valu
         .is_some_and(|v| v <= FILE_VERSION && data["format_version"].is_i64())
     {
         return refuse(
-            "This file was made by a newer version of RadiCal. Update this installation to import it.",
+            "This file was made by a newer version of RadiCal. Update RadiCal to import it.",
         );
     }
     let entries = data["templates"].as_array().cloned().unwrap_or_default();

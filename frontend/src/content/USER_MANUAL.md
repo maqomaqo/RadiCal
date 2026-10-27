@@ -29,9 +29,50 @@
 
 ## Getting Started
 
-1. Open RadiCal in your browser: `http://localhost:8000` on the computer it is installed on, or
-   your deployment's address.
+RadiCal comes in two forms. Both do the same analyses with the same screens, so the rest of this
+manual applies to either; where they differ, it says so.
+
+- **RadiCal Desktop** is an app on your own computer, for one person. There is no account and no
+  sign-in, and your work stays on your computer.
+- **RadiCal on a server** is one installation shared by a group. Each person opens it in a web
+  browser and signs in to their own account.
+
+The installation guide (`docs/INSTALLATION.md` on RadiCal's GitHub page) covers installing either.
+
+To start:
+
+1. **RadiCal Desktop:** open RadiCal as you would any other app. It starts on the Dashboard.
+   **On a server:** open its address in your browser (`http://localhost:8000` on the computer it
+   is installed on, or the address you were given), and sign in or create an account.
 2. Click **New Analysis** (top navigation bar, or from the Dashboard).
+
+### Using RadiCal Desktop
+
+- **Menus.** The **File** menu has **New Analysis** (⌘N on a Mac, Ctrl+N elsewhere), **Import
+  Dates…** (⌘O / Ctrl+O), which opens the file import on New Analysis, and **Import Project…**
+  (⌘⇧O / Ctrl+Shift+O), which loads a shared project (see
+  [Sharing and replicating a project](#sharing-and-replicating-a-project)). **Help → RadiCal Help**
+  opens this manual.
+- **Opening OxCal models.** Double-click an `.oxcal` file, or drop it on RadiCal's icon, and it
+  opens in the import on New Analysis.
+- **Saving files.** Exports, reports and plot images open the usual Save dialog, so you choose
+  where each one goes.
+- **Your work** is kept in one file, `radical.db`, in RadiCal's folder:
+  `~/Library/Application Support/RadiCal` on a Mac, `%APPDATA%\RadiCal` on Windows and
+  `~/.local/share/radical` on Linux. To back it up, quit RadiCal and copy that file.
+- **Updates.** RadiCal looks for a new version when it opens and asks before installing it;
+  **Help → Check for Updates…** looks straight away. Your work is kept through every update.
+- **Moving work between the two.** Export a project from one (**Export** on the project page) and
+  import the .zip into the other (**Import project** on the Projects page, or **File → Import
+  Project…** in RadiCal Desktop).
+
+Accounts, passwords and [access tokens for scripts](#scripts-and-access-tokens) exist only on a
+server.
+
+### Signing in on a server
+
+Everything you make (projects, analyses, imported curves, model templates) belongs to your account,
+and other people on the same installation cannot see it.
 
 **Forgotten password.** Click **Forgot your password?** on the sign-in page. If your installation
 can send email, enter your address and RadiCal emails you a link to choose a new password; the link
@@ -174,8 +215,8 @@ are wrapped in one Phase, asserting no ordering between them.
 **Curves** in the top navigation lists every curve available, and is where you
 add your own. Three are shipped (IntCal20, SHCal20 and Marine20) and cannot be edited or removed.
 
-**Curves you import or mix are private to your account.** Other users on the same installation
-cannot see them. Only the three shipped curves are shared. This is deliberate: a curve you are
+**On a server, curves you import or mix are private to your account.** Other users on the same
+installation cannot see them. Only the three shipped curves are shared. This is deliberate: a curve you are
 still checking should not appear in a colleague's picker, and a curve added for one site years ago
 should not become something a newcomer picks by mistake. To share a curve with a colleague, use
 **Download** on the curve's row (which returns the exact bytes you imported), and have them import
@@ -384,7 +425,7 @@ the same diagram for a completed analysis, and Posterior distribution plots foll
 A template is a model's structure saved for reuse: its Sequences, Phases, Boundaries, Hiatuses and
 their TPQ/TAQ limits, without the dates. It also keeps the model settings (solver, resolution, and
 whether durations, KDEs and dispersal are estimated), but not a dispersal origin, which belongs to
-a site. Templates belong to your account and can be used in any project.
+a site. Templates can be used in any of your projects (on a server, they belong to your account).
 
 **To save one**, open the model in the editor and choose **Templates › Save this model as a
 template**, then give it a name.
@@ -1164,8 +1205,8 @@ version of RadiCal than yours cannot be read until you update.
 **Compare** puts two to four runs of the same dates side by side and computes the difference.
 
 Tick two to four finished analyses on a project page and press **Compare**. **The first one you
-tick is the reference**: every shift and ratio is measured against it. The comparison is an
-ordinary URL, bookmarkable and shareable.
+tick is the reference**: every shift and ratio is measured against it. On a server the comparison
+is an ordinary URL, which you can bookmark or send to someone with access to the same analyses.
 
 **Reporting format** and **HPD confidence** are set once at the top. A comparison whose runs used
 **different calibration curves** is allowed but captioned: the shift then measures the curve rather
@@ -1266,6 +1307,9 @@ independently, not with the single shared scale that its displayed ranges are we
 Everything the app does goes through its API, so a script can do it too: re-run a project
 overnight, export it, or run a batch of analyses. A script signs in with a **personal access
 token** rather than your password.
+
+This is for RadiCal on a server. RadiCal Desktop has no accounts, and accepts requests only from
+its own window, so scripts cannot reach it.
 
 **Making one.** Open the account menu (your name, top right) and choose **Account and access
 tokens**, then **New token**. Give it a name that says what it is for, choose its access, and

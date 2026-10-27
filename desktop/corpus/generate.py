@@ -1,6 +1,6 @@
 """
 Build the golden corpus: what the Python implementation answers today, for the
-Rust port to be held to. See docs/RUST_DESKTOP_PLAN.md, Phase 0 and section 4.
+Rust port to be held to. See desktop/README.md, "The golden corpus".
 
     cd backend && python ../desktop/corpus/generate.py
 

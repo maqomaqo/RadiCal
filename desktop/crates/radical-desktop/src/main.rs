@@ -5,7 +5,7 @@
 //! radical-server on loopback with a token made for this launch, and opens a
 //! window on it. The frontend is the same build the Docker image serves; it
 //! talks HTTP to the server exactly as it does there, and the window hands it
-//! the token before any of its code runs (docs/RUST_DESKTOP_PLAN.md §2.2).
+//! the token before any of its code runs.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
@@ -16,6 +16,7 @@ use radical_server::launch::{self, Launch};
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 
 mod files;
+mod links;
 mod menu;
 mod opened;
 mod updates;
@@ -130,8 +131,16 @@ fn main() {
                 // The import dialogs take a dropped file themselves; left on,
                 // the window would swallow the drop before the page saw it.
                 .disable_drag_drop_handler()
-                // The window shows RadiCal and nothing else.
-                .on_navigation(move |url| url.origin().ascii_serialization() == origin);
+                // The window shows RadiCal and nothing else: links out of it
+                // open in the system's browser.
+                .on_navigation({
+                    let origin = origin.clone();
+                    move |url| links::navigate(&origin, url)
+                })
+                .on_new_window({
+                    let app = app.handle().clone();
+                    move |url, features| links::new_window(&app, &origin, &url, features)
+                });
             // On macOS the app's own bar is the title bar: the page runs to
             // the window's top edge and the window's buttons sit inside the
             // bar, centred on its 64px height. The frontend leaves room for

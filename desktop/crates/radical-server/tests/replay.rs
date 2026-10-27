@@ -327,6 +327,39 @@ impl Ids {
     }
 }
 
+/// Messages reworded since the corpus was recorded, recorded text first. The
+/// Python said "server" and "installation" when a server was the only
+/// RadiCal; the desktop app made those wrong there.
+const REWORDED: &[(&str, &str)] = &[
+    (
+        "This file was made by a newer version of RadiCal. Update this installation to import it.",
+        "This file was made by a newer version of RadiCal. Update RadiCal to import it.",
+    ),
+    (
+        "This package was made by a newer version of RadiCal. Update this installation to import it.",
+        "This package was made by a newer version of RadiCal. Update RadiCal to import it.",
+    ),
+    (
+        "The run stopped because of an unexpected error inside the app, not because of anything about this model. Nothing was saved over, so the analysis still holds whatever results it had. The server log has the details; re-running may simply work.",
+        "The run stopped because of an unexpected error inside the app, not because of anything about this model. Nothing was saved over, so the analysis still holds whatever results it had. Re-running may simply work. On a server, its log has the details.",
+    ),
+];
+
+/// A recorded answer in today's words: [`REWORDED`] applied to every string.
+fn reworded(v: &Value) -> Value {
+    match v {
+        Value::String(s) => match REWORDED.iter().find(|(old, _)| old == s) {
+            Some((_, new)) => Value::String((*new).to_owned()),
+            None => v.clone(),
+        },
+        Value::Array(a) => Value::Array(a.iter().map(reworded).collect()),
+        Value::Object(o) => {
+            Value::Object(o.iter().map(|(k, x)| (k.clone(), reworded(x))).collect())
+        }
+        other => other.clone(),
+    }
+}
+
 /// The corpus's `summarise_long_arrays`.
 fn summarise(v: &Value) -> Value {
     fn numbers(v: &Value, out: &mut Vec<f64>) -> bool {
@@ -1045,7 +1078,10 @@ async fn replay(accounts: bool) {
         // A poll the backend saw finished waits for the Rust job to finish,
         // as long as the suite's own `_await_job` would (300 s: a slow
         // runner takes far longer than a laptop over an influence report);
-        // one it saw still running accepts whatever state this one is in.
+        // one it saw running waits until this one has at least started, and
+        // then accepts whatever state it is in. That is what the suite's own
+        // wait-until-running loops are for: a cancel that follows has to find
+        // the job running, not still queued, or it tests the other path.
         // Reading an analysis waits the same way for its run, which the
         // backend's had finished by then.
         let progress = match route.as_str() {
@@ -1054,20 +1090,22 @@ async fn replay(accounts: bool) {
             _ => None,
         };
         if let Some(key) = progress {
-            let state = want["response_json"]["data"][key].as_str().unwrap_or("");
-            if !matches!(state, "queued" | "running") {
-                for _ in 0..6000 {
-                    let now = answer
-                        .1
-                        .as_ref()
-                        .and_then(|b| b["data"][key].as_str())
-                        .unwrap_or("");
-                    if !matches!(now, "queued" | "running") {
-                        break;
-                    }
-                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-                    answer = send(&app, method, url, &i, &mut ids, auth.as_deref()).await;
+            let waiting: &[&str] = match want["response_json"]["data"][key].as_str() {
+                Some("queued") => &[],
+                Some("running") => &["queued"],
+                _ => &["queued", "running"],
+            };
+            for _ in 0..6000 {
+                let now = answer
+                    .1
+                    .as_ref()
+                    .and_then(|b| b["data"][key].as_str())
+                    .unwrap_or("");
+                if !waiting.contains(&now) {
+                    break;
                 }
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                answer = send(&app, method, url, &i, &mut ids, auth.as_deref()).await;
             }
         }
         let entry = tally.entry(route.clone()).or_default();
@@ -1109,7 +1147,7 @@ async fn replay(accounts: bool) {
             Some(format!("status {status} vs {}", want["status"]))
         } else if let Some(w) = want.get("response_json") {
             match &body {
-                Some(b) => differs("", &moment(&summarise(b)), &moment(w), &mut ids),
+                Some(b) => differs("", &moment(&summarise(b)), &moment(&reworded(w)), &mut ids),
                 None => Some("not JSON".to_owned()),
             }
         } else if let Some(w) = want.get("response_zip") {
