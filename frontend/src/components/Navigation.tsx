@@ -8,6 +8,7 @@ import PersonOutlineIcon from '@mui/icons-material/PersonOutline'
 import { Link as RouterLink, useLocation } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
 import { isSingleUser } from '@/api/client'
+import { MAC_TITLE_BAR, useFullscreen } from '@/desktop/shell'
 
 const NAV_LINKS = [
   { to: '/', label: 'Dashboard' },
@@ -22,6 +23,9 @@ const NAV_LINKS = [
  * small-screen menu, where there is no room for the distinction.
  */
 const HELP_LINK = { to: '/help', label: 'Help' }
+
+/** How far from the window's left edge the bar's contents start in the macOS app. */
+const TRAFFIC_LIGHT_CLEARANCE = 88
 
 /**
  * A section is "where you are" for every page beneath it, not just its index:
@@ -47,9 +51,31 @@ export default function Navigation() {
   const [navAnchor, setNavAnchor] = useState<HTMLElement | null>(null)
   const [accountAnchor, setAccountAnchor] = useState<HTMLElement | null>(null)
 
+  // In the macOS app this bar is also the window's title bar (see
+  // MAC_TITLE_BAR), so it does what a title bar does: dragging its empty
+  // parts moves the window and double-clicking them zooms it. "deep" makes
+  // the whole bar the handle; Tauri leaves out the links and buttons in it.
+  // The window's own buttons sit at its left end, so the wordmark starts far
+  // enough in to clear them -- except in full screen, where macOS hides them.
+  const fullscreen = useFullscreen()
+  const clearTrafficLights = MAC_TITLE_BAR && !fullscreen
+
   return (
-    <AppBar position="sticky">
-      <Container maxWidth="lg">
+    <AppBar position="sticky" data-tauri-drag-region={MAC_TITLE_BAR ? 'deep' : undefined}>
+      <Container
+        maxWidth="lg"
+        sx={
+          clearTrafficLights
+            ? {
+                // The Container's own 24px gutter, or however much more
+                // puts the wordmark 88px from the window's edge: the buttons
+                // end at 72px. The Container's margin counts toward it once
+                // the window is wider than the Container.
+                paddingLeft: { sm: `max(24px, calc(${TRAFFIC_LIGHT_CLEARANCE}px - max(0px, (100vw - 1200px) / 2)))` },
+              }
+            : undefined
+        }
+      >
         <Toolbar
           disableGutters
           sx={{

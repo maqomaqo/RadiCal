@@ -20,6 +20,7 @@ import { usePlotColors, usePlotFont } from '@/theme/plotColors'
 import { useElementTypeColors } from '@/theme/diagramColors'
 import type { ElementType } from '@/types'
 import { downloadPlotPng } from '@/utils/downloadPlot'
+import { STICKY_TOP, onPageScroll } from '@/desktop/shell'
 
 // Same binding as PosteriorPlot -- see the note there for why the factory is
 // bound to the packaged plotly.js rather than a CDN global.
@@ -137,8 +138,6 @@ const GROUP_NAME_Y = 0.5
 // ambiguous, and a qualifier that has to be readable cannot also be faint.
 const ERA_SIZE = 9
 
-// The app bar is sticky, so the pinned ruler hangs directly beneath it.
-const APP_BAR_HEIGHT = { xs: 56, sm: 64 }
 // How much taller than the viewport the figure has to be before the ruler is
 // worth its band: room for the app bar, the page's own heading and the plot's
 // controls above the figure.
@@ -231,7 +230,8 @@ function CalendarRuler({
       ref={innerRef}
       sx={{
         position: 'sticky',
-        top: APP_BAR_HEIGHT,
+        // Directly beneath the app bar.
+        top: STICKY_TOP,
         zIndex: 2,
         // Opaque: the curves scroll underneath it. A translucent band over a
         // figure blends two readings of the same axis into one picture.
@@ -735,10 +735,10 @@ export default function StackedPosteriorPlot({
       if (!frame) frame = requestAnimationFrame(measure)
     }
     measure()
-    window.addEventListener('scroll', onScroll, { passive: true })
+    const stopScroll = onPageScroll(onScroll)
     window.addEventListener('resize', onScroll)
     return () => {
-      window.removeEventListener('scroll', onScroll)
+      stopScroll()
       window.removeEventListener('resize', onScroll)
       if (frame) cancelAnimationFrame(frame)
     }
