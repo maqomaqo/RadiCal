@@ -1,3 +1,5 @@
+import { isTauri } from '@tauri-apps/api/core'
+
 /**
  * Format an error response from the backend into a single readable
  * string, for use in alerts/toasts.
@@ -48,6 +50,17 @@ export function formatApiError(data: unknown): string {
 }
 
 /**
+ * Why a request got no answer. On a server it is the connection or the
+ * server; in the desktop app the server is part of the app, so the network
+ * has nothing to do with it and reopening the app is the remedy.
+ */
+export function unreachableMessage(): string {
+  return isTauri()
+    ? "RadiCal's own server stopped answering. Quitting and reopening RadiCal should fix it."
+    : 'the server could not be reached. It may be down, or your connection may have dropped.'
+}
+
+/**
  * What to tell the reader when fetch itself rejected.
  *
  * The browser's own message -- "Failed to fetch", "Load failed",
@@ -58,7 +71,7 @@ export function formatApiError(data: unknown): string {
 export function describeFetchError(err: unknown): string {
   const message = err instanceof Error ? err.message : String(err)
   if (/failed to fetch|load failed|networkerror|network request failed/i.test(message)) {
-    return 'the server could not be reached. It may be down, or your connection may have dropped.'
+    return unreachableMessage()
   }
   return message
 }

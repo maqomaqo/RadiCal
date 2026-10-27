@@ -16,7 +16,7 @@ lowest-common-denominator UI.
 
 ## Product Purpose
 
-A web-based tool for radiocarbon dating analysis: calibration against IntCal20/Marine20/SHCal20,
+A tool for radiocarbon dating analysis, as a desktop app or on a shared server in the browser: calibration against IntCal20/Marine20/SHCal20,
 Bayesian chronological modelling with stratigraphic constraints (OxCal-style Sequences, Phases,
 Boundaries, Hiatuses), and interactive posterior visualization. Success is a calendar-date estimate
 a user can trust and cite — correct, reproducible, and traceable to the curve/solver/settings that

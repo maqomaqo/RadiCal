@@ -1,4 +1,5 @@
-import { formatApiError } from './apiError'
+import { isTauri } from '@tauri-apps/api/core'
+import { formatApiError, unreachableMessage } from './apiError'
 
 /**
  * Loading the Dashboard's recent analyses, and saying precisely what went
@@ -39,7 +40,11 @@ export async function loadRecentAnalyses<T>(
     // DNS, TLS, server down -- so there is nothing the server said to report.
     return {
       ok: false,
-      error: { message: "Can't reach the server. Check your connection, then try again." },
+      error: {
+        message: isTauri()
+          ? unreachableMessage()
+          : "Can't reach the server. Check your connection, then try again.",
+      },
     }
   }
 

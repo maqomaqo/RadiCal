@@ -333,8 +333,9 @@ The primary navigation is a sticky `AppBar` that never scrolls out of view, sinc
 trees can run long. Below the `sm` breakpoint the three section links (Dashboard, Projects, Curves)
 and Help collapse into a hamburger menu rather than wrapping the bar to a second line — a wrapped
 sticky bar would push all page content down a row on every load. The primary action, "New Analysis",
-stays visible at every width; it never collapses into the menu. The account control stays reachable
-at every width too, dropping to its icon below `md`.
+stays visible at every width; it never collapses into the menu. On a server the account control stays
+reachable at every width too, dropping to its icon below `md`; RadiCal Desktop has no accounts and
+no account control.
 
 Pages load on demand; while a page's chunk arrives, a centred spinner sits below the nav, which
 stays put.
@@ -449,7 +450,7 @@ not a RadiCal-specific choice).
   Projects).
 - **Help** is a question-mark icon on the controls side, not a fourth tab — it is the way out of
   being stuck anywhere, not a place.
-- **Account** is a menu, not a bare sign-out button: the trigger shows the address (truncated,
+- **Account** (on a server only; RadiCal Desktop has none) is a menu, not a bare sign-out button: the trigger shows the address (truncated,
   220px max; icon only below `md`) and the menu spells it out in full under a "Signed in as" caption.
 - **Focus on the bar** is a 2px white ring inset by 2px. The theme's primary focus ring would be
   invisible on a primary bar, and an outset ring would be clipped by the bar's edges.

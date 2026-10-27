@@ -31,7 +31,8 @@ use serde_json::{Value, json};
 pub const PROGRESS_INTERVAL: Duration = Duration::from_millis(500);
 
 /// What [`reconcile_orphans`] says of work a restart interrupted.
-pub const INTERRUPTED: &str = "Interrupted by a server restart.";
+pub const INTERRUPTED: &str =
+    "Interrupted: RadiCal was closed or restarted while this was running.";
 
 // --------------------------------------------------------------------------
 // Failures
@@ -120,7 +121,7 @@ pub fn classify(error: &JobError) -> Failure {
     let internal = |detail: String| {
         Failure {
         category: "internal",
-        message: "The run stopped because of an unexpected error inside the app, not because of anything about this model. Nothing was saved over, so the analysis still holds whatever results it had. The server log has the details; re-running may simply work.".to_owned(),
+        message: "The run stopped because of an unexpected error inside the app, not because of anything about this model. Nothing was saved over, so the analysis still holds whatever results it had. Re-running may simply work. On a server, its log has the details.".to_owned(),
         detail: Some(detail),
     }
     };
