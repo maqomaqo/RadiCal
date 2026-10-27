@@ -1078,7 +1078,10 @@ async fn replay(accounts: bool) {
         // A poll the backend saw finished waits for the Rust job to finish,
         // as long as the suite's own `_await_job` would (300 s: a slow
         // runner takes far longer than a laptop over an influence report);
-        // one it saw still running accepts whatever state this one is in.
+        // one it saw running waits until this one has at least started, and
+        // then accepts whatever state it is in. That is what the suite's own
+        // wait-until-running loops are for: a cancel that follows has to find
+        // the job running, not still queued, or it tests the other path.
         // Reading an analysis waits the same way for its run, which the
         // backend's had finished by then.
         let progress = match route.as_str() {
@@ -1087,20 +1090,22 @@ async fn replay(accounts: bool) {
             _ => None,
         };
         if let Some(key) = progress {
-            let state = want["response_json"]["data"][key].as_str().unwrap_or("");
-            if !matches!(state, "queued" | "running") {
-                for _ in 0..6000 {
-                    let now = answer
-                        .1
-                        .as_ref()
-                        .and_then(|b| b["data"][key].as_str())
-                        .unwrap_or("");
-                    if !matches!(now, "queued" | "running") {
-                        break;
-                    }
-                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-                    answer = send(&app, method, url, &i, &mut ids, auth.as_deref()).await;
+            let waiting: &[&str] = match want["response_json"]["data"][key].as_str() {
+                Some("queued") => &[],
+                Some("running") => &["queued"],
+                _ => &["queued", "running"],
+            };
+            for _ in 0..6000 {
+                let now = answer
+                    .1
+                    .as_ref()
+                    .and_then(|b| b["data"][key].as_str())
+                    .unwrap_or("");
+                if !waiting.contains(&now) {
+                    break;
                 }
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                answer = send(&app, method, url, &i, &mut ids, auth.as_deref()).await;
             }
         }
         let entry = tally.entry(route.clone()).or_default();
