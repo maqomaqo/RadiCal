@@ -345,10 +345,18 @@ function AppShell() {
  * less the app bar's, so the scrollbar starts below the bar rather than
  * running up beside it. In a browser, nothing -- the document scrolls, as a
  * web page's should. See `DESKTOP` in desktop/shell.ts.
+ *
+ * `position: relative` makes the region the containing block of anything
+ * absolutely positioned inside it with no positioned ancestor of its own --
+ * the visually hidden table captions, for one. Without it their containing
+ * block is the window: they sit where they fall on the long page, stretch
+ * the document past the window and give it a second scrollbar.
  */
 function PageScroller({ children }: { children: ReactNode }) {
   if (!DESKTOP) return <>{children}</>
-  return <Box sx={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>{children}</Box>
+  return (
+    <Box sx={{ flex: 1, minHeight: 0, overflowY: 'auto', position: 'relative' }}>{children}</Box>
+  )
 }
 
 function App() {
