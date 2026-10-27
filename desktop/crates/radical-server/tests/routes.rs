@@ -96,3 +96,36 @@ async fn the_api_documents_itself_without_signing_in() {
     }
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// Axum refuses a body over 2 MB in plain text unless told otherwise; a
+/// project package is often larger, and its route must still answer in JSON.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_upload_over_two_megabytes_reaches_its_route() {
+    let dir = std::env::temp_dir().join(format!("radical-upload-{}", radical_store::new_id()));
+    let state = radical_server::State::open(dir.join("radical.db"), 1).unwrap();
+    let app = radical_server::app(state);
+    let boundary = "radical-upload-boundary";
+    let mut body = format!(
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"project.zip\"\r\n\
+         Content-Type: application/zip\r\n\r\n"
+    )
+    .into_bytes();
+    body.extend(std::iter::repeat_n(b'x', 3 * 1024 * 1024));
+    body.extend(format!("\r\n--{boundary}--\r\n").into_bytes());
+    let request = Request::builder()
+        .method(Method::POST)
+        .uri("/api/import/project/preview")
+        .header(
+            "content-type",
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .body(Body::from(body))
+        .unwrap();
+    let response = app.oneshot(request).await.unwrap();
+    let status = response.status().as_u16();
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    let _ = std::fs::remove_dir_all(dir);
+    assert_ne!(status, 413, "{}", String::from_utf8_lossy(&bytes));
+    let body: Value = serde_json::from_slice(&bytes).expect("the route answers in JSON");
+    assert!(body.get("success").is_some(), "{body}");
+}

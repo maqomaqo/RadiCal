@@ -42,7 +42,7 @@ use crate::solve::relabel_tree;
 use crate::validate::{Fields, Problems};
 use crate::{ApiError, ApiResult, State, ok};
 
-const MAX_PACKAGE_BYTES: usize = 100 * 1024 * 1024;
+pub(crate) const MAX_PACKAGE_BYTES: usize = 100 * 1024 * 1024;
 const MAX_MEMBERS: usize = 20000;
 const ANALYSIS_TYPES: [&str; 3] = ["calibration", "group_calibration", "bayesian"];
 /// What a date on a curve the import has yet to store is validated under.
