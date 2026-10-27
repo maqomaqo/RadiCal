@@ -605,16 +605,31 @@ async fn rerun_analysis(
         ));
     }
     set_status(&state, &analysis_id, "pending", None);
-    let job_id = state.jobs.submit(
+    let (worker, target) = (state.clone(), analysis_id.clone());
+    let job_id = state.jobs.submit_undoable(
         "analysis_run",
         Some(&analysis_id),
         caller.owner(),
         analysis_run_work(&state, &analysis_id),
+        Some(Box::new(move || status_after_cancel(&worker, &target))),
     )?;
     Ok(answer(
         StatusCode::ACCEPTED,
         json!({"id": analysis_id, "status": "queued", "job_id": job_id}),
     ))
+}
+
+/// A cancelled re-run, whether it was running or never started: only a
+/// finished run writes, so the analysis keeps the results it already had.
+fn status_after_cancel(state: &State, analysis_id: &str) {
+    let has_results = state
+        .store
+        .read(|c| {
+            rows::select_where::<AnalysisResult>(c, "analysis_id = ?", [analysis_id], "rowid")
+        })
+        .is_ok_and(|r| !r.is_empty());
+    let status = if has_results { "completed" } else { "pending" };
+    set_status(state, analysis_id, status, None);
 }
 
 /// An 'analysis_run' job's work (`_run_analysis_job`): solve a saved
@@ -642,21 +657,7 @@ pub fn analysis_run_work(state: &State, analysis_id: &str) -> radical_jobs::Work
                 Ok(Some(json!({"analysis_id": target, "solver": solver})))
             }
             Err(Failed::Cancelled) => {
-                // Only a finished run writes, so the analysis keeps the
-                // results it already had.
-                let has_results = worker
-                    .store
-                    .read(|c| {
-                        rows::select_where::<AnalysisResult>(
-                            c,
-                            "analysis_id = ?",
-                            [&target],
-                            "rowid",
-                        )
-                    })
-                    .is_ok_and(|r| !r.is_empty());
-                let status = if has_results { "completed" } else { "pending" };
-                set_status(&worker, &target, status, None);
+                status_after_cancel(&worker, &target);
                 Err(radical_jobs::JobError::Cancelled)
             }
             Err(failure) => {
