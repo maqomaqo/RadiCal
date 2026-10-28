@@ -1,5 +1,4 @@
-//! Time the sampler on the benchmark models `desktop/bench/sampler_bench.py`
-//! writes, the way that script times Python:
+//! Time the sampler on the benchmark models in `desktop/bench/models.json`:
 //!
 //! ```text
 //! cargo run --release -p radical-core --example sampler_bench
@@ -28,10 +27,9 @@ const FIXED_SWEEPS: usize = 10_000;
 
 fn main() {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../bench/models.json");
-    let models: serde_json::Map<String, Value> = serde_json::from_str(
-        &std::fs::read_to_string(path).expect("run desktop/bench/sampler_bench.py first"),
-    )
-    .unwrap();
+    let models: serde_json::Map<String, Value> =
+        serde_json::from_str(&std::fs::read_to_string(path).expect("desktop/bench/models.json"))
+            .unwrap();
     let cal = Calibrator::default();
     println!(
         "{:28} {:>18} {:>8} {:>20}",

@@ -18,8 +18,8 @@ export type NodeType = 'sample' | 'group'
 
 // --- Explicit model structure (OxCal-style Sequence/Phase/Boundary) ---
 //
-// Mirrors backend/app/services/model_tree.py. `children` are ordered
-// OLDEST FIRST, matching OxCal's reading order and the Harris matrix
+// Mirrors desktop/crates/radical-core/src/model_tree.rs. `children` are
+// ordered OLDEST FIRST, matching OxCal's reading order and the Harris matrix
 // convention of oldest at the bottom. A Boundary placed between two Phases
 // inside a Sequence is a SINGLE shared parameter -- the end of the earlier
 // phase and the start of the later one at once -- not two independent ones.
@@ -212,10 +212,10 @@ export interface PosteriorSummary {
 
 // --- durations and differences ---
 //
-// Mirrors backend/app/services/intervals.py. Deliberately NOT shaped like
-// PosteriorSummary above: every figure here is a LENGTH OF TIME in years, not
-// a calendar age, so none of it may go through formatCalendarAge or the
-// BC/AD conversion. Different field names are what makes that mistake
+// Mirrors desktop/crates/radical-core/src/intervals.rs. Deliberately NOT
+// shaped like PosteriorSummary above: every figure here is a LENGTH OF TIME in
+// years, not a calendar age, so none of it may go through formatCalendarAge or
+// the BC/AD conversion. Different field names are what makes that mistake
 // impossible rather than merely discouraged.
 export interface DurationSummary {
   mean: number

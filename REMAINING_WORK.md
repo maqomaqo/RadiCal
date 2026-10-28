@@ -46,7 +46,7 @@ matters most once a wiggle match can sit inside a Phase (item 2).
 Deploying copies a date's values into the analysis on purpose, as a snapshot,
 but nothing records which `ProjectSample` a `RadiocarbonSample` came from. So
 nothing can show "this analysis uses an outdated version of this date". A
-nullable `source_project_sample_id` (one Alembic migration) would enable that
+nullable `source_project_sample_id` (one store migration) would enable that
 without weakening the snapshot.
 
 ### 6. Bundled ΔR snapshot
@@ -99,11 +99,16 @@ before the first open (`docs/INSTALLATION.md` tells users how to get past it).
 Both take weeks of paperwork before any code changes. Once they're done, drop
 the warning section from `docs/INSTALLATION.md`.
 
+### 10. Exact solver's matrix products
+The exact solver is the one place the Rust server is not faster than the
+Python one was: NumPy handed its large matrix products to Apple Accelerate or
+OpenBLAS. Calling a BLAS from `radical-core`'s `matmul` would close the gap.
+
 ---
 
 ## Testing
 
-### 10. No automated end-to-end tests
+### 11. No automated end-to-end tests
 Flows are verified by hand against the running stack. The obvious first
 scenarios, for example Playwright against `docker-compose.yml`: sign in → new
 analysis → run → results; deploy from a collection; compare two analyses.
@@ -114,10 +119,10 @@ most exposed. Smoke tests of the Results, Stratigraphy and Curve Browser pages
 on all three, in CI with `tauri-driver`, would catch a webview difference
 before users do.
 
-### 11. Frontend unit gaps
+### 12. Frontend unit gaps
 - `utils/stratigraphy.ts` (`flattenStructure`, `expandRelationships`,
   `findCycle`) is pure and untested.
-- `hooks/useJob.ts` and `api/jobs.ts` are covered only end to end, through the
-  backend suite.
+- `hooks/useJob.ts` and `api/jobs.ts` have no tests of their own; only the
+  server side of jobs is tested, by `radical-server`'s tests.
 - `ImportDatesDialog` needs a component test. That means adding jsdom, since
   Vitest currently runs in `node` (`vite.config.ts`).

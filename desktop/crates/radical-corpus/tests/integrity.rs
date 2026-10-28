@@ -26,7 +26,7 @@ fn every_listed_file_is_the_one_that_was_generated() {
         assert_eq!(
             &sha256_hex(&bytes),
             want,
-            "{path} has changed since generate.py wrote it"
+            "{path} does not match its SHA-256 in manifest.json"
         );
     }
 }

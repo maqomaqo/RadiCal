@@ -5,7 +5,7 @@
   {
    "name": "pipeline/fixture",
    "inputs": {
-    "file": "backend/tests/fixtures/calib_marine/query_response.html"
+    "file": "desktop/corpus/fixtures/calib_marine/query_response.html"
    },
    "outputs": {
     "declared": 106,
@@ -30,7 +30,7 @@
   {
    "name": "freshness/fixture",
    "inputs": {
-    "file": "backend/tests/fixtures/calib_marine/freshness_response.html"
+    "file": "desktop/corpus/fixtures/calib_marine/freshness_response.html"
    },
    "outputs": {
     "record_count": 2060,

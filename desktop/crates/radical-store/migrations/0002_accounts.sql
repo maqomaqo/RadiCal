@@ -1,4 +1,4 @@
--- Version 2: the accounts, for RadiCal on a server (docs/RUST_SERVER_PLAN.md).
+-- Version 2: the accounts, for RadiCal on a server.
 -- RadiCal Desktop has the same tables and columns, and leaves them empty: one
 -- person, no owners.
 --

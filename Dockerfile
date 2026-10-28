@@ -5,7 +5,6 @@
 # frontend's same-origin `fetch('/api/...')` calls need no proxy in front.
 # Its data is one SQLite file on the /data volume, and the calibration curves
 # are compiled into the binary. Nothing else is needed: no database server.
-# See docs/RUST_SERVER_PLAN.md.
 #
 # Built for the platform of the machine building it. The publishing workflow
 # (.github/workflows/publish-image.yml) builds amd64 and arm64 on runners of

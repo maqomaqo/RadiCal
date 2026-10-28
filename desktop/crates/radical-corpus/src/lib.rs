@@ -1,8 +1,8 @@
-//! The golden corpus: what the Python implementation answers today, written by
-//! `desktop/corpus/generate.py`, for the Rust port to be held to.
+//! The golden corpus: what the earlier Python server answered, recorded by
+//! `desktop/corpus/generate.py` (in the repository at tag `v2.1.0`), for the
+//! Rust code to be held to.
 //!
-//! This crate only reads it. The format is described in that script's module
-//! docstring; the parts a reader has to know are here:
+//! This crate only reads it. The parts of the format a reader has to know:
 //!
 //! - Each family file is `{"schema": 2, "family": ..., "cases": [...]}`, and a
 //!   case carries `name`, `inputs`, and either `outputs` or `error` -- a
@@ -28,7 +28,7 @@ use serde::Deserialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-/// The corpus format this crate reads. Bumped with `SCHEMA` in generate.py.
+/// The corpus format this crate reads.
 pub const SCHEMA: u32 = 2;
 
 #[derive(Debug)]

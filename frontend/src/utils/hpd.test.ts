@@ -250,8 +250,8 @@ describe('the reporting levels', () => {
    *
    * JavaScript has no erf, so these are written out. The values below are
    * erf(n/sqrt(2)) to full double precision and must match
-   * SIGMA_1/SIGMA_2/SIGMA_3 in backend/app/services/calibration.py, which
-   * computes them -- the page re-selects a region client-side from a
+   * SIGMA_1/SIGMA_2/SIGMA_3 in desktop/crates/radical-core/src/calibration.rs
+   * -- the page re-selects a region client-side from a
    * distribution the backend produced, so the two arriving at different levels
    * is exactly the drift this pins.
    */

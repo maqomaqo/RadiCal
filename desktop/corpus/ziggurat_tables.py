@@ -2,7 +2,7 @@
 Write NumPy's ziggurat tables for the standard normal as Rust source:
 desktop/crates/radical-core/src/rng/ziggurat_tables.rs.
 
-    cd backend && python ../desktop/corpus/ziggurat_tables.py
+    python3 desktop/corpus/ziggurat_tables.py
 
 numpy.random.Generator.normal draws by Marsaglia and Tsang's ziggurat over
 three 256-entry tables (ki_double, wi_double, fi_double in NumPy's
@@ -10,8 +10,9 @@ random/src/distributions/ziggurat_constants.h). They are data, not something
 the algorithm derives at run time, so the port needs NumPy's own values to
 the bit. NumPy does not ship the header in its wheels; the tables are
 compiled into numpy/random/_generator, and this reads them from there --
-from the NumPy that backend/requirements.txt pins, which is the one the
-corpus is generated with -- and checks each looks as it must before writing.
+from the installed NumPy, which should be the one the corpus was generated
+with (manifest.json's `generated_from`) -- and checks each looks as it must
+before writing.
 
 The corpus (units/rng, `normal`) then holds the port's draws to NumPy's,
 which a wrong table could not pass.

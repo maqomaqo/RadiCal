@@ -1,5 +1,5 @@
-//! Moving an installation from the backend's PostgreSQL to SQLite
-//! (`radical-server import-postgres`, docs/RUST_SERVER_PLAN.md S4).
+//! Moving an installation from the Python server's PostgreSQL to SQLite
+//! (`radical-server import-postgres`).
 //!
 //! The backend's tables are this store's tables, column for column (the
 //! schema test holds them so), so the move is a copy: every row of every
