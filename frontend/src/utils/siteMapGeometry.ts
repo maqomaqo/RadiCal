@@ -455,22 +455,54 @@ function naturalEarthHeight(phi: number): number {
   return phi * (1.007226 + p2 * (0.015085 + p4 * (-0.044475 + 0.028874 * p2 - 0.005916 * p4)))
 }
 
-/** d/dφ of naturalEarthHeight: how tall a radian of latitude draws at φ. */
-function naturalEarthSlope(phi: number): number {
-  const p2 = phi * phi
-  const p4 = p2 * p2
-  const p6 = p4 * p2
-  const p8 = p4 * p4
-  return (
-    1.007226 +
-    3 * 0.015085 * p2 -
-    7 * 0.044475 * p6 +
-    9 * 0.028874 * p8 -
-    11 * 0.005916 * p8 * p2
-  )
+const RADIANS = Math.PI / 180
+
+/**
+ * Width over height of the box Plotly draws a frame into, in Natural Earth.
+ *
+ * Plotly fits the BOUNDING BOX of the frame's outline to the plot area and
+ * letterboxes whatever is left, so this has to be that box, not an estimate
+ * from the middle of the frame:
+ *
+ * - The widest part of a frame is the latitude in it nearest the equator,
+ *   since that is where a degree of longitude draws widest -- not its middle.
+ *   Measuring at the middle made every frame off the equator come out wider
+ *   than asked for, and the map drew with a band above and below.
+ * - The top and bottom edges are not parallels. Plotly gives the outline five
+ *   points along each and d3 joins them by great circles, which bow towards
+ *   the pole between the points; the poleward edge's bow is part of the box.
+ *   Left out, a wide frame came out taller than asked for, with a thin band
+ *   either side.
+ *
+ * The longitude edges are meridians, which a great circle follows exactly.
+ * Plotly rotates the projection to the frame's centre, so the box is
+ * symmetric about it.
+ */
+function drawnAspect(frame: MapFrame): number {
+  const span = (frame.lon[1] - frame.lon[0]) * RADIANS
+  const south = frame.lat[0] * RADIANS
+  const north = frame.lat[1] * RADIANS
+  const nearestEquator = Math.min(Math.max(0, south), north)
+  // The furthest a great circle between two points on a parallel, span/4
+  // apart, reaches towards the pole: at its midpoint, span/8 from each.
+  const bowed = (phi: number) => Math.atan(Math.tan(phi) / Math.cos(span / 8))
+  const top = Math.max(naturalEarthHeight(north), naturalEarthHeight(bowed(north)))
+  const bottom = Math.min(naturalEarthHeight(south), naturalEarthHeight(bowed(south)))
+  return (span * naturalEarthWidth(nearestEquator)) / (top - bottom)
 }
 
-const RADIANS = Math.PI / 180
+/**
+ * The least x in [low, high] for which `reached` holds, to well under a
+ * pixel. `reached` must be false below some point and true above it.
+ */
+function bisect(low: number, high: number, reached: (x: number) => boolean): number {
+  for (let i = 0; i < 50; i++) {
+    const mid = (low + high) / 2
+    if (reached(mid)) high = mid
+    else low = mid
+  }
+  return high
+}
 
 /**
  * The frame widened, or heightened, to fill a box of the given aspect
@@ -482,12 +514,12 @@ const RADIANS = Math.PI / 180
  * blank is filled with more map on either side, which is what a reader would
  * have panned to see anyway.
  *
- * Measured in the Natural Earth projection the offline map draws in, where a
- * degree of longitude is narrower than one of latitude everywhere -- by
- * 0.87 at the equator and more towards the poles -- rather than by the
- * cosine a cylindrical map would use, which left a strip of letterbox on
- * either side. The tiled map takes only this frame's centre and a zoom from
- * its width, for which the same figure is close enough.
+ * Measured as Plotly draws it -- see drawnAspect -- in the Natural Earth
+ * projection the offline map uses, where a degree of longitude is narrower
+ * than one of latitude everywhere: by 0.87 at the equator and more towards
+ * the poles, rather than by the cosine a cylindrical map would use. The
+ * tiled map takes only this frame's centre and a zoom from its width, for
+ * which the same figure is close enough.
  *
  * Longitude is allowed past 180: Plotly rotates the projection to the
  * range's centre and draws across the antimeridian, which is exactly what a
@@ -501,17 +533,20 @@ export function fitFrameToAspect(frame: MapFrame, aspect: number): MapFrame {
   if (!Number.isFinite(aspect) || aspect <= 0) return frame
   const midLat = (frame.lat[0] + frame.lat[1]) / 2
   const midLon = (frame.lon[0] + frame.lon[1]) / 2
-  const width = (frame.lon[1] - frame.lon[0]) * RADIANS * naturalEarthWidth(midLat * RADIANS)
-  const height =
-    naturalEarthHeight(frame.lat[1] * RADIANS) - naturalEarthHeight(frame.lat[0] * RADIANS)
-  if (width < aspect * height) {
-    const half = Math.min(
-      180,
-      ((aspect * height) / naturalEarthWidth(midLat * RADIANS) / RADIANS) / 2,
-    )
-    return { lon: [midLon - half, midLon + half], lat: frame.lat }
+  // Solved for rather than worked out in one step: the box's width depends
+  // on which latitudes are in the frame, and its height on how wide it is.
+  if (drawnAspect(frame) < aspect) {
+    const widened = (half: number): MapFrame => ({
+      lon: [midLon - half, midLon + half],
+      lat: frame.lat,
+    })
+    const half = bisect((frame.lon[1] - frame.lon[0]) / 2, 180, (h) => drawnAspect(widened(h)) >= aspect)
+    return widened(half)
   }
-  const half = Math.min(90, (width / aspect / naturalEarthSlope(midLat * RADIANS) / RADIANS) / 2)
-  const shift = Math.max(0, midLat + half - 90) - Math.max(0, -90 - (midLat - half))
-  return { lon: frame.lon, lat: [midLat - half - shift, midLat + half - shift] }
+  const heightened = (half: number): MapFrame => {
+    const shift = Math.max(0, midLat + half - 90) - Math.max(0, -90 - (midLat - half))
+    return { lon: frame.lon, lat: [midLat - half - shift, midLat + half - shift] }
+  }
+  const half = bisect((frame.lat[1] - frame.lat[0]) / 2, 90, (h) => drawnAspect(heightened(h)) <= aspect)
+  return heightened(half)
 }

@@ -467,12 +467,22 @@ export default function SiteMap({
   const openingFrame = useRef(frame)
   const dataFrame = editable ? openingFrame.current : frame
 
-  // The box's width over its height, measured, so the frame can be widened to
-  // fill it -- see fitFrameToAspect. Starts at the CSS aspect the box is
-  // given below and is corrected by the observer on first layout.
-  const [aspect, setAspect] = useState(16 / 9)
+  // The box's size, measured by the observer below; null until first layout.
+  const [box, setBox] = useState<{ width: number; height: number } | null>(null)
+  // What Plotly took from the box for itself -- the upright colour bar's
+  // margin -- measured once it has drawn. The map is drawn in what is left,
+  // so that is what the frame must fill: fitted to the whole box, a map with
+  // a colour bar came out too wide for its plot area and was letterboxed
+  // above and below.
+  const [reserved, setReserved] = useState({ x: 0, y: 0 })
+  // The CSS aspect the box is given below, until it has been measured.
+  const boxAspect = box ? box.width / box.height : 16 / 9
+  const aspect = box
+    ? Math.max(1, box.width - reserved.x) / Math.max(1, box.height - reserved.y)
+    : boxAspect
   // Portrait or near it: a phone's column, where the colour bar lies flat.
-  const narrowFigure = aspect < 1.25
+  // Decided on the box, not the plot area, since it decides the colour bar.
+  const narrowFigure = boxAspect < 1.25
   const viewFrame = useMemo(
     () => (dataFrame ? fitFrameToAspect(dataFrame, aspect) : null),
     [dataFrame, aspect],
@@ -916,7 +926,7 @@ export default function SiteMap({
     if (!container || typeof ResizeObserver === 'undefined') return
     const observer = new ResizeObserver((entries) => {
       const { width, height: tall } = entries[0].contentRect
-      if (width > 0 && tall > 0) setAspect(width / tall)
+      if (width > 0 && tall > 0) setBox({ width, height: tall })
       const gd = graphDiv.current as HTMLElement | null
       if (gd && gd.isConnected) Plotly.Plots.resize(gd)
     })
@@ -940,6 +950,18 @@ export default function SiteMap({
 
   const onDrawn = useCallback((gd: HTMLElement) => {
     graphDiv.current = gd
+    const full = (gd as HTMLElement & {
+      _fullLayout?: { width: number; height: number; _size: { w: number; h: number } }
+    })._fullLayout
+    if (full) {
+      const x = full.width - full._size.w
+      const y = full.height - full._size.h
+      // Unchanged to the pixel is left alone, or every draw would ask for
+      // another.
+      setReserved((prev) =>
+        Math.abs(prev.x - x) < 0.5 && Math.abs(prev.y - y) < 0.5 ? prev : { x, y },
+      )
+    }
     // MapLibre names its canvas "Map", whichever map it is.
     const canvas = (mapLibreOf(gd) as { getCanvas?: () => HTMLElement } | null)?.getCanvas?.()
     canvas?.setAttribute('aria-label', label)

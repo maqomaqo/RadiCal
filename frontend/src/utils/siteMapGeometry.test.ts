@@ -200,6 +200,61 @@ describe('fitFrameToAspect', () => {
     expect(fitted.lat).toEqual([-80, 80])
   })
 
+  /**
+   * The aspect of the box Plotly draws a frame into, found the long way: the
+   * outline Plotly builds (five points along the top and bottom edges),
+   * joined by great circles as d3 joins them, walked finely and projected in
+   * Natural Earth, centred as Plotly centres it.
+   */
+  function plotlyAspect(frame: { lon: [number, number]; lat: [number, number] }): number {
+    const rad = Math.PI / 180
+    const project = (lon: number, lat: number) => {
+      const p = lat * rad
+      const p2 = p * p
+      const p4 = p2 * p2
+      const w = 0.8707 - 0.131979 * p2 + p4 * (-0.013791 + p4 * (0.003971 * p2 - 0.001529 * p4))
+      const h = p * (1.007226 + p2 * (0.015085 + p4 * (-0.044475 + 0.028874 * p2 - 0.005916 * p4)))
+      return [lon * rad * w, h]
+    }
+    const half = (frame.lon[1] - frame.lon[0]) / 2
+    const [south, north] = frame.lat
+    const corners: Array<[number, number]> = [[-half, south], [-half, north]]
+    for (let i = 1; i <= 4; i++) corners.push([-half + (i * half) / 2, north])
+    for (let i = 0; i <= 4; i++) corners.push([half - (i * half) / 2, south])
+    const xs: number[] = []
+    const ys: number[] = []
+    for (let i = 0; i + 1 < corners.length; i++) {
+      for (const p of densifyGreatCircle([
+        { latitude: corners[i][1], longitude: corners[i][0] },
+        { latitude: corners[i + 1][1], longitude: corners[i + 1][0] },
+      ])) {
+        const [x, y] = project(p.longitude, p.latitude)
+        xs.push(x)
+        ys.push(y)
+      }
+    }
+    return (Math.max(...xs) - Math.min(...xs)) / (Math.max(...ys) - Math.min(...ys))
+  }
+
+  it.each([
+    // Off the equator, where the frame is widest at its equatorward edge,
+    // not its middle: measured at the middle, these drew with a band above
+    // and below.
+    { lon: [-10, 30], lat: [40, 62] },
+    { lon: [10, 12], lat: [30, 60] },
+    // Wide and flat, where the top and bottom edges bow towards the poles:
+    // left out, these drew with a band either side.
+    { lon: [-60, 60], lat: [-10, 10] },
+    { lon: [150, 250], lat: [-25, -5] },
+  ] as Array<{ lon: [number, number]; lat: [number, number] }>)(
+    'fills the box exactly as Plotly draws $lon, $lat',
+    (frame) => {
+      for (const aspect of [16 / 9, 2.75, 0.85]) {
+        expect(plotlyAspect(fitFrameToAspect(frame, aspect))).toBeCloseTo(aspect, 2)
+      }
+    },
+  )
+
   it('shifts a window off a pole instead of running past it', () => {
     // A wide frame near the pole in a tall box wants latitude it cannot
     // have: the window is moved towards the equator and keeps its height.
