@@ -30,12 +30,12 @@
 ## Getting Started
 
 RadiCal comes in two forms. Both do the same analyses with the same screens, so the rest of this
-manual applies to either; where they differ, it says so.
+manual applies to either; differences are noted when applicable.
 
 - **RadiCal Desktop** is an app on your own computer, for one person. There is no account and no
   sign-in, and your work stays on your computer.
 - **RadiCal on a server** is one installation shared by a group. Each person opens it in a web
-  browser and signs in to their own account.
+  browser and signs in to their own account. You can run this on a localhost using Docker, or on a remote server.
 
 The installation guide (`docs/INSTALLATION.md` on RadiCal's GitHub page) covers installing either.
 
