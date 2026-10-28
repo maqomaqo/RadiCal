@@ -16,7 +16,7 @@ colors:
   undated-level-slate: "#5b7f8d"
   residual-early: "#b85c14"
   residual-late: "#215f7a"
-  muted-surface: "#f6f0eb"
+  muted-surface: "#f1e8e0"
   context-shade-lightest: "#35826e"
   context-shade-darkest: "#04372a"
   state-error: "#a3231d"
