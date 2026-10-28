@@ -90,9 +90,8 @@ export default function ReservoirSnapshotCard() {
         Marine reservoir database
       </Typography>
       <Typography variant="body2" color="text.secondary" sx={{ maxWidth: '64ch', mb: 2 }}>
-        Where a marine date's ΔR comes from when it is derived from a position rather than typed.
-        A snapshot is frozen once stored, like a calibration curve, so a published date keeps
-        meaning what it said.
+        RadiCal uses this dataset when you choose to set ΔR based on the spatial position of a date.
+        A snapshot of the database is frozen once stored, like a calibration curve, so analysed dates keep their reference point.
       </Typography>
 
       {error && <Alert severity="warning" sx={{ mb: 2 }}>{error}</Alert>}
@@ -133,8 +132,7 @@ export default function ReservoirSnapshotCard() {
           {freshness?.behind && current && (
             <Alert severity="info" sx={{ mb: 2 }}>
               Fetching adds a NEW snapshot beside this one. Nothing already computed changes:
-              dates that cite {current.id} go on citing it, and it stays resolvable for as long
-              as they do.
+              dates that cite {current.id} will continue to cite that version.
             </Alert>
           )}
 
@@ -163,8 +161,7 @@ export default function ReservoirSnapshotCard() {
 
           <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 1.5 }}>
             Checking costs one small request; fetching costs about a megabyte and takes a few
-            seconds. Neither happens on its own — an offset that changed underneath a published
-            analysis is the thing this design exists to prevent.
+            seconds.
           </Typography>
         </>
       )}
