@@ -1177,18 +1177,8 @@ export default function ProjectDetail() {
             }
             label="Show a basemap with coastlines, rivers and place names"
           />
-          {/* The notice says what the request gives away, and says it BEFORE
-              the switch is thrown rather than in a footnote afterwards. That
-              ordering is the point: defaulting to tiles and mentioning it
-              later would be the same disclosure with better manners. */}
           <Alert severity={editTiles ? 'warning' : 'info'} sx={{ mt: 1 }}>
-            The map draws its coastlines from data this app serves itself, and asks nothing of
-            anyone. Turning this on fetches map tiles from OpenFreeMap instead — on every map this
-            project appears in, placing and results alike — which tells their server which patch
-            of ground is on screen each time someone opens or pans a map: not the coordinates
-            themselves, but enough to locate a site. Worth it to drop a pin on a field boundary;
-            think twice for a restricted site. It needs the internet: when OpenFreeMap cannot be
-            reached, the map falls back to the app's own coastlines and says so.
+            Turning this on sets OpenFreeMap as the map default rather than the simpler locally stored map that comes with the app. Needs an internet connection.
           </Alert>
         </DialogContent>
         <DialogActions>
