@@ -3778,9 +3778,15 @@ export default function Results() {
         </Typography>
       )}
 
+      {/* Back to the project, not the Dashboard: the Dashboard stays a click
+          away in the menu, but the project link is the small one in the band
+          at the top, a long scroll from here. */}
       <Box sx={{ mt: 4 }}>
-        <Button onClick={() => navigate('/')} variant="outlined">
-          Back to Dashboard
+        <Button
+          onClick={() => navigate(`/projects/${analysis.project_id ?? 'unassigned'}`)}
+          variant="outlined"
+        >
+          {analysis.project_id ? 'Back to Project' : 'Back to Unassigned'}
         </Button>
       </Box>
 
