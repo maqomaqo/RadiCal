@@ -89,7 +89,7 @@ class MeasurementInput(BaseModel):
     #
     # Sign convention: a marine sample of calendar age t has expected
     # radiocarbon age curve(t) + delta_r, so a positive Delta-R dates the
-    # sample YOUNGER than it would uncorrected. Supersedes `reservoir_age`.
+    # sample YOUNGER than it would uncorrected.
     delta_r: Optional[float] = Field(default=None, ge=-5000, le=5000)
     delta_r_error: Optional[float] = Field(default=None, ge=0, le=5000)
     # Where a looked-up ΔR came from. Carried through the draft for the same
@@ -105,7 +105,6 @@ class MeasurementInput(BaseModel):
     latitude: Optional[float] = Field(default=None, ge=-90, le=90)
     longitude: Optional[float] = Field(default=None, ge=-180, le=180)
 
-    reservoir_age: Optional[float] = Field(default=None, ge=-500, le=2000)
     depth_cm: Optional[float] = Field(default=None, ge=0, le=10000)
 
     # Where this sample sits in a wiggle-matched series, in years BEFORE the
@@ -251,7 +250,6 @@ class ProjectSampleUpdate(BaseModel):
     @classmethod
     def _known_curve(cls, value: Optional[str]) -> Optional[str]:
         return validate_curve_id(value)
-    reservoir_age: Optional[float] = Field(default=None, ge=-500, le=2000)
     delta_r: Optional[float] = Field(default=None, ge=-5000, le=5000)
     delta_r_error: Optional[float] = Field(default=None, ge=0, le=5000)
     # Like the TPQ/TAQ pair above, the both-or-neither rule cannot live here --

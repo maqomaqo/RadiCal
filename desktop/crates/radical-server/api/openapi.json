@@ -4971,19 +4971,6 @@
             ],
             "title": "Longitude"
           },
-          "reservoir_age": {
-            "anyOf": [
-              {
-                "type": "number",
-                "maximum": 2000.0,
-                "minimum": -500.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reservoir Age"
-          },
           "depth_cm": {
             "anyOf": [
               {
@@ -5486,19 +5473,6 @@
               }
             ],
             "title": "Longitude"
-          },
-          "reservoir_age": {
-            "anyOf": [
-              {
-                "type": "number",
-                "maximum": 2000.0,
-                "minimum": -500.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reservoir Age"
           },
           "depth_cm": {
             "anyOf": [
@@ -6092,19 +6066,6 @@
             ],
             "title": "Longitude"
           },
-          "reservoir_age": {
-            "anyOf": [
-              {
-                "type": "number",
-                "maximum": 2000.0,
-                "minimum": -500.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reservoir Age"
-          },
           "depth_cm": {
             "anyOf": [
               {
@@ -6604,19 +6565,6 @@
             ],
             "title": "Longitude"
           },
-          "reservoir_age": {
-            "anyOf": [
-              {
-                "type": "number",
-                "maximum": 2000.0,
-                "minimum": -500.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reservoir Age"
-          },
           "depth_cm": {
             "anyOf": [
               {
@@ -6832,19 +6780,6 @@
               }
             ],
             "title": "Curve Id"
-          },
-          "reservoir_age": {
-            "anyOf": [
-              {
-                "type": "number",
-                "maximum": 2000.0,
-                "minimum": -500.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reservoir Age"
           },
           "delta_r": {
             "anyOf": [

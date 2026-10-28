@@ -55,14 +55,13 @@ const SAMPLE_COLUMNS: [(&str, &str); 21] = [
 ];
 
 /// Every field a collected date is stored with.
-pub const COLLECTION_FIELDS: [&str; 22] = [
+pub const COLLECTION_FIELDS: [&str; 21] = [
     "sample_name",
     "age_bp",
     "error_1sigma",
     "material_type",
     "sample_type",
     "curve_id",
-    "reservoir_age",
     "delta_r",
     "delta_r_error",
     "delta_r_source",
@@ -292,7 +291,6 @@ fn sample_value(s: &ProjectSample, field: &str) -> Value {
         "material_type" => json!(s.material_type),
         "sample_type" => json!(s.sample_type),
         "curve_id" => json!(s.curve_id),
-        "reservoir_age" => json!(s.reservoir_age),
         "delta_r" => json!(s.delta_r),
         "delta_r_error" => json!(s.delta_r_error),
         "delta_r_source" => s.delta_r_source.clone().unwrap_or(Value::Null),

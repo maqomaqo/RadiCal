@@ -28,7 +28,6 @@ export interface PastedDate {
   taq_age_bp: number | null
   delta_r: number | null
   delta_r_error: number | null
-  reservoir_age: number | null
   depth_cm: number | null
   ring_offset: number | null
   ring_offset_error: number | null
@@ -93,7 +92,6 @@ export function parsePastedDates(
       // own dialog.
       delta_r: null,
       delta_r_error: null,
-      reservoir_age: null,
       depth_cm: null,
       ring_offset: null,
       ring_offset_error: null,

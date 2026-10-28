@@ -47,7 +47,6 @@ pub struct Measurement {
     pub delta_r_source: Option<Map<String, Value>>,
     pub latitude: Option<f64>,
     pub longitude: Option<f64>,
-    pub reservoir_age: Option<f64>,
     pub depth_cm: Option<f64>,
     pub ring_offset: Option<f64>,
     pub ring_offset_error: Option<f64>,
@@ -65,7 +64,6 @@ pub const DELTA_R: Bounds = Bounds::range(-5000.0, 5000.0);
 pub const DELTA_R_ERROR: Bounds = Bounds::range(0.0, 5000.0);
 pub const LATITUDE: Bounds = Bounds::range(-90.0, 90.0);
 pub const LONGITUDE: Bounds = Bounds::range(-180.0, 180.0);
-pub const RESERVOIR_AGE: Bounds = Bounds::range(-500.0, 2000.0);
 pub const DEPTH: Bounds = Bounds::range(0.0, 10000.0);
 pub const RING_OFFSET: Bounds = Bounds::range(-50000.0, 50000.0);
 pub const RING_OFFSET_ERROR: Bounds = Bounds::range(0.0, 10000.0);
@@ -111,7 +109,6 @@ pub fn measurement_fields(f: &mut Fields, store: &Store) -> Measurement {
         delta_r_source: f.opt_dict("delta_r_source"),
         latitude: f.opt_float("latitude", LATITUDE),
         longitude: f.opt_float("longitude", LONGITUDE),
-        reservoir_age: f.opt_float("reservoir_age", RESERVOIR_AGE),
         depth_cm: f.opt_float("depth_cm", DEPTH),
         ring_offset: f.opt_float("ring_offset", RING_OFFSET),
         ring_offset_error: f.opt_float("ring_offset_error", RING_OFFSET_ERROR),

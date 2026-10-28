@@ -451,7 +451,6 @@ def _sample_row(
         longitude=getattr(measurement, 'longitude', None),
         outlier_prior=getattr(measurement, 'outlier_prior', 0.0),
         outlier_model=getattr(measurement, 'outlier_model', None),
-        reservoir_age=measurement.reservoir_age,
         depth_cm=measurement.depth_cm,
         ring_offset=getattr(measurement, 'ring_offset', None),
         ring_offset_error=getattr(measurement, 'ring_offset_error', None),
@@ -1055,7 +1054,6 @@ def calibrate_single(measurement: CalibrateRequest, db: Session = Depends(get_db
             delta_r_source=measurement.delta_r_source,
             latitude=measurement.latitude,
             longitude=measurement.longitude,
-            reservoir_age=measurement.reservoir_age,
             depth_cm=measurement.depth_cm,
             location=measurement.location,
             notes=measurement.notes
@@ -1656,7 +1654,6 @@ def get_analysis(analysis_id: str, db: Session = Depends(get_db),
                     # switched off by editing the analysis.
                     "outlier_prior": s.outlier_prior,
                     "outlier_model": s.outlier_model,
-                    "reservoir_age": s.reservoir_age,
                     "depth_cm": s.depth_cm,
                     # Same reason again: a wiggle match IS its ring offsets,
                     # so leaving them out here would have an edit resubmit the

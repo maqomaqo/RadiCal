@@ -39,7 +39,6 @@ fn serialize(s: &ProjectSample) -> Value {
         "material_type": s.material_type,
         "sample_type": s.sample_type,
         "curve_id": s.curve_id,
-        "reservoir_age": s.reservoir_age,
         "delta_r": s.delta_r,
         "delta_r_error": s.delta_r_error,
         "delta_r_source": s.delta_r_source.clone().unwrap_or(Value::Null),
@@ -137,7 +136,6 @@ async fn create(
             error_1sigma: m.error_1sigma,
             material_type: m.material_type,
             curve_id: Some(m.curve_id),
-            reservoir_age: m.reservoir_age,
             delta_r: m.delta_r,
             delta_r_error: m.delta_r_error,
             latitude: m.latitude,
@@ -212,7 +210,6 @@ async fn update(
         let message = unknown_curve(id);
         f.value_error(Some("curve_id"), &message);
     }
-    let reservoir_age = f.opt_float("reservoir_age", schemas::RESERVOIR_AGE);
     let delta_r = f.opt_float("delta_r", schemas::DELTA_R);
     let delta_r_error = f.opt_float("delta_r_error", schemas::DELTA_R_ERROR);
     let latitude = f.opt_float("latitude", schemas::LATITUDE);
@@ -234,7 +231,6 @@ async fn update(
         "material_type",
         "sample_type",
         "curve_id",
-        "reservoir_age",
         "delta_r",
         "delta_r_error",
         "latitude",
@@ -265,7 +261,6 @@ async fn update(
             "material_type" => s.material_type = material.clone().unwrap_or_default(),
             "sample_type" => s.sample_type = sample_type.clone().unwrap_or_default(),
             "curve_id" => s.curve_id = curve.clone(),
-            "reservoir_age" => s.reservoir_age = reservoir_age,
             "delta_r" => s.delta_r = delta_r,
             "delta_r_error" => s.delta_r_error = delta_r_error,
             "latitude" => s.latitude = latitude,
@@ -617,7 +612,6 @@ async fn deploy(
                     material_type: src.material_type.clone(),
                     sample_type: src.sample_type.clone(),
                     curve_id: src.curve_id.clone(),
-                    reservoir_age: src.reservoir_age,
                     delta_r: src.delta_r,
                     delta_r_error: src.delta_r_error,
                     delta_r_source: src.delta_r_source.clone(),

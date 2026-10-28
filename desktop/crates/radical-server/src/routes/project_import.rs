@@ -510,7 +510,7 @@ fn curve_for(state: &State, curve_id: &str, plan: &mut Plan, at: &str) -> Option
 // --------------------------------------------------------------------------
 
 /// The fields `ProjectSampleInput` has.
-const SAMPLE_INPUT_FIELDS: [&str; 22] = [
+const SAMPLE_INPUT_FIELDS: [&str; 21] = [
     "sample_name",
     "age_bp",
     "error_1sigma",
@@ -522,7 +522,6 @@ const SAMPLE_INPUT_FIELDS: [&str; 22] = [
     "delta_r_source",
     "latitude",
     "longitude",
-    "reservoir_age",
     "depth_cm",
     "ring_offset",
     "ring_offset_error",
@@ -1162,7 +1161,6 @@ fn commit_import(state: &State, plan: &mut Plan, name: &str) -> radical_store::R
                     material_type: m.material_type.clone(),
                     sample_type,
                     curve_id: local,
-                    reservoir_age: m.reservoir_age,
                     depth_cm: m.depth_cm,
                     location: m.location.clone(),
                     notes: m.notes.clone(),

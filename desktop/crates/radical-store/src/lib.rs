@@ -31,6 +31,7 @@ pub mod rows;
 const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0001_initial.sql"),
     include_str!("../migrations/0002_accounts.sql"),
+    include_str!("../migrations/0003_drop_reservoir_age.sql"),
 ];
 
 /// The schema version this build writes.

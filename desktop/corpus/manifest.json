@@ -15,9 +15,9 @@
  },
  "files": {
   "data/api/calibrate.json": "d8c3ffec90c632e4083f33ef9cc5f0fc027e75b9f2733387c5d515e12156a428",
-  "data/api/exchanges.json": "009c944fb6e159ef2eed8fe65824c3829e28ae195c36ecc6cba8f3ab54fb692a",
-  "data/api/models.json": "ec1131489d2aa9dd0d8b52950b74eef0ec88e98b2322c43a2e7fdf62e6d1dca7",
-  "data/schema/sqlite.json": "e988635662941744e4cdf7e4b32597ac9e97074a44e07e7d4baecf6ffafb696a",
+  "data/api/exchanges.json": "45aaf42448ce2ab0788b1f7aad4bf539dfabdc742f662bd75eddabecbfa29fa5",
+  "data/api/models.json": "6fff090b65a72928506b112c15f524fab84cef3c35e8261aa68a777385c7753b",
+  "data/schema/sqlite.json": "6492d83586ce1e388e7aea7328769cd0d63b694e761c767cf38e694c81bf5e36",
   "data/units/agreement.json": "43748019453979c4f3050d0e412d331e22d4c7ae7ee390eb974ba8a9cc14eea7",
   "data/units/calibrate.json": "979813d23f9db0e24a9a0d6ea18d93dceddb247b4d3ec55a8e39dc9feecd9f39",
   "data/units/cell_edges.json": "530b19fc70de602bbd3935ea5c12eeb93a31d08b957c640c8f3fda14bd9dd6da",
@@ -49,8 +49,8 @@
   "data/units/wiggle_match.json": "8b66c3d44c85f373ec1d48501457f53f8586c34ef918d69a24430551a0b519e3"
  },
  "generated_from": {
-  "commit": "a0d0096118b9d02fd774461ece0725c5da9a5a81",
-  "dirty": false,
+  "commit": "8e3404fb7487001b4861ff032a4cd5fecf80b95f",
+  "dirty": true,
   "numpy": "2.4.6",
   "python": "3.13.9",
   "scipy": "1.18.0"

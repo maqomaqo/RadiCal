@@ -85,8 +85,6 @@ export interface ProjectSample {
    * having forgotten.
    */
   delta_r_source: Record<string, unknown> | null
-  /** Superseded by delta_r, but still carried on older and imported rows. */
-  reservoir_age: number | null
   depth_cm: number | null
   // Where the date sits in a wiggle-matched series: years BEFORE the series
   // reference, 0 at the reference and increasing into the past. Held in the
@@ -143,7 +141,6 @@ type DraftForm = {
   taq_age_bp: string
   delta_r: string
   delta_r_error: string
-  reservoir_age: string
   depth_cm: string
   ring_offset: string
   ring_offset_error: string
@@ -166,7 +163,6 @@ const EMPTY_FORM: DraftForm = {
   taq_age_bp: '',
   delta_r: '',
   delta_r_error: '',
-  reservoir_age: '',
   depth_cm: '',
   ring_offset: '',
   ring_offset_error: '',
@@ -190,7 +186,6 @@ function toForm(s: ProjectSample): DraftForm {
     taq_age_bp: s.taq_age_bp == null ? '' : String(s.taq_age_bp),
     delta_r: s.delta_r == null ? '' : String(s.delta_r),
     delta_r_error: s.delta_r_error == null ? '' : String(s.delta_r_error),
-    reservoir_age: s.reservoir_age == null ? '' : String(s.reservoir_age),
     depth_cm: s.depth_cm == null ? '' : String(s.depth_cm),
     ring_offset: s.ring_offset == null ? '' : String(s.ring_offset),
     ring_offset_error: s.ring_offset_error == null ? '' : String(s.ring_offset_error),
@@ -217,12 +212,11 @@ function formToPayload(form: DraftForm) {
     taq_age_bp: numOrNull(form.taq_age_bp),
     // Sent whether or not they are filled in, so emptying one clears it. The
     // PATCH applies exactly the fields the body carries (exclude_unset), so a
-    // field this form omits is left alone -- which is why these four survived
+    // field this form omits is left alone -- which is why these survived
     // every edit before the form could reach them, and why they now have to
     // be sent explicitly rather than dropped when blank.
     delta_r: numOrNull(form.delta_r),
     delta_r_error: numOrNull(form.delta_r_error),
-    reservoir_age: numOrNull(form.reservoir_age),
     depth_cm: numOrNull(form.depth_cm),
     ring_offset: numOrNull(form.ring_offset),
     ring_offset_error: numOrNull(form.ring_offset_error),
@@ -742,8 +736,8 @@ export default function ProjectSampleTable({
    * Material is stored as the literal string 'unknown' when nobody filled it
    * in, so a collection imported without materials drew thirty-two rows of the
    * app's own placeholder in the widest text column on the page. TPQ/TAQ,
-   * reservoir age, depth, location and notes are all carried by the API and
-   * set on a minority of collections. ΔR is the exception that proves the
+   * depth, location and notes are all carried by the API and set on a
+   * minority of collections. ΔR is the exception that proves the
    * rule: it appears whenever anything is marine, precisely because an empty
    * cell there is the finding.
    */
@@ -804,16 +798,6 @@ export default function ProjectSampleTable({
         populated: anyOf((s) => !!s.default_context_name),
         sortKey: 'default_context_name',
         render: (s) => s.default_context_name || muted('—'),
-      },
-      {
-        id: 'reservoir_age',
-        label: 'Reservoir age',
-        auto: anyOf((s) => s.reservoir_age != null),
-        populated: anyOf((s) => s.reservoir_age != null),
-        align: 'right',
-        numeric: true,
-        headTitle: 'The older, whole-reservoir form of a marine correction. ΔR supersedes it.',
-        render: (s) => (s.reservoir_age == null ? muted('—') : s.reservoir_age),
       },
       {
         id: 'depth_cm',
@@ -930,8 +914,7 @@ export default function ProjectSampleTable({
   const showReservoirFields =
     formIsMarine ||
     form.delta_r !== '' ||
-    form.delta_r_error !== '' ||
-    form.reservoir_age !== ''
+    form.delta_r_error !== ''
   // The same pairing rule the measurement form applies: an offset without its
   // error is not a weaker correction, it is one the solver cannot weight.
   const deltaRErrorIncomplete = deltaRErrorMissing({
@@ -1051,9 +1034,9 @@ export default function ProjectSampleTable({
         )}
 
         {/* Every field the collection stores can be put on screen, whether or
-            not this project has filled it in -- notes, depth, location and
-            reservoir age are carried by the API and by imports, and were
-            unreachable from here. Pushed to the right because it changes how
+            not this project has filled it in -- notes, depth and location are
+            carried by the API and by imports, and were unreachable from
+            here. Pushed to the right because it changes how
             the table reads rather than what is in it. */}
         <Box sx={{ flex: 1 }} />
         <Button
@@ -1433,10 +1416,8 @@ export default function ProjectSampleTable({
                 already carries a value, so switching a date to a terrestrial
                 curve cannot strand one out of reach.
 
-                ΔR leads and the reservoir age follows it, in that order,
-                because ΔR is what supersedes the other. Labels and wording are
-                the measurement form's own, so the two places a ΔR can be typed
-                cannot describe it differently. */}
+                Labels and wording are the measurement form's own, so the two
+                places a ΔR can be typed cannot describe it differently. */}
             {showReservoirFields && (
               <>
                 <TextField
@@ -1463,15 +1444,6 @@ export default function ProjectSampleTable({
                   Local marine reservoir offset from the global average the curve already models —
                   not a whole reservoir age. Leave blank to apply no correction.
                 </Typography>
-                <TextField
-                  label="Reservoir age (years)"
-                  type="number"
-                  value={form.reservoir_age}
-                  inputProps={{ min: -500, max: 2000 }}
-                  helperText="The older, whole-reservoir form. ΔR above supersedes it."
-                  onChange={(e) => setForm({ ...form, reservoir_age: e.target.value })}
-                  sx={{ gridColumn: '1 / -1' }}
-                />
               </>
             )}
 

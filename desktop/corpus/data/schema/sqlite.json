@@ -1174,13 +1174,6 @@
       "pk": 0
      },
      {
-      "name": "reservoir_age",
-      "type": "FLOAT",
-      "notnull": false,
-      "default": null,
-      "pk": 0
-     },
-     {
       "name": "depth_cm",
       "type": "FLOAT",
       "notnull": false,
@@ -1474,13 +1467,6 @@
      {
       "name": "outlier_model",
       "type": "VARCHAR",
-      "notnull": false,
-      "default": null,
-      "pk": 0
-     },
-     {
-      "name": "reservoir_age",
-      "type": "FLOAT",
       "notnull": false,
       "default": null,
       "pk": 0

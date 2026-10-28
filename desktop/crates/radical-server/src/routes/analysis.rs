@@ -427,7 +427,6 @@ pub fn measurement_json(s: &RadiocarbonSample) -> Value {
         "longitude": s.longitude,
         "outlier_prior": s.outlier_prior,
         "outlier_model": s.outlier_model,
-        "reservoir_age": s.reservoir_age,
         "depth_cm": s.depth_cm,
         "ring_offset": s.ring_offset,
         "ring_offset_error": s.ring_offset_error,

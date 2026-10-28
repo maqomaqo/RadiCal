@@ -225,3 +225,46 @@ fn a_desktop_database_gains_the_accounts_in_place() {
     drop(store);
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+/// A database from before reservoir_age was dropped (version 2), with a date
+/// that carries one, opens under version 3 with the date otherwise intact.
+#[test]
+fn a_database_loses_the_reservoir_age_in_place() {
+    use radical_store::rows::{self, ProjectSample};
+    let dir = std::env::temp_dir().join(format!("radical-upgrade-{}", radical_store::new_id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("radical.db");
+    {
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch(include_str!("../migrations/0001_initial.sql"))
+            .unwrap();
+        conn.execute_batch(include_str!("../migrations/0002_accounts.sql"))
+            .unwrap();
+        conn.execute_batch(
+            "INSERT INTO projects (id, name, coordinate_precision, map_tiles_enabled)
+                 VALUES ('p1', 'Before', 'full', 1);
+             INSERT INTO project_samples (id, project_id, sample_name, age_bp, error_1sigma,
+                     material_type, sample_type, curve_id, reservoir_age, delta_r, delta_r_error)
+                 VALUES ('s1', 'p1', 'Shell', 3000, 30, 'shell', 'marine', 'marine20', 400,
+                     -42, 18);
+             PRAGMA user_version = 2;",
+        )
+        .unwrap();
+    }
+    let store = Store::open(&path).unwrap();
+    let version: i64 = store
+        .read(|c| Ok(c.pragma_query_value(None, "user_version", |r| r.get(0))?))
+        .unwrap();
+    assert_eq!(version as usize, radical_store::SCHEMA_VERSION);
+    let sample: ProjectSample = store.read(|c| rows::get(c, "s1")).unwrap().unwrap();
+    assert_eq!(
+        (
+            sample.sample_name.as_str(),
+            sample.delta_r,
+            sample.delta_r_error
+        ),
+        ("Shell", Some(-42.0), Some(18.0))
+    );
+    drop(store);
+    std::fs::remove_dir_all(dir).unwrap();
+}
