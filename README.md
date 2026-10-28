@@ -169,7 +169,12 @@ The main groups:
   the code.
 
 ## References
-The maths and logic is built on, and validated against, the work of others:
+RadiCal's calibration, Bayesian model and sampler follow the published methods below, and its
+calibration and both solvers are tested against OxCal 4.4's own results. Some parts are its own:
+the exact solver, which calculates the same posterior directly rather than by sampling, and parts
+of the geographic analysis, such as the search for a dispersal origin and fitting each dispersal
+to every posterior draw. Appendix A of the [user manual](frontend/src/content/USER_MANUAL.md#appendix-a-mathematical-methods)
+sets out how each number is computed and which source, if any, it draws on.
 
 - Svetlik, I., et al. (2019). The best possible time resolution: how precise could a radiocarbon dating method be? Radiocarbon, 61(6).
 - Reimer, P. J., et al. (2020). IntCal20 Northern Hemisphere radiocarbon age calibration curve. Radiocarbon, 62(4).
@@ -180,4 +185,5 @@ The maths and logic is built on, and validated against, the work of others:
 - Nicholls, G., and Jones, M. (2001). Radiocarbon dating with temporal order constraints. Applied Statistics, 50(4).
 - Bronk Ramsey, C. (2008). Deposition models for chronological records. Quaternary Science Reviews, 27(1-2).
 - Galimberti, M., Bronk Ramsey, C., and Manning, S. W. (2004). Wiggle-match dating of tree-ring sequences. Radiocarbon, 46(2).
+- Ammerman, A. J., and Cavalli-Sforza, L. L. (1971). Measuring the rate of spread of early farming in Europe. Man, 6(4).
 
