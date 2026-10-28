@@ -9,8 +9,8 @@
 //!
 //! On its own, or inside RadiCal Desktop, it listens on 127.0.0.1 for one
 //! person on their own computer. With `--accounts` it is RadiCal on a server:
-//! everyone signs in, and each account sees only its own work
-//! (docs/RUST_SERVER_PLAN.md); in a container it listens on `--host 0.0.0.0`.
+//! everyone signs in, and each account sees only its own work; in a
+//! container it listens on `--host 0.0.0.0`.
 //! With `--frontend` it also serves the built frontend. `reset-password` sets
 //! an account's password from the server, for an installation that cannot
 //! send email. `new-secret` prints a line for `.env` with a fresh signing key.

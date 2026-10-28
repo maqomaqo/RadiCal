@@ -1,9 +1,9 @@
-//! The backend's own API tests, replayed against the Rust server.
+//! The earlier Python server's own API tests, replayed against the Rust server.
 //!
-//! `corpus/record_api.py` records every HTTP exchange the backend's suite
-//! makes, in order, against one shared database; this sends each of the
-//! suite user's requests to the Rust server, in the same order, against one
-//! fresh store, and compares the answers: the status exactly, and the JSON up
+//! `corpus/record_api.py` (at tag `v2.1.0`) recorded every HTTP exchange that
+//! server's suite made, in order, against one shared database; this sends
+//! each of the suite user's requests to the Rust server, in the same order,
+//! against one fresh store, and compares the answers: the status exactly, and the JSON up
 //! to ids (bound as they first appear, as the units tests bind them) and to
 //! rounding. Long numeric arrays are compared as the summary the corpus
 //! stores (length, count, min, max, sum).

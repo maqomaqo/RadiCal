@@ -1,35 +1,35 @@
 [
  {
   "filename": "Hillside_sites_3.oxcal",
-  "fixture": "backend/tests/fixtures/oxcal/Hillside_sites_3.oxcal"
+  "fixture": "desktop/corpus/fixtures/oxcal/Hillside_sites_3.oxcal"
  },
  {
   "filename": "Hillside_sites_3_unordered.oxcal",
-  "fixture": "backend/tests/fixtures/oxcal/Hillside_sites_3_unordered.oxcal"
+  "fixture": "desktop/corpus/fixtures/oxcal/Hillside_sites_3_unordered.oxcal"
  },
  {
   "filename": "Hillside_sites_3_shared_boundary.oxcal",
-  "fixture": "backend/tests/fixtures/oxcal/Hillside_sites_3_shared_boundary.oxcal"
+  "fixture": "desktop/corpus/fixtures/oxcal/Hillside_sites_3_shared_boundary.oxcal"
  },
  {
   "filename": "x.oxcal",
-  "fixture": "backend/tests/fixtures/oxcal/Hillside_sites_3.oxcal"
+  "fixture": "desktop/corpus/fixtures/oxcal/Hillside_sites_3.oxcal"
  },
  {
   "filename": "Hillside_Seq.oxcal",
-  "fixture": "backend/tests/fixtures/oxcal_charcoal/Hillside_Seq.oxcal"
+  "fixture": "desktop/corpus/fixtures/oxcal_charcoal/Hillside_Seq.oxcal"
  },
  {
   "filename": "Dune_Section.oxcal",
-  "fixture": "backend/tests/fixtures/oxcal_outlier/Dune_Section.oxcal"
+  "fixture": "desktop/corpus/fixtures/oxcal_outlier/Dune_Section.oxcal"
  },
  {
   "filename": "Coastal_midden.oxcal",
-  "fixture": "backend/tests/fixtures/oxcal_delta_r/Coastal_midden.oxcal"
+  "fixture": "desktop/corpus/fixtures/oxcal_delta_r/Coastal_midden.oxcal"
  },
  {
   "filename": "Dune_layers.oxcal",
-  "fixture": "backend/tests/fixtures/oxcal_display/Dune_layers.oxcal"
+  "fixture": "desktop/corpus/fixtures/oxcal_display/Dune_layers.oxcal"
  },
  {
   "filename": null,
@@ -205,11 +205,11 @@
  },
  {
   "filename": "Timber_D_Sequence.oxcal",
-  "fixture": "backend/tests/fixtures/oxcal_wiggle/Timber_D_Sequence.oxcal"
+  "fixture": "desktop/corpus/fixtures/oxcal_wiggle/Timber_D_Sequence.oxcal"
  },
  {
   "filename": "Varves_V_Sequence.oxcal",
-  "fixture": "backend/tests/fixtures/oxcal_wiggle/Varves_V_Sequence.oxcal"
+  "fixture": "desktop/corpus/fixtures/oxcal_wiggle/Varves_V_Sequence.oxcal"
  },
  {
   "filename": "t.oxcal",
@@ -233,7 +233,7 @@
  },
  {
   "filename": "Core_P_Sequence.oxcal",
-  "fixture": "backend/tests/fixtures/oxcal_wiggle/Core_P_Sequence.oxcal"
+  "fixture": "desktop/corpus/fixtures/oxcal_wiggle/Core_P_Sequence.oxcal"
  },
  {
   "filename": "t.oxcal",
@@ -373,18 +373,18 @@
  },
  {
   "filename": "DS_Layers.oxcal",
-  "fixture": "backend/tests/fixtures/oxcal_resolution/DS_Layers.oxcal"
+  "fixture": "desktop/corpus/fixtures/oxcal_resolution/DS_Layers.oxcal"
  },
  {
   "filename": "DS_Layers_res1.oxcal",
-  "fixture": "backend/tests/fixtures/oxcal_resolution/DS_Layers_res1.oxcal"
+  "fixture": "desktop/corpus/fixtures/oxcal_resolution/DS_Layers_res1.oxcal"
  },
  {
   "filename": "Dune_Section_res1.oxcal",
-  "fixture": "backend/tests/fixtures/oxcal_resolution/Dune_Section_res1.oxcal"
+  "fixture": "desktop/corpus/fixtures/oxcal_resolution/Dune_Section_res1.oxcal"
  },
  {
   "filename": "Hillside_sites_3_res1.oxcal",
-  "fixture": "backend/tests/fixtures/oxcal_resolution/Hillside_sites_3_res1.oxcal"
+  "fixture": "desktop/corpus/fixtures/oxcal_resolution/Hillside_sites_3_res1.oxcal"
  }
 ]

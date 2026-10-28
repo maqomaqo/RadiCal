@@ -101,9 +101,9 @@ export function hpdRangesFromCurve(
 /**
  * Calendar step a MODELLED range is reported at by default.
  *
- * Mirrors REPORTING_STEP_YEARS in backend/app/services/exact_chain.py, which
- * is where the reasoning lives; both sides must agree, because this page
- * re-selects a region from a distribution the backend computed and the stored
+ * Mirrors REPORTING_STEP_YEARS in
+ * desktop/crates/radical-core/src/exact_chain/mod.rs, which is where the
+ * reasoning lives; both sides must agree, because this page re-selects a region from a distribution the backend computed and the stored
  * hpd_68_ranges/hpd_95_ranges beside it were built at that step. An analysis
  * that asked for another resolution records it as solver.resolution, and
  * reportingOf hands that through instead.
@@ -262,10 +262,9 @@ export function posteriorEnvelope(
  *
  * `confidence` is the threshold the HPD set is accumulated to, so the digits
  * change the reported range. Mirrors SIGMA_1/2/3 in
- * backend/app/services/calibration.py, where they are derived; JavaScript has
- * no erf, so they are written out here and pinned by a test. Both sides must
- * agree, since the page re-selects a region from a backend-computed
- * distribution.
+ * desktop/crates/radical-core/src/calibration.rs; JavaScript has no erf, so
+ * they are written out here and pinned by a test. Both sides must agree,
+ * since the page re-selects a region from a backend-computed distribution.
  */
 export const SIGMA_1 = 0.6826894921370859
 export const SIGMA_2 = 0.9544997361036416

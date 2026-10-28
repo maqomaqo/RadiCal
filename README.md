@@ -38,9 +38,8 @@ A tool for radiocarbon dating analysis: calibration, Bayesian chronological mode
 - **axum** for the HTTP API; calibration, both Bayesian solvers (exact integration for
   chain-shaped models, MH/Gibbs otherwise) and the PDF report in RadiCal's own crates
 - **SQLite** for storage, one file per installation, with migrations applied on startup
-- The earlier **Python/FastAPI** server (`backend/`) stays for one release as the reference the
-  Rust server was checked against, then goes; its recorded answers (`desktop/corpus`) remain the
-  contract
+- The answers of the earlier Python/FastAPI server, recorded in `desktop/corpus`, are the contract
+  the Rust server is tested against
 
 ## Project Structure
 
@@ -64,7 +63,6 @@ RadiCal/
 │   │   ├── radical-server/   # The HTTP API, accounts, the PDF report, the binary
 │   │   └── radical-desktop/  # RadiCal Desktop's app shell
 │   └── corpus/               # Recorded answers from the Python server, replayed as tests
-├── backend/                  # The earlier Python/FastAPI server (to be removed)
 ├── calibration_data/         # Full IntCal20/Marine20/SHCal20 curve files
 ├── docs/                     # Installation and desktop release guides
 ├── docker-compose.yml

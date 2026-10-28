@@ -25,10 +25,12 @@ produced it.
 ## Positioning
 
 Standalone identity — not "OxCal in a browser" and not defined by OxCal, even though its solvers
-are validated against real OxCal 4.4 runs for correctness (see `test_oxcal_agreement.py`, `test_exact_chain.py` and `test_gibbs.py` in `backend/tests/`). The mechanism
+were validated against real OxCal 4.4 runs for correctness (by the Python server's suite,
+`test_oxcal_agreement.py`, `test_exact_chain.py` and `test_gibbs.py`, at tag `v2.1.0`; the Rust
+server is held to that server's recorded answers in `desktop/corpus`). The mechanism
 a neighboring tool can't casually copy:
 
-- A single curve registry (`backend/app/services/curve_registry.py`) that *measures* every curve
+- A single curve registry (`desktop/crates/radical-core/src/curve_registry.rs`) that *measures* every curve
   it loads (points, range, calendar grid, content hash) rather than hardcoding facts about them, so
   the curve pickers, CSV importer, and OxCal importer can't drift apart on what a curve is.
 - Two from-scratch Bayesian solvers (exact integration for chain-shaped models, OxCal's own
@@ -77,7 +79,9 @@ CSV/JSON/PDF; grouping analyses under a project and re-running them in bulk.
 
 No real testimonials, customer quotes, or case studies exist and none should be fabricated. The one
 piece of real evidence on hand is technical, not promotional: the Bayesian solvers have been
-validated against real OxCal 4.4 runs, in `backend/tests/` (`test_oxcal_agreement.py`, `test_exact_chain.py`, `test_gibbs.py`) — describe this accurately
+validated against real OxCal 4.4 runs, by the Python server's suite (`test_oxcal_agreement.py`,
+`test_exact_chain.py`, `test_gibbs.py`, at tag `v2.1.0`), and the Rust server is held to that
+server's recorded answers in `desktop/corpus` — describe this accurately
 as validation evidence, not dressed up as a marketing claim.
 
 ## Product Principles

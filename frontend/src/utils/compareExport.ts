@@ -42,8 +42,8 @@ export interface CompareCsvRun {
  * A duration's HPD as one cell: "0-125 (95.4%)", smallest first.
  *
  * The same shape and the same ordering the single-analysis CSV writes
- * (`_years_ranges` in backend/app/api/results.py), and for the same reason
- * given there: a length reads upwards, where a calendar range reads oldest
+ * (`years_ranges` in desktop/crates/radical-server/src/routes/results.rs),
+ * and for the same reason given there: a length reads upwards, where a calendar range reads oldest
  * first. One export of a duration must not look different from another.
  */
 function yearsRanges(value: DerivedValue, defaultLabel: string, signed: boolean): string {

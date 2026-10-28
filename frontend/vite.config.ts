@@ -65,8 +65,8 @@ export default defineConfig({
     proxy: {
       '/api': {
         // The frontend calls same-origin /api and this forwards it. Run
-        // directly on the host, the backend is on localhost; the compose
-        // stack sets API_PROXY_TARGET to the backend service instead.
+        // directly on the host, the server is on localhost; the compose
+        // stack sets API_PROXY_TARGET to the server service instead.
         target: process.env.API_PROXY_TARGET || 'http://localhost:8000',
         changeOrigin: true,
       },

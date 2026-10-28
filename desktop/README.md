@@ -8,8 +8,7 @@ desktop/
   Cargo.toml            the workspace
   rust-toolchain.toml   the pinned compiler
   crates/
-    radical-core/       the calibration maths, the exact solvers and the sampler,
-                        ported from backend/app/services
+    radical-core/       the calibration maths, the exact solvers and the sampler
     radical-io/         file formats: date tables, curve files, OxCal models
     radical-store/      the database, one SQLite file
     radical-jobs/       runs that happen outside the request that asked for them
@@ -17,13 +16,15 @@ desktop/
     radical-desktop/    the desktop app: the server and the frontend in one window
     radical-corpus/     reads the golden corpus and checks it is intact
   bench/
-    sampler_bench.py    times the Python sampler and writes models.json for the Rust example
+    models.json         the models the sampler benchmark runs
   corpus/
-    generate.py         writes the corpus from the Python implementation
-    ziggurat_tables.py  writes NumPy's normal-draw tables as Rust source
     manifest.json       every corpus file's SHA-256, and the curves it was made against
     data/units/         one service function per case
     data/api/           whole API requests and responses: solver and server targets
+    inputs/             the inputs some families were made from
+    fixtures/           OxCal models and captured pages that cases read by path
+    ziggurat_tables.py  writes NumPy's normal-draw tables as Rust source
+    html_entities.py    writes Python's HTML entity tables as Rust source
 ```
 
 ## Building and testing
@@ -44,25 +45,20 @@ same pipeline the API ran it through and compares each number it stored. The sam
 reproduce Python's runs draw for draw, except where noted in `tests/models/sampled.rs`.
 
 `cargo run --release -p radical-core --example sampler_bench` times the sampler on the models in
-`bench/models.json`; `bench/sampler_bench.py` times Python on the same ones.
+`bench/models.json`.
 
 `cargo test -p radical-core --test units -- --nocapture` also prints, for each corpus family, the
 largest relative difference from the Python answer and where it was.
 
 ## The golden corpus
 
-The corpus records what the Python implementation answers today. The Rust port is checked
-against it. The format is in `corpus/generate.py`'s docstring.
+The corpus records what the earlier Python server answered, and the Rust code is held to it. The
+Python server was removed after v2.1.0; the code that generated the corpus, and the Python files
+that comments in this workspace name (`backend/...`), are in the repository at tag `v2.1.0`.
 
-Regenerate it only when the Python behaviour changes on purpose. Then commit the result, so the
-corpus diff records what changed. Run it with the backend's pinned dependencies:
-
-```bash
-cd backend
-pip install -r requirements-dev.txt
-python ../desktop/corpus/generate.py            # everything, a few minutes
-python ../desktop/corpus/generate.py --units-only   # the unit cases only, seconds
-```
+The corpus is no longer regenerated. When behaviour changes on purpose, edit the cases it changes
+and put the file's new SHA-256 (`shasum -a 256 FILE`) in `manifest.json`, so the corpus diff
+records what changed. New tests are written in Rust.
 
 `radical-corpus`'s tests fail when a corpus file no longer matches the manifest. They also fail
 when the curves in `calibration_data/` differ from the ones the corpus was generated against.

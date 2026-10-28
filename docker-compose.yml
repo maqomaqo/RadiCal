@@ -8,13 +8,6 @@
 # The server keeps its data in one SQLite file on the `data` volume, as the
 # published image does (docker-compose.prod.yml), but with RADICAL_ENV
 # defaulting to development.
-#
-# The earlier Python backend and its PostgreSQL stay for one release, behind
-# the `python` profile (docs/RUST_SERVER_PLAN.md, S6): for recording the
-# corpus, and for bringing a PostgreSQL database's data across once with
-#
-#   docker compose --profile python up -d --wait postgres
-#   docker compose run --rm server import-postgres
 
 services:
   server:
@@ -39,8 +32,6 @@ services:
       RADICAL_SMTP_USER: ${RADICAL_SMTP_USER:-}
       RADICAL_SMTP_PASSWORD: ${RADICAL_SMTP_PASSWORD:-}
       RADICAL_SMTP_FROM: ${RADICAL_SMTP_FROM:-}
-      # Read only by `import-postgres`.
-      RADICAL_IMPORT_FROM: postgresql://${POSTGRES_USER:-radiocarbon}:${POSTGRES_PASSWORD:-password}@postgres:5432/${POSTGRES_DB:-radiocarbon_db}
     volumes:
       - data:/data
     command: ["--accounts", "--host", "0.0.0.0", "--port", "8000"]
@@ -64,57 +55,8 @@ services:
       - /app/node_modules
     command: npm run dev -- --host
 
-  # The earlier Python backend, on :8001 so it can run beside the server.
-  # It bind-mounts the source and runs --reload, and
-  # `docker exec radiocarbon_backend pytest` works in it.
-  backend:
-    profiles: ["python"]
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-      args:
-        INSTALL_DEV: "true"
-    container_name: radiocarbon_backend
-    ports:
-      - "8001:8000"
-    environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-radiocarbon}:${POSTGRES_PASSWORD:-password}@postgres:5432/${POSTGRES_DB:-radiocarbon_db}
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
-      RADICAL_ENV: ${RADICAL_ENV:-development}
-      RADICAL_SECRET_KEY: ${RADICAL_SECRET_KEY:-}
-      INTCAL_CURVE_PATH: ${INTCAL_CURVE_PATH:-/app/data/intcal20.14c}
-      MARINE_CURVE_PATH: ${MARINE_CURVE_PATH:-/app/data/marine20.14c}
-      SHCAL_CURVE_PATH: ${SHCAL_CURVE_PATH:-/app/data/shcal20.14c}
-    depends_on:
-      postgres:
-        condition: service_healthy
-    volumes:
-      - ./backend:/app
-      - ./calibration_data:/app/data
-      - ./uploads:/app/uploads
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-
-  postgres:
-    profiles: ["python"]
-    image: postgres:15-alpine
-    container_name: radiocarbon_db
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-radiocarbon}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
-      POSTGRES_DB: ${POSTGRES_DB:-radiocarbon_db}
-    ports:
-      - "5433:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-radiocarbon} -d ${POSTGRES_DB:-radiocarbon_db}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
 volumes:
   data:
-  postgres_data:
 
 networks:
   default:
