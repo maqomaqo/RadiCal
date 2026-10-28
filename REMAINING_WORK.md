@@ -126,12 +126,3 @@ before users do.
   server side of jobs is tested, by `radical-server`'s tests.
 - `ImportDatesDialog` needs a component test. That means adding jsdom, since
   Vitest currently runs in `node` (`vite.config.ts`).
-
-### 13. No test against OxCal itself
-The tests that held the solvers to real OxCal 4.4 runs
-(`test_oxcal_agreement.py`, `test_exact_chain.py`, `test_gibbs.py`, with their
-OxCal output fixtures) were in the Python server's suite, removed after
-v2.1.0. The Rust code is held to that server's recorded answers
-(`desktop/corpus`), so it still agrees with OxCal through them, but nothing
-compares it with OxCal directly. Port those comparisons to Rust, taking the
-fixtures from tag `v2.1.0`, before the corpus is next changed on purpose.

@@ -25,9 +25,8 @@ produced it.
 ## Positioning
 
 Standalone identity — not "OxCal in a browser" and not defined by OxCal, even though its solvers
-were validated against real OxCal 4.4 runs for correctness (by the Python server's suite,
-`test_oxcal_agreement.py`, `test_exact_chain.py` and `test_gibbs.py`, at tag `v2.1.0`; the Rust
-server is held to that server's recorded answers in `desktop/corpus`). The mechanism
+are validated against real OxCal 4.4 runs for correctness (see
+`desktop/crates/radical-core/tests/oxcal/`). The mechanism
 a neighboring tool can't casually copy:
 
 - A single curve registry (`desktop/crates/radical-core/src/curve_registry.rs`) that *measures* every curve
@@ -79,9 +78,7 @@ CSV/JSON/PDF; grouping analyses under a project and re-running them in bulk.
 
 No real testimonials, customer quotes, or case studies exist and none should be fabricated. The one
 piece of real evidence on hand is technical, not promotional: the Bayesian solvers have been
-validated against real OxCal 4.4 runs, by the Python server's suite (`test_oxcal_agreement.py`,
-`test_exact_chain.py`, `test_gibbs.py`, at tag `v2.1.0`), and the Rust server is held to that
-server's recorded answers in `desktop/corpus` — describe this accurately
+validated against real OxCal 4.4 runs, in `desktop/crates/radical-core/tests/oxcal/` — describe this accurately
 as validation evidence, not dressed up as a marketing claim.
 
 ## Product Principles

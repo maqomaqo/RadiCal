@@ -22,7 +22,7 @@ desktop/
     data/units/         one service function per case
     data/api/           whole API requests and responses: solver and server targets
     inputs/             the inputs some families were made from
-    fixtures/           OxCal models and captured pages that cases read by path
+    fixtures/           OxCal models, OxCal's own results for them, and captured pages
     ziggurat_tables.py  writes NumPy's normal-draw tables as Rust source
     html_entities.py    writes Python's HTML entity tables as Rust source
 ```
@@ -47,6 +47,10 @@ reproduce Python's runs draw for draw, except where noted in `tests/models/sampl
 `cargo run --release -p radical-core --example sampler_bench` times the sampler on the models in
 `bench/models.json`.
 
+`cargo test -p radical-core --test oxcal` runs the fixture models in `corpus/fixtures/oxcal*/`
+and compares the answers with OxCal 4.4's own results for the same runs: calibrated ranges,
+modelled dates and Boundaries, outlier probabilities and scales, and agreement indices.
+
 `cargo test -p radical-core --test units -- --nocapture` also prints, for each corpus family, the
 largest relative difference from the Python answer and where it was.
 
@@ -56,9 +60,10 @@ The corpus records what the earlier Python server answered, and the Rust code is
 Python server was removed after v2.1.0; the code that generated the corpus, and the Python files
 that comments in this workspace name (`backend/...`), are in the repository at tag `v2.1.0`.
 
-The corpus is no longer regenerated. When behaviour changes on purpose, edit the cases it changes
-and put the file's new SHA-256 (`shasum -a 256 FILE`) in `manifest.json`, so the corpus diff
-records what changed. New tests are written in Rust.
+The corpus is no longer regenerated. When behaviour changes on purpose, check the change against
+OxCal first (`--test oxcal`), then edit the cases it changes and put the file's new SHA-256
+(`shasum -a 256 FILE`) in `manifest.json`, so the corpus diff records what changed. New tests are
+written in Rust.
 
 `radical-corpus`'s tests fail when a corpus file no longer matches the manifest. They also fail
 when the curves in `calibration_data/` differ from the ones the corpus was generated against.
