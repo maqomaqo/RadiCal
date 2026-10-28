@@ -1,5 +1,4 @@
 # RadiCal
-[![DOI](https://zenodo.org/badge/1322368174.svg)](https://doi.org/10.5281/zenodo.23727568)
 
 A tool for radiocarbon dating analysis: calibration, Bayesian chronological modelling with constraints, and interactive posterior visualization. It runs as a desktop app (RadiCal Desktop, for macOS, Windows and Linux) or on a server that a group shares in the browser.
 
