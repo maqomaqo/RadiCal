@@ -27,10 +27,9 @@ const FIXED_SWEEPS: usize = 10_000;
 
 fn main() {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../bench/models.json");
-    let models: serde_json::Map<String, Value> = serde_json::from_str(
-        &std::fs::read_to_string(path).expect("desktop/bench/models.json"),
-    )
-    .unwrap();
+    let models: serde_json::Map<String, Value> =
+        serde_json::from_str(&std::fs::read_to_string(path).expect("desktop/bench/models.json"))
+            .unwrap();
     let cal = Calibrator::default();
     println!(
         "{:28} {:>18} {:>8} {:>20}",
