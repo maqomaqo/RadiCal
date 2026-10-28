@@ -398,7 +398,6 @@ export default function NewAnalysis() {
           // holds, so anything missing here is anything removed.
           outlier_prior: m.outlier_prior ?? 0,
           outlier_model: m.outlier_model ?? 'general',
-          reservoir_age: m.reservoir_age ?? null,
           depth_cm: m.depth_cm ?? null,
           // The two ordinates. Loaded for the same reason as the outlier
           // settings above: an edit resubmits whatever the draft holds, so a
@@ -932,7 +931,6 @@ export default function NewAnalysis() {
       outlier_prior:
         analysisType === 'bayesian' ? currentMeasurement.outlier_prior ?? 0 : 0,
       outlier_model: currentMeasurement.outlier_model ?? 'general',
-      reservoir_age: currentMeasurement.reservoir_age,
     }
 
     addMeasurement(measurement)

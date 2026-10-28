@@ -19,7 +19,6 @@ export function projectSampleToMeasurement(s: ProjectSample): DraftMeasurement {
     material_type: s.material_type || 'unknown',
     sample_type: s.sample_type,
     curve_id: s.curve_id || 'intcal20',
-    reservoir_age: s.reservoir_age ?? null,
     // Carried rather than blanked: a reservoir offset belongs to where the
     // sample came from, so dropping it recalibrates a marine date without
     // its local correction -- which moves the answer, not just a label.

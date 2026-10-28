@@ -279,10 +279,10 @@ class TestEditRoundTrip:
 
     def test_editing_preserves_the_fields_the_form_does_not_show(self, client):
         """
-        reservoir_age, depth_cm, location and notes are recorded against a
-        date but take no part in the calculation, and the new-analysis form
-        does not surface them -- so nothing on screen would reveal that an
-        edit had blanked them. Dates deployed from a project collection
+        depth_cm, location and notes are recorded against a date but take no
+        part in the calculation, and the new-analysis form does not surface
+        them -- so nothing on screen would reveal that an edit had blanked
+        them. Dates deployed from a project collection
         arrive with them set.
         """
         tag = f"ex{next(_ROUND_TRIP_IDS)}"
@@ -293,7 +293,7 @@ class TestEditRoundTrip:
                 {"id": f"{tag}b1", "element_type": "boundary", "name": "End", "children": []},
             ],
         }
-        extras = {"reservoir_age": 400, "depth_cm": 125.5,
+        extras = {"depth_cm": 125.5,
                   "location": "Trench 4", "notes": "possible bioturbation"}
         created = client.post(
             "/api/analysis/bayesian?wait=true",
@@ -330,7 +330,6 @@ class TestEditRoundTrip:
                         "age_bp": m["age_bp"], "error_1sigma": m["error_1sigma"],
                         "material_type": m["material_type"], "sample_type": m["sample_type"],
                         "curve_id": m["curve_id"],
-                        "reservoir_age": m.get("reservoir_age"),
                         "depth_cm": m.get("depth_cm"),
                         "location": m.get("location"),
                         "notes": m.get("notes"),

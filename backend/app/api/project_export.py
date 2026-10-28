@@ -44,7 +44,7 @@ from app.services.model_tree import rows_to_tree
 # needed to put the same run back together, and no result.
 _INPUT_FIELDS = (
     'id', 'sample_name', 'age_bp', 'error_1sigma', 'material_type', 'sample_type',
-    'curve_id', 'delta_r', 'delta_r_error', 'delta_r_source', 'reservoir_age',
+    'curve_id', 'delta_r', 'delta_r_error', 'delta_r_source',
     'latitude', 'longitude', 'location', 'notes', 'depth_cm', 'ring_offset',
     'ring_offset_error', 'inbuilt_years', 'inbuilt_shape', 'outlier_prior',
     'outlier_model', 'group_id', 'element_id', 'tpq_age_bp', 'taq_age_bp',
@@ -66,8 +66,7 @@ _CURVE_FIELDS = (
 # The collection as the CSV importer reads it (date_import.COLUMN_ALIASES),
 # so the file goes straight back in with every field it was stored with;
 # `phase` is the collection's default_context_name. The template's columns
-# come first, then the rest. reservoir_age is left out: it is superseded by
-# delta_r and never applied.
+# come first, then the rest.
 _SAMPLE_COLUMNS = [
     ('sample_name', 'sample_name'), ('age_bp', 'age_bp'),
     ('error_1sigma', 'error_1sigma'), ('material_type', 'material_type'),
@@ -85,7 +84,7 @@ _SAMPLE_COLUMNS = [
 # so the importer can store the same row. samples.csv beside it is for people.
 COLLECTION_FIELDS = (
     'sample_name', 'age_bp', 'error_1sigma', 'material_type', 'sample_type',
-    'curve_id', 'reservoir_age', 'delta_r', 'delta_r_error', 'delta_r_source',
+    'curve_id', 'delta_r', 'delta_r_error', 'delta_r_source',
     'latitude', 'longitude', 'depth_cm', 'ring_offset', 'ring_offset_error',
     'inbuilt_years', 'inbuilt_shape', 'location', 'notes', 'default_context_name',
     'tpq_age_bp', 'taq_age_bp',

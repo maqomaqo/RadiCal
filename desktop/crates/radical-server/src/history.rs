@@ -25,7 +25,7 @@ pub fn app_commit() -> Option<&'static str> {
 }
 
 /// The fields of a date that are what it was run from.
-const INPUT_FIELDS: [&str; 26] = [
+const INPUT_FIELDS: [&str; 25] = [
     "id",
     "sample_name",
     "age_bp",
@@ -36,7 +36,6 @@ const INPUT_FIELDS: [&str; 26] = [
     "delta_r",
     "delta_r_error",
     "delta_r_source",
-    "reservoir_age",
     "latitude",
     "longitude",
     "location",

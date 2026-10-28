@@ -148,7 +148,6 @@ class ProjectSample(Base):
     material_type = Column(String, nullable=False)
     sample_type = Column(String, nullable=False)  # 'terrestrial' or 'marine'
     curve_id = Column(String, default='intcal20')
-    reservoir_age = Column(Float, nullable=True)
 
     # Local marine reservoir offset and its uncertainty, as on
     # RadiocarbonSample: the deviation from the global average the marine
@@ -583,10 +582,6 @@ class RadiocarbonSample(Base):
     # Which outlier model applies when outlier_prior is set: 'general' or
     # 'charcoal'. Persisted for the same reason as the prior beside it.
     outlier_model = Column(String, nullable=True)
-    # Superseded by delta_r and never applied to a calibration: it was
-    # ambiguous whether it meant a whole reservoir age or a local offset.
-    # Kept because existing rows may hold a value.
-    reservoir_age = Column(Float, nullable=True)
     depth_cm = Column(Float, nullable=True)
 
     # Where this sample sits in a wiggle-matched series (a tree-ring sequence,

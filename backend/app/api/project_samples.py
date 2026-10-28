@@ -57,7 +57,6 @@ def _serialize(sample: ProjectSample) -> dict:
         "material_type": sample.material_type,
         "sample_type": sample.sample_type,
         "curve_id": sample.curve_id,
-        "reservoir_age": sample.reservoir_age,
         "delta_r": sample.delta_r,
         "delta_r_error": sample.delta_r_error,
         # NULL means hand-entered, which is not the same as unknown: it is the
@@ -163,7 +162,6 @@ def create_project_samples(
             material_type=item.material_type,
             sample_type=sample_type,
             curve_id=item.curve_id,
-            reservoir_age=item.reservoir_age,
             delta_r=item.delta_r,
             delta_r_error=item.delta_r_error,
             # Provenance belongs to the number it derived: kept only beside a
@@ -556,7 +554,6 @@ def deploy_samples_to_analysis(
             material_type=src.material_type,
             sample_type=src.sample_type,
             curve_id=src.curve_id,
-            reservoir_age=src.reservoir_age,
             # Carried across: a reservoir offset belongs to where the sample
             # came from, so a deployed date arrives already corrected.
             delta_r=src.delta_r,

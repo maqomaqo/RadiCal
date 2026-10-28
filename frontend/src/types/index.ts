@@ -164,15 +164,10 @@ export interface DraftMeasurement extends MatrixMeasurement {
   // through the draft so a date picked from a collection keeps its offset's
   // derivation; the API stores it on the analysis's own copy of the date.
   delta_r_source?: Record<string, unknown> | null
-  // Recorded against the date but not used in the calculation. Carried
-  // through the draft so editing a saved analysis resubmits them instead
-  // of blanking them -- dates deployed from a project collection arrive
-  // with these already filled in.
-  reservoir_age?: number | null
   // Where the sample came from, in WGS84 decimal degrees. Carried through the
-  // draft for the same reason as reservoir_age above -- a date deployed from a
-  // collection arrives placed, and an edit that dropped these would unplace it
-  // -- and the two are one fact: the API refuses a latitude without its
+  // draft so editing a saved analysis resubmits them instead of blanking them
+  // -- a date deployed from a collection arrives placed, and an edit that
+  // dropped these would unplace it -- and the two are one fact: the API refuses a latitude without its
   // longitude, as it refuses a ΔR without its error.
   latitude?: number | null
   longitude?: number | null
