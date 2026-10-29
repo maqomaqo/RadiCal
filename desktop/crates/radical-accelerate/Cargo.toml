@@ -1,0 +1,14 @@
+[package]
+name = "radical-accelerate"
+description = "Apple Accelerate's matrix product for radical-core on macOS: the workspace's one call across an FFI boundary."
+publish = false
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+# The workspace forbids unsafe code; this crate exists to hold the one unsafe
+# call it cannot avoid, so it denies it instead and allows it on that call.
+[lints.rust]
+unsafe_code = "deny"
+

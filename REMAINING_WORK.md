@@ -99,16 +99,11 @@ before the first open (`docs/INSTALLATION.md` tells users how to get past it).
 Both take weeks of paperwork before any code changes. Once they're done, drop
 the warning section from `docs/INSTALLATION.md`.
 
-### 10. Exact solver's matrix products
-The exact solver is the one place the Rust server is not faster than the
-Python one was: NumPy handed its large matrix products to Apple Accelerate or
-OpenBLAS. Calling a BLAS from `radical-core`'s `matmul` would close the gap.
-
 ---
 
 ## Testing
 
-### 11. No automated end-to-end tests
+### 10. No automated end-to-end tests
 Flows are verified by hand against the running stack. The obvious first
 scenarios, for example Playwright against `docker-compose.yml`: sign in → new
 analysis → run → results; deploy from a collection; compare two analyses.
@@ -119,7 +114,7 @@ most exposed. Smoke tests of the Results, Stratigraphy and Curve Browser pages
 on all three, in CI with `tauri-driver`, would catch a webview difference
 before users do.
 
-### 12. Frontend unit gaps
+### 11. Frontend unit gaps
 - `utils/stratigraphy.ts` (`flattenStructure`, `expandRelationships`,
   `findCycle`) is pure and untested.
 - `hooks/useJob.ts` and `api/jobs.ts` have no tests of their own; only the

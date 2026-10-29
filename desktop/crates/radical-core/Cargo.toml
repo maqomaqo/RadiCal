@@ -13,6 +13,14 @@ sha2.workspace = true
 # The exact solver's evidence keys a model's readings as hashlib.sha1 does.
 sha1.workspace = true
 
+# The exact solvers' matrix products (matrix::Matrix::matmul): Accelerate on
+# macOS, faer everywhere else.
+[target.'cfg(target_os = "macos")'.dependencies]
+radical-accelerate = { path = "../radical-accelerate" }
+
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+faer.workspace = true
+
 [dev-dependencies]
 radical-corpus = { path = "../radical-corpus" }
 serde_json.workspace = true
