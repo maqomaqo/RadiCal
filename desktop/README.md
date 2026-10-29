@@ -9,6 +9,7 @@ desktop/
   rust-toolchain.toml   the pinned compiler
   crates/
     radical-core/       the calibration maths, the exact solvers and the sampler
+    radical-accelerate/ Apple Accelerate's matrix product, for radical-core on macOS
     radical-io/         file formats: date tables, curve files, OxCal models
     radical-store/      the database, one SQLite file
     radical-jobs/       runs that happen outside the request that asked for them

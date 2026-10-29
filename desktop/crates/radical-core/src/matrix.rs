@@ -3,12 +3,19 @@
 //!
 //! The solvers' matrices are indexed [younger boundary, older boundary] on a
 //! calendar grid of up to 2,000 points, so one is 32 MB and a product is
-//! 8 x 10^9 multiply-adds. NumPy hands those products to BLAS; here they are
-//! a cache-blocked loop split across threads by rows of the result. Neither
-//! adds the products in a fixed order, so a product agrees with NumPy's to
+//! 8 x 10^9 multiply-adds. NumPy hands those products to BLAS, and so does
+//! this on macOS: Apple's Accelerate (`radical-accelerate`). Everywhere else
+//! they go to faer's GEMM kernels, pure Rust and SIMD, split across threads by
+//! rows of the result. None of them adds the products in a fixed order, so a
+//! product agrees with NumPy's to
 //! rounding rather than to the bit -- and every number that comes out of the
 //! message passing with it. Elementwise work and reductions follow NumPy's
 //! order exactly ([`crate::numeric`]).
+
+#[cfg(not(target_os = "macos"))]
+use faer::linalg::matmul::matmul;
+#[cfg(not(target_os = "macos"))]
+use faer::{Accum, MatMut, MatRef, Par};
 
 use crate::numeric;
 
@@ -242,43 +249,30 @@ impl Matrix {
         if m == 0 || n == 0 || k == 0 {
             return out;
         }
-        let threads = std::thread::available_parallelism()
-            .map_or(1, usize::from)
-            .min(m.div_ceil(16))
-            .max(1);
-        let rows_per = m.div_ceil(threads);
-        std::thread::scope(|scope| {
-            for (chunk, c) in out.data.chunks_mut(rows_per * n).enumerate() {
-                let first = chunk * rows_per;
-                scope.spawn(move || gemm_rows(self, other, c, first, k, n));
-            }
-        });
-        out
-    }
-}
-
-/// Rows `first..` of `a @ b` into `c`, blocked over the inner dimension so a
-/// band of `b` stays in cache while every row of the chunk passes over it.
-/// A zero in `a` is skipped: the solvers' matrices are triangular, and every
-/// value they hold is finite, so the product it would add is an exact zero.
-fn gemm_rows(a: &Matrix, b: &Matrix, c: &mut [f64], first: usize, k: usize, n: usize) {
-    const KC: usize = 128;
-    let rows = c.len() / n;
-    for p0 in (0..k).step_by(KC) {
-        let p1 = (p0 + KC).min(k);
-        for i in 0..rows {
-            let a_row = &a.row(first + i)[p0..p1];
-            let c_row = &mut c[i * n..(i + 1) * n];
-            for (p, &aip) in (p0..p1).zip(a_row) {
-                if aip == 0.0 {
-                    continue;
+        #[cfg(target_os = "macos")]
+        radical_accelerate::dgemm(m, k, n, &self.data, &other.data, &mut out.data);
+        #[cfg(not(target_os = "macos"))]
+        {
+            // Bands of at least 64 rows, each a single-threaded faer product:
+            // faer's own parallelism would bring rayon in for no measured gain.
+            let threads = std::thread::available_parallelism()
+                .map_or(1, usize::from)
+                .min(m.div_ceil(64))
+                .max(1);
+            let rows_per = m.div_ceil(threads);
+            let b = MatRef::from_row_major_slice(&other.data, k, n);
+            std::thread::scope(|scope| {
+                for (chunk, band) in out.data.chunks_mut(rows_per * n).enumerate() {
+                    let rows = band.len() / n;
+                    let first = chunk * rows_per * k;
+                    let a =
+                        MatRef::from_row_major_slice(&self.data[first..first + rows * k], rows, k);
+                    let c = MatMut::from_row_major_slice_mut(band, rows, n);
+                    scope.spawn(move || matmul(c, Accum::Replace, a, b, 1.0, Par::Seq));
                 }
-                let b_row = b.row(p);
-                for (cj, &bj) in c_row.iter_mut().zip(b_row) {
-                    *cj += aip * bj;
-                }
-            }
+            });
         }
+        out
     }
 }
 
