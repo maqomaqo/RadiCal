@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { decomposeColor, recomposeColor, useTheme } from '@mui/material/styles'
 import type { ElementType } from '@/types'
+import { SURFACES, type ColorMode } from './surfaces'
 
 /**
  * Diagram colours are their own palette rather than borrowings from the
@@ -47,6 +48,63 @@ export const DEPOSITION_TEAL = '#1c6a86'
 export const UNDATED_LEVEL_SLATE = '#5b7f8d'
 
 /**
+ * The same hues for the dark theme.
+ *
+ * A hue is a claim about what something IS, so none of these moved: each is
+ * the light value's own hue and (barely reduced) chroma, taken UP in
+ * lightness until it clears 4.6:1 on `background.muted` -- the dimmest surface
+ * a label can sit on -- which is 5.4:1 on a card and 6:1 on the canvas. The
+ * 4.5:1 that the light theme asked of its inks on white is therefore still
+ * asked of them here, for the same reason: they carry a 10px label as well as
+ * a border.
+ *
+ * One hue was moved on purpose. The light theme tells the Boundary coral from
+ * the `error` oxblood by DEPTH, because hue separation is unavailable in the
+ * red band -- and depth is exactly what a dark ground takes away, since both
+ * have to be light to be read. So the pair separates the other way round here:
+ * the coral leans 15 degrees towards rose and stays the stronger of the two,
+ * and `error` leans towards orange-red and is the lighter and softer of them
+ * (see theme/appTheme.ts).
+ */
+export const BOUNDARY_CORAL_DARK = '#f66b73'
+export const BOUNDARY_CORAL_INK_DARK = '#f0666f'
+export const PHASE_GREEN_DARK = '#56a089'
+export const HIATUS_VIOLET_DARK = '#a287c0'
+export const WIGGLE_AMBER_DARK = '#c2864a'
+export const DEPOSITION_TEAL_DARK = '#5b9ab5'
+export const UNDATED_LEVEL_SLATE_DARK = '#5b7f8d'
+
+export interface ElementHues {
+  boundary: { main: string; ink: string }
+  phase: string
+  hiatus: string
+  wiggle: string
+  deposition: string
+  undated: string
+}
+
+/** The element hues for a colour mode. */
+export function elementHues(mode: ColorMode): ElementHues {
+  return mode === 'dark'
+    ? {
+        boundary: { main: BOUNDARY_CORAL_DARK, ink: BOUNDARY_CORAL_INK_DARK },
+        phase: PHASE_GREEN_DARK,
+        hiatus: HIATUS_VIOLET_DARK,
+        wiggle: WIGGLE_AMBER_DARK,
+        deposition: DEPOSITION_TEAL_DARK,
+        undated: UNDATED_LEVEL_SLATE_DARK,
+      }
+    : {
+        boundary: { main: BOUNDARY_CORAL, ink: BOUNDARY_CORAL_INK },
+        phase: PHASE_GREEN,
+        hiatus: HIATUS_VIOLET,
+        wiggle: WIGGLE_AMBER,
+        deposition: DEPOSITION_TEAL,
+        undated: UNDATED_LEVEL_SLATE,
+      }
+}
+
+/**
  * The app's warm ink -- the tint behind every recoloured MUI shadow.
  *
  * Not an element colour and not a hue: it is what the app draws with when a
@@ -57,7 +115,7 @@ export const UNDATED_LEVEL_SLATE = '#5b7f8d'
  *
  * Here rather than in plotColors.ts, since three surfaces need the value.
  */
-export const WARM_INK = '#2b2320'
+export const WARM_INK = SURFACES.light.ink
 
 export interface ElementTypeColor {
   /** Borders, rules and tints. Graphic use, which only needs 3:1. */
@@ -80,22 +138,24 @@ const solid = (main: string): ElementTypeColor => ({ main, ink: main })
  * structural container, so it follows the brand colour wherever that goes.
  */
 export function useElementTypeColors(): Record<ElementType, ElementTypeColor> {
-  const primary = useTheme().palette.primary.main
+  const { palette } = useTheme()
+  const primary = palette.primary.main
+  const mode = palette.mode
   // Memoised so callers can list this in a useMemo's dependencies without
   // a fresh object every render invalidating it -- the Harris diagram
   // rebuilds its whole node geometry off one such memo.
-  return useMemo(
-    () => ({
+  return useMemo(() => {
+    const hues = elementHues(mode)
+    return {
       sequence: solid(primary),
-      phase: solid(PHASE_GREEN),
-      boundary: { main: BOUNDARY_CORAL, ink: BOUNDARY_CORAL_INK },
-      hiatus: solid(HIATUS_VIOLET),
-      wiggle_sequence: solid(WIGGLE_AMBER),
-      deposition_sequence: solid(DEPOSITION_TEAL),
-      interpolated_depth: solid(UNDATED_LEVEL_SLATE),
-    }),
-    [primary]
-  )
+      phase: solid(hues.phase),
+      boundary: hues.boundary,
+      hiatus: solid(hues.hiatus),
+      wiggle_sequence: solid(hues.wiggle),
+      deposition_sequence: solid(hues.deposition),
+      interpolated_depth: solid(hues.undated),
+    }
+  }, [primary, mode])
 }
 
 /**
@@ -156,6 +216,31 @@ export const CONTEXT_PALETTE = [
 ]
 
 /**
+ * The same ramp for the dark theme: hue 171 held, chroma easing down as the
+ * steps get light, and the six steps still ~1.2:1 apart -- the widest spacing
+ * the floor allows, since the first has to clear 4.6:1 on `background.muted`
+ * to carry a 10px label.
+ *
+ * Index order means the same thing in both modes: index 0 is the quietest
+ * step and index 5 the strongest. On paper that is the lightest green and the
+ * darkest; on ink it is the dimmest and the palest. What a reader learns --
+ * "stronger step, higher in the ramp" -- survives the change of ground.
+ */
+export const CONTEXT_PALETTE_DARK = [
+  '#57a088',
+  '#6bae98',
+  '#80bda8',
+  '#95cdb9',
+  '#abdecc',
+  '#c2f0df',
+]
+
+/** The context ramp for a colour mode. */
+export function contextPalette(mode: ColorMode = 'light'): string[] {
+  return mode === 'dark' ? CONTEXT_PALETTE_DARK : CONTEXT_PALETTE
+}
+
+/**
  * Which shades to use for `count` contexts, spread across the ramp.
  *
  * Taking them in order would give three contexts the three most similar
@@ -168,16 +253,15 @@ export const CONTEXT_PALETTE = [
  * of one green, and pretending otherwise would be the categorical palette
  * again in disguise.
  */
-export function contextShades(count: number): string[] {
-  const last = CONTEXT_PALETTE.length - 1
+export function contextShades(count: number, mode: ColorMode = 'light'): string[] {
+  const palette = contextPalette(mode)
+  const last = palette.length - 1
   if (count <= 0) return []
   // One context takes the middle of the ramp -- the canonical Phase green --
-  // rather than the palest end, which would read as a container tint.
-  if (count === 1) return [CONTEXT_PALETTE[2]]
-  if (count > CONTEXT_PALETTE.length) {
-    return Array.from({ length: count }, (_, i) => CONTEXT_PALETTE[i % CONTEXT_PALETTE.length])
+  // rather than the quietest end, which would read as a container tint.
+  if (count === 1) return [palette[2]]
+  if (count > palette.length) {
+    return Array.from({ length: count }, (_, i) => palette[i % palette.length])
   }
-  return Array.from({ length: count }, (_, i) =>
-    CONTEXT_PALETTE[Math.round((i * last) / (count - 1))]
-  )
+  return Array.from({ length: count }, (_, i) => palette[Math.round((i * last) / (count - 1))])
 }

@@ -1,3 +1,6 @@
+import { formatOklch, parseOklch } from './oklch'
+import { SURFACES } from './surfaces'
+
 /**
  * The tiled basemap: OpenFreeMap's Positron, trimmed.
  *
@@ -85,6 +88,97 @@ export function tailorBasemapStyle(style: StyleObject): StyleObject {
   delete tailored.sprite
   return tailored
 }
+
+/**
+ * The tailored style re-grounded for the dark theme.
+ *
+ * OpenFreeMap serves no dark style, and a pale rectangle in the middle of a
+ * dark page is the loudest thing on it. So Positron's own colours are moved,
+ * property by property, by what each one IS -- not inverted wholesale, which
+ * would put the sea lighter than the land:
+ *
+ *   - the background is the card the figure sits on, so the land is the plot
+ *     surface and marks are checked against the same ground as on any figure;
+ *   - fills keep their place relative to the land: the sea stays the darker
+ *     surface, a glacier or a building stays the lighter one, at half the
+ *     distance, since a dark ground leaves half the room;
+ *   - lines and text are marks, so they swap sides -- coastline, borders and
+ *     names are lighter than the land where they were darker -- and a place
+ *     name is held to 4.5:1 on the land;
+ *   - every hue is kept and every chroma is cut to what the warm ground
+ *     carries, so the one tinted surface on the map is still the sea and
+ *     nothing on it is a colour except the marks.
+ *
+ * The trimming that `tailorBasemapStyle` did is untouched: this only recolours
+ * what is left.
+ */
+export function darkenBasemapStyle(style: StyleObject): StyleObject {
+  const cached = darkened.get(style)
+  if (cached) return cached
+
+  const land = parseOklch(SURFACES.dark.paper)!
+  const light = { l: 0.96 } // Positron's land, which is its `background`
+  const MAX_CHROMA = 0.016
+
+  const regrind = (value: string, role: 'background' | 'fill' | 'line' | 'text' | 'halo') => {
+    const c = parseOklch(value)
+    if (!c) return value
+    if (role === 'background') return SURFACES.dark.paper
+    if (role === 'halo') return formatOklch({ ...land, a: c.a })
+    const hue = c.c < 0.02 ? land.h : c.h
+    const chroma = Math.min(c.c, MAX_CHROMA)
+    const base = { c: chroma, h: hue, a: c.a }
+    if (role === 'fill') return formatOklch({ ...base, l: land.l + (c.l - light.l) * 0.5 })
+    if (role === 'line') {
+      const l = Math.min(0.6, Math.max(0.12, land.l + (light.l - c.l) * 0.5))
+      return formatOklch({ ...base, l })
+    }
+    // text: lifted, so a black name becomes the lightest and a grey one holds
+    // its rank. Chroma is allowed to stay, so the water labels are still blue.
+    return formatOklch({
+      l: 0.66 + (1 - c.l) * 0.26,
+      c: c.c < 0.02 ? 0.01 : Math.min(c.c, 0.08),
+      h: c.c < 0.02 ? land.h : c.h,
+      a: c.a,
+    })
+  }
+
+  // A value is a colour string or an expression (an array whose strings are
+  // stops); anything that does not parse as a colour -- "linear", "zoom" -- is
+  // an operator and is left alone.
+  const walk = (value: unknown, role: Parameters<typeof regrind>[1]): unknown =>
+    typeof value === 'string'
+      ? regrind(value, role)
+      : Array.isArray(value)
+        ? value.map((v) => walk(v, role))
+        : value
+
+  const ROLES: Record<string, Parameters<typeof regrind>[1]> = {
+    'background-color': 'background',
+    'text-halo-color': 'halo',
+    'text-color': 'text',
+    'fill-color': 'fill',
+    'fill-outline-color': 'line',
+    'line-color': 'line',
+  }
+
+  const layers = (style.layers || []).map((layer) => {
+    const paint = layer.paint as Record<string, unknown> | undefined
+    if (!paint) return layer
+    const next: Record<string, unknown> = { ...paint }
+    for (const [prop, value] of Object.entries(paint)) {
+      const role = ROLES[prop]
+      if (role) next[prop] = walk(value, role)
+    }
+    return { ...layer, paint: next }
+  })
+
+  const result = { ...style, layers }
+  darkened.set(style, result)
+  return result
+}
+
+const darkened = new WeakMap<StyleObject, StyleObject>()
 
 /**
  * The tailored style, fetched once per page and shared by every map.

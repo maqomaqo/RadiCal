@@ -16,9 +16,9 @@ import {
   TextField,
   Typography,
 } from '@mui/material'
-import { alpha } from '@mui/material/styles'
+import { useTheme } from '@mui/material/styles'
 import UploadFileIcon from '@mui/icons-material/UploadFile'
-import { WARM_INK } from '@/theme/diagramColors'
+import { inkAt } from '@/theme/ink'
 import {
   createCurve,
   previewCurve,
@@ -83,6 +83,7 @@ export function slugify(text: string): string {
  * rather than a category of it, which is what a preview of an unnamed file is.
  */
 function CurveSketch({ points }: { points: number[][] }) {
+  const mode = useTheme().palette.mode
   if (points.length < 2) return null
 
   const width = 520
@@ -114,8 +115,8 @@ function CurveSketch({ points }: { points: number[][] }) {
         aria-label="The uploaded curve: radiocarbon age against calendar age"
         sx={{ width: '100%', height: 'auto', display: 'block' }}
       >
-        <path d={band} fill={alpha(WARM_INK, 0.12)} stroke="none" />
-        <path d={line} fill="none" stroke={alpha(WARM_INK, 0.8)} strokeWidth={1.5} />
+        <path d={band} fill={inkAt(mode, 0.12)} stroke="none" />
+        <path d={line} fill="none" stroke={inkAt(mode, 0.8)} strokeWidth={1.5} />
       </Box>
       <Typography variant="caption" color="textSecondary">
         Radiocarbon age (vertical) against calendar age (horizontal, younger at

@@ -1,5 +1,6 @@
 import { alpha } from '@mui/material/styles'
-import { PHASE_GREEN } from './diagramColors'
+import { PHASE_GREEN, PHASE_GREEN_DARK } from './diagramColors'
+import type { ColorMode } from './surfaces'
 
 /**
  * How each calibration curve is drawn, keyed by which curve it is.
@@ -84,6 +85,15 @@ const SLOTS: Array<{ line: string; dash: CurveDash }> = [
   { line: '#4a7524', dash: 'dot' },
 ]
 
+/**
+ * The same five slots for the dark theme: each line is its light hue taken up
+ * in lightness until it clears 4.6:1 on the dimmest surface a legend swatch
+ * can sit on (`background.muted`), chroma barely reduced. Dash is untouched --
+ * it is what survives a greyscale print in either mode. Pairwise hue gaps are
+ * exactly the light palette's, because no hue moved.
+ */
+const SLOT_LINES_DARK = ['#a287c0', '#d9709e', PHASE_GREEN_DARK, '#d17e4e', '#759e57']
+
 /** How many distinct styles the palette holds. See SLOTS for why it is five. */
 export const CURVE_PALETTE_SIZE = SLOTS.length
 
@@ -138,8 +148,10 @@ export function curveSlot(curveId: string): number {
 }
 
 /** The drawing style for one palette slot. */
-export function styleForSlot(slot: number): CurveStyle {
-  const { line, dash } = SLOTS[((slot % SLOTS.length) + SLOTS.length) % SLOTS.length]
+export function styleForSlot(slot: number, mode: ColorMode = 'light'): CurveStyle {
+  const index = ((slot % SLOTS.length) + SLOTS.length) % SLOTS.length
+  const { dash } = SLOTS[index]
+  const line = mode === 'dark' ? SLOT_LINES_DARK[index] : SLOTS[index].line
   return {
     line,
     dash,
@@ -162,7 +174,10 @@ export function styleForSlot(slot: number): CurveStyle {
  * Order matters only when a collision happens, and the caller's order is the
  * model's own, so the same analysis resolves the same way every time.
  */
-export function curveStyles(curveIds: string[]): Record<string, CurveStyle> {
+export function curveStyles(
+  curveIds: string[],
+  mode: ColorMode = 'light'
+): Record<string, CurveStyle> {
   const taken = new Set<number>()
   const styles: Record<string, CurveStyle> = {}
   for (const id of curveIds) {
@@ -172,7 +187,7 @@ export function curveStyles(curveIds: string[]): Record<string, CurveStyle> {
       slot = (slot + 1) % SLOTS.length
     }
     taken.add(slot)
-    styles[id] = styleForSlot(slot)
+    styles[id] = styleForSlot(slot, mode)
   }
   return styles
 }

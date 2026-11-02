@@ -80,6 +80,14 @@ works once, within an hour. Otherwise, ask whoever runs RadiCal to set a new one
 a password you know, open the account menu (your name, top right) and choose **Account and access
 tokens**.
 
+### Appearance
+
+RadiCal has a light and a dark appearance, with the same colours meaning the same things in both.
+Choose between them with the sun-and-moon button on the top bar (in the sections menu on a phone):
+**Light**, **Dark**, or **Match system**, which follows your computer and changes with it. The
+choice is remembered on that computer. Figures keep the appearance they were drawn in, so a PNG
+saved from a dark page has a dark background.
+
 ## Creating an Analysis
 
 New Analysis is a single form: settings on the left, measurements on the right, the measurement
@@ -693,7 +701,7 @@ gets no Sequence row, because its Phase duration already measures the same quant
 
 A figure showing every datable phase on one calendar axis, one strip each, in model order. Shading
 represents the probability the phase was **in progress** in each year, read off the same joint draws
-as the durations: darker means more probable, and hover gives the figure. Along a Sequence the
+as the durations: stronger shading means more probable, and hover gives the figure. Along a Sequence the
 strips follow one another; across parallel branches, a column read top to bottom shows which phases
 were probably running simultaneously. A phase without its own Boundaries uses its dated events, and
 a single-date phase shows that date's probability. **Download PNG** saves the figure, and the PDF
@@ -969,7 +977,7 @@ the browser. Accurate to about a kilometre. This is the default.
 
 **The tiled basemap** is turned on per project with **Show a basemap with coastlines, rivers and
 place names** (Edit Project). It uses [OpenFreeMap](https://openfreemap.org)'s *Positron* — a
-light-grey OpenStreetMap-based map trimmed so that islands are always islands and nothing competes
+light-grey OpenStreetMap-based map (recoloured to match when the appearance is dark) trimmed so that islands are always islands and nothing competes
 with the data drawn over it. Panning or zooming tells OpenFreeMap's server which patch of ground
 is on screen (not the coordinates of any date, but enough to locate a site). Worth it for precise
 placement; consider the trade-off for restricted sites. OpenFreeMap needs no account or key.

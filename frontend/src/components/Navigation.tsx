@@ -9,6 +9,7 @@ import { Link as RouterLink, useLocation } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
 import { isSingleUser } from '@/api/client'
 import { MAC_TITLE_BAR, useFullscreen } from '@/desktop/shell'
+import AppearanceMenu, { appearanceItems } from '@/components/AppearanceMenu'
 
 const NAV_LINKS = [
   { to: '/', label: 'Dashboard' },
@@ -118,6 +119,10 @@ export default function Navigation() {
                 {link.label}
               </MenuItem>
             ))}
+            {/* Below `sm` the bar has no room for a control of its own, so
+                Appearance joins the sections here, as Help does. */}
+            <Divider />
+            {appearanceItems(() => setNavAnchor(null))}
           </Menu>
 
           <Typography
@@ -231,6 +236,8 @@ export default function Navigation() {
               <HelpOutlineIcon />
             </IconButton>
           </Tooltip>
+
+          <AppearanceMenu />
 
           {/* Who you are, and the way out. The address rather than an avatar
               or initials: on an installation where everything is private per

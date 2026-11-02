@@ -15,14 +15,20 @@ import AddIcon from '@mui/icons-material/Add'
 import RemoveIcon from '@mui/icons-material/Remove'
 import ZoomOutMapIcon from '@mui/icons-material/ZoomOutMap'
 import DownloadIcon from '@mui/icons-material/Download'
-import { alpha } from '@mui/material/styles'
+import { alpha, useTheme } from '@mui/material/styles'
 import Plotly from 'plotly.js-dist-min'
 import type { ColorScale, Config, Data, Layout } from 'plotly.js-dist-min'
 
 import { useBasemapPreference } from '@/hooks/useBasemapPreference'
 import { useTileServerReachable } from '@/hooks/useTileServer'
-import { CONTEXT_PALETTE } from '@/theme/diagramColors'
-import { BASEMAP_PROVIDER, BASEMAP_TEXT_FONT, loadedBasemapStyle } from '@/theme/basemapStyle'
+import { CONTEXT_PALETTE, CONTEXT_PALETTE_DARK } from '@/theme/diagramColors'
+import {
+  BASEMAP_PROVIDER,
+  BASEMAP_TEXT_FONT,
+  darkenBasemapStyle,
+  loadedBasemapStyle,
+} from '@/theme/basemapStyle'
+import type { ColorMode } from '@/theme/surfaces'
 import { usePlotColors, usePlotFont } from '@/theme/plotColors'
 import { downloadPlotPng } from '@/utils/downloadPlot'
 import {
@@ -213,10 +219,33 @@ function placeFromTiledMap(graphDiv: unknown, event: MouseEvent): Placement {
  */
 const VALUE_RAMP = ['#8fcdb7', '#6cb59d', ...CONTEXT_PALETTE]
 
-/** VALUE_RAMP as a Plotly colour scale: its stops evenly spaced over 0-1. */
-const VALUE_SCALE: ColorScale = VALUE_RAMP.map(
-  (hex, i): [number, string] => [i / (VALUE_RAMP.length - 1), hex],
-)
+/**
+ * The same ramp on the dark theme's land. A stronger value is a stronger mark
+ * in both: darker on paper, lighter on ink. The two anchors below the context
+ * ramp are the same hue continued past where a labelled box could go, now at
+ * 1.8:1 and 2.4:1 against the dark paper -- the same distances from the land
+ * as the light pair is from white, which is what kept the youngest sites on
+ * the map.
+ */
+const VALUE_RAMP_DARK = ['#0f5140', '#266452', ...CONTEXT_PALETTE_DARK]
+
+/** A ramp as a Plotly colour scale: its stops evenly spaced over 0-1. */
+const valueScaleFor = (ramp: string[]): ColorScale =>
+  ramp.map((hex, i): [number, string] => [i / (ramp.length - 1), hex])
+
+const VALUE_SCALES: Record<ColorMode, ColorScale> = {
+  light: valueScaleFor(VALUE_RAMP),
+  dark: valueScaleFor(VALUE_RAMP_DARK),
+}
+
+/**
+ * The signed scale's meeting point, which is the ink at 13% over each mode's
+ * surface -- `inkAt` cannot be used, because Plotly's colour bar takes no alpha.
+ */
+const NEUTRAL_MIDPOINT: Record<ColorMode, string> = {
+  light: '#e3e2e2',
+  dark: '#413b37',
+}
 
 /**
  * How the marks that carry a value are outlined.
@@ -405,6 +434,7 @@ export default function SiteMap({
   highlightIds,
 }: SiteMapProps) {
   const plot = usePlotColors()
+  const mode = useTheme().palette.mode
   const plotFont = usePlotFont()
   const plotBox = useRef<HTMLDivElement>(null)
   const graphDiv = useRef<unknown>(null)
@@ -420,7 +450,8 @@ export default function SiteMap({
   const reachable = useTileServerReachable(wantTiles)
   // The style arrives with a positive verdict -- the probe fetches it -- so
   // this is a guard, not a second wait.
-  const basemapStyle = reachable === true ? loadedBasemapStyle() : null
+  const loadedStyle = reachable === true ? loadedBasemapStyle() : null
+  const basemapStyle = loadedStyle && mode === 'dark' ? darkenBasemapStyle(loadedStyle) : loadedStyle
   const tiles = wantTiles && reachable === true && basemapStyle !== null
   const deciding = tilesWanted === null || (wantTiles && reachable === null)
   const fellBack = wantTiles && reachable === false
@@ -546,7 +577,7 @@ export default function SiteMap({
       const marker = {
         size: Math.max(8, 14 * regionStepDeg),
         color: region.map((cell) => cell.support),
-        colorscale: VALUE_SCALE,
+        colorscale: VALUE_SCALES[mode],
         cmin: 0,
         cmax: 1,
         opacity: 0.45,
@@ -678,15 +709,15 @@ export default function SiteMap({
             ? {
                 colorscale: [
                   [0, plot.residualLate],
-                  // WARM_INK at 13% over white, flattened: Plotly's colour
-                  // bar cannot composite an rgba stop.
-                  [0.5, '#e3e2e2'],
+                  // The ink at 13% over the plot surface, flattened: Plotly's
+                  // colour bar cannot composite an rgba stop.
+                  [0.5, NEUTRAL_MIDPOINT[mode]],
                   [1, plot.residualEarly],
                 ] as Array<[number, string]>,
                 cmin: -reach,
                 cmax: reach,
               }
-            : { colorscale: VALUE_SCALE }
+            : { colorscale: VALUE_SCALES[mode] }
         if (tiles) {
           // The outline, as a disc UNDER each mark. scattermap has no
           // marker.line -- MapLibre's circle layer takes no stroke through
@@ -845,7 +876,7 @@ export default function SiteMap({
     }
 
     return list
-  }, [sites, selected, plot, tiles, values, valueLabel, valueScale, origin, isochrons, narrowFigure,
+  }, [sites, selected, plot, mode, tiles, values, valueLabel, valueScale, origin, isochrons, narrowFigure,
       formatIsochron, region, regionStepDeg, links, dataFrame, highlighted])
 
   /**

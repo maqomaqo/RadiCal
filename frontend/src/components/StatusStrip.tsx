@@ -1,7 +1,7 @@
 import { Box } from '@mui/material'
-import { alpha } from '@mui/material/styles'
+import { useTheme } from '@mui/material/styles'
 import type { SxProps, Theme } from '@mui/material/styles'
-import { WARM_INK } from '@/theme/diagramColors'
+import { inkAt } from '@/theme/ink'
 
 /** The four states `Analysis.status` is constrained to. */
 export interface StatusCounts {
@@ -45,19 +45,20 @@ export default function StatusStrip({
   total: number
   sx?: SxProps<Theme>
 }) {
+  const mode = useTheme().palette.mode
   const untouched = Math.max(0, total - counts.completed - counts.running - counts.failed)
   const filled: Array<{ key: string; value: number; color: string }> = [
     { key: 'completed', value: counts.completed, color: 'success.main' },
     { key: 'running', value: counts.running, color: 'info.main' },
     { key: 'failed', value: counts.failed, color: 'error.main' },
-    { key: 'untouched', value: untouched, color: alpha(WARM_INK, 0.16) },
+    { key: 'untouched', value: untouched, color: inkAt(mode, 0.16) },
   ].filter((segment) => segment.value > 0)
   // A project with nothing in it still gets the empty track, so every card in
   // the grid ends on the same line. The track is the scale; a card that simply
   // stopped short would read as unfinished rather than as empty.
   const segments = filled.length
     ? filled
-    : [{ key: 'empty', value: 1, color: alpha(WARM_INK, 0.08) }]
+    : [{ key: 'empty', value: 1, color: inkAt(mode, 0.08) }]
 
   return (
     <Box

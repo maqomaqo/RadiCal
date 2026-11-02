@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { alpha, useTheme } from '@mui/material/styles'
-import { BOUNDARY_CORAL_INK, HIATUS_VIOLET, PHASE_GREEN, WARM_INK } from './diagramColors'
+import { elementHues } from './diagramColors'
+import { inkAt } from './ink'
 
 /**
  * How each analysis is drawn on the compare page.
@@ -46,15 +47,18 @@ export interface RunStyle {
  * diagramColors.
  */
 export function useRunStyles(count: number): RunStyle[] {
-  const primary = useTheme().palette.primary.main
+  const { palette } = useTheme()
+  const primary = palette.primary.main
+  const mode = palette.mode
   return useMemo(() => {
-    const hues = [primary, BOUNDARY_CORAL_INK, HIATUS_VIOLET, PHASE_GREEN]
+    const element = elementHues(mode)
+    const hues = [primary, element.boundary.ink, element.hiatus, element.phase]
     return Array.from({ length: Math.min(count, hues.length) }, (_, i) => ({
       line: hues[i],
       fillOuter: alpha(hues[i], 0.26),
       fillInner: alpha(hues[i], 0.68),
     }))
-  }, [primary, count])
+  }, [primary, mode, count])
 }
 
 /**
@@ -64,19 +68,20 @@ export function useRunStyles(count: number): RunStyle[] {
  * -- an annotation should not take a hue and compete with the data it annotates.
  */
 export function useCompareMarks() {
+  const mode = useTheme().palette.mode
   return useMemo(
     () => ({
       /** Vertical rule at the reference run's median, through the whole row. */
-      referenceRule: alpha(WARM_INK, 0.38),
-      grid: alpha(WARM_INK, 0.1),
+      referenceRule: inkAt(mode, 0.38),
+      grid: inkAt(mode, 0.1),
       /** The median tick inside a bar, drawn light so it reads on the fill. */
-      medianTick: alpha(WARM_INK, 0.75),
+      medianTick: inkAt(mode, 0.75),
       /** The rule standing in for a run that has no such quantity at all.
        *  Stronger than the grid on purpose: "this model derives nothing here"
        *  is a finding, and a mark too faint to see reads as a rendering
        *  failure instead. */
-      absent: alpha(WARM_INK, 0.28),
+      absent: inkAt(mode, 0.28),
     }),
-    []
+    [mode]
   )
 }
