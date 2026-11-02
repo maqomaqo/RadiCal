@@ -150,6 +150,16 @@ describe('createAppTheme', () => {
     }
   })
 
+  it('keeps the label legible when a filled colour is hovered', () => {
+    // MUI hovers a contained button to `dark`, its darkened step. On the dark
+    // ground the label is the canvas, so darkening would take it under 4.5:1.
+    const { palette } = createAppTheme('dark')
+    for (const role of ['primary', 'secondary', 'error', 'warning', 'success'] as const) {
+      expect(getContrastRatio(palette[role].contrastText, palette[role].dark), role).toBeGreaterThanOrEqual(4.5)
+      expect(getContrastRatio(palette[role].dark, palette[role].main), role).toBeGreaterThan(1.1)
+    }
+  })
+
   it('keeps white labels on the app bar legible', () => {
     expect(getContrastRatio('#ffffff', APP_BAR_DARK)).toBeGreaterThan(7)
   })

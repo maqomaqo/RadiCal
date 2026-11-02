@@ -40,6 +40,13 @@ interface Roles {
   success: string
   /** The text drawn ON a filled primary/secondary/status colour. */
   onColor: string | null
+  /**
+   * What a filled colour hovers to (MUI's `dark`). In the light theme MUI's own
+   * darkened step is right: the label is white and gets more contrast. In the
+   * dark theme the label is the canvas, and darkening the fill would take it
+   * from ~6:1 to ~3.3:1 -- so the hover is a step LIGHTER instead.
+   */
+  hover: Partial<Record<'primary' | 'secondary' | 'error' | 'warning' | 'success', string>> | null
 }
 
 const ROLES: Record<ColorMode, Roles> = {
@@ -57,6 +64,7 @@ const ROLES: Record<ColorMode, Roles> = {
     warning: '#a85c11',
     success: '#2e7d32',
     onColor: null,
+    hover: null,
   },
   dark: {
     primary: '#6494d7',
@@ -72,6 +80,13 @@ const ROLES: Record<ColorMode, Roles> = {
     // cool neutral on the warmest ground in the app. The canvas is what a
     // label sits on in the dark theme, so it is what is cut out of the fill.
     onColor: SURFACES.dark.canvas,
+    hover: {
+      primary: '#73a4e8',
+      secondary: '#fd8589',
+      error: '#fd937b',
+      warning: '#da9159',
+      success: '#6cb26d',
+    },
   },
 }
 
@@ -104,19 +119,21 @@ export function createAppTheme(mode: ColorMode): Theme {
   const roles = ROLES[mode]
   const PRIMARY = roles.primary
   const ink = (strength: number) => inkAt(mode, strength)
-  const withText = (main: string) =>
-    roles.onColor ? { main, contrastText: roles.onColor } : { main }
+  const withText = (main: string, role: keyof NonNullable<Roles['hover']>) =>
+    roles.onColor
+      ? { main, contrastText: roles.onColor, ...(roles.hover?.[role] ? { dark: roles.hover[role] } : {}) }
+      : { main }
 
   return createTheme({
     palette: {
       mode,
-      primary: withText(PRIMARY),
-      secondary: withText(roles.secondary),
+      primary: withText(PRIMARY, 'primary'),
+      secondary: withText(roles.secondary, 'secondary'),
       // The semantic trio, shifted slightly from MUI's stock values to accommodate app colour clash/overlap.
-      info: withText(PRIMARY),
-      error: withText(roles.error),
-      warning: withText(roles.warning),
-      success: withText(roles.success),
+      info: withText(PRIMARY, 'primary'),
+      error: withText(roles.error, 'error'),
+      warning: withText(roles.warning, 'warning'),
+      success: withText(roles.success, 'success'),
       ink: surfaces.ink,
       background: {
         default: surfaces.canvas,

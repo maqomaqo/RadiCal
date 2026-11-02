@@ -322,6 +322,11 @@ down to a band (`#183f73`), white on it at 10.5:1, so every `color="inherit"` co
 2px white focus ring and the no-dimmed-labels rule are unchanged. A filled primary takes the canvas
 as its label colour (6.0:1) — MUI would have chosen pure black.
 
+**Hover goes lighter.** MUI hovers a filled button to a darkened step, which on white *adds* contrast to a
+white label. On this ground the label is the canvas, so darkening takes it from ~6:1 to ~3.3:1. Each
+filled role therefore sets its hover (`palette.X.dark`) a step lighter instead: primary `#73a4e8`,
+secondary `#fd8589`, error `#fd937b`, warning `#da9159`, success `#6cb26d`, all ≥ 7:1.
+
 **The context ramp keeps its order.** Index 0 is the quietest step and index 5 the strongest in both
 modes: lightest-green-to-darkest on paper, dimmest-to-palest on ink. What a reader learns — a higher
 step is a stronger one — survives the change of ground. The six steps are still ~1.2:1 apart.
