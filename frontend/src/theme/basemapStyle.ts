@@ -1,5 +1,4 @@
 import { formatOklch, parseOklch } from './oklch'
-import { SURFACES } from './surfaces'
 
 /**
  * The tiled basemap: OpenFreeMap's Positron, trimmed.
@@ -112,23 +111,38 @@ export function tailorBasemapStyle(style: StyleObject): StyleObject {
  * The trimming that `tailorBasemapStyle` did is untouched: this only recolours
  * what is left.
  */
+/**
+ * The dark map's land: a step above the card, not the card itself.
+ *
+ * The first version put the land ON the card (`#231d19`) and halved every
+ * fill's distance from it, which left the sea 1.1:1 from the land -- two
+ * near-blacks, and the map read as one flat dark slab. Positron's own sea is
+ * ~1.5:1 from its land, so that distance is kept (1.48:1 here): the land
+ * rises above the band surface, and fills keep their FULL distance rather than
+ * half -- the dark ground can afford it once the land is not at the bottom of
+ * the range, and the sea stays dark but not black.
+ */
+export const LAND_DARK = '#3a342f'
+const FILL_SCALE = 1.0
+
 export function darkenBasemapStyle(style: StyleObject): StyleObject {
   const cached = darkened.get(style)
   if (cached) return cached
 
-  const land = parseOklch(SURFACES.dark.paper)!
+  const land = parseOklch(LAND_DARK)!
   const light = { l: 0.96 } // Positron's land, which is its `background`
   const MAX_CHROMA = 0.016
 
   const regrind = (value: string, role: 'background' | 'fill' | 'line' | 'text' | 'halo') => {
     const c = parseOklch(value)
     if (!c) return value
-    if (role === 'background') return SURFACES.dark.paper
+    if (role === 'background') return LAND_DARK
     if (role === 'halo') return formatOklch({ ...land, a: c.a })
     const hue = c.c < 0.02 ? land.h : c.h
-    const chroma = Math.min(c.c, MAX_CHROMA)
+    // A source grey (R=G=B) becomes the ground's own warm tint, not a cool neutral.
+    const chroma = c.c < 0.02 ? 0.012 : Math.min(c.c, MAX_CHROMA)
     const base = { c: chroma, h: hue, a: c.a }
-    if (role === 'fill') return formatOklch({ ...base, l: land.l + (c.l - light.l) * 0.5 })
+    if (role === 'fill') return formatOklch({ ...base, l: Math.max(0.06, land.l + (c.l - light.l) * FILL_SCALE) })
     if (role === 'line') {
       const l = Math.min(0.6, Math.max(0.12, land.l + (light.l - c.l) * 0.5))
       return formatOklch({ ...base, l })

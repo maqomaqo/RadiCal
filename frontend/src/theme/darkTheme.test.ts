@@ -12,7 +12,7 @@ import {
   elementHues,
 } from './diagramColors'
 import { curveStyles, CURVE_PALETTE_SIZE, styleForSlot } from './curveColors'
-import { darkenBasemapStyle } from './basemapStyle'
+import { LAND_DARK, darkenBasemapStyle } from './basemapStyle'
 import { inkAlpha, inkAt } from './ink'
 import { APP_BAR_DARK, SURFACES } from './surfaces'
 
@@ -195,19 +195,30 @@ describe('darkenBasemapStyle', () => {
   const result = darkenBasemapStyle(style)
   const paint = (id: string) => result.layers!.find((l) => l.id === id)!.paint as Record<string, unknown>
 
-  it('makes the land the plot surface, so marks sit on the ground they were checked against', () => {
-    expect(paint('background')['background-color']).toBe(dark.paper)
+  it('paints the land in the dark map\'s land, a step above the card', () => {
+    expect(paint('background')['background-color']).toBe(LAND_DARK)
+    expect(getContrastRatio(LAND_DARK, dark.paper)).toBeGreaterThan(1.2)
   })
 
-  it('keeps the sea the darker surface and the coastline the lighter mark', () => {
+  it('keeps the sea clearly darker than the land -- Positron\'s own is about 1.5:1', () => {
+    // Two near-blacks at 1.1:1 read as one slab; this is the distance a reader
+    // needs to see where a coast is.
+    const sea = paint('water')['fill-color'] as string
+    expect(getContrastRatio(LAND_DARK, sea)).toBeGreaterThanOrEqual(1.45)
+  })
+
+  it('draws the coastline lighter than the land, and every grey as a warm one', () => {
     const lum = (css: string) => getContrastRatio(css, '#000000')
-    expect(lum(paint('water')['fill-color'] as string)).toBeLessThan(lum(dark.paper))
-    expect(lum(paint('boundary_2')['line-color'] as string)).toBeGreaterThan(lum(dark.paper))
+    const line = paint('boundary_2')['line-color'] as string
+    expect(lum(line)).toBeGreaterThan(lum(LAND_DARK))
+    const [r, g, b] = decomposeColor(line).values
+    expect(r).toBeGreaterThan(b)
+    expect(r === g && g === b).toBe(false)
   })
 
   it('holds a place name to 4.5:1 on the land', () => {
     const name = paint('label_city')['text-color'] as string
-    expect(getContrastRatio(name, dark.paper)).toBeGreaterThanOrEqual(4.5)
+    expect(getContrastRatio(name, LAND_DARK)).toBeGreaterThanOrEqual(4.5)
   })
 
   it('leaves an expression’s operators alone and recolours its stops', () => {

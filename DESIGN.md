@@ -337,13 +337,17 @@ read — so the pair separates the other way: the coral leans 15° towards rose 
 and `error` leans towards orange-red and is the softer and lighter of the two.
 
 **Maps.** The tiled basemap is OpenFreeMap's Positron, which has no dark sibling, so
-`darkenBasemapStyle` recolours it by what each property *is*: the land becomes the plot surface;
-fills keep their place relative to it (the sea stays the darker surface); lines and names swap sides
-(a coastline is lighter than the land where it was darker) and a place name is held to 4.5:1. Hues are
-kept, chroma is cut to what the warm ground carries, so the sea is still the one tinted surface and
-nothing on the map is a colour except the marks. The value ramp continues at its *dim* end (1.8:1 and
-2.4:1 on the dark land, the same distances as the pale pair on white), and the signed scale meets at
-Warm Ink's counterpart — aged paper at 13% over the dark paper (`#413b37`).
+`darkenBasemapStyle` recolours it by what each property *is*. The land is `#3a342f`, a step above the
+card (not the card itself): the first version put the land on the card and halved every fill's
+distance from it, which left the sea 1.1:1 from the land and the map reading as one flat slab.
+Positron's own sea is ~1.5:1 from its land and the dark one is 1.48:1 (dark, but not
+black), so a coast is visible at a glance. Fills keep their place relative to the land (the sea stays
+the darker surface); lines and names swap sides (a coastline is lighter than the land where it was
+darker) and a place name is held to 4.5:1; a source grey becomes the ground's warm tint, never an
+R=G=B neutral. Hues are kept and chroma is cut to what the warm ground carries, so the sea is still
+the one tinted surface and nothing on the map is a colour except the marks. The value ramp continues
+at its *dim* end — `#226653` and `#387a66`, 1.8:1 and 2.4:1 on that land, the same distances as the
+pale pair on white — and the signed scale meets at aged paper at 13% over the dark paper (`#413b37`).
 
 **React Flow** (the Harris matrix) ships a light skin and v11 has no colour-mode prop, so its zoom
 buttons, minimap and attribution plate are re-grounded from the palette in dark only.

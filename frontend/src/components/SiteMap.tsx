@@ -223,11 +223,11 @@ const VALUE_RAMP = ['#8fcdb7', '#6cb59d', ...CONTEXT_PALETTE]
  * The same ramp on the dark theme's land. A stronger value is a stronger mark
  * in both: darker on paper, lighter on ink. The two anchors below the context
  * ramp are the same hue continued past where a labelled box could go, now at
- * 1.8:1 and 2.4:1 against the dark paper -- the same distances from the land
- * as the light pair is from white, which is what kept the youngest sites on
+ * 1.8:1 and 2.4:1 against the dark map's land (`LAND_DARK`) -- the same
+ * distances from the land as the light pair is from white, which is what kept the youngest sites on
  * the map.
  */
-const VALUE_RAMP_DARK = ['#0f5140', '#266452', ...CONTEXT_PALETTE_DARK]
+const VALUE_RAMP_DARK = ['#226653', '#387a66', ...CONTEXT_PALETTE_DARK]
 
 /** A ramp as a Plotly colour scale: its stops evenly spaced over 0-1. */
 const valueScaleFor = (ramp: string[]): ColorScale =>
