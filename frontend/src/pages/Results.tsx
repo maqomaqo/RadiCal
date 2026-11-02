@@ -37,7 +37,7 @@ import {
 } from '@mui/material'
 import { alpha, useTheme } from '@mui/material/styles'
 import { useElementTypeColors } from '@/theme/diagramColors'
-import { MUTED, PAPER } from '@/theme/surfaces'
+import { scrollHintSx } from '@/theme/scrollHint'
 import { visuallyHidden } from '@mui/utils'
 import UnfoldMoreIcon from '@mui/icons-material/UnfoldMore'
 import UnfoldLessIcon from '@mui/icons-material/UnfoldLess'
@@ -588,11 +588,9 @@ const NUMERIC_CELL_SX = { whiteSpace: 'nowrap' } as const
  * Needs its own opaque background, or whatever scrolls beneath paints over it.
  * Callers pass the row's own tint so a flagged row keeps its colour here too.
  */
-/* The two surfaces a sticky cell composites against. Imported rather than
-   restated: sx colour tokens do not resolve inside a plain style object or
-   inside the linear-gradient() below, which is why these were once local
-   copies of the hex values -- and a copy of a token is a token that can drift.
-   theme/surfaces.ts is the one place both these and createTheme read from. */
+/* A sticky cell paints its own background, so the caller passes the surface it
+   composites against -- `background.paper` or `background.muted` from the
+   theme in hand, so the cell is opaque in either colour mode. */
 
 function stickyNameCell(background: string, indentPx = 0) {
   return {
@@ -613,25 +611,6 @@ function stickyNameCell(background: string, indentPx = 0) {
     whiteSpace: { xs: 'nowrap', sm: 'normal' },
   }
 }
-
-/**
- * A shadow at the right edge, present only while there is more table to
- * scroll to. Without it the overflow is silent: the Overlap column simply is
- * not there, and nothing on screen suggests it could be.
- * `background-attachment: local` ties it to the scroll position.
- */
-const SCROLL_HINT_SX = {
-  backgroundImage:
-    // PAPER, not var(--mui-paper): that custom property is defined nowhere in
-    // this app, so the gradient would fall back to pure white -- including
-    // where it fades across the table's warm header band.
-    `linear-gradient(to left, ${PAPER} 40%, ${alpha(PAPER, 0)}),` +
-    'radial-gradient(farthest-side at 100% 50%, rgba(43,35,32,0.16), rgba(43,35,32,0))',
-  backgroundPosition: 'right center, right center',
-  backgroundSize: '32px 100%, 14px 100%',
-  backgroundRepeat: 'no-repeat',
-  backgroundAttachment: 'local, scroll',
-} as const
 
 /**
  * The laboratory measurement as it is cited: `3120 ± 30`.
@@ -865,7 +844,7 @@ function StructureTableRow({
         title={row.name}
         sx={{
           pl: `${16 + row.depth * CHEVRON_GUTTER_PX}px`,
-          ...stickyNameCell(tint ?? PAPER, row.depth * CHEVRON_GUTTER_PX),
+          ...stickyNameCell(tint ?? theme.palette.background.paper, row.depth * CHEVRON_GUTTER_PX),
         }}
       >
         {/* The disclosure control is the only marker a Sequence/Phase row
@@ -1039,6 +1018,7 @@ function StructureTableRow({
 }
 
 export default function Results() {
+  const theme = useTheme()
   const { analysisId } = useParams<{ analysisId: string }>()
   const navigate = useNavigate()
   const notify = useNotify()
@@ -3147,7 +3127,7 @@ export default function Results() {
         <TableContainer
           id="results-table"
           sx={{
-            ...SCROLL_HINT_SX,
+            ...scrollHintSx(theme),
             maxHeight: tableExpanded ? 'none' : { xs: 'none', md: '70vh' },
           }}
         >
@@ -3185,7 +3165,7 @@ export default function Results() {
               // lifted: the container is then as tall as the table, so there
               // is no scrollport left for top:0 to pin against.
               '& thead th': {
-                backgroundColor: MUTED,
+                backgroundColor: theme.palette.background.muted,
                 top: tableExpanded ? 'auto' : { xs: 'auto', md: 0 },
               },
               // The name column takes what it needs and no more; the numeric
@@ -3207,7 +3187,7 @@ export default function Results() {
                     between a date and its own result. It settles at 27%, which
                     is the deepest-indented name plus its type label, and the
                     gap halves to 124px. */}
-                <TableCell sx={{ ...stickyNameCell(MUTED), top: 0, zIndex: 4, width: '1%' }}>
+                <TableCell sx={{ ...stickyNameCell(theme.palette.background.muted), top: 0, zIndex: 4, width: '1%' }}>
                   {structureRows.length > 0 ? 'Structure / Sample' : 'Sample'}
                 </TableCell>
                 {/* What was measured, left of everything derived from it. */}
@@ -3333,7 +3313,7 @@ export default function Results() {
                       <TableRow key={result.sample_id}>
                         <TableCell
                           title={result.sample_name || `Sample ${idx + 1}`}
-                          sx={stickyNameCell(PAPER)}
+                          sx={stickyNameCell(theme.palette.background.paper)}
                         >
                           {result.sample_name || `Sample ${idx + 1}`}
                         </TableCell>

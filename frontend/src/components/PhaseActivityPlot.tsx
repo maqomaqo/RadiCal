@@ -17,7 +17,7 @@ import {
   calendarAxisTitle,
   formatCalendarAge,
 } from '@/utils/dateFormat'
-import { PHASE_GREEN } from '@/theme/diagramColors'
+import { elementHues } from '@/theme/diagramColors'
 import { usePlotColors, usePlotFont } from '@/theme/plotColors'
 import { downloadPlotPng } from '@/utils/downloadPlot'
 import type { PhaseActivity } from '@/types'
@@ -76,10 +76,10 @@ export default function PhaseActivityPlot({ activity, dateFormat = DEFAULT_DATE_
       hovertemplate: `<b>%{customdata[0]}</b><br>%{customdata[1]}<br>${measure}<extra></extra>`,
     })
     return [
-      trace(false, PHASE_GREEN, '%{z:.0%} probability in progress'),
+      trace(false, elementHues(theme.palette.mode).phase, '%{z:.0%} probability in progress'),
       trace(true, theme.palette.primary.main, 'relative probability %{z:.2f}'),
     ]
-  }, [rows, ages, dateFormat, theme.palette.primary.main])
+  }, [rows, ages, dateFormat, theme.palette.primary.main, theme.palette.mode])
 
   const ticks = useMemo(
     () => (ages.length ? calendarAxisTicks(Math.min(...ages), Math.max(...ages), dateFormat) : null),

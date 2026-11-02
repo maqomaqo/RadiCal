@@ -4,7 +4,21 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/png" href="/favicon-64.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
     <title>RadiCal</title>
+    <script>
+      // Paint the page in the chosen mode before the app has loaded, so a
+      // reload in the dark theme does not open on a white sheet. The values
+      // are the canvas of each mode (theme/surfaces.ts) and the key is the one
+      // ColorModeProvider writes; this only decides the first paint, the app
+      // takes over from there.
+      try {
+        var stored = localStorage.getItem('radical.colorMode')
+        var dark = stored === 'dark' || (stored !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches)
+        document.documentElement.style.backgroundColor = dark ? '#17110e' : '#faf7f4'
+        document.documentElement.style.colorScheme = dark ? 'dark' : 'light'
+      } catch (e) {}
+    </script>
   </head>
   <body>
     <div id="root"></div>

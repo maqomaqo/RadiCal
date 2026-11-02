@@ -1,6 +1,8 @@
 import { useMemo } from 'react'
 import { alpha, useTheme } from '@mui/material/styles'
-import { BOUNDARY_CORAL_INK, PHASE_GREEN, WARM_INK } from './diagramColors'
+import { elementHues } from './diagramColors'
+import { inkAt } from './ink'
+import type { ColorMode } from './surfaces'
 
 /**
  * Colours for the posterior plots, shared by the single-date and stacked
@@ -109,26 +111,42 @@ export function usePlotFont(): PlotFont {
   )
 }
 
-// The app's warm ink, as the theme's shadows use. Point estimates are
-// annotation over the data rather than data, so they read as pencil marks
-// instead of taking a hue and competing with the curve they mark. Shared from
-// diagramColors so the matrix and the plots cannot drift to two inks.
-const INK = WARM_INK
+/**
+ * The two directions of a residual, per colour mode. Same hues, lifted on a
+ * dark ground the way every element hue is (see diagramColors.ts): an orange
+ * and a teal-blue that are the ends of the one axis a colour-blind reader still
+ * separates.
+ */
+const RESIDUALS: Record<ColorMode, { early: string; late: string }> = {
+  light: { early: '#b85c14', late: '#215f7a' },
+  dark: { early: '#d27d46', late: '#6499b3' },
+}
 
 export function usePlotColors(): PlotColors {
   const theme = useTheme()
   const primary = theme.palette.primary.main
+  const mode = theme.palette.mode
+  const surface = theme.palette.background.paper
   // Memoised so a caller can list it in a useMemo's dependencies; both plots
   // build their whole trace array in one.
-  return useMemo(
-    () => ({
+  return useMemo(() => {
+    const hues = elementHues(mode)
+    // The app's ink, as the theme's shadows use. Point estimates are
+    // annotation over the data rather than data, so they read as pencil marks
+    // instead of taking a hue and competing with the curve they mark. Every
+    // strength below is stated in the light theme's terms and re-derived for
+    // the dark one by contrast (theme/ink.ts), so the marks keep their rank --
+    // the prior recedes behind the posterior, the grid behind both -- on
+    // either ground.
+    const ink = (strength: number) => inkAt(mode, strength)
+    return {
       posteriorLine: primary,
-      posteriorFill: alpha(primary, 0.22),
-      boundaryLine: BOUNDARY_CORAL_INK,
+      posteriorFill: alpha(primary, mode === 'dark' ? 0.26 : 0.22),
+      boundaryLine: hues.boundary.ink,
       // Lighter than the posterior's fill: a boundary is a transition rather
       // than a dated thing, so it reads as an outline against the solid dates
       // either side.
-      boundaryFill: alpha(BOUNDARY_CORAL_INK, 0.13),
+      boundaryFill: alpha(hues.boundary.ink, mode === 'dark' ? 0.16 : 0.13),
       // The unmodelled calibration, behind its posterior. It recedes rather
       // than claiming a colour of its own -- but it recedes in the app's ink,
       // not in a neutral grey. rgba(100,100,100,·) is a dead R=G=B grey, the
@@ -136,31 +154,31 @@ export function usePlotColors(): PlotColors {
       // beside warm-ink point estimates. The ink is warmer AND more visible at
       // these strengths: 0.45 composites to #a09c9b at 2.72:1, against the
       // grey's #b2b2b2 at 2.12:1.
-      priorLine: alpha(INK, 0.45),
-      priorFill: alpha(INK, 0.14),
-      hpd95: alpha(PHASE_GREEN, 0.3),
-      hpd68: alpha(PHASE_GREEN, 0.72),
-      mean: alpha(INK, 0.85),
-      median: alpha(INK, 0.45),
-      residualEarly: '#b85c14',
-      residualLate: '#215f7a',
-      guide: alpha(INK, 0.3),
+      priorLine: ink(0.45),
+      priorFill: ink(0.14),
+      hpd95: alpha(hues.phase, 0.3),
+      hpd68: alpha(hues.phase, 0.72),
+      mean: ink(0.85),
+      median: ink(0.45),
+      residualEarly: RESIDUALS[mode].early,
+      residualLate: RESIDUALS[mode].late,
+      guide: ink(0.3),
       // Both were pure black at the one call site that drew them, which put a
       // second, cooler grid inside a figure whose every other mark is warm.
-      phaseRule: alpha(INK, 0.14),
-      label: alpha(INK, 0.92),
-      axis: alpha(INK, 0.74),
-      // White. Every fill on these plots is translucent, and has to be -- the
-      // prior reads by showing through the posterior over it, and the stacked
-      // curves draw over their own HPD bars -- so tinting the surface they
-      // composite against desaturates all of them at once. White is what they
-      // were picked against, and matches the card the plot sits on.
-      surface: theme.palette.background.paper,
-      // With the surface white, the grid is what marks out the plot area.
+      phaseRule: ink(0.14),
+      label: ink(0.92),
+      axis: ink(0.74),
+      // The card the plot sits on. Every fill on these plots is translucent,
+      // and has to be -- the prior reads by showing through the posterior
+      // over it, and the stacked curves draw over their own HPD bars -- so
+      // tinting the surface they composite against desaturates all of them at
+      // once. A known, uncoloured surface is what they were picked against:
+      // white in the light theme, the dark paper in the dark one.
+      surface,
+      // With the surface plain, the grid is what marks out the plot area.
       // Warm, to sit with the rest of the app rather than reintroducing a cool
       // grey by the back door.
-      grid: alpha(INK, 0.09),
-    }),
-    [primary, theme.palette.background.paper]
-  )
+      grid: ink(0.09),
+    }
+  }, [primary, mode, surface])
 }

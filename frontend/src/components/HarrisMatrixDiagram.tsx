@@ -39,9 +39,10 @@ import ReactFlow, {
 } from 'reactflow'
 import 'reactflow/dist/style.css'
 import { Alert, Box, Typography } from '@mui/material'
-import { useTheme } from '@mui/material/styles'
+import { alpha, useTheme } from '@mui/material/styles'
+import { inkAt } from '@/theme/ink'
 import type { MatrixMeasurement, ModelElement } from '@/types'
-import { CONTEXT_PALETTE, contextShades, tint, useElementTypeColors } from '@/theme/diagramColors'
+import { contextPalette, contextShades, tint, useElementTypeColors } from '@/theme/diagramColors'
 import {
   LABEL_FONT_SIZE,
   RULE_LABEL_GAP,
@@ -283,6 +284,7 @@ export default function HarrisMatrixDiagram({
   height = 520,
 }: Props) {
   const theme = useTheme()
+  const mode = theme.palette.mode
   const elementTypeColors = useElementTypeColors()
 
   /**
@@ -327,12 +329,12 @@ export default function HarrisMatrixDiagram({
     // contextShades). The shades come from the COUNT first, so a three-context
     // model gets three widely spaced steps rather than the three most similar
     // ones at the head of the ramp.
-    const shades = contextShades(layout.nodes.filter((n) => n.kind === 'context').length)
+    const shades = contextShades(layout.nodes.filter((n) => n.kind === 'context').length, mode)
     let contextIndex = 0
     return layout.nodes.map((node) => {
       let color: string
       if (node.kind === 'context') {
-        color = shades[contextIndex++] ?? CONTEXT_PALETTE[0]
+        color = shades[contextIndex++] ?? contextPalette(mode)[0]
       } else if (node.kind === 'boundary') {
         // The deeper coral: a boundary here is a rule AND its label, so the
         // colour has to carry 10px text too.
@@ -410,6 +412,27 @@ export default function HarrisMatrixDiagram({
           borderColor: 'divider',
           borderRadius: 1,
           '& .react-flow__attribution a': { color: 'text.secondary' },
+          // React Flow ships a light skin and v11 has no colour-mode prop, so
+          // in the dark theme its own chrome -- zoom buttons, minimap,
+          // attribution plate -- is re-grounded here from the palette. The
+          // light theme leaves it as it is.
+          ...(mode === 'dark'
+            ? {
+                '& .react-flow__attribution': { backgroundColor: alpha(theme.palette.background.paper, 0.7) },
+                '& .react-flow__controls': { boxShadow: 'none', border: 1, borderColor: 'divider' },
+                '& .react-flow__controls-button': {
+                  backgroundColor: 'background.raised',
+                  borderBottomColor: 'divider',
+                  fill: theme.palette.text.primary,
+                  '&:hover': { backgroundColor: 'background.muted' },
+                },
+                '& .react-flow__minimap': {
+                  backgroundColor: theme.palette.background.paper,
+                  border: 1,
+                  borderColor: 'divider',
+                },
+              }
+            : {}),
         }}
       >
         <ReactFlow
@@ -423,9 +446,16 @@ export default function HarrisMatrixDiagram({
           minZoom={0.1}
           fitView
         >
-          <Background />
+          <Background color={mode === 'dark' ? inkAt(mode, 0.3) : undefined} />
           <Controls showInteractive={false} />
-          {layout.nodes.length > 12 && <MiniMap pannable zoomable />}
+          {layout.nodes.length > 12 && (
+            <MiniMap
+              pannable
+              zoomable
+              maskColor={mode === 'dark' ? 'rgba(8, 4, 2, 0.6)' : undefined}
+              nodeColor={mode === 'dark' ? inkAt(mode, 0.4) : undefined}
+            />
+          )}
         </ReactFlow>
       </Box>
 

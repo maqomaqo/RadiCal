@@ -7,6 +7,7 @@ import { fetchCurvePoints, type CurvePoint } from '@/api/curves'
 import { useCurves } from '@/hooks/useCurves'
 import type { StackedSeries } from '@/components/StackedPosteriorPlot'
 import { usePlotColors, usePlotFont } from '@/theme/plotColors'
+import { useTheme } from '@mui/material/styles'
 import { curveStyles } from '@/theme/curveColors'
 import {
   DateFormat,
@@ -412,7 +413,8 @@ export default function CurvePosteriorPlot({
    * How each curve is drawn -- fixed by which curve it is, not by the order it
    * arrived in. See theme/curveColors.ts.
    */
-  const curveStyle = useMemo(() => curveStyles(curveIds), [curveIds])
+  const mode = useTheme().palette.mode
+  const curveStyle = useMemo(() => curveStyles(curveIds, mode), [curveIds, mode])
 
   const curveNameFor = useMemo(() => {
     const byId = new Map(curves.map((c) => [c.id, c.name]))

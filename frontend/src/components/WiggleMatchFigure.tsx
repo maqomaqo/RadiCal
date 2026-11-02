@@ -110,7 +110,11 @@ export default function WiggleMatchFigure({
     }
   }, [curveId, window.from, window.to])
 
-  const style = useMemo(() => (curveId ? curveStyles([curveId])[curveId] : null), [curveId])
+  const mode = useTheme().palette.mode
+  const style = useMemo(
+    () => (curveId ? curveStyles([curveId], mode)[curveId] : null),
+    [curveId, mode]
+  )
 
   const data = useMemo((): Data[] => {
     const traces: Data[] = []

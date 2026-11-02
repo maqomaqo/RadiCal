@@ -22,6 +22,13 @@ colors:
   state-error: "#a3231d"
   state-warning: "#a85c11"
   state-success: "#2e7d32"
+  dark-canvas: "#17110e"
+  dark-paper: "#231d19"
+  dark-muted: "#2f2924"
+  dark-raised: "#38312b"
+  paper-ink: "#f7f3ee"
+  dark-app-bar: "#183f73"
+  dark-primary: "#6494d7"
 typography:
   headline:
     fontFamily: "Roboto, sans-serif"
@@ -114,6 +121,8 @@ editor read as a status display.
   claim about what something *is*, so it is never reused for something else.
 - MUI's structural defaults (shape, elevation levels, component APIs) are kept; the craft is in
   which values they're fed, not in replacing the framework's behavior.
+- Two appearances, one object turned over: the dark theme is the same paper-and-ink read by lamplight
+  (see Dark theme under Colors), not an inversion and not a second palette.
 
 ## Colors
 
@@ -259,6 +268,93 @@ chosen against that as well as against white.
   map is a colour except the marks. Roads and place names stay: they are the shape of the land at
   high zoom.
 
+### Dark theme
+
+Chosen with the Appearance control on the bar (Light, Dark, or Match system; kept in the browser, and
+applied before the app loads so a reload does not open on a white sheet). Built in
+`theme/appTheme.ts` as the same theme function called with a mode, so a token is stated once and a
+dark value is a decision about that token rather than a second stylesheet.
+
+**Strategy.** The light theme is ink on paper; the dark theme is paper on ink — the same two
+materials with the roles swapped, which is what the "instrument" metaphor predicts. Every neutral
+keeps the one warm hue (55°, chroma ≈ 0.012) and surfaces are told apart by lightness alone, exactly
+as in the light theme, where lift was always a luminance difference and hue never did that work. Not
+a mechanical inversion: a ground has been designed (below), and every colour that carries a meaning
+was taken to the new ground individually.
+
+**Surfaces** (`theme/surfaces.ts`). Canvas `#17110e` → Paper `#231d19` (1.11:1) → Muted `#2f2924`
+(1.14:1) → Raised `#38312b` for what floats over a card (menus, popovers, tooltips). Raised exists
+because a shadow is nearly invisible on a dark ground, so the Warm Shadow Rule is kept (the scale is
+recoloured to a deep warm black) but the *edge* a shadow used to draw is now a 1px divider and a step
+of lightness. MUI's dark-mode white elevation wash is switched off: it is a pure white over a warm
+ground, and it would make elevation a property of a component instead of the palette. The plot
+surface is Paper, for the same reason it was white: a known, uncoloured ground that every
+translucent fill composites against.
+
+**Ink** (`palette.ink`, `#f7f3ee` — the aged paper the light theme sits on). Every strength of ink is
+stated once, in the light theme's terms, and `theme/ink.ts` finds the alpha that gives the same
+*measured contrast* on the dark paper (`divider` 0.14 → 0.105, `text.secondary` 0.74 → 0.61). That is
+the "match the contrast, not the number" rule applied across a change of ground, and it means the
+prior still recedes behind the posterior and the grid behind both, in either mode. Text holds the
+light theme's 11.4:1 and 6.3:1.
+
+**Hues.** No hue moved; each was taken *up* in lightness (chroma eased by ≤ 10%) until it clears
+4.6:1 on Muted — the dimmest surface a label can sit on — so every ink that carried a 10px label on
+white still does. That is 5.4:1 on a card and 6:1 on the canvas.
+
+| Role | Light | Dark |
+|---|---|---|
+| Primary (links, lines, focus, posterior) | `#3c70b8` | `#6494d7` |
+| Boundary coral, ink / main | `#d23f4a` / `#f15d5f` | `#f0666f` / `#f66b73` |
+| Phase green | `#1f7a62` | `#56a089` |
+| Hiatus violet | `#7a5c99` | `#a287c0` |
+| Wiggle amber | `#a5651a` | `#c2864a` |
+| Deposition teal | `#1c6a86` | `#5b9ab5` |
+| Undated level slate | `#5b7f8d` | `#5b7f8d` (3.9:1; a graphic mark, not a label) |
+| Context ramp (index 0 → 5) | `#35826e` → `#04372a` | `#57a088` → `#c2f0df` |
+| Residual early / late | `#b85c14` / `#215f7a` | `#d27d46` / `#6499b3` |
+| Curve slots (violet, raspberry, green, orange, olive) | as in the light theme | `#a287c0`, `#d9709e`, `#56a089`, `#d17e4e`, `#759e57` |
+| `error` / `warning` / `success` | `#a3231d` / `#a85c11` / `#2e7d32` | `#ef8168` / `#c98249` / `#5da25e` |
+
+**Primary is a light blue here, and the bar is not.** Text, lines and focus need the lighter blue; a
+bar that size in it would be the loudest object on the screen. The app bar is the brand blue taken
+down to a band (`#183f73`), white on it at 10.5:1, so every `color="inherit"` control on it, the
+2px white focus ring and the no-dimmed-labels rule are unchanged. A filled primary takes the canvas
+as its label colour (6.0:1) — MUI would have chosen pure black.
+
+**Hover goes lighter.** MUI hovers a filled button to a darkened step, which on white *adds* contrast to a
+white label. On this ground the label is the canvas, so darkening takes it from ~6:1 to ~3.3:1. Each
+filled role therefore sets its hover (`palette.X.dark`) a step lighter instead: primary `#73a4e8`,
+secondary `#fd8589`, error `#fd937b`, warning `#da9159`, success `#6cb26d`, all ≥ 7:1.
+
+**The context ramp keeps its order.** Index 0 is the quietest step and index 5 the strongest in both
+modes: lightest-green-to-darkest on paper, dimmest-to-palest on ink. What a reader learns — a higher
+step is a stronger one — survives the change of ground. The six steps are still ~1.2:1 apart.
+
+**The red pair.** The light theme separates `error` from the Boundary coral by depth, because hue
+separation is unavailable in the red band. A dark ground removes depth — both have to be light to be
+read — so the pair separates the other way: the coral leans 15° towards rose and stays the stronger,
+and `error` leans towards orange-red and is the softer and lighter of the two.
+
+**Maps.** The tiled basemap is OpenFreeMap's Positron, which has no dark sibling, so
+`darkenBasemapStyle` recolours it by what each property *is*. The land is `#3a342f`, a step above the
+card (not the card itself): the first version put the land on the card and halved every fill's
+distance from it, which left the sea 1.1:1 from the land and the map reading as one flat slab.
+Positron's own sea is ~1.5:1 from its land and the dark one is 1.48:1 (dark, but not
+black), so a coast is visible at a glance. Fills keep their place relative to the land (the sea stays
+the darker surface); lines and names swap sides (a coastline is lighter than the land where it was
+darker) and a place name is held to 4.5:1; a source grey becomes the ground's warm tint, never an
+R=G=B neutral. Hues are kept and chroma is cut to what the warm ground carries, so the sea is still
+the one tinted surface and nothing on the map is a colour except the marks. The value ramp continues
+at its *dim* end — `#226653` and `#387a66`, 1.8:1 and 2.4:1 on that land, the same distances as the
+pale pair on white — and the signed scale meets at aged paper at 13% over the dark paper (`#413b37`).
+
+**React Flow** (the Harris matrix) ships a light skin and v11 has no colour-mode prop, so its zoom
+buttons, minimap and attribution plate are re-grounded from the palette in dark only.
+
+**Figures keep the mode they were drawn in.** A PNG saved from a dark page has a dark background.
+The PDF report is assembled on the server and is unaffected.
+
 ### Named Rules
 **The One Object, One Color Rule.** A Boundary, Phase, or Hiatus is the same hue in the tree editor,
 the Harris matrix, and the posterior plot — never a per-view palette. Its corollary, learned the hard
@@ -279,6 +375,11 @@ smudged.
 **The Borrowed-Status Rule.** `success`/`warning`/`error` are reserved for genuine semantic state
 (a solved solver, an actual warning, a destructive confirm action). They are never repurposed as a
 categorical label for structural elements — that reads as a status display where none is intended.
+
+**The Same-Contrast-Not-Same-Number Rule.** A strength of ink, a text alpha, a grid — anything stated
+as an alpha of the one neutral — is stated once in the light theme's terms and re-derived for the dark
+ground by measured contrast (`theme/ink.ts`). Copying an alpha across a change of ground changes the
+contrast it was chosen for. Never write a second table of alphas.
 
 **The Basemap-Is-A-Surface Rule.** A mark on a map is checked against the tiles it will sit on, not
 only against white. A colour that reads on the offline map and disappears into a tile's ocean or
@@ -664,6 +765,13 @@ scattered rows in a table.
 - **Do** mark the current item in a nav or contents list with weight and a rule; keep every label at
   full contrast.
 - **Do** write every control label in sentence case, Tabs and ToggleButtons included.
+- **Do** read a surface or the ink from `theme.palette` (`background.paper`, `background.muted`,
+  `background.raised`, `palette.ink`) or from `inkAt(mode, strength)` wherever a colour string is
+  built outside `sx` — a gradient, a Plotly trace, an SVG fill. A constant from `surfaces.ts` is the
+  *light* value and is wrong in half the app.
+- **Do** pass `mode` to a palette function (`contextShades`, `curveStyles`, `elementHues`) rather than
+  importing the light constant, and check any new element hue at 4.6:1 on `background.muted` in the
+  dark theme as well as 4.5:1 on white in the light one.
 
 ### Don't:
 - **Don't** fall back to MUI's stock blue (`#1976d2`) or pink (`#dc004e`) — both were the literal
@@ -701,5 +809,9 @@ scattered rows in a table.
   in the wiggle amber is claiming to be a wiggle match.
 - **Don't** dim an inactive nav label on the primary bar. White at any alpha over the blue is under
   4.5:1.
+- **Don't** invert the light theme to make the dark one, or take a hue's *lightness* from the light
+  value. A dark ground inverts what "deeper" means; each hue is re-lifted to a contrast, not flipped.
+- **Don't** let MUI fill a dark gap with a cool neutral: the elevation wash, the tooltip's grey, the
+  backdrop's pure black and the `contrastText` it picks (black at 0.87) are all overridden.
 - **Don't** add colour to the tiled basemap. Woodland, parks and road shields were cut so the marks
   are the only colour on it.

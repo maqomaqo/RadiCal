@@ -38,7 +38,6 @@ import {
 } from '@mui/material'
 import { alpha } from '@mui/material/styles'
 import { tint } from '@/theme/diagramColors'
-import { PAPER } from '@/theme/surfaces'
 import DeleteIcon from '@mui/icons-material/Delete'
 import RocketLaunchIcon from '@mui/icons-material/RocketLaunch'
 import TimelineIcon from '@mui/icons-material/Timeline'
@@ -280,7 +279,7 @@ export default function SampleSelectionBar({
         // reads as an extension of the rows rather than a new surface.
         // Composited rather than translucent, because a sticky band with an
         // alpha fill shows the rows sliding underneath it.
-        backgroundColor: tint(theme.palette.primary.main, 0.08, PAPER),
+        backgroundColor: tint(theme.palette.primary.main, theme.palette.mode === 'dark' ? 0.14 : 0.08, theme.palette.background.paper),
         border: `1px solid ${alpha(theme.palette.primary.main, 0.2)}`,
       })}
     >

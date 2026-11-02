@@ -13,9 +13,10 @@
 // services/intervals.py and `intervals.note`.
 import { useMemo, useRef, useState } from 'react'
 import { Box, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Typography } from '@mui/material'
-import { alpha, useTheme } from '@mui/material/styles'
+import { useTheme } from '@mui/material/styles'
 import { visuallyHidden } from '@mui/utils'
-import { WARM_INK } from '@/theme/diagramColors'
+import { inkAt } from '@/theme/ink'
+import { scrollHintSx } from '@/theme/scrollHint'
 import type { DifferenceRecord } from '@/types'
 
 /** An entry on the matrix's axes: one dated event, in chronological order. */
@@ -179,13 +180,7 @@ export default function OrderingMatrix({
       <TableContainer
         sx={{
           maxWidth: '100%',
-          backgroundImage:
-            'linear-gradient(to left, #fff 40%, rgba(255,255,255,0)),' +
-            'radial-gradient(farthest-side at 100% 50%, rgba(43,35,32,0.16), rgba(43,35,32,0))',
-          backgroundPosition: 'right center, right center',
-          backgroundSize: '32px 100%, 14px 100%',
-          backgroundRepeat: 'no-repeat',
-          backgroundAttachment: 'local, scroll',
+          ...scrollHintSx(theme),
         }}
       >
         <Table
@@ -331,7 +326,7 @@ export default function OrderingMatrix({
                           // legend below is a usable key. Same direction as the
                           // table's OverlapMeter: stronger is less separable.
                           backgroundColor:
-                            strength == null ? 'transparent' : alpha(WARM_INK, strength),
+                            strength == null ? 'transparent' : inkAt(theme.palette.mode, strength),
                           // A ring drawn OUTSIDE the cell, over the paper, so
                           // it reads the same on the palest and darkest fill:
                           // a 2px border inside a cell at 0.8 ink is invisible
@@ -383,10 +378,10 @@ export default function OrderingMatrix({
                 height: 14,
                 borderRadius: '2px',
                 flexShrink: 0,
-                backgroundColor: alpha(WARM_INK, step.strength),
+                backgroundColor: inkAt(theme.palette.mode, step.strength),
                 // The palest step is nearly paper, so a hairline keeps it a
                 // swatch rather than a gap in the row.
-                border: `1px solid ${alpha(WARM_INK, 0.12)}`,
+                border: `1px solid ${inkAt(theme.palette.mode, 0.12)}`,
               }}
             />
             <Typography variant="caption" color="textSecondary">
