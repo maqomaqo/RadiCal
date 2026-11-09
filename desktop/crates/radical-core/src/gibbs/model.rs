@@ -9,7 +9,7 @@ use crate::Error;
 use crate::exact_chain::prior::{log_interior_placements, log_limits_factor_of_span, pair_limits};
 use crate::exact_chain::tables::{
     ElementBounds, OUTLIER_KERNEL_HALF_WIDTH_YEARS, OutlierPart, build_grid, convolve_on_grid,
-    date_tables, effective_date_bounds, outlier_kernel_at_scale, scale_nodes,
+    cut_to_limits, date_tables, effective_date_bounds, outlier_kernel_at_scale, scale_nodes,
 };
 use crate::measurement::{Calibrator, Measurement};
 use crate::model_tree::{Element, ModelPlan, inherited_bounds, plan_model};
@@ -65,6 +65,9 @@ pub struct Model {
     pub log_likelihood: Vec<Vec<f64>>,
     pub cdf: Vec<Vec<f64>>,
     pub outlier_parts: HashMap<String, OutlierPart>,
+    /// Per flagged date, its likelihood before its limiters: what the offset
+    /// smears (`tables::with_outlier_component`).
+    pub outlier_sources: HashMap<String, Vec<f64>>,
 
     /// The outlier models in use, sorted, with each one's scale nodes and
     /// flagged date rows.
@@ -136,6 +139,7 @@ impl Clone for Model {
             log_likelihood: self.log_likelihood.clone(),
             cdf: self.cdf.clone(),
             outlier_parts: self.outlier_parts.clone(),
+            outlier_sources: self.outlier_sources.clone(),
             outlier_models: self.outlier_models.clone(),
             scale_grid: self.scale_grid.clone(),
             scaled_dates: self.scaled_dates.clone(),
@@ -321,6 +325,7 @@ impl Model {
             log_likelihood,
             cdf,
             outlier_parts: tables.outlier_parts,
+            outlier_sources: tables.outlier_sources,
             outlier_models: Vec::new(),
             scale_grid: Vec::new(),
             scaled_dates: Vec::new(),
@@ -409,11 +414,17 @@ impl Model {
         for (model, name) in self.outlier_models.iter().enumerate() {
             for &row in &self.scaled_dates[model] {
                 let (inlier, _broad, prior) = &self.outlier_parts[&self.params[row]];
+                // The offset smears the date's likelihood before its limiters,
+                // and the limiters then cut the smeared component, as in the
+                // exact solver's tables.
+                let source = &self.outlier_sources[&self.params[row]];
+                let bounds = effective_date_bounds(&self.measurements[row], &self.element_bounds);
                 let mut mixtures = Vec::with_capacity(self.scale_grid[model].len());
                 let mut responsibility = Vec::with_capacity(self.scale_grid[model].len());
                 for &log_scale in &self.scale_grid[model] {
                     let kernel = outlier_kernel_at_scale(self.dt, half_width, name, log_scale);
-                    let broad = convolve_on_grid(inlier, &kernel);
+                    let mut broad = convolve_on_grid(source, &kernel);
+                    cut_to_limits(&mut broad, &self.grid, bounds);
                     let mixture: Vec<f64> = inlier
                         .iter()
                         .zip(&broad)
