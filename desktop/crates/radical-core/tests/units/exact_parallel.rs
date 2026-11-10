@@ -75,7 +75,8 @@ fn exact_parallel() {
                             let areas = w["areas"].as_array().unwrap();
                             assert_eq!(g.areas.len(), areas.len(), "{name}");
                             for (a, wa) in g.areas.iter().zip(areas) {
-                                check_chain(&name, a, wa);
+                                check_chain(&name, &a.chain, wa);
+                                assert!(!a.nested(), "{name}");
                             }
                         }
                     }
