@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 
-use crate::exact_chain::summary::{edge_mass, summarize};
+use crate::exact_chain::summary::{cut_edge_mass, summarize};
 use crate::exact_chain::tables::refined_grid_at;
 use crate::exact_chain::{OutlierScale, Posterior, REFINE_MIN_GAIN, REPORTING_STEP_YEARS};
 use crate::intervals::{Block, DEFAULT_DRAWS, Draws, report};
@@ -301,7 +301,7 @@ fn deposition_report(model: &Model, rate_histograms: &[Vec<f64>]) -> Vec<Deposit
 /// than the exact solver's own second pass: every sweep costs a pass over the
 /// grid per Boundary, and a pilot's histograms end where its draws did, not
 /// where the posterior does.
-pub const SAMPLER_REFINED_MIN_STEP_YEARS: f64 = 1.0;
+pub const SAMPLER_REFINED_MIN_STEP_YEARS: f64 = 0.5;
 pub const SAMPLER_REFINE_MARGIN_FRACTION: f64 = 0.25;
 /// A refined run is kept only if no parameter leaves more than this in the
 /// outermost 1% of its grid: more, and the margin cut a tail.
@@ -405,6 +405,7 @@ pub fn solve(
             Err(c) => return Ok(Err(c)),
         };
         if let Some(refined) = refined {
+            let refined_grid = refined.grid.clone();
             let on_refined = sampled(
                 refined,
                 root,
@@ -416,7 +417,7 @@ pub fn solve(
             match on_refined {
                 Err(c) => return Ok(Err(c)),
                 Ok(run)
-                    if edge_mass(&run.histograms, run.histograms.first().map_or(0, Vec::len))
+                    if cut_edge_mass(&run.histograms, &refined_grid, &model.grid)
                         <= SAMPLER_REFINED_EDGE_MASS =>
                 {
                     return Ok(Ok(run));
@@ -819,6 +820,25 @@ mod tests {
         assert_eq!(with.first_pass_step, None);
         assert_eq!(with.lobe_weight_error, None);
         assert!(SampleOptions::default().collapsed_moves && SampleOptions::default().refine_grid);
+    }
+
+    #[test]
+    fn dates_against_the_young_end_of_the_curve_are_still_solved_finely() {
+        // Two phases of the last few centuries: the End Boundary's posterior
+        // runs to the end of the curve, which is the end of the grid on both
+        // passes and no reason to keep the first.
+        // Twelve dates to a phase: with a few, the Start Boundary's own
+        // tail is long enough that no second grid would be finer.
+        let older: Vec<(f64, f64)> = (0..12).map(|i| (210.0 + f64::from(i), 12.0)).collect();
+        let younger: Vec<(f64, f64)> = (0..12).map(|i| (115.0 + f64::from(i), 12.0)).collect();
+        let (root, dates) = sequence(&[&older, &younger]);
+        let cal = Calibrator::default();
+        let chain = exact_chain::layout(Some(&root), &dates, false, true).unwrap();
+        let exact =
+            exact_chain::solve(&dates, &root, &chain, &SolveOptions::default(), &cal).unwrap();
+        let first = exact.grid.first_pass_step.expect("a second pass");
+        assert!(exact.grid.step < first, "{} then {first}", exact.grid.step);
+        assert!(exact.grid.lower <= 1.0);
     }
 
     #[test]

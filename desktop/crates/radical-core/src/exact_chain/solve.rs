@@ -12,7 +12,7 @@ use crate::exact_chain::ordered::{
 };
 use crate::exact_chain::prior::{boundary_pair_term, pair_limits, span_prior_correction};
 use crate::exact_chain::summary::{
-    Posterior, edge_mass, outlier_probability, straddling, summarize,
+    Posterior, cut_edge_mass, edge_mass, outlier_probability, straddling, summarize,
 };
 use crate::exact_chain::tables::{
     DateTables, ElementBounds, OUTLIER_SCALE_NODES, build_grid, date_tables, flat_date_tables,
@@ -411,8 +411,8 @@ pub(crate) fn two_pass(
     };
     let mut results = None;
     if let Some(refined) = &refined {
-        let (mut second, _densities) = solver.full(refined, weights.as_ref())?;
-        if second.edge_mass <= REFINED_EDGE_MASS {
+        let (mut second, densities) = solver.full(refined, weights.as_ref())?;
+        if cut_edge_mass(&densities, refined, &grid) <= REFINED_EDGE_MASS {
             second.grid.first_pass_step = Some(grid[1] - grid[0]);
             results = Some(second);
         }
