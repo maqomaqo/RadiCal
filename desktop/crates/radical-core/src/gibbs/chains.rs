@@ -609,7 +609,7 @@ mod lobe_tests {
     #[test]
     fn one_round_is_too_few_to_tell() {
         let model = model();
-        let one = vec![vec![round(&model, 0.5)]];
+        let one = [vec![round(&model, 0.5)]];
         let kept: Vec<&[Histograms]> = one.iter().map(Vec::as_slice).collect();
         assert_eq!(lobe_weight_error(&model, &kept), None);
     }
