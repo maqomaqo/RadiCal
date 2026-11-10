@@ -120,6 +120,39 @@ pub fn edge_mass(densities: &[Vec<f64>], grid_len: usize) -> f64 {
     worst
 }
 
+/// [`edge_mass`] at the ends a second grid CUT: `refined` against the `first`
+/// grid it was narrowed from.
+///
+/// An end the second grid shares with the first was not cut by the
+/// refinement. It is where the first grid itself stops -- the end of the
+/// curve, for dates of the last few centuries -- and whatever a posterior
+/// holds against it there it held on the first grid too, so it is no reason
+/// to throw the finer answer away. Counting it did exactly that: any model
+/// with a Boundary pressed against the curve's young end was reported from
+/// its first pass, at a step several times coarser.
+pub fn cut_edge_mass(densities: &[Vec<f64>], refined: &[f64], first: &[f64]) -> f64 {
+    let n = refined.len();
+    let edge = (n / 100).max(1);
+    let step = refined[1] - refined[0];
+    let lower_cut = refined[0] > first[0] + 0.5 * step;
+    let upper_cut = refined[n - 1] < first[first.len() - 1] - 0.5 * step;
+    let mut worst = 0.0;
+    for dens in densities {
+        let total = sum(dens);
+        if total > 0.0 {
+            let mut share = 0.0;
+            if lower_cut {
+                share += sum(&dens[..edge]);
+            }
+            if upper_cut {
+                share += sum(&dens[dens.len() - edge..]);
+            }
+            worst = py_max(worst, share / total);
+        }
+    }
+    worst
+}
+
 /// The cell edges a grid's points stand for, and the cumulative mass at each.
 fn cells(grid: &[f64], mass: &[f64]) -> (Vec<f64>, Vec<f64>) {
     let dt = grid[1] - grid[0];
@@ -273,4 +306,25 @@ pub fn summarize(
         outlier_probability: None,
         agreement_index: None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mass_at_an_end_the_refinement_did_not_cut_is_not_counted() {
+        let first: Vec<f64> = (0..=1000).map(f64::from).collect();
+        // Everything against the young end.
+        let mut density = vec![0.0; 201];
+        density[0] = 1.0;
+        // A second grid that keeps the first's young end and cuts its old one.
+        let shared: Vec<f64> = (0..=200).map(|i| 0.5 * f64::from(i)).collect();
+        assert_eq!(cut_edge_mass(&[density.clone()], &shared, &first), 0.0);
+        // One that starts inside the first has cut that end.
+        let inside: Vec<f64> = (0..=200).map(|i| 100.0 + 0.5 * f64::from(i)).collect();
+        assert_eq!(cut_edge_mass(&[density.clone()], &inside, &first), 1.0);
+        density.reverse();
+        assert_eq!(cut_edge_mass(&[density], &shared, &first), 1.0);
+    }
 }

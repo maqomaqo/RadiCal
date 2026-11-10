@@ -2,9 +2,9 @@
 //! tables, per-group span terms, and for every parameter its hard bounds and
 //! the parameters constraining it. Port of `gibbs.Model`.
 
-use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::sync::Arc as Rc;
 
 use crate::Error;
 use crate::exact_chain::prior::{log_interior_placements, log_limits_factor_of_span, pair_limits};
@@ -48,8 +48,26 @@ fn round_even(x: f64) -> i64 {
 
 /// (row, scale node, beta's bits): a tempered likelihood table's key.
 type TemperedKey = (usize, Option<usize>, u64);
-/// A likelihood row and its cumulative sum.
-type Tables = (Vec<f64>, Vec<f64>);
+/// A tempered likelihood row and its cumulative sum, as its cache holds them.
+type Tables = (Rc<[f64]>, Rc<[f64]>);
+
+/// A likelihood table for one draw: the model's own, lent, or a tempered one
+/// shared out of its cache. Either way not a copy: a draw reads a few cells
+/// of a row as long as the grid.
+enum Shared<'a> {
+    Borrowed(&'a [f64]),
+    Counted(Rc<[f64]>),
+}
+
+impl std::ops::Deref for Shared<'_> {
+    type Target = [f64];
+    fn deref(&self) -> &[f64] {
+        match self {
+            Self::Borrowed(row) => row,
+            Self::Counted(row) => row,
+        }
+    }
+}
 
 /// The sampler's model of one analysis.
 #[derive(Debug)]
@@ -490,14 +508,15 @@ impl Model {
         self.model_of[row].map(|model| state.scale[model])
     }
 
-    /// (density, cumulative) of a drawable row's likelihood at power `beta`,
-    /// cached per power.
-    fn likelihood_tables(
+    /// (density, cumulative) of a drawable row's likelihood at power `beta`:
+    /// the untempered tables lent, a tempered pair shared out of its cache,
+    /// which holds one per power.
+    fn shared_tables(
         &self,
         row: usize,
         node: Option<usize>,
         beta: f64,
-    ) -> (Cow<'_, [f64]>, Cow<'_, [f64]>) {
+    ) -> (Shared<'_>, Shared<'_>) {
         let density = match node {
             None => &self.likelihood[row],
             Some(n) => &self.likelihood_at[&row][n],
@@ -507,18 +526,22 @@ impl Model {
                 None => &self.cdf[row],
                 Some(n) => &self.cdf_at[&row][n],
             };
-            return (Cow::Borrowed(density), Cow::Borrowed(cdf));
+            return (Shared::Borrowed(density), Shared::Borrowed(cdf));
         }
         let key = (row, node, beta.to_bits());
         if let Some(found) = self.tempered.borrow().get(&key) {
-            return (Cow::Owned(found.0.clone()), Cow::Owned(found.1.clone()));
+            return (
+                Shared::Counted(Rc::clone(&found.0)),
+                Shared::Counted(Rc::clone(&found.1)),
+            );
         }
         let powered: Vec<f64> = density.iter().map(|&d| d.powf(beta)).collect();
         let cumulative = cumsum(&powered);
+        let (powered, cumulative): (Rc<[f64]>, Rc<[f64]>) = (powered.into(), cumulative.into());
         self.tempered
             .borrow_mut()
-            .insert(key, (powered.clone(), cumulative.clone()));
-        (Cow::Owned(powered), Cow::Owned(cumulative))
+            .insert(key, (Rc::clone(&powered), Rc::clone(&cumulative)));
+        (Shared::Counted(powered), Shared::Counted(cumulative))
     }
 
     /// The dates' log likelihood at their current positions, untempered:
@@ -1339,7 +1362,7 @@ impl Model {
             return self.draw_deposition_level(row, state, u, lo, hi, beta);
         }
         let node = self.scale_of(row, state);
-        let (density, cdf) = self.likelihood_tables(row, node, beta);
+        let (density, cdf) = self.shared_tables(row, node, beta);
         let (mut low_weight, mut high_weight) = (1.0, 1.0);
         for &other in &self.edge_tied_with[row] {
             let at = state.index[other];
@@ -2125,7 +2148,7 @@ impl Model {
             return Some(0.0);
         }
         let node = self.scale_of(row, state);
-        let (density, cdf) = self.likelihood_tables(row, node, beta);
+        let (density, cdf) = self.shared_tables(row, node, beta);
         let (mut low_weight, mut high_weight) = (1.0, 1.0);
         for &other in &self.edge_tied_with[row] {
             let other_at = state.index[other];
