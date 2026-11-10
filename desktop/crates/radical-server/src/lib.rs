@@ -42,6 +42,11 @@ pub struct State {
     pub curves: Arc<curves::StoreCurves>,
     /// Accounts mode, for RadiCal on a server: None on the desktop.
     pub accounts: Option<accounts::Accounts>,
+    /// Sample as the recorded server did where an analysis does not say:
+    /// without the collapsed moves or the refined grid, which make a seeded
+    /// run another run. For replaying the recording; see
+    /// [`Self::with_recorded_sampler`].
+    pub recorded_sampler: bool,
 }
 
 impl State {
@@ -60,11 +65,21 @@ impl State {
             jobs,
             curves,
             accounts: None,
+            recorded_sampler: false,
         })
     }
 
     /// The same server with accounts: every request but the few before
     /// signing in must say whose it is.
+    /// Have analyses that do not set `collapsed_moves` or `refine_grid`
+    /// sample without them, as the recorded answers were sampled.
+    pub fn with_recorded_sampler(self) -> Self {
+        Self {
+            recorded_sampler: true,
+            ..self
+        }
+    }
+
     pub fn with_accounts(self, accounts: accounts::Accounts) -> Self {
         Self {
             accounts: Some(accounts),

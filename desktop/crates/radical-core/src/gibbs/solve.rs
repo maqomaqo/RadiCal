@@ -57,13 +57,15 @@ pub struct SampleOptions {
     pub temperatures: usize,
     pub match_oxcal: bool,
     /// Offer the moves that carry a Boundary with its dates integrated out
-    /// (`Model::collapsed_shift`). Off by default: they draw from the
-    /// generator, so every seeded run would become another run.
+    /// (`Model::collapsed_shift`). They draw from the generator, so a seeded
+    /// run with them is another run than one without. Never taken by a run
+    /// matching OxCal 4.4, whatever is asked: OxCal has no such move.
     pub collapsed_moves: bool,
     /// Sample twice: a short pilot on the grid padded blind for the
     /// Boundaries' tails, then the run itself on a grid covering only where
-    /// the pilot went, at a finer step ([`refined_model`]). Off by default,
-    /// as `collapsed_moves` is and for the same reason.
+    /// the pilot went, at a finer step ([`refined_model`]). Another run than
+    /// one without, as `collapsed_moves` is, and likewise never taken by a
+    /// run matching OxCal 4.4.
     pub refine_grid: bool,
 }
 
@@ -85,8 +87,8 @@ impl Default for SampleOptions {
             resolution: REPORTING_STEP_YEARS,
             temperatures: DEFAULT_TEMPERATURES,
             match_oxcal: false,
-            collapsed_moves: false,
-            refine_grid: false,
+            collapsed_moves: true,
+            refine_grid: true,
         }
     }
 }
@@ -787,6 +789,36 @@ mod tests {
                 want = (want.posterior_median, want.posterior_std),
             );
         }
+    }
+
+    #[test]
+    fn a_run_matching_oxcal_takes_neither_whatever_is_asked() {
+        // The plateau phases a refined grid and collapsed moves change most,
+        // sampled as OxCal 4.4 samples: asking for both changes nothing, not
+        // a sweep and not a count.
+        let (root, dates) = sequence(&[
+            &[(2530.0, 20.0), (2520.0, 20.0), (2540.0, 20.0)],
+            &[(2480.0, 20.0), (2470.0, 20.0), (2490.0, 20.0)],
+            &[(2440.0, 20.0), (2430.0, 20.0), (2450.0, 20.0)],
+        ]);
+        let cal = Calibrator::new(&crate::measurement::Builtins, crate::Mode::MatchOxcal);
+        let run = |asked: bool| {
+            let options = SampleOptions {
+                sweeps: 3_000,
+                max_sweeps: Some(3_000),
+                chains: 2,
+                match_oxcal: true,
+                collapsed_moves: asked,
+                refine_grid: asked,
+                ..SampleOptions::default()
+            };
+            solve(&dates, &root, &options, &cal, None).unwrap().unwrap()
+        };
+        let (with, without) = (run(true), run(false));
+        assert_eq!(with, without);
+        assert_eq!(with.first_pass_step, None);
+        assert_eq!(with.lobe_weight_error, None);
+        assert!(SampleOptions::default().collapsed_moves && SampleOptions::default().refine_grid);
     }
 
     #[test]
