@@ -712,6 +712,32 @@ pub fn refined_grid(
     num_groups: usize,
     cal: &Calibrator,
 ) -> Result<Option<Vec<f64>>, Error> {
+    refined_grid_at(
+        grid,
+        densities,
+        measurements,
+        element_bounds,
+        num_groups,
+        cal,
+        REFINED_MIN_STEP_YEARS,
+        REFINE_MARGIN_FRACTION,
+    )
+}
+
+/// [`refined_grid`] with its finest step and its margin given: the sampler
+/// refines from a pilot run's histograms, which know a tail only as far as
+/// the run happened to reach, and pays for every grid point in every sweep.
+#[allow(clippy::too_many_arguments)]
+pub fn refined_grid_at(
+    grid: &[f64],
+    densities: &[Vec<f64>],
+    measurements: &[Measurement],
+    element_bounds: &ElementBounds,
+    num_groups: usize,
+    cal: &Calibrator,
+    min_step: f64,
+    margin_fraction: f64,
+) -> Result<Option<Vec<f64>>, Error> {
     let m = grid.len();
     let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
     for density in densities {
@@ -737,16 +763,13 @@ pub fn refined_grid(
     let first_step = grid[1] - grid[0];
     let margin = py_max(
         REFINE_MARGIN_STEPS * first_step,
-        REFINE_MARGIN_FRACTION * (hi - lo),
+        margin_fraction * (hi - lo),
     );
     let (lo, hi) = (
         py_max(grid[0], lo - margin),
         py_min(grid[m - 1], hi + margin),
     );
-    let step = reporting_aligned_step(py_max(
-        REFINED_MIN_STEP_YEARS,
-        (hi - lo) / point_budget(num_groups),
-    ));
+    let step = reporting_aligned_step(py_max(min_step, (hi - lo) / point_budget(num_groups)));
     if step * REFINE_MIN_GAIN > first_step {
         return Ok(None);
     }

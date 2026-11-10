@@ -71,6 +71,11 @@ pub struct Chain {
     pub round_draws: Vec<Vec<Vec<i32>>>,
     pub round_length: usize,
     pub limits_shrunk: bool,
+    /// The sets [`Model::collapsed_shift`] is offered over each sweep; empty
+    /// unless the run asked for collapsed moves ([`Self::collapse`]).
+    pub collapsed_sets: Vec<Vec<usize>>,
+    pub collapsed_proposed: usize,
+    pub collapsed_accepted: usize,
 }
 
 /// What a chain hands back when it is finished.
@@ -168,7 +173,16 @@ impl Chain {
             round_draws: Vec::new(),
             round_length,
             limits_shrunk: false,
+            collapsed_sets: Vec::new(),
+            collapsed_proposed: 0,
+            collapsed_accepted: 0,
         })
+    }
+
+    /// Have every sweep also offer the collapsed moves. They draw from the
+    /// generator, so a run with them is another run than one without.
+    pub fn collapse(&mut self) {
+        self.collapsed_sets = self.model.collapsed_sets();
     }
 
     /// One sweep of the chain, and of each tempered copy with a swap
@@ -278,6 +292,14 @@ impl Chain {
                 self.scales[index] = (self.scales[index] * factor).max(1.0);
                 self.since_adapt[index] = 0;
                 self.took_since_adapt[index] = 0;
+            }
+        }
+        for set in &self.collapsed_sets {
+            let (next, took) = model.collapsed_shift(state, &mut self.rng, set, beta);
+            state = next;
+            if adapt {
+                self.collapsed_proposed += 1;
+                self.collapsed_accepted += usize::from(took);
             }
         }
         state
@@ -556,6 +578,7 @@ pub struct RunOptions {
     pub start: Start,
     pub temperatures: usize,
     pub match_oxcal: bool,
+    pub collapsed_moves: bool,
 }
 
 impl Default for RunOptions {
@@ -571,6 +594,7 @@ impl Default for RunOptions {
             start: Start::default(),
             temperatures: DEFAULT_TEMPERATURES,
             match_oxcal: false,
+            collapsed_moves: false,
         }
     }
 }
@@ -594,6 +618,9 @@ pub fn run(
         &options.start,
         options.temperatures,
     )?;
+    if options.collapsed_moves {
+        chain.collapse();
+    }
     let mut report = |chain: &Chain, phase: &'static str, convergence: f64| -> bool {
         match on_progress.as_deref_mut() {
             None => true,

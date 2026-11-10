@@ -2,6 +2,7 @@
 //! tables, per-group span terms, and for every parameter its hard bounds and
 //! the parameters constraining it. Port of `gibbs.Model`.
 
+use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
@@ -27,6 +28,9 @@ use super::{
 /// (2^k of them); a bigger cluster is counted over its downsets, up to
 /// MAX_CLUSTER_DOWNSETS of them at any one size.
 const DENSE_CLUSTER_DATES: usize = 20;
+/// The scale, in years, of a collapsed move's local kernel: about a
+/// measurement's error, to move a Boundary within its lobe.
+const COLLAPSED_LOCAL_YEARS: f64 = 20.0;
 const MAX_CLUSTER_DOWNSETS: usize = 1 << 16;
 
 /// A calibration lobe: (peak cell, share of the row's total, first cell, one
@@ -118,6 +122,9 @@ pub struct Model {
     date_tie_pairs: Vec<(usize, usize)>,
     younger_dates: HashMap<usize, HashSet<usize>>,
     pub blocks: Vec<Vec<usize>>,
+    /// Per parameter row: a date held by Boundaries alone, which a collapsed
+    /// move may integrate out ([`Self::collapsed_shift`]).
+    pub free_date: Vec<bool>,
 
     cluster_weights: RefCell<HashMap<Vec<usize>, f64>>,
     tempered: RefCell<HashMap<TemperedKey, Tables>>,
@@ -179,6 +186,7 @@ impl Clone for Model {
             date_tie_pairs: self.date_tie_pairs.clone(),
             younger_dates: self.younger_dates.clone(),
             blocks: self.blocks.clone(),
+            free_date: self.free_date.clone(),
             // Caches start empty in a copy; they refill as they are read.
             cluster_weights: RefCell::default(),
             tempered: RefCell::default(),
@@ -365,6 +373,7 @@ impl Model {
             date_tie_pairs: Vec::new(),
             younger_dates: HashMap::new(),
             blocks: Vec::new(),
+            free_date: Vec::new(),
             cluster_weights: RefCell::default(),
             tempered: RefCell::default(),
             peak_gaps_cache: RefCell::default(),
@@ -373,6 +382,17 @@ impl Model {
         model.build_outlier_tables();
         model.build_constraints();
         model.build_blocks();
+        model.free_date = (0..model.params.len())
+            .map(|row| {
+                row < model.num_dates
+                    && !model.deposition_of.contains_key(&row)
+                    && model.date_tied_with[row].is_empty()
+                    && model.below[row]
+                        .iter()
+                        .chain(&model.above[row])
+                        .all(|&other| model.is_boundary(other))
+            })
+            .collect();
         Ok(model)
     }
 
@@ -477,7 +497,7 @@ impl Model {
         row: usize,
         node: Option<usize>,
         beta: f64,
-    ) -> (Vec<f64>, Vec<f64>) {
+    ) -> (Cow<'_, [f64]>, Cow<'_, [f64]>) {
         let density = match node {
             None => &self.likelihood[row],
             Some(n) => &self.likelihood_at[&row][n],
@@ -487,18 +507,18 @@ impl Model {
                 None => &self.cdf[row],
                 Some(n) => &self.cdf_at[&row][n],
             };
-            return (density.clone(), cdf.clone());
+            return (Cow::Borrowed(density), Cow::Borrowed(cdf));
         }
         let key = (row, node, beta.to_bits());
         if let Some(found) = self.tempered.borrow().get(&key) {
-            return found.clone();
+            return (Cow::Owned(found.0.clone()), Cow::Owned(found.1.clone()));
         }
         let powered: Vec<f64> = density.iter().map(|&d| d.powf(beta)).collect();
         let cumulative = cumsum(&powered);
         self.tempered
             .borrow_mut()
             .insert(key, (powered.clone(), cumulative.clone()));
-        (powered, cumulative)
+        (Cow::Owned(powered), Cow::Owned(cumulative))
     }
 
     /// The dates' log likelihood at their current positions, untempered:
@@ -2089,6 +2109,174 @@ impl Model {
         let state = self.initial_state(None, None, Some(wishes)).ok()?;
         let at = state.index[row];
         (first as i64 <= at && at < last as i64).then_some(state)
+    }
+
+    /// log p(where `row` is | everything else), for a date drawn by
+    /// [`Self::draw_date`]'s plain branch: its weight there over the total
+    /// that draw is taken from. None where the draw has no such density -- no
+    /// room, or no likelihood anywhere in it.
+    fn log_conditional(&self, row: usize, state: &State, beta: f64) -> Option<f64> {
+        let (lo, hi) = self.allowed(row, state);
+        let at = state.index[row];
+        if hi < lo || at < lo || at > hi {
+            return None;
+        }
+        if hi == lo {
+            return Some(0.0);
+        }
+        let node = self.scale_of(row, state);
+        let (density, cdf) = self.likelihood_tables(row, node, beta);
+        let (mut low_weight, mut high_weight) = (1.0, 1.0);
+        for &other in &self.edge_tied_with[row] {
+            let other_at = state.index[other];
+            if other_at == lo {
+                low_weight *= 0.5;
+            } else if other_at == hi {
+                high_weight *= 0.5;
+            }
+        }
+        let (l, h) = (lo as usize, hi as usize);
+        let interior = if h >= l + 2 { cdf[h - 1] - cdf[l] } else { 0.0 };
+        let low_end = low_weight * density[l];
+        let high_end = high_weight * density[h];
+        let total = interior + low_end + high_end;
+        let weight = if at == lo {
+            low_end
+        } else if at == hi {
+            high_end
+        } else {
+            density[at as usize]
+        };
+        (total > 0.0 && weight > 0.0).then(|| (weight / total).ln())
+    }
+
+    /// Translate the Boundaries in `rows` with the dates they alone hold
+    /// INTEGRATED OUT, then draw those dates afresh. Returns (state, taken).
+    ///
+    /// [`Self::shift`] carries a phase between calibration lobes rigidly:
+    /// every date moves by the one offset, and the move is taken only if all
+    /// of them like where that puts them. But lobes are not copies of each
+    /// other, and a phase of many dates sits differently in each, so the
+    /// rigid move is refused nearly always and the chain changes lobe
+    /// rarely. Given its Boundaries a free date ([`Self::free_date`]) is
+    /// independent of everything else, so it can be summed out exactly: the
+    /// move is a Metropolis step on the model WITHOUT those dates,
+    ///
+    /// ```text
+    /// pi_c(x) = sum over t of pi(x, t) = pi(x, t) / p(t | x)   for any t
+    /// ```
+    ///
+    /// followed by t' ~ p(t | x'), which is [`Self::draw_date`]. The offset
+    /// is symmetric, so the ratio is pi_c(x') / pi_c(x). A date in `rows`
+    /// that is not free moves rigidly, as in `shift`.
+    pub fn collapsed_shift(
+        &self,
+        state: State,
+        rng: &mut Generator,
+        rows: &[usize],
+        beta: f64,
+    ) -> (State, bool) {
+        let moved: Vec<usize> = rows
+            .iter()
+            .copied()
+            .filter(|&r| !self.free_date[r])
+            .collect();
+        let boundaries: HashSet<usize> = moved
+            .iter()
+            .copied()
+            .filter(|&r| self.is_boundary(r))
+            .collect();
+        let free: Vec<usize> = (0..self.num_dates)
+            .filter(|&d| {
+                self.free_date[d]
+                    && self.below[d]
+                        .iter()
+                        .chain(&self.above[d])
+                        .any(|b| boundaries.contains(b))
+            })
+            .collect();
+        if free.is_empty() {
+            return (state, false);
+        }
+        let kernel = rng.random();
+        let gaps = if kernel >= 2.0 / 3.0 {
+            self.peak_gaps(&free)
+        } else {
+            Vec::new()
+        };
+        let steps = if !gaps.is_empty() {
+            let jitter = round_even(PEAK_JUMP_JITTER_YEARS / self.dt);
+            let gap = gaps[rng.integers(0, gaps.len() as i64) as usize];
+            let sign = if rng.random() < 0.5 { 1 } else { -1 };
+            gap * sign + rng.integers(-jitter, jitter + 1)
+        } else {
+            let years = if kernel < 1.0 / 3.0 {
+                COLLAPSED_LOCAL_YEARS
+            } else {
+                WIDE_MOVE_YEARS
+            };
+            round_even(rng.normal(0.0, (years / self.dt).max(1e-9)))
+        };
+        if steps == 0 {
+            return (state, false);
+        }
+        let mut current = self.log_posterior(&state, beta);
+        for &d in &free {
+            match self.log_conditional(d, &state, beta) {
+                Some(c) => current -= c,
+                None => return (state, false),
+            }
+        }
+        let mut proposal = state.clone();
+        for &row in &moved {
+            let to = state.index[row] + steps;
+            if to < 0 || to >= self.m as i64 {
+                return (state, false);
+            }
+            proposal.index[row] = to;
+        }
+        // Each free date's own draw given the moved Boundaries: they do not
+        // constrain each other, so the order they are drawn in is no matter.
+        for &d in &free {
+            let (lo, hi) = self.allowed(d, &proposal);
+            let u = rng.random();
+            if hi < lo {
+                return (state, false);
+            }
+            proposal.index[d] = lo;
+            proposal.index[d] = self.draw_date(d, &proposal, u, beta);
+        }
+        let mut proposed = self.log_posterior(&proposal, beta);
+        if proposed == f64::NEG_INFINITY {
+            return (state, false);
+        }
+        for &d in &free {
+            match self.log_conditional(d, &proposal, beta) {
+                Some(c) => proposed -= c,
+                None => return (state, false),
+            }
+        }
+        if proposed >= current || rng.random() < (proposed - current).exp() {
+            (proposal, true)
+        } else {
+            (state, false)
+        }
+    }
+
+    /// The parameter sets a collapsed move is offered over: the whole model,
+    /// each group's pair of Boundaries, and each Boundary on its own. Fewer
+    /// than a translation's ([`Self::move_sets`]): with the dates summed out a
+    /// pair of Boundaries is the whole of a phase, and each move costs a draw
+    /// of every date it frees.
+    pub fn collapsed_sets(&self) -> Vec<Vec<usize>> {
+        let mut sets: Vec<Vec<usize>> = vec![(0..self.params.len()).collect()];
+        for (older, younger, dates) in &self.group_dates {
+            if !dates.is_empty() && self.group_dates.len() > 1 {
+                sets.push(vec![*younger, *older]);
+            }
+        }
+        sets.extend(self.boundary_rows.iter().map(|&b| vec![b]));
+        sets
     }
 
     /// Propose translating `rows` by a common offset and accept on the exact

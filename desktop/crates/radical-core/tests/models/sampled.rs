@@ -27,6 +27,10 @@ fn sample_like_the_api(request: &Value, dates: &[Measurement], root: &Element) -
         estimate_durations: config["estimate_durations"].as_bool().unwrap_or(false),
         resolution: config["resolution"].as_f64().unwrap_or(5.0),
         match_oxcal: config["match_oxcal"].as_bool().unwrap_or(false),
+        // The recorded runs predate both, and each makes a seeded run
+        // another run.
+        collapsed_moves: false,
+        refine_grid: false,
         ..SampleOptions::default()
     };
     let cal = Calibrator::default();

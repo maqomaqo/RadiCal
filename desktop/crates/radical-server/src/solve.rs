@@ -459,7 +459,14 @@ pub fn run_bayesian(
             Mode::Standard
         },
     };
-    let mut solved = solve_bayesian(dates, tree, &config, &cal, on_progress)?;
+    let mut solved = solve_bayesian(
+        dates,
+        tree,
+        &config,
+        &cal,
+        !state.recorded_sampler,
+        on_progress,
+    )?;
     if match_oxcal {
         solved.solver["match_oxcal"] = json!(true);
     }
@@ -475,6 +482,10 @@ fn solve_bayesian(
     tree: &Value,
     config: &Config,
     cal: &Calibrator,
+    // Whether a sampled run takes the collapsed moves and the refined grid
+    // where the analysis does not say. Never when matching OxCal 4.4, which
+    // has neither: `gibbs::solve` leaves both out of such a run.
+    current_sampler: bool,
     on_progress: OnProgress,
 ) -> Result<Solved, Failed> {
     let requested = config.get("solver").as_str().unwrap_or("auto").to_owned();
@@ -618,8 +629,14 @@ fn solve_bayesian(
             as usize,
         resolution,
         match_oxcal,
+        collapsed_moves: config.flag("collapsed_moves", current_sampler),
+        refine_grid: config.flag("refine_grid", current_sampler),
         ..SampleOptions::default()
     };
+    let (collapsed_moves, refine_grid) = (
+        options.collapsed_moves && !match_oxcal,
+        options.refine_grid && !match_oxcal,
+    );
     let mut sampled = match gibbs::solve(dates, &root, &options, cal, on_progress)? {
         Ok(s) => s,
         Err(_) => return Err(Failed::Cancelled),
@@ -653,7 +670,7 @@ fn solve_bayesian(
             cal,
         ))
     };
-    let solver = json!({
+    let mut solver = json!({
         "method": "gibbs",
         "cross_check": cross,
         "lobe_probe": sampled.lobe_probe.as_ref().map(lobe_probe_json),
@@ -677,6 +694,15 @@ fn solve_bayesian(
         "deposition": sampled.deposition.iter().map(deposition_json).collect::<Vec<_>>(),
         "outlier_scale": outlier_scales(&sampled.outlier_scale),
     });
+    // What the recorded server did not report, said only of a run it could
+    // not have made.
+    if collapsed_moves || refine_grid {
+        solver["collapsed_moves"] = json!(collapsed_moves);
+        solver["refine_grid"] = json!(refine_grid);
+        solver["first_pass_step"] = json!(sampled.first_pass_step);
+        solver["lobe_weight_error"] = json!(sampled.lobe_weight_error);
+        solver["lobe_weight_error_target"] = json!(sampled.lobe_weight_error_target);
+    }
     let summaries = phase_summaries(
         &root,
         dates,

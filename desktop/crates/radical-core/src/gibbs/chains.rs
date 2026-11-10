@@ -116,6 +116,7 @@ pub struct ChainsOptions {
     pub start_strategy: String,
     pub temperatures: usize,
     pub match_oxcal: bool,
+    pub collapsed_moves: bool,
 }
 
 impl Default for ChainsOptions {
@@ -131,6 +132,7 @@ impl Default for ChainsOptions {
             start_strategy: DEFAULT_START_STRATEGY.to_owned(),
             temperatures: super::DEFAULT_TEMPERATURES,
             match_oxcal: false,
+            collapsed_moves: false,
         }
     }
 }
@@ -201,6 +203,11 @@ pub fn solve_chains(
             )
         })
         .collect::<Result<Vec<_>, _>>()?;
+    if options.collapsed_moves {
+        for chain in &mut chains {
+            chain.collapse();
+        }
+    }
     let burn_in = chains[0].burn_in;
 
     let burn_chunk = (burn_in / 10).max(1);

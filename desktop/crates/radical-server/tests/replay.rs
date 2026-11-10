@@ -997,7 +997,11 @@ fn bad_token(kind: &str) -> &'static str {
 async fn replay(accounts: bool) {
     let family = load_family("api/exchanges").unwrap();
     let dir = std::env::temp_dir().join(format!("radical-replay-{}", radical_store::new_id()));
-    let mut state = radical_server::State::open(dir.join("radical.db"), 2).unwrap();
+    // The recording was sampled before the collapsed moves and the refined
+    // grid, which make a seeded run another run.
+    let mut state = radical_server::State::open(dir.join("radical.db"), 2)
+        .unwrap()
+        .with_recorded_sampler();
     if accounts {
         state = state.with_accounts(radical_server::accounts::Accounts {
             secret: "radical-replay-secret".to_owned(),
