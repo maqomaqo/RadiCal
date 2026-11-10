@@ -17,7 +17,7 @@ use axum::extract::{Path, Query, State as Extract};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
-use radical_core::calibration::{SIGMA_1, SIGMA_2, hpd_ranges, point_estimate};
+use radical_core::calibration::{SIGMA_1, SIGMA_2, hpd_ranges_ending, point_estimate};
 use radical_core::curve_mix::mix;
 use radical_core::curve_registry::{
     BUILTINS, Builtin, Measured, MixRecipe, StoredNames, builtin_spec, content_hash, find_mixed,
@@ -611,8 +611,8 @@ async fn simulate(
         "c14_age": c14[0],
         "curve_error": sigma[0],
         "error": error,
-        "hpd_68_ranges": ranges_json(&hpd_ranges(cal, &probs, SIGMA_1).map_err(refused)?),
-        "hpd_95_ranges": ranges_json(&hpd_ranges(cal, &probs, SIGMA_2).map_err(refused)?),
+        "hpd_68_ranges": ranges_json(&hpd_ranges_ending(cal, &probs, SIGMA_1, state.range_ends).map_err(refused)?),
+        "hpd_95_ranges": ranges_json(&hpd_ranges_ending(cal, &probs, SIGMA_2, state.range_ends).map_err(refused)?),
         "point_estimates": {
             "mean": point.mean, "median": point.median, "mode": point.mode, "std": point.std,
         },

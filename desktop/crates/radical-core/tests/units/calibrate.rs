@@ -1,6 +1,6 @@
 use crate::*;
 use radical_core::calibration::{DISPLAY_MASS_THRESHOLD, DISPLAY_MAX_POINTS};
-use radical_core::{Mode, REPORTING_CONFIDENCE_LEVELS, hpd_ranges, point_estimate};
+use radical_core::{Mode, REPORTING_CONFIDENCE_LEVELS, point_estimate};
 use radical_corpus::Window;
 
 /// The posterior inside its stored window, the mass outside it, the HPD
@@ -58,7 +58,14 @@ fn calibrate() {
 
         for level in REPORTING_CONFIDENCE_LEVELS {
             let key = format!("{level:.10}");
-            let got = hpd_ranges(cal, &probs, level).unwrap();
+            // As the recording reported them: at the end points.
+            let got = radical_core::hpd_ranges_ending(
+                cal,
+                &probs,
+                level,
+                radical_core::RangeEnds::GridPoints,
+            )
+            .unwrap();
             check_ranges(
                 &mut c,
                 &format!("{name}/hpd/{key}"),

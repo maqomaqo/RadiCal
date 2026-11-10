@@ -203,10 +203,28 @@ pub fn hpd_ranges_from_distribution(
     Ok(ranges)
 }
 
+/// Where a calibrated range is said to end.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum RangeEnds {
+    /// At the edges of the cells its end points stand for ([`cell_edges`]):
+    /// a range of grid points 3300..3360 on a 10-year grid covers 3295-3365.
+    /// How a modelled posterior's ranges are reported
+    /// (`exact_chain::summary::reported_ranges`), and what the range's share
+    /// of the probability is the mass OF.
+    #[default]
+    CellEdges,
+    /// At the end points themselves, as the recorded server reported them:
+    /// half a cell short at each end -- half a year on IntCal20 back to 5,000
+    /// cal BP, 2.5 years to 15,000, 5 anywhere on Marine20 -- and no width
+    /// at all for a range of one point. Kept for replaying the recording.
+    GridPoints,
+}
+
 /// The HPD region of a calibrated posterior as one or more disjoint
 /// calendar-age ranges, each with its own share of the total probability --
 /// standard radiocarbon reporting practice, needed because calibration curves
-/// are not monotonic. Python's `CalibrationCurve.get_hpd_ranges`.
+/// are not monotonic. Python's `CalibrationCurve.get_hpd_ranges`, with each
+/// range run out to the edges of its end cells ([`RangeEnds::CellEdges`]).
 ///
 /// The percentages are shares of the ENTIRE distribution, so they typically
 /// sum to slightly more than the level asked for: the set is built from whole
@@ -220,8 +238,30 @@ pub fn hpd_ranges(
     probs: &[f64],
     confidence: f64,
 ) -> Result<Vec<HpdRange>, Error> {
-    let widths = (cal_ages.len() > 1).then(|| diff(&cell_edges(cal_ages)));
-    hpd_ranges_from_distribution(cal_ages, probs, confidence, widths.as_deref())
+    hpd_ranges_ending(cal_ages, probs, confidence, RangeEnds::CellEdges)
+}
+
+/// [`hpd_ranges`] with its ranges ending where `ends` says.
+pub fn hpd_ranges_ending(
+    cal_ages: &[f64],
+    probs: &[f64],
+    confidence: f64,
+    ends: RangeEnds,
+) -> Result<Vec<HpdRange>, Error> {
+    let edges = (cal_ages.len() > 1).then(|| cell_edges(cal_ages));
+    let widths = edges.as_deref().map(diff);
+    let mut ranges = hpd_ranges_from_distribution(cal_ages, probs, confidence, widths.as_deref())?;
+    if let (RangeEnds::CellEdges, Some(edges)) = (ends, &edges) {
+        // A range's ends are grid points, so each is found exactly: point i
+        // stands for the cell from edges[i] to edges[i + 1].
+        for range in &mut ranges {
+            let first = cal_ages.partition_point(|&a| a < range.min);
+            let last = cal_ages.partition_point(|&a| a < range.max);
+            range.min = edges[first];
+            range.max = edges[last + 1];
+        }
+    }
+    Ok(ranges)
 }
 
 /// The overall HPD envelope: the min/max across all disjoint ranges combined,
@@ -229,8 +269,13 @@ pub fn hpd_ranges(
 /// are frequently multimodal, that span claims probability mass in the gap
 /// between peaks -- use [`hpd_ranges`] for the per-range breakdown. Python's
 /// `get_hpd_interval`.
-pub fn hpd_interval(cal_ages: &[f64], probs: &[f64], confidence: f64) -> Result<(f64, f64), Error> {
-    let ranges = hpd_ranges(cal_ages, probs, confidence)?;
+pub fn hpd_interval(
+    cal_ages: &[f64],
+    probs: &[f64],
+    confidence: f64,
+    ends: RangeEnds,
+) -> Result<(f64, f64), Error> {
+    let ranges = hpd_ranges_ending(cal_ages, probs, confidence, ends)?;
     let lo = ranges.iter().map(|r| r.min).fold(f64::INFINITY, f64::min);
     let hi = ranges
         .iter()
@@ -693,6 +738,31 @@ mod tests {
             curve.calibrate(1000.0, 30.0, None, None, Mode::Standard),
             Err(Error::EmptyCurve)
         );
+    }
+
+    #[test]
+    fn a_range_runs_to_the_edges_of_its_end_cells() {
+        // A grid that steps from 1 year to 5, as IntCal20 does at 5,000 cal
+        // BP, with all but a sliver of the mass on points 2, 3 and 5.
+        let ages = [0.0, 1.0, 2.0, 3.0, 8.0, 13.0];
+        let probs = [0.001, 0.001, 0.4, 0.397, 0.001, 0.2];
+        let at_points = hpd_ranges_ending(&ages, &probs, 0.99, RangeEnds::GridPoints).unwrap();
+        let at_edges = hpd_ranges(&ages, &probs, 0.99).unwrap();
+        // The lone point at 13 is the grid's last: its cell runs from half
+        // way back to 8 and is closed at 13 itself.
+        assert_eq!(
+            at_points.iter().map(|r| (r.min, r.max)).collect::<Vec<_>>(),
+            [(13.0, 13.0), (2.0, 3.0)]
+        );
+        assert_eq!(
+            at_edges.iter().map(|r| (r.min, r.max)).collect::<Vec<_>>(),
+            [(10.5, 13.0), (1.5, 5.5)]
+        );
+        // Only the ends move: the shares are the same cells' mass.
+        for (a, b) in at_points.iter().zip(&at_edges) {
+            assert_eq!(a.probability_percent, b.probability_percent);
+        }
+        assert_eq!(RangeEnds::default(), RangeEnds::CellEdges);
     }
 
     #[test]

@@ -9,7 +9,7 @@ use axum::Router;
 use axum::body::Bytes;
 use axum::extract::{Path, Query, State as Extract};
 use axum::routing::get;
-use radical_core::calibration::{REPORTING_CONFIDENCE_LEVELS, hpd_ranges};
+use radical_core::calibration::{REPORTING_CONFIDENCE_LEVELS, hpd_ranges_ending};
 use radical_core::measurement::Curves;
 use radical_core::model_tree::migrate_from_relationships;
 use radical_core::statistics::{self, SameEvent};
@@ -373,7 +373,12 @@ pub fn same_event_for_samples(
             inbuilt_shape: s.inbuilt_shape.clone(),
         })
         .collect();
-    match statistics::same_event(&dates, |id| state.curves.curve(id).ok(), Mode::Standard) {
+    match statistics::same_event(
+        &dates,
+        |id| state.curves.curve(id).ok(),
+        Mode::Standard,
+        state.range_ends,
+    ) {
         None => json!([]),
         Some(test) => {
             let mut out = json!({"element_id": null, "name": null});
@@ -404,7 +409,7 @@ fn unmodelled(state: &State, s: &RadiocarbonSample) -> Option<(Value, Value)> {
     let cal = curve.cal_ages();
     let mut levels = Vec::new();
     for level in REPORTING_CONFIDENCE_LEVELS {
-        levels.push(json!({"confidence": level, "ranges": ranges_json(&hpd_ranges(cal, &probs, level).ok()?)}));
+        levels.push(json!({"confidence": level, "ranges": ranges_json(&hpd_ranges_ending(cal, &probs, level, state.range_ends).ok()?)}));
     }
     let series = curve.display_distribution(cal, &probs, 200, 1e-4);
     Some((Value::Array(levels), json!(series)))

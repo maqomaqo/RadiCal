@@ -11,8 +11,9 @@
 //
 // Two variants: hpdRangesFromCurve gives the full multi-range breakdown, a
 // non-monotonic curve mapping one measurement to several disjoint peaks, and
-// hpdEnvelopeFromHistogram a single envelope widened by half a bin at each end
-// because a point is the centre of the width it stands for, not its edge.
+// hpdEnvelopeFromHistogram a single envelope. Both run a range out by half a
+// cell at each end, because a point is the centre of the width it stands for,
+// not its edge.
 import type { HPDRange } from '@/types'
 
 /**
@@ -92,7 +93,19 @@ export function hpdRangesFromCurve(
   const ranges: HPDRange[] = runsOf(selected).map(([s, e]) => {
     let segMass = 0
     for (let k = s; k <= e; k++) segMass += normWeights[k]
-    return { min: ages[s], max: ages[e], probability_percent: segMass * 100 }
+    // Out to the edges of the cells the end points stand for, as the server
+    // reports a calibrated range (RangeEnds::CellEdges in
+    // desktop/crates/radical-core/src/calibration.rs) and as a modelled one
+    // is: the share beside it is the mass OF those cells, and a range of one
+    // point is as wide as its cell, not zero. The series' own two end cells
+    // stop at the end points, as the curve's do.
+    const edgeBefore = s > 0 ? (ages[s - 1] + ages[s]) / 2 : ages[s]
+    const edgeAfter = e < ages.length - 1 ? (ages[e] + ages[e + 1]) / 2 : ages[e]
+    return {
+      min: Math.min(edgeBefore, edgeAfter),
+      max: Math.max(edgeBefore, edgeAfter),
+      probability_percent: segMass * 100,
+    }
   })
   ranges.sort((a, b) => b.max - a.max)
   return ranges

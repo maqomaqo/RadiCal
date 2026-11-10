@@ -56,8 +56,9 @@ pub mod wiggle_match;
 use std::fmt;
 
 pub use calibration::{
-    CalibrationCurve, HpdRange, Mode, PointEstimate, REPORTING_CONFIDENCE_LEVELS, SIGMA_1, SIGMA_2,
-    SIGMA_3, cell_edges, f14c, hpd_ranges, hpd_ranges_from_distribution, point_estimate,
+    CalibrationCurve, HpdRange, Mode, PointEstimate, REPORTING_CONFIDENCE_LEVELS, RangeEnds,
+    SIGMA_1, SIGMA_2, SIGMA_3, cell_edges, f14c, hpd_ranges, hpd_ranges_ending,
+    hpd_ranges_from_distribution, point_estimate,
 };
 pub use curves::get_curve;
 pub use measurement::Measurement;
