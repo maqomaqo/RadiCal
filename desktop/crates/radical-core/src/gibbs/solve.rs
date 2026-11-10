@@ -5,8 +5,9 @@
 
 use std::collections::HashMap;
 
-use crate::exact_chain::summary::summarize;
-use crate::exact_chain::{OutlierScale, Posterior, REPORTING_STEP_YEARS};
+use crate::exact_chain::summary::{edge_mass, summarize};
+use crate::exact_chain::tables::refined_grid_at;
+use crate::exact_chain::{OutlierScale, Posterior, REFINE_MIN_GAIN, REPORTING_STEP_YEARS};
 use crate::intervals::{Block, DEFAULT_DRAWS, Draws, report};
 use crate::measurement::{Calibrator, Measurement};
 use crate::model_tree::Element;
@@ -55,6 +56,15 @@ pub struct SampleOptions {
     pub resolution: f64,
     pub temperatures: usize,
     pub match_oxcal: bool,
+    /// Offer the moves that carry a Boundary with its dates integrated out
+    /// (`Model::collapsed_shift`). Off by default: they draw from the
+    /// generator, so every seeded run would become another run.
+    pub collapsed_moves: bool,
+    /// Sample twice: a short pilot on the grid padded blind for the
+    /// Boundaries' tails, then the run itself on a grid covering only where
+    /// the pilot went, at a finer step ([`refined_model`]). Off by default,
+    /// as `collapsed_moves` is and for the same reason.
+    pub refine_grid: bool,
 }
 
 impl Default for SampleOptions {
@@ -75,6 +85,8 @@ impl Default for SampleOptions {
             resolution: REPORTING_STEP_YEARS,
             temperatures: DEFAULT_TEMPERATURES,
             match_oxcal: false,
+            collapsed_moves: false,
+            refine_grid: false,
         }
     }
 }
@@ -154,6 +166,8 @@ pub struct Sampled {
     /// The pooled histograms the summaries came from, by parameter row.
     pub histograms: Vec<Vec<f64>>,
     pub params: Vec<String>,
+    /// The pilot run's grid step, when the run itself was on a refined grid.
+    pub first_pass_step: Option<f64>,
 }
 
 /// Whether calibration lobes the run left empty are empty because the model
@@ -280,6 +294,75 @@ fn deposition_report(model: &Model, rate_histograms: &[Vec<f64>]) -> Vec<Deposit
         .collect()
 }
 
+/// The finest step the sampler's second grid takes, and how far past where
+/// the pilot went it reaches, as a fraction of that width. Coarser and wider
+/// than the exact solver's own second pass: every sweep costs a pass over the
+/// grid per Boundary, and a pilot's histograms end where its draws did, not
+/// where the posterior does.
+pub const SAMPLER_REFINED_MIN_STEP_YEARS: f64 = 1.0;
+pub const SAMPLER_REFINE_MARGIN_FRACTION: f64 = 0.25;
+/// A refined run is kept only if no parameter leaves more than this in the
+/// outermost 1% of its grid: more, and the margin cut a tail.
+pub const SAMPLER_REFINED_EDGE_MASS: f64 = 1e-3;
+
+/// The model on a grid covering only where a pilot run found the posterior,
+/// at a finer step; None when that would not be meaningfully finer.
+///
+/// The sampler's own grid is padded by six times the dates' width for the
+/// Boundaries' tails, blind, and its step is that range over the point
+/// budget. On three phases of twelve dates across a plateau that is a 5-year
+/// step, and the dates' posteriors came out 0.10 from the exact solver's in
+/// cumulative probability whatever the run's length; on the exact solver's
+/// grid the same sampler came within 0.01. The pilot is `options.sweeps` per
+/// chain and no more: it is asked where the posterior is, not what it is.
+fn refined_model(
+    model: &Model,
+    measurements: &[Measurement],
+    root: &Element,
+    options: &SampleOptions,
+    temperatures: usize,
+    cal: &Calibrator,
+    on_progress: Option<&mut dyn FnMut(&Progress) -> bool>,
+) -> Result<Result<Option<Model>, Cancelled>, Error> {
+    let pilot = ChainsOptions {
+        chains: options.chains.max(1),
+        sweeps: options.sweeps,
+        seed: options.seed,
+        target_convergence: options.target_convergence,
+        max_sweeps: Some(options.sweeps),
+        min_sweeps: 0,
+        collect_draws: 0,
+        start_strategy: DEFAULT_START_STRATEGY.to_owned(),
+        temperatures,
+        match_oxcal: false,
+        collapsed_moves: options.collapsed_moves,
+    };
+    let pooled = match solve_chains(model, &pilot, on_progress)? {
+        Ok(p) => p,
+        Err(c) => return Ok(Err(c)),
+    };
+    let grid = refined_grid_at(
+        &model.grid,
+        &pooled.result.histograms,
+        measurements,
+        &model.element_bounds,
+        1,
+        cal,
+        SAMPLER_REFINED_MIN_STEP_YEARS,
+        SAMPLER_REFINE_MARGIN_FRACTION,
+    )?;
+    Ok(Ok(match grid {
+        Some(grid) => Some(Model::new(
+            measurements,
+            root,
+            Some(grid),
+            options.uniform_span_prior,
+            cal,
+        )?),
+        None => None,
+    }))
+}
+
 /// Posterior summaries for every date, boundary and undated level from a
 /// sampled run. `chains` above one runs that many chains in parallel under
 /// one stopping rule ([`solve_chains`]). Joint states are kept whatever was
@@ -303,6 +386,68 @@ pub fn solve(
         options.uniform_span_prior,
         cal,
     )?;
+    let mut on_progress = on_progress;
+    // No pilot where the blind grid is already as fine as a second would be.
+    let could_refine = model.dt >= REFINE_MIN_GAIN * SAMPLER_REFINED_MIN_STEP_YEARS;
+    if options.refine_grid && could_refine && options.grid.is_none() && !options.match_oxcal {
+        let refined = match refined_model(
+            &model,
+            measurements,
+            root,
+            options,
+            temperatures,
+            cal,
+            reborrow(&mut on_progress),
+        )? {
+            Ok(refined) => refined,
+            Err(c) => return Ok(Err(c)),
+        };
+        if let Some(refined) = refined {
+            let on_refined = sampled(
+                refined,
+                root,
+                Some(model.dt),
+                options,
+                temperatures,
+                reborrow(&mut on_progress),
+            )?;
+            match on_refined {
+                Err(c) => return Ok(Err(c)),
+                Ok(run)
+                    if edge_mass(&run.histograms, run.histograms.first().map_or(0, Vec::len))
+                        <= SAMPLER_REFINED_EDGE_MASS =>
+                {
+                    return Ok(Ok(run));
+                }
+                // The margin cut a tail: the blind grid after all.
+                Ok(_) => {}
+            }
+        }
+    }
+    sampled(model, root, None, options, temperatures, on_progress)
+}
+
+/// A progress callback lent for one call, to be lent again for the next.
+fn reborrow<'s>(
+    on_progress: &'s mut Option<&mut dyn FnMut(&Progress) -> bool>,
+) -> Option<&'s mut dyn FnMut(&Progress) -> bool> {
+    match on_progress {
+        Some(callback) => Some(&mut **callback),
+        None => None,
+    }
+}
+
+/// [`solve`] on a model already built: the run and its summaries.
+/// `pilot_step` is the pilot's grid step when `model` is on a refined grid.
+fn sampled(
+    model: Model,
+    root: &Element,
+    pilot_step: Option<f64>,
+    options: &SampleOptions,
+    temperatures: usize,
+    on_progress: Option<&mut dyn FnMut(&Progress) -> bool>,
+) -> Result<Result<Sampled, Cancelled>, Error> {
+    let measurements = &model.measurements.clone()[..];
     let wants_intervals =
         options.estimate_durations || !model.depositions.is_empty() || options.dispersal.is_some();
     let pooled = if options.chains > 1 {
@@ -317,6 +462,7 @@ pub fn solve(
             start_strategy: DEFAULT_START_STRATEGY.to_owned(),
             temperatures,
             match_oxcal: options.match_oxcal,
+            collapsed_moves: options.collapsed_moves && !options.match_oxcal,
         };
         match solve_chains(&model, &chains, on_progress)? {
             Ok(p) => p,
@@ -340,6 +486,7 @@ pub fn solve(
             start: Start::default(),
             temperatures,
             match_oxcal: options.match_oxcal,
+            collapsed_moves: options.collapsed_moves && !options.match_oxcal,
         };
         match run(model.clone(), &run_options, on_progress)? {
             Ok(r) => Pooled::single(r),
@@ -548,5 +695,129 @@ pub fn solve(
         intervals,
         histograms: chain.histograms.clone(),
         params: model.params.clone(),
+        first_pass_step: pilot_step,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::exact_chain::{self, SolveOptions};
+
+    fn element(id: &str, kind: &str, children: Vec<Element>) -> Element {
+        Element {
+            id: id.into(),
+            element_type: kind.into(),
+            name: Some(id.into()),
+            tpq_age_bp: None,
+            taq_age_bp: None,
+            params: None,
+            children,
+        }
+    }
+
+    /// Phases in a row, a Boundary either side of each, `ages` in each.
+    fn sequence(ages: &[&[(f64, f64)]]) -> (Element, Vec<Measurement>) {
+        let mut children = vec![element("b0", "boundary", Vec::new())];
+        let mut dates = Vec::new();
+        for (p, phase) in ages.iter().enumerate() {
+            children.push(element(&format!("p{p}"), "phase", Vec::new()));
+            children.push(element(&format!("b{}", p + 1), "boundary", Vec::new()));
+            for (d, &(age, error)) in phase.iter().enumerate() {
+                dates.push(Measurement {
+                    id: format!("d{p}_{d}"),
+                    age_bp: age,
+                    error_1sigma: error,
+                    element_id: Some(format!("p{p}")),
+                    ..Measurement::default()
+                });
+            }
+        }
+        (element("s", "sequence", children), dates)
+    }
+
+    #[test]
+    fn collapsed_moves_leave_the_posterior_where_the_exact_solver_puts_it() {
+        // Two phases of four: a wrong ratio in the collapsed move would show
+        // in the Boundaries first, whose spread is the span prior's.
+        let (root, dates) = sequence(&[
+            &[
+                (3050.0, 30.0),
+                (3040.0, 30.0),
+                (3060.0, 30.0),
+                (3045.0, 30.0),
+            ],
+            &[
+                (2950.0, 30.0),
+                (2960.0, 30.0),
+                (2940.0, 30.0),
+                (2955.0, 30.0),
+            ],
+        ]);
+        let cal = Calibrator::default();
+        let chain = exact_chain::layout(Some(&root), &dates, false, true).unwrap();
+        let exact =
+            exact_chain::solve(&dates, &root, &chain, &SolveOptions::default(), &cal).unwrap();
+        let options = SampleOptions {
+            sweeps: 30_000,
+            max_sweeps: Some(30_000),
+            temperatures: 1,
+            collapsed_moves: true,
+            ..SampleOptions::default()
+        };
+        let got = solve(&dates, &root, &options, &cal, None).unwrap().unwrap();
+        for (id, want) in &exact.measurements {
+            let have = &got.measurements.iter().find(|(i, _)| i == id).unwrap().1;
+            assert!(
+                (have.posterior_mean - want.posterior_mean).abs() < 3.0
+                    && (have.posterior_std / want.posterior_std - 1.0).abs() < 0.1,
+                "{id}: {have:?} against {want:?}",
+                have = (have.posterior_mean, have.posterior_std),
+                want = (want.posterior_mean, want.posterior_std),
+            );
+        }
+        for (id, want) in &exact.boundaries {
+            let have = &got.boundaries.iter().find(|(i, _, _)| i == id).unwrap().2;
+            let want = &want.posterior;
+            assert!(
+                (have.posterior_median - want.posterior_median).abs() < 5.0
+                    && (have.posterior_std / want.posterior_std - 1.0).abs() < 0.15,
+                "{id}: {have:?} against {want:?}",
+                have = (have.posterior_median, have.posterior_std),
+                want = (want.posterior_median, want.posterior_std),
+            );
+        }
+    }
+
+    #[test]
+    fn a_coarse_grid_is_refined_and_a_fine_one_left() {
+        let cal = Calibrator::default();
+        // Three phases across 150 radiocarbon years of plateau: a blind grid
+        // of several thousand years, so a step of several.
+        let (root, dates) = sequence(&[
+            &[(2530.0, 20.0), (2520.0, 20.0), (2540.0, 20.0)],
+            &[(2480.0, 20.0), (2470.0, 20.0), (2490.0, 20.0)],
+            &[(2440.0, 20.0), (2430.0, 20.0), (2450.0, 20.0)],
+        ]);
+        let options = SampleOptions {
+            sweeps: 3_000,
+            max_sweeps: Some(3_000),
+            temperatures: 1,
+            refine_grid: true,
+            ..SampleOptions::default()
+        };
+        let got = solve(&dates, &root, &options, &cal, None).unwrap().unwrap();
+        let pilot = got.first_pass_step.expect("a second grid");
+        assert!(
+            pilot >= REFINE_MIN_GAIN * got.grid.2,
+            "{pilot} then {}",
+            got.grid.2
+        );
+        assert!(got.grid.2 >= SAMPLER_REFINED_MIN_STEP_YEARS);
+
+        // One tight phase: the blind grid is already at its finest.
+        let (root, dates) = sequence(&[&[(3050.0, 30.0), (3040.0, 30.0), (3060.0, 30.0)]]);
+        let got = solve(&dates, &root, &options, &cal, None).unwrap().unwrap();
+        assert_eq!(got.first_pass_step, None);
+    }
 }
