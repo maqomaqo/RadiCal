@@ -70,13 +70,42 @@
 //! ends by the chain solver's own interior fill; and every date given its
 //! enclosing pair.
 //!
+//! # Areas inside an area
+//!
+//! A stage of an area may hold areas of its own, to any depth: a trench whose
+//! one phase is dug as several cuts, each with its own sequence. Nothing new is
+//! needed, because every statement above is about a chain and the pair of
+//! Boundaries either side of one of its stages, and an area is a chain.
+//!
+//! Upwards, an area's stage holding areas has the transfer matrix an outer
+//! stage has -- its own dates' term, no tie of its own, times its areas' Z --
+//! so the area's J and Z are formed from the innermost areas outwards.
+//!
+//! Downwards, an area solved with its end factor W gives pair weights for its
+//! own stages that already hold everything outside each, W included: the rest
+//! of the area, and through W the rest of the model. So an area inside it has
+//!
+//! ```text
+//! W'(f', l') = sum over S' >= f' and E' <= l' of
+//!              pair(S', E') * own(S', E') * product of its siblings' Z(S', E')
+//! ```
+//!
+//! with pair the enclosing AREA's pair weight for that stage in place of the
+//! outer chain's: the same sum one level down, and exact for the same reason
+//! -- given the two Boundaries either side of a stage, what the stage holds is
+//! independent of everything else. The areas are solved outermost first, and
+//! joint draws follow that order: an area's ends given its stage's pair, its
+//! interior given its ends, and then the areas inside each of its stages given
+//! that stage's pair as just drawn.
+//!
 //! # What it does NOT cover
 //!
 //! [`layout_with_reason`] declines, with a reason, a model whose areas are side
 //! by side but which is not this shape: areas with no Boundary before and after
-//! them that they share (separate models, in effect), an area that is not
-//! itself a single line, areas inside an area, or anything ordering one area
-//! against another. Those are sampled. Dates outside every outer Boundary are
+//! them that they share (separate models, in effect), an area that is neither
+//! a single line nor a line whose stages hold areas, an area with dates outside
+//! its own first and last Boundary, or anything ordering one area against
+//! another. Those are sampled. Dates outside every outer Boundary are
 //! taken under the chain solver's rules for them, as the same weight on the
 //! first or last outer Boundary.
 //!
@@ -208,8 +237,52 @@ pub struct Stage {
     pub older_id: String,
     pub younger_id: String,
     pub dates: Vec<String>,
-    pub areas: Vec<Chain>,
+    pub areas: Vec<Area>,
     pub blocks: Blocks,
+}
+
+/// One area: its own line of Boundaries and groups, and the areas side by
+/// side inside each of its groups -- `inner`, one list per group, empty for a
+/// group that holds only dates.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Area {
+    pub chain: Chain,
+    pub inner: Vec<Vec<Area>>,
+}
+
+impl Area {
+    /// An area that is a single line, with no areas inside it.
+    pub fn line(chain: Chain) -> Self {
+        let inner = vec![Vec::new(); chain.groups.len()];
+        Self { chain, inner }
+    }
+
+    /// Whether any of its groups holds areas.
+    pub fn nested(&self) -> bool {
+        self.inner.iter().any(|areas| !areas.is_empty())
+    }
+
+    /// Its Boundaries in model order: each of its own, then those of the areas
+    /// in the group after it.
+    fn boundary_ids_into(&self, out: &mut Vec<String>) {
+        for (index, id) in self.chain.boundary_ids.iter().enumerate() {
+            out.push(id.clone());
+            for area in self.inner.get(index).into_iter().flatten() {
+                area.boundary_ids_into(out);
+            }
+        }
+    }
+
+    /// Its groups of dates, and those of every area inside it.
+    fn num_groups(&self) -> usize {
+        self.chain.groups.len()
+            + self
+                .inner
+                .iter()
+                .flatten()
+                .map(Area::num_groups)
+                .sum::<usize>()
+    }
 }
 
 /// A chain of outer Boundaries whose stages may hold areas, oldest first, and
@@ -247,14 +320,15 @@ impl Stages {
     }
 
     /// Every Boundary in the model, in model order: each outer Boundary, then
-    /// the Boundaries of the areas in the stage after it.
+    /// the Boundaries of the areas in the stage after it, and of the areas
+    /// inside those.
     pub fn all_boundary_ids(&self) -> Vec<String> {
         let mut out = Vec::new();
         for (index, outer) in self.boundary_ids.iter().enumerate() {
             out.push(outer.clone());
             if let Some(stage) = self.stages.get(index) {
                 for area in &stage.areas {
-                    out.extend(area.boundary_ids.iter().cloned());
+                    area.boundary_ids_into(&mut out);
                 }
             }
         }
@@ -262,14 +336,14 @@ impl Stages {
     }
 
     /// Groups of dates in the model, for the grid's point budget: every stage,
-    /// and every group inside every area.
+    /// and every group inside every area, at every depth.
     pub fn num_groups(&self) -> usize {
         self.stages.len()
             + self
                 .stages
                 .iter()
                 .flat_map(|s| &s.areas)
-                .map(|a| a.groups.len())
+                .map(Area::num_groups)
                 .sum::<usize>()
     }
 }
@@ -330,15 +404,13 @@ pub fn layout_with_reason(
             .or_default()
             .push(m.id.clone());
     }
-    let subtree_dates = |element: &Element| -> Vec<String> {
-        let mut inside = HashSet::new();
-        ids(element, &mut inside);
-        measurements
-            .iter()
-            .filter(|m| m.element_id.as_ref().is_some_and(|e| inside.contains(e)))
-            .map(|m| m.id.clone())
-            .collect()
+    let written = Written {
+        measurements,
+        dates_of,
+        closed: closure(&written_order(&plan)),
+        names: &plan.boundary_names,
     };
+    let subtree_dates = |element: &Element| written.subtree_dates(element);
 
     let children: Vec<Element> = flattened(root)
         .children
@@ -376,68 +448,7 @@ pub fn layout_with_reason(
     let older_tail: Vec<String> = older_blocks.iter().flatten().cloned().collect();
     let younger_tail: Vec<String> = younger_blocks.iter().flatten().cloned().collect();
 
-    let closed = closure(&written_order(&plan));
-    let mut stages = Vec::new();
-    for pair in positions.windows(2) {
-        let (older, younger) = (pair[0], pair[1]);
-        let between: Vec<&Element> = children[older + 1..younger]
-            .iter()
-            .filter(|c| !subtree_dates(c).is_empty() || has_areas(Some(c)) || c.is("sequence"))
-            .collect();
-        let mut dates: Vec<String> = Vec::new();
-        let mut areas: Vec<Chain> = Vec::new();
-        if between.len() > 1 {
-            // Phases in a row with no Boundary between them: one stage of
-            // dates in blocks, unless areas are among them.
-            if between.iter().any(|c| has_areas(Some(c))) {
-                let names: Vec<String> =
-                    between.iter().map(|c| format!("'{}'", shown(c))).collect();
-                return Err(format!(
-                    "{} sit one after another with no Boundary between them, and areas side \
-                     by side are among them. Add a Boundary between them to make the model \
-                     exactly solvable",
-                    names.join(" and ")
-                ));
-            }
-            dates = between.iter().flat_map(|c| subtree_dates(c)).collect();
-        } else if let Some(element) = between.first() {
-            if !element.is("phase") {
-                return Err(format!(
-                    "'{}' is not a Phase, so it cannot sit between two Boundaries of the outer \
-                     Sequence",
-                    shown(element)
-                ));
-            }
-            if has_areas(Some(element)) {
-                areas_of(
-                    element,
-                    measurements,
-                    &dates_of,
-                    &subtree_dates,
-                    &mut dates,
-                    &mut areas,
-                )?;
-            } else {
-                dates = subtree_dates(element);
-            }
-        }
-        let blocks = blocks_with_reason(&dates, &closed)?;
-        if !areas.is_empty() && blocks.len() > 1 {
-            return Err(NO_BOUNDARY_BETWEEN.into());
-        }
-        let blocks = if blocks.is_empty() {
-            one_block(&dates)
-        } else {
-            blocks
-        };
-        stages.push(Stage {
-            older_id: children[older].id.clone(),
-            younger_id: children[younger].id.clone(),
-            dates,
-            areas,
-            blocks,
-        });
-    }
+    let stages = written.stages(&children, &positions)?;
 
     let layout = Stages {
         boundary_ids: positions.iter().map(|&i| children[i].id.clone()).collect(),
@@ -460,51 +471,241 @@ pub fn layout_with_reason(
     Ok(Some(layout))
 }
 
-/// Fill `dates` with the dates lying directly in a stage's Phase and `areas`
-/// with its Sequences as Chains, looking through Phases nested in it, which
-/// add no ordering. A reason when that is not possible.
-fn areas_of(
-    phase: &Element,
-    measurements: &[Measurement],
-    dates_of: &HashMap<Option<String>, Vec<String>>,
-    subtree_dates: &dyn Fn(&Element) -> Vec<String>,
-    dates: &mut Vec<String>,
-    areas: &mut Vec<Chain>,
-) -> Result<(), String> {
-    dates.extend(
-        dates_of
-            .get(&Some(phase.id.clone()))
-            .into_iter()
-            .flatten()
-            .cloned(),
-    );
-    for child in &phase.children {
-        match child.element_type.as_str() {
-            "sequence" => {
-                let name = child.given_name().unwrap_or("an area");
-                let inside: HashSet<String> = subtree_dates(child).into_iter().collect();
-                let members: Vec<Measurement> = measurements
-                    .iter()
-                    .filter(|m| inside.contains(&m.id))
-                    .cloned()
-                    .collect();
-                let chain = chain_layout(Some(child), &members, false, false)
-                    .map_err(|reason| format!("in '{name}', {reason}"))?;
-                areas.push(chain);
+/// The model as written, for laying out a line of Boundaries and what lies
+/// between each pair: the outer Sequence's, or an area's that holds areas.
+struct Written<'a> {
+    measurements: &'a [Measurement],
+    /// {element id: the dates directly in it}.
+    dates_of: HashMap<Option<String>, Vec<String>>,
+    /// Everything each parameter is older than ([`closure`]).
+    closed: Order,
+    names: &'a Names,
+}
+
+impl Written<'_> {
+    /// Every date in `element` or anything inside it.
+    fn subtree_dates(&self, element: &Element) -> Vec<String> {
+        let mut inside = HashSet::new();
+        ids(element, &mut inside);
+        self.measurements
+            .iter()
+            .filter(|m| m.element_id.as_ref().is_some_and(|e| inside.contains(e)))
+            .map(|m| m.id.clone())
+            .collect()
+    }
+
+    /// One stage per neighbouring pair of the Boundaries at `positions` in
+    /// `children`, a Sequence's children with nested Sequences spelled out.
+    fn stages(&self, children: &[Element], positions: &[usize]) -> Result<Vec<Stage>, String> {
+        let mut stages = Vec::new();
+        for pair in positions.windows(2) {
+            let (older, younger) = (pair[0], pair[1]);
+            let between: Vec<&Element> = children[older + 1..younger]
+                .iter()
+                .filter(|c| {
+                    !self.subtree_dates(c).is_empty() || has_areas(Some(c)) || c.is("sequence")
+                })
+                .collect();
+            let mut dates: Vec<String> = Vec::new();
+            let mut areas: Vec<Area> = Vec::new();
+            if between.len() > 1 {
+                // Phases in a row with no Boundary between them: one stage of
+                // dates in blocks, unless areas are among them.
+                if between.iter().any(|c| has_areas(Some(c))) {
+                    let names: Vec<String> =
+                        between.iter().map(|c| format!("'{}'", shown(c))).collect();
+                    return Err(format!(
+                        "{} sit one after another with no Boundary between them, and areas side \
+                         by side are among them. Add a Boundary between them to make the model \
+                         exactly solvable",
+                        names.join(" and ")
+                    ));
+                }
+                dates = between.iter().flat_map(|c| self.subtree_dates(c)).collect();
+            } else if let Some(element) = between.first() {
+                if !element.is("phase") {
+                    return Err(format!(
+                        "'{}' is not a Phase, so it cannot sit between two Boundaries of the outer \
+                         Sequence",
+                        shown(element)
+                    ));
+                }
+                if has_areas(Some(element)) {
+                    self.areas_of(element, &mut dates, &mut areas)?;
+                } else {
+                    dates = self.subtree_dates(element);
+                }
             }
-            "phase" => areas_of(child, measurements, dates_of, subtree_dates, dates, areas)?,
-            "hiatus" => {}
-            kind => {
-                return Err(format!(
-                    "'{}' holds a {} outside any Sequence, so its areas are not each a single \
-                     line of phases",
-                    phase.given_name().unwrap_or("a Phase"),
-                    kind.replace('_', " ")
-                ));
+            let blocks = blocks_with_reason(&dates, &self.closed)?;
+            if !areas.is_empty() && blocks.len() > 1 {
+                return Err(NO_BOUNDARY_BETWEEN.into());
+            }
+            let blocks = if blocks.is_empty() {
+                one_block(&dates)
+            } else {
+                blocks
+            };
+            stages.push(Stage {
+                older_id: children[older].id.clone(),
+                younger_id: children[younger].id.clone(),
+                dates,
+                areas,
+                blocks,
+            });
+        }
+        Ok(stages)
+    }
+
+    /// Fill `dates` with the dates lying directly in a stage's Phase and
+    /// `areas` with its Sequences as areas, looking through Phases nested in
+    /// it, which add no ordering. A reason when that is not possible.
+    fn areas_of(
+        &self,
+        phase: &Element,
+        dates: &mut Vec<String>,
+        areas: &mut Vec<Area>,
+    ) -> Result<(), String> {
+        dates.extend(
+            self.dates_of
+                .get(&Some(phase.id.clone()))
+                .into_iter()
+                .flatten()
+                .cloned(),
+        );
+        for child in &phase.children {
+            match child.element_type.as_str() {
+                "sequence" => {
+                    let name = child.given_name().unwrap_or("an area");
+                    let area = if has_areas(Some(child)) {
+                        self.area_holding_areas(child)
+                    } else {
+                        let inside: HashSet<String> =
+                            self.subtree_dates(child).into_iter().collect();
+                        let members: Vec<Measurement> = self
+                            .measurements
+                            .iter()
+                            .filter(|m| inside.contains(&m.id))
+                            .cloned()
+                            .collect();
+                        chain_layout(Some(child), &members, false, false).map(Area::line)
+                    };
+                    // An area inside this one names itself.
+                    areas.push(area.map_err(|reason| {
+                        if reason.starts_with("in '") {
+                            reason
+                        } else {
+                            format!("in '{name}', {reason}")
+                        }
+                    })?);
+                }
+                "phase" => self.areas_of(child, dates, areas)?,
+                "hiatus" => {}
+                kind => {
+                    return Err(format!(
+                        "'{}' holds a {} outside any Sequence, so its areas are not each a single \
+                         line of phases",
+                        phase.given_name().unwrap_or("a Phase"),
+                        kind.replace('_', " ")
+                    ));
+                }
             }
         }
+        Ok(())
     }
-    Ok(())
+
+    /// An area one of whose stages holds areas: laid out from the tree as the
+    /// outer Sequence is, a line of its own Boundaries with a stage between
+    /// each pair. It has no tails -- a date outside its first and last
+    /// Boundary is not outside the model's, and nothing here weighs it.
+    fn area_holding_areas(&self, sequence: &Element) -> Result<Area, String> {
+        let children: Vec<Element> = flattened(sequence)
+            .children
+            .into_iter()
+            .filter(|c| !c.is("hiatus"))
+            .collect();
+        let positions: Vec<usize> = (0..children.len())
+            .filter(|&i| children[i].is("boundary"))
+            .collect();
+        if positions.len() < 2 {
+            return Err(
+                "no Boundary pair encloses the areas side by side inside it. Add a Boundary \
+                 before and after them"
+                    .into(),
+            );
+        }
+        let (first, last) = (positions[0], positions[positions.len() - 1]);
+        let outside_dates: Vec<String> = children[..first]
+            .iter()
+            .chain(&children[last + 1..])
+            .flat_map(|c| self.subtree_dates(c))
+            .collect();
+        if !outside_dates.is_empty() {
+            return Err(outside_every_boundary_reason(
+                &outside_dates,
+                self.measurements,
+            ));
+        }
+        if let Some(stray) = children[..first]
+            .iter()
+            .chain(&children[last + 1..])
+            .find(|c| has_areas(Some(c)))
+        {
+            return Err(format!(
+                "'{}' holds areas side by side outside its first and last Boundary. Add a \
+                 Boundary before and after them",
+                shown(stray)
+            ));
+        }
+        let stages = self.stages(&children, &positions)?;
+        let boundary_ids: Vec<String> = positions.iter().map(|&i| children[i].id.clone()).collect();
+        let names: Names = self
+            .names
+            .iter()
+            .filter(|(id, _)| boundary_ids.contains(id))
+            .cloned()
+            .collect();
+        let mut chain = Chain::new(
+            boundary_ids,
+            stages.iter().map(|s| s.dates.clone()).collect(),
+            names,
+        );
+        chain.blocks = stages.iter().map(|s| s.blocks.clone()).collect();
+        Ok(Area {
+            chain,
+            inner: stages.into_iter().map(|s| s.areas).collect(),
+        })
+    }
+}
+
+/// `area`'s groups of dates, and those of the areas inside it.
+fn lay_groups(area: &Area, laid: &mut HashSet<Group>) {
+    for (index, group) in area.chain.groups.iter().enumerate() {
+        if !group.is_empty() {
+            laid.insert(sorted_group(
+                &area.chain.boundary_ids[index],
+                &area.chain.boundary_ids[index + 1],
+                group,
+            ));
+        }
+    }
+    for inner in area.inner.iter().flatten() {
+        lay_groups(inner, laid);
+    }
+}
+
+/// `area`'s ordering between `older` and `younger`, the Boundaries either side
+/// of its stage: its ends inside them, its own line, and the areas inside each
+/// of its groups between that group's Boundaries.
+fn order_area(order: &mut Order, older: &str, younger: &str, area: &Area) {
+    let ids = &area.chain.boundary_ids;
+    edge(order, older, &ids[0]);
+    edge(order, &ids[ids.len() - 1], younger);
+    order_chain(order, ids, &area.chain.blocks);
+    for (index, areas) in area.inner.iter().enumerate() {
+        for inner in areas {
+            order_area(order, &ids[index], &ids[index + 1], inner);
+        }
+    }
 }
 
 type Group = (String, String, Vec<String>);
@@ -540,15 +741,7 @@ fn as_written(
             ));
         }
         for area in &stage.areas {
-            for (index, group) in area.groups.iter().enumerate() {
-                if !group.is_empty() {
-                    laid.insert(sorted_group(
-                        &area.boundary_ids[index],
-                        &area.boundary_ids[index + 1],
-                        group,
-                    ));
-                }
-            }
+            lay_groups(area, &mut laid);
         }
     }
     let mut placed: HashSet<&String> = laid.iter().flat_map(|(_, _, g)| g).collect();
@@ -588,13 +781,7 @@ fn as_written(
     );
     for stage in &layout.stages {
         for area in &stage.areas {
-            edge(&mut laid_order, &stage.older_id, &area.boundary_ids[0]);
-            edge(
-                &mut laid_order,
-                &area.boundary_ids[area.boundary_ids.len() - 1],
-                &stage.younger_id,
-            );
-            order_chain(&mut laid_order, &area.boundary_ids, &area.blocks);
+            order_area(&mut laid_order, &stage.older_id, &stage.younger_id, area);
         }
     }
     if closure(&written_order(plan)) != closure(&laid_order) {
@@ -644,11 +831,59 @@ pub fn solve(
     )
 }
 
+/// `term`, a stage's own log transfer, less the tie between its two
+/// Boundaries, which are not neighbours where areas lie between them.
+fn untied(term: &mut Matrix) {
+    let tie = BOUNDARY_TIE_WEIGHT.ln();
+    for i in 0..term.rows() {
+        let v = term.get(i, i) - tie;
+        term.set(i, i, v);
+    }
+}
+
+/// A stage's log transfer, [younger, older]: its own term and its areas' Z.
+fn with_areas(term: &Matrix, areas: &[AreaSolve]) -> Matrix {
+    let mut term = term.clone();
+    for area in areas {
+        let zt = area.z.transpose();
+        term.zip_inplace(&zt, |t, z| t + (z.ln() + area.log_z_scale));
+    }
+    term
+}
+
+/// Solve each of a stage's areas given everything outside it: `pair_weight`,
+/// [E, S], the weight of everything outside the stage, and `own`, the stage's
+/// own term, with the other areas' Z.
+fn solve_areas(pair_weight: Matrix, own: &Matrix, areas: &mut [AreaSolve]) {
+    let m = own.rows();
+    let mut beyond = pair_weight; // [E, S]
+    beyond.map_inplace(f64::ln);
+    beyond.zip_inplace(own, |a, b| a + b);
+    let rescaled = Matrix::from_rows(m, m, exp_rescaled(beyond.data()));
+    let (beyond, _) = scaled(rescaled.transpose()); // [S, E]
+    for a in 0..areas.len() {
+        let mut rest = beyond.clone();
+        for (o, other) in areas.iter().enumerate() {
+            if o != a {
+                rest = scaled(rest.zip_map(&other.z, |x, y| x * y)).0;
+            }
+        }
+        let (w, _) = scaled(outside(&rest)); // [first, last]
+        areas[a].solve_given(&w.transpose());
+    }
+}
+
 /// One area's parts on one grid: its log transfer matrices, its products and
-/// its weight with its ends held, J, and within its stage, Z.
-struct Area {
+/// its weight with its ends held, J, and within its stage, Z; the same for the
+/// areas inside each of its groups; and, once it is solved given everything
+/// outside it, its messages.
+struct AreaSolve {
     chain: Chain,
+    /// Each group's log transfer, the areas inside it folded in.
     log_t: Vec<Matrix>,
+    /// {group index: its own term, without its areas}, for the groups that
+    /// hold areas.
+    own: BTreeMap<usize, Matrix>,
     ordered: BTreeMap<usize, OrderedGroup>,
     products: Option<ChainProducts>,
     j: Matrix,
@@ -656,18 +891,42 @@ struct Area {
     /// log of Z's true scale: the products', every transfer's own rescaling,
     /// and Z's.
     log_z_scale: f64,
+    inner: Vec<Vec<AreaSolve>>,
+    messages: Option<EndFactorMessages>,
 }
 
-impl Area {
+impl AreaSolve {
+    /// The upward pass: the areas inside it first, whose Z its own transfers
+    /// hold.
     fn new(
-        chain: &Chain,
+        area: &Area,
         grid: &[f64],
         allowed: &HashMap<String, Vec<bool>>,
         cumulative: &HashMap<String, Vec<f64>>,
         likelihood: &HashMap<String, Vec<f64>>,
     ) -> Self {
+        let chain = &area.chain;
+        let inner: Vec<Vec<AreaSolve>> = area
+            .inner
+            .iter()
+            .map(|areas| {
+                areas
+                    .iter()
+                    .map(|a| Self::new(a, grid, allowed, cumulative, likelihood))
+                    .collect()
+            })
+            .collect();
         // Ordered groups inside the area too.
-        let (log_t, ordered) = chain_log_transfers(grid, chain, cumulative, likelihood, allowed);
+        let (mut log_t, ordered) =
+            chain_log_transfers(grid, chain, cumulative, likelihood, allowed);
+        let mut own = BTreeMap::new();
+        for (index, areas) in inner.iter().enumerate() {
+            if !areas.is_empty() {
+                untied(&mut log_t[index]);
+                let folded = with_areas(&log_t[index], areas);
+                own.insert(index, std::mem::replace(&mut log_t[index], folded));
+            }
+        }
         let products = ChainProducts::new(chain, allowed, &log_t);
         let j = products.end_to_end().clone(); // [first, last]
         let (z, z_factor) = scaled(within(&j)); // [S, E]
@@ -676,12 +935,106 @@ impl Area {
         Self {
             chain: chain.clone(),
             log_t,
+            own,
             ordered,
             products: Some(products),
             j,
             z,
             log_z_scale,
+            inner,
+            messages: None,
         }
+    }
+
+    /// The downward pass: this area given `end_factor`, [last, first], the
+    /// weight of everything outside it, and then the areas inside each of its
+    /// groups given everything outside them -- its own pair weights, which
+    /// hold the end factor.
+    fn solve_given(&mut self, end_factor: &Matrix) {
+        let products = self.products.take().expect("solved once");
+        let messages = messages_with_end_factor(products, end_factor);
+        for (index, areas) in self.inner.iter_mut().enumerate() {
+            if !areas.is_empty() {
+                solve_areas(messages.pair_weight(index), &self.own[&index], areas);
+            }
+        }
+        self.messages = Some(messages);
+    }
+
+    /// Its dates' and Boundaries' unnormalised marginals, and those of the
+    /// areas inside it: each Boundary, then the areas in the group after it.
+    fn marginals(
+        &mut self,
+        cumulative: &HashMap<String, Vec<f64>>,
+        likelihood: &HashMap<String, Vec<f64>>,
+        dt: f64,
+        dates: &mut Vec<(String, Vec<f64>)>,
+        boundaries: &mut Vec<(String, Vec<f64>)>,
+    ) {
+        let messages = self.messages.as_ref().expect("solved");
+        let pair = |k: usize| messages.pair_weight(k);
+        dates.extend(chain_date_marginals(
+            &self.chain,
+            &mut self.ordered,
+            &self.log_t,
+            &pair,
+            cumulative,
+            likelihood,
+            dt,
+        ));
+        for (i, bid) in self.chain.boundary_ids.iter().enumerate() {
+            boundaries.push((bid.clone(), messages.boundary_density(i)));
+            for area in self.inner.get_mut(i).into_iter().flatten() {
+                area.marginals(cumulative, likelihood, dt, dates, boundaries);
+            }
+        }
+    }
+
+    /// Joint draws of its Boundaries and dates given its stage's (S, E), `s`
+    /// and `e`, one per draw, and then of the areas inside each of its groups
+    /// given that group's Boundaries as drawn.
+    #[allow(clippy::too_many_arguments)]
+    fn draw(
+        &self,
+        rng: &mut Generator,
+        s: &[usize],
+        e: &[usize],
+        cumulative: &HashMap<String, Vec<f64>>,
+        likelihood: &HashMap<String, Vec<f64>>,
+        dt: f64,
+        draws: &mut HashMap<String, Vec<usize>>,
+        date_draws: &mut HashMap<String, Vec<usize>>,
+    ) -> Result<(), Error> {
+        let messages = self.messages.as_ref().expect("solved");
+        let (first, last) = draw_area_ends(rng, &self.j, s, e)?;
+        let inner = messages.draw_boundaries(&self.log_t, rng, s.len(), Some((first, last)))?;
+        for (i, bid) in self.chain.boundary_ids.iter().enumerate() {
+            draws.insert(bid.clone(), inner[i].clone());
+        }
+        date_draws.extend(chain_draw_dates(
+            rng,
+            &self.chain,
+            &self.ordered,
+            cumulative,
+            likelihood,
+            &inner,
+            dt,
+        )?);
+        for (index, areas) in self.inner.iter().enumerate() {
+            for area in areas {
+                area.draw(
+                    rng,
+                    &inner[index],
+                    &inner[index + 1],
+                    cumulative,
+                    likelihood,
+                    dt,
+                    draws,
+                    date_draws,
+                )?;
+            }
+        }
+        Ok(())
     }
 }
 
@@ -727,7 +1080,6 @@ impl ParallelSolver<'_> {
             _ => (false, None),
         };
         let dt = grid[1] - grid[0];
-        let m = grid.len();
         let stages = self.stages;
         let outer = self.outer;
         let mut tables = date_tables(
@@ -770,13 +1122,13 @@ impl ParallelSolver<'_> {
         }
         let (cumulative, likelihood) = (&tables.cumulative, &tables.likelihood);
 
-        let mut areas: Vec<Vec<Area>> = stages
+        let mut areas: Vec<Vec<AreaSolve>> = stages
             .stages
             .iter()
             .map(|s| {
                 s.areas
                     .iter()
-                    .map(|chain| Area::new(chain, grid, &allowed, cumulative, likelihood))
+                    .map(|area| AreaSolve::new(area, grid, &allowed, cumulative, likelihood))
                     .collect()
             })
             .collect();
@@ -802,13 +1154,9 @@ impl ParallelSolver<'_> {
         // one.
         let (mut own, mut ordered) =
             chain_log_transfers(grid, outer, cumulative, likelihood, &allowed);
-        let tie = BOUNDARY_TIE_WEIGHT.ln();
         for (index, stage) in stages.stages.iter().enumerate() {
             if !stage.areas.is_empty() {
-                for i in 0..m {
-                    let v = own[index].get(i, i) - tie;
-                    own[index].set(i, i, v);
-                }
+                untied(&mut own[index]);
             }
         }
         let span_prior_applied = log_correction.is_some();
@@ -837,14 +1185,7 @@ impl ParallelSolver<'_> {
         let log_t: Vec<Matrix> = own
             .iter()
             .enumerate()
-            .map(|(index, term)| {
-                let mut term = term.clone();
-                for area in &areas[index] {
-                    let zt = area.z.transpose();
-                    term.zip_inplace(&zt, |t, z| t + (z.ln() + area.log_z_scale));
-                }
-                term
-            })
+            .map(|(index, term)| with_areas(term, &areas[index]))
             .collect();
 
         let msgs: Messages = match correction {
@@ -885,29 +1226,12 @@ impl ParallelSolver<'_> {
         .collect();
         let outer_densities: Vec<Vec<f64>> = (0..n).map(|i| msgs.boundary_density(i)).collect();
 
-        // Each area given everything outside it.
-        let mut area_messages: Vec<Vec<EndFactorMessages>> = Vec::new();
+        // Each area given everything outside it, and the areas inside it
+        // given that.
         for (index, stage_areas) in areas.iter_mut().enumerate() {
-            let mut found = Vec::new();
             if !stage_areas.is_empty() {
-                let mut beyond = msgs.pair_weight(index); // [E, S]
-                beyond.map_inplace(f64::ln);
-                beyond.zip_inplace(&own[index], |a, b| a + b);
-                let rescaled = Matrix::from_rows(m, m, exp_rescaled(beyond.data()));
-                let (beyond, _) = scaled(rescaled.transpose()); // [S, E]
-                for a in 0..stage_areas.len() {
-                    let mut rest = beyond.clone();
-                    for (o, other) in stage_areas.iter().enumerate() {
-                        if o != a {
-                            rest = scaled(rest.zip_map(&other.z, |x, y| x * y)).0;
-                        }
-                    }
-                    let (w, _) = scaled(outside(&rest)); // [first, last]
-                    let products = stage_areas[a].products.take().expect("solved once");
-                    found.push(messages_with_end_factor(products, &w.transpose()));
-                }
+                solve_areas(msgs.pair_weight(index), &own[index], stage_areas);
             }
-            area_messages.push(found);
         }
 
         let mut date_densities: Vec<(String, Vec<f64>)> = Vec::new();
@@ -917,20 +1241,14 @@ impl ParallelSolver<'_> {
             for date_id in &stage.dates {
                 date_densities.push((date_id.clone(), stage_dates[date_id].clone()));
             }
-            for (area, area_msgs) in areas[index].iter_mut().zip(&area_messages[index]) {
-                let area_pair = |k: usize| area_msgs.pair_weight(k);
-                date_densities.extend(chain_date_marginals(
-                    &area.chain,
-                    &mut area.ordered,
-                    &area.log_t,
-                    &area_pair,
+            for area in &mut areas[index] {
+                area.marginals(
                     cumulative,
                     likelihood,
                     dt,
-                ));
-                for (i, bid) in area.chain.boundary_ids.iter().enumerate() {
-                    boundary_densities.push((bid.clone(), area_msgs.boundary_density(i)));
-                }
+                    &mut date_densities,
+                    &mut boundary_densities,
+                );
             }
         }
         boundary_densities.push((last.clone(), outer_densities[n - 1].clone()));
@@ -969,22 +1287,17 @@ impl ParallelSolver<'_> {
             )?);
             for (index, _stage) in stages.stages.iter().enumerate() {
                 let (s, e) = (&outer_draws[index], &outer_draws[index + 1]);
-                for (area, area_msgs) in areas[index].iter().zip(&area_messages[index]) {
-                    let (first, last) = draw_area_ends(rng, &area.j, s, e)?;
-                    let inner =
-                        area_msgs.draw_boundaries(&area.log_t, rng, count, Some((first, last)))?;
-                    for (i, bid) in area.chain.boundary_ids.iter().enumerate() {
-                        draws.insert(bid.clone(), inner[i].clone());
-                    }
-                    date_draws.extend(chain_draw_dates(
+                for area in &areas[index] {
+                    area.draw(
                         rng,
-                        &area.chain,
-                        &area.ordered,
+                        s,
+                        e,
                         cumulative,
                         likelihood,
-                        &inner,
                         dt,
-                    )?);
+                        &mut draws,
+                        &mut date_draws,
+                    )?;
                 }
             }
             Ok((
