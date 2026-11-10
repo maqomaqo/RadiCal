@@ -109,6 +109,11 @@ pub const TARGET_RHAT: f64 = 1.05;
 /// The largest difference any chain may show from the pooled probability of
 /// a parameter being older than a given year before a pooled run may stop.
 pub const TARGET_CHAIN_THRESHOLD_GAP: f64 = 0.05;
+/// The largest standard error any calibration lobe's share of its date's
+/// posterior may carry before a pooled run may stop
+/// (`chains::lobe_weight_error`). Two points: the first-half/second-half
+/// overlap and the threshold gap each pass a run five points out.
+pub const TARGET_LOBE_WEIGHT_ERROR: f64 = 0.02;
 /// The span of the dates' likelihoods the extra chains start across.
 pub const START_QUANTILE_RANGE: (f64, f64) = (0.025, 0.975);
 /// Nodes the deposition rigidity k is tabulated over, log-uniform between the

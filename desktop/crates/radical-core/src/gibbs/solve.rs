@@ -19,7 +19,7 @@ use super::chains::{ChainsOptions, Pooled, solve_chains};
 use super::model::{Lobe, Model};
 use super::{
     DEFAULT_SEED, DEFAULT_START_STRATEGY, DEFAULT_SWEEPS, DEFAULT_TEMPERATURES, MAX_SWEEPS,
-    TARGET_CHAIN_THRESHOLD_GAP, TARGET_CONVERGENCE, TARGET_RHAT,
+    TARGET_CHAIN_THRESHOLD_GAP, TARGET_CONVERGENCE, TARGET_LOBE_WEIGHT_ERROR, TARGET_RHAT,
 };
 
 /// The lobe probe: a lobe holding at least PROBE_SHARE of a date's likelihood
@@ -137,6 +137,11 @@ pub struct Sampled {
     pub convergence: f64,
     pub chain_threshold_gap: Option<f64>,
     pub chain_threshold_gap_target: Option<f64>,
+    /// The largest standard error of any calibration lobe's share of its
+    /// date's posterior (`chains::lobe_weight_error`), and what a run has to
+    /// reach; None with one chain, matching OxCal, or no date with lobes.
+    pub lobe_weight_error: Option<f64>,
+    pub lobe_weight_error_target: Option<f64>,
     pub temperatures: usize,
     pub converged: bool,
     pub acceptance: Vec<f64>,
@@ -508,6 +513,7 @@ pub fn solve(
 
     let rhat = pooled.rhat;
     let gap = pooled.chain_threshold_gap;
+    let lobe_error = pooled.lobe_weight_error.filter(|_| !options.match_oxcal);
     Ok(Ok(Sampled {
         measurements: summaries,
         boundaries,
@@ -526,10 +532,13 @@ pub fn solve(
         convergence: within,
         chain_threshold_gap: gap,
         chain_threshold_gap_target: gap.map(|_| TARGET_CHAIN_THRESHOLD_GAP),
+        lobe_weight_error: lobe_error,
+        lobe_weight_error_target: lobe_error.map(|_| TARGET_LOBE_WEIGHT_ERROR),
         temperatures,
         converged: within >= options.target_convergence
             && rhat.is_none_or(|r| r <= TARGET_RHAT)
-            && gap.is_none_or(|g| g <= TARGET_CHAIN_THRESHOLD_GAP),
+            && gap.is_none_or(|g| g <= TARGET_CHAIN_THRESHOLD_GAP)
+            && lobe_error.is_none_or(|e| e <= TARGET_LOBE_WEIGHT_ERROR),
         acceptance: chain.acceptance.clone(),
         outlier_scale,
         grid: (model.grid[0], model.grid[model.m - 1], model.dt),
