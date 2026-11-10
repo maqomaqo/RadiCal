@@ -15,12 +15,19 @@ use crate::measurement::{Calibrator, Measurement};
 use crate::model_tree::{Element, ModelPlan, inherited_bounds, plan_model};
 use crate::numeric::{argmax, cumsum, find_peaks, linspace, mean, searchsorted_left, sum};
 use crate::rng::Generator;
+use crate::special::gammaln;
 
 use super::{
     DEPOSITION_K_NODES, Deposition, EQUALISED_EDGE, LOBE_HELD_FRACTION, LOBE_MIN_MASS,
     MAX_PEAK_GAPS, PEAK_JUMP_FRACTION, PEAK_JUMP_JITTER_YEARS, PEAK_PROMINENCE, START_STRATEGIES,
     State, WIDE_MOVE_FRACTION, WIDE_MOVE_YEARS, log_deposition_density,
 };
+
+/// The most tied dates in one cell whose orders are counted over every subset
+/// (2^k of them); a bigger cluster is counted over its downsets, up to
+/// MAX_CLUSTER_DOWNSETS of them at any one size.
+const DENSE_CLUSTER_DATES: usize = 20;
+const MAX_CLUSTER_DOWNSETS: usize = 1 << 16;
 
 /// A calibration lobe: (peak cell, share of the row's total, first cell, one
 /// past the last).
@@ -874,6 +881,8 @@ impl Model {
         let k = key.len();
         let weight = if k < 2 {
             1.0
+        } else if k > DENSE_CLUSTER_DATES {
+            self.large_cluster_weight(&key)
         } else {
             let position: HashMap<usize, usize> =
                 key.iter().enumerate().map(|(i, &d)| (d, i)).collect();
@@ -902,6 +911,53 @@ impl Model {
         };
         self.cluster_weights.borrow_mut().insert(key, weight);
         weight
+    }
+
+    /// [`Self::cluster_weight`] for a cluster too big to tabulate every subset
+    /// of: the same count, taken over the cluster's DOWNSETS alone -- the
+    /// sets of dates that can be the oldest so many of some order. A cluster
+    /// this size is nearly always a Sequence, a chain or close to one, and has
+    /// about as many downsets as dates where it has 2^k subsets.
+    ///
+    /// Where even the downsets are too many, or the cluster too big for a
+    /// mask, the weight of ONE order is returned: a lower bound, of a
+    /// configuration whose weight is of the order of 1/k! whatever the count.
+    fn large_cluster_weight(&self, key: &[usize]) -> f64 {
+        let k = key.len();
+        let one_order = (-gammaln(k as f64 + 1.0)).exp().max(f64::MIN_POSITIVE);
+        if k > 128 {
+            return one_order;
+        }
+        let position: HashMap<usize, usize> =
+            key.iter().enumerate().map(|(i, &d)| (d, i)).collect();
+        let mut older = vec![0_u128; k];
+        for &d in key {
+            for younger in self.younger_dates.get(&d).into_iter().flatten() {
+                if let Some(&p) = position.get(younger) {
+                    older[p] |= 1 << position[&d];
+                }
+            }
+        }
+        // Ordered maps, so the counts add in one order whatever the run.
+        let mut layer: BTreeMap<u128, f64> = BTreeMap::from([(0, 1.0)]);
+        for _ in 0..k {
+            let mut next: BTreeMap<u128, f64> = BTreeMap::new();
+            for (&placed, &ways) in &layer {
+                for (i, &needs) in older.iter().enumerate() {
+                    if placed >> i & 1 == 0 && needs & !placed == 0 {
+                        *next.entry(placed | 1 << i).or_insert(0.0) += ways;
+                    }
+                }
+            }
+            if next.len() > MAX_CLUSTER_DOWNSETS {
+                return one_order;
+            }
+            layer = next;
+        }
+        let ways = layer.values().next().copied().unwrap_or(1.0);
+        (ways.ln() - gammaln(k as f64 + 1.0))
+            .exp()
+            .max(f64::MIN_POSITIVE)
     }
 
     /// The dates in `cell` joined to `start` through date ties.
@@ -2087,5 +2143,66 @@ impl Model {
             return (proposal, proposed_lp, true, wide);
         }
         (state, current_lp, false, wide)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn element(id: &str, kind: &str, children: Vec<Element>) -> Element {
+        Element {
+            id: id.into(),
+            element_type: kind.into(),
+            name: Some(id.into()),
+            tpq_age_bp: None,
+            taq_age_bp: None,
+            params: None,
+            children,
+        }
+    }
+
+    /// Phases one after another between two Boundaries, with none between
+    /// them, holding `sizes` dates each: every date of one older than every
+    /// date of the next.
+    fn ordered_phases(sizes: &[usize]) -> Model {
+        let mut children = vec![element("start", "boundary", Vec::new())];
+        let mut dates = Vec::new();
+        for (p, &size) in sizes.iter().enumerate() {
+            children.push(element(&format!("p{p}"), "phase", Vec::new()));
+            for d in 0..size {
+                dates.push(Measurement {
+                    id: format!("d{p}_{d}"),
+                    age_bp: 2450.0,
+                    error_1sigma: 30.0,
+                    element_id: Some(format!("p{p}")),
+                    ..Measurement::default()
+                });
+            }
+        }
+        children.push(element("end", "boundary", Vec::new()));
+        let root = element("s", "sequence", children);
+        Model::new(&dates, &root, None, true, &Calibrator::default()).unwrap()
+    }
+
+    #[test]
+    fn a_big_cluster_is_counted_as_a_small_one_is() {
+        // Three dates before three: 3! * 3! of the 6! orders.
+        let model = ordered_phases(&[3, 3]);
+        let all: BTreeSet<usize> = (0..6).collect();
+        let dense = model.cluster_weight(&all);
+        assert!((dense - 36.0 / 720.0).abs() < 1e-15);
+        let key: Vec<usize> = all.into_iter().collect();
+        assert!((model.large_cluster_weight(&key) - dense).abs() < 1e-15);
+    }
+
+    #[test]
+    fn a_long_sequence_in_one_cell_has_one_order() {
+        // Forty dates in a row: 2^40 subsets, forty-one downsets, one order.
+        let model = ordered_phases(&[1; 40]);
+        let all: BTreeSet<usize> = (0..40).collect();
+        let weight = model.cluster_weight(&all);
+        let want = (-gammaln(41.0)).exp();
+        assert!(weight > 0.0 && (weight / want - 1.0).abs() < 1e-12);
     }
 }

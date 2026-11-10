@@ -18,7 +18,8 @@ use super::chain::{
 use super::model::Model;
 use super::{
     DEFAULT_START_STRATEGY, MAX_CHAIN_WORKERS, MAX_SWEEPS, ROUNDS, START_QUANTILE_RANGE,
-    START_STRATEGIES, TARGET_CHAIN_THRESHOLD_GAP, TARGET_CONVERGENCE, TARGET_RHAT,
+    START_STRATEGIES, TARGET_CHAIN_THRESHOLD_GAP, TARGET_CONVERGENCE, TARGET_LOBE_WEIGHT_ERROR,
+    TARGET_RHAT,
 };
 
 /// How many chains a run may have. Python caps it at the machine's cores,
@@ -72,6 +73,9 @@ pub struct Pooled {
     pub between_chain_convergence: Option<f64>,
     pub rhat: Option<f64>,
     pub chain_threshold_gap: Option<f64>,
+    /// [`lobe_weight_error`] over what the chains kept; None with one chain
+    /// or no date with several lobes.
+    pub lobe_weight_error: Option<f64>,
 }
 
 impl Pooled {
@@ -85,6 +89,7 @@ impl Pooled {
             between_chain_convergence: None,
             rhat: None,
             chain_threshold_gap: None,
+            lobe_weight_error: None,
             result,
         }
     }
@@ -244,8 +249,12 @@ pub fn solve_chains(
         // Pooled halves agree; now the chains must agree with each other.
         let totals: Vec<Histograms> = kept.iter().map(|rounds| total(rounds)).collect();
         let (_overlap, rhat) = between_chains(&totals);
+        // And know how the posterior is shared between calibration lobes: a
+        // run matching OxCal stops where OxCal does.
         if rhat.is_some_and(|r| r <= TARGET_RHAT)
             && chain_threshold_gap(&totals).is_some_and(|g| g <= TARGET_CHAIN_THRESHOLD_GAP)
+            && (options.match_oxcal
+                || lobe_weight_error(model, &kept).is_none_or(|e| e <= TARGET_LOBE_WEIGHT_ERROR))
         {
             break measure;
         }
@@ -260,6 +269,8 @@ pub fn solve_chains(
     let mut pooled = pool_chains(&results);
     pooled.per_chain_convergence = results.iter().map(|r| worst(&r.convergence)).collect();
     pooled.result.convergence = pooled_measure;
+    let kept: Vec<&[Histograms]> = chains.iter().map(|c| after_burn_in(&c.rounds)).collect();
+    pooled.lobe_weight_error = lobe_weight_error(model, &kept);
     Ok(Ok(pooled))
 }
 
@@ -344,7 +355,59 @@ pub fn pool_chains(results: &[ChainResult]) -> Pooled {
         between_chain_convergence: between,
         rhat,
         chain_threshold_gap: gap,
+        lobe_weight_error: None,
     }
+}
+
+/// The largest standard error of any calibration lobe's share of its date's
+/// posterior, over every date with several lobes ([`Model::lobes`]); None when
+/// no date has, or there are too few rounds to tell.
+///
+/// What the other measures cannot see. A model whose dates sit in one lobe or
+/// another TOGETHER -- a tight phase on a stretch of curve that calibrates
+/// twice -- changes lobe rarely, and how the posterior is shared between the
+/// lobes is then known only as well as the changes are many. The two halves of
+/// a run can overlap, and every chain agree with the pool, to within the five
+/// points each allows while the shares are several points out; which lobe the
+/// median falls in turns on less.
+///
+/// The share is read per round and per chain, and its error taken two ways:
+/// from the spread of the rounds' shares, as batch means, and from the spread
+/// of the chains' own. Rounds within a chain that seldom changes lobe are
+/// alike, and their spread says little; chains started apart are not. The
+/// larger is returned.
+pub fn lobe_weight_error(model: &Model, kept: &[&[Histograms]]) -> Option<f64> {
+    let standard_error = |shares: &[f64]| -> Option<f64> {
+        (shares.len() >= 2).then(|| (var1(shares) / shares.len() as f64).sqrt())
+    };
+    let mut worst: Option<f64> = None;
+    for row in 0..model.num_dates {
+        for (_, _, first, last) in model.lobes(row) {
+            let mut by_round = Vec::new();
+            let mut by_chain = Vec::new();
+            for rounds in kept {
+                let (mut inside, mut all) = (0.0, 0.0);
+                for round in *rounds {
+                    let (lobe, total) = (sum(&round[row][first..last]), sum(&round[row]));
+                    if total > 0.0 {
+                        by_round.push(lobe / total);
+                    }
+                    inside += lobe;
+                    all += total;
+                }
+                if all > 0.0 {
+                    by_chain.push(inside / all);
+                }
+            }
+            for error in [standard_error(&by_round), standard_error(&by_chain)]
+                .into_iter()
+                .flatten()
+            {
+                worst = Some(worst.map_or(error, |w| w.max(error)));
+            }
+        }
+    }
+    worst
 }
 
 /// The largest difference, over every parameter, chain and calendar year,
@@ -465,4 +528,89 @@ pub fn between_chains(histograms: &[Histograms]) -> (Option<f64>, Option<f64>) {
         }
     }
     (Some(worst_overlap), worst_rhat)
+}
+
+#[cfg(test)]
+mod lobe_tests {
+    use super::*;
+    use crate::measurement::{Calibrator, Measurement};
+    use crate::model_tree::Element;
+
+    fn element(id: &str, kind: &str, children: Vec<Element>) -> Element {
+        Element {
+            id: id.into(),
+            element_type: kind.into(),
+            name: Some(id.into()),
+            tpq_age_bp: None,
+            taq_age_bp: None,
+            params: None,
+            children,
+        }
+    }
+
+    /// One date that calibrates to several lobes, in a phase of its own.
+    fn model() -> Model {
+        let root = element(
+            "s",
+            "sequence",
+            vec![
+                element("start", "boundary", Vec::new()),
+                element("p", "phase", Vec::new()),
+                element("end", "boundary", Vec::new()),
+            ],
+        );
+        let date = Measurement {
+            id: "d".into(),
+            age_bp: 150.0,
+            error_1sigma: 12.0,
+            element_id: Some("p".into()),
+            ..Measurement::default()
+        };
+        Model::new(&[date], &root, None, true, &Calibrator::default()).unwrap()
+    }
+
+    /// A round of 1,000 sweeps with the date `share` of them at the peak of
+    /// its first lobe and the rest at the peak of its second.
+    fn round(model: &Model, share: f64) -> Histograms {
+        let lobes = model.lobes(0);
+        let mut histograms = vec![vec![0.0; model.m]; model.params.len()];
+        histograms[0][lobes[0].0] = 1000.0 * share;
+        histograms[0][lobes[1].0] = 1000.0 * (1.0 - share);
+        histograms
+    }
+
+    #[test]
+    fn chains_that_each_keep_to_a_lobe_do_not_know_its_share() {
+        let model = model();
+        assert!(model.lobes(0).len() >= 2);
+        let stuck: Vec<Vec<Histograms>> = [1.0, 0.0, 1.0, 0.0]
+            .iter()
+            .map(|&s| vec![round(&model, s); 6])
+            .collect();
+        let kept: Vec<&[Histograms]> = stuck.iter().map(Vec::as_slice).collect();
+        // Shares of 1, 0, 1, 0 over four chains: sd 0.577, error 0.289.
+        let error = lobe_weight_error(&model, &kept).unwrap();
+        assert!(
+            (error - (1.0_f64 / 3.0).sqrt() / 2.0).abs() < 1e-12,
+            "{error}"
+        );
+
+        let mixing: Vec<Vec<Histograms>> = (0..4)
+            .map(|c| {
+                (0..6)
+                    .map(|r| round(&model, 0.5 + 0.01 * ((c + r) % 3) as f64 - 0.01))
+                    .collect()
+            })
+            .collect();
+        let kept: Vec<&[Histograms]> = mixing.iter().map(Vec::as_slice).collect();
+        assert!(lobe_weight_error(&model, &kept).unwrap() < 0.005);
+    }
+
+    #[test]
+    fn one_round_is_too_few_to_tell() {
+        let model = model();
+        let one = vec![vec![round(&model, 0.5)]];
+        let kept: Vec<&[Histograms]> = one.iter().map(Vec::as_slice).collect();
+        assert_eq!(lobe_weight_error(&model, &kept), None);
+    }
 }
