@@ -181,13 +181,22 @@ pub fn date_likelihood(
     cal: &Calibrator,
 ) -> Result<Vec<f64>, Error> {
     let mut lik = event_likelihood(grid, m, cal)?;
+    cut_to_limits(&mut lik, grid, bounds);
+    Ok(lik)
+}
+
+/// Zero `values` wherever `grid` lies outside the (taq, tpq) limiters: the
+/// hard truncation a TPQ/TAQ puts on an EVENT.
+pub fn cut_to_limits(values: &mut [f64], grid: &[f64], bounds: Limits) {
     let (taq, tpq) = bounds;
-    for (l, &t) in lik.iter_mut().zip(grid) {
+    if taq.is_none() && tpq.is_none() {
+        return;
+    }
+    for (v, &t) in values.iter_mut().zip(grid) {
         if taq.is_some_and(|taq| t < taq) || tpq.is_some_and(|tpq| t > tpq) {
-            *l = 0.0;
+            *v = 0.0;
         }
     }
-    Ok(lik)
 }
 
 /// The offset scales an outlier model is allowed, as log10(years).
@@ -380,6 +389,13 @@ pub fn convolve_on_grid(values: &[f64], kernel: &[f64]) -> Vec<f64> {
 /// `scale_weights`, one per node of [`scale_nodes`], mixes the offset over the
 /// scale's posterior rather than its prior.
 ///
+/// `source` is what the offset smears and `bounds` what the result is cut to.
+/// A TPQ/TAQ bounds the EVENT, and an outlier's event is not where its
+/// material calibrates: so the smear is of the date's likelihood BEFORE its
+/// limiters (`source`), and the limiters then cut the smeared component as
+/// they cut the inlier. Smearing the cut inlier instead carried the outlier
+/// component straight back over the limit it had just been cut at.
+///
 /// Integrating out a Bernoulli outlier indicator is exact and costs the
 /// solver nothing, because the indicator touches only this date's own
 /// likelihood:
@@ -394,6 +410,8 @@ pub fn convolve_on_grid(values: &[f64], kernel: &[f64]) -> Vec<f64> {
 pub fn with_outlier_component(
     grid: &[f64],
     inlier: &[f64],
+    source: &[f64],
+    bounds: Limits,
     prior: f64,
     model: &str,
     scale_weights: Option<&[f64]>,
@@ -407,7 +425,8 @@ pub fn with_outlier_component(
         None => outlier_kernel(step, half_width, model),
         Some(w) => weighted_kernel(step, half_width, model, w),
     };
-    let broad = convolve_on_grid(inlier, &kernel);
+    let mut broad = convolve_on_grid(source, &kernel);
+    cut_to_limits(&mut broad, grid, bounds);
     // NOT renormalised over the grid. The convolution of two normalised
     // densities is already proper on the real line, and most of its mass lies
     // off this grid -- which is exactly the statement that a flagged date's
@@ -453,6 +472,10 @@ pub struct DateTables {
     pub likelihood: HashMap<String, Vec<f64>>,
     pub cumulative: HashMap<String, Vec<f64>>,
     pub outlier_parts: HashMap<String, OutlierPart>,
+    /// Per flagged date, its likelihood BEFORE its TPQ/TAQ limiters, on the
+    /// inlier's normalisation: what an outlier offset smears (see
+    /// [`with_outlier_component`]). The inlier itself where nothing is cut.
+    pub outlier_sources: HashMap<String, Vec<f64>>,
 }
 
 /// Every date's likelihood on `grid`, its cumulative integral, and the parts
@@ -487,7 +510,11 @@ pub fn date_tables(
     let dt = grid[1] - grid[0];
     let mut tables = DateTables::default();
     for m in measurements {
-        let mut lik = date_likelihood(grid, m, effective_date_bounds(m, element_bounds), cal)?;
+        let bounds = effective_date_bounds(m, element_bounds);
+        let prior = m.outlier_prior();
+        let mut lik = event_likelihood(grid, m, cal)?;
+        let mut source = (prior > 0.0).then(|| lik.clone());
+        cut_to_limits(&mut lik, grid, bounds);
         let total = sum(&lik) * dt;
         if total <= 0.0 || !total.is_finite() {
             return Err(Error::Model(format!(
@@ -501,8 +528,12 @@ pub fn date_tables(
         for l in &mut lik {
             *l /= total;
         }
-        let prior = m.outlier_prior();
-        if prior > 0.0 {
+        if let Some(source) = source.as_mut() {
+            for l in source {
+                *l /= total;
+            }
+        }
+        if let Some(source) = source {
             let model_name = m.outlier_model();
             if !OUTLIER_MODELS.contains(&model_name) {
                 return Err(Error::Model(format!(
@@ -514,10 +545,12 @@ pub fn date_tables(
             let weights = scale_weights
                 .and_then(|w| w.get(model_name))
                 .map(Vec::as_slice);
-            let (mixture, broad) = with_outlier_component(grid, &lik, prior, model_name, weights);
+            let (mixture, broad) =
+                with_outlier_component(grid, &lik, &source, bounds, prior, model_name, weights);
             tables
                 .outlier_parts
                 .insert(m.id.clone(), (lik, broad, prior));
+            tables.outlier_sources.insert(m.id.clone(), source);
             lik = mixture;
         }
         tables.cumulative.insert(
@@ -742,4 +775,84 @@ pub fn reporting_aligned_step(step: f64) -> f64 {
 /// [`grid_over`], for the evidence's grid.
 pub(crate) fn regular_grid(lo: f64, hi: f64, step: f64) -> Vec<f64> {
     grid_over(lo, hi, step)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn flagged(taq: Option<f64>, tpq: Option<f64>) -> Measurement {
+        Measurement {
+            id: "x".into(),
+            age_bp: 2450.0,
+            error_1sigma: 30.0,
+            outlier_prior: Some(0.5),
+            taq_age_bp: taq,
+            tpq_age_bp: tpq,
+            ..Measurement::default()
+        }
+    }
+
+    fn tables_of(m: &Measurement) -> (Vec<f64>, DateTables) {
+        let grid: Vec<f64> = (0..=900).map(|i| 2100.0 + i as f64).collect();
+        let cal = Calibrator::default();
+        let tables = date_tables(
+            &grid,
+            std::slice::from_ref(m),
+            &ElementBounds::new(),
+            None,
+            None,
+            &cal,
+        )
+        .unwrap();
+        (grid, tables)
+    }
+
+    #[test]
+    fn an_outlier_component_stays_inside_the_dates_limiters() {
+        for (taq, tpq) in [(Some(2600.0), None), (None, Some(2450.0))] {
+            let (grid, tables) = tables_of(&flagged(taq, tpq));
+            let (_, broad, _) = &tables.outlier_parts["x"];
+            let mixture = &tables.likelihood["x"];
+            let outside = |t: f64| taq.is_some_and(|a| t < a) || tpq.is_some_and(|p| t > p);
+            for (i, &t) in grid.iter().enumerate() {
+                if outside(t) {
+                    assert_eq!(broad[i], 0.0, "outlier component at {t}");
+                    assert_eq!(mixture[i], 0.0, "likelihood at {t}");
+                }
+            }
+            assert!(
+                grid.iter()
+                    .zip(broad)
+                    .any(|(&t, &b)| !outside(t) && b > 0.0)
+            );
+        }
+    }
+
+    #[test]
+    fn the_offset_smears_the_likelihood_from_before_the_limiters() {
+        // Inside the limit, a limited date's outlier component is the
+        // unlimited date's, on the limited inlier's normalisation: the
+        // material may lie beyond a limit that bounds only the event.
+        let (grid, free) = tables_of(&flagged(None, None));
+        let (_, cut) = tables_of(&flagged(Some(2600.0), None));
+        let step = grid[1] - grid[0];
+        let kept: f64 = free.outlier_parts["x"]
+            .0
+            .iter()
+            .zip(&grid)
+            .filter(|&(_, &t)| t >= 2600.0)
+            .map(|(l, _)| l * step)
+            .sum();
+        assert!(kept > 0.0 && kept < 1.0);
+        for (i, &t) in grid.iter().enumerate() {
+            if t >= 2600.0 {
+                let want = free.outlier_parts["x"].1[i] / kept;
+                let got = cut.outlier_parts["x"].1[i];
+                assert!((got - want).abs() <= 1e-9 * want, "at {t}: {got} vs {want}");
+            }
+        }
+        // And with no limiter the source is the inlier itself, to the bit.
+        assert_eq!(free.outlier_sources["x"], free.outlier_parts["x"].0);
+    }
 }

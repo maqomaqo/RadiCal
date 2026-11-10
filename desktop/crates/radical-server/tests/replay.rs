@@ -203,6 +203,29 @@ const KNOWN: &[(&str, &str)] = &[
     ),
 ];
 
+/// Single differences excused, narrower than [`KNOWN`]: an exchange of the
+/// named test is excused only when the difference it reports contains the
+/// given text, so every other exchange of the test, and every other field of
+/// this one up to that difference, is still held.
+///
+/// A flagged date under a Sequence's TPQ/TAQ. The recording smeared the date's
+/// outlier offset from its likelihood already cut at the limits; the offset
+/// now smears the likelihood from before them and the limits cut the result
+/// (`exact_chain::tables::with_outlier_component`). In these two models the
+/// Boundaries carry the same limits, so only the flagged date's posterior_std
+/// moves, by 1e-9 of itself. The new figure is given to ten places: its last
+/// digits are a platform's own.
+const KNOWN_DIFFERENCES: &[(&str, &str)] = &[
+    (
+        "test_project_import.py::TestCurvesTravel::test_a_stored_curve_is_reused_by_its_owner_and_added_for_someone_else",
+        "posterior_std: 24.03067364",
+    ),
+    (
+        "test_project_import.py::TestCurvesTravel::test_an_altered_curve_is_refused",
+        "posterior_std: 24.03067364",
+    ),
+];
+
 /// Tests excused on Windows only: its C runtime's exp and log differ from
 /// glibc's and Apple's in the last bit, which is enough to swap the two
 /// equal-mass halves of a 10-year cell at an HPD region's edge (the tie
@@ -1174,6 +1197,9 @@ async fn replay(accounts: bool) {
             }
             Some(p)
                 if KNOWN.iter().any(|(t, _)| test.contains(t))
+                    || KNOWN_DIFFERENCES
+                        .iter()
+                        .any(|(t, d)| test.contains(t) && p.contains(d))
                     || (cfg!(windows) && WINDOWS_TIES.iter().any(|t| test.contains(t))) =>
             {
                 if std::env::var("REPLAY_SHOW").is_ok_and(|s| route.contains(&s)) {
