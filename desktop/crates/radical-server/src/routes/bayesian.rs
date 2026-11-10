@@ -447,8 +447,14 @@ pub fn rerun(state: &State, analysis_id: &str, handle: &Handle) -> Result<(), Fa
                 let curve = state
                     .curves
                     .curve(s.curve_id.as_deref().unwrap_or_default())?;
-                let stats =
-                    calibration_stats(curve, s.age_bp, s.error_1sigma, s.delta_r, s.delta_r_error)?;
+                let stats = calibration_stats(
+                    curve,
+                    s.age_bp,
+                    s.error_1sigma,
+                    s.delta_r,
+                    s.delta_r_error,
+                    state.range_ends,
+                )?;
                 rows_out.push(calibration_result_row(analysis_id, &s.id, &stats));
             }
             let flag = |k: &str| config.get(k).and_then(Value::as_bool).unwrap_or(false);

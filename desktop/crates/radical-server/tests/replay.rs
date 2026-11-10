@@ -1001,7 +1001,7 @@ async fn replay(accounts: bool) {
     // grid, which make a seeded run another run.
     let mut state = radical_server::State::open(dir.join("radical.db"), 2)
         .unwrap()
-        .with_recorded_sampler();
+        .as_recorded();
     if accounts {
         state = state.with_accounts(radical_server::accounts::Accounts {
             secret: "radical-replay-secret".to_owned(),

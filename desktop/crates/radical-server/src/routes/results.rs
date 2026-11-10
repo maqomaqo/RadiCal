@@ -13,7 +13,7 @@ use axum::extract::{Path, Query, State as Extract};
 use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
-use radical_core::calibration::{SIGMA_1, SIGMA_2, hpd_ranges};
+use radical_core::calibration::{SIGMA_1, SIGMA_2, hpd_ranges_ending};
 use radical_core::date_format::{self, era_label, format_age, format_range};
 use radical_core::measurement::Curves;
 use radical_core::model_tree::flatten_structure;
@@ -153,8 +153,8 @@ fn unmodelled_ranges(
     };
     let cal = curve.cal_ages();
     match (
-        hpd_ranges(cal, &probs, SIGMA_1),
-        hpd_ranges(cal, &probs, SIGMA_2),
+        hpd_ranges_ending(cal, &probs, SIGMA_1, state.range_ends),
+        hpd_ranges_ending(cal, &probs, SIGMA_2, state.range_ends),
     ) {
         (Ok(a), Ok(b)) => (ranges_json(&a), ranges_json(&b)),
         _ => blank,

@@ -47,6 +47,9 @@ pub struct State {
     /// run another run. For replaying the recording; see
     /// [`Self::with_recorded_sampler`].
     pub recorded_sampler: bool,
+    /// Where a calibrated range is said to end: the edges of its end cells,
+    /// or for replaying the recording the end points themselves.
+    pub range_ends: radical_core::RangeEnds,
 }
 
 impl State {
@@ -66,6 +69,7 @@ impl State {
             curves,
             accounts: None,
             recorded_sampler: false,
+            range_ends: radical_core::RangeEnds::CellEdges,
         })
     }
 
@@ -77,6 +81,17 @@ impl State {
         Self {
             recorded_sampler: true,
             ..self
+        }
+    }
+
+    /// Answer as the recorded server did wherever this one has since been
+    /// changed on purpose: [`Self::with_recorded_sampler`], and calibrated
+    /// ranges ending at their end points rather than at the edges of the
+    /// cells those stand for.
+    pub fn as_recorded(self) -> Self {
+        Self {
+            range_ends: radical_core::RangeEnds::GridPoints,
+            ..self.with_recorded_sampler()
         }
     }
 

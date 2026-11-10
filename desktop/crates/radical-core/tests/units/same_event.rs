@@ -19,7 +19,13 @@ fn same_event_test() {
                 ..Date::default()
             })
             .collect();
-        let got = same_event(&dates, radical_core::curves::builtin, Mode::Standard);
+        let got = same_event(
+            &dates,
+            radical_core::curves::builtin,
+            Mode::Standard,
+            // As the recording reported them.
+            radical_core::RangeEnds::GridPoints,
+        );
         let want = outputs(&case);
         let name = &case.name;
         let Some(got) = got else {

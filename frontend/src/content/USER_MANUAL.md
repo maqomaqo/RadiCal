@@ -1420,6 +1420,12 @@ A single calibration can return ranges that are not multiples of five: SHCal20 i
 1-year steps through the late Holocene, and a range there is quoted to the year. Only the
 *modelled* posterior is rebinned. Point estimates and plots always use the full-resolution posterior.
 
+**Where a range ends.** Every range, of either kind, runs to the edges of the grid cells at its two
+ends: a grid point stands for the calendar years half way to each of its neighbours, and the
+percentage quoted beside a range is the probability in those cells. On a 1-year grid that is half
+a year beyond the outermost points, which rounding to whole years absorbs; on Marine20, tabulated
+every 10 years, it is 5 years at each end.
+
 ### A.2 Calibrating one date
 
 The probability method of Stuiver and Reimer (1993), in the form OxCal uses (Bronk Ramsey 2001,

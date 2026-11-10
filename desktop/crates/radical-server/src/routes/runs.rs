@@ -6,7 +6,7 @@ use axum::Router;
 use axum::body::Bytes;
 use axum::extract::State as Extract;
 use axum::routing::post;
-use radical_core::calibration::{SIGMA_1, SIGMA_2, hpd_ranges, point_estimate};
+use radical_core::calibration::{SIGMA_1, SIGMA_2, hpd_ranges_ending, point_estimate};
 use radical_core::measurement::Curves;
 use radical_core::numeric::argmax;
 use radical_core::statistics;
@@ -55,11 +55,12 @@ pub fn calibration_stats(
     error: f64,
     delta_r: Option<f64>,
     delta_r_error: Option<f64>,
+    ends: radical_core::RangeEnds,
 ) -> Result<Stats, Error> {
     let probs = curve.calibrate(age_bp, error, delta_r, delta_r_error, Mode::Standard)?;
     let cal = curve.cal_ages();
-    let hpd_68_ranges = hpd_ranges(cal, &probs, SIGMA_1)?;
-    let hpd_95_ranges = hpd_ranges(cal, &probs, SIGMA_2)?;
+    let hpd_68_ranges = hpd_ranges_ending(cal, &probs, SIGMA_1, ends)?;
+    let hpd_95_ranges = hpd_ranges_ending(cal, &probs, SIGMA_2, ends)?;
     let point = point_estimate(cal, &probs)?;
     Ok(Stats {
         calibrated_age_bp: cal[argmax(&probs).unwrap_or(0)],
@@ -174,8 +175,15 @@ async fn calibrate(Extract(state): Extract<State>, caller: Caller, body: Bytes) 
     // the caller may use.
     authorise_curve_ids(&state, &caller, [m.curve_id.as_str()])?;
     let curve = state.curves.curve(&m.curve_id).map_err(refused)?;
-    let stats = calibration_stats(curve, m.age_bp, m.error_1sigma, m.delta_r, m.delta_r_error)
-        .map_err(refused)?;
+    let stats = calibration_stats(
+        curve,
+        m.age_bp,
+        m.error_1sigma,
+        m.delta_r,
+        m.delta_r_error,
+        state.range_ends,
+    )
+    .map_err(refused)?;
     let mut data = json!({
         "id": null,
         "name": "Single Calibration",
@@ -307,6 +315,7 @@ async fn calibrate_group(Extract(state): Extract<State>, caller: Caller, body: B
             sample.error_1sigma,
             sample.delta_r,
             sample.delta_r_error,
+            state.range_ends,
         )
         .map_err(refused)?;
         results.push(calibration_result_row(&analysis.id, &sample.id, &stats));
@@ -365,7 +374,12 @@ async fn same_event(Extract(state): Extract<State>, caller: Caller, body: Bytes)
             inbuilt_shape: m.inbuilt_shape.clone(),
         })
         .collect();
-    let test = statistics::same_event(&dates, |id| state.curves.curve(id).ok(), Mode::Standard);
+    let test = statistics::same_event(
+        &dates,
+        |id| state.curves.curve(id).ok(),
+        Mode::Standard,
+        state.range_ends,
+    );
     Ok(ok(test.as_ref().map_or(Value::Null, same_event_json)))
 }
 

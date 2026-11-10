@@ -27,7 +27,10 @@
 
 use crate::numeric::sum;
 use crate::special::chi2_ppf;
-use crate::{CalibrationCurve, HpdRange, Mode, REPORTING_CONFIDENCE_LEVELS, hpd_ranges, py_pow};
+use crate::{
+    CalibrationCurve, HpdRange, Mode, REPORTING_CONFIDENCE_LEVELS, RangeEnds, hpd_ranges_ending,
+    py_pow,
+};
 
 /// Significance level the test is reported at -- OxCal's, and Ward and
 /// Wilson's.
@@ -85,14 +88,16 @@ fn truthy(x: Option<f64>) -> f64 {
 
 /// The Ward and Wilson test over `dates`, or None for fewer than two.
 ///
-/// `curves` finds the curve the pooled age is calibrated against, and `mode`
-/// is the run's likelihood mode. The pooled ranges are given only where
+/// `curves` finds the curve the pooled age is calibrated against, `mode` is
+/// the run's likelihood mode, and `ends` where the pooled ranges are said to
+/// end. The pooled ranges are given only where
 /// pooling is justified, and are None if the curve cannot be found or the
 /// pooled age does not calibrate: the test stands without them.
 pub fn same_event<'c>(
     dates: &[Date],
     curves: impl Fn(&str) -> Option<&'c CalibrationCurve>,
     mode: Mode,
+    ends: RangeEnds,
 ) -> Option<SameEvent> {
     let n = dates.len();
     if n < 2 {
@@ -177,7 +182,7 @@ pub fn same_event<'c>(
         // The pooled age calibrated, only where pooling is justified: a pool
         // of dates from more than one event is a date of nothing.
         pooled_hpd_ranges: if consistent {
-            pooled_ranges(&dates[0], mean, error, curves, mode)
+            pooled_ranges(&dates[0], mean, error, curves, mode, ends)
         } else {
             None
         },
@@ -193,6 +198,7 @@ fn pooled_ranges<'c>(
     error: f64,
     curves: impl Fn(&str) -> Option<&'c CalibrationCurve>,
     mode: Mode,
+    ends: RangeEnds,
 ) -> Option<Vec<LevelRanges>> {
     let curve = curves(reference.curve_id.as_deref()?)?;
     let probs = curve
@@ -209,7 +215,7 @@ fn pooled_ranges<'c>(
         .map(|&level| {
             Some(LevelRanges {
                 confidence: level,
-                ranges: hpd_ranges(curve.cal_ages(), &probs, level).ok()?,
+                ranges: hpd_ranges_ending(curve.cal_ages(), &probs, level, ends).ok()?,
             })
         })
         .collect()

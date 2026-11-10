@@ -1266,8 +1266,13 @@ impl<'a, 'l> Translator<'a, 'l> {
                 inbuilt_shape: d.inbuilt_shape.clone(),
             })
             .collect();
-        statistics::same_event(&rows, |id| self.library.curve(id).ok(), Mode::Standard)
-            .expect("two or more dates")
+        statistics::same_event(
+            &rows,
+            |id| self.library.curve(id).ok(),
+            Mode::Standard,
+            radical_core::RangeEnds::default(),
+        )
+        .expect("two or more dates")
     }
 
     fn simulate_measurement(&mut self, node: &Node, date: &mut Date, year: f64) -> bool {

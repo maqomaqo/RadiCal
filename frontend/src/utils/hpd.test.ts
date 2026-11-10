@@ -109,6 +109,27 @@ describe('hpdRangesFromCurve', () => {
     expect(ranges.every((r) => r.probability_percent > 0)).toBe(true)
   })
 
+  it('runs each range out to the edges of its end cells', () => {
+    // Two peaks on a 10-year grid: points 0-10 and 50-60. A point stands for
+    // the cell half way to each neighbour, so the older peak covers 45-60 --
+    // closed at 60, the series' own end -- and the younger 0-15.
+    const series: Series = [
+      [0, 0.05], [10, 0.05],
+      [20, 0.0001], [30, 0.0001], [40, 0.0001],
+      [50, 0.05], [60, 0.05],
+    ]
+    const ranges = hpdRangesFromCurve(series, 0.9)
+
+    expect(ranges.map((r) => [r.min, r.max])).toEqual([[45, 60], [0, 15]])
+  })
+
+  it('gives a range of one point the width of its cell', () => {
+    const series: Series = [[0, 0.001], [10, 0.001], [20, 1], [30, 0.001], [40, 0.001]]
+    const [only] = hpdRangesFromCurve(series, 0.5)
+
+    expect([only.min, only.max]).toEqual([15, 25])
+  })
+
   it('reports shares that add up', () => {
     const ranges = hpdRangesFromCurve(flat(0, 100, 10, 0.01), 0.95)
     const total = ranges.reduce((sum, r) => sum + r.probability_percent, 0)
