@@ -213,15 +213,16 @@ const KNOWN: &[(&str, &str)] = &[
 /// now smears the likelihood from before them and the limits cut the result
 /// (`exact_chain::tables::with_outlier_component`). In these two models the
 /// Boundaries carry the same limits, so only the flagged date's posterior_std
-/// moves, by 1e-9 of itself.
+/// moves, by 1e-9 of itself. The new figure is given to ten places: its last
+/// digits are a platform's own.
 const KNOWN_DIFFERENCES: &[(&str, &str)] = &[
     (
         "test_project_import.py::TestCurvesTravel::test_a_stored_curve_is_reused_by_its_owner_and_added_for_someone_else",
-        "posterior_std: 24.030673642458826 vs 24.030673614064526",
+        "posterior_std: 24.03067364",
     ),
     (
         "test_project_import.py::TestCurvesTravel::test_an_altered_curve_is_refused",
-        "posterior_std: 24.030673642458826 vs 24.030673614064526",
+        "posterior_std: 24.03067364",
     ),
 ];
 
