@@ -37,8 +37,8 @@ import { useNotify } from '@/contexts/NotificationContext'
 import type { ModelElement } from '@/types'
 
 // One date as the importer read it. Mirrors the dicts
-// services/date_import.py returns -- measurement fields as
-// schemas/sample.py names them, plus the phase it was filed under.
+// radical-io's date_import.rs returns -- measurement fields as
+// the server names them, plus the phase it was filed under.
 export interface ImportedDate {
   id: string
   sample_name: string
@@ -250,7 +250,6 @@ export default function ImportDatesDialog({
   useEffect(() => {
     if (open && file) upload(file)
     // Once per file handed in, not again on every render.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, file])
 
   const handleFiles = (files: FileList | null) => {

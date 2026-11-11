@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
   offsetsFromRingNumbers,
-  referenceFromOffsets,
   seriesSpan,
   shortSeriesWarning,
   SHORT_SERIES_SPAN,
@@ -44,23 +43,6 @@ describe('offsetsFromRingNumbers', () => {
 
   it('handles an empty series without inventing a reference', () => {
     expect(offsetsFromRingNumbers([])).toEqual({})
-  })
-})
-
-describe('referenceFromOffsets', () => {
-  it('finds the member at offset zero', () => {
-    expect(
-      referenceFromOffsets([
-        { id: 'a', ring_offset: 40 },
-        { id: 'b', ring_offset: 0 },
-      ])
-    ).toBe('b')
-  })
-
-  it('returns null when no member sits at the reference point', () => {
-    // Legitimate: the solved parameter is the age AT offset zero whether or
-    // not a sample was taken there.
-    expect(referenceFromOffsets([{ id: 'a', ring_offset: 40 }])).toBeNull()
   })
 })
 

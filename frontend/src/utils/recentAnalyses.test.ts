@@ -55,7 +55,7 @@ describe('loadRecentAnalyses', () => {
     expect(result.error.detail).toBe('Database connection lost')
   })
 
-  it('flattens FastAPI validation errors into the detail line', async () => {
+  it('flattens validation errors into the detail line', async () => {
     const result = await loadRecentAnalyses(5, async () =>
       jsonResponse(
         { success: false, detail: [{ loc: ['body', 'per_page'], msg: 'Input should be >= 1' }] },

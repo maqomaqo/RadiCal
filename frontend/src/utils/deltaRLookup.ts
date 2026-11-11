@@ -4,7 +4,7 @@
  *
  * Its own module, importing nothing, because these are the judgements the
  * panel is obliged to get right and they are worth asserting without a DOM.
- * The arithmetic is entirely the server's -- see services/reservoir.py -- and
+ * The arithmetic is entirely the server's -- see radical-core's reservoir.rs -- and
  * nothing here recomputes any part of it.
  */
 

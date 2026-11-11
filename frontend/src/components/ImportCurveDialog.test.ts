@@ -1,12 +1,12 @@
 // The curve id the import dialog offers has to be one the backend will
 // accept: it is a primary key, it goes in URLs, and every date's curve_id
-// stores it, so a mismatch between this rule and schemas/curve.py's would
+// stores it, so a mismatch between this rule and the server's would
 // show up as a 422 after the user had filled in the whole form.
 import { describe, expect, it } from 'vitest'
 
 import { slugify } from './ImportCurveDialog'
 
-// schemas/curve.py's SLUG_PATTERN, verbatim.
+// SLUG_PATTERN in radical-server's routes/curve_routes.rs, verbatim.
 const BACKEND_PATTERN = /^[a-z0-9][a-z0-9_-]{1,63}$/
 
 describe('slugify', () => {

@@ -129,7 +129,7 @@ export default function ProjectDetail() {
 
   // The project as one package: every analysis's Export JSON, what each was
   // run from, the run its results came from, the curves they need, the
-  // collection and a summary table (api/project_export.py). Import project
+  // collection and a summary table (radical-server's routes/project_export.rs). Import project
   // reads it back in. `ids` narrows it to those analyses and the dates they
   // use. Stored results only, no solver or plots, so a large project is
   // seconds, said once while it builds.
@@ -204,7 +204,6 @@ export default function ProjectDetail() {
   // import's run a second time.
   useEffect(() => {
     if (arrival) navigate(location.pathname, { replace: true, state: null })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // Only a job this page started. Unlike the results page there is no useful
@@ -235,7 +234,7 @@ export default function ProjectDetail() {
 
   // What the re-run changed: every analysis whose Boundaries or durations
   // moved by 10 years or more against its previous run, or gained or lost a
-  // range (api/run_history.py). The point of keeping earlier runs is to see
+  // range (radical-server's routes/run_history.rs). The point of keeping earlier runs is to see
   // what a change to the code did.
   const reportRunDiff = async (id: string) => {
     try {

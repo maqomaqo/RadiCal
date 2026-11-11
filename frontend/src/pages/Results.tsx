@@ -211,7 +211,7 @@ interface AnalysisResult {
     rhat?: number | null
     rhat_target?: number | null
     // Sampled path only: the sampled Boundaries against a direct calculation
-    // of the same model (services/cross_check.py), where the model's shape
+    // of the same model (radical-core's cross_check.rs), where the model's shape
     // allows one. Null when the analysis turned it off.
     // Sampled path only: calibration lobes the run left empty that a chain
     // started in them did not leave (gibbs.probe_unvisited_lobes).
@@ -1047,7 +1047,7 @@ export default function Results() {
   const [replicating, setReplicating] = useState(false)
   const [pairingInbuilt, setPairingInbuilt] = useState(false)
   // This analysis's kept runs, newest (the current result) first, and the
-  // menu that offers each earlier one for comparison (api/run_history.py).
+  // menu that offers each earlier one for comparison (radical-server's routes/run_history.rs).
   const [runs, setRuns] = useState<RunSummary[]>([])
   const [runsAnchor, setRunsAnchor] = useState<HTMLElement | null>(null)
   const [exportingPdf, setExportingPdf] = useState(false)
@@ -1147,7 +1147,6 @@ export default function Results() {
     setThresholdBp(stored)
     setThresholdText(stored != null ? formatCalendarAge(stored, dateFormat) : '')
     // dateFormat is read once, for the label; it has its own handler.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [analysisId])
 
   const thresholdInvalid =

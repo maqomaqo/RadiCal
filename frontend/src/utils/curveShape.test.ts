@@ -3,7 +3,7 @@
 // The thresholds are the claim, not the wording: a "plateau" that included
 // ordinary curve, or an "ordinary" band that swallowed the Hallstatt plateau,
 // would make the readout confidently wrong about the one thing it exists to
-// say. The numbers below are what services/curve_view.py actually measures on
+// say. The numbers below are what radical-core's curve_view.rs actually measures on
 // IntCal20 for those stretches (see its SLOPE_HALF_SPAN_YEARS table).
 import { describe, expect, it } from 'vitest'
 

@@ -225,7 +225,6 @@ export default function Projects() {
       setImportOpen(true)
       navigate(`${location.pathname}${location.search}`, { replace: true, state: null })
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.key])
   const [projects, setProjects] = useState<ProjectSummary[]>([])
   const [unassignedCount, setUnassignedCount] = useState(0)
@@ -260,7 +259,6 @@ export default function Projects() {
     if (query.trim()) next.set('q', query.trim())
     if (sort !== 'activity') next.set('sort', sort)
     setSearchParams(next, { replace: true })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query, sort])
 
   const fetchProjects = async () => {

@@ -299,7 +299,6 @@ export default function CurvePosteriorPlot({
           s.measurement &&
           isNum(s.measurement.ageBp)
       ),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [seriesSignature]
   )
   /**
@@ -315,7 +314,6 @@ export default function CurvePosteriorPlot({
       boundaries: rest.filter((s) => s.kind === 'boundary').length,
       dates: rest.filter((s) => s.kind === 'date').length,
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [drawable, seriesSignature])
 
   /** Each drawable date's posterior and prior, trimmed and put on unit area. */
@@ -406,7 +404,6 @@ export default function CurvePosteriorPlot({
     return () => {
       active = false
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [curveKey])
 
   /**

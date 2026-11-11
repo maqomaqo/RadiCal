@@ -274,5 +274,3 @@ describe('compareCsv derived quantities', () => {
   })
 })
 
-// eslint-disable-next-line
-it('dump', () => { console.log('\n=== CSV ===\n' + withDerived + '\n=== END ===') })

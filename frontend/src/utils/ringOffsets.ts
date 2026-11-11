@@ -11,7 +11,7 @@
 //   reference and INCREASES INTO THE PAST, so a member's calendar age is the
 //   reference's PLUS its offset.
 //
-// Same sentence as services/wiggle_match.py's module docstring and the OxCal
+// Same sentence as radical-core's wiggle_match.rs module docs and the OxCal
 // importer's.
 
 /** A date and the ring number it was cut from, as the entry table has them. */
@@ -48,14 +48,6 @@ export function offsetsFromRingNumbers(
   const out: Record<string, number> = {}
   for (const sample of samples) out[sample.id] = reference.ring - sample.ring
   return out
-}
-
-/** Which member offset 0 refers to, given a set of offsets. */
-export function referenceFromOffsets(
-  samples: Array<{ id: string; ring_offset?: number | null }>
-): string | null {
-  const at_zero = samples.find((s) => s.ring_offset === 0)
-  return at_zero ? at_zero.id : null
 }
 
 /** The span of a series in its own units: the outermost gap minus the innermost. */

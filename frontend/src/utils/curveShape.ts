@@ -2,7 +2,7 @@
  * What a calibration curve is doing at a given calendar age, in words.
  *
  * The number behind this is the local gradient the backend computes over a
- * fixed calendar span (see services/curve_view.py), and it is the single most
+ * fixed calendar span (see radical-core's curve_view.rs), and it is the single most
  * useful thing to know about a stretch of curve: it governs how tightly
  * anything can be dated there, which is invisible in the calibrated output
  * and impossible to read off the curve's shape at a glance.

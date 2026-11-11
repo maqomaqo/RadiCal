@@ -86,7 +86,7 @@ export async function loadRecentAnalyses<T>(
 /**
  * The server's explanation, or nothing.
  *
- * formatApiError owns the shape-handling -- FastAPI's `detail` may be a
+ * formatApiError owns the shape-handling -- the server's `detail` may be a
  * string, an object, or a list of validation errors. This only guards the case
  * it cannot know about: with no `detail` at all it falls back to
  * JSON.stringify of the whole body, printing the response envelope back at the

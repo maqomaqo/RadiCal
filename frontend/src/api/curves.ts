@@ -1,7 +1,7 @@
 /**
  * The calibration curves the backend can actually calibrate against.
  *
- * services/curve_registry.py is the single source of truth and measures every
+ * radical-core's curve_registry.rs is the single source of truth and measures every
  * countable field from the loaded curve; this module is how the frontend asks
  * it, rather than holding a list of its own.
  *

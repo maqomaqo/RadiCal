@@ -136,12 +136,6 @@ export function formatHPDRanges(ranges: HPDRange[] | undefined | null, format: D
     .join(', ')
 }
 
-/** Sum of probability_percent across all ranges in an HPD region (e.g. 95.4 for a "95%" request). */
-export function totalHPDPercent(ranges: HPDRange[] | undefined | null): number | null {
-  if (!ranges || ranges.length === 0) return null
-  return ranges.reduce((sum, r) => sum + r.probability_percent, 0)
-}
-
 // --- Per-analysis persistence -----------------------------------------
 //
 // The reporting format is a display preference rather than analytical data,

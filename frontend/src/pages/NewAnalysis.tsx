@@ -182,7 +182,6 @@ export default function NewAnalysis() {
   const resolutionValid = isUsableResolution(resolutionText)
   useEffect(() => {
     if (Number(resolutionText) !== mcmc.resolution) setResolutionText(String(mcmc.resolution))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mcmc.resolution])
   // The assigned project's basemap setting, so the origin is placed on the
   // same map its dates were.
@@ -351,7 +350,6 @@ export default function NewAnalysis() {
     if (fresh || state?.openImport || state?.importFile) {
       navigate(`${location.pathname}${location.search}`, { replace: true, state: null })
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.key])
 
   // Editing: pull the saved inputs into the shared draft store, so this page
@@ -491,7 +489,6 @@ export default function NewAnalysis() {
     return () => {
       cancelled = true
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editRouteId])
 
   const handleCreateProjectInline = async () => {

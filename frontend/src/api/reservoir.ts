@@ -12,7 +12,7 @@
 
 import { formatApiError } from '@/utils/apiError'
 
-/** How precisely a habit is known. services/reservoir.py's FEEDING_CLASSES. */
+/** How precisely a habit is known. FEEDING_CLASSES in radical-core's reservoir.rs. */
 export type FeedingClass =
   | 'suspension'
   | 'deposit'

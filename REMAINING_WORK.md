@@ -8,8 +8,8 @@ Every item was checked against the code; verify again before starting one.
 ## Modelling
 
 ### 1. Phase-duration priors and custom per-date priors
-Durations are reported from the joint posterior (`services/intervals.py`), but
-nothing lets a user state one up front, such as "this phase lasted at most a
+Durations are reported from the joint posterior (`radical-core/src/intervals.rs`),
+but nothing lets a user state one up front, such as "this phase lasted at most a
 century", before the model sees the dates. The uniform span prior is the only
 duration prior. Custom per-date priors are missing too. A user-specified
 duration prior pays off exactly where the reported duration comes back wider
@@ -17,11 +17,12 @@ than the archaeology allows.
 
 ### 2. Wiggle matching inside a larger model
 A wiggle sequence nested in a bigger structure is refused by name, at the
-importer and at the run (`model_tree.py`, `api/analysis.py`). Its members are
+importer and at the run (`radical-io/src/oxcal_script.rs`,
+`radical-server/src/solve.rs`). Its members are
 one calendar age plus fixed gaps, not n free parameters, so the surrounding
 Boundaries and span terms have to be told that. Reading the series as n dates
 in a phase would report a match that was never made. The data model already
-carries the reference member (`ELEMENT_PARAMS['wiggle_sequence']`), so this is
+carries the reference member (`reference_sample_id` in `model_tree.rs`), so this is
 solver work, not a migration.
 
 ### 3. Outlier model on a wiggle-match member

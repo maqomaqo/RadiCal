@@ -1,7 +1,7 @@
 // Client-side HPD (highest posterior density) computation at the reader's
 // selected confidence level, applied to a distribution the backend already
 // sent in full -- so switching confidence in the Results table is instant.
-// Mirrors the selection in calibration.py's hpd_ranges_from_distribution.
+// Mirrors the selection in radical-core's calibration.rs, hpd_ranges_from_distribution.
 //
 // Every series passed in is a probability DENSITY. The curves are not
 // uniformly spaced and a downsampled window can be uneven too, so these rank

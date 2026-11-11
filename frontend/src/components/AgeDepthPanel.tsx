@@ -13,7 +13,7 @@
 // prior's own range -- which is the case where the prior rather than the data
 // is doing the work.
 //
-// Every figure here is read off JOINT draws (services/intervals.py): an
+// Every figure here is read off JOINT draws (radical-core's intervals.rs): an
 // accumulation rate is a function of two ages at once, and pairing their
 // marginals would give a rate distribution wrong in shape rather than scale.
 import {

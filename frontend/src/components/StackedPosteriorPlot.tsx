@@ -377,7 +377,6 @@ export default function StackedPosteriorPlot({
    */
   const drawable = useMemo(
     () => series.filter((s) => s.distribution && s.distribution.length > 0),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [seriesSignature]
   )
 

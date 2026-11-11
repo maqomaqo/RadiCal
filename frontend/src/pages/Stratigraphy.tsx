@@ -210,7 +210,6 @@ export default function Stratigraphy() {
       .finally(() => setLoadingStructure(false))
     // The draft values are read once, when the structure is first loaded;
     // the early return above makes later changes to them irrelevant here.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, editRouteId, modelTree, setDraftTree])
 
   /**

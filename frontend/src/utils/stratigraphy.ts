@@ -1,4 +1,4 @@
-// Client-side mirror of backend stratigraphy.py's
+// Client-side mirror of radical-core's stratigraphy.rs
 // expand_relationships/find_cycle. The backend is the authoritative check,
 // rejecting a cyclic request with a 422 before any run; this gives the
 // Stratigraphy UI instant feedback without a round trip on every edit.

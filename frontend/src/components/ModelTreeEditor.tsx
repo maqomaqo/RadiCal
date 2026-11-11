@@ -174,7 +174,7 @@ const OFFERED_TYPES: ElementType[] = [
   'deposition_sequence',
 ]
 
-// Types a date can be assigned to. Mirrors model_tree.DATE_HOLDERS: a date is
+// Types a date can be assigned to. Mirrors DATE_HOLDERS in radical-core's model_tree.rs: a date is
 // a measurement of one event, and these are the elements that say where that
 // event sits.
 function holdsDates(type: ElementType): boolean {
@@ -183,7 +183,7 @@ function holdsDates(type: ElementType): boolean {
 
 // What a newly added element of each type starts with. Only the
 // ordinate-bearing ones have settings at all; the backend fills in anything a
-// stored element does not carry (model_tree.ELEMENT_PARAMS), so these are the
+// stored element does not carry (radical-core's model_tree.rs, element_params), so these are the
 // starting VALUES rather than a schema.
 const DEFAULT_PARAMS: Partial<Record<ElementType, ElementParams>> = {
   wiggle_sequence: { gap_units: 'rings', reference_sample_id: null },
@@ -433,7 +433,7 @@ export function phaseOptions(
 }
 
 /** Client-side mirror of the backend's validate_tree, so problems surface
- *  while editing rather than on submit. See services/model_tree.py. */
+ *  while editing rather than on submit. See radical-core's model_tree.rs. */
 export function validateTree(
   root: ModelElement,
   assignments: Record<string, string>,

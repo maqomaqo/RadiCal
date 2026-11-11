@@ -5,14 +5,10 @@
 **/dist
 **/__pycache__
 **/*.pyc
-**/.pytest_cache
-**/.venv
-**/venv
 .git
 .github
 .claude
 .impeccable
-uploads
 docs
 # The Rust workspace's build output and its golden corpus, neither of which
 # the image is built from.
