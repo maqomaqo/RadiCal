@@ -343,7 +343,6 @@ export default function ProjectSampleTable({
 
   useEffect(() => {
     fetchSamples()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId])
 
   const openAdd = () => {

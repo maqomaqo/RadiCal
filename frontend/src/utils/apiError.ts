@@ -4,7 +4,7 @@ import { isTauri } from '@tauri-apps/api/core'
  * Format an error response from the backend into a single readable
  * string, for use in alerts/toasts.
  *
- * FastAPI's `detail` is a plain string for most errors, but for a 422
+ * The server's `detail` is a plain string for most errors, but for a 422
  * validation failure it is a LIST of structured objects, e.g.
  * `[{"loc": ["body", "age_bp"], "msg": "Input should be >= 0", ...}]`.
  * Concatenating that into a message renders "[object Object]", which would

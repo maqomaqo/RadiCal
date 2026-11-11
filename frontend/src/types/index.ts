@@ -1,7 +1,7 @@
 // Shared types for the "New Analysis" -> "Stratigraphy" draft flow: a Bayesian
 // analysis is built client-side across two pages before one POST
-// /api/analysis/bayesian submits everything. These mirror the backend's
-// schemas/sample.py field names and semantics, so the payload needs no
+// /api/analysis/bayesian submits everything. These mirror the server's
+// field names and semantics (radical-server's schemas.rs), so the payload needs no
 // reshaping.
 
 export type SampleType = 'terrestrial' | 'marine'
@@ -45,16 +45,8 @@ export type ElementType =
   | 'deposition_sequence'
   | 'interpolated_depth'
 
-// The element types a date can be assigned to. Mirrors
-// model_tree.DATE_HOLDERS.
-export const DATE_HOLDER_TYPES: ElementType[] = [
-  'phase',
-  'wiggle_sequence',
-  'deposition_sequence',
-]
-
 // Settings belonging to ONE kind of element, keyed by element_type. Mirrors
-// model_tree.ELEMENT_PARAMS; every field optional, because an element written
+// radical-core's model_tree.rs; every field optional, because an element written
 // before a setting existed simply does not carry it and the backend fills in
 // the default.
 export interface ElementParams {
@@ -280,7 +272,7 @@ export interface DifferenceRecord {
 
 // --- age against depth ---
 //
-// Mirrors services/intervals.py's age_depth section. Every figure here is read
+// Mirrors radical-core's intervals.rs, its age_depth section. Every figure here is read
 // off JOINT draws: an accumulation rate is a function of two ages at once, and
 // pairing their marginals gives a rate distribution wrong in SHAPE rather than
 // scale -- which no eyeball check catches.
@@ -323,7 +315,7 @@ export interface AgeDepthRecord {
 
 // --- wave of advance ---
 //
-// Mirrors services/dispersal.py. A speed here is km/yr and t0 is a CALENDAR
+// Mirrors radical-core's dispersal.rs. A speed here is km/yr and t0 is a CALENDAR
 // age, which is why the two take different shapes: t0 carries the calendar key
 // names (median/band_68/band_95, as AgeDepthLevel does) so it can be formatted
 // BC/AD, and the speed carries the duration names so it cannot be.
@@ -524,7 +516,7 @@ export interface PhaseActivity {
 }
 
 // A kernel density estimate of how a set of dates is spread through time:
-// OxCal's KDE_Plot, computed by services/kde.py on the backend.
+// OxCal's KDE_Plot, computed by radical-core's kde.rs on the server.
 export interface KdeQuantity {
   median: number
   mean: number

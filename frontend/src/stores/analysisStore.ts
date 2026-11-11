@@ -77,7 +77,7 @@ export interface McmcConfig {
   dispersal_origin: { lat: number; lon: number } | null
 }
 
-// The sampler runs until it converges (services/gibbs.py), and the exact
+// The sampler runs until it converges (radical-core's gibbs), and the exact
 // solver has no run length at all; mcmc_min_sweeps is the only setting here
 // that lengthens a run.
 export const DEFAULT_MCMC: McmcConfig = {

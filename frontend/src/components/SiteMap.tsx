@@ -471,7 +471,6 @@ export default function SiteMap({
 
   const selected = useMemo(() => new Set(selectedIds), [selectedIds])
   const highlightKey = (highlightIds || []).join('|')
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   const highlighted = useMemo(() => new Set(highlightIds || []), [highlightKey])
 
   const { sites, missing, frame } = useMemo(() => {

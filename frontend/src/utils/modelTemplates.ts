@@ -17,7 +17,7 @@ export interface ModelTemplate {
   updated_at: string | null
 }
 
-// The element types a date can sit in (backend model_tree.DATE_HOLDERS).
+// The element types a date can sit in (radical-core's model_tree.rs, DATE_HOLDERS).
 const DATE_HOLDERS = new Set(['phase', 'wiggle_sequence', 'deposition_sequence'])
 
 const nameKey = (name: string | null | undefined) => (name ?? '').trim().toLowerCase()

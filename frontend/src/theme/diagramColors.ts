@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { decomposeColor, recomposeColor, useTheme } from '@mui/material/styles'
 import type { ElementType } from '@/types'
-import { SURFACES, type ColorMode } from './surfaces'
+import type { ColorMode } from './surfaces'
 
 /**
  * Diagram colours are their own palette rather than borrowings from the
@@ -103,19 +103,6 @@ export function elementHues(mode: ColorMode): ElementHues {
         undated: UNDATED_LEVEL_SLATE,
       }
 }
-
-/**
- * The app's warm ink -- the tint behind every recoloured MUI shadow.
- *
- * Not an element colour and not a hue: it is what the app draws with when a
- * mark is ABOUT the data rather than a category of it. Point estimates are ink
- * because they annotate the curve; the ordering matrix is ink because overlap
- * measures what the model could not resolve, which is fog over a reading
- * rather than another kind of thing beside it.
- *
- * Here rather than in plotColors.ts, since three surfaces need the value.
- */
-export const WARM_INK = SURFACES.light.ink
 
 export interface ElementTypeColor {
   /** Borders, rules and tints. Graphic use, which only needs 3:1. */

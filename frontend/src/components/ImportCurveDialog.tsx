@@ -57,8 +57,8 @@ interface Props {
 /**
  * A curve id from its name.
  *
- * Must agree with `schemas/curve.py`'s `slugify` and satisfy its
- * `SLUG_PATTERN`, or the dialog offers an id the backend rejects. The id is a
+ * Must agree with `slugify` in radical-server's `routes/curve_routes.rs` and
+ * satisfy its `SLUG_PATTERN`, or the dialog offers an id the server rejects. The id is a
  * primary key, appears in URLs, and is what every date's `curve_id` stores, so
  * it cannot be changed afterwards.
  */

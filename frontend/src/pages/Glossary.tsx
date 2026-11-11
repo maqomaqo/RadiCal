@@ -13,9 +13,10 @@ import AgreementSymbol from '@/components/AgreementSymbol'
  * page defines the real terms instead; nothing else in the app changes its
  * language because it exists.
  *
- * Definitions come from the implementation's own comments (services/
- * agreement.py, schemas/sample.py, models.py, utils/dateFormat.ts) rather than
- * being written fresh, so the glossary and the behaviour cannot drift.
+ * Definitions come from the implementation's own comments (radical-core's
+ * agreement.rs, radical-server's schemas.rs, radical-store's rows.rs,
+ * utils/dateFormat.ts) rather than being written fresh, so the glossary and
+ * the behaviour cannot drift.
  *
  * It sits under Help, beneath the user manual (pages/Help.tsx): the manual
  * describes what to do, in these words, and each page links to the other.

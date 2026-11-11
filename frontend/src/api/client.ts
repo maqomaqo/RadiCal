@@ -202,7 +202,7 @@ export async function signIn(email: string, password: string) {
   return submitCredentials('/api/auth/login', { email, password })
 }
 
-/** POST /api/auth/register. Registration is open; see api/auth.py. */
+/** POST /api/auth/register. Registration is open; see radical-server's routes/auth.rs. */
 export async function register(email: string, password: string, displayName?: string) {
   return submitCredentials('/api/auth/register', {
     email,
@@ -262,7 +262,7 @@ async function postOpen(path: string, body: Record<string, unknown>) {
   const payload = await response.json().catch(() => null)
 
   if (!response.ok) {
-    // FastAPI's `detail` is a string for our own errors and a list of field
+    // The server's `detail` is a string for our own errors and a list of field
     // problems for a validation failure. Both have to end up as one sentence
     // a person can read.
     const detail = payload?.detail
@@ -286,10 +286,6 @@ async function submitCredentials(path: string, body: Record<string, unknown>) {
   }
   storeSession(data.token, data.user)
   return data
-}
-
-export async function signOut() {
-  clearSession()
 }
 
 /**

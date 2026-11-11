@@ -183,7 +183,6 @@ export function TemplateLibraryDialog({
       setImportFile(null)
       setImportPlan(null)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
 
   const toggle = (id: string) =>

@@ -193,7 +193,7 @@ export default function CompareResults() {
     Promise.all(
       requestedIds.map(async (id) => {
         // `analysis@run` is one of an analysis's kept earlier runs (backend
-        // api/run_history.py), served in the same shape as the analysis.
+        // radical-server's routes/run_history.rs), served in the same shape as the analysis.
         const [analysisId, runId] = id.split('@')
         const response = await fetch(
           runId ? `/api/analysis/${analysisId}/runs/${runId}` : `/api/analysis/${analysisId}`

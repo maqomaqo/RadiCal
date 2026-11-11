@@ -17,7 +17,7 @@ import { useAuth } from '@/contexts/AuthContext'
 /**
  * Whether the page was opened from a password-reset email. The link is
  * /reset-password#token=..., the token in the fragment so it never reaches a
- * server log (see backend services/mail.py).
+ * server log (see radical-server's accounts/mail.rs).
  */
 export function isResetLink(): boolean {
   return window.location.pathname === '/reset-password'

@@ -47,7 +47,7 @@ const NUMERIC_SX = { fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' } 
 
 /**
  * Which dates the answer rests on: the model re-solved with each date left
- * out, moved or treated as an outlier (api/influence.py), ranked by how far a
+ * out, moved or treated as an outlier (radical-server's routes/influence.rs), ranked by how far a
  * chosen figure moves. The figure is chosen after the run.
  */
 export default function InfluencePanel({

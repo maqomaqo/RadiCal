@@ -2,7 +2,7 @@ import type { DraftMeasurement } from '@/types'
 import type { HPDRange } from '@/utils/dateFormat'
 
 /**
- * One Ward and Wilson same-event test, as backend services/statistics.py
+ * One Ward and Wilson same-event test, as radical-core's statistics.rs
  * reports it: over a group calibration's dates (element_id null), or over one
  * Phase's. The statistics are null when the dates could not be pooled, and
  * `refused` says why.

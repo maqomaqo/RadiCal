@@ -1,7 +1,7 @@
 // The kernel density estimates on the Results page: how a group calibration's
 // dates, or each phase's modelled dates, are spread through time, as OxCal's
 // KDE_Plot draws it -- the mean of many KDEs, each of one joint draw of the
-// dates, with the ±1σ of those KDEs as a band. Computed by services/kde.py;
+// dates, with the ±1σ of those KDEs as a band. Computed by radical-core's kde.rs;
 // what it means is in the manual.
 import { useMemo, useRef } from 'react'
 import { Box, Button, Paper, Typography } from '@mui/material'

@@ -176,7 +176,7 @@ export default function MeasurementFields({
           }
           size="small"
           sx={{ flex: 1 }}
-          // The range services/schemas/sample.py already enforces. Stated here
+          // The range the server already enforces (AGE in schemas.rs). Stated here
           // so it is a constraint on the way in rather than a 422 on the way
           // back -- and so the field gets native spinner and validation
           // behaviour for free.

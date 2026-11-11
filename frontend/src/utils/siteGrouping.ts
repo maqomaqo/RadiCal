@@ -3,7 +3,7 @@
  *
  * The dispersal models read the model tree as a set of places: a site is an
  * element opened by its own Boundary, and its position is the centroid of the
- * coordinates on its dates (services/dispersal.py, derive_sites). A collection
+ * coordinates on its dates (radical-core's dispersal.rs, derive_sites). A collection
  * of 224 dates from fourteen islands, deployed into the one starting phase
  * every analysis begins with, therefore has NO sites -- not because the dates
  * lack coordinates, which they carry, but because the tree has no structure

@@ -336,7 +336,7 @@ describe('keyboard renesting', () => {
 //
 // A wiggle match and a deposition sequence hold DATES but no elements, and
 // each is built on an ordinate the date has to carry. validateTree is the
-// client-side mirror of services/model_tree.py: the point of duplicating it
+// client-side mirror of radical-core's model_tree.rs: the point of duplicating it
 // is that a problem surfaces while the model is being built rather than on
 // submit, so what is asserted here is that it catches the same things.
 

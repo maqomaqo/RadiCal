@@ -6,11 +6,14 @@
  * was entered -- degrading data at rest helps nobody and cannot be undone --
  * and a project's `coordinate_precision` decides what appears in an export or
  * a rendered figure. The rounding itself happens on the SERVER, in
- * api/results.py, so nothing here re-implements it: this file is the names and
+ * radical-server's routes/results.rs, so nothing here re-implements it: this file is the names and
  * the labels only.
  */
 
-/** The four values the backend will store; see schemas/project.py. */
+/**
+ * The four values the server will store; see COORDINATE_PRECISIONS in
+ * radical-server's routes/projects.rs.
+ */
 export type CoordinatePrecision = 'full' | '0.01' | '0.1' | '1'
 
 /**

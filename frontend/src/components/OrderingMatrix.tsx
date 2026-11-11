@@ -10,7 +10,7 @@
 //
 // Beyond MAX_PAIRS the backend reports consecutive pairs only, which is a
 // chain rather than a matrix, so this never renders for that case -- see
-// services/intervals.py and `intervals.note`.
+// radical-core's intervals.rs and `intervals.note`.
 import { useMemo, useRef, useState } from 'react'
 import { Box, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Typography } from '@mui/material'
 import { useTheme } from '@mui/material/styles'
@@ -63,7 +63,7 @@ const LABEL_GUTTER = 96
  * deficiency that would flatten a hue ramp, and frees the primary blue to mean
  * selection and focus alone on this grid.
  *
- * DISCRETE, not a continuous ramp. services/intervals.py bins overlap into
+ * DISCRETE, not a continuous ramp. radical-core's intervals.rs bins overlap into
  * exactly these five named bands, and a continuous alpha puts 24 of 55 cells
  * within two decades of each other -- 0.66, 0.718 and 0.72 for overlaps of
  * 83%, 91% and 92%, indistinguishable by eye. Five steps let a reader told

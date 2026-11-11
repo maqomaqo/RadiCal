@@ -34,7 +34,7 @@ import { absoluteTime, parseServerTime, relativeTime } from '@/utils/serverTime'
 
 /**
  * The signed-in account: its password, and its personal access tokens: long-lived
- * credentials for scripts (api/auth.py). The secret is shown once, in the
+ * credentials for scripts (radical-server's routes/auth.rs). The secret is shown once, in the
  * dialog that follows making one, because the server keeps only its hash.
  */
 
