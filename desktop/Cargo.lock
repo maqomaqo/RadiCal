@@ -3617,11 +3617,11 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
 name = "radical-accelerate"
-version = "0.2.0"
+version = "0.3.0"
 
 [[package]]
 name = "radical-core"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "faer",
  "radical-accelerate",
@@ -3633,7 +3633,7 @@ dependencies = [
 
 [[package]]
 name = "radical-corpus"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -3642,7 +3642,7 @@ dependencies = [
 
 [[package]]
 name = "radical-desktop"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "open",
  "percent-encoding",
@@ -3662,7 +3662,7 @@ dependencies = [
 
 [[package]]
 name = "radical-io"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "radical-core",
  "radical-corpus",
@@ -3673,7 +3673,7 @@ dependencies = [
 
 [[package]]
 name = "radical-jobs"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "radical-core",
  "radical-store",
@@ -3682,7 +3682,7 @@ dependencies = [
 
 [[package]]
 name = "radical-server"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "axum",
  "base64 0.23.1",
@@ -3710,7 +3710,7 @@ dependencies = [
 
 [[package]]
 name = "radical-store"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "radical-corpus",
  "rusqlite",
